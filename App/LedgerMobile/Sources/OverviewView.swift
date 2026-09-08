@@ -24,6 +24,7 @@ struct OverviewView: View {
                         } label: {
                             TransactionRow(transaction: transaction, accountLabels: accountLabels)
                         }
+                        .ledgerTransactionActions(transaction)
                     }
                     if ledger.transactions.isEmpty {
                         Text("所选范围暂无流水").foregroundStyle(.secondary)

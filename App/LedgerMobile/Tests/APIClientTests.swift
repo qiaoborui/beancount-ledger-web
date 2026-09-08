@@ -21,6 +21,20 @@ final class APIClientTests: XCTestCase {
         XCTAssertGreaterThan(LedgerAPIClient.gmailEventResourceTimeout, 40)
     }
 
+    func testGlobalSearchRequestsAllDatesWithoutCurrentRange() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/transactions")
+            XCTAssertEqual(request.httpMethod, "GET")
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+            XCTAssertEqual(items.first(where: { $0.name == "start" })?.value, "0001-01-01")
+            XCTAssertEqual(items.first(where: { $0.name == "end" })?.value, "9999-12-31")
+            return Self.response(for: request, body: #"{"transactions":[],"sensitiveUnlocked":true}"#)
+        }
+        let result = try await makeClient().globalTransactions(baseURL: URL(string: "https://ledger.example.com")!)
+        XCTAssertTrue(result.sensitiveUnlocked)
+        XCTAssertTrue(result.transactions.isEmpty)
+    }
+
     func testHealthUsesExpectedEndpointAndDecodesCapabilities() async throws {
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://ledger.example.com/api/health")
@@ -504,6 +518,25 @@ final class APIClientTests: XCTestCase {
                     LedgerTransactionEntryPosting(account: "Liabilities:CreditCard", amount: "-328.00", currency: "CNY"),
                 ]
             )
+        )
+    }
+
+    func testTransactionDeleteSendsSourceHashAndReason() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/ledger/transactions")
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: try Self.bodyData(from: request)) as? [String: Any])
+            let source = try XCTUnwrap(json["source"] as? [String: Any])
+            XCTAssertEqual(source["hash"] as? String, "verified-hash")
+            XCTAssertEqual(source["gitSha"] as? String, "base-revision")
+            XCTAssertEqual(source["line"] as? Int, 88)
+            XCTAssertEqual(json["reason"] as? String, "重复导入")
+            return Self.response(for: request, body: #"{"ok":true}"#)
+        }
+        try await makeClient().deleteTransaction(
+            baseURL: URL(string: "https://ledger.example.com")!,
+            source: TransactionSource(file: "example.bean", line: 88, hash: "verified-hash", gitSHA: "base-revision"),
+            reason: "重复导入"
         )
     }
 

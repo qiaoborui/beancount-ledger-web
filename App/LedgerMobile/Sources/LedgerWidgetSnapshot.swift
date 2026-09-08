@@ -219,12 +219,17 @@ struct LedgerWidgetSnapshotStore: Sendable {
         self.suiteName = suiteName
     }
 
-    func load() -> LedgerWidgetSnapshot? {
-        try? coordinator.withLock {
-            guard let defaults else { return nil }
+    func load() -> LedgerWidgetSnapshot? { loadState().snapshot }
+
+    func loadState() -> LedgerWidgetSnapshotState {
+        (try? coordinator.withLock {
+            guard let defaults else { return LedgerWidgetSnapshotState(snapshot: nil, attemptedAt: nil) }
             _ = defaults.synchronize()
-            return load(from: defaults)
-        }
+            return LedgerWidgetSnapshotState(
+                snapshot: load(from: defaults),
+                attemptedAt: defaults.object(forKey: Self.snapshotAttemptKey) as? Date
+            )
+        }) ?? LedgerWidgetSnapshotState(snapshot: nil, attemptedAt: nil)
     }
 
     func save(_ snapshot: LedgerWidgetSnapshot) throws {
@@ -237,16 +242,29 @@ struct LedgerWidgetSnapshotStore: Sendable {
     }
 
     @discardableResult
-    func saveIfNewer(_ snapshot: LedgerWidgetSnapshot, attemptedAt: Date) throws -> Bool {
+    func saveIfNewer(
+        _ snapshot: LedgerWidgetSnapshot,
+        attemptedAt: Date,
+        recoveringFutureState expected: LedgerWidgetSnapshotState? = nil
+    ) throws -> Bool {
         try coordinator.withLock {
             guard let defaults else { throw LedgerWidgetSnapshotStoreError.unavailable }
             _ = defaults.synchronize()
-            if let currentAttempt = defaults.object(forKey: Self.snapshotAttemptKey) as? Date,
-               currentAttempt > attemptedAt {
-                return false
-            }
-            if let current = load(from: defaults), current.updatedAt > snapshot.updatedAt {
-                return false
+            let current = LedgerWidgetSnapshotState(
+                snapshot: load(from: defaults),
+                attemptedAt: defaults.object(forKey: Self.snapshotAttemptKey) as? Date
+            )
+            // Clock correction can put both the cached payload and its write time in the future.
+            // Recover only the exact state this request observed, under the shared-store lock.
+            // Server timestamps can be slightly later than the request's start time.
+            let toleratedResponseTime = attemptedAt.addingTimeInterval(60)
+            let recoversClockSkew = expected == current
+                && current.snapshot != nil
+                && current.isFuture(relativeTo: toleratedResponseTime)
+                && snapshot.updatedAt <= toleratedResponseTime
+            if !recoversClockSkew {
+                if let currentAttempt = current.attemptedAt, currentAttempt > attemptedAt { return false }
+                if let stored = current.snapshot, stored.updatedAt > snapshot.updatedAt { return false }
             }
             defaults.set(try JSONEncoder().encode(snapshot), forKey: Self.snapshotKey)
             defaults.set(attemptedAt, forKey: Self.snapshotAttemptKey)
@@ -313,5 +331,14 @@ enum LedgerWidgetSnapshotStoreError: LocalizedError {
 
     var errorDescription: String? {
         "无法访问小组件共享空间"
+    }
+}
+
+struct LedgerWidgetSnapshotState: Equatable, Sendable {
+    let snapshot: LedgerWidgetSnapshot?
+    let attemptedAt: Date?
+
+    func isFuture(relativeTo date: Date) -> Bool {
+        (snapshot.map { $0.updatedAt > date } ?? false) || (attemptedAt.map { $0 > date } ?? false)
     }
 }

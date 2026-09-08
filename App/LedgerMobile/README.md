@@ -14,8 +14,8 @@ shell uses a system sidebar and keeps its visibility when changing destinations.
 Overview, transactions, accounts, and More use compact, continuous system lists;
 settings and editing retain grouped forms. All pages use inline navigation titles.
 Range-scoped pages keep the calendar and current period in the navigation bar,
-above search. Period stepping stays in the date picker until confirmation.
-Transactions show categories beside notes, with native search, date sections, and a swipe action for tags;
+with a floating bottom search control on iPhone and toolbar search on iPad on iOS 26 and later. Period stepping stays in the date picker until confirmation.
+Transactions show categories beside notes, with native search, date sections, and swipe actions for tags and confirmed deletion;
 accounts have search and expandable groups. Editing and import preparation use
 system forms, searchable account selection, and navigation-bar confirmation.
 See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy rules.
@@ -79,7 +79,9 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
 - Keep native Ledger passkey login ready for paid-team signing; Personal Team
   builds use password login and device-level biometric quick unlock.
 - Enable Face ID or Touch ID from Settings, then unlock with a server-revocable
-  device token protected by the system Keychain.
+  device token protected by the system Keychain. Cold launch requests authentication
+  automatically; returning after the lock interval does the same. Canceling leaves
+  manual retry and password login available.
 - Choose an automatic lock interval per server: immediately, 1, 5, 15, or 30
   minutes. App Switcher snapshots remain covered as soon as the app leaves the
   foreground.

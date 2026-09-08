@@ -15,7 +15,7 @@ final class LedgerWidgetVisualTests: XCTestCase {
             XCTAssertEqual(request.url?.absoluteString, "https://ledger.example.com/api/widget/snapshot")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
-            let data = try XCTUnwrap(request.httpBody)
+            let data = try WidgetMockURLProtocol.bodyData(from: request)
             let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: String])
             XCTAssertEqual(body["deviceId"], "widget-device")
             XCTAssertEqual(body["token"], "widget-token")
@@ -114,7 +114,8 @@ final class LedgerWidgetVisualTests: XCTestCase {
             imports: LedgerWidgetSnapshot.placeholder.imports,
             importsUpdatedAt: LedgerWidgetSnapshot.placeholder.importsUpdatedAt
         )
-        try snapshotStore.save(futureSnapshot)
+        // Model a device whose clock was an hour ahead when the cache was written.
+        try snapshotStore.saveIfNewer(futureSnapshot, attemptedAt: now.addingTimeInterval(60 * 60))
         let credentialStore = WidgetTestCredentialStore()
         try credentialStore.save(
             LedgerWidgetCredential(
@@ -145,6 +146,100 @@ final class LedgerWidgetVisualTests: XCTestCase {
         XCTAssertEqual(callCount, 1)
         XCTAssertEqual(result.snapshot?.updatedAt, now)
         XCTAssertEqual(snapshotStore.load()?.updatedAt, now)
+    }
+
+    func testFutureCacheRecoveryKeepsConcurrentWidgetWrite() async throws {
+        let suiteName = "ledger-widget-future-race-\(UUID().uuidString)"
+        let store = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let future = snapshot(updatedAt: now.addingTimeInterval(3_600))
+        try store.saveIfNewer(future, attemptedAt: future.updatedAt)
+        let credentials = WidgetTestCredentialStore()
+        try credentials.save(LedgerWidgetCredential(
+            serverOrigin: "https://ledger.example.com", deviceID: "widget-device", token: "widget-token",
+            valuationCurrency: "CNY", enabled: true
+        ))
+        let client = WidgetDelayedRefreshClient(snapshot: snapshot(updatedAt: now))
+        let loader = LedgerWidgetTimelineLoader(credentialStore: credentials, snapshotStore: store, client: client)
+        let load = Task { await loader.load(now: now) }
+        await client.waitUntilStarted()
+        let concurrent = snapshot(updatedAt: now.addingTimeInterval(7_200))
+        try store.saveIfNewer(concurrent, attemptedAt: concurrent.updatedAt)
+        await client.complete()
+        let result = await load.value
+        XCTAssertEqual(result.snapshot, concurrent)
+        XCTAssertEqual(store.load(), concurrent)
+    }
+
+    func testClockSkewRecoveryRequiresOriginalStateAndNormalReplacementTimestamp() throws {
+        let suiteName = "ledger-widget-future-store-\(UUID().uuidString)"
+        let store = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let future = snapshot(updatedAt: now.addingTimeInterval(3_600))
+        try store.save(future)
+        let observed = store.loadState()
+        XCTAssertFalse(try store.saveIfNewer(snapshot(updatedAt: now), attemptedAt: now))
+        XCTAssertFalse(try store.saveIfNewer(
+            snapshot(updatedAt: now.addingTimeInterval(61)), attemptedAt: now, recoveringFutureState: observed
+        ))
+        XCTAssertTrue(try store.saveIfNewer(snapshot(updatedAt: now), attemptedAt: now, recoveringFutureState: observed))
+        // A slow recovery attempt cannot replace a newer normal cache.
+        let newer = snapshot(updatedAt: now.addingTimeInterval(10))
+        XCTAssertTrue(try store.saveIfNewer(newer, attemptedAt: now.addingTimeInterval(10)))
+        XCTAssertFalse(try store.saveIfNewer(snapshot(updatedAt: now), attemptedAt: now, recoveringFutureState: observed))
+        XCTAssertEqual(store.load(), newer)
+    }
+
+    func testClockSkewRecoveryAllowsServerTimestampAfterRequestStart() throws {
+        let suiteName = "ledger-widget-response-time-\(UUID().uuidString)"
+        let store = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let future = snapshot(updatedAt: now.addingTimeInterval(3_600))
+        try store.saveIfNewer(future, attemptedAt: future.updatedAt)
+        let response = snapshot(updatedAt: now.addingTimeInterval(2))
+        XCTAssertTrue(try store.saveIfNewer(response, attemptedAt: now, recoveringFutureState: store.loadState()))
+        XCTAssertEqual(store.load(), response)
+    }
+
+    func testSmallTimestampDifferenceKeepsMonotonicCacheProtection() throws {
+        let suiteName = "ledger-widget-small-clock-difference-\(UUID().uuidString)"
+        let store = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let cached = snapshot(updatedAt: now.addingTimeInterval(30))
+        try store.saveIfNewer(cached, attemptedAt: now.addingTimeInterval(30))
+        XCTAssertFalse(try store.saveIfNewer(
+            snapshot(updatedAt: now.addingTimeInterval(2)), attemptedAt: now, recoveringFutureState: store.loadState()
+        ))
+        XCTAssertEqual(store.load(), cached)
+    }
+
+    func testFutureAttemptRecoveryDetectsConcurrentRewriteOfIdenticalSnapshot() throws {
+        let suiteName = "ledger-widget-future-attempt-\(UUID().uuidString)"
+        let store = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let cached = snapshot(updatedAt: now.addingTimeInterval(-30))
+        try store.saveIfNewer(cached, attemptedAt: now.addingTimeInterval(3_600))
+        let observed = store.loadState()
+        XCTAssertTrue(observed.isFuture(relativeTo: now))
+        // The payload can be identical while a later writer owns a new attempt.
+        try store.saveIfNewer(cached, attemptedAt: now.addingTimeInterval(7_200))
+        XCTAssertFalse(try store.saveIfNewer(snapshot(updatedAt: now), attemptedAt: now, recoveringFutureState: observed))
+        XCTAssertEqual(store.loadState().attemptedAt, now.addingTimeInterval(7_200))
+        XCTAssertTrue(try store.saveIfNewer(snapshot(updatedAt: now), attemptedAt: now, recoveringFutureState: store.loadState()))
+        XCTAssertEqual(store.loadState().attemptedAt, now)
+    }
+
+    private func snapshot(updatedAt: Date) -> LedgerWidgetSnapshot {
+        LedgerWidgetSnapshot(
+            updatedAt: updatedAt, expense: LedgerWidgetSnapshot.placeholder.expense,
+            accounts: LedgerWidgetSnapshot.placeholder.accounts, imports: LedgerWidgetSnapshot.placeholder.imports,
+            importsUpdatedAt: LedgerWidgetSnapshot.placeholder.importsUpdatedAt
+        )
     }
 
     func testRenderSupportedWidgetFamilies() throws {
@@ -229,6 +324,9 @@ final class LedgerWidgetVisualTests: XCTestCase {
         XCTAssertEqual(layout.spendingDayCount, 2)
         XCTAssertEqual(layout.url(for: 29)?.absoluteString, "ledger://transactions?date=2028-02-29")
         XCTAssertNil(layout.url(for: 30))
+        XCTAssertEqual(layout.dateString(for: 29), "2028-02-29")
+        XCTAssertNil(layout.dateString(for: 30))
+        XCTAssertNil(layout.dateString(for: 0))
     }
 
     func testCalendarDeepLinksValidateCivilDates() {
@@ -272,6 +370,32 @@ final class LedgerWidgetVisualTests: XCTestCase {
         ] {
             try render(ExpenseLockScreenWidgetView(entry: entry, familyOverride: family), size: size, name: name, padding: 0)
         }
+    }
+
+    func testAccountWidgetDeepLinkRoundTripsReservedCharactersAndHidesRedactedAccount() throws {
+        let account = LedgerWidgetAccountSnapshot(
+            account: "Assets:银行:日常 & 储蓄?#",
+            label: "储蓄", group: "银行", currency: "CNY", balance: 100,
+            valuationCurrency: "CNY", valuation: nil
+        )
+        let url = try XCTUnwrap(LedgerWidgetNavigation.account(account))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.scheme, "ledger")
+        XCTAssertEqual(components.host, "accounts")
+        XCTAssertEqual(components.queryItems?.first { $0.name == "account" }?.value, account.account)
+        XCTAssertEqual(components.queryItems?.first { $0.name == "currency" }?.value, "CNY")
+        XCTAssertEqual(LedgerWidgetNavigation.account(account, isRedacted: true)?.absoluteString, "ledger://accounts")
+    }
+
+    func testCalendarWidgetDeepLinkKeepsDayAndHidesRedactedDate() {
+        XCTAssertEqual(
+            LedgerWidgetNavigation.transactions(date: "2028-02-29")?.absoluteString,
+            "ledger://transactions?date=2028-02-29"
+        )
+        XCTAssertEqual(
+            LedgerWidgetNavigation.transactions(date: "2028-02-29", isRedacted: true)?.absoluteString,
+            "ledger://transactions"
+        )
     }
 
     private func render<V: View>(
@@ -439,6 +563,21 @@ private actor WidgetRecordingRefreshClient: LedgerWidgetRefreshing {
 
 private final class WidgetMockURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    static func bodyData(from request: URLRequest) throws -> Data {
+        if let data = request.httpBody { return data }
+        let stream = try XCTUnwrap(request.httpBodyStream)
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while true {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 { throw stream.streamError ?? URLError(.cannotDecodeRawData) }
+            if count == 0 { return data }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+    }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }

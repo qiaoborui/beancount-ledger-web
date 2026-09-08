@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private enum TransactionAmountParser {
     static func minorUnits(_ raw: String) -> Int? {
@@ -57,17 +58,133 @@ struct TransactionRow: View {
     }
 }
 
+extension View {
+    func ledgerTransactionActions(_ transaction: LedgerTransaction) -> some View {
+        modifier(LedgerTransactionActions(transaction: transaction))
+    }
+}
+
+/// Copies the same human-readable fields shown in the ledger, without source or metadata.
+enum LedgerTransactionCopySummary {
+    static func text(for transaction: LedgerTransaction, accounts: [LedgerAccount], amountsVisible: Bool) -> String {
+        let presentation = TransactionPresentation(transaction: transaction)
+        let labels = TransactionCategoryPresentation.accountLabels(accounts)
+        let amount = amountsVisible
+            ? amountPrefix(presentation.kind) + MoneyText.format(minorUnits: presentation.minorUnits, currency: presentation.currency)
+            : "金额已隐藏"
+        var lines = [transaction.date, presentation.title]
+        if !presentation.subtitle.isEmpty { lines.append(presentation.subtitle) }
+        lines.append(amount)
+        let accountNames = transaction.postings.map { labels[$0.account] ?? $0.account }
+        lines.append(accountNames.joined(separator: " · "))
+        if let tags = transaction.tags, !tags.isEmpty { lines.append(tags.map { "#" + $0 }.joined(separator: " ")) }
+        return lines.joined(separator: "\n")
+    }
+}
+
+private struct LedgerTransactionActions: ViewModifier {
+    @EnvironmentObject private var session: LedgerSession
+    let transaction: LedgerTransaction
+    @State private var action: Action?
+    @State private var confirmationFeedback = 0
+
+    private enum Kind { case edit, tags, delete }
+    private struct Action: Identifiable {
+        let id = UUID()
+        let kind: Kind
+        let transaction: LedgerTransaction
+    }
+
+    private var resolved: LedgerTransaction? {
+        guard session.phase == .ready, !session.privacyShielded,
+              case let .visible(current) = session.transactionResolution(for: transaction.source) else { return nil }
+        return current
+    }
+
+    private func canWrite(_ transaction: LedgerTransaction) -> Bool {
+        transaction.source.hash?.isEmpty == false
+            && session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites != true
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .contextMenu {
+                Button("编辑", systemImage: "pencil") { present(.edit) }
+                    .disabled(resolved.map { !canWrite($0) || $0.editableEntry == nil } ?? true)
+                    .accessibilityIdentifier("transaction-context-edit")
+                Button("复制摘要", systemImage: "doc.on.doc", action: copySummary)
+                    .disabled(resolved == nil)
+                    .accessibilityIdentifier("transaction-context-copy")
+                Button("添加标签", systemImage: "tag") { present(.tags) }
+                    .disabled(resolved.map { !canWrite($0) } ?? true)
+                    .accessibilityIdentifier("transaction-context-tags")
+                Divider()
+                Button("删除", systemImage: "trash", role: .destructive) { present(.delete) }
+                    .disabled(resolved.map { !canWrite($0) } ?? true)
+                    .accessibilityIdentifier("transaction-context-delete")
+            }
+            .sheet(item: $action) { action in
+                actionSheet(action).ledgerPrivacyProtectedSheet()
+            }
+            .sensoryFeedback(.success, trigger: confirmationFeedback)
+    }
+
+    @ViewBuilder
+    private func actionSheet(_ action: Action) -> some View {
+        switch action.kind {
+        case .edit:
+            TransactionEditorView(
+                transaction: action.transaction,
+                accounts: session.ledger?.accounts ?? [],
+                commodities: session.ledger?.commodities ?? []
+            ) { entry in
+                try await session.updateTransaction(source: action.transaction.source, entry: entry)
+                confirmationFeedback &+= 1
+            }
+        case .tags:
+            TransactionTagEditorSheet(selectedCount: 1) { tags in
+                try await session.addTransactionTags(sources: [action.transaction.source], tags: tags)
+                confirmationFeedback &+= 1
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        case .delete:
+            TransactionDeleteSheet(transaction: action.transaction) { confirmationFeedback &+= 1 }
+        }
+    }
+
+    private func present(_ kind: Kind) {
+        guard let current = resolved, canWrite(current) else { return }
+        if case .edit = kind, current.editableEntry == nil { return }
+        action = Action(kind: kind, transaction: current)
+    }
+
+    private func copySummary() {
+        guard let current = resolved else { return }
+        let text = LedgerTransactionCopySummary.text(
+            for: current, accounts: session.ledger?.accounts ?? [], amountsVisible: session.amountsVisible
+        )
+        UIPasteboard.general.setItems([["public.utf8-plain-text": text]], options: [
+            .localOnly: true,
+            .expirationDate: Date().addingTimeInterval(120)
+        ])
+        confirmationFeedback &+= 1
+    }
+}
+
 struct TransactionsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var filters = LedgerTransactionFilter()
     @State private var filterPresented = false
+    @State private var deletionTarget: LedgerTransaction?
     @State private var selectingTags = false
     @State private var selectedTransactionIDs: Set<String> = []
     @State private var tagEditorPresented = false
     @State private var actionMessage: String?
     @State private var actionMessageStyle: LedgerStatusStyle = .failure
     @State private var confirmationFeedback = 0
+    @State private var selectionFeedback = 0
 
     private var transactions: [LedgerTransaction] {
         session.visibleTransactions
@@ -153,7 +270,15 @@ struct TransactionsView: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
+                            .ledgerTransactionActions(transaction)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    deletionTarget = transaction
+                                } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
+                                .disabled(transaction.source.hash?.isEmpty != false
+                                    || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
                                 Button {
                                     selectingTags = true
                                     toggleTagSelection(transaction)
@@ -183,7 +308,6 @@ struct TransactionsView: View {
         }
         .ledgerReadingList()
         .ledgerNavigation("流水", isRoot: isRoot, showsTimeRange: true)
-        .searchable(text: $filters.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "收付款对象、说明、账户或标签")
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
         .toolbar {
@@ -217,6 +341,14 @@ struct TransactionsView: View {
                 .accessibilityValue("\(activeStructuredFilterCount) 个筛选条件")
             }
         }
+            .sheet(item: $deletionTarget) { transaction in
+                TransactionDeleteSheet(transaction: transaction) {
+                    actionMessage = "交易已删除，原文已在账本中注释保留。"
+                    actionMessageStyle = .confirmed
+                    confirmationFeedback &+= 1
+                }
+                .ledgerPrivacyProtectedSheet()
+            }
             .sheet(isPresented: $filterPresented) {
                 TransactionFilterSheet(
                     kind: $filters.kind,
@@ -238,7 +370,7 @@ struct TransactionsView: View {
                     }
                 )
                 .ledgerPrivacyProtectedSheet()
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -260,6 +392,7 @@ struct TransactionsView: View {
                 selectedTransactionIDs.formIntersection(ids)
             }
         .sensoryFeedback(.success, trigger: confirmationFeedback)
+        .sensoryFeedback(.selection, trigger: selectionFeedback)
     }
 
     private var allVisibleEligibleSelected: Bool {
@@ -280,8 +413,10 @@ struct TransactionsView: View {
         }
         if selectedTransactionIDs.contains(transaction.id) {
             selectedTransactionIDs.remove(transaction.id)
+            selectionFeedback &+= 1
         } else if selectedTransactionIDs.count < TransactionTagSelectionRules.maximumCount {
             selectedTransactionIDs.insert(transaction.id)
+            selectionFeedback &+= 1
         } else {
             actionMessageStyle = .failure
             actionMessage = "一次最多选择 200 条交易。"
@@ -289,6 +424,8 @@ struct TransactionsView: View {
     }
 
     private func toggleAllVisibleForTags() {
+        let previousSelection = selectedTransactionIDs
+        defer { if previousSelection != selectedTransactionIDs { selectionFeedback &+= 1 } }
         let eligible = filteredTransactions.filter(isTagEligible)
         if allVisibleEligibleSelected {
             selectedTransactionIDs.subtract(eligible.map(\.id))
@@ -353,6 +490,7 @@ struct WidgetDayTransactionsView: View {
                             accountLabels: TransactionCategoryPresentation.accountLabels(payload?.accounts ?? [])
                         )
                     }
+                    .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
                 }
             } header: {
                 if !transactions.isEmpty { Text("全部支出 · \(transactions.count) 笔") }
@@ -736,8 +874,7 @@ private struct TransactionTagSelectionBar: View {
         .buttonStyle(PressScaleButtonStyle())
         .padding(.horizontal, LedgerSpacing.lg)
         .padding(.vertical, LedgerSpacing.sm)
-        .background(LedgerPalette.panel)
-        .overlay(alignment: .top) { Rectangle().fill(LedgerPalette.line).frame(height: 1) }
+        .ledgerFloatingActionSurface()
     }
 }
 
@@ -750,6 +887,7 @@ private struct TransactionTagEditorSheet: View {
     @State private var input = ""
     @State private var errorMessage: String?
     @State private var applying = false
+    @State private var failureFeedback = 0
 
     var body: some View {
         NavigationStack {
@@ -785,14 +923,16 @@ private struct TransactionTagEditorSheet: View {
             }
             .padding(LedgerSpacing.lg)
             .background(LedgerPalette.canvas)
-            .navigationTitle("批量添加标签")
+            .navigationTitle(selectedCount == 1 ? "添加标签" : "批量添加标签")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { dismiss() }.disabled(applying)
                 }
             }
         }
+        .interactiveDismissDisabled(applying)
+        .sensoryFeedback(.error, trigger: failureFeedback)
     }
 
     private func apply() async {
@@ -804,6 +944,7 @@ private struct TransactionTagEditorSheet: View {
             dismiss()
         } catch {
             errorMessage = "添加失败，已恢复服务器数据。请检查后重试：\(error.localizedDescription)"
+            failureFeedback &+= 1
         }
         applying = false
     }
@@ -815,6 +956,7 @@ struct TransactionDetailView: View {
 
     @State private var transaction: LedgerTransaction
     @State private var editorPresented = false
+    @State private var deletionPresented = false
     @State private var savedMessage: String?
     @State private var confirmationFeedback = 0
     @State private var confirmedEntry: LedgerTransactionEntry?
@@ -856,7 +998,10 @@ struct TransactionDetailView: View {
                         AccountDetailView(account: posting.account, currency: posting.currency ?? presentation.currency)
                     } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(posting.account).font(.subheadline).foregroundStyle(.primary)
+                            Text(accountLabel(posting.account)).font(.subheadline).foregroundStyle(.primary)
+                            if accountLabel(posting.account) != posting.account {
+                                Text(posting.account).font(.caption).foregroundStyle(.secondary)
+                            }
                             AmountLabel(
                                 minorUnits: posting.amount,
                                 currency: posting.currency ?? presentation.currency,
@@ -905,10 +1050,17 @@ struct TransactionDetailView: View {
         .navigationTitle("交易详情")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .toolbarBackground(LedgerPalette.panel, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+
         .toolbar {
             if !snapshotOnly {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(role: .destructive) { deletionPresented = true } label: {
+                        Label("删除交易", systemImage: "trash")
+                    }
+                    .disabled(transaction.source.hash?.isEmpty != false || sourceUnavailable
+                        || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
+                    .accessibilityIdentifier("transaction-delete")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("编辑") { editorPresented = true }
                         .fontWeight(.semibold)
@@ -921,6 +1073,10 @@ struct TransactionDetailView: View {
                         .accessibilityIdentifier("transaction-edit")
                 }
             }
+        }
+        .sheet(isPresented: $deletionPresented) {
+            TransactionDeleteSheet(transaction: transaction) { dismiss() }
+                .ledgerPrivacyProtectedSheet()
         }
         .sheet(isPresented: $editorPresented) {
             TransactionEditorView(
@@ -950,6 +1106,10 @@ struct TransactionDetailView: View {
         .sensoryFeedback(.success, trigger: confirmationFeedback)
     }
 
+    private func accountLabel(_ path: String) -> String {
+        session.ledger?.accounts.first(where: { $0.account == path })?.displayLabel ?? path
+    }
+
     private func synchronizeTransaction(with ledger: LedgerBootstrap?) {
         guard !snapshotOnly, let ledger else { return }
         if case let .visible(resolved) = session.transactionResolution(for: transaction.source) {
@@ -970,6 +1130,76 @@ struct TransactionDetailView: View {
             }
         }
         sourceUnavailable = true
+    }
+}
+
+private struct TransactionDeleteSheet: View {
+    @EnvironmentObject private var session: LedgerSession
+    @Environment(\.dismiss) private var dismiss
+    let transaction: LedgerTransaction
+    let onDeleted: () -> Void
+    @State private var reason = ""
+    @State private var isDeleting = false
+    @State private var failureFeedback = 0
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TransactionRow(transaction: transaction)
+                } header: {
+                    Text("确认删除这笔交易")
+                } footer: {
+                    Text("确认后从流水和统计中移除，原交易会作为注释保留在账本文件中。")
+                }
+                Section("删除原因（可选）") {
+                    TextField("例如：重复导入", text: $reason, axis: .vertical)
+                        .lineLimit(2...4)
+                }
+                if let errorMessage {
+                    Section { StatusBanner(message: errorMessage) { self.errorMessage = nil } }
+                }
+                Section {
+                    Button(role: .destructive) {
+                        isDeleting = true
+                        errorMessage = nil
+                        Task {
+                            do {
+                                try await session.deleteTransaction(
+                                    source: transaction.source,
+                                    reason: reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                                )
+                                dismiss()
+                                onDeleted()
+                            } catch {
+                                errorMessage = error.localizedDescription
+                                failureFeedback &+= 1
+                            }
+                            isDeleting = false
+                        }
+                    } label: {
+                        HStack {
+                            Label("确认删除", systemImage: "trash")
+                            if isDeleting { Spacer(); ProgressView() }
+                        }
+                    }
+                    .accessibilityIdentifier("transaction-delete-confirm")
+                }
+            }
+            .disabled(isDeleting)
+            .navigationTitle("删除交易")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }.disabled(isDeleting)
+                }
+            }
+        }
+        .interactiveDismissDisabled(isDeleting)
+        .sensoryFeedback(.error, trigger: failureFeedback)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }
 
@@ -1054,6 +1284,9 @@ private struct TransactionEditorView: View {
     @State private var postings: [EditableTransactionPosting]
     @State private var errorMessage: String?
     @State private var saving = false
+    @State private var failureFeedback = 0
+    @State private var initialDraft: Draft?
+    @State private var discardPresented = false
     @FocusState private var keyboardFocused: Bool
 
     init(
@@ -1093,6 +1326,30 @@ private struct TransactionEditorView: View {
                 currency: $0.currency ?? "CNY"
             )
         })
+    }
+
+    private struct Draft: Equatable {
+        let date: Date
+        let payee: String
+        let narration: String
+        let tags: String
+        let metadata: String
+        let postings: [EditableTransactionPosting]
+    }
+
+    private var currentDraft: Draft {
+        Draft(date: date, payee: payee, narration: narration, tags: tagsText,
+              metadata: metadataText, postings: postings)
+    }
+
+    private var hasChanges: Bool {
+        initialDraft.map { $0 != currentDraft } ?? false
+    }
+
+    private func requestDismiss() {
+        guard !saving else { return }
+        keyboardFocused = false
+        if hasChanges { discardPresented = true } else { dismiss() }
     }
 
     private var accountChoices: [LedgerAccount] {
@@ -1191,7 +1448,8 @@ private struct TransactionEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }.disabled(saving)
+                    Button("取消", action: requestDismiss).disabled(saving)
+                        .accessibilityIdentifier("transaction-edit-cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -1209,7 +1467,17 @@ private struct TransactionEditorView: View {
                 }
             }
         }
-        .interactiveDismissDisabled(saving)
+        .onAppear { if initialDraft == nil { initialDraft = currentDraft } }
+        .interactiveDismissDisabled(saving || hasChanges)
+        .alert("放弃未保存的修改？", isPresented: $discardPresented) {
+            Button("放弃修改", role: .destructive) { dismiss() }
+                .accessibilityIdentifier("transaction-edit-discard")
+            Button("继续编辑", role: .cancel) { }
+                .accessibilityIdentifier("transaction-edit-continue")
+        } message: {
+            Text("已修改的内容会保留，直到保存或确认放弃。")
+        }
+        .sensoryFeedback(.error, trigger: failureFeedback)
         .privacySensitive()
     }
 
@@ -1223,6 +1491,7 @@ private struct TransactionEditorView: View {
             dismiss()
         } catch {
             errorMessage = "保存失败，已恢复服务器数据。请检查后重试：\(error.localizedDescription)"
+            failureFeedback &+= 1
         }
         saving = false
     }

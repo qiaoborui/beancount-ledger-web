@@ -10,6 +10,10 @@ struct ImportHistoryView: View {
 
     var isRoot = false
 
+    @State private var sharedItems: [LedgerSharedImportInbox.Item] = []
+    @State private var activeSharedItem: LedgerSharedImportInbox.Item?
+    @State private var sharedItemToRemove: LedgerSharedImportInbox.Item?
+    @State private var sharedInboxError: String?
     @State private var documents: [LedgerImportDocument] = []
     @State private var errorMessage: String?
     @State private var isLoading = true
@@ -47,9 +51,9 @@ struct ImportHistoryView: View {
     var body: some View {
         VStack(spacing: 0) {
             Group {
-                if isLoading && documents.isEmpty {
+                if isLoading && documents.isEmpty && sharedItems.isEmpty {
                     loadingState
-                } else if documents.isEmpty, let errorMessage {
+                } else if documents.isEmpty && sharedItems.isEmpty, let errorMessage {
                     failureState(errorMessage)
                 } else {
                     content
@@ -65,9 +69,13 @@ struct ImportHistoryView: View {
         ) { result in
             Task { await handleFileSelection(result) }
         }
-        .sheet(item: $activeImportFile) { file in
+        .sheet(item: $activeImportFile, onDismiss: { activeSharedItem = nil }) { file in
             NativeImportFlowView(file: file, providers: providers) { _ in
-                Task { await load(replacingContent: false) }
+                let completedItem = activeSharedItem
+                Task {
+                    if let completedItem { await removeSharedItem(completedItem) }
+                    await load(replacingContent: false)
+                }
             }
             .environmentObject(session)
         }
@@ -104,7 +112,21 @@ struct ImportHistoryView: View {
         } message: { item in
             Text("“\(pendingTitle(item))”会从待核对列表移除，不会写入账本。")
         }
+        .confirmationDialog("移除待导入文件？", isPresented: Binding(
+            get: { sharedItemToRemove != nil },
+            set: { if !$0 { sharedItemToRemove = nil } }
+        ), presenting: sharedItemToRemove) { item in
+            Button("移除副本", role: .destructive) {
+                Task { await removeSharedItem(item) }
+                sharedItemToRemove = nil
+            }
+            Button("取消", role: .cancel) { sharedItemToRemove = nil }
+        } message: { _ in
+            Text("仅移除 Ledger 中的待导入副本，原始文件保留。")
+        }
+        .onChange(of: session.sharedImportRevision) { _, _ in Task { await loadSharedInbox() } }
         .task {
+            await loadSharedInbox()
             await refreshAll(replacingContent: true)
             await applyGmailOAuthResult(session.gmailOAuthResult)
             presentDebugImportFlowIfNeeded()
@@ -117,7 +139,10 @@ struct ImportHistoryView: View {
                 gmailRealtimeConnected = false
                 return
             }
-            Task { await loadGmail(replacingContent: false) }
+            Task {
+                await loadSharedInbox()
+                await loadGmail(replacingContent: false)
+            }
         }
         .onChange(of: session.gmailOAuthResult) { _, result in
             Task { await applyGmailOAuthResult(result) }
@@ -163,6 +188,7 @@ struct ImportHistoryView: View {
                     StatusBanner(message: errorMessage) { self.errorMessage = nil }
                 }
 
+                sharedInboxSection
                 importSection
                 gmailAutomationSection
                 updateSummary
@@ -184,6 +210,59 @@ struct ImportHistoryView: View {
         Text(loadedAt.map { "刚刚检查 · \($0.formatted(date: .omitted, time: .shortened))" } ?? "等待检查")
             .font(.footnote)
             .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var sharedInboxSection: some View {
+        if !sharedItems.isEmpty || sharedInboxError != nil {
+            VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+                SectionHeading(title: "待导入", detail: "从其他 App 分享的账单")
+                if let sharedInboxError { Text(sharedInboxError).foregroundStyle(.secondary) }
+                ForEach(sharedItems) { item in
+                    HStack {
+                        Button { Task { await reviewSharedItem(item) } } label: {
+                            Label(item.name, systemImage: "doc.badge.arrow.up")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .accessibilityIdentifier("shared-import-review-\(item.name)")
+                        .disabled(isReadingFile)
+                        Button { sharedItemToRemove = item } label: { Image(systemName: "trash") }
+                            .accessibilityLabel("移除待导入文件")
+                    }
+                    .padding(LedgerSpacing.md)
+                    .background(LedgerPalette.raised, in: RoundedRectangle(cornerRadius: LedgerRadius.md))
+                }
+            }
+        }
+    }
+
+    private func loadSharedInbox() async {
+        do {
+            let items = try await Task.detached { try LedgerSharedImportInbox.appInbox().items() }.value
+            guard !Task.isCancelled else { return }
+            sharedItems = items
+            sharedInboxError = nil
+        } catch { sharedInboxError = error.localizedDescription }
+    }
+
+    private func reviewSharedItem(_ item: LedgerSharedImportInbox.Item) async {
+        guard !isReadingFile else { return }
+        isReadingFile = true
+        defer { isReadingFile = false }
+        do {
+            let data = try await Task.detached(priority: .userInitiated) { try LedgerSharedImportInbox.appInbox().read(item) }.value
+            try LedgerImportFileValidator.validate(name: item.name, byteCount: data.count, providers: providers)
+            guard !Task.isCancelled, session.phase == .ready else { return }
+            activeSharedItem = item
+            activeImportFile = LedgerImportSelectedFile(name: item.name, data: data)
+        } catch { sharedInboxError = error.localizedDescription }
+    }
+
+    private func removeSharedItem(_ item: LedgerSharedImportInbox.Item) async {
+        do {
+            try await Task.detached { try LedgerSharedImportInbox.appInbox().remove(item) }.value
+            await loadSharedInbox()
+        } catch { sharedInboxError = error.localizedDescription }
     }
 
     private var importSection: some View {
@@ -898,6 +977,7 @@ struct ImportHistoryView: View {
             do {
                 let file = try await Self.readImportFile(at: url, providers: providers)
                 guard !Task.isCancelled else { return }
+                activeSharedItem = nil
                 activeImportFile = file
             } catch is CancellationError {
                 return

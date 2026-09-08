@@ -49,6 +49,7 @@ struct ExpenseCalendarWidget: Widget {
 
 struct ExpenseCalendarWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.redactionReasons) private var redactionReasons
     let entry: ExpenseCalendarEntry
     var familyOverride: WidgetFamily?
 
@@ -67,7 +68,7 @@ struct ExpenseCalendarWidgetView: View {
                     medium(snapshot.expense, layout: layout, updatedAt: snapshot.updatedAt)
                 }
             }
-            .widgetURL(URL(string: "ledger://overview"))
+            .widgetURL(URL(string: "ledger://transactions"))
             .containerBackground(for: .widget) { LedgerWidgetColors.panel }
         } else {
             LedgerWidgetUnavailableView(
@@ -75,7 +76,7 @@ struct ExpenseCalendarWidgetView: View {
                 detail: "打开 Ledger 并刷新一次",
                 symbol: "calendar"
             )
-            .widgetURL(URL(string: "ledger://overview"))
+            .widgetURL(URL(string: "ledger://transactions"))
         }
     }
 
@@ -93,7 +94,9 @@ struct ExpenseCalendarWidgetView: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(LedgerWidgetColors.secondary)
                 Spacer(minLength: 0)
-                if let today = layout.today, let url = layout.url(for: today) {
+                if let today = layout.today, let url = LedgerWidgetNavigation.transactions(
+                    date: layout.dateString(for: today), isRedacted: !redactionReasons.isEmpty
+                ) {
                     Link(destination: url) {
                         calendarMetric(title: "今日消费", value: money(layout.amounts[today] ?? 0, expense), prominent: true)
                     }
@@ -183,6 +186,7 @@ struct ExpenseCalendarWidgetView: View {
 }
 
 private struct ExpenseMonthGrid: View {
+    @Environment(\.redactionReasons) private var redactionReasons
     let layout: ExpenseCalendarLayout
     let currency: String
     let compact: Bool
@@ -210,38 +214,44 @@ private struct ExpenseMonthGrid: View {
 
     @ViewBuilder
     private func dayCell(_ day: Int?) -> some View {
-        if let day, let url = layout.url(for: day) {
+        if let day, let date = layout.dateString(for: day),
+           let destination = LedgerWidgetNavigation.transactions(date: date, isRedacted: !redactionReasons.isEmpty) {
             let amount = layout.amounts[day] ?? 0
-            Link(destination: url) {
-                VStack(spacing: 2) {
-                    Text("\(day)")
-                        .font(.system(size: compact ? 11 : 12, weight: day == layout.today || amount > 0 ? .semibold : .regular))
-                    if !compact {
-                        Text(amount == 0 ? " " : MoneyText.formatWidget(minorUnits: amount, currency: currency))
-                            .font(.system(size: 9, weight: .medium))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                    }
-                }
-                .monospacedDigit()
-                .foregroundStyle(layout.isFuture(day) ? LedgerWidgetColors.secondary.opacity(0.55) : LedgerWidgetColors.ink)
-                .frame(maxWidth: .infinity)
-                .frame(height: compact ? 17 : 34)
-                .background(heatColor(amount), in: RoundedRectangle(cornerRadius: 5))
-                .overlay {
-                    if day == layout.today {
-                        RoundedRectangle(cornerRadius: 5).strokeBorder(LedgerWidgetColors.cobalt, lineWidth: 1.5)
-                    }
-                }
-                .contentShape(Rectangle())
+            Link(destination: destination) {
+                dayLabel(day, amount: amount)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(layout.date(for: day))，支出 \(MoneyText.formatWidget(minorUnits: amount, currency: currency))")
-            .accessibilityHint("查看当天全部支出")
+            .accessibilityLabel(redactionReasons.isEmpty
+                ? "\(date)，支出 \(MoneyText.formatWidget(minorUnits: amount, currency: currency))"
+                : "流水")
+            .accessibilityHint(redactionReasons.isEmpty ? "查看当天全部支出" : "打开流水")
         } else {
-            Color.clear
-                .frame(height: compact ? 17 : 34)
+            Color.clear.frame(height: compact ? 17 : 34)
         }
+    }
+
+    private func dayLabel(_ day: Int, amount: Int) -> some View {
+        VStack(spacing: 2) {
+            Text("\(day)")
+                .font(.system(size: compact ? 11 : 12, weight: day == layout.today || amount > 0 ? .semibold : .regular))
+            if !compact {
+                Text(amount == 0 ? " " : MoneyText.formatWidget(minorUnits: amount, currency: currency))
+                    .font(.system(size: 9, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+        }
+        .monospacedDigit()
+        .foregroundStyle(layout.isFuture(day) ? LedgerWidgetColors.secondary.opacity(0.55) : LedgerWidgetColors.ink)
+        .frame(maxWidth: .infinity)
+        .frame(height: compact ? 17 : 34)
+        .background(heatColor(amount), in: RoundedRectangle(cornerRadius: 5))
+        .overlay {
+            if day == layout.today {
+                RoundedRectangle(cornerRadius: 5).strokeBorder(LedgerWidgetColors.cobalt, lineWidth: 1.5)
+            }
+        }
+        .contentShape(Rectangle())
     }
 
     private func heatColor(_ amount: Int) -> Color {
@@ -264,7 +274,14 @@ struct ExpenseCalendarLayout {
     private let currentDay: String
 
     func date(for day: Int) -> String { String(format: "%@-%02d", monthPrefix, day) }
-    func url(for day: Int) -> URL? { LedgerWidgetLink.expenseDay(date(for: day)) }
+    func dateString(for day: Int) -> String? {
+        guard cells.contains(day) else { return nil }
+        return date(for: day)
+    }
+    func url(for day: Int) -> URL? {
+        guard let date = dateString(for: day) else { return nil }
+        return LedgerWidgetLink.expenseDay(date)
+    }
     func isFuture(_ day: Int) -> Bool { date(for: day) > currentDay }
 
     init(expense: LedgerWidgetExpenseSnapshot, now: Date = Date()) {

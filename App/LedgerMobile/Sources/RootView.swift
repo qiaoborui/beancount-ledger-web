@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -12,10 +13,10 @@ struct RootView: View {
             case .configuration:
                 ServerConfigurationView()
             case .checking:
-                MainTabView()
-                    .redacted(reason: .placeholder)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+                // A search deep link can arrive before authentication finishes. Keep native
+                // search controllers unmounted until the ready shell has a stable lifetime.
+                ProgressView("正在连接账本")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             case let .locked(authenticated):
                 LoginView(authenticated: authenticated)
             case .ready:
@@ -28,7 +29,7 @@ struct RootView: View {
             }
         }
         .tint(LedgerPalette.cobalt)
-        .animation(.easeOut(duration: 0.18), value: session.phase)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: session.phase)
         .sheet(isPresented: Binding(
             get: { session.canPresentWidgetDay },
             set: { presented in
@@ -202,7 +203,7 @@ private struct MainTabView: View {
             },
             set: { destination in
                 let overflow = moreDestination.flatMap {
-                    session.compactTabDestinations.contains($0) ? nil : $0
+                    $0.isCompactOverflow(in: session.compactTabDestinations) ? $0 : nil
                 }
                 session.primaryDestinationID = destination == .settings
                     ? (overflow ?? .settings).rawValue
@@ -216,10 +217,14 @@ private struct MainTabView: View {
             if horizontalSizeClass == .regular {
                 LedgerRegularShell(selection: selection)
             } else {
-                compactTabs
+                compactTabs.ledgerAdaptiveTabBar()
             }
         }
         .ledgerTimeRangeSheet()
+        .task(id: session.pendingExternalRoute?.id) { await session.applyPendingExternalRoute() }
+        .onChange(of: session.isRangeLoading) { _, loading in
+            if !loading { Task { await session.applyPendingExternalRoute() } }
+        }
         .onChange(of: session.compactTabDestinations) { _, destinations in
             if let moreDestination, destinations.contains(moreDestination) {
                 self.moreDestination = nil
@@ -227,7 +232,31 @@ private struct MainTabView: View {
         }
     }
 
+    @ViewBuilder
     private var compactTabs: some View {
+        if #available(iOS 26.0, *) {
+            TabView(selection: compactSelection) {
+                ForEach(session.compactTabDestinations) { destination in
+                    Tab(destination.compactTitle, systemImage: destination.systemImage, value: destination) {
+                        NavigationStack { LedgerDestinationView(destination: destination, isRoot: true) }
+                    }
+                }
+                Tab("更多", systemImage: "ellipsis", value: LedgerDestination.settings) {
+                    NavigationStack { MoreView(overflowDestination: $moreDestination) }
+                }
+                Tab(value: LedgerDestination.search, role: .search) {
+                    NavigationStack { GlobalSearchView(query: $session.globalSearchQuery, usesNativeSearchTab: true) }
+                        .searchable(text: $session.globalSearchQuery, prompt: "搜索整个账本")
+                        .onSubmit(of: .search) { session.recordGlobalSearch(session.globalSearchQuery) }
+                }
+            }
+            .tabViewSearchActivation(.searchTabSelection)
+        } else {
+            legacyCompactTabs
+        }
+    }
+
+    private var legacyCompactTabs: some View {
         TabView(selection: compactSelection) {
             ForEach(session.compactTabDestinations) { destination in
                 NavigationStack {
@@ -239,6 +268,9 @@ private struct MainTabView: View {
             NavigationStack { MoreView(overflowDestination: $moreDestination) }
                 .tabItem { Label("更多", systemImage: "ellipsis") }
                 .tag(LedgerDestination.settings)
+            NavigationStack { GlobalSearchPage() }
+                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
+                .tag(LedgerDestination.search)
         }
     }
 }
@@ -259,6 +291,7 @@ struct LedgerDestinationView: View {
         case .transactions: TransactionsView(isRoot: isRoot)
         case .accounts: AccountsView(isRoot: isRoot)
         case .settings: SettingsView(isRoot: isRoot)
+        case .search: GlobalSearchPage()
         }
     }
 }
@@ -281,6 +314,7 @@ private struct LedgerRegularShell: View {
                     sidebarRow(.investments)
                 }
                 Section("工具") {
+                    sidebarRow(.search)
                     sidebarRow(.imports)
                     sidebarRow(.currencies)
                     sidebarRow(.query)

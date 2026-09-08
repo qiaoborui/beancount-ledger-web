@@ -11,8 +11,9 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
     case transactions
     case accounts
     case settings
+    case search
 
-    static let compactTabLimit = 4
+    static let compactTabLimit = 3
     static let defaultCompactTabs: [LedgerDestination] = [.overview, .transactions, .accounts]
 
     var id: String { rawValue }
@@ -29,6 +30,7 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
         case .transactions: "交易账本"
         case .accounts: "账户"
         case .settings: "设置"
+        case .search: "搜索"
         }
     }
 
@@ -44,6 +46,7 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
         case .transactions: "交易"
         case .accounts: "账户"
         case .settings: "更多"
+        case .search: "搜索"
         }
     }
 
@@ -59,23 +62,28 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
         case .transactions: "list.bullet"
         case .accounts: "book.closed"
         case .settings: "gearshape"
+        case .search: "magnifyingglass"
         }
     }
 
     static var compactTabCandidates: [LedgerDestination] {
-        allCases.filter { $0 != .settings }
+        allCases.filter { $0 != .settings && $0 != .search }
     }
 
     static func normalizedCompactTabs(_ destinations: [LedgerDestination]) -> [LedgerDestination] {
         var seen = Set<LedgerDestination>()
         let normalized = destinations
-            .filter { $0 != .settings && seen.insert($0).inserted }
+            .filter { $0 != .settings && $0 != .search && seen.insert($0).inserted }
             .prefix(compactTabLimit)
         return normalized.isEmpty ? defaultCompactTabs : Array(normalized)
     }
 
+    func isCompactOverflow(in destinations: [LedgerDestination]) -> Bool {
+        self != .settings && self != .search && !destinations.contains(self)
+    }
+
     func compactSelection(in destinations: [LedgerDestination]) -> LedgerDestination {
-        self == .settings || destinations.contains(self) ? self : .settings
+        isCompactOverflow(in: destinations) ? .settings : self
     }
 
     static func stored(_ rawValue: String) -> LedgerDestination {
@@ -862,6 +870,11 @@ struct LedgerTransactionEntry: Codable, Equatable, Sendable {
 struct LedgerTransactionUpdateRequest: Encodable, Equatable, Sendable {
     let source: TransactionSource
     let entry: LedgerTransactionEntry
+}
+
+struct LedgerTransactionDeleteRequest: Encodable, Equatable, Sendable {
+    let source: TransactionSource
+    let reason: String
 }
 
 struct LedgerTransactionTagsRequest: Encodable, Equatable, Sendable {

@@ -109,6 +109,7 @@ struct ExpenseHeatmapWidget: Widget {
 }
 
 struct ExpenseHeatmapWidgetView: View {
+  @Environment(\.redactionReasons) private var redactionReasons
   let entry: ExpenseCalendarEntry
 
   var body: some View {
@@ -161,7 +162,8 @@ struct ExpenseHeatmapWidgetView: View {
               VStack(spacing: 3) {
                 ForEach(0..<7) { row in
                   let index = column * 7 + row
-                  if index < points.count, let url = LedgerWidgetLink.expenseDay(points[index].date)
+                  if index < points.count, let url = LedgerWidgetNavigation.transactions(
+                    date: points[index].date, isRedacted: !redactionReasons.isEmpty)
                   {
                     let point = points[index]
                     Link(destination: url) {
@@ -176,7 +178,9 @@ struct ExpenseHeatmapWidgetView: View {
                         .frame(width: width, height: height)
                     }
                     .accessibilityLabel(
-                      "\(point.date)，\(MoneyText.formatWidget(minorUnits: point.amount, currency: insights.history.currency))，查看当天消费"
+                      redactionReasons.isEmpty
+                        ? "\(point.date)，\(MoneyText.formatWidget(minorUnits: point.amount, currency: insights.history.currency))，查看当天消费"
+                        : "流水"
                     )
                   } else {
                     Color.clear.frame(width: width, height: height)
