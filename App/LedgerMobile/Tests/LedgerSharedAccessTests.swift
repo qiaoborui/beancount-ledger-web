@@ -12,6 +12,56 @@ final class LedgerSharedAccessTests: XCTestCase {
         XCTAssertEqual(access.widgetKeychainAccessGroup, legacyKeychain)
     }
 
+    func testILoaderWithoutALTMetadataSharesOneGroupAcrossAllBundles() {
+        for suffix in ["", ".widgets", ".share"] {
+            let access = LedgerSharedAccess(infoDictionary: [
+                "CFBundleIdentifier": "com.qiaoborui.ledger.mobile.NEWTEAM123" + suffix,
+                LedgerSharedAccess.widgetKeychainInfoKey: legacyKeychain,
+            ])
+            XCTAssertEqual(access.appGroupIdentifier, original + ".NEWTEAM123")
+            XCTAssertEqual(access.widgetKeychainAccessGroup, original + ".NEWTEAM123")
+        }
+    }
+
+    func testILoaderRenewalIgnoresStaleBuildTimeKeychainGroup() {
+        let identifier = "com.qiaoborui.ledger.mobile.NEWTEAM123.widgets"
+        let first = LedgerSharedAccess(infoDictionary: ["CFBundleIdentifier": identifier])
+        let renewed = LedgerSharedAccess(infoDictionary: [
+            "CFBundleIdentifier": identifier,
+            LedgerSharedAccess.widgetKeychainInfoKey: "DIFFERENT1.stale.shared",
+        ])
+        XCTAssertEqual(first, renewed)
+        XCTAssertEqual(first.widgetKeychainAccessGroup, original + ".NEWTEAM123")
+    }
+
+    func testOriginalAndUnrecognizedBundleIDsKeepOriginalSigningConfiguration() {
+        let base = "com.qiaoborui.ledger.mobile"
+        for identifier in [
+            base, base + ".widgets", base + ".share", base + ".short",
+            base + ".newteam123", base + ".NEWTEAM1234", base + ".NEWTEAM12/",
+            base + ".NEWTEAM123.unknown", base + ".NEWTEAM123.widgets.extra",
+            base + ".widgets.NEWTEAM123", base + "extra.NEWTEAM123",
+            "prefix." + base + ".NEWTEAM123",
+        ] {
+            let access = LedgerSharedAccess(infoDictionary: [
+                "CFBundleIdentifier": identifier,
+                LedgerSharedAccess.widgetKeychainInfoKey: legacyKeychain,
+            ])
+            XCTAssertEqual(access.appGroupIdentifier, original, identifier)
+            XCTAssertEqual(access.widgetKeychainAccessGroup, legacyKeychain, identifier)
+        }
+    }
+
+    func testALTMappingTakesPrecedenceOverILoaderBundleFallback() {
+        for mapping in [[original + ".OTHER12345"], [], [original, original + ".NEWTEAM123"]] {
+            let access = LedgerSharedAccess(infoDictionary: [
+                "CFBundleIdentifier": "com.qiaoborui.ledger.mobile.NEWTEAM123",
+                "ALTAppGroups": mapping,
+            ])
+            XCTAssertEqual(access.widgetKeychainAccessGroup, mapping.count == 1 ? mapping.first : nil)
+        }
+    }
+
     func testSideStoreUsesItsAppGroupForBothPreferencesAndKeychain() {
         let resigned = original + ".NEWTEAM123"
         let access = configuration(groups: [resigned])

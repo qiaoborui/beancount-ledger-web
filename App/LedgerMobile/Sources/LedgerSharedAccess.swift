@@ -28,11 +28,32 @@ struct LedgerSharedAccess: Equatable, Sendable {
             return
         }
 
+        // iLoader omits ALTAppGroups for ordinary apps. It inserts the team
+        // after the main bundle ID, before each extension suffix, and assigns
+        // group.<rewritten main bundle ID> to all three provisioning profiles.
+        if let identifier = infoDictionary["CFBundleIdentifier"] as? String,
+           let group = Self.iLoaderAppGroup(bundleIdentifier: identifier) {
+            appGroupIdentifier = group
+            widgetKeychainAccessGroup = group
+            return
+        }
+
         // Preserve credentials of installations signed directly by Xcode.
         appGroupIdentifier = Self.originalAppGroupIdentifier
         let value = (infoDictionary[Self.widgetKeychainInfoKey] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         widgetKeychainAccessGroup = value.flatMap { $0.isEmpty || $0.contains("$(") ? nil : $0 }
+    }
+
+    private static func iLoaderAppGroup(bundleIdentifier: String) -> String? {
+        var mainIdentifier = bundleIdentifier
+        for suffix in [".widgets", ".share"] where mainIdentifier.hasSuffix(suffix) {
+            mainIdentifier = String(mainIdentifier.dropLast(suffix.count))
+            break
+        }
+        let group = "group." + mainIdentifier
+        guard group != originalAppGroupIdentifier, isLedgerAppGroup(group) else { return nil }
+        return group
     }
 
     private static func isLedgerAppGroup(_ group: String) -> Bool {
