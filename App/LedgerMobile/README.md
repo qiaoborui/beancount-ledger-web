@@ -183,6 +183,23 @@ is sent to `/api/auth/login` and is never stored by the app. Biometric quick
 unlock stores only the server-issued device token under
 `biometryCurrentSet` and `WhenUnlockedThisDeviceOnly` Keychain protection.
 
+## SideStore and AltStore installation
+
+Keep the Widget and Share extensions when importing the IPA. The app and both
+extensions resolve their shared container from the `ALTAppGroups` mapping added
+by SideStore/AltStore. Re-signed builds also use that entitled App Group as the
+widget credential's Keychain access group, so renewal with the same Apple team
+preserves the shared namespace. Direct Xcode installations retain their existing
+App Group and Keychain group.
+
+After updating an older re-signed build, open Ledger, complete biometric unlock,
+and tap the widget background-refresh row in Settings to provision its read-only
+credential and republish the snapshot into the correct group. Verify that the
+status becomes successful, then refresh the app in SideStore and verify again.
+Changing Apple teams creates a different shared namespace and requires setting
+up credentials again. An absent or ambiguous Ledger mapping in `ALTAppGroups`
+disables widget credential access.
+
 ## Native passkey deployment
 
 The checked-in Debug and Release configurations support installation with an

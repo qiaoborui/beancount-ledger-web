@@ -208,7 +208,7 @@ struct LedgerWidgetImportSnapshot: Codable, Equatable, Identifiable, Sendable {
 }
 
 struct LedgerWidgetSnapshotStore: Sendable {
-    static let appGroupIdentifier = "group.com.qiaoborui.ledger.mobile"
+    static let appGroupIdentifier = LedgerSharedAccess.current.appGroupIdentifier
     static let snapshotKey = "ledger.widgets.snapshot.v1"
     static let snapshotAttemptKey = "ledger.widgets.snapshot-attempt.v1"
     static let shared = LedgerWidgetSnapshotStore()
