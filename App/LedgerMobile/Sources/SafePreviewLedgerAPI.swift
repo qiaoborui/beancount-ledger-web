@@ -26,6 +26,7 @@ extension LedgerSession {
 
 #if DEBUG
 private actor SafePreviewLedgerAPI: LedgerAPI {
+    private var failNextGlobalSearch = ProcessInfo.processInfo.arguments.contains("--safe-search-failure")
     private var history: [BQLHistoryRecord] = []
     private var committedImportDocument: LedgerImportDocument?
     private var importCommitAttempts = 0
@@ -87,6 +88,10 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
     }
 
     func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions {
+        if failNextGlobalSearch {
+            failNextGlobalSearch = false
+            throw LedgerAPIError.transport("安全预览：搜索连接暂时中断")
+        }
         let payload = try await bootstrap(baseURL: baseURL, start: "0001-01-01", end: "9999-12-31", today: "2026-08-31", valuationCurrency: "CNY")
         return LedgerGlobalTransactions(transactions: payload.transactions, sensitiveUnlocked: true)
     }

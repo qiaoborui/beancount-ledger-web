@@ -133,6 +133,75 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 3))
     }
 
+    func testGlobalSearchClearsFiltersWithoutLosingQueryOrScope() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        let search = revealSearch("搜索整个账本")
+        search.tap()
+        search.typeText("城市\n")
+        let bookshop = app.buttons["transaction-row-88"]
+        XCTAssertTrue(bookshop.waitForExistence(timeout: 5))
+        let scopes = app.segmentedControls.firstMatch
+        scopes.buttons["流水"].tap()
+        app.buttons["global-search-filters"].tap()
+        app.buttons["global-search-tag-filter"].tap()
+        app.buttons["#investment"].firstMatch.tap()
+        if !app.buttons["global-search-apply-filters"].exists {
+            app.navigationBars.buttons.firstMatch.tap()
+        }
+        app.buttons["global-search-apply-filters"].tap()
+        let clearFilters = app.buttons["global-search-clear-filters"]
+        XCTAssertTrue(clearFilters.waitForExistence(timeout: 3))
+        XCTAssertFalse(bookshop.exists)
+        capture("global-search-filter-empty")
+        clearFilters.tap()
+        XCTAssertTrue(bookshop.waitForExistence(timeout: 3))
+        XCTAssertEqual(search.value as? String, "城市")
+        XCTAssertTrue(scopes.buttons["流水"].isSelected)
+        XCTAssertFalse(app.buttons["移除筛选：#investment"].exists)
+    }
+
+    func testGlobalSearchExpandsScopeWithoutLosingQuery() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        let search = revealSearch("搜索整个账本")
+        search.tap()
+        search.typeText("城市\n")
+        XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 5))
+        let scopes = app.segmentedControls.firstMatch
+        scopes.buttons["账户"].tap()
+        let expandScope = app.buttons["global-search-expand-scope"]
+        XCTAssertTrue(expandScope.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["global-search-clear-filters"].exists)
+        expandScope.tap()
+        XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 3))
+        XCTAssertEqual(search.value as? String, "城市")
+        XCTAssertTrue(scopes.buttons["全部"].isSelected)
+    }
+
+    func testGlobalSearchFailureOffersRetryWithoutClaimingNoResults() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--safe-search-failure"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
+        let search = revealSearch("搜索整个账本")
+        search.tap()
+        search.typeText("城市\n")
+        let retry = app.buttons["重新加载"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["global-search-loading"].exists)
+        XCTAssertFalse(app.staticTexts["没有符合条件的结果"].exists)
+        capture("global-search-load-failure")
+        retry.tap()
+        XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 5))
+        XCTAssertFalse(retry.exists)
+        XCTAssertEqual(search.value as? String, "城市")
+    }
+
     func testGlobalSearchScopesFiltersAndRecentQueries() throws {
         app = XCUIApplication()
         app.launchArguments = ["--safe-preview"]

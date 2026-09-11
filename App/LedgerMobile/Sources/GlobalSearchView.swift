@@ -19,6 +19,7 @@ struct GlobalSearchView: View {
     var usesNativeSearchTab = false
     @State private var documents: [LedgerImportDocument] = []
     @State private var results = LedgerSearchResults()
+    @State private var completedSearch: SearchRequest?
     @State private var loading = false
     @State private var activeLoadID: UUID?
     @State private var errorMessage: String?
@@ -35,14 +36,20 @@ struct GlobalSearchView: View {
         Set(session.visibleGlobalTransactions.flatMap { $0.tags ?? [] }).sorted()
     }
 
+    private var searchRequest: SearchRequest {
+        SearchRequest(query: query, scope: session.globalSearchScope, filters: session.globalSearchFilters, revision: revision)
+    }
+
+    private var isSearching: Bool { loading || completedSearch != searchRequest }
+
     var body: some View {
         VStack(spacing: 0) {
             searchHeader
             List {
-                if loading && hasSearch {
+                if isSearching && hasSearch {
                     ProgressView("正在搜索…").accessibilityIdentifier("global-search-loading")
                 }
-                if let errorMessage {
+                if let errorMessage, !isSearching {
                     Section {
                         Text(errorMessage).foregroundStyle(.secondary)
                         Button("重新加载") { Task { await load() } }
@@ -71,15 +78,36 @@ struct GlobalSearchView: View {
                                                description: Text("查找流水、账户、标签和文件"))
                             .listRowSeparator(.hidden)
                     }
-                } else if results.isEmpty && !loading {
+                } else if !isSearching && results.isEmpty && errorMessage == nil {
                     ContentUnavailableView {
                         Label("没有符合条件的结果", systemImage: "magnifyingglass")
                     } description: {
                         Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                              ? "试试其他搜索范围或筛选条件。"
                              : "未找到“\(query)”的匹配结果，试试其他关键词或调整筛选条件。")
+                    } actions: {
+                        VStack(spacing: 8) {
+                            if !session.globalSearchFilters.isEmpty {
+                                Button {
+                                    session.globalSearchFilters = .init()
+                                } label: {
+                                    Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                         ? "清除筛选" : "清除筛选，保留关键词")
+                                        .frame(minHeight: 44)
+                                }
+                                .accessibilityIdentifier("global-search-clear-filters")
+                            }
+                            if session.globalSearchScope != .all {
+                                Button {
+                                    session.globalSearchScope = .all
+                                } label: {
+                                    Text("搜索全部范围").frame(minHeight: 44)
+                                }
+                                .accessibilityIdentifier("global-search-expand-scope")
+                            }
+                        }
                     }
-                } else {
+                } else if !isSearching && !results.isEmpty {
                     if !results.destinations.isEmpty {
                         Section("功能") {
                             ForEach(results.destinations) { destination in
@@ -154,7 +182,7 @@ struct GlobalSearchView: View {
         .scrollDismissesKeyboard(.interactively)
         .task { await load() }
         .refreshable { await load(forceRefresh: true) }
-        .task(id: SearchRequest(query: query, scope: session.globalSearchScope, filters: session.globalSearchFilters, revision: revision)) { await search() }
+        .task(id: searchRequest) { await search(request: searchRequest) }
         .sheet(isPresented: $filtersPresented) {
             GlobalSearchFilterSheet(filters: session.globalSearchFilters, scope: session.globalSearchScope,
                                     accounts: session.ledger?.accounts ?? [], tags: allTags) { filters in
@@ -215,19 +243,17 @@ struct GlobalSearchView: View {
         }
     }
 
-    private func search() async {
+    private func search(request: SearchRequest) async {
         do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
-        let query = query
         let transactions = session.visibleGlobalTransactions
         let accounts = session.ledger?.accounts ?? []
         let documents = documents
-        let scope = session.globalSearchScope
-        let filters = session.globalSearchFilters
         let result = await Task.detached(priority: .userInitiated) {
-            LedgerGlobalSearch.search(query, transactions: transactions, accounts: accounts, documents: documents, scope: scope, filters: filters)
+            LedgerGlobalSearch.search(request.query, transactions: transactions, accounts: accounts, documents: documents, scope: request.scope, filters: request.filters)
         }.value
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, request == searchRequest else { return }
         results = result
+        completedSearch = request
         limit = 50
     }
 
@@ -286,13 +312,17 @@ struct GlobalSearchView: View {
     }
 
     private func filterChip(_ title: String, remove: @escaping () -> Void) -> some View {
-        Button(action: remove) { Label(title, systemImage: "xmark.circle.fill").font(.subheadline) }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
-            .accessibilityLabel("移除筛选：" + title)
+        Button(action: remove) {
+            Label(title, systemImage: "xmark.circle.fill")
+                .font(.subheadline)
+                .frame(minHeight: 44)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .accessibilityLabel("移除筛选：" + title)
     }
 
-    private struct SearchRequest: Equatable {
+    private struct SearchRequest: Equatable, Sendable {
         let query: String
         let scope: LedgerGlobalSearchScope
         let filters: LedgerGlobalSearchFilters
@@ -360,7 +390,7 @@ private struct GlobalSearchFilterSheet: View {
                     }
                 }
                 Section {
-                    Button("清除全部筛选", role: .destructive) {
+                    Button("清除全部筛选") {
                         draft = .init()
                         limitsDates = false
                     }
