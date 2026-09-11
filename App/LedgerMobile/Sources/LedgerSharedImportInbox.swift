@@ -5,7 +5,7 @@ import Darwin
 
 /// Files shared into Ledger remain local until the user reviews and submits them.
 struct LedgerSharedImportInbox: Sendable {
-    static let appGroupIdentifier = "group.com.qiaoborui.ledger.mobile"
+    static let appGroupIdentifier = LedgerSharedAccess.current.appGroupIdentifier
     static let maximumBytes = 10 * 1024 * 1024
     static let maximumItems = 20
     static let maximumSharedItems = 5

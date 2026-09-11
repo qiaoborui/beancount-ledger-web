@@ -8,7 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "3"
     MARKETING_VERSION: "0.1.0"
     TARGETED_DEVICE_FAMILY: "1,2"
 
@@ -90,6 +90,7 @@ targets:
     platform: iOS
     sources:
       - WidgetExtension
+      - path: Sources/LedgerSharedAccess.swift
       - path: Sources/LedgerWidgetSnapshot.swift
       - path: Sources/LedgerWidgetCredentialStore.swift
       - path: Sources/LedgerWidgetRefreshClient.swift
@@ -123,6 +124,7 @@ targets:
     platform: iOS
     sources:
       - ShareExtension
+      - path: Sources/LedgerSharedAccess.swift
       - path: Sources/LedgerSharedImportInbox.swift
     info:
       path: ShareExtension/Info.plist
@@ -175,6 +177,7 @@ targets:
     platform: iOS
     sources:
       - WidgetTests
+      - path: Sources/LedgerSharedAccess.swift
       - path: WidgetExtension/AccountBalanceWidget.swift
       - path: WidgetExtension/ExpenseOverviewWidget.swift
       - path: WidgetExtension/ExpenseCalendarWidget.swift

@@ -291,7 +291,7 @@ enum LedgerWidgetCredentialStoreError: LocalizedError {
 }
 
 final class SystemLedgerWidgetCredentialStore: LedgerWidgetCredentialStoring, @unchecked Sendable {
-    static let accessGroupInfoKey = "LedgerWidgetKeychainAccessGroup"
+    static let accessGroupInfoKey = LedgerSharedAccess.widgetKeychainInfoKey
 
     private let service = "com.qiaoborui.ledger.mobile.widget-access"
     private let account = "current"
@@ -414,10 +414,7 @@ final class SystemLedgerWidgetCredentialStore: LedgerWidgetCredentialStoring, @u
     }
 
     private static func configuredAccessGroup(bundle: Bundle = .main) -> String? {
-        guard let raw = bundle.object(forInfoDictionaryKey: accessGroupInfoKey) as? String else { return nil }
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, !value.contains("$(") else { return nil }
-        return value
+        LedgerSharedAccess(infoDictionary: bundle.infoDictionary ?? [:]).widgetKeychainAccessGroup
     }
 }
 
