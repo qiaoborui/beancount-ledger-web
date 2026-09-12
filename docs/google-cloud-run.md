@@ -14,6 +14,27 @@ Cloud Scheduler -> Cloud Run Gmail drain and Watch renewal endpoints
 Private ledger GitHub Actions -> ledger-indexer -> Postgres read model
 ```
 
+The API image includes Python and Beancount 3.2.3. Before a GitHub write, it
+materializes the ledger's include tree at the transaction's fixed base commit,
+overlays the proposed files, and runs `bean-check` within the GitHub write
+timeout. Relative nested and wildcard includes are supported. Referenced bill
+paths are checked against the same Git tree without downloading their contents.
+The temporary snapshot is removed after validation; the API needs writable
+temporary storage and keeps no persistent checkout. Validation failures leave
+the ledger branch unchanged. Custom API images must also supply `bean-check`
+(or configure its executable path with `BEAN_CHECK_BIN`).
+
+Each validation fetches the complete tree at the fixed base revision and reuses
+include contents by their immutable Git blob SHA. A per-writer memory cache
+holds at most 32 MiB and 512 blobs with LRU eviction; changing the repository,
+API, branch, ledger root or credentials clears its scope. Only include contents
+enter this cache. Cache misses download with at most six concurrent requests.
+External edits, additions, deletions and force pushes resolve against the new
+revision's tree; the complete candidate still runs through `bean-check` for
+every write. Warm instances reuse unchanged blobs across commits; new instances
+start cold. See [write validation performance](write-validation-performance.md)
+for the reproducible CI budget and its measurement boundaries.
+
 The deployment workflow lives at
 `.github/workflows/deploy-google-cloud.yml`. On each `main` push it plans the
 affected components, starts reusable application checks and the required

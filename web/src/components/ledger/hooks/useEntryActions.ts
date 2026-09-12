@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { readJson } from "@/lib/clientFetch";
 import { apiFetch } from "@/lib/apiEndpoints";
 import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
 import { haptic } from "../haptics";
 import type { ManualForm } from "../types";
 import i18n from "@/i18n";
+import { createLedgerOperationId, type EnqueuePendingWrites } from "../pendingLedgerOperations";
 
 const emptyManual = (): ManualForm => ({
   kind: "expense",
@@ -21,7 +22,7 @@ function offlineOrNetworkError(error?: unknown) {
   return (typeof navigator !== "undefined" && !navigator.onLine) || error instanceof TypeError;
 }
 
-export function useEntryActions({ load, showToast, enqueuePendingWrites }: { load: (forceFresh?: boolean) => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void }) {
+export function useEntryActions({ load, showToast, enqueuePendingWrites }: { load: (forceFresh?: boolean) => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: EnqueuePendingWrites }) {
   const [nl, setNl] = useState("");
   const [previews, setPreviews] = useState<ParsedTransaction[]>([]);
   const [parseStatus, setParseStatus] = useState<"idle" | "parsing" | "success" | "error">("idle");
@@ -30,8 +31,11 @@ export function useEntryActions({ load, showToast, enqueuePendingWrites }: { loa
   const [entryOpen, setEntryOpen] = useState(false);
   const [manual, setManual] = useState<ManualForm>(() => emptyManual());
 
-  async function appendEntry(entry: ParsedTransaction | BalanceAssertion) {
-    const res = await apiFetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) }, { kind: "write" });
+  const operationIdsRef = useRef(new WeakMap<ParsedTransaction, string>());
+  const submittingRef = useRef(false);
+
+  async function appendEntry(entry: ParsedTransaction | BalanceAssertion, operationId = createLedgerOperationId()) {
+    const res = await apiFetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": operationId }, body: JSON.stringify(entry) }, { kind: "write" });
     const data = await readJson<{ error?: string }>(res);
     if (!res.ok) {
       showToast("error", data.error || i18n.t("entryActions.writeFailed"));
@@ -114,8 +118,13 @@ export function useEntryActions({ load, showToast, enqueuePendingWrites }: { loa
   }
 
   async function appendPreviews() {
-    if (!previews.length) return;
+    if (!previews.length || submittingRef.current) return;
     const entries = previews;
+    const operationIds = entries.map((entry) => {
+      const id = operationIdsRef.current.get(entry) ?? createLedgerOperationId();
+      operationIdsRef.current.set(entry, id);
+      return id;
+    });
     const resetDraft = () => {
       setPreviews([]);
       setNl("");
@@ -124,39 +133,43 @@ export function useEntryActions({ load, showToast, enqueuePendingWrites }: { loa
       setParseStatus("idle");
       setParseMessage("");
     };
-
-    if (offlineOrNetworkError()) {
-      enqueuePendingWrites(entries);
+    const savePending = async () => {
+      if (!await enqueuePendingWrites(entries, operationIds)) throw new Error(i18n.t("pendingWrites.storageFailed"));
       resetDraft();
       showToast("info", i18n.t("entryActions.savedPending", { count: entries.length }));
-      return;
-    }
-
+    };
+    submittingRef.current = true;
     setAppendStatus("writing");
-    setParseMessage(i18n.t("entryActions.writingCount", { count: entries.length }));
-    resetDraft();
-    showToast("info", i18n.t("entryActions.writingToast", { count: entries.length }));
     try {
-      const res = await apiFetch("/api/ledger/append-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries }) }, { kind: "write" });
+      if (offlineOrNetworkError()) {
+        await savePending();
+        return;
+      }
+      setParseMessage(i18n.t("entryActions.writingCount", { count: entries.length }));
+      showToast("info", i18n.t("entryActions.writingToast", { count: entries.length }));
+      let res: Response;
+      try {
+        res = await apiFetch("/api/ledger/append-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries, operationIds }) }, { kind: "write" });
+      } catch (error) {
+        if (offlineOrNetworkError(error)) { await savePending(); return; }
+        throw error;
+      }
       const data = await readJson<{ error?: string; count?: number }>(res);
       if (!res.ok) throw new Error(data.error || i18n.t("entryActions.writeFailed"));
       const count = typeof data.count === "number" ? data.count : entries.length;
+      resetDraft();
       haptic([6, 24, 10]);
       showToast("success", i18n.t("entryActions.writtenCount", { count }));
-      load(true);
+      void load(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (offlineOrNetworkError(error)) {
-        enqueuePendingWrites(entries);
-        showToast("info", i18n.t("entryActions.networkUnstableSaved", { count: entries.length }));
-        return;
-      }
       setPreviews(entries);
       setEntryOpen(true);
       setParseStatus("error");
       setParseMessage(message);
       showToast("error", message || i18n.t("entryActions.writeFailed"));
     } finally {
+      submittingRef.current = false;
       setAppendStatus("idle");
     }
   }

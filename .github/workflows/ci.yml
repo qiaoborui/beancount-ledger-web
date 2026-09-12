@@ -94,9 +94,19 @@ jobs:
         with:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ledger validator
+        run: python -m pip install beancount==3.2.3
       - name: Test
         working-directory: server
         run: go test ./...
+      - name: GitHub write performance gate
+        working-directory: server
+        env:
+          LEDGER_VALIDATION_PERFORMANCE_REQUIRED: "1"
+        run: go test ./internal/app -run '^TestGitHubWriteValidationLargeLedgerPerformance$' -count=1 -v
       - name: Build
         working-directory: server
         run: go build ./cmd/...

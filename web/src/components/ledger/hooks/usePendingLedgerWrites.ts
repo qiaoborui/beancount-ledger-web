@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteIndexedCache, readIndexedCache, writeIndexedCache } from "@/lib/indexedLedgerCache";
 import { readJson } from "@/lib/clientFetch";
 import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
 import { haptic } from "../haptics";
 import {
   mergePendingOperation,
+  createLedgerOperationId,
   migrateLegacyPendingWrites,
   normalizePendingLedgerOperations,
   type PendingEntry,
@@ -34,49 +35,67 @@ function pendingStorageKeys() {
   return pendingStorageKeysForScope(apiEndpointLedgerScope());
 }
 
-function makeId() {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
+const makeId = createLedgerOperationId;
 
-function readJsonArray(key: string): unknown[] {
-  if (typeof window === "undefined") return [];
+type PendingQueueSnapshot = {
+  version: 1;
+  revision: number;
+  writer: string;
+  operations: PendingLedgerOperation[];
+};
+
+function readLocalValue(key: string): unknown {
+  if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(key);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    return raw ? JSON.parse(raw) : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
-function readLocalPendingOperations(): PendingLedgerOperation[] {
-  if (typeof window === "undefined") return [];
-  const keys = pendingStorageKeys();
-  return normalizePendingLedgerOperations(readJsonArray(keys.local));
+function readJsonArray(key: string): unknown[] {
+  const value = readLocalValue(key);
+  return Array.isArray(value) ? value : [];
+}
+
+function decodeQueueSnapshot(value: unknown): PendingQueueSnapshot {
+  const snapshot = value as Partial<PendingQueueSnapshot> | null;
+  if (snapshot?.version === 1 && typeof snapshot.revision === "number" && Number.isSafeInteger(snapshot.revision)
+    && snapshot.revision > 0 && typeof snapshot.writer === "string" && Array.isArray(snapshot.operations)) {
+    return { ...snapshot, operations: normalizePendingLedgerOperations(snapshot.operations) } as PendingQueueSnapshot;
+  }
+  return { version: 1, revision: 0, writer: "", operations: normalizePendingLedgerOperations(value) };
+}
+
+async function readStoredQueue(scope: string): Promise<PendingQueueSnapshot> {
+  const keys = pendingStorageKeysForScope(scope);
+  const local = decodeQueueSnapshot(readLocalValue(keys.local));
+  const indexed = decodeQueueSnapshot(await readIndexedCache<unknown>(keys.indexed));
+  // Whole snapshots include deletions. A newer empty queue must win over an older
+  // non-empty copy, including legacy arrays left behind by a failed store.
+  if (local.revision || indexed.revision) {
+    if (local.revision !== indexed.revision) return local.revision > indexed.revision ? local : indexed;
+    return local.writer > indexed.writer ? local : indexed;
+  }
+  return { ...local, operations: mergeOperationLists(indexed.operations, local.operations) };
 }
 
 export async function readPendingLedgerOperations(): Promise<PendingLedgerOperation[]> {
   const keys = pendingStorageKeys();
   await pendingOperationsWriteChains.get(keys.scope)?.catch(() => undefined);
-  const local = readLocalPendingOperations();
-  const indexed = normalizePendingLedgerOperations(await readIndexedCache<PendingLedgerOperation[]>(keys.indexed));
-  const merged = mergeOperationLists(indexed.length ? indexed : local, local);
-  const scopeMigration = await migratePreviousSameOriginPendingOperations(merged, keys.scope);
+  const stored = await readStoredQueue(keys.scope);
+  const scopeMigration = await migratePreviousSameOriginPendingOperations(stored.operations, keys.scope);
   const migration = await migrateLegacyPendingOperations(scopeMigration.operations, keys.scope);
-  if (!scopeMigration.persisted && !migration.persisted && (migration.operations.length || local.length)) await writePendingOperations(migration.operations, false);
+  if (!stored.revision && !scopeMigration.persisted && !migration.persisted && migration.operations.length) await writePendingOperations(migration.operations, false, keys.scope);
   return migration.operations;
 }
 
 async function migratePreviousSameOriginPendingOperations(current: PendingLedgerOperation[], scope: string) {
   const previousScope = apiEndpointPreviousLedgerScope();
   if (!previousScope || previousScope === scope) return { operations: current, persisted: false };
-  const previousKeys = pendingStorageKeysForScope(previousScope);
   await pendingOperationsWriteChains.get(previousScope)?.catch(() => undefined);
-  const previousLocal = normalizePendingLedgerOperations(readJsonArray(previousKeys.local));
-  const previousIndexed = normalizePendingLedgerOperations(await readIndexedCache<PendingLedgerOperation[]>(previousKeys.indexed));
-  const previous = mergeOperationLists(previousIndexed.length ? previousIndexed : previousLocal, previousLocal).map((operation) => ({
+  const previous = (await readStoredQueue(previousScope)).operations.map((operation) => ({
     ...operation,
     ledgerScope: scope,
   }));
@@ -84,24 +103,27 @@ async function migratePreviousSameOriginPendingOperations(current: PendingLedger
   const next = mergeOperationLists(current, previous);
   const persisted = await writePendingOperations(next, false);
   if (!persisted) return { operations: next, persisted: false };
-  removeLocalStorageKey(previousKeys.local);
-  await deleteIndexedCache(previousKeys.indexed);
+  await writePendingOperations([], false, previousScope);
   return { operations: next, persisted: true };
 }
 
-async function writePendingOperations(operations: PendingLedgerOperation[], notify = true) {
+async function writePendingOperations(operations: PendingLedgerOperation[], notify = true, scope = apiEndpointLedgerScope()) {
   if (typeof window === "undefined") return false;
-  const keys = pendingStorageKeys();
+  const keys = pendingStorageKeysForScope(scope);
   const write = async () => {
+    const previous = await readStoredQueue(scope);
+    const snapshot: PendingQueueSnapshot = {
+      version: 1, revision: Math.max(Date.now(), previous.revision + 1), writer: makeId(), operations,
+    };
     let localStored = false;
     try {
-      localStorage.setItem(keys.local, JSON.stringify(operations));
+      localStorage.setItem(keys.local, JSON.stringify(snapshot));
       localStored = true;
     } catch {
       // Keep the in-memory queue even if localStorage is unavailable.
     }
-    const indexedStored = await writeIndexedCache(keys.indexed, operations);
-    if (notify) window.dispatchEvent(new Event(pendingWritesChangeEvent));
+    const indexedStored = await writeIndexedCache(keys.indexed, snapshot);
+    if (notify && (localStored || indexedStored)) window.dispatchEvent(new Event(pendingWritesChangeEvent));
     return localStored || indexedStored;
   };
   const chain = pendingOperationsWriteChains.get(keys.scope) ?? Promise.resolve(true);
@@ -166,15 +188,6 @@ function removeLegacyLocalPendingOperations() {
   }
 }
 
-function removeLocalStorageKey(key: string) {
-  try {
-    localStorage.removeItem(key);
-    return localStorage.getItem(key) == null;
-  } catch {
-    return false;
-  }
-}
-
 function mergeOperationLists(primary: PendingLedgerOperation[], secondary: PendingLedgerOperation[]) {
   const seen = new Set<string>();
   const merged: PendingLedgerOperation[] = [];
@@ -186,9 +199,9 @@ function mergeOperationLists(primary: PendingLedgerOperation[], secondary: Pendi
   return merged.sort((a, b) => a.createdAt - b.createdAt);
 }
 
-function appendOperation(entry: PendingEntry, baseLedgerVersion?: LedgerVersion | null): PendingLedgerOperation {
+function appendOperation(entry: PendingEntry, baseLedgerVersion?: LedgerVersion | null, id = makeId()): PendingLedgerOperation {
   const now = Date.now();
-  return { id: makeId(), createdAt: now, updatedAt: now, kind: "append", entry, baseLedgerVersion, status: "pending", ledgerScope: apiEndpointLedgerScope() };
+  return { id, createdAt: now, updatedAt: now, kind: "append", entry, baseLedgerVersion, status: "pending", ledgerScope: apiEndpointLedgerScope() };
 }
 
 function updateOperation(source: Txn["source"], entry: ParsedTransaction, baseLedgerVersion?: LedgerVersion | null): PendingLedgerOperation {
@@ -218,7 +231,27 @@ export function discardPendingLedgerOperation(operations: PendingLedgerOperation
 }
 
 export function hasPendingOperationsToSync(operations: PendingLedgerOperation[]) {
-  return operations.some((operation) => operation.status !== "conflict");
+  return operations.some((operation) => operation.status !== "conflict" && operation.status !== "paused");
+}
+
+class PendingWriteError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+function canAttempt(operation: PendingLedgerOperation, manual: boolean) {
+  return operation.status !== "conflict" && (manual || (operation.status !== "paused" && (operation.nextAttemptAt ?? 0) <= Date.now()));
+}
+
+async function readWriteResponse(response: Response, fallback: string) {
+  try {
+    const data = await readJson<{ error?: string }>(response);
+    if (!response.ok) throw new PendingWriteError(data.error || fallback, response.status);
+  } catch (error) {
+    if (!response.ok && !(error instanceof PendingWriteError)) {
+      throw new PendingWriteError(error instanceof Error ? error.message : fallback, response.status);
+    }
+    throw error;
+  }
 }
 
 export async function syncOperation(operation: PendingLedgerOperation) {
@@ -226,193 +259,217 @@ export async function syncOperation(operation: PendingLedgerOperation) {
     throw new Error(i18n.t("pendingWrites.differentLedger"));
   }
   if (operation.kind === "append") {
-    const res = await apiFetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(operation.entry) }, { kind: "write" });
-    const data = await readJson<{ error?: string }>(res);
-    if (!res.ok) throw new Error(data.error || i18n.t("pendingWrites.syncFailed"));
+    const res = await apiFetch("/api/ledger/append", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": operation.id }, body: JSON.stringify(operation.entry) }, { kind: "write" });
+    await readWriteResponse(res, i18n.t("pendingWrites.syncFailed"));
     return;
   }
 
   if (operation.kind === "update-transaction") {
     const res = await apiFetch("/api/ledger/transactions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, entry: operation.entry }) }, { kind: "write" });
-    const data = await readJson<{ error?: string }>(res);
-    if (!res.ok) throw new Error(data.error || i18n.t("pendingWrites.updateSyncFailed"));
+    await readWriteResponse(res, i18n.t("pendingWrites.updateSyncFailed"));
     return;
   }
 
   if (operation.kind === "add-transaction-tags") {
     const res = await apiFetch("/api/ledger/transactions/tags", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources: operation.sources, tags: operation.tags }) }, { kind: "write" });
-    const data = await readJson<{ error?: string }>(res);
-    if (!res.ok) throw new Error(data.error || i18n.t("pendingWrites.updateSyncFailed"));
+    await readWriteResponse(res, i18n.t("pendingWrites.updateSyncFailed"));
     return;
   }
 
   const res = await apiFetch("/api/ledger/transactions", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: operation.source, reason: operation.reason }) }, { kind: "write" });
-  const data = await readJson<{ error?: string }>(res);
-  if (!res.ok) throw new Error(data.error || i18n.t("pendingWrites.deleteSyncFailed"));
+  await readWriteResponse(res, i18n.t("pendingWrites.deleteSyncFailed"));
 }
 
 export function usePendingLedgerWrites({ load, showToast, ledgerVersion }: { load: (forceFresh?: boolean) => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; ledgerVersion?: LedgerVersion | null }) {
   const [pendingOperations, setPendingOperations] = useState<PendingLedgerOperation[]>([]);
   const [syncingPendingWrites, setSyncingPendingWrites] = useState(false);
+  const [storageUnavailable, setStorageUnavailable] = useState(false);
+  const unsavedRef = useRef(new Map<string, PendingLedgerOperation[]>());
+  const mutationChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const syncingRef = useRef(false);
+
+  const readQueue = useCallback(async (scope = apiEndpointLedgerScope()) => {
+    if (scope !== apiEndpointLedgerScope()) return [];
+    const stored = await readPendingLedgerOperations();
+    return unsavedRef.current.get(scope) ?? stored;
+  }, []);
+
+  const refresh = useCallback(async () => {
+    const scope = apiEndpointLedgerScope();
+    const operations = await readQueue(scope);
+    if (scope !== apiEndpointLedgerScope()) return;
+    setPendingOperations(operations);
+    setStorageUnavailable(unsavedRef.current.has(scope));
+  }, [readQueue]);
 
   useEffect(() => {
-    const refresh = () => {
-      void readPendingLedgerOperations().then(setPendingOperations);
-    };
-    refresh();
-    window.addEventListener("storage", refresh);
-    window.addEventListener(pendingWritesChangeEvent, refresh);
-    window.addEventListener("online", refresh);
-    window.addEventListener(apiEndpointSettingsChangeEvent, refresh);
+    const onChange = () => { void refresh(); };
+    onChange();
+    window.addEventListener("storage", onChange);
+    window.addEventListener(pendingWritesChangeEvent, onChange);
+    window.addEventListener("online", onChange);
+    window.addEventListener(apiEndpointSettingsChangeEvent, onChange);
     return () => {
-      window.removeEventListener("storage", refresh);
-      window.removeEventListener(pendingWritesChangeEvent, refresh);
-      window.removeEventListener("online", refresh);
-      window.removeEventListener(apiEndpointSettingsChangeEvent, refresh);
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(pendingWritesChangeEvent, onChange);
+      window.removeEventListener("online", onChange);
+      window.removeEventListener(apiEndpointSettingsChangeEvent, onChange);
     };
-  }, []);
+  }, [refresh]);
 
-  const persist = useCallback((next: PendingLedgerOperation[]) => {
-    setPendingOperations(next);
-    void writePendingOperations(next);
-  }, []);
+  // Serialize read/modify/write as well as the disk writes. A failed snapshot stays
+  // authoritative in memory until a later successful save or an explicit discard.
+  const mutate = useCallback((change: (operations: PendingLedgerOperation[]) => PendingLedgerOperation[], scope = apiEndpointLedgerScope()) => {
+    const run = async () => {
+      if (scope !== apiEndpointLedgerScope()) return false;
+      const current = await readQueue(scope);
+      if (scope !== apiEndpointLedgerScope()) return false;
+      const next = change(current);
+      unsavedRef.current.set(scope, next);
+      setPendingOperations(next);
+      const saved = await writePendingOperations(next, true, scope);
+      if (saved) unsavedRef.current.delete(scope);
+      if (scope === apiEndpointLedgerScope()) {
+        setStorageUnavailable(!saved);
+        setPendingOperations(unsavedRef.current.get(scope) ?? next);
+      }
+      return saved;
+    };
+    const withLedgerLock = async (): Promise<boolean> => {
+      if (typeof navigator !== "undefined" && navigator.locks) {
+        return navigator.locks.request(`ledger-pending-writes:${scope}`, run);
+      }
+      return run();
+    };
+    const next = mutationChainRef.current.then(withLedgerLock, withLedgerLock);
+    mutationChainRef.current = next;
+    return next;
+  }, [readQueue]);
 
-  const enqueueOperation = useCallback((operation: PendingLedgerOperation) => {
-    setPendingOperations((current) => {
-      const next = mergePendingOperation(current, operation);
-      void writePendingOperations(next);
-      return next;
-    });
-    haptic([8, 30, 8]);
-  }, []);
+  const enqueueOperation = useCallback(async (operation: PendingLedgerOperation) => {
+    const saved = await mutate((current) => mergePendingOperation(current, operation));
+    if (saved) haptic([8, 30, 8]);
+    return saved;
+  }, [mutate]);
 
-  const enqueuePendingWrites = useCallback((entries: PendingEntry[]) => {
-    if (!entries.length) return;
-    setPendingOperations((current) => {
-      const next = [...current, ...entries.map((entry) => appendOperation(entry, ledgerVersion))];
-      void writePendingOperations(next);
-      return next;
-    });
-    haptic([8, 30, 8]);
-  }, [ledgerVersion]);
+  const enqueuePendingWrites = useCallback(async (entries: PendingEntry[], operationIds = entries.map(() => makeId())) => {
+    if (!entries.length) return true;
+    const operations = entries.map((entry, index) => appendOperation(entry, ledgerVersion, operationIds[index]));
+    const saved = await mutate((current) => mergeOperationLists(current, operations));
+    if (saved) haptic([8, 30, 8]);
+    return saved;
+  }, [ledgerVersion, mutate]);
 
-  const enqueueTransactionUpdate = useCallback((source: Txn["source"], entry: ParsedTransaction) => {
-    enqueueOperation(updateOperation(source, entry, ledgerVersion));
-  }, [enqueueOperation, ledgerVersion]);
-
-  const enqueueTransactionDelete = useCallback((source: Txn["source"], reason: string) => {
-    enqueueOperation(deleteOperation(source, reason, ledgerVersion));
-  }, [enqueueOperation, ledgerVersion]);
-
-  const enqueueAddTransactionTags = useCallback((sources: Txn["source"][], tags: string[]) => {
-    enqueueOperation(addTransactionTagsOperation(sources, tags, ledgerVersion));
-  }, [enqueueOperation, ledgerVersion]);
+  const enqueueTransactionUpdate = useCallback((source: Txn["source"], entry: ParsedTransaction) => (
+    enqueueOperation(updateOperation(source, entry, ledgerVersion))
+  ), [enqueueOperation, ledgerVersion]);
+  const enqueueTransactionDelete = useCallback((source: Txn["source"], reason: string) => (
+    enqueueOperation(deleteOperation(source, reason, ledgerVersion))
+  ), [enqueueOperation, ledgerVersion]);
+  const enqueueAddTransactionTags = useCallback((sources: Txn["source"][], tags: string[]) => (
+    enqueueOperation(addTransactionTagsOperation(sources, tags, ledgerVersion))
+  ), [enqueueOperation, ledgerVersion]);
 
   const syncPendingWrites = useCallback(async ({ userInitiated = false }: { userInitiated?: boolean } = {}) => {
-    const current = await readPendingLedgerOperations();
-    if (!current.length || syncingPendingWrites) return;
+    if (syncingRef.current) return;
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      showToast("info", i18n.t("pendingWrites.stillOffline", { count: current.length }));
+      if (userInitiated) showToast("info", i18n.t("pendingWrites.stillOffline", { count: pendingOperations.length }));
       return;
     }
-
+    const scope = apiEndpointLedgerScope();
+    syncingRef.current = true;
     setSyncingPendingWrites(true);
-    showToast("info", i18n.t("pendingWrites.syncingCount", { count: current.length }));
     let syncedCount = 0;
     let interruptedMessage = "";
+    const attempted = new Set<string>();
     try {
-      while (true) {
-        const latest = await readPendingLedgerOperations();
-        if (!latest.length) break;
-        const syncIndex = latest.findIndex((operation) => operation.status !== "conflict");
-        if (syncIndex < 0) break;
-        const item = { ...latest[syncIndex], status: "syncing" as const, lastAttemptAt: Date.now(), updatedAt: Date.now() };
-        persist(latest.map((operation, index) => index === syncIndex ? item : operation));
+      if (unsavedRef.current.has(scope)) {
+        if (!userInitiated) return;
+        if (!await mutate((current) => current, scope)) {
+          showToast("error", i18n.t("pendingWrites.storageFailed"));
+          return;
+        }
+      }
+      while (scope === apiEndpointLedgerScope()) {
+        await mutationChainRef.current;
+        const latest = await readQueue(scope);
+        const item = latest.find((operation) => !attempted.has(operation.id) && canAttempt(operation, userInitiated));
+        if (!item || scope !== apiEndpointLedgerScope()) break;
+        attempted.add(item.id);
+        if (!await mutate((current) => current.map((operation) => operation.id === item.id
+          ? { ...operation, status: "syncing", lastAttemptAt: Date.now(), updatedAt: Date.now() } : operation), scope)) break;
+        if (scope !== apiEndpointLedgerScope()) break;
         try {
           await syncOperation(item);
           syncedCount += 1;
-          persist((await readPendingLedgerOperations()).filter((operation) => operation.id !== item.id));
+          if (!await mutate((current) => current.filter((operation) => operation.id !== item.id), scope)) break;
         } catch (error) {
           const message = error instanceof Error ? error.message : i18n.t("pendingWrites.syncInterrupted");
-          const remaining = await readPendingLedgerOperations();
-          const failedIndex = remaining.findIndex((operation) => operation.id === item.id);
-          const status = isPendingLedgerConflict(message) ? "conflict" : "error";
-          if (failedIndex >= 0) {
-            const failed = remaining[failedIndex];
-            persist(remaining.map((operation, index) => index === failedIndex ? {
-              ...failed,
-              status,
-              lastError: message,
-              retryCount: (failed.retryCount ?? 0) + 1,
-              lastAttemptAt: Date.now(),
-              updatedAt: Date.now(),
-            } : operation));
-          }
-          if (status === "conflict") continue;
+          const permanent = error instanceof PendingWriteError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
+          const status = isPendingLedgerConflict(message) ? "conflict" : permanent ? "paused" : "error";
           interruptedMessage = message;
-          break;
+          const saved = await mutate((current) => current.map((operation) => {
+            if (operation.id !== item.id) return operation;
+            const retryCount = (operation.retryCount ?? 0) + 1;
+            return {
+              ...operation, status, lastError: message, retryCount, lastAttemptAt: Date.now(), updatedAt: Date.now(),
+              nextAttemptAt: status === "error" ? Date.now() + Math.min(60_000, 1_000 * 2 ** Math.min(retryCount - 1, 6)) : undefined,
+            };
+          }), scope);
+          if (!saved) break;
         }
       }
-      if (userInitiated) haptic([6, 24, 10]);
-      const remaining = await readPendingLedgerOperations();
+      if (scope !== apiEndpointLedgerScope()) return;
+      const remaining = await readQueue(scope);
       if (syncedCount > 0) {
+        if (userInitiated) haptic([6, 24, 10]);
         showToast("success", remaining.length ? i18n.t("pendingWrites.syncedPartial", { synced: syncedCount, remaining: remaining.length }) : i18n.t("pendingWrites.syncedAll", { count: syncedCount }));
         await load(true);
-      } else {
+      } else if (userInitiated) {
         showToast(interruptedMessage ? "error" : "info", interruptedMessage || i18n.t("pendingWrites.remainingPending", { count: remaining.length }));
       }
     } finally {
+      syncingRef.current = false;
       setSyncingPendingWrites(false);
     }
-  }, [load, persist, showToast, syncingPendingWrites]);
+  }, [load, mutate, pendingOperations.length, readQueue, showToast]);
 
-  const discardPendingOperation = useCallback((id: string) => {
-    setPendingOperations((current) => {
-      const next = discardPendingLedgerOperation(current, id);
-      void writePendingOperations(next);
-      return next;
-    });
-  }, []);
+  const discardPendingOperation = useCallback(async (id: string) => {
+    if (!await mutate((current) => discardPendingLedgerOperation(current, id))) showToast("error", i18n.t("pendingWrites.storageFailed"));
+  }, [mutate, showToast]);
 
   useEffect(() => {
-    const syncWhenOnline = () => {
-      void syncPendingWrites();
-    };
+    const syncWhenOnline = () => { void syncPendingWrites(); };
     window.addEventListener("online", syncWhenOnline);
     return () => window.removeEventListener("online", syncWhenOnline);
   }, [syncPendingWrites]);
 
   useEffect(() => {
-    if (!hasPendingOperationsToSync(pendingOperations) || syncingPendingWrites) return;
+    if (storageUnavailable || syncingPendingWrites || !hasPendingOperationsToSync(pendingOperations)) return;
     if (typeof navigator !== "undefined" && !navigator.onLine) return;
-    const timer = window.setTimeout(() => {
-      void syncPendingWrites();
-    }, 300);
+    const eligible = pendingOperations.filter((operation) => operation.status !== "conflict" && operation.status !== "paused");
+    const delay = Math.min(...eligible.map((operation) => operation.nextAttemptAt ? Math.max(0, operation.nextAttemptAt - Date.now()) : 300));
+    const timer = window.setTimeout(() => { void syncPendingWrites(); }, delay);
     return () => window.clearTimeout(timer);
-  }, [pendingOperations.length, syncPendingWrites, syncingPendingWrites]);
+  }, [pendingOperations, storageUnavailable, syncPendingWrites, syncingPendingWrites]);
 
   const pendingWriteCount = pendingOperations.length;
   const pendingWriteSummary = useMemo(() => {
     if (!pendingOperations.length) return "";
+    if (storageUnavailable) return i18n.t("pendingWrites.storageFailed");
     const oldest = new Date(Math.min(...pendingOperations.map((item) => item.createdAt))).toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" });
     const conflictCount = pendingOperations.filter((item) => item.status === "conflict").length;
     if (conflictCount) return i18n.t("pendingWrites.conflictSummary", { conflict: conflictCount, total: pendingOperations.length });
+    const pausedCount = pendingOperations.filter((item) => item.status === "paused").length;
+    if (pausedCount) return i18n.t("pendingWrites.pausedSummary", { count: pausedCount });
     const errorCount = pendingOperations.filter((item) => item.status === "error").length;
     if (errorCount) return i18n.t("pendingWrites.errorSummary", { error: errorCount, total: pendingOperations.length });
     return i18n.t("pendingWrites.pendingSummary", { count: pendingOperations.length, oldest });
-  }, [pendingOperations]);
+  }, [pendingOperations, storageUnavailable]);
 
   return {
-    pendingOperations,
-    pendingWrites: pendingOperations,
-    pendingWriteCount,
-    pendingWriteSummary,
-    enqueuePendingWrites,
-    enqueueTransactionUpdate,
-    enqueueTransactionDelete,
-    enqueueAddTransactionTags,
-    syncPendingWrites,
-    syncingPendingWrites,
-    discardPendingOperation,
+    pendingOperations, pendingWrites: pendingOperations, pendingWriteCount, pendingWriteSummary,
+    enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete, enqueueAddTransactionTags,
+    syncPendingWrites, syncingPendingWrites, discardPendingOperation,
   };
 }

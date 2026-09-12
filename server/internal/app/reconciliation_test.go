@@ -52,7 +52,7 @@ func TestReconciliationServiceUsesInjectedSnapshotWithoutLocalLedger(t *testing.
 		"main.bean":                 "include \"commodities.bean\"\ninclude \"accounts.bean\"\ninclude \"transactions/2026/05.bean\"\n",
 		"commodities.bean":          "2026-01-01 commodity CNY\n",
 		"accounts.bean":             "2026-01-01 open Assets:Cash CNY\n2026-01-01 open Equity:Balance-Adjustments CNY\n",
-		"transactions/2026/05.bean": "; 2026-05 transactions\n",
+		"transactions/2026/05.bean": "2026-05-01 * \"Opening cash\"\n  Assets:Cash 100 CNY\n  Equity:Balance-Adjustments -100 CNY\n",
 	})
 	defer fake.server.Close()
 

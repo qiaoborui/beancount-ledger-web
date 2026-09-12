@@ -373,6 +373,9 @@ func buildReconciliationRows(snapshot *LedgerSnapshot, start, end string) []Reco
 }
 
 func ledgerWriteErrorStatus(err error) int {
+	if errors.Is(err, errAppendIdempotencyConflict) {
+		return http.StatusConflict
+	}
 	if errors.Is(err, errLedgerWriteTimeout) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return http.StatusGatewayTimeout
 	}
@@ -387,7 +390,11 @@ func (s *Server) appendEntry(c *gin.Context) {
 	if !bindJSON(c, &entry) {
 		return
 	}
-	texts, err := s.writer.AppendEntriesWithSource(ledgerWriteSourceAppendEntry, []LedgerEntry{entry})
+	ids := []string{c.GetHeader("Idempotency-Key")}
+	if ids[0] == "" {
+		ids = newAppendOperationIDs(1)
+	}
+	texts, err := s.writer.AppendEntriesWithOperationIDs(ledgerWriteSourceAppendEntry, []LedgerEntry{entry}, ids)
 	if err != nil {
 		errorJSON(c, ledgerWriteErrorStatus(err), err)
 		return
@@ -403,7 +410,10 @@ func (s *Server) appendBatch(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	texts, err := s.writer.AppendEntriesWithSource(ledgerWriteSourceAppendBatch, input.Entries)
+	if len(input.OperationIDs) == 0 {
+		input.OperationIDs = newAppendOperationIDs(len(input.Entries))
+	}
+	texts, err := s.writer.AppendEntriesWithOperationIDs(ledgerWriteSourceAppendBatch, input.Entries, input.OperationIDs)
 	if err != nil {
 		errorJSON(c, ledgerWriteErrorStatus(err), err)
 		return

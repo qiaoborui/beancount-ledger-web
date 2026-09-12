@@ -753,9 +753,9 @@ export function LedgerApp({ page: pageProp }: { page?: LedgerPage }) {
   };
 
   const guardedAppendPreviews = () => { appendPreviews(); };
-  const guardedUpdateTransaction = (...args: Parameters<typeof updateTransaction>) => { updateTransaction(...args); };
-  const guardedDeleteTransaction = (...args: Parameters<typeof deleteTransaction>) => { deleteTransaction(...args); };
-  const guardedAddTransactionTags = (...args: Parameters<typeof addTransactionTags>) => { addTransactionTags(...args); };
+  const guardedUpdateTransaction = (...args: Parameters<typeof updateTransaction>) => updateTransaction(...args);
+  const guardedDeleteTransaction = (...args: Parameters<typeof deleteTransaction>) => deleteTransaction(...args);
+  const guardedAddTransactionTags = (...args: Parameters<typeof addTransactionTags>) => addTransactionTags(...args);
   const guardedReverseTransaction = (...args: Parameters<typeof reverseTransaction>) => { if (guardOnline()) reverseTransaction(...args); };
   const guardedReconcileAccount = (...args: Parameters<typeof reconcileAccount>) => { if (guardOnline()) reconcileAccount(...args); };
   const guardedImportRefresh = () => {

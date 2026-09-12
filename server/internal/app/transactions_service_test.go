@@ -21,7 +21,12 @@ func TestReverseTransactionEntryMirrorsOriginalPostings(t *testing.T) {
 			{Account: "Assets:Cash", Amount: -1200, Currency: "CNY"},
 		},
 	}
-	entry := ReverseTransactionEntry(original, "2026-05-02")
+	original.Entry = &LedgerEntry{Kind: "transaction", Date: original.Date, Payee: original.Payee, Narration: original.Narration, Tags: original.Tags,
+		Postings: []EntryPosting{{Account: "Expenses:Food", Amount: "12.00", Currency: "CNY"}, {Account: "Assets:Cash", Amount: "-12.00", Currency: "CNY"}}}
+	entry, err := ReverseTransactionEntry(original, "2026-05-02")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if entry.Date != "2026-05-02" || entry.Payee != "Cafe" || entry.Narration != "冲销：Lunch" {
 		t.Fatalf("unexpected reversal entry header: %#v", entry)
 	}
@@ -499,6 +504,8 @@ func TestTransactionServiceReverseUsesInjectedSnapshotWithoutLocalLedger(t *test
 			{Account: "Assets:Cash", Amount: -1200, Currency: "CNY"},
 		},
 		Source: TransactionSource{File: "transactions/2026/05.bean", Line: 1, Hash: "source-hash"},
+		Entry: &LedgerEntry{Kind: "transaction", Date: "2026-05-01", Payee: "Cafe", Narration: "Lunch", Currency: "CNY",
+			Postings: []EntryPosting{{Account: "Expenses:Food", Amount: "12.00", Currency: "CNY"}, {Account: "Assets:Cash", Amount: "-12.00", Currency: "CNY"}}},
 	}}}
 	service := NewTransactionServiceWithSnapshot(nil, NewLedgerWriter(cfg, nil), func() (*LedgerSnapshot, error) {
 		return snapshot, nil

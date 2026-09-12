@@ -68,7 +68,8 @@ type ReconcileRequest struct {
 }
 
 type AppendBatchRequest struct {
-	Entries []LedgerEntry `json:"entries"`
+	Entries      []LedgerEntry `json:"entries"`
+	OperationIDs []string      `json:"operationIds,omitempty"`
 }
 
 type AccountOperationsRequest struct {
@@ -239,6 +240,9 @@ func (r ReconcileRequest) Validate() error {
 func (r AppendBatchRequest) Validate() error {
 	if len(r.Entries) == 0 {
 		return fmt.Errorf("entries is required")
+	}
+	if err := validateAppendOperationIDs(r.OperationIDs, len(r.Entries)); err != nil {
+		return err
 	}
 	for i, entry := range r.Entries {
 		if err := entry.Validate(); err != nil {

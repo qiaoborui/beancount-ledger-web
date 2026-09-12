@@ -334,6 +334,8 @@ export const zhCN = {
     locked: "Home report locked",
   },
   pendingWrites: {
+    storageFailed: '浏览器保存失败，记录已保留在当前页面，请保持页面打开并重试。',
+    pausedSummary: '{{count}} 项待处理，请修正问题后手动重试',
     differentLedger: "待同步操作属于另一个账本，已停止同步",
     syncFailed: "同步失败",
     updateSyncFailed: "修改同步失败",

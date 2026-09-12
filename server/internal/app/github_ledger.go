@@ -32,6 +32,7 @@ type githubLedgerClient struct {
 	repo             string
 	branch           string
 	useGraphQLCommit bool
+	validationCache  *githubValidationCache
 }
 
 type githubLedgerTransaction struct {
@@ -46,14 +47,17 @@ type githubLedgerTransaction struct {
 }
 
 type githubLedgerTransactionMetrics struct {
-	readRequests    int
-	readElapsed     time.Duration
-	blobRequests    int
-	blobElapsed     time.Duration
-	treeElapsed     time.Duration
-	commitElapsed   time.Duration
-	refElapsed      time.Duration
-	mutationElapsed time.Duration
+	validationElapsed   time.Duration
+	beanCheckElapsed    time.Duration
+	validationCacheHits int
+	readRequests        int
+	readElapsed         time.Duration
+	blobRequests        int
+	blobElapsed         time.Duration
+	treeElapsed         time.Duration
+	commitElapsed       time.Duration
+	refElapsed          time.Duration
+	mutationElapsed     time.Duration
 }
 
 type fileInfo struct {

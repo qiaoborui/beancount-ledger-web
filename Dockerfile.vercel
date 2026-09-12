@@ -7,12 +7,15 @@ RUN go mod download
 COPY server ./
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/ledger-web ./cmd/ledger-web
 
-FROM alpine:3.22 AS runner
+FROM debian:bookworm-slim AS runner
 WORKDIR /app
 ENV GIN_MODE=release
-RUN apk add --no-cache ca-certificates \
-  && addgroup -S ledger \
-  && adduser -S -G ledger ledger
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip \
+  && rm -rf /var/lib/apt/lists/* \
+  && pip3 install --no-cache-dir --break-system-packages beancount==3.2.3 \
+  && groupadd --system ledger \
+  && useradd --system --gid ledger --create-home --shell /usr/sbin/nologin ledger
 COPY --from=go-builder /app/ledger-web ./ledger-web
 COPY examples ./examples
 USER ledger

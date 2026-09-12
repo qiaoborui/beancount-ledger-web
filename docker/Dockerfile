@@ -49,14 +49,17 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /app/zip-worker ./cmd/zip-worker
 
 # ── API runtime ──
-FROM alpine:3.22 AS server
+FROM debian:bookworm-slim AS server
 WORKDIR /app
 ENV GIN_MODE=release
 ENV SERVE_STATIC=false
 
-RUN apk add --no-cache ca-certificates \
-  && addgroup -S ledger \
-  && adduser -S -G ledger ledger
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip \
+  && rm -rf /var/lib/apt/lists/* \
+  && pip3 install --no-cache-dir --break-system-packages beancount==3.2.3 \
+  && groupadd --system ledger \
+  && useradd --system --gid ledger --create-home --shell /usr/sbin/nologin ledger
 
 COPY --from=go-builder /app/ledger-web /app/ledger-web
 COPY examples /app/examples

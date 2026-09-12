@@ -34,9 +34,42 @@ or mounted ledger copy.
 - When the browser is online again, the app retries the queue against the local
   Go server.
 
-The browser is not the source of truth. Every queued write still goes through the
-Go API and GitHub API ledger writer. The scheduled indexer validates and parses
-the ledger checkout before publishing a new Postgres read-model revision.
+Every queued write goes through the Go API and GitHub API ledger writer. Before
+committing, the writer stages the candidate ledger at its fixed Git revision and
+runs `bean-check`. The scheduled indexer validates and parses the committed
+ledger before publishing a new Postgres read-model revision.
+
+## Reliable append retries
+
+Each confirmed entry receives a stable operation ID before its first network
+request. Single appends send it in `Idempotency-Key`; batches send one ID per
+entry in `operationIds`. A batch that loses its response reuses those IDs when
+replaying individual entries from the offline queue.
+
+The writer commits a receipt under `.ledger-write-receipts/` in the private ledger
+in the same transaction as each appended entry. Receipts contain a content hash,
+with hashed operation IDs in their filenames. Repeating the same ID and content
+returns success without another append; reusing the ID for different content
+returns HTTP 409. Preserve this directory with the ledger, including after
+editing or deleting the original entry: these records keep a delayed retry from
+recreating an old transaction. GitHub commits keep receipts and entries atomic;
+filesystem writes roll both back when validation fails.
+
+Clients that omit operation IDs still work. The server generates IDs for its own
+internal commit retry; clients need stable IDs to deduplicate separate HTTP
+requests.
+
+## Queue failures
+
+Authentication, lock, conflict, and validation errors pause automatic retries and
+keep the operation available for review. Network failures, HTTP 408/429 and server
+errors use exponential backoff from one second up to one minute. Manual retry
+can resume an operation immediately after the underlying issue is resolved.
+
+The UI closes a queued draft only after browser storage confirms the save. When
+storage is unavailable, the draft and the current page's in-memory operation
+remain available with a recovery message. Keep that page open until storage is
+available or the entry has synced successfully.
 
 ## Conflict behavior
 
@@ -59,6 +92,12 @@ The app uses IndexedDB as the primary browser store for:
 
 `localStorage` remains a compatibility mirror for older pending writes and small
 UI preferences. Do not treat browser storage as a backup of the private ledger.
+Pending queues use versioned complete snapshots in both stores. The newest
+successful snapshot wins, including an empty queue, so a stale copy left by a
+failed store cannot restore a discarded or completed operation. Legacy array
+queues migrate when read.
+Browsers with Web Locks serialize the whole queue read/modify/write operation
+across tabs for the same ledger.
 
 ## HTTPS and passkeys
 

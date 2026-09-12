@@ -85,7 +85,8 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
 
     func testStoreRoundTripsCurrentSchemaAndRejectsUnsupportedSchemas() throws {
         let suiteName = "ledger-widget-snapshot-tests-\(UUID().uuidString)"
-        let store = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: suiteName)
+        let store = LedgerWidgetSnapshotStore(suiteName: suiteName, lockDirectory: lockDirectory)
         defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
 
         let current = LedgerWidgetSnapshot(
@@ -125,8 +126,9 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
 
     func testStoreMigratesSchemaOneWithoutDiscardingCachedExpenseAndAccounts() throws {
         let suiteName = "ledger-widget-snapshot-tests-\(UUID().uuidString)"
+        let lockDirectory = try temporaryWidgetLockDirectory(for: suiteName)
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        let store = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        let store = LedgerWidgetSnapshotStore(suiteName: suiteName, lockDirectory: lockDirectory)
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let updatedAt = Date(timeIntervalSince1970: 123)
@@ -175,7 +177,8 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
 
     func testStoreRejectsAnOlderSnapshotThatFinishesLater() throws {
         let suiteName = "ledger-widget-snapshot-order-tests-\(UUID().uuidString)"
-        let store = LedgerWidgetSnapshotStore(suiteName: suiteName)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: suiteName)
+        let store = LedgerWidgetSnapshotStore(suiteName: suiteName, lockDirectory: lockDirectory)
         defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
 
         let updatedAt = Date(timeIntervalSince1970: 2_000_000_000)
@@ -190,12 +193,13 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
         XCTAssertEqual(store.load(), newer)
     }
 
-    func testRefreshStatusStoresShareAnInstallationScopedNotificationName() {
+    func testRefreshStatusStoresShareAnInstallationScopedNotificationName() throws {
         let suiteName = "ledger-widget-notification-name-tests-\(UUID().uuidString)"
+        let lockDirectory = try temporaryWidgetLockDirectory(for: suiteName)
         defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
 
-        let first = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
-        let second = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        let first = LedgerWidgetRefreshStatusStore(suiteName: suiteName, lockDirectory: lockDirectory)
+        let second = LedgerWidgetRefreshStatusStore(suiteName: suiteName, lockDirectory: lockDirectory)
 
         XCTAssertEqual(first.changeNotificationNameValue, second.changeNotificationNameValue)
         XCTAssertFalse(first.changeNotificationNameValue.contains(suiteName))
@@ -203,8 +207,9 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
 
     func testTimelineLoaderPersistsServerVersionFailureAndKeepsCachedSnapshot() async throws {
         let suiteName = "ledger-widget-refresh-status-tests-\(UUID().uuidString)"
-        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName)
-        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: suiteName)
+        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName, lockDirectory: lockDirectory)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName, lockDirectory: lockDirectory)
         defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
 
         let now = Date(timeIntervalSince1970: 2_000_000_000)
@@ -234,8 +239,9 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
 
     func testForcedTimelineRefreshBypassesFreshCacheAndRecordsSuccess() async throws {
         let suiteName = "ledger-widget-forced-refresh-tests-\(UUID().uuidString)"
-        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName)
-        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: suiteName)
+        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName, lockDirectory: lockDirectory)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName, lockDirectory: lockDirectory)
         defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
 
         let now = Date(timeIntervalSince1970: 2_000_000_000)
@@ -264,8 +270,9 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
 
     func testAuthorizationFailureSuspendsCredentialAndRecordsRecoveryState() async throws {
         let suiteName = "ledger-widget-authorization-status-tests-\(UUID().uuidString)"
-        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName)
-        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: suiteName)
+        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName, lockDirectory: lockDirectory)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName, lockDirectory: lockDirectory)
         defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
 
         let now = Date(timeIntervalSince1970: 2_000_000_000)
@@ -289,8 +296,9 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
 
     func testLockedAuthorizationFailureSuspendsCredentialAndRecordsRecoveryState() async throws {
         let suiteName = "ledger-widget-locked-status-tests-\(UUID().uuidString)"
-        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName)
-        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: suiteName)
+        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName, lockDirectory: lockDirectory)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName, lockDirectory: lockDirectory)
         defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
 
         let now = Date(timeIntervalSince1970: 2_000_000_000)
@@ -314,7 +322,8 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
 
     func testRefreshStatusDoesNotRegressWhenOlderAttemptFinishesLater() throws {
         let suiteName = "ledger-widget-status-order-tests-\(UUID().uuidString)"
-        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: suiteName)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName, lockDirectory: lockDirectory)
         defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
 
         let olderAttempt = Date(timeIntervalSince1970: 2_000_000_000)
@@ -330,8 +339,9 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
 
     func testObsoleteCredentialCompletionKeepsReplacementReadyStatus() async throws {
         let suiteName = "ledger-widget-credential-race-tests-\(UUID().uuidString)"
-        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName)
-        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: suiteName)
+        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName, lockDirectory: lockDirectory)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName, lockDirectory: lockDirectory)
         defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
 
         let now = Date(timeIntervalSince1970: 2_000_000_000)

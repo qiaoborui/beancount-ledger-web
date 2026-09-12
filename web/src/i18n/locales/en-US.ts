@@ -338,6 +338,8 @@ export const enUS: DeepStringify<TranslationResource> = {
     locked: "Home report locked",
   },
   pendingWrites: {
+    storageFailed: 'Browser storage failed. Your records remain on this page. Keep it open and retry.',
+    pausedSummary: '{{count}} writes paused. Resolve the issue and retry manually.',
     differentLedger: "This pending operation belongs to another ledger; sync stopped",
     syncFailed: "Sync failed",
     updateSyncFailed: "Update sync failed",
