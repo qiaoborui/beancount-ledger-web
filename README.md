@@ -77,6 +77,10 @@ restores, image updates, and the full configuration reference.
 
 ## Development
 
+Install `beancount==3.2.3` in the Python environment used for development and make
+`bean-check` available on `PATH`. Backend integration tests and all ledger write
+storage modes use this validator; the API and Vercel images include it.
+
 ```bash
 cd server && go test ./... && go build ./cmd/...
 cd agent && uv sync --frozen --python 3.12 && uv run pytest
