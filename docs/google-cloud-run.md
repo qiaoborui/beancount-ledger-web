@@ -14,6 +14,16 @@ Cloud Scheduler -> Cloud Run Gmail drain and Watch renewal endpoints
 Private ledger GitHub Actions -> ledger-indexer -> Postgres read model
 ```
 
+The API image includes Python and Beancount 3.2.3. Before a GitHub write, it
+materializes the ledger's include tree at the transaction's fixed base commit,
+overlays the proposed files, and runs `bean-check` within the GitHub write
+timeout. Relative nested and wildcard includes are supported. Referenced bill
+paths are checked against the same Git tree without downloading their contents.
+The temporary snapshot is removed after validation; the API needs writable
+temporary storage and keeps no persistent checkout. Validation failures leave
+the ledger branch unchanged. Custom API images must also supply `bean-check`
+(or configure its executable path with `BEAN_CHECK_BIN`).
+
 The deployment workflow lives at
 `.github/workflows/deploy-google-cloud.yml`. On each `main` push it plans the
 affected components, starts reusable application checks and the required

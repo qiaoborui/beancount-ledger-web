@@ -1,13 +1,11 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -176,6 +174,11 @@ func (w *LedgerWriter) RunTransactionWithSourceResult(source string, apply func(
 			tx.Restore()
 			return err
 		}
+		// A completed operation replay only reads its receipt. Return the
+		// recorded success without revalidating or dirtying an unchanged ledger.
+		if len(tx.snapshots) == 0 {
+			return nil
+		}
 		if err := runBeanCheck(w.cfg); err != nil {
 			tx.Restore()
 			return err
@@ -241,6 +244,14 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 			return "", err
 		}
 		applyElapsed := time.Since(applyStarted)
+		if err := remoteTx.validate(); err != nil {
+			w.logGitHubAPITransaction(source, attempt+1, attemptStarted, beginElapsed, applyElapsed, remoteTx, err)
+			cancel()
+			if isContextTimeout(err) {
+				return "", ledgerWriteTimeoutError(timeout, err)
+			}
+			return "", err
+		}
 		gitSHA, err := remoteTx.commit(ledgerCommitMessage(source))
 		if err != nil {
 			w.logGitHubAPITransaction(source, attempt+1, attemptStarted, beginElapsed, applyElapsed, remoteTx, err)
@@ -471,9 +482,16 @@ func (w *LedgerWriter) AppendEntries(entries []LedgerEntry) ([]string, error) {
 }
 
 func (w *LedgerWriter) AppendEntriesWithSource(source string, entries []LedgerEntry) ([]string, error) {
+	return w.AppendEntriesWithOperationIDs(source, entries, nil)
+}
+
+func (w *LedgerWriter) AppendEntriesWithOperationIDs(source string, entries []LedgerEntry, operationIDs []string) ([]string, error) {
+	if err := validateAppendOperationIDs(operationIDs, len(entries)); err != nil {
+		return nil, err
+	}
 	items := make([]appendItem, 0, len(entries))
 	texts := make([]string, 0, len(entries))
-	for _, entry := range entries {
+	for index, entry := range entries {
 		var text string
 		if entry.Kind == "transaction" {
 			text = TransactionToBean(entry)
@@ -482,7 +500,11 @@ func (w *LedgerWriter) AppendEntriesWithSource(source string, entries []LedgerEn
 		} else {
 			return nil, fmt.Errorf("unsupported ledger entry kind: %s", entry.Kind)
 		}
-		items = append(items, appendItem{date: entry.Date, beanText: text})
+		item := appendItem{date: entry.Date, beanText: text}
+		if len(operationIDs) > 0 {
+			item.operationID = operationIDs[index]
+		}
+		items = append(items, item)
 		texts = append(texts, text)
 	}
 	if err := w.appendItemsChecked(source, items, func(tx *LedgerWriteTransaction) error {
@@ -907,8 +929,9 @@ func (tx *LedgerWriteTransaction) validateTransactionSource(source TransactionSo
 }
 
 type appendItem struct {
-	date     string
-	beanText string
+	date        string
+	beanText    string
+	operationID string
 }
 
 func (w *LedgerWriter) appendItemsChecked(source string, items []appendItem, validate func(*LedgerWriteTransaction) error) error {
@@ -923,13 +946,31 @@ func (w *LedgerWriter) appendItemsChecked(source string, items []appendItem, val
 	}
 	sort.Strings(files)
 	return w.RunTransactionWithSource(source, func(tx *LedgerWriteTransaction) error {
+		pending := make(map[string][]appendItem, len(byFile))
+		for _, file := range files {
+			for _, item := range byFile[file] {
+				done, err := w.appendOperationCompleted(tx, item)
+				if err != nil {
+					return err
+				}
+				if !done {
+					pending[file] = append(pending[file], item)
+				}
+			}
+		}
+		if len(pending) == 0 {
+			return nil
+		}
 		if validate != nil {
 			if err := validate(tx); err != nil {
 				return err
 			}
 		}
 		for _, file := range files {
-			fileItems := byFile[file]
+			fileItems := pending[file]
+			if len(fileItems) == 0 {
+				continue
+			}
 			if err := w.ensureMonthlyFileAndInclude(tx, file, fileItems[0].date); err != nil {
 				return err
 			}
@@ -943,6 +984,11 @@ func (w *LedgerWriter) appendItemsChecked(source string, items []appendItem, val
 			}
 			if err := tx.WriteFile(file, []byte(next), 0o644); err != nil {
 				return err
+			}
+			for _, item := range fileItems {
+				if err := w.recordAppendOperation(tx, item); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -1022,19 +1068,7 @@ func appendText(before, beanText string) string {
 }
 
 func runBeanCheck(cfg Config) error {
-	cmd := env("BEAN_CHECK_BIN", "bean-check")
-	command := exec.Command(cmd, mainBeanPath(cfg))
-	command.Dir = filepath.Dir(mainBeanPath(cfg))
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	command.Stdout = &stderr
-	if err := command.Run(); err != nil {
-		if stderr.Len() > 0 {
-			return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
-		}
-		return err
-	}
-	return nil
+	return runBeanCheckContext(context.Background(), cfg)
 }
 
 func editableLedgerFile(cfg Config, file string) (string, error) {

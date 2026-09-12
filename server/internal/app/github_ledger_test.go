@@ -53,7 +53,7 @@ func TestGitHubAPIWriterCommitsWithoutLocalCheckout(t *testing.T) {
 
 func TestGitHubAPIImportWriteCreatesIncludeBeanAndDocument(t *testing.T) {
 	fake := newFakeGitHubLedgerAPI(t, map[string]string{
-		"main.bean":                  "include \"transactions/2026/06.bean\"\n",
+		"main.bean":                  "2026-01-01 open Assets:Cash CNY\n2026-01-01 open Expenses:Food CNY\ninclude \"transactions/2026/06.bean\"\n",
 		"transactions/2026/06.bean":  "; 2026-06 交易记录\n",
 		"imports/alipay-config.yaml": "defaultMinusAccount: Expenses:Unknown\n",
 	})
@@ -281,8 +281,8 @@ func TestGitHubAPIAddTransactionTagsUsesOneCommitAcrossFiles(t *testing.T) {
 			t.Fatalf("existing tag was duplicated: %q", blob)
 		}
 	}
-	if got := fake.contentReadCounts(); len(got) != 2 || got["transactions/2026/05.bean"] != 1 || got["transactions/2026/06.bean"] != 1 {
-		t.Fatalf("content reads=%#v, want only one read per modified transaction file", got)
+	if got := fake.contentReadCounts(); len(got) != 5 || got["transactions/2026/05.bean"] != 1 || got["transactions/2026/06.bean"] != 1 || got["main.bean"] != 1 || got["accounts.bean"] != 1 || got["commodities.bean"] != 1 {
+		t.Fatalf("content reads=%#v, want one read per transaction and validation include", got)
 	}
 }
 
@@ -931,6 +931,7 @@ type fakeGitHubLedgerAPI struct {
 	commitCount                    int
 	contentReads                   map[string]int
 	failNextContentReadAfterCommit bool
+	failNextRefResponse            bool
 	graphQLExpectedHead            string
 	graphQLRepository              string
 	graphQLBranch                  string
@@ -1079,6 +1080,12 @@ func (api *fakeGitHubLedgerAPI) handle(w http.ResponseWriter, r *http.Request) {
 		api.updatedRef = "refs/heads/main"
 		for path, blobSHA := range api.treeBlobs {
 			api.files[path] = api.blobs[blobSHA]
+		}
+		if api.failNextRefResponse {
+			api.failNextRefResponse = false
+			w.WriteHeader(http.StatusServiceUnavailable)
+			writeJSON(api.t, w, map[string]string{"message": "response lost after commit"})
+			return
 		}
 		writeJSON(api.t, w, map[string]any{"ref": api.updatedRef, "object": map[string]any{"sha": body.SHA}})
 	default:

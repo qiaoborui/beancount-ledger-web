@@ -18,7 +18,7 @@ func corsMiddleware() gin.HandlerFunc {
 		if crossOriginAllowed(c, origin) {
 			c.Header("Access-Control-Allow-Origin", normalizeWebOrigin(origin))
 			c.Header("Access-Control-Allow-Credentials", "true")
-			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key")
 			c.Header("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
 			c.Header("Vary", appendVary(c.Writer.Header().Get("Vary"), "Origin"))
 			if c.Request.Method == http.MethodOptions {

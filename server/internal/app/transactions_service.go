@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -52,11 +53,43 @@ func (s *TransactionService) Reverse(input ReverseTransactionRequest) (LedgerEnt
 	if original == nil {
 		return LedgerEntry{}, errors.New("找不到原交易，账本可能已被修改，请刷新后重试")
 	}
+	// Editing needs lossless comment round-tripping; a reversal leaves the
+	// original untouched. Recover its exact posting model from the same snapshot
+	// while allowing comments, retaining all other lossless-model guards.
+	reversible := *original
+	if reversible.Entry == nil {
+		for _, raw := range snapshot.BeanEntries {
+			if raw.Kind != "transaction" || raw.File != original.Source.File || raw.Line != original.Source.Line {
+				continue
+			}
+			if original.Source.Hash != "" && transactionHash(raw.RawLines) != original.Source.Hash {
+				continue
+			}
+			clean := raw
+			clean.RawLines = make([]string, 0, len(raw.RawLines))
+			for _, line := range raw.RawLines {
+				if hasBeanComment(line) {
+					tokens := scanBeanLine(line)
+					if len(tokens) == 0 {
+						continue
+					}
+					indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+					line = indent + renderBeanTokens(tokens)
+				}
+				clean.RawLines = append(clean.RawLines, line)
+			}
+			reversible.Entry = EditableLedgerEntryFromBeanTransaction(clean)
+			break
+		}
+	}
 	reverseDate := input.Date
 	if reverseDate == "" {
 		reverseDate = time.Now().Format("2006-01-02")
 	}
-	entry := ReverseTransactionEntry(*original, reverseDate)
+	entry, err := ReverseTransactionEntry(reversible, reverseDate)
+	if err != nil {
+		return LedgerEntry{}, err
+	}
 	if err := s.writer.AppendBeanTextWithSource(reverseDate, TransactionToBean(entry), ledgerWriteSourceTransactionReversal); err != nil {
 		return LedgerEntry{}, err
 	}
@@ -79,20 +112,38 @@ func FindTransaction(txns []Transaction, source TransactionSource) *Transaction 
 	return nil
 }
 
-func ReverseTransactionEntry(original Transaction, reverseDate string) LedgerEntry {
-	entry := LedgerEntry{
-		Kind:        "transaction",
-		Date:        reverseDate,
-		Payee:       original.Payee,
-		Narration:   "冲销：" + original.Narration,
-		Metadata:    map[string]MetadataValue{"reversal": true},
-		Tags:        original.Tags,
-		Currency:    "CNY",
-		Confidence:  1,
-		NeedsReview: false,
+func ReverseTransactionEntry(original Transaction, reverseDate string) (LedgerEntry, error) {
+	if original.Entry == nil {
+		return LedgerEntry{}, errors.New("交易缺少可安全冲销的原始分录，请使用账本编辑器处理")
 	}
-	for _, posting := range original.Postings {
-		entry.Postings = append(entry.Postings, EntryPosting{Account: posting.Account, Amount: fromCents(-posting.Amount), Currency: posting.Currency})
+	entry := *original.Entry
+	entry.Date = reverseDate
+	entry.Narration = "冲销：" + entry.Narration
+	entry.Tags = append([]string(nil), entry.Tags...)
+	entry.Links = append([]string(nil), entry.Links...)
+	entry.Metadata = make(map[string]MetadataValue, len(original.Entry.Metadata)+1)
+	for key, value := range original.Entry.Metadata {
+		entry.Metadata[key] = value
 	}
-	return entry
+	entry.Metadata["reversal"] = true
+	entry.Postings = append([]EntryPosting(nil), entry.Postings...)
+	for i := range entry.Postings {
+		posting := &entry.Postings[i]
+		// Preserve Beancount's inferred balancing leg.
+		if posting.Amount == "" {
+			continue
+		}
+		if err := validateBeanDecimal("amount", posting.Amount); err != nil {
+			return LedgerEntry{}, err
+		}
+		// Sign inversion on decimal text preserves every digit and the precision
+		// Beancount uses for tolerance inference. Lot costs and prices stay positive.
+		amount := strings.TrimSpace(posting.Amount)
+		if strings.HasPrefix(amount, "-") {
+			posting.Amount = strings.TrimPrefix(amount, "-")
+		} else {
+			posting.Amount = "-" + strings.TrimPrefix(amount, "+")
+		}
+	}
+	return entry, nil
 }
