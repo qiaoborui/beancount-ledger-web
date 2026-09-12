@@ -3,7 +3,7 @@ import type { LedgerVersion, TimeRange, Txn } from "./types";
 
 export type PendingEntry = ParsedTransaction | BalanceAssertion;
 
-export type PendingLedgerOperationStatus = "pending" | "syncing" | "error" | "conflict";
+export type PendingLedgerOperationStatus = "pending" | "syncing" | "error" | "paused" | "conflict";
 
 type PendingLedgerOperationBase = {
   id: string;
@@ -14,8 +14,15 @@ type PendingLedgerOperationBase = {
   retryCount?: number;
   lastAttemptAt?: number;
   lastError?: string;
+  nextAttemptAt?: number;
   ledgerScope?: string;
 };
+
+export function createLedgerOperationId(): string {
+  return crypto.randomUUID();
+}
+
+export type EnqueuePendingWrites = (entries: PendingEntry[], operationIds?: string[]) => Promise<boolean>;
 
 export type PendingAppendOperation = {
   id: string;

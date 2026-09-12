@@ -46,9 +46,10 @@ async function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStor
     const store = tx.objectStore(STORE_NAME);
     const request = run(store);
 
-    request.onsuccess = () => resolve(request.result);
+    tx.oncomplete = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
     tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
   });
 }
 

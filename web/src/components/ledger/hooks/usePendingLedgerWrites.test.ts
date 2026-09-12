@@ -201,6 +201,16 @@ describe("pending operation storage migration", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each(["local", "indexed"])("lets an empty snapshot override a stale legacy array in %s", async (legacyStore) => {
+    const old: PendingLedgerOperation = { id: "discarded", createdAt: 1, kind: "append", entry };
+    const snapshot = { version: 1, revision: 1, writer: "completed-discard", operations: [] };
+    const storage = installBackendStorage("ledger-one");
+    storage.values.set(pendingOperationsMigrationKey, "1");
+    storage.values.set(scopedLocalKey("ledger-one"), JSON.stringify(legacyStore === "local" ? [old] : snapshot));
+    indexedCacheState.values.set(scopedIndexedKey("ledger-one"), legacyStore === "indexed" ? [old] : snapshot);
+    expect(await readPendingLedgerOperations()).toEqual([]);
+  });
+
   it("imports the legacy queue into only the first ledger scope", async () => {
     const legacyOperation: PendingLedgerOperation = { id: "legacy-1", createdAt: 1, kind: "append", entry };
     const storage = installBackendStorage("ledger-one", memoryStorage({
@@ -239,8 +249,8 @@ describe("pending operation storage migration", () => {
     const migrated = await readPendingLedgerOperations();
 
     expect(migrated).toEqual([{ ...provisionalOperation, ledgerScope: "cluster:ledger-one" }]);
-    expect(storage.values.has(provisionalKey)).toBe(false);
-    expect(JSON.parse(storage.values.get(scopedLocalKey("ledger-one")) ?? "[]")).toEqual(migrated);
+    expect(JSON.parse(storage.values.get(provisionalKey) ?? "null").operations).toEqual([]);
+    expect(JSON.parse(storage.values.get(scopedLocalKey("ledger-one")) ?? "null").operations).toEqual(migrated);
   });
 
   it("keeps legacy data when both target stores fail", async () => {
@@ -272,7 +282,7 @@ describe("pending operation storage migration", () => {
 
     await readPendingLedgerOperations();
 
-    expect(JSON.parse(storage.values.get(scopedLocalKey("ledger-one")) ?? "[]")).toEqual([{ ...legacyOperation, ledgerScope: "cluster:ledger-one" }]);
+    expect(JSON.parse(storage.values.get(scopedLocalKey("ledger-one")) ?? "null").operations).toEqual([{ ...legacyOperation, ledgerScope: "cluster:ledger-one" }]);
     expect(storage.values.get(pendingOperationsMigrationKey)).toBe("1");
     expect(storage.values.has(pendingOperationsKey)).toBe(false);
   });
@@ -288,7 +298,7 @@ describe("pending operation storage migration", () => {
 
     await readPendingLedgerOperations();
 
-    expect(indexedCacheState.values.get(scopedIndexedKey("ledger-one"))).toEqual([{ ...legacyOperation, ledgerScope: "cluster:ledger-one" }]);
+    expect(indexedCacheState.values.get(scopedIndexedKey("ledger-one"))).toMatchObject({ operations: [{ ...legacyOperation, ledgerScope: "cluster:ledger-one" }] });
     expect(indexedCacheState.values.get(pendingOperationsMigrationKey)).toBe(true);
     expect(storage.values.has(pendingOperationsKey)).toBe(false);
   });

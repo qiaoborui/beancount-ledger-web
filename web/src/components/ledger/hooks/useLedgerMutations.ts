@@ -5,12 +5,13 @@ import type { BalanceAssertion, ParsedTransaction } from "@/lib/schemas";
 import { haptic } from "../haptics";
 import type { Txn } from "../types";
 import i18n from "@/i18n";
+import { createLedgerOperationId, type EnqueuePendingWrites } from "../pendingLedgerOperations";
 
 function offlineOrNetworkError(error?: unknown) {
   return (typeof navigator !== "undefined" && !navigator.onLine) || error instanceof TypeError;
 }
 
-export function useLedgerMutations({ appendEntry, load, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete, enqueueAddTransactionTags }: { appendEntry: (entry: ParsedTransaction | BalanceAssertion) => Promise<{ ok: boolean }>; load: (forceFresh?: boolean) => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: (entries: (ParsedTransaction | BalanceAssertion)[]) => void; enqueueTransactionUpdate: (source: Txn["source"], entry: ParsedTransaction) => void; enqueueTransactionDelete: (source: Txn["source"], reason: string) => void; enqueueAddTransactionTags: (sources: Txn["source"][], tags: string[]) => void }) {
+export function useLedgerMutations({ appendEntry, load, showToast, enqueuePendingWrites, enqueueTransactionUpdate, enqueueTransactionDelete, enqueueAddTransactionTags }: { appendEntry: (entry: ParsedTransaction | BalanceAssertion, operationId?: string) => Promise<{ ok: boolean }>; load: (forceFresh?: boolean) => void | Promise<void>; showToast: (kind: "info" | "success" | "error", text: string) => void; enqueuePendingWrites: EnqueuePendingWrites; enqueueTransactionUpdate: (source: Txn["source"], entry: ParsedTransaction) => Promise<boolean>; enqueueTransactionDelete: (source: Txn["source"], reason: string) => Promise<boolean>; enqueueAddTransactionTags: (sources: Txn["source"][], tags: string[]) => Promise<boolean> }) {
   const [assertion, setAssertion] = useState<BalanceAssertion>({
     kind: "balance",
     date: new Date().toISOString().slice(0, 10),
@@ -20,21 +21,22 @@ export function useLedgerMutations({ appendEntry, load, showToast, enqueuePendin
   });
 
   async function appendAssertion() {
+    const operationId = createLedgerOperationId();
     if (offlineOrNetworkError()) {
-      enqueuePendingWrites([assertion]);
+      if (!await enqueuePendingWrites([assertion], [operationId])) { showToast("error", i18n.t("pendingWrites.storageFailed")); return; }
       showToast("info", i18n.t("ledgerMutations.offlineAssertionSaved"));
       return;
     }
     showToast("info", i18n.t("ledgerMutations.writingAssertion"));
     try {
-      const res = await appendEntry(assertion);
+      const res = await appendEntry(assertion, operationId);
       if (!res.ok) return;
       haptic([6, 24, 10]);
       showToast("success", i18n.t("ledgerMutations.assertionWritten"));
       load(true);
     } catch (error) {
       if (offlineOrNetworkError(error)) {
-        enqueuePendingWrites([assertion]);
+        if (!await enqueuePendingWrites([assertion], [operationId])) { showToast("error", i18n.t("pendingWrites.storageFailed")); return; }
         showToast("info", i18n.t("ledgerMutations.networkUnstableAssertionSaved"));
         return;
       }
@@ -43,19 +45,19 @@ export function useLedgerMutations({ appendEntry, load, showToast, enqueuePendin
   }
 
   async function updateTransaction(source: Txn["source"], entry: ParsedTransaction) {
-    enqueueTransactionUpdate(source, entry);
+    if (!await enqueueTransactionUpdate(source, entry)) throw new Error(i18n.t("pendingWrites.storageFailed"));
     haptic(8);
     showToast("success", i18n.t("ledgerMutations.transactionSavedLocal"));
   }
 
   async function deleteTransaction(source: Txn["source"], reason: string) {
-    enqueueTransactionDelete(source, reason);
+    if (!await enqueueTransactionDelete(source, reason)) throw new Error(i18n.t("pendingWrites.storageFailed"));
     haptic(8);
     showToast("success", i18n.t("ledgerMutations.transactionHiddenLocal"));
   }
 
   async function addTransactionTags(sources: Txn["source"][], tags: string[]) {
-    enqueueAddTransactionTags(sources, tags);
+    if (!await enqueueAddTransactionTags(sources, tags)) throw new Error(i18n.t("pendingWrites.storageFailed"));
     haptic(8);
     showToast("success", i18n.t("ledgerMutations.transactionTagsSavedLocal", { count: sources.length }));
   }

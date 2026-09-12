@@ -396,7 +396,7 @@ const MemoTransactionTableRow = memo(function TransactionTableRow({ txn, account
   );
 });
 
-export function TransactionList({ txns, accounts = [], searchable, categoryQuery, setCategoryQuery, metadataQuery, setMetadataQuery, searchQuery, setSearchQuery, serverFilteredSearch, serverSearchLoading, serverSearchError, matchMode, setMatchMode, viewMode, setViewMode, onUpdate, onDelete, onReverse, onAddTags, showToast }: { txns: Txn[]; accounts?: AccountView[]; searchable?: boolean; categoryQuery?: string; setCategoryQuery?: (value: string) => void; metadataQuery?: string; setMetadataQuery?: (value: string) => void; searchQuery?: string; setSearchQuery?: (value: string) => void; serverFilteredSearch?: boolean; serverSearchLoading?: boolean; serverSearchError?: string; matchMode?: "exact" | "prefix"; setMatchMode?: (mode: "exact" | "prefix") => void; viewMode?: "compact" | "full"; setViewMode?: (mode: "compact" | "full") => void; onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void; onDelete?: (source: Txn["source"], reason: string) => void; onReverse?: (source: Txn["source"], date: string) => void; onAddTags?: (sources: Txn["source"][], tags: string[]) => void; showToast?: (kind: "info" | "success" | "error", text: string) => void }) {
+export function TransactionList({ txns, accounts = [], searchable, categoryQuery, setCategoryQuery, metadataQuery, setMetadataQuery, searchQuery, setSearchQuery, serverFilteredSearch, serverSearchLoading, serverSearchError, matchMode, setMatchMode, viewMode, setViewMode, onUpdate, onDelete, onReverse, onAddTags, showToast }: { txns: Txn[]; accounts?: AccountView[]; searchable?: boolean; categoryQuery?: string; setCategoryQuery?: (value: string) => void; metadataQuery?: string; setMetadataQuery?: (value: string) => void; searchQuery?: string; setSearchQuery?: (value: string) => void; serverFilteredSearch?: boolean; serverSearchLoading?: boolean; serverSearchError?: string; matchMode?: "exact" | "prefix"; setMatchMode?: (mode: "exact" | "prefix") => void; viewMode?: "compact" | "full"; setViewMode?: (mode: "compact" | "full") => void; onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void | Promise<void>; onDelete?: (source: Txn["source"], reason: string) => void | Promise<void>; onReverse?: (source: Txn["source"], date: string) => void | Promise<void>; onAddTags?: (sources: Txn["source"][], tags: string[]) => void | Promise<void>; showToast?: (kind: "info" | "success" | "error", text: string) => void }) {
   const { t } = useTranslation();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -535,15 +535,19 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
       return next;
     });
   };
-  const applyBulkTags = () => {
+  const applyBulkTags = async () => {
     const tags = [...new Set(bulkTagInput.split(/[\s,]+/).map((tag) => tag.trim().replace(/^#+/, "")).filter(Boolean))];
     if (!bulkSelectedKeys.size) return showToast?.("info", t("transactionList.selectBeforeTagging"));
     if (!tags.length || tags.length > 50 || tags.some((tag) => tag.length > 64 || !/^[A-Za-z0-9_-]+$/.test(tag))) return showToast?.("error", t("transactionList.tagFormatError"));
     const selectedTxns = txns.filter((txn) => bulkSelectedKeys.has(transactionKey(txn)) && txn.source.hash && !txn.pending).slice(0, 200);
     if (!selectedTxns.length) return;
-    onAddTags?.(selectedTxns.map((txn) => txn.source), tags);
-    setBulkSelectedKeys(new Set());
-    setBulkTagInput("");
+    try {
+      await onAddTags?.(selectedTxns.map((txn) => txn.source), tags);
+      setBulkSelectedKeys(new Set());
+      setBulkTagInput("");
+    } catch (error) {
+      showToast?.("error", error instanceof Error ? error.message : String(error));
+    }
   };
   const focusDesktopRow = (key: string) => {
     window.requestAnimationFrame(() => desktopRowRefs.current.get(key)?.focus());
@@ -755,7 +759,7 @@ export function TransactionList({ txns, accounts = [], searchable, categoryQuery
       )}
     </div>
     {searchable && <MobileSheet open={mobileFiltersOpen} title={t("transactionList.filterSheetTitle")} onClose={() => setMobileFiltersOpen(false)} footer={<div className="grid grid-cols-2 gap-2"><Button type="button" variant="outline" className="h-11 bg-panel" onClick={clearFilters} disabled={!hasFilters}>{t("transactionList.clearFilters")}</Button><Button type="button" className="h-11" onClick={() => setMobileFiltersOpen(false)}>{t("transactionList.done")}</Button></div>}>{renderFilterControls("mobile")}</MobileSheet>}
-    {drawerTxn && <TransactionDrawer key={`${drawerTxn.source.file}:${drawerTxn.source.line}:sheet`} txn={drawerTxn} accounts={accounts} onClose={() => setDrawerTxn(null)} onUpdate={onUpdate} onDelete={(source, reason) => { onDelete?.(source, reason); setDrawerTxn(null); }} onReverse={(source, date) => { onReverse?.(source, date); setDrawerTxn(null); }} />}
+    {drawerTxn && <TransactionDrawer key={`${drawerTxn.source.file}:${drawerTxn.source.line}:sheet`} txn={drawerTxn} accounts={accounts} onClose={() => setDrawerTxn(null)} onUpdate={onUpdate} onDelete={async (source, reason) => { await onDelete?.(source, reason); setDrawerTxn(null); }} onReverse={(source, date) => { onReverse?.(source, date); setDrawerTxn(null); }} />}
   </section>;
 }
 
@@ -860,9 +864,9 @@ type TransactionDrawerProps = {
   txn: Txn;
   accounts: AccountView[];
   onClose: () => void;
-  onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void;
-  onDelete?: (source: Txn["source"], reason: string) => void;
-  onReverse?: (source: Txn["source"], date: string) => void;
+  onUpdate?: (source: Txn["source"], entry: ParsedTransaction) => void | Promise<void>;
+  onDelete?: (source: Txn["source"], reason: string) => void | Promise<void>;
+  onReverse?: (source: Txn["source"], date: string) => void | Promise<void>;
 };
 
 type PendingTransactionAction =
@@ -920,7 +924,7 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
     setDiscardDialogOpen(true);
     return false;
   };
-  function save() {
+  async function save() {
     setFormError(null);
     let parsedMetadata: Record<string, MetadataValue> = {};
     try {
@@ -946,9 +950,13 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
       setFormError(t("transactionList.postingsNeedAmount"));
       return;
     }
-    onUpdate?.(txn.source, { kind: "transaction", date, payee, narration, metadata: parsedMetadata, tags: tags.split(/\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean), confidence: 1, needsReview: false, questions: [], postings: cleanedPostings });
-    setEditing(false);
-    onClose();
+    try {
+      await onUpdate?.(txn.source, { kind: "transaction", date, payee, narration, metadata: parsedMetadata, tags: tags.split(/\s+/).map((tag) => tag.replace(/^#/, "")).filter(Boolean), confidence: 1, needsReview: false, questions: [], postings: cleanedPostings });
+      setEditing(false);
+      onClose();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   const footer = pendingAppend ? <div className="text-sm leading-6 text-olive">
@@ -1083,14 +1091,18 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
     </div>}
   </>;
 
-  const confirmPendingAction = () => {
+  const confirmPendingAction = async () => {
     if (!pendingAction) return;
-    if (pendingAction.kind === "delete") {
-      onDelete?.(txn.source, pendingAction.reason.trim() || t("transactionList.deleteReason"));
-    } else {
-      onReverse?.(txn.source, pendingAction.date || reverseDate);
+    try {
+      if (pendingAction.kind === "delete") {
+        await onDelete?.(txn.source, pendingAction.reason.trim() || t("transactionList.deleteReason"));
+      } else {
+        await onReverse?.(txn.source, pendingAction.date || reverseDate);
+      }
+      setPendingAction(null);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : String(error));
     }
-    setPendingAction(null);
   };
 
   return <>
@@ -1115,9 +1127,10 @@ function TransactionDrawer({ txn, accounts, onClose, onUpdate, onDelete, onRever
             <Input id="reverse-date" type="date" value={pendingAction.date} onChange={(event) => setPendingAction({ kind: "reverse", date: event.target.value })} />
           </div>
         )}
+        {formError && <Alert variant="destructive"><AlertDescription>{formError}</AlertDescription></Alert>}
         <AlertDialogFooter>
           <AlertDialogCancel>{t("transactionList.cancel")}</AlertDialogCancel>
-          <AlertDialogAction className={pendingAction?.kind === "delete" ? "bg-destructive text-white hover:bg-destructive/90" : undefined} onClick={confirmPendingAction}>
+          <AlertDialogAction className={pendingAction?.kind === "delete" ? "bg-destructive text-white hover:bg-destructive/90" : undefined} onClick={(event) => { event.preventDefault(); void confirmPendingAction(); }}>
             {pendingAction?.kind === "delete" ? t("transactionList.confirmDelete") : t("transactionList.confirmReverse")}
           </AlertDialogAction>
         </AlertDialogFooter>
