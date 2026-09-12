@@ -1024,7 +1024,8 @@ final class LedgerSessionTests: XCTestCase {
         let defaultsSuite = "ledger-mobile-widget-registration-failure-tests-\(UUID().uuidString)"
         let statusSuite = "ledger-mobile-widget-registration-status-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: defaultsSuite)!
-        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: statusSuite)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: statusSuite)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: statusSuite, lockDirectory: lockDirectory)
         defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
         defer {
             defaults.removePersistentDomain(forName: defaultsSuite)
@@ -1054,7 +1055,8 @@ final class LedgerSessionTests: XCTestCase {
         let defaultsSuite = "ledger-mobile-widget-foreground-tests-\(UUID().uuidString)"
         let statusSuite = "ledger-mobile-widget-foreground-status-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: defaultsSuite)!
-        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: statusSuite)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: statusSuite)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: statusSuite, lockDirectory: lockDirectory)
         defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
         defer {
             defaults.removePersistentDomain(forName: defaultsSuite)
@@ -1094,7 +1096,8 @@ final class LedgerSessionTests: XCTestCase {
         let defaultsSuite = "ledger-mobile-widget-notification-tests-\(UUID().uuidString)"
         let statusSuite = "ledger-mobile-widget-notification-status-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: defaultsSuite)!
-        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: statusSuite)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: statusSuite)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: statusSuite, lockDirectory: lockDirectory)
         defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
         defer {
             defaults.removePersistentDomain(forName: defaultsSuite)
@@ -1601,11 +1604,88 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertFalse(session.amountsVisible)
     }
 
-    func testReadySessionPublishesWidgetSnapshotAndLogoutClearsIt() async {
+    func testPendingWidgetPublicationCannotRestoreSnapshotAfterLogout() async throws {
+        try await assertPendingWidgetPublicationIsInvalidated(by: .logout)
+    }
+
+    func testPendingWidgetPublicationCannotRestoreSnapshotAfterServerChange() async throws {
+        try await assertPendingWidgetPublicationIsInvalidated(by: .changeServer)
+    }
+
+    func testPendingWidgetPublicationCannotReplaceSnapshotAfterLock() async throws {
+        try await assertPendingWidgetPublicationIsInvalidated(by: .lock)
+    }
+
+    private enum WidgetSessionInvalidation {
+        case logout, changeServer, lock
+    }
+
+    private func assertPendingWidgetPublicationIsInvalidated(
+        by invalidation: WidgetSessionInvalidation
+    ) async throws {
+        let suite = "ledger-widget-publication-race-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let lockDirectory = try temporaryWidgetLockDirectory(for: suite)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suite, lockDirectory: lockDirectory)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suite, lockDirectory: lockDirectory)
+        let previous = LedgerWidgetSnapshotBuilder.make(report: Self.widgetReport, ledger: Self.payload)
+        try snapshotStore.save(previous)
+        XCTAssertEqual(snapshotStore.load(), previous)
+
+        let registrationStarted = expectation(description: "Widget registration is suspended")
+        let registrationGate = SessionRequestGate(started: registrationStarted)
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            widgetReport: Self.widgetReport,
+            widgetQuickUnlockRegistrationGate: registrationGate
+        )
+        let credentialStore = MockWidgetCredentialStore()
+        let session = LedgerSession(
+            api: api,
+            defaults: defaults,
+            biometricStore: MockBiometricCredentialStore(
+                credential: QuickUnlockCredential(deviceID: "phone", token: "phone-token")
+            ),
+            widgetSnapshotStore: snapshotStore,
+            widgetCredentialStore: credentialStore,
+            widgetRefreshStatusStore: statusStore
+        )
+        let resumeTask = Task { await session.resume() }
+        await fulfillment(of: [registrationStarted], timeout: 3)
+        XCTAssertEqual(session.phase, .ready)
+
+        switch invalidation {
+        case .logout: session.logout()
+        case .changeServer: session.changeServer()
+        case .lock: await session.lock()
+        }
+        let invalidatedState = snapshotStore.loadState()
+        if invalidation == .lock {
+            XCTAssertEqual(invalidatedState.snapshot, previous)
+        } else {
+            XCTAssertNil(invalidatedState.snapshot)
+        }
+
+        await registrationGate.release()
+        await resumeTask.value
+
+        XCTAssertEqual(snapshotStore.loadState(), invalidatedState)
+        XCTAssertNil(try credentialStore.load())
+        let calls = await api.callCounts()
+        XCTAssertEqual(calls.quickUnlockRegistrationModes, ["widget"])
+        XCTAssertEqual(calls.quickUnlockRevoke, 1)
+    }
+
+    func testReadySessionPublishesWidgetSnapshotAndLogoutClearsIt() async throws {
         let defaultsSuite = "ledger-mobile-widget-session-tests-\(UUID().uuidString)"
         let widgetSuite = "ledger-mobile-widget-store-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: defaultsSuite)!
-        let widgetStore = LedgerWidgetSnapshotStore(suiteName: widgetSuite)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: widgetSuite)
+        let widgetStore = LedgerWidgetSnapshotStore(suiteName: widgetSuite, lockDirectory: lockDirectory)
         defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
         defer {
             defaults.removePersistentDomain(forName: defaultsSuite)
@@ -1638,7 +1718,8 @@ final class LedgerSessionTests: XCTestCase {
         let defaultsSuite = "ledger-mobile-widget-import-fallback-tests-\(UUID().uuidString)"
         let widgetSuite = "ledger-mobile-widget-import-fallback-store-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: defaultsSuite)!
-        let widgetStore = LedgerWidgetSnapshotStore(suiteName: widgetSuite)
+        let lockDirectory = try temporaryWidgetLockDirectory(for: widgetSuite)
+        let widgetStore = LedgerWidgetSnapshotStore(suiteName: widgetSuite, lockDirectory: lockDirectory)
         defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
         defer {
             defaults.removePersistentDomain(forName: defaultsSuite)
@@ -2612,6 +2693,30 @@ final class LedgerSessionTests: XCTestCase {
     )
 }
 
+private actor SessionRequestGate {
+    private let started: XCTestExpectation
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+
+    init(started: XCTestExpectation) {
+        self.started = started
+    }
+
+    func wait() async {
+        guard !released else { return }
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            started.fulfill()
+        }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
 private actor SessionMockAPI: LedgerAPI {
     struct BootstrapRequest: Equatable, Sendable {
         let start: String
@@ -2717,6 +2822,7 @@ private actor SessionMockAPI: LedgerAPI {
     let quickUnlockRevokeDelayNanoseconds: UInt64
     let widgetQuickUnlockRegisterErrorStatus: Int?
     let widgetQuickUnlockRevokeErrorStatus: Int?
+    let widgetQuickUnlockRegistrationGate: SessionRequestGate?
     let transactionWriteDelayNanoseconds: UInt64
     let transactionWritesShouldFail: Bool
     private var authStatusCalls = 0
@@ -2792,6 +2898,7 @@ private actor SessionMockAPI: LedgerAPI {
         quickUnlockRevokeDelayNanoseconds: UInt64 = 0,
         widgetQuickUnlockRegisterErrorStatus: Int? = nil,
         widgetQuickUnlockRevokeErrorStatus: Int? = nil,
+        widgetQuickUnlockRegistrationGate: SessionRequestGate? = nil,
         transactionWriteDelayNanoseconds: UInt64 = 0,
         transactionWritesShouldFail: Bool = false
     ) {
@@ -2826,6 +2933,7 @@ private actor SessionMockAPI: LedgerAPI {
         self.quickUnlockRevokeDelayNanoseconds = quickUnlockRevokeDelayNanoseconds
         self.widgetQuickUnlockRegisterErrorStatus = widgetQuickUnlockRegisterErrorStatus
         self.widgetQuickUnlockRevokeErrorStatus = widgetQuickUnlockRevokeErrorStatus
+        self.widgetQuickUnlockRegistrationGate = widgetQuickUnlockRegistrationGate
         self.transactionWriteDelayNanoseconds = transactionWriteDelayNanoseconds
         self.transactionWritesShouldFail = transactionWritesShouldFail
         serverTransactions = payload.transactions
@@ -2865,6 +2973,7 @@ private actor SessionMockAPI: LedgerAPI {
         quickUnlockRegisterCalls += 1
         quickUnlockRegistrationModes.append(mode)
         if mode == "widget" {
+            await widgetQuickUnlockRegistrationGate?.wait()
             if let widgetQuickUnlockRegisterErrorStatus {
                 throw LedgerAPIError.server(
                     status: widgetQuickUnlockRegisterErrorStatus,

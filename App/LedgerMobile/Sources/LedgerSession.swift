@@ -2039,6 +2039,10 @@ final class LedgerSession: ObservableObject {
             return
         }
         await ensureWidgetCredential(for: serverURL, valuationCurrency: valuationCurrency)
+        // Credential registration can suspend while the user ends or locks this session.
+        guard generation == requestGeneration, self.serverURL == serverURL, phase == .ready else {
+            return
+        }
         guard let report else {
             return
         }

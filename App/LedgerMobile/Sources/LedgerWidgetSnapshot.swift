@@ -214,9 +214,11 @@ struct LedgerWidgetSnapshotStore: Sendable {
     static let shared = LedgerWidgetSnapshotStore()
 
     let suiteName: String
+    private let coordinator: LedgerWidgetSharedStoreCoordinator
 
-    init(suiteName: String = appGroupIdentifier) {
+    init(suiteName: String = appGroupIdentifier, lockDirectory: URL? = nil) {
         self.suiteName = suiteName
+        coordinator = LedgerWidgetSharedStoreCoordinator(suiteName: suiteName, lockDirectory: lockDirectory)
     }
 
     func load() -> LedgerWidgetSnapshot? { loadState().snapshot }
@@ -291,10 +293,6 @@ struct LedgerWidgetSnapshotStore: Sendable {
             defaults.removeObject(forKey: Self.snapshotAttemptKey)
             _ = defaults.synchronize()
         }
-    }
-
-    private var coordinator: LedgerWidgetSharedStoreCoordinator {
-        LedgerWidgetSharedStoreCoordinator(suiteName: suiteName)
     }
 
     private func load(from defaults: UserDefaults) -> LedgerWidgetSnapshot? {

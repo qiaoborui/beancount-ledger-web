@@ -21,13 +21,14 @@ private final class LedgerWidgetProcessLockRegistry: @unchecked Sendable {
 
 struct LedgerWidgetSharedStoreCoordinator: Sendable {
     let suiteName: String
+    var lockDirectory: URL? = nil
 
     func withLock<T>(_ operation: () throws -> T) throws -> T {
         let processLock = LedgerWidgetProcessLockRegistry.shared.lock(for: suiteName)
         processLock.lock()
         defer { processLock.unlock() }
 
-        guard let containerURL = FileManager.default.containerURL(
+        guard let containerURL = lockDirectory ?? FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: suiteName
         ) else {
             return try operation()
@@ -166,10 +167,12 @@ struct LedgerWidgetRefreshStatusStore: Sendable {
 
     let suiteName: String
     let changeNotificationNameValue: String
+    private let coordinator: LedgerWidgetSharedStoreCoordinator
 
-    init(suiteName: String = LedgerWidgetSnapshotStore.appGroupIdentifier) {
+    init(suiteName: String = LedgerWidgetSnapshotStore.appGroupIdentifier, lockDirectory: URL? = nil) {
         self.suiteName = suiteName
-        let coordinator = LedgerWidgetSharedStoreCoordinator(suiteName: suiteName)
+        let coordinator = LedgerWidgetSharedStoreCoordinator(suiteName: suiteName, lockDirectory: lockDirectory)
+        self.coordinator = coordinator
         let nonce = try? coordinator.withLock {
             guard let defaults = UserDefaults(suiteName: suiteName) else {
                 throw LedgerWidgetCredentialStoreError.unavailable
@@ -231,10 +234,6 @@ struct LedgerWidgetRefreshStatusStore: Sendable {
 
     var changeNotificationName: CFNotificationName {
         CFNotificationName(rawValue: changeNotificationNameValue as CFString)
-    }
-
-    private var coordinator: LedgerWidgetSharedStoreCoordinator {
-        LedgerWidgetSharedStoreCoordinator(suiteName: suiteName)
     }
 
     private func load(from defaults: UserDefaults) -> LedgerWidgetRefreshStatus? {
