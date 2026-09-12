@@ -22,6 +22,7 @@ type LedgerWriter struct {
 	commoditiesProvider func() ([]string, error)
 	logger              *slog.Logger
 	mu                  sync.Mutex
+	validationCache     githubValidationCache
 }
 
 // SetLogger attaches the process structured logger for background error
@@ -146,6 +147,7 @@ func (w *LedgerWriter) SetConfig(cfg Config) {
 	}
 	w.mu.Lock()
 	w.cfg = cfg
+	w.validationCache.setScope(cfg)
 	w.mu.Unlock()
 }
 
@@ -214,6 +216,8 @@ func (w *LedgerWriter) runGitHubAPITransactionLocked(source string, apply func(*
 	if err != nil {
 		return "", err
 	}
+	w.validationCache.setScope(w.cfg)
+	client.validationCache = &w.validationCache
 	if strings.TrimSpace(source) == "" {
 		source = ledgerWriteSourceDefault
 	}
@@ -298,6 +302,9 @@ func (w *LedgerWriter) logGitHubAPITransaction(source string, attempt int, start
 		slog.Duration("read_api_elapsed_sum", metrics.readElapsed),
 		slog.Int("read_requests", metrics.readRequests),
 		slog.Duration("apply_elapsed", applyElapsed),
+		slog.Duration("validation_elapsed", metrics.validationElapsed),
+		slog.Duration("bean_check_elapsed", metrics.beanCheckElapsed),
+		slog.Int("validation_cache_hits", metrics.validationCacheHits),
 		slog.Duration("blob_elapsed", metrics.blobElapsed),
 		slog.Int("blob_requests", metrics.blobRequests),
 		slog.Duration("tree_elapsed", metrics.treeElapsed),

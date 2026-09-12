@@ -986,7 +986,7 @@ func (api *fakeGitHubLedgerAPI) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		entries := make([]map[string]any, 0, len(api.files))
 		for path, content := range api.files {
-			entries = append(entries, map[string]any{"path": path, "mode": "100644", "type": "blob", "sha": sha256Hex([]byte(content)), "size": len(content)})
+			entries = append(entries, map[string]any{"path": path, "mode": "100644", "type": "blob", "sha": gitBlobSHA([]byte(content)), "size": len(content)})
 		}
 		writeJSON(api.t, w, map[string]any{"sha": "base-tree", "truncated": false, "tree": entries})
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/repos/owner/ledger/contents/"):

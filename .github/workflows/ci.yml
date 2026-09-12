@@ -102,6 +102,11 @@ jobs:
       - name: Test
         working-directory: server
         run: go test ./...
+      - name: GitHub write performance gate
+        working-directory: server
+        env:
+          LEDGER_VALIDATION_PERFORMANCE_REQUIRED: "1"
+        run: go test ./internal/app -run '^TestGitHubWriteValidationLargeLedgerPerformance$' -count=1 -v
       - name: Build
         working-directory: server
         run: go build ./cmd/...
