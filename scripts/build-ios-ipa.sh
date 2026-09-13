@@ -7,6 +7,7 @@ output_dir="${1:?Usage: bash scripts/build-ios-ipa.sh OUTPUT_DIRECTORY}"
 mkdir -p "$output_dir"
 output_dir="$(cd "$output_dir" && pwd)"
 build_dir="$(mktemp -d "${TMPDIR:-/tmp}/ledger-ios-ipa.XXXXXX")"
+trap 'rm -rf "$build_dir"' EXIT
 project_dir="$repo_root/App/LedgerMobile"
 archive="$build_dir/LedgerMobile.xcarchive"
 

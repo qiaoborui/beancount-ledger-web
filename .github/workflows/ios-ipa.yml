@@ -2,7 +2,9 @@ name: iOS SideStore IPA
 
 on:
   workflow_dispatch:
-  pull_request:
+  # Run trusted repository pushes on the persistent Mac, plus manual builds.
+  push:
+    branches: [main, 'codex/ios-*']
     paths:
       - 'App/LedgerMobile/**'
       - 'scripts/build-ios-ipa.sh'
@@ -12,14 +14,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: ios-ipa-${{ github.event.pull_request.number || github.ref }}
+  group: ios-ipa-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   ipa:
     name: Build SideStore IPA
-    # GitHub's newest Xcode preview image; macos-latest tracks stable macOS.
-    runs-on: xcode-27
+    runs-on: [self-hosted, macOS, ARM64, ledger-ios]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -27,12 +28,41 @@ jobs:
           persist-credentials: false
 
       - name: Select latest installed Xcode (including beta)
-        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
-        with:
-          xcode-version: latest
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import plistlib
+          import re
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+          candidates = []
+          for app in pathlib.Path('/Applications').glob('Xcode*.app'):
+              developer = app / 'Contents/Developer'
+              version_file = app / 'Contents/version.plist'
+              if not version_file.is_file() or not (developer / 'usr/bin/xcodebuild').is_file():
+                  continue
+              with version_file.open('rb') as source:
+                  info = plistlib.load(source)
+              version = tuple(int(part) for part in info['CFBundleShortVersionString'].split('.'))
+              version = version + (0,) * (3 - len(version))
+              build = tuple((0, int(part)) if part.isdigit() else (1, part)
+                            for part in re.findall(r'\d+|\D+', info['ProductBuildVersion']))
+              stable = not re.search(r'\d[a-z]$', info['ProductBuildVersion'])
+              candidates.append((version, stable, build, str(developer)))
+          if not candidates:
+              raise SystemExit('Install Xcode in /Applications and complete its first launch setup.')
+          developer = max(candidates)[3]
+          with open(os.environ['GITHUB_ENV'], 'a') as target:
+              target.write(f'DEVELOPER_DIR={developer}\n')
+          print(f'Selected {developer}')
+          PY
+
+      - name: Verify build tools
+        run: |
+          echo /opt/homebrew/bin >> "$GITHUB_PATH"
+          /opt/homebrew/bin/xcodegen --version
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
 
       - name: Build and verify IPA
         env:
