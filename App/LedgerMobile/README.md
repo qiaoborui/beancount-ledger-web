@@ -185,6 +185,39 @@ unlock stores only the server-issued device token under
 
 ## iLoader, SideStore and AltStore installation
 
+### Download an IPA from GitHub Actions
+
+Open **Actions → iOS SideStore IPA → Run workflow**, choose the branch and run
+the workflow. iOS pull requests also build this package automatically. Once the
+run succeeds, download its `LedgerMobile-SideStore-<run>-<attempt>` artifact,
+extract the outer ZIP, and import the contained `.ipa` into SideStore using **+**.
+The artifact includes a SHA-256 checksum and `build-info.txt` with the source
+commit, app version and actual Xcode/SDK versions. Downloads are retained for
+30 days. The manual Run workflow button becomes available when the workflow is
+on the repository's default branch.
+
+The workflow uses GitHub's `xcode-27` preview runner and selects its latest
+installed Xcode, including beta releases. The runner image supplies Xcode
+updates; the runner label should advance when GitHub introduces the next major
+Xcode preview image. See the [runner image inventory](https://github.com/actions/runner-images)
+for availability.
+
+Packaging requires no Apple credentials or repository signing secrets. The
+Release device archive receives ad-hoc signatures that preserve App Group
+entitlements for the installer's discovery step. SideStore supplies the final
+Apple ID signature, provisioning profiles and Keychain groups. Keep both
+extensions when SideStore asks, and renew with the same Apple ID. Personal Team
+builds support password login and Face ID / Touch ID quick unlock.
+
+To build the same package locally with your selected Xcode:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+  bash scripts/build-ios-ipa.sh /tmp/ledger-sidestore-output
+```
+
+### Shared storage and renewal
+
 Keep the Widget and Share extensions when importing the IPA. The app and both
 extensions resolve their shared container from the `ALTAppGroups` mapping added
 by SideStore/AltStore. iLoader 2.3.3 omits this metadata for ordinary apps; its
