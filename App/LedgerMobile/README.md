@@ -185,6 +185,51 @@ unlock stores only the server-issued device token under
 
 ## iLoader, SideStore and AltStore installation
 
+### Download an IPA from GitHub Actions
+
+Open **Actions → iOS SideStore IPA → Run workflow**, choose the branch and run
+the workflow. Pushes affecting iOS files on `main` or `codex/ios-*` branches also
+build this package automatically. Once the
+run succeeds, download its `LedgerMobile-SideStore-<run>-<attempt>` artifact,
+extract the outer ZIP, and import the contained `.ipa` into SideStore using **+**.
+The artifact includes a SHA-256 checksum and `build-info.txt` with the source
+commit, app version and actual Xcode/SDK versions. Downloads are retained for
+30 days. The manual Run workflow button becomes available when the workflow is
+on the repository's default branch.
+
+The workflow uses a dedicated Apple Silicon Mac runner with labels
+`self-hosted`, `macOS`, `ARM64`, and `ledger-ios`. It selects the newest Xcode in
+`/Applications`, including beta releases, through the job's `DEVELOPER_DIR`.
+The Mac's global Xcode selection stays available to other local work. Install
+Xcode updates on the runner and complete Apple's first-launch setup before
+building. XcodeGen must be installed with Homebrew at `/opt/homebrew/bin/xcodegen`.
+Register the runner with this repository and the `ledger-ios` label, then run
+its bundled `svc.sh install` and `svc.sh start` as the macOS login user. The Mac
+must stay awake and the runner service must remain online to accept builds.
+Each build uses a separate temporary archive directory and removes it on exit.
+Automatic triggers are confined to repository branch pushes; public pull
+requests execute through the regular hosted CI workflow.
+Before enabling a persistent runner on this public repository, set Actions →
+General → Fork pull request workflows to **Require approval for all external
+contributors** (`all_external_contributors`). Review workflow changes before
+approving those runs: a fork can add a workflow requesting the same runner labels.
+
+Packaging requires no Apple credentials or repository signing secrets. The
+Release device archive receives ad-hoc signatures that preserve App Group
+entitlements for the installer's discovery step. SideStore supplies the final
+Apple ID signature, provisioning profiles and Keychain groups. Keep both
+extensions when SideStore asks, and renew with the same Apple ID. Personal Team
+builds support password login and Face ID / Touch ID quick unlock.
+
+To build the same package locally with your selected Xcode:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+  bash scripts/build-ios-ipa.sh /tmp/ledger-sidestore-output
+```
+
+### Shared storage and renewal
+
 Keep the Widget and Share extensions when importing the IPA. The app and both
 extensions resolve their shared container from the `ALTAppGroups` mapping added
 by SideStore/AltStore. iLoader 2.3.3 omits this metadata for ordinary apps; its

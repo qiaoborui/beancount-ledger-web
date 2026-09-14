@@ -1,0 +1,99 @@
+name: iOS SideStore IPA
+
+on:
+  workflow_dispatch:
+  # Run trusted repository pushes on the persistent Mac, plus manual builds.
+  push:
+    branches: [main, 'codex/ios-*']
+    paths:
+      - 'App/LedgerMobile/**'
+      - 'scripts/build-ios-ipa.sh'
+      - '.github/workflows/ios-ipa.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    name: Build SideStore IPA
+    runs-on: [self-hosted, macOS, ARM64, ledger-ios]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Select latest installed Xcode (including beta)
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import plistlib
+          import re
+
+          candidates = []
+          for app in pathlib.Path('/Applications').glob('Xcode*.app'):
+              developer = app / 'Contents/Developer'
+              version_file = app / 'Contents/version.plist'
+              if not version_file.is_file() or not (developer / 'usr/bin/xcodebuild').is_file():
+                  continue
+              with version_file.open('rb') as source:
+                  info = plistlib.load(source)
+              version = tuple(int(part) for part in info['CFBundleShortVersionString'].split('.'))
+              version = version + (0,) * (3 - len(version))
+              build = tuple((0, int(part)) if part.isdigit() else (1, part)
+                            for part in re.findall(r'\d+|\D+', info['ProductBuildVersion']))
+              stable = not re.search(r'\d[a-z]$', info['ProductBuildVersion'])
+              candidates.append((version, stable, build, str(developer)))
+          if not candidates:
+              raise SystemExit('Install Xcode in /Applications and complete its first launch setup.')
+          developer = max(candidates)[3]
+          with open(os.environ['GITHUB_ENV'], 'a') as target:
+              target.write(f'DEVELOPER_DIR={developer}\n')
+          print(f'Selected {developer}')
+          PY
+
+      - name: Verify build tools
+        run: |
+          echo /opt/homebrew/bin >> "$GITHUB_PATH"
+          /opt/homebrew/bin/xcodegen --version
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Build and verify IPA
+        env:
+          IPA_OUTPUT_DIR: ${{ runner.temp }}/ios-ipa
+        run: bash scripts/build-ios-ipa.sh "$IPA_OUTPUT_DIR"
+
+      - name: Upload SideStore package
+        id: artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: LedgerMobile-SideStore-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-ipa/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Download and installation instructions
+        env:
+          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
+          IPA_OUTPUT_DIR: ${{ runner.temp }}/ios-ipa
+        run: |
+          {
+            echo '## SideStore IPA'
+            echo
+            echo "[Download build artifact]($ARTIFACT_URL)"
+            echo
+            echo 'Extract the artifact ZIP, then import the .ipa into SideStore.'
+            echo 'Keep both Widget and Share extensions, and renew with the same Apple ID.'
+            echo 'Open Ledger after installation and unlock to refresh widget credentials.'
+            echo
+            echo '```text'
+            cat "$IPA_OUTPUT_DIR/build-info.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
