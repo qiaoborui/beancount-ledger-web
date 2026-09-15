@@ -82,7 +82,16 @@ func (s *Server) ledgerEntries(c *gin.Context) {
 		errorJSON(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusOK, BeanLoadResultFromEntries(snapshot.BeanEntries, snapshot.BeanErrors))
+	result := BeanLoadResultFromEntries(snapshot.BeanEntries, snapshot.BeanErrors)
+	if s.cfg.localTransport && s.cfg.localCanonical != nil {
+		// The canonical loader consumes source controls while transforming
+		// semantic entries. Keep the source-only SDK fields from the raw parse.
+		result.OptionsMap = copyStringMap(snapshot.OptionsMap)
+		result.Plugins = SDKPluginsFromBeanEntries(snapshot.SourceBeanEntries)
+		result.Includes = SDKIncludesFromBeanEntries(snapshot.SourceBeanEntries)
+		result.Directives = SDKControlEntriesFromBeanEntries(snapshot.SourceBeanEntries)
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func (s *Server) summary(c *gin.Context) {

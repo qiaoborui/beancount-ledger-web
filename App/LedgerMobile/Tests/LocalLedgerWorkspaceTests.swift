@@ -33,6 +33,20 @@ final class LocalLedgerWorkspaceTests: XCTestCase {
         ))
     }
 
+    func testPublishedGenerationDiscardsStagedImportRuntime() async throws {
+        let fixture = try fixture()
+        let original = try await fixture.workspace.create()
+        let revision = try await fixture.workspace.commit(expectedRevisionID: original.id,
+            changes: [.write(Data("; ledger".utf8), to: "main.bean")], mutateStage: { root in
+                let runtime = root.deletingLastPathComponent().appendingPathComponent("runtime/imports/fixture")
+                try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
+                try Data("synthetic raw statement".utf8).write(to: runtime.appendingPathComponent("original"))
+            }, validator: { _ in })
+        let generation = fixture.workspace.rootDirectory.appendingPathComponent("generations/" + revision.id.uuidString)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: generation.appendingPathComponent("runtime").path))
+        XCTAssertEqual(try Data(contentsOf: generation.appendingPathComponent("workspace/main.bean")), Data("; ledger".utf8))
+    }
+
     func testStalePreviewCannotOverwriteNewerCommitOrImportReplacement() async throws {
         let fixture = try fixture()
         let base = try await fixture.workspace.create()

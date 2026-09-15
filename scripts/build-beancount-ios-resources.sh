@@ -20,3 +20,7 @@ source "$BUILD/upstream/Python.xcframework/build/utils.sh"
 install_python ../../server/.build/beancount-ios/upstream/Python.xcframework
 mkdir -p "$CODESIGNING_FOLDER_PATH/python/app_packages"
 rsync -a --exclude __pycache__ "$BUILD/packages/" "$CODESIGNING_FOLDER_PATH/python/app_packages/"
+# The application-owned bridge changes independently of compiled extensions.
+# Always package its current source, including incremental Xcode builds.
+install -m 644 "$ROOT/App/LedgerMobile/Runtime/ledger_validator.py" \
+    "$CODESIGNING_FOLDER_PATH/python/app_packages/ledger_validator.py"

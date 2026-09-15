@@ -43,6 +43,11 @@ type ParsedPosting struct {
 	PriceCurrency string
 	Price         BeanAmount
 	TotalPrice    bool
+	// Canonical is set only by the embedded loader bridge. Raw-source parsing
+	// retains its existing semantics; booked lot identity belongs to that bridge.
+	Canonical bool   `json:"-"`
+	CostDate  string `json:",omitempty"`
+	CostLabel string `json:",omitempty"`
 }
 
 type ParseError struct {

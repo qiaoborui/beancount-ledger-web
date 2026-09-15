@@ -16,6 +16,8 @@ actor LocalLedgerWorkspace {
     private static let maximumRevisionBytes = 1024 * 1024
     private static let revisionFileName = "revision.json"
     private static let committedMarkerName = ".committed"
+    private static let consumedImportMarkerName = ".consumed-import"
+    nonisolated static let importPreviewRetention: TimeInterval = 24 * 60 * 60
 
     /// Bounds a generation, counting directories as entries as well as files.
     struct TreeLimits: Sendable {
@@ -236,6 +238,7 @@ actor LocalLedgerWorkspace {
     func commit(
         expectedRevisionID: UUID? = nil,
         changes: [Change],
+        consumingImportID: String? = nil,
         mutateStage: Validator? = nil,
         validator: Validator
     ) async throws -> Revision {
@@ -244,6 +247,7 @@ actor LocalLedgerWorkspace {
         try prepareLayout()
         try acquireTransactionLock()
         try removeAbandonedStages()
+        if let consumingImportID { try validateImportID(consumingImportID) }
         let parent = try loadCurrentRevisionIfPresent()
         guard parent?.id == expectedRevisionID else { throw WorkspaceError.staleRevision }
         let normalizedChanges = try validatedChanges(changes)
@@ -306,8 +310,31 @@ actor LocalLedgerWorkspace {
         return try finalize(
             stage: stage,
             parentID: parent?.id,
-            changedPaths: changedPaths.sorted()
+            changedPaths: changedPaths.sorted(),
+            consumingImportID: consumingImportID
         )
+    }
+
+    /// Preview creation shares the cross-instance write lock with publication
+    /// and retention cleanup. Ordinary snapshot reads remain concurrent.
+    func withImportPreviewSnapshot<Value: Sendable>(
+        _ operation: @Sendable (Revision, URL) async throws -> Value
+    ) async throws -> Value {
+        try beginTransaction()
+        defer { endTransaction() }
+        try prepareLayout()
+        try acquireTransactionLock()
+        try removeAbandonedStages()
+        let revision = try requiredCurrentRevision()
+        return try await operation(revision, workspaceURL(for: revision))
+    }
+
+    func maintainImportRuntime(now: Date = Date()) throws {
+        try beginTransaction()
+        defer { endTransaction() }
+        try prepareLayout()
+        try acquireTransactionLock()
+        try maintainImportRuntimeLocked(now: now)
     }
 
     func currentRevision() throws -> Revision? {
@@ -404,6 +431,7 @@ actor LocalLedgerWorkspace {
     }
 
     private func removeAbandonedStages() throws {
+        try maintainImportRuntimeLocked(now: Date())
         for item in try fileManager.contentsOfDirectory(
             at: stagingDirectory,
             includingPropertiesForKeys: nil
@@ -427,7 +455,8 @@ actor LocalLedgerWorkspace {
         return stage
     }
 
-    private func finalize(stage: URL, parentID: UUID?, changedPaths: [String]) throws -> Revision {
+    private func finalize(stage: URL, parentID: UUID?, changedPaths: [String],
+                          consumingImportID: String? = nil) throws -> Revision {
         let revision = Revision(
             id: UUID(),
             parentID: parentID,
@@ -439,6 +468,12 @@ actor LocalLedgerWorkspace {
             throw WorkspaceError.corruptRevision
         }
 
+        // Runtime is a sibling of the staged ledger, never revision content.
+        try removeRuntimeDirectoryIfPresent(stage.appendingPathComponent("runtime"))
+        if let consumingImportID {
+            try Data(consumingImportID.utf8).write(
+                to: stage.appendingPathComponent(Self.consumedImportMarkerName), options: .atomic)
+        }
         try writeRevisionMetadata(revision, in: stage)
         try synchronizeTree(at: stage)
         try Task.checkCancellation()
@@ -454,7 +489,101 @@ actor LocalLedgerWorkspace {
         // `current.json` publication is the commit point. Recovery only trusts
         // generations carrying this post-publication marker.
         try? writeCommittedMarker(for: revision.id, in: generation)
+        // Publication succeeded. Cleanup failures retain a durable retry marker
+        // and must never turn a successful financial write into a failed reply.
+        try? consumeImportRuntime(in: generation)
         return revision
+    }
+
+    private func validateImportID(_ id: String) throws {
+        guard !id.isEmpty, id.utf8.count <= 128,
+              id.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0)
+                  || (48...57).contains($0) || $0 == 45 || $0 == 95 }) else {
+            throw WorkspaceError.invalidRelativePath(id)
+        }
+    }
+
+    private func removeRuntimeDirectoryIfPresent(_ directory: URL) throws {
+        guard let kind = try itemKindIfPresent(at: directory) else { return }
+        guard kind == .directory else { throw WorkspaceError.unsupportedItem(directory.lastPathComponent) }
+        _ = try validateRuntimeTree(at: directory)
+        try fileManager.removeItem(at: directory)
+    }
+
+    /// Cleanup checks item types without applying ledger content quotas. Raw
+    /// uploads can exceed the ledger's size while remaining safe to remove.
+    /// Return the latest modification, including nested directories, for TTL.
+    private func validateRuntimeTree(at root: URL) throws -> Date {
+        var pending = [root]
+        var latest = Date.distantPast
+        while let item = pending.popLast() {
+            switch try itemKind(at: item) {
+            case .directory:
+                pending.append(contentsOf: try fileManager.contentsOfDirectory(at: item,
+                    includingPropertiesForKeys: nil))
+            case .regularFile:
+                break
+            case .symbolicLink:
+                throw WorkspaceError.symbolicLink(item.path)
+            default:
+                throw WorkspaceError.unsupportedItem(item.path)
+            }
+            let modified = try fileManager.attributesOfItem(atPath: item.path)[.modificationDate] as? Date
+            latest = max(latest, modified ?? .distantFuture)
+        }
+        return latest
+    }
+
+    /// Internal runtime paths have a fixed layout, independent of a ledger's
+    /// configurable entry-path depth limit. Every existing ancestor is checked.
+    private func importRuntimeDirectory(_ path: String) throws -> URL {
+        var directory = rootDirectory
+        for component in path.split(separator: "/") {
+            directory.appendPathComponent(String(component), isDirectory: true)
+            if let kind = try itemKindIfPresent(at: directory), kind != .directory {
+                throw WorkspaceError.unsupportedItem(path)
+            }
+        }
+        return directory
+    }
+
+    private func consumeImportRuntime(in generation: URL) throws {
+        let marker = generation.appendingPathComponent(Self.consumedImportMarkerName)
+        guard try itemKindIfPresent(at: marker) == .regularFile else { return }
+        let bytes = try readRegularFile(at: marker, displayPath: Self.consumedImportMarkerName)
+        guard bytes.count <= 128, let id = String(data: bytes, encoding: .utf8) else {
+            throw WorkspaceError.corruptRevision
+        }
+        try validateImportID(id)
+        for prefix in ["runtime/imports/", "runtime/scratch/imports/"] {
+            let directory = try importRuntimeDirectory(prefix + id)
+            try removeRuntimeDirectoryIfPresent(directory)
+        }
+        try fileManager.removeItem(at: marker)
+    }
+
+    private func maintainImportRuntimeLocked(now: Date) throws {
+        // Only generated UUID containers qualify. The immutable workspace tree
+        // and every historical revision are retained in full.
+        for generation in try fileManager.contentsOfDirectory(at: generationsDirectory, includingPropertiesForKeys: nil) {
+            guard let id = UUID(uuidString: generation.lastPathComponent),
+                  (try? itemKind(at: generation)) == .directory,
+                  (try? hasCommittedMarker(for: id, in: generation)) == true else { continue }
+            try? removeRuntimeDirectoryIfPresent(generation.appendingPathComponent("runtime"))
+            try? consumeImportRuntime(in: generation)
+        }
+        let cutoff = now.addingTimeInterval(-Self.importPreviewRetention)
+        for prefix in ["runtime/imports", "runtime/scratch/imports"] {
+            let parent = try importRuntimeDirectory(prefix)
+            guard try itemKindIfPresent(at: parent) == .directory else { continue }
+            for directory in try fileManager.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil) {
+                guard (try? validateImportID(directory.lastPathComponent)) != nil,
+                      (try? itemKind(at: directory)) == .directory,
+                      let latestModification = try? validateRuntimeTree(at: directory),
+                      latestModification < cutoff else { continue }
+                try removeRuntimeDirectoryIfPresent(directory)
+            }
+        }
     }
 
     private func writeRevisionMetadata(_ revision: Revision, in generation: URL) throws {

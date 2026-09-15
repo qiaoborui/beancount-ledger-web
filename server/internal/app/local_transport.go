@@ -30,15 +30,16 @@ func localRequestAuthenticated(c *gin.Context) bool {
 }
 
 type LocalRequest struct {
-	WorkspaceRoot string            `json:"workspaceRoot"`
-	RuntimeRoot   string            `json:"runtimeRoot"`
-	Entrypoint    string            `json:"entrypoint"`
-	Method        string            `json:"method"`
-	Path          string            `json:"path"`
-	Query         map[string]string `json:"query"`
-	Body          json.RawMessage   `json:"body"`
-	Staging       bool              `json:"staging"`
-	ImportFile    *LocalImportFile  `json:"importFile,omitempty"`
+	WorkspaceRoot string               `json:"workspaceRoot"`
+	RuntimeRoot   string               `json:"runtimeRoot"`
+	Entrypoint    string               `json:"entrypoint"`
+	Method        string               `json:"method"`
+	Path          string               `json:"path"`
+	Query         map[string]string    `json:"query"`
+	Body          json.RawMessage      `json:"body"`
+	Staging       bool                 `json:"staging"`
+	ImportFile    *LocalImportFile     `json:"importFile,omitempty"`
+	Canonical     *LocalCanonicalModel `json:"canonical,omitempty"`
 }
 
 type LocalImportFile struct {
@@ -229,16 +230,59 @@ func localConfig(input LocalRequest) (Config, error) {
 	if filepath.IsAbs(entrypoint) || !fs.ValidPath(filepath.ToSlash(entrypoint)) {
 		return Config{}, errors.New("entrypoint must be a relative workspace path")
 	}
-	if err := rejectLocalSymlinks(ledgerRoot); err != nil {
+	// The selected generation is pinned by the caller. Sync candidates, old
+	// generations and Git objects have independent lifetimes and must never be
+	// traversed while validating this request.
+	for _, directory := range []string{ledgerRoot, container, filepath.Dir(root), root} {
+		if err := validateLocalDirectory(directory, false); err != nil {
+			return Config{}, err
+		}
+	}
+	if err := rejectLocalSymlinks(root); err != nil {
 		return Config{}, err
 	}
-	return Config{localTransport: true, localEntrypoint: entrypoint, LedgerRoot: root,
+	runtimeRoots := []string{runtimeRoot}
+	if input.Staging {
+		runtimeRoots = append(runtimeRoots, filepath.Join(filepath.Dir(root), "runtime"))
+	}
+	for _, directory := range runtimeRoots {
+		if err := validateLocalDirectory(directory, true); err != nil {
+			return Config{}, err
+		}
+		if err := scanLocalTree(directory, true); err != nil {
+			return Config{}, err
+		}
+	}
+	return Config{localTransport: true, localEntrypoint: entrypoint, localCanonical: input.Canonical, LedgerRoot: root,
 		RuntimeDir: runtimeRoot, LedgerStorage: "filesystem", LedgerReadModel: "files",
 		LedgerClusterID: "local:" + ledgerRoot, NotificationRefreshInterval: "off"}, nil
 }
 
 func rejectLocalSymlinks(root string) error {
+	return scanLocalTree(root, false)
+}
+
+func validateLocalDirectory(path string, allowMissing bool) error {
+	info, err := os.Lstat(path)
+	if allowMissing && errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("local workspace ancestors must be regular directories")
+	}
+	return nil
+}
+
+func scanLocalTree(root string, allowDisappearing bool) error {
 	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		// Import preview cleanup can remove runtime entries during enumeration.
+		// The immutable workspace and all mandatory ancestors remain strict.
+		if allowDisappearing && errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}

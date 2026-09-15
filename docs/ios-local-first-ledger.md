@@ -61,7 +61,11 @@ Platform integration stays in Swift: file coordination, protected storage,
 Keychain, background tasks, File Provider access, and Widget publication. The
 portable Go core owns Beancount parsing, normalized ledger models, BQL,
 analytics, import compilation, and write planning. The embedded Beancount
-runtime performs canonical booking and validation in process.
+runtime performs canonical booking, plugin transformations, and validation in
+process. Its versioned canonical snapshot supplies the Go financial read model;
+the original parsed source supplies editor drafts and mutation locators. Derived
+plugin entries without an original transaction remain read-only. The native
+engine caches only the latest immutable generation model; mutable stages reload.
 
 The Swift/Go boundary uses versioned JSON request and response envelopes. This
 keeps generated gomobile APIs small and makes server/mobile parity fixtures
@@ -98,6 +102,8 @@ Application Support/Ledgers/<ledger-id>/
     repository.git/
     candidates/<attempt-id>/
   staging/
+  runtime/imports/<import-id>/
+  runtime/scratch/imports/<import-id>/
 ```
 
 `current.json` identifies the committed generation. A write builds a sibling
@@ -120,6 +126,23 @@ references for active readers, pending changes, and provider merge bases.
 Abandoned staging directories are disposable. The initial implementation copies
 the workspace for each write; clone-based copies and storage quotas need device
 performance measurements before broad local-write rollout.
+
+Import previews and extracted files live in runtime storage. A stage's runtime
+sibling is removed before its ledger generation is published. Successful import
+publication records an exact-ID cleanup intent; cleanup failures retain that
+intent for retry while the financial commit stays successful. Failed validation
+preserves the original preview for retry. Preview creation and cleanup share the
+workspace write lock. Previews expire after 24 hours; maintenance on preview/write
+operations and hourly opportunistic read maintenance remove expired app-owned
+import directories and runtime siblings
+left in committed generations by earlier development builds. Ledger workspaces
+and committed revision history are retained.
+
+Local requests validate the selected workspace and runtime tree plus their
+managed ancestors. Unselected generations, sync candidates, and Git object
+storage are outside this request scan. Runtime cleanup may remove a file during
+validation; missing runtime descendants are tolerated while selected workspace
+and ancestor checks remain strict.
 
 Workspace paths are normalized relative paths. Absolute paths, `..`
 components, symlink traversal, and destinations outside the generation root are

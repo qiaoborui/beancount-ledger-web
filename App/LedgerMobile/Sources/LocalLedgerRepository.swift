@@ -15,6 +15,8 @@ actor LocalLedgerRepository: LedgerRepository {
     private let validator: LocalLedgerCatalog.Validator
     private var presentedRevisionID: UUID?
     private var importRevisionIDs: [String: UUID] = [:]
+    private var importPreviewDates: [String: Date] = [:]
+    private var lastRuntimeMaintenance: Date?
 
     init(descriptor: LocalLedgerDescriptor, workspace: LocalLedgerWorkspace,
          engine: any LocalLedgerEngine = EmbeddedLocalLedgerEngine.shared,
@@ -78,13 +80,21 @@ actor LocalLedgerRepository: LedgerRepository {
         let result = try JSONDecoder().decode(LedgerImportPreview.self, from: data)
         presentedRevisionID = revision
         importRevisionIDs[result.importID] = revision
+        importPreviewDates[result.importID] = Date()
         return result
     }
     func commitImport(request: LedgerImportCommitRequest) async throws -> LedgerImportCommitResult {
         guard let expected = importRevisionIDs[request.importID] else { throw LocalLedgerError.previewRequired }
+        guard let created = importPreviewDates[request.importID],
+              Date().timeIntervalSince(created) < LocalLedgerWorkspace.importPreviewRetention else {
+            importRevisionIDs.removeValue(forKey: request.importID)
+            importPreviewDates.removeValue(forKey: request.importID)
+            throw LocalLedgerError.previewRequired
+        }
         let result: LedgerImportCommitResult = try await mutate("/api/ledger/imports/commit", method: "POST",
-            body: json(request), expected: expected)
+            body: json(request), expected: expected, consumingImportID: request.importID)
         importRevisionIDs.removeValue(forKey: request.importID)
+        importPreviewDates.removeValue(forKey: request.importID)
         return result
     }
     func updateTransaction(source: TransactionSource, entry: LedgerTransactionEntry) async throws {
@@ -264,25 +274,42 @@ actor LocalLedgerRepository: LedgerRepository {
     }
     private func readSnapshot(_ path: String, method: String = "GET", query: [String: String] = [:],
         body: BQLCell? = nil, importFile: LocalLedgerEngineRequest.ImportFile? = nil) async throws -> (UUID, Data) {
+        let now = Date()
+        if lastRuntimeMaintenance.map({ now.timeIntervalSince($0) >= 60 * 60 }) ?? true {
+            // Opportunistic maintenance also runs for read-only app sessions.
+            // An active write/preview owns the lock; ordinary reads still proceed.
+            if (try? await workspace.maintainImportRuntime(now: now)) != nil {
+                lastRuntimeMaintenance = now
+            }
+            for (id, created) in importPreviewDates where now.timeIntervalSince(created) >= LocalLedgerWorkspace.importPreviewRetention {
+                importPreviewDates.removeValue(forKey: id)
+                importRevisionIDs.removeValue(forKey: id)
+            }
+        }
         let engine = engine, entrypoint = descriptor.entrypoint
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
-        return try await workspace.withCurrentSnapshot { revision, root in
+        let operation: @Sendable (LocalLedgerWorkspace.Revision, URL) async throws -> (UUID, Data) = { revision, root in
             let data = try await engine.dispatch(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                 entrypoint: entrypoint, method: method, path: path, query: query, body: body, importFile: importFile))
             return (revision.id, data)
         }
+        if path == "/api/ledger/imports/preview" {
+            return try await workspace.withImportPreviewSnapshot(operation)
+        }
+        return try await workspace.withCurrentSnapshot(operation)
     }
     private actor ResultBox {
         var data: Data?
         func set(_ value: Data) { data = value }
     }
     private func mutate<T: Decodable & Sendable>(_ path: String, method: String, body: BQLCell,
-        expected: UUID? = nil) async throws -> T {
+        expected: UUID? = nil, consumingImportID: String? = nil) async throws -> T {
         guard let revisionID = expected ?? presentedRevisionID else { throw LocalLedgerError.previewRequired }
         let engine = engine, validator = validator, entrypoint = descriptor.entrypoint
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
         let box = ResultBox()
-        let revision = try await workspace.commit(expectedRevisionID: revisionID, changes: [], mutateStage: { root in
+        let revision = try await workspace.commit(expectedRevisionID: revisionID, changes: [],
+            consumingImportID: consumingImportID, mutateStage: { root in
             let data = try await engine.dispatch(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                 entrypoint: entrypoint, method: method, path: path, body: body, staging: true))
             // Decode before publication; malformed replies cannot produce a successful financial write.

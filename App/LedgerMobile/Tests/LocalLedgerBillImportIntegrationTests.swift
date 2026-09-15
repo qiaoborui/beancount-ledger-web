@@ -62,6 +62,9 @@ final class LocalLedgerBillImportIntegrationTests: XCTestCase {
         XCTAssertEqual(initialFiles, afterInvalidFiles)
         XCTAssertTrue(afterInvalidTransactions.transactions.isEmpty)
         XCTAssertTrue(afterInvalidDocuments.isEmpty)
+        let previewRuntime = repository.workspace.rootDirectory
+            .appendingPathComponent("runtime/imports/" + preview.importID)
+        XCTAssertEqual(try Data(contentsOf: previewRuntime.appendingPathComponent("original")), file.data)
 
         // Reuse the same preview after rejection. This also verifies its
         // temporary source survives a discarded staging transaction.
@@ -72,6 +75,12 @@ final class LocalLedgerBillImportIntegrationTests: XCTestCase {
         XCTAssertEqual(committed.readModelPending, false)
         XCTAssertNil(committed.indexGitSHA)
         XCTAssertNil(committed.runtimeCleanupError)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: previewRuntime.path))
+        let generations = repository.workspace.rootDirectory.appendingPathComponent("generations")
+        for generation in try FileManager.default.contentsOfDirectory(at: generations, includingPropertiesForKeys: nil) {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: generation.appendingPathComponent("runtime").path),
+                "Published revisions must contain only ledger and revision metadata")
+        }
         let committedRevision = try await repository.workspace.currentRevision()
         XCTAssertNotEqual(initialRevision?.id, committedRevision?.id)
         let transactions = try await repository.globalTransactions()

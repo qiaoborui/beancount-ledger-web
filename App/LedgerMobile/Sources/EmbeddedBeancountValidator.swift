@@ -21,9 +21,24 @@ actor EmbeddedBeancountValidator {
             let lineno: Int?
         }
         let errors: [Diagnostic]
+        let canonical: BQLCell?
     }
 
     func validate(workspace: URL, entryFile: String = "main.bean") throws {
+        _ = try load(workspace: workspace, entryFile: entryFile)
+    }
+
+    /// The canonical loader's booked, plugin-transformed entries are the
+    /// financial read model. Source files remain the editable representation.
+    func canonicalModel(workspace: URL, entryFile: String = "main.bean") throws -> BQLCell {
+        let result = try load(workspace: workspace, entryFile: entryFile)
+        guard let canonical = result.canonical, case .object = canonical else {
+            throw ValidationError(message: "本地 Beancount 运行时缺少完整读取模型，请重新构建运行时")
+        }
+        return canonical
+    }
+
+    private func load(workspace: URL, entryFile: String) throws -> Result {
         #if canImport(BeancountRuntime)
         if !initialized {
             let failure = Bundle.main.bundlePath.withCString { BRInitialize($0) }
@@ -46,6 +61,7 @@ actor EmbeddedBeancountValidator {
             }.joined(separator: "\n")
             throw ValidationError(message: message)
         }
+        return result
         #else
         throw ValidationError(message: "此构建缺少本地 Beancount 校验运行时")
         #endif

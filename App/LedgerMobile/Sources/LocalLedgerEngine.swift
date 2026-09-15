@@ -31,6 +31,7 @@ struct LocalLedgerEngineRequest: Encodable, Sendable {
     var body: BQLCell? = nil
     var importFile: ImportFile? = nil
     var staging = false
+    var canonical: BQLCell? = nil
 }
 
 /// A process-local JSON boundary. Implementations never open an HTTP listener.
@@ -40,9 +41,24 @@ protocol LocalLedgerEngine: Sendable {
 
 actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     static let shared = EmbeddedLocalLedgerEngine()
+    // Committed generation directories are immutable. Keep only the most recent
+    // model; mutable stages always load their current contents independently.
+    private var canonicalCache: (workspace: String, entrypoint: String, model: BQLCell)?
 
     func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
         #if canImport(LedgerCore)
+        var request = request
+        if !request.staging, let cached = canonicalCache,
+           cached.workspace == request.workspaceRoot, cached.entrypoint == request.entrypoint {
+            request.canonical = cached.model
+        } else {
+            let model = try await EmbeddedBeancountValidator.shared.canonicalModel(
+                workspace: URL(fileURLWithPath: request.workspaceRoot), entryFile: request.entrypoint)
+            request.canonical = model
+            if !request.staging {
+                canonicalCache = (request.workspaceRoot, request.entrypoint, model)
+            }
+        }
         let encoded = try JSONEncoder().encode(request)
         let response = MobilecoreDispatchJSON(String(decoding: encoded, as: UTF8.self))
         let data = Data(response.utf8)

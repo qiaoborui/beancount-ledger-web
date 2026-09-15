@@ -20,7 +20,10 @@ final class LocalLedgerRepositoryTests: XCTestCase {
                 return Data("{}".utf8)
             }
             if request.path == "/api/ledger/imports/preview" {
-                let id = request.importFile?.name ?? "preview"
+                let id = (request.importFile?.name ?? "preview").replacingOccurrences(of: ".", with: "-")
+                let runtime = URL(fileURLWithPath: request.runtimeRoot).appendingPathComponent("imports/" + id)
+                try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
+                try Data("synthetic original".utf8).write(to: runtime.appendingPathComponent("original"))
                 return try JSONSerialization.data(withJSONObject: [
                     "importId": id, "provider": "alipay",
                     "providerDetection": ["provider": "alipay", "reason": "fixture", "confidence": "high"],
@@ -248,10 +251,30 @@ final class LocalLedgerRepositoryTests: XCTestCase {
         XCTAssertTrue(writesBeforeValidCommit.isEmpty)
         let result = try await repository.commitImport(request: .init(importID: second.importID, provider: second.provider, entries: []))
         XCTAssertTrue(result.ok)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repository.workspace.rootDirectory
+            .appendingPathComponent("runtime/imports/" + second.importID).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repository.workspace.rootDirectory
+            .appendingPathComponent("runtime/imports/" + first.importID + "/original").path))
         do {
             _ = try await repository.commitImport(request: .init(importID: second.importID, provider: second.provider, entries: []))
             XCTFail("Committed preview remained reusable")
         } catch { XCTAssertEqual(error as? LocalLedgerError, .previewRequired) }
+    }
+
+    func testReopenedReadOnlyRepositoryExpiresAbandonedPreview() async throws {
+        let catalog = LocalLedgerCatalog(rootDirectory: try root(), engine: Engine(), validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Retention fixture")
+        let repository = catalog.repository(for: descriptor)
+        let preview = try await repository.previewImport(file: .init(name: "abandoned", data: Data()),
+            provider: "alipay", alipayFundRounding: false, archivePassword: "")
+        let directory = repository.workspace.rootDirectory.appendingPathComponent("runtime/imports/" + preview.importID)
+        for item in [directory.appendingPathComponent("original"), directory] {
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-90_000)],
+                ofItemAtPath: item.path)
+        }
+        let reopened = catalog.repository(for: descriptor)
+        _ = try await reopened.runBQL(query: "SELECT 1", valuationCurrency: "CNY")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
     }
 
     func testUnreadableCreateAndImportPublishNoDescriptorOrRevision() async throws {
