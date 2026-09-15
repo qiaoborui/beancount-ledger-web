@@ -246,7 +246,8 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 The app requires iOS 17 or later and a device passcode for local ledger access.
 Git synchronization supports HTTPS remotes, an explicit branch, and optional
 username/token credentials. Adding a Git ledger only reads the remote. Later
-synchronization requires a separate user confirmation before pull/validate/push.
+synchronization runs automatically when enabled, or immediately from the status
+dot. Conflicts require explicit resolution before synchronization resumes.
 
 ## iLoader, SideStore and AltStore installation
 
@@ -254,6 +255,47 @@ These notes cover installation and renewal of a private local build. Public
 binary distribution remains gated by [the runtime licensing issue](Runtime/THIRD_PARTY.md).
 Keep the embedded Python framework and standard-library extension frameworks
 when packaging or re-signing; they must receive valid signatures with the app.
+### GitHub Actions packaging, currently gated
+
+The SideStore workflow's packaging job and `scripts/build-ios-ipa.sh` are
+disabled for the embedded runtime pending the combined-work license audit.
+Private Xcode builds remain available using the steps above. Resolving the
+license gate also requires updating IPA packaging for the embedded frameworks.
+The following runner and renewal notes preserve the packaging setup for that
+future re-enablement.
+
+After re-enablement, a successful run provides a `LedgerMobile-SideStore-<run>-<attempt>` artifact;
+extract the outer ZIP, and import the contained `.ipa` into SideStore using **+**.
+The artifact includes a SHA-256 checksum and `build-info.txt` with the source
+commit, app version and actual Xcode/SDK versions. Downloads are retained for
+30 days. The manual Run workflow button becomes available when the workflow is
+on the repository's default branch.
+
+The workflow uses a dedicated Apple Silicon Mac runner with labels
+`self-hosted`, `macOS`, `ARM64`, and `ledger-ios`. It selects the newest Xcode in
+`/Applications`, including beta releases, through the job's `DEVELOPER_DIR`.
+The Mac's global Xcode selection stays available to other local work. Install
+Xcode updates on the runner and complete Apple's first-launch setup before
+building. XcodeGen must be installed with Homebrew at `/opt/homebrew/bin/xcodegen`.
+Register the runner with this repository and the `ledger-ios` label, then run
+its bundled `svc.sh install` and `svc.sh start` as the macOS login user. The Mac
+must stay awake and the runner service must remain online to accept builds.
+Each build uses a separate temporary archive directory and removes it on exit.
+Automatic triggers are confined to repository branch pushes; public pull
+requests execute through the regular hosted CI workflow.
+Before enabling a persistent runner on this public repository, set Actions →
+General → Fork pull request workflows to **Require approval for all external
+contributors** (`all_external_contributors`). Review workflow changes before
+approving those runs: a fork can add a workflow requesting the same runner labels.
+
+Packaging requires no Apple credentials or repository signing secrets. The
+Release device archive receives ad-hoc signatures that preserve App Group
+entitlements for the installer's discovery step. SideStore supplies the final
+Apple ID signature, provisioning profiles and Keychain groups. Keep both
+extensions when SideStore asks, and renew with the same Apple ID. Local ledger
+access uses Face ID, Touch ID, or the device passcode.
+
+### Shared storage and renewal
 
 Keep the Widget and Share extensions when importing the IPA. The app and both
 extensions resolve their shared container from the `ALTAppGroups` mapping added
