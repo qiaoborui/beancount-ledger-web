@@ -3,18 +3,26 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [[ -f "$repo_root/App/LedgerMobile/Runtime/BeancountRuntime.c" ]]; then
-  echo 'IPA packaging is gated pending the embedded runtime license audit and framework packaging update.' >&2
-  echo 'See App/LedgerMobile/Runtime/THIRD_PARTY.md; use the documented private Xcode build workflow for testing.' >&2
+if [[ $# != 2 || "${1:-}" != --private-local ]]; then
+  echo 'Usage: bash scripts/build-ios-ipa.sh --private-local NEW_OUTPUT_DIRECTORY' >&2
+  echo 'Private local use only. Public redistribution remains gated; see App/LedgerMobile/Runtime/THIRD_PARTY.md.' >&2
   exit 1
 fi
-output_dir="${1:?Usage: bash scripts/build-ios-ipa.sh OUTPUT_DIRECTORY}"
-mkdir -p "$output_dir"
+umask 077
+output_dir="$2"
+if ! mkdir "$output_dir"; then
+  echo 'Choose a fresh output directory; existing files are preserved.' >&2
+  exit 1
+fi
 output_dir="$(cd "$output_dir" && pwd)"
 build_dir="$(mktemp -d "${TMPDIR:-/tmp}/ledger-ios-ipa.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
 project_dir="$repo_root/App/LedgerMobile"
 archive="$build_dir/LedgerMobile.xcarchive"
+
+# Build generated inputs from this checkout, including a fresh Python bridge.
+bash "$repo_root/scripts/build-ledgercore-xcframework.sh"
+bash "$repo_root/scripts/build-beancount-ios.sh"
 
 cd "$project_dir"
 xcodegen generate
@@ -26,6 +34,7 @@ xcodebuild archive \
   -project LedgerMobile.xcodeproj \
   -scheme LedgerMobile \
   -configuration Release \
+  -quiet \
   -destination 'generic/platform=iOS' \
   -derivedDataPath "$build_dir/DerivedData" \
   -archivePath "$archive" \
@@ -34,6 +43,23 @@ xcodebuild archive \
 mkdir "$build_dir/Payload"
 ditto "$archive/Products/Applications/LedgerMobile.app" "$build_dir/Payload/LedgerMobile.app"
 app="$build_dir/Payload/LedgerMobile.app"
+
+# Xcode's unsigned archive leaves Python and its extension frameworks unsigned.
+# Sign inner bundles first; SideStore will replace these ad-hoc signatures.
+shopt -s nullglob
+frameworks=("$app/Frameworks/"*.framework)
+if [[ ${#frameworks[@]} == 0 || ! -d "$app/Frameworks/Python.framework" ]]; then
+  echo 'Embedded Python frameworks are missing from the archive.' >&2
+  exit 1
+fi
+for framework in "${frameworks[@]}"; do
+  if [[ -L "$framework" ]]; then
+    echo 'Unexpected framework symlink in the device archive.' >&2
+    exit 1
+  fi
+  codesign --force --sign - "$framework"
+  codesign --verify --strict "$framework"
+done
 
 # SideStore discovers App Groups from the Mach-O signature. Preserve those
 # entitlements with certificate-free ad-hoc signatures, signing extensions first.
@@ -88,8 +114,21 @@ for bundle, identifier in expected.items():
         "group.com.qiaoborui.ledger.mobile"
     ], bundle
 assert len(versions) == 1, versions
-print("Verified arm64 iOS app, both extensions, matching versions and signed App Group entitlements.")
+frameworks = list((app / "Frameworks").glob("*.framework"))
+assert (app / "Frameworks/Python.framework").is_dir()
+for framework in frameworks:
+    with (framework / "Info.plist").open("rb") as source:
+        info = plistlib.load(source)
+    subprocess.run(["lipo", "-verify_arch", "arm64", str(framework / info["CFBundleExecutable"])], check=True)
+    subprocess.run(["codesign", "--verify", "--strict", str(framework)], check=True)
+packages = app / "python/app_packages"
+for required in ("ledger_validator.py", "beancount/loader.py", "regex/__init__.py",
+                 "licenses/Beancount-GPL-2.0.txt", "licenses/regex.txt", "licenses/CPython.txt"):
+    assert (packages / required).is_file(), required
+assert (app / "python/lib/python3.14").is_dir(), "Python standard library is missing"
+print(f"Verified app, both extensions, App Groups and {len(frameworks)} embedded framework signatures.")
 PY
+cmp "$repo_root/App/LedgerMobile/Runtime/ledger_validator.py" "$app/python/app_packages/ledger_validator.py"
 
 version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Info.plist")"
 build="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")"
@@ -104,5 +143,6 @@ shasum -a 256 "$ipa_name" > "$ipa_name.sha256"
   echo "Source: $(git -C "$repo_root" rev-parse HEAD)"
   echo "App: $version ($build)"
   echo 'Signing: ad-hoc; install and re-sign with SideStore / iLoader / AltStore'
+  echo 'Distribution: private local use only; public redistribution remains gated'
   cat "$ipa_name.sha256"
 } | tee build-info.txt

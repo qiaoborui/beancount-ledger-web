@@ -8,9 +8,10 @@ unresolved redistribution licensing issue: publishing source alone does not
 resolve it. Obtain compatible permission or replace the affected dependencies
 before redistributing a combined application. Other linked dependencies also
 need an audit before distribution. This document changes no repository license.
-The current scripts support private local builds and tests; public IPA release
-is gated until the combined-work licensing issue and dependency notice audit
-are resolved.
+The current scripts support private local builds and tests. Manual GitHub Actions
+builds upload a short-lived private artifact for authorized repository users and
+retain a local copy on the owner's Mac. Public IPA release is gated until the
+combined-work licensing issue and dependency notice audit are resolved.
 
 * Beancount 3.2.3, copyright Martin Blais and contributors: GPL-2.0-only,
   explicitly declared in pyproject.toml and README.rst.

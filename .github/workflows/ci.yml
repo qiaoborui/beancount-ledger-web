@@ -47,6 +47,9 @@ jobs:
       - name: Test self-hosted deployment manifest validation
         run: bash .github/scripts/test-deploy-selfhost-submit.sh
 
+      - name: Verify private IPA packaging guards
+        run: python3 scripts/test_ios_private_ipa.py
+
       - name: Detect changed components
         id: changes
         env:
