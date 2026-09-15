@@ -19,7 +19,7 @@ final class LocalLedgerIntegrationTests: XCTestCase {
 
         func entry(_ amount: String, credit: String, narration: String) -> LedgerTransactionEntry {
             LedgerTransactionEntry(date: "2026-09-15", payee: "Offline fixture", narration: narration,
-                metadata: [:], tags: ["offline"], postings: [
+                metadata: ["file": .string("receipt.pdf")], tags: ["offline"], postings: [
                     .init(account: "Expenses:Food", amount: amount, currency: "CNY"),
                     .init(account: "Assets:Cash", amount: credit, currency: "CNY")
                 ])
@@ -29,6 +29,7 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         XCTAssertEqual(initial.transactions.count, 1)
         let transaction = try XCTUnwrap(initial.transactions.first)
         XCTAssertEqual(transaction.narration, "created offline")
+        XCTAssertEqual(transaction.metadata?["file"], .string("receipt.pdf"))
         XCTAssertFalse(transaction.source.file.hasPrefix("/"))
 
         let beforeInvalid = try await repository.workspace.currentRevision()
@@ -44,6 +45,7 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         let updated = try await repository.globalTransactions()
         XCTAssertEqual(updated.transactions.count, 1)
         XCTAssertEqual(updated.transactions.first?.narration, "edited offline")
+        XCTAssertEqual(updated.transactions.first?.editableEntry?.metadata["file"], .string("receipt.pdf"))
         _ = try await repository.homeReport(start: "2026-09-01", end: "2026-10-01", valuationCurrency: "CNY")
         _ = try await repository.dashboard(start: "2026-09-01", end: "2026-10-01", valuationCurrency: "CNY")
         _ = try await repository.incomeStatement(start: "2026-09-01", end: "2026-10-01", valuationCurrency: "CNY")
@@ -62,6 +64,8 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         XCTAssertTrue(deleted.transactions.isEmpty)
         let exported = try await restored.exportLedger()
         defer { try? FileManager.default.removeItem(at: exported) }
+        let saved = try String(contentsOf: exported.appendingPathComponent("transactions/2026/09.bean"), encoding: .utf8)
+        XCTAssertTrue(saved.contains("file: \"receipt.pdf\""), "Stored metadata must retain the exact user value, including in recoverable deletion comments")
         try await EmbeddedBeancountValidator.shared.validate(workspace: exported, entryFile: descriptor.entrypoint)
         #else
         throw XCTSkip("Requires the app-linked iOS Go and canonical Beancount runtimes")

@@ -9,6 +9,10 @@ import (
 // encode as null, so use the endpoint's existing model to normalize collections
 // only at the local boundary. Optional pointers and BQL null cells remain null.
 func normalizeLocalResponseCollections(payload any, path string) any {
+	return normalizeLocalCollectionValue(payload, localResponseModel(path))
+}
+
+func localResponseModel(path string) reflect.Type {
 	var model any
 	switch path {
 	case "/api/ledger/bootstrap":
@@ -34,7 +38,7 @@ func normalizeLocalResponseCollections(payload any, path string) any {
 	default:
 		model = localCollectionEnvelope{}
 	}
-	return normalizeLocalCollectionValue(payload, reflect.TypeOf(model))
+	return reflect.TypeOf(model)
 }
 
 // The remaining handlers return JSON envelopes rather than named models.

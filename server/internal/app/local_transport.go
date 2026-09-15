@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -127,7 +128,7 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 	if err := json.Unmarshal(response.body.Bytes(), &payload); err != nil {
 		return http.StatusInternalServerError, nil, errors.New("local endpoint returned an invalid JSON response")
 	}
-	normalizeLocalSourcePaths(payload, cfg.LedgerRoot, false)
+	normalizeLocalSourcePaths(payload, localResponseModel(input.Path), cfg.LedgerRoot, false)
 	if status >= 200 && status < 300 {
 		payload = normalizeLocalResponseCollections(payload, input.Path)
 	}
@@ -363,7 +364,7 @@ func localRequestBody(input LocalRequest, root string) ([]byte, string, error) {
 		if err := json.Unmarshal(input.Body, &body); err != nil {
 			return nil, "", err
 		}
-		normalizeLocalSourcePaths(body, root, true)
+		normalizeLocalSourcePaths(body, localSourceRequestModel(input), root, true)
 		encoded, err := json.Marshal(body)
 		return encoded, "application/json", err
 	}
@@ -409,22 +410,79 @@ func localRequestBody(input LocalRequest, root string) ([]byte, string, error) {
 	return buffer.Bytes(), writer.FormDataContentType(), nil
 }
 
-func normalizeLocalSourcePaths(value any, root string, incoming bool) {
-	switch value := value.(type) {
-	case map[string]any:
-		if file, ok := value["file"].(string); ok {
-			if incoming && !filepath.IsAbs(file) && fs.ValidPath(filepath.ToSlash(file)) {
-				value["file"] = filepath.Join(root, filepath.FromSlash(file))
-			} else if !incoming && strings.HasPrefix(file, root+string(filepath.Separator)) {
-				value["file"] = filepath.ToSlash(strings.TrimPrefix(file, root+string(filepath.Separator)))
+// Only these request schemas carry transaction locators. Ledger metadata,
+// importer payloads and arbitrary BQL cells remain opaque user data.
+func localSourceRequestModel(input LocalRequest) reflect.Type {
+	switch strings.ToUpper(input.Method) + " " + input.Path {
+	case "PUT /api/ledger/transactions":
+		return reflect.TypeOf(UpdateTransactionRequest{})
+	case "DELETE /api/ledger/transactions":
+		return reflect.TypeOf(DeleteTransactionRequest{})
+	case "POST /api/ledger/transactions":
+		return reflect.TypeOf(ReverseTransactionRequest{})
+	case "POST /api/ledger/transactions/tags":
+		return reflect.TypeOf(AddTransactionTagsRequest{})
+	default:
+		return nil
+	}
+}
+
+func normalizeLocalSourcePaths(value any, model reflect.Type, root string, incoming bool) {
+	if model == nil || value == nil {
+		return
+	}
+	for model.Kind() == reflect.Pointer {
+		model = model.Elem()
+	}
+	switch model.Kind() {
+	case reflect.Struct:
+		values, ok := value.(map[string]any)
+		if !ok {
+			return
+		}
+		// Parse errors also expose a source file, while their message remains
+		// untouched. Match concrete types instead of matching arbitrary keys.
+		if model == reflect.TypeOf(TransactionSource{}) || (!incoming && model == reflect.TypeOf(BeanParseError{})) {
+			if file, ok := values["file"].(string); ok {
+				if incoming && !filepath.IsAbs(file) && fs.ValidPath(filepath.ToSlash(file)) {
+					values["file"] = filepath.Join(root, filepath.FromSlash(file))
+				} else if !incoming && strings.HasPrefix(file, root+string(filepath.Separator)) {
+					values["file"] = filepath.ToSlash(strings.TrimPrefix(file, root+string(filepath.Separator)))
+				}
+			}
+			return
+		}
+		for index := 0; index < model.NumField(); index++ {
+			field := model.Field(index)
+			if !field.IsExported() {
+				continue
+			}
+			name := strings.Split(field.Tag.Get("json"), ",")[0]
+			if name == "-" {
+				continue
+			}
+			if field.Anonymous && name == "" {
+				normalizeLocalSourcePaths(values, field.Type, root, incoming)
+				continue
+			}
+			if name == "" {
+				name = field.Name
+			}
+			if child, exists := values[name]; exists {
+				normalizeLocalSourcePaths(child, field.Type, root, incoming)
 			}
 		}
-		for _, child := range value {
-			normalizeLocalSourcePaths(child, root, incoming)
+	case reflect.Slice, reflect.Array:
+		if values, ok := value.([]any); ok {
+			for _, child := range values {
+				normalizeLocalSourcePaths(child, model.Elem(), root, incoming)
+			}
 		}
-	case []any:
-		for _, child := range value {
-			normalizeLocalSourcePaths(child, root, incoming)
+	case reflect.Map:
+		if values, ok := value.(map[string]any); ok {
+			for _, child := range values {
+				normalizeLocalSourcePaths(child, model.Elem(), root, incoming)
+			}
 		}
 	}
 }
