@@ -100,10 +100,12 @@ struct LedgerSharedImportInbox: Sendable {
         directory.appendingPathComponent(item.id.uuidString, isDirectory: true)
     }
 
+    // Keep the explicit scalar call: the bound Foundation method misclassifies
+    // ASCII names on physical iOS 27 (24A437) with Xcode 27 Release builds.
     private func validateName(_ name: String) throws {
         guard !name.isEmpty, name.utf8.count <= 255,
               name == (name as NSString).lastPathComponent,
-              !name.contains("\\"), !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+              !name.contains("\\"), !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw InboxError.invalidFile
         }
         guard Self.supportedExtensions.contains((name as NSString).pathExtension.lowercased()) else {

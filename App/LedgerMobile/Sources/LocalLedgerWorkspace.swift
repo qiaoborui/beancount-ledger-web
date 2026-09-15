@@ -825,11 +825,13 @@ actor LocalLedgerWorkspace {
         }
     }
 
+    // Keep the explicit scalar call: the bound Foundation method misclassifies
+    // ASCII names on physical iOS 27 (24A437) with Xcode 27 Release builds.
     private func validatedRelativePath(_ path: String) throws -> String {
         guard !path.isEmpty,
               !path.hasPrefix("/"),
               !path.contains("\\"),
-              !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+              !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw WorkspaceError.invalidRelativePath(path)
         }
         let components = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)

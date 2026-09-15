@@ -32,7 +32,7 @@ final class LedgerSharedImportInboxTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let source = root.appendingPathComponent("bill.csv")
         try Data("safe fixture".utf8).write(to: source)
-        for name in ["../bill.csv", "a/bill.csv", "a\\bill.csv", "bill\n.csv", "bill.exe", "bill"] {
+        for name in ["../bill.csv", "a/bill.csv", "a\\bill.csv", "bill\n.csv", "bill\t.csv", "bill\u{7F}.csv", "bill\u{0}.csv", "bill.exe", "bill"] {
             XCTAssertThrowsError(try inbox.enqueue(fileURL: source, originalName: name), name)
         }
         XCTAssertThrowsError(try inbox.enqueue(fileURL: URL(string: "https://example.com/bill.csv")!))

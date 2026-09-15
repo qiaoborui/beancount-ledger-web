@@ -203,9 +203,22 @@ final class LocalLedgerWorkspaceTests: XCTestCase {
         }
     }
 
+    func testHiddenRepositoryDirectoriesSurvivePublicationAndGenerationCopy() async throws {
+        let fixture = try fixture()
+        let content = Data("synthetic metadata".utf8)
+        let revision = try await fixture.workspace.commit(changes: [], mutateStage: { stage in
+            try FileManager.default.createDirectory(at: stage.appendingPathComponent(".agents"), withIntermediateDirectories: true)
+            try content.write(to: stage.appendingPathComponent(".agents/config.md"))
+            try Data("; synthetic ledger".utf8).write(to: stage.appendingPathComponent("main.bean"))
+        }, validator: { _ in })
+        _ = try await fixture.workspace.commit(expectedRevisionID: revision.id, changes: [], validator: { _ in })
+        let stored = try await fixture.workspace.readFile(at: ".agents/config.md")
+        XCTAssertEqual(stored, content)
+    }
+
     func testRejectsUnsafeAndDuplicateRelativePaths() async throws {
         let fixture = try fixture()
-        let invalid = ["", "/main.bean", "../main.bean", "a/../main.bean", "a//main.bean", "a\\main.bean", "./main.bean"]
+        let invalid = ["bill\n.bean", "bill\t.bean", "bill\u{7F}.bean", "bill\u{0}.bean", "", "/main.bean", "../main.bean", "a/../main.bean", "a//main.bean", "a\\main.bean", "./main.bean"]
 
         for path in invalid {
             await XCTAssertThrowsErrorAsync(path) {
