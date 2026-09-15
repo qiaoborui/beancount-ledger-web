@@ -236,6 +236,7 @@ actor LocalLedgerWorkspace {
     func commit(
         expectedRevisionID: UUID? = nil,
         changes: [Change],
+        mutateStage: Validator? = nil,
         validator: Validator
     ) async throws -> Revision {
         try beginTransaction()
@@ -269,14 +270,43 @@ actor LocalLedgerWorkspace {
             try Task.checkCancellation()
             try apply(change, in: workspace)
         }
+        if let mutateStage {
+            try await mutateStage(workspace)
+            try Task.checkCancellation()
+        }
         try await validator(workspace)
         try Task.checkCancellation()
-        _ = try validateTree(at: workspace)
+        let finalPaths = try validateTree(at: workspace)
+        var changedPaths = Set(normalizedChanges.map(\.relativePath))
+        if mutateStage != nil {
+            if let parent {
+                let previous = try workspaceURL(for: parent)
+                let previousPaths = Set(try validateTree(at: previous))
+                let finalPathSet = Set(finalPaths)
+                for path in previousPaths.union(finalPathSet) {
+                    let existed = previousPaths.contains(path)
+                    let exists = finalPathSet.contains(path)
+                    if !existed || !exists {
+                        changedPaths.insert(path)
+                    } else {
+                        let oldFile = try secureDescendant(path, of: previous, allowMissingLeaf: false)
+                        let newFile = try secureDescendant(path, of: workspace, allowMissingLeaf: false)
+                        let executionChanged = try isExecutable(oldFile) != isExecutable(newFile)
+                        if !fileManager.contentsEqual(atPath: oldFile.path, andPath: newFile.path)
+                            || executionChanged {
+                            changedPaths.insert(path)
+                        }
+                    }
+                }
+            } else {
+                changedPaths.formUnion(finalPaths)
+            }
+        }
         try protectTree(at: workspace)
         return try finalize(
             stage: stage,
             parentID: parent?.id,
-            changedPaths: normalizedChanges.map(\.relativePath).sorted()
+            changedPaths: changedPaths.sorted()
         )
     }
 
@@ -305,6 +335,12 @@ actor LocalLedgerWorkspace {
     }
 
     func readFile(at relativePath: String) throws -> Data {
+        try readFileSnapshot(at: relativePath).data
+    }
+
+    /// Reads bytes and their revision under one actor turn, with the same path
+    /// and regular-file checks used by writes.
+    func readFileSnapshot(at relativePath: String) throws -> (revision: Revision, data: Data) {
         let path = try validatedRelativePath(relativePath)
         let revision = try requiredCurrentRevision()
         let workspace = try workspaceURL(for: revision)
@@ -312,7 +348,7 @@ actor LocalLedgerWorkspace {
         guard try itemKind(at: file) == .regularFile else {
             throw WorkspaceError.unsupportedItem(path)
         }
-        return try readRegularFile(at: file, displayPath: path)
+        return (revision, try readRegularFile(at: file, displayPath: path))
     }
 
     // MARK: - Layout and revision pointer
@@ -724,7 +760,9 @@ actor LocalLedgerWorkspace {
                 if kind == .symbolicLink { throw WorkspaceError.symbolicLink(change.relativePath) }
                 throw WorkspaceError.unsupportedItem(change.relativePath)
             }
+            let executable = try itemKindIfPresent(at: destination) == .regularFile ? isExecutable(destination) : false
             try data.write(to: destination, options: .atomic)
+            try fileManager.setAttributes([.posixPermissions: executable ? 0o700 : 0o600], ofItemAtPath: destination.path)
             try protect(destination)
         case .remove:
             guard let kind = try itemKindIfPresent(at: destination) else { return }
@@ -832,7 +870,8 @@ actor LocalLedgerWorkspace {
                     budget: &budget
                 )
             case S_IFREG:
-                try copyRegularFile(fromDescriptor: childDescriptor, to: target, budget: &budget)
+                try copyRegularFile(fromDescriptor: childDescriptor, to: target,
+                    executable: status.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH) != 0, budget: &budget)
                 try protect(target)
             default:
                 close(childDescriptor)
@@ -883,6 +922,7 @@ actor LocalLedgerWorkspace {
     private func copyRegularFile(
         fromDescriptor sourceDescriptor: Int32,
         to destination: URL,
+        executable: Bool,
         budget: inout TreeBudget
     ) throws {
         let destinationDescriptor = open(
@@ -905,6 +945,9 @@ actor LocalLedgerWorkspace {
             guard let chunk = try input.read(upToCount: Self.copyBufferSize), !chunk.isEmpty else { break }
             try budget.addBytes(chunk.count)
             try output.write(contentsOf: chunk)
+        }
+        guard fchmod(destinationDescriptor, executable ? S_IRUSR | S_IWUSR | S_IXUSR : S_IRUSR | S_IWUSR) == 0 else {
+            throw CocoaError(.fileWriteUnknown)
         }
         try output.synchronize()
     }
@@ -931,6 +974,7 @@ actor LocalLedgerWorkspace {
                 try createProtectedDirectory(target)
                 try copyDirectoryContentsByPath(from: item, to: target, sourceRoot: sourceRoot, budget: &budget)
             case .regularFile:
+                let executable = try isExecutable(item)
                 let input = try FileHandle(forReadingFrom: item)
                 defer { try? input.close() }
                 fileManager.createFile(atPath: target.path, contents: nil)
@@ -941,6 +985,7 @@ actor LocalLedgerWorkspace {
                     try budget.addBytes(chunk.count)
                     try output.write(contentsOf: chunk)
                 }
+                try fileManager.setAttributes([.posixPermissions: executable ? 0o700 : 0o600], ofItemAtPath: target.path)
                 try protect(target)
             case .symbolicLink:
                 throw WorkspaceError.symbolicLink(item.path)
@@ -1167,12 +1212,19 @@ actor LocalLedgerWorkspace {
     }
 
     private func protect(_ url: URL) throws {
+        let mode = try itemKind(at: url) == .directory || isExecutable(url) ? 0o700 : 0o600
+        try fileManager.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path)
         #if os(iOS)
         try fileManager.setAttributes(
-            [.protectionKey: FileProtectionType.complete],
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
             ofItemAtPath: url.path
         )
         #endif
+    }
+
+    private func isExecutable(_ url: URL) throws -> Bool {
+        let permissions = try fileManager.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+        return (permissions?.intValue ?? 0) & 0o111 != 0
     }
 
     private func removeIfPresent(_ url: URL) {

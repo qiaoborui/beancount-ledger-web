@@ -270,13 +270,21 @@ final class LedgerMobileUITests: XCTestCase {
         let toggle = app.buttons["account-groups-toggle-all"]
         let daily = app.staticTexts["日常账户"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.segmentedControls["account-category-picker"].exists)
+        XCTAssertFalse(app.buttons["account-filter-assets"].exists)
         XCTAssertEqual(toggle.label, "全部展开")
-        XCTAssertFalse(daily.exists)
+        let cashGroup = app.buttons["account-group-cash"].firstMatch
+        XCTAssertTrue(cashGroup.waitForExistence(timeout: 3))
         capture("accounts-default-collapsed")
+        XCTAssertGreaterThanOrEqual(toggle.frame.height, 44)
+        XCTAssertLessThanOrEqual(toggle.frame.maxY, cashGroup.frame.minY)
+        XCTAssertLessThanOrEqual(cashGroup.frame.minY - toggle.frame.maxY, 12,
+            "The bulk action sits directly above the first account group")
+        XCTAssertFalse(daily.exists)
         toggle.tap()
         XCTAssertTrue(daily.waitForExistence(timeout: 3))
         XCTAssertEqual(toggle.label, "全部折叠")
-        app.buttons["account-group-cash"].firstMatch.tap()
+        cashGroup.tap()
         XCTAssertFalse(daily.exists)
         XCTAssertEqual(toggle.label, "全部展开")
         toggle.tap()
@@ -397,9 +405,10 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(summaryHeading.frame.minX, 0)
         XCTAssertLessThanOrEqual(summaryHeading.frame.maxX, app.frame.maxX)
         capture("native-accessibility-overview")
-        app.buttons["隐藏金额"].tap()
-        XCTAssertTrue(app.buttons["显示金额"].waitForExistence(timeout: 3))
-        capture("native-accessibility-private")
+        XCTAssertTrue(app.buttons["ledger-sync-status"].exists)
+        XCTAssertFalse(app.buttons["隐藏金额"].exists)
+        XCTAssertFalse(app.buttons["显示金额"].exists)
+        capture("native-accessibility-sync-status")
         openDestination(compact: "交易", regular: "交易账本")
         XCTAssertTrue(app.navigationBars["流水"].waitForExistence(timeout: 3))
         capture("native-accessibility-transactions")
@@ -642,57 +651,34 @@ final class LedgerMobileUITests: XCTestCase {
             entry.tap()
         }
 
-        let content = app.scrollViews["import-history-content"]
+        let content = app.collectionViews["import-history-content"]
         XCTAssertTrue(content.waitForExistence(timeout: 4))
-        XCTAssertTrue(app.staticTexts["渠道状态"].exists)
-        XCTAssertTrue(app.staticTexts["支付宝"].exists)
-        XCTAssertTrue(app.staticTexts["微信支付"].exists)
-        XCTAssertTrue(app.staticTexts["招商银行信用卡"].exists)
+        XCTAssertTrue(app.staticTexts["渠道覆盖"].exists)
         XCTAssertTrue(app.buttons["import-select-file"].exists)
-        XCTAssertTrue(app.staticTexts["支持 CSV、Excel、PDF、邮件和 ZIP，单个文件最大 10MB。"].exists)
-        XCTAssertTrue(app.staticTexts["Gmail 自动账单"].exists)
+        XCTAssertTrue(app.staticTexts["支持 CSV、Excel、PDF、邮件和 ZIP，最大 10MB。预览并确认后写入账本。"].exists)
+        XCTAssertFalse(app.staticTexts["Gmail 自动账单"].exists)
+        XCTAssertFalse(app.buttons["gmail-sync"].exists)
+        XCTAssertFalse(app.buttons["gmail-connect"].exists)
 
-        let connectedAccount = app.staticTexts["已连接 ledger.preview@gmail.com"]
-        for _ in 0..<3 where !connectedAccount.exists { content.swipeUp() }
-        XCTAssertTrue(connectedAccount.waitForExistence(timeout: 3))
-        XCTAssertTrue(
-            app.staticTexts.matching(
-                NSPredicate(format: "label BEGINSWITH %@", "Gmail 推送")
-            ).firstMatch.exists
-        )
-        for _ in 0..<3 where !app.buttons["gmail-sync"].exists { content.swipeUp() }
-        XCTAssertTrue(app.buttons["gmail-sync"].exists)
-
-        let readyReview = app.buttons["gmail-review-safe-gmail-ready"]
-        for _ in 0..<3 where !readyReview.isHittable { content.swipeUp() }
-        waitUntilHittable(readyReview)
-        readyReview.tap()
-        XCTAssertTrue(app.navigationBars["核对交易"].waitForExistence(timeout: 4))
-        XCTAssertTrue(app.scrollViews["native-import-preview"].exists)
-        XCTAssertTrue(app.buttons["import-commit"].exists)
-        app.buttons["关闭"].tap()
-        XCTAssertTrue(content.waitForExistence(timeout: 3))
-
-        let failedMenu = app.buttons["gmail-failed-menu-safe-gmail-failed"]
-        for _ in 0..<3 where !failedMenu.isHittable { content.swipeUp() }
-        waitUntilHittable(failedMenu)
-        failedMenu.tap()
-        app.buttons["重新处理"].tap()
-        XCTAssertTrue(
-            app.staticTexts["已重新处理“待重试账单”。"].waitForExistence(timeout: 4)
-        )
-
-        let archivedEmail = app.staticTexts["ccb-credit-2026-08.eml"]
+        capture("native-import-history")
+        let coverage = app.descendants(matching: .any)["import-channel-coverage"].firstMatch
+        XCTAssertTrue(coverage.waitForExistence(timeout: 3))
+        coverage.tap()
+        for provider in ["alipay", "wechat", "cmb"] {
+            let row = app.descendants(matching: .any)["import-provider-\(provider)"].firstMatch
+            for _ in 0..<5 where !row.exists { content.swipeUp() }
+            XCTAssertTrue(row.exists)
+        }
+        for _ in 0..<5 where !coverage.isHittable { content.swipeDown() }
+        coverage.tap()
+        let archivedEmail = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "ccb-credit-2026-08.eml")).firstMatch
         for _ in 0..<5 where !archivedEmail.exists { content.swipeUp() }
         XCTAssertTrue(archivedEmail.exists)
 
-        let archivedFile = app.staticTexts["alipay-2026-08.csv"]
+        let archivedFile = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "alipay-2026-08.csv")).firstMatch
         for _ in 0..<5 where !archivedFile.exists { content.swipeUp() }
         XCTAssertTrue(archivedFile.exists)
 
-        let safetyNotice = app.staticTexts["预览确认后写入"]
-        for _ in 0..<3 where !safetyNotice.exists { content.swipeUp() }
-        XCTAssertTrue(safetyNotice.exists)
         capture("import-history")
     }
 
@@ -765,6 +751,30 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 3))
     }
 
+    func testImportPreviewFinalRowStaysAboveCommitSurface() throws {
+        XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--safe-import-flow"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
+        if isPad {
+            app.buttons["sidebar-imports"].tap()
+        } else {
+            app.tabBars.buttons["更多"].tap()
+            let entry = app.buttons["more-imports"]
+            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+            entry.tap()
+        }
+        XCTAssertTrue(app.buttons["import-generate-preview"].waitForExistence(timeout: 4))
+        app.buttons["import-generate-preview"].tap()
+        XCTAssertTrue(app.navigationBars["核对交易"].waitForExistence(timeout: 4))
+        let lastEdit = app.buttons["import-entry-edit-safe-import-2"]
+        revealAboveImportActions(lastEdit, in: app.collectionViews["native-import-preview"])
+        capture("import-final-row-above-actions")
+        lastEdit.tap()
+        XCTAssertTrue(app.navigationBars["编辑交易"].waitForExistence(timeout: 3))
+    }
+
     func testNativeImportPreviewSelectionAndCommitFlow() throws {
         XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
         app = XCUIApplication()
@@ -797,37 +807,51 @@ final class LedgerMobileUITests: XCTestCase {
         let providerMenu = app.buttons["import-provider-menu"]
         providerMenu.tap()
         XCTAssertTrue(app.buttons["招商银行信用卡"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["Gmail 自动账单"].exists)
+        XCTAssertFalse(app.buttons["Gmail 自动账单"].exists)
         app.buttons["自动识别"].tap()
         capture("import-flow-01-preparation")
 
         app.buttons["import-generate-preview"].tap()
         XCTAssertTrue(app.navigationBars["核对交易"].waitForExistence(timeout: 4))
-        XCTAssertTrue(app.staticTexts["已选择 2 / 2"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["跳过 1"].exists)
+        XCTAssertTrue(app.buttons["import-commit"].waitForExistence(timeout: 3))
+        XCTAssertEqual(app.buttons["import-commit"].label, "写入 2 条交易")
+        let summary = app.descendants(matching: .any)["import-preview-summary"].firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: 3))
+        XCTAssertTrue(summary.label.contains("已跳过 1 条重复交易"))
 
         let toggle = app.buttons["import-entry-toggle-safe-import-1"]
-        let review = app.scrollViews["native-import-preview"]
-        for _ in 0..<4 where !toggle.isHittable { review.swipeUp() }
-        XCTAssertTrue(toggle.exists)
+        let review = app.collectionViews["native-import-preview"]
+        revealAboveImportActions(toggle, in: review)
         toggle.tap()
-        XCTAssertTrue(app.staticTexts["已选择 1 / 2"].waitForExistence(timeout: 3))
+        let oneSelected = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "写入 1 条交易"), object: app.buttons["import-commit"])
+        XCTAssertEqual(XCTWaiter.wait(for: [oneSelected], timeout: 3), .completed)
+        XCTAssertTrue(toggle.label.hasPrefix("包含"))
+        revealAboveImportActions(toggle, in: review)
         toggle.tap()
-        XCTAssertTrue(app.staticTexts["已选择 2 / 2"].waitForExistence(timeout: 3))
+        let twoSelected = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "写入 2 条交易"), object: app.buttons["import-commit"])
+        XCTAssertEqual(XCTWaiter.wait(for: [twoSelected], timeout: 3), .completed)
 
+        app.buttons["import-entry-safe-import-1"].tap()
         let tagToggle = app.buttons["import-entry-tag-toggle-safe-import-1"]
-        for _ in 0..<3 where !tagToggle.isHittable { review.swipeUp() }
-        waitUntilHittable(tagToggle)
+        revealAboveImportActions(tagToggle, in: review)
         tagToggle.tap()
+        let bulkTags = app.descendants(matching: .any)["import-bulk-tags"].firstMatch
+        for _ in 0..<5 where !bulkTags.isHittable { review.swipeDown() }
+        XCTAssertTrue(bulkTags.isHittable)
+        bulkTags.tap()
         let bulkTagInput = app.textFields["import-bulk-tag-input"]
         for _ in 0..<3 where !bulkTagInput.isHittable { review.swipeDown() }
         replaceText(in: bulkTagInput, with: "travel dining")
         app.buttons["import-bulk-tag-add"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
         for _ in 0..<3 where !tagToggle.isHittable { review.swipeUp() }
         XCTAssertTrue(app.staticTexts["#dining  #learning  #travel"].waitForExistence(timeout: 3))
 
         let edit = app.buttons["import-entry-edit-safe-import-1"]
-        XCTAssertTrue(edit.exists)
+        revealAboveImportActions(edit, in: review)
+        capture("import-edit-control-visible")
         edit.tap()
         XCTAssertTrue(app.navigationBars["编辑交易"].waitForExistence(timeout: 3))
 
@@ -857,13 +881,13 @@ final class LedgerMobileUITests: XCTestCase {
         let reviewedEntry = app.buttons["import-entry-safe-import-1"]
         for _ in 0..<3 where !reviewedEntry.isHittable { review.swipeUp() }
         waitUntilHittable(reviewedEntry)
-        reviewedEntry.tap()
+        if !app.staticTexts["分类账户"].exists { reviewedEntry.tap() }
         XCTAssertTrue(app.staticTexts["分类账户"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Expenses:Education:Books"].exists)
         XCTAssertTrue(app.staticTexts["368.50 CNY"].exists)
 
         let editAgain = app.buttons["import-entry-edit-safe-import-1"]
-        waitUntilHittable(editAgain)
+        revealAboveImportActions(editAgain, in: review)
         editAgain.tap()
         XCTAssertTrue(app.navigationBars["编辑交易"].waitForExistence(timeout: 3))
         XCTAssertEqual(app.textFields["import-edit-payee"].value as? String, "新城市书房")
@@ -875,6 +899,18 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["核对交易"].waitForExistence(timeout: 3))
         capture("import-flow-02-review")
 
+        // Editing scrolls the review back to its transaction. Restore the bulk
+        // field before checking its disabled state; List virtualizes offscreen rows.
+        for _ in 0..<5 where !bulkTagInput.isHittable { review.swipeDown() }
+        if !bulkTagInput.exists {
+            waitUntilHittable(bulkTags)
+            bulkTags.tap()
+        }
+        XCTAssertTrue(bulkTagInput.waitForExistence(timeout: 3))
+        revealAboveImportActions(bulkTagInput, in: review)
+        XCTAssertTrue(bulkTagInput.isEnabled)
+        let visibleEntryControls = [toggle, editAgain].filter { $0.exists && $0.isHittable }
+
         app.buttons["写入 2 条交易"].tap()
         let confirmation = app.alerts["确认写入账本？"]
         XCTAssertTrue(confirmation.waitForExistence(timeout: 3))
@@ -884,13 +920,14 @@ final class LedgerMobileUITests: XCTestCase {
         let savingButton = app.buttons["import-commit"]
         waitForImportSavingState(savingButton, timeout: 2)
         let feedbackElapsed = Date().timeIntervalSince(saveStartedAt)
-        XCTAssertFalse(toggle.isEnabled)
-        XCTAssertFalse(editAgain.isEnabled)
         XCTAssertFalse(bulkTagInput.isEnabled)
+        for control in visibleEntryControls { XCTAssertFalse(control.isEnabled) }
 
         let commitError = app.descendants(matching: .any)["import-commit-error"]
         XCTAssertTrue(commitError.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["新城市书房"].exists)
+        let preservedPayee = app.staticTexts["新城市书房"]
+        for _ in 0..<4 where !preservedPayee.exists { review.swipeUp() }
+        XCTAssertTrue(preservedPayee.waitForExistence(timeout: 3))
 
         app.buttons["import-commit"].tap()
         let retryConfirmation = app.alerts["确认写入账本？"]
@@ -932,9 +969,11 @@ final class LedgerMobileUITests: XCTestCase {
         capture("import-flow-03-complete")
 
         app.buttons["完成"].tap()
-        let history = app.scrollViews["import-history-content"]
+        let history = app.collectionViews["import-history-content"]
         XCTAssertTrue(history.waitForExistence(timeout: 4))
-        let newArchive = app.staticTexts["2026-08-01_2026-08-30-wechat-safe-import-preview.xlsx"]
+        let newArchive = app.descendants(matching: .any)[
+            "import-document-transactions/2026/documents/imports/2026-08-01_2026-08-30-wechat-safe-import-preview.xlsx"
+        ]
         for _ in 0..<5 where !newArchive.exists { history.swipeUp() }
         XCTAssertTrue(newArchive.waitForExistence(timeout: 4))
     }
@@ -955,14 +994,16 @@ final class LedgerMobileUITests: XCTestCase {
         app.buttons["import-generate-preview"].tap()
         let toggle = app.buttons["import-entry-toggle-safe-import-1"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 4))
-        let review = app.scrollViews["native-import-preview"]
+        let review = app.collectionViews["native-import-preview"]
         for _ in 0..<4 where !toggle.isHittable || toggle.frame.midY > app.frame.height * 0.6 { review.swipeUp() }
         toggle.tap()
-        XCTAssertTrue(app.staticTexts["已选择 1 / 2"].waitForExistence(timeout: 3))
+        let oneSelected = app.buttons.matching(identifier: "import-commit")
+            .matching(NSPredicate(format: "label == %@", "写入 1 条交易")).firstMatch
+        XCTAssertTrue(oneSelected.waitForExistence(timeout: 3))
         app.navigationBars["核对交易"].buttons["返回"].tap()
         XCTAssertTrue(app.buttons["继续编辑"].waitForExistence(timeout: 3))
         app.buttons["继续编辑"].tap()
-        XCTAssertTrue(app.staticTexts["已选择 1 / 2"].exists)
+        XCTAssertTrue(oneSelected.waitForExistence(timeout: 3))
         app.navigationBars["核对交易"].buttons["返回"].tap()
         app.buttons["放弃修改"].tap()
         XCTAssertTrue(app.buttons["import-generate-preview"].waitForExistence(timeout: 3))
@@ -1049,7 +1090,7 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["正在验证标签"].waitForExistence(timeout: 0.5))
         let tagFeedbackElapsed = Date().timeIntervalSince(tagStartedAt)
         XCTAssertFalse(app.buttons["transaction-bulk-tag-apply"].isEnabled)
-        XCTAssertTrue(app.staticTexts["服务器已验证，并为 1 条交易添加标签。"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["已验证，并为 1 条交易添加标签。"].waitForExistence(timeout: 4))
         let tagCompleteElapsed = Date().timeIntervalSince(tagStartedAt)
         XCTAssertGreaterThanOrEqual(tagCompleteElapsed, 0.9)
         XCTAssertTrue(app.buttons["transaction-actions"].waitForExistence(timeout: 3))
@@ -1274,7 +1315,7 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.scrollViews["analysis-content-\(kind)"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "选择时间范围")).firstMatch.exists)
         XCTAssertTrue(app.navigationBars[title].exists)
-        XCTAssertTrue(app.navigationBars.firstMatch.buttons["隐藏金额"].exists)
+        XCTAssertTrue(app.navigationBars.firstMatch.buttons["ledger-sync-status"].exists)
         capture(captureName)
         let backButton = app.navigationBars.firstMatch.buttons.firstMatch
         waitUntilHittable(backButton)
@@ -1359,7 +1400,11 @@ final class LedgerMobileUITests: XCTestCase {
     private func replaceText(in element: XCUIElement, with replacement: String) {
         XCTAssertTrue(element.waitForExistence(timeout: 3))
         element.tap()
-        if isPad, element.identifier == "import-edit-amount" {
+        let originalValue = (element.value as? String) ?? ""
+        if element.elementType == .textField,
+           !originalValue.isEmpty, originalValue != element.placeholderValue {
+            // Native forms can scroll while focusing lower fields. The text
+            // selection menu follows that field through the keyboard animation.
             element.press(forDuration: 1.0)
             let selectionLabel = NSPredicate(format: "label IN %@", ["Select All", "全选"])
             let candidates = app.menuItems.matching(selectionLabel).allElementsBoundByIndex
@@ -1408,6 +1453,29 @@ final class LedgerMobileUITests: XCTestCase {
             scrollUpThroughGutter(scrollView)
         }
         XCTAssertLessThanOrEqual(element.frame.maxY, obscuredEdge)
+    }
+
+    private func revealAboveImportActions(_ element: XCUIElement, in scrollView: XCUIElement) {
+        // Native sticky section headers and the commit surface both overlap
+        // rows that XCTest reports as hittable. Keep the entire control inside
+        // the unobscured band, using short drags to avoid overshooting it.
+        let safeTop = app.navigationBars["核对交易"].frame.maxY + 80
+        let safeBottom = app.buttons["import-commit"].frame.minY - 64
+        let centerY = (safeTop + safeBottom) / 2
+        for _ in 0..<10 {
+            if element.exists && element.isHittable
+                && element.frame.minY > safeTop && element.frame.maxY < safeBottom { break }
+            let distance = element.exists ? max(-150, min(150, centerY - element.frame.midY)) : -150
+            let start = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: 0))
+                .withOffset(CGVector(dx: 0, dy: centerY - scrollView.frame.minY))
+            start.press(forDuration: 0.1,
+                thenDragTo: start.withOffset(CGVector(dx: 0, dy: distance)),
+                withVelocity: .slow, thenHoldForDuration: 0.1)
+        }
+        XCTAssertTrue(element.exists)
+        XCTAssertTrue(element.isHittable)
+        XCTAssertGreaterThan(element.frame.minY, safeTop)
+        XCTAssertLessThan(element.frame.maxY, safeBottom)
     }
 
     private func scrollUpThroughGutter(_ scrollView: XCUIElement) {

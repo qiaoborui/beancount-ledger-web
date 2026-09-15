@@ -8,7 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    CURRENT_PROJECT_VERSION: "3"
+    CURRENT_PROJECT_VERSION: "10"
     MARKETING_VERSION: "0.1.0"
     TARGETED_DEVICE_FAMILY: "1,2"
 
@@ -20,10 +20,21 @@ targets:
       - Sources
       - Resources
     dependencies:
+      - sdk: libresolv.tbd
+      - framework: ../../server/.build/ledgercore/LedgerCore.xcframework
+        embed: false
+      - framework: ../../server/.build/beancount-ios/BeancountRuntime.xcframework
+        embed: false
+      - framework: ../../server/.build/beancount-ios/upstream/Python.xcframework
+        embed: true
       - target: LedgerWidgets
         embed: true
       - target: LedgerShare
         embed: true
+    postBuildScripts:
+      - name: Package embedded Beancount runtime
+        script: bash "$SRCROOT/../../scripts/build-beancount-ios-resources.sh"
+        basedOnDependencyAnalysis: false
     info:
       path: Supporting/Info.plist
       properties:
@@ -50,6 +61,10 @@ targets:
         NSFaceIDUsageDescription: 使用 Face ID 解锁受保护的账本金额和财务数据。
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
         NSSupportsLiveActivities: true
+        UIBackgroundModes:
+          - processing
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.qiaoborui.ledger.mobile.local-sync
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -70,6 +85,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Supporting/LedgerMobilePersonal.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
         SUPPORTED_PLATFORMS: "iphoneos iphonesimulator macosx"
         SUPPORTS_MACCATALYST: YES
         DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO

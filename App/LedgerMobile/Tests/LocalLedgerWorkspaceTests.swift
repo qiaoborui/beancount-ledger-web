@@ -676,7 +676,7 @@ final class LocalLedgerWorkspaceTests: XCTestCase {
     }
 
     #if os(iOS)
-    func testCommittedLedgerUsesCompleteFileProtection() async throws {
+    func testCommittedLedgerUsesFirstUnlockFileProtection() async throws {
         #if targetEnvironment(simulator)
         throw XCTSkip("iOS Data Protection attributes require a physical device filesystem")
         #else
@@ -690,9 +690,9 @@ final class LocalLedgerWorkspaceTests: XCTestCase {
             let attributes = try FileManager.default.attributesOfItem(
                 atPath: directory.appendingPathComponent("main.bean").path
             )
-            return (attributes[.protectionKey] as? FileProtectionType)?.rawValue
+            return attributes[.protectionKey] as? String
         }
-        XCTAssertEqual(protection, FileProtectionType.complete.rawValue)
+        XCTAssertEqual(protection, FileProtectionType.completeUntilFirstUserAuthentication.rawValue)
         #endif
     }
     #endif

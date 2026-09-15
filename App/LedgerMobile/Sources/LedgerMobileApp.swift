@@ -2,14 +2,29 @@ import SwiftUI
 
 @main
 struct LedgerMobileApp: App {
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(LedgerBackgroundAppDelegate.self) private var backgroundDelegate
+    #endif
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var session = LedgerSession.appSession()
+    @StateObject private var session: LedgerSession
+
+    init() {
+        let session = LedgerSession.appSession()
+        _session = StateObject(wrappedValue: session)
+        LocalLedgerBackgroundSyncService.shared.configure { [weak session] in
+            await session?.performBackgroundLocalSync() ?? false
+        }
+        LocalLedgerBackgroundSyncService.shared.startMonitoring { [weak session] reachable in
+            session?.updateLocalSyncNetworkAvailability(reachable)
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(session)
                 .task {
+                    session.startLocalAutomaticSyncServices()
                     await session.updateActivity(
                         isActive: scenePhase == .active,
                         isBackground: scenePhase == .background

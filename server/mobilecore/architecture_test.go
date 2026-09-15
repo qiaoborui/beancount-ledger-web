@@ -14,6 +14,7 @@ import (
 func TestMobileCoreUsesOnlyBindingSafeDependencies(t *testing.T) {
 	allowed := map[string]bool{
 		"encoding/json":                  true,
+		"fmt":                            true,
 		"io":                             true,
 		"path":                           true,
 		"sort":                           true,
@@ -21,6 +22,7 @@ func TestMobileCoreUsesOnlyBindingSafeDependencies(t *testing.T) {
 		"golang.org/x/text/unicode/norm": true,
 		"strings":                        true,
 		"github.com/borui/beancount-ledger-web/server/internal/ledgercore": true,
+		"github.com/borui/beancount-ledger-web/server/internal/app":        true,
 	}
 	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {

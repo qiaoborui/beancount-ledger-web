@@ -437,6 +437,13 @@ func (s *Server) materializeImportFile(ctx context.Context, key, localPath strin
 }
 
 func (s *Server) materializeImportMetaFiles(ctx context.Context, importID string, meta *importMeta) error {
+	if s.cfg.localTransport {
+		meta.InputFile = previewPath(s.cfg, importID, "original")
+		meta.DocumentFile = previewPath(s.cfg, importID, "document")
+		if meta.DocumentFileKey == "" {
+			meta.DocumentFile = ""
+		}
+	}
 	if meta.InputFileKey != "" {
 		if meta.InputFile == "" {
 			meta.InputFile = previewPath(s.cfg, importID, "original")
@@ -465,6 +472,12 @@ func (s *Server) materializeImportMetaFiles(ctx context.Context, importID string
 }
 
 func importRuntimeDir(cfg Config, importID string) string {
+	if cfg.localTransport {
+		if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(importID) {
+			importID = "invalid"
+		}
+		return filepath.Join(cfg.RuntimeDir, "scratch", "imports", importID)
+	}
 	if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(importID) {
 		return filepath.Join(os.TempDir(), "beancount-ledger-web", "imports", "invalid")
 	}

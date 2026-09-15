@@ -4,7 +4,6 @@ import SwiftUI
 struct AccountsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var selectedCategory = AccountBalanceCategory.all
     @State private var expandedSectionIDs: Set<String> = []
     var isRoot = true
 
@@ -20,54 +19,16 @@ struct AccountsView: View {
         guard let ledger = session.ledger else { return [] }
         return ledger.accountSections(
             periodBalancesAvailable: session.accountPeriodBalancesAvailable && ledger.periodAccountBalancesAvailable
-        ).compactMap { section in
-            let rows = section.rows.filter { row in
-                selectedCategory.includes(row)
-            }
-            return rows.isEmpty ? nil : AccountBalanceSection(id: section.id, title: section.title, rows: rows)
-        }
+        ).filter { !$0.rows.isEmpty }
     }
 
     var body: some View {
         List {
-            Section {
-                Picker("账户分类", selection: $selectedCategory) {
-                    ForEach(AccountBalanceCategory.allCases) { category in
-                        Text(category.title)
-                            .tag(category)
-                            .accessibilityIdentifier("account-filter-\(category.rawValue)")
-                    }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("account-category-picker")
-            }
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-
             if let error = session.errorMessage {
                 Section { StatusBanner(message: error, onDismiss: session.dismissError) }
             }
-            if !sections.isEmpty {
-                HStack {
-                    Text("\(sections.count) 个分组")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button(allVisibleSectionsExpanded ? "全部折叠" : "全部展开") {
-                        let visibleIDs = Set(sections.map(\.id))
-                        setExpandedSectionIDs(allVisibleSectionsExpanded
-                            ? activeExpandedSectionIDs.subtracting(visibleIDs)
-                            : activeExpandedSectionIDs.union(visibleIDs))
-                    }
-                    .font(.subheadline)
-                    .buttonStyle(.borderless)
-                    .frame(minHeight: 44)
-                    .accessibilityIdentifier("account-groups-toggle-all")
-                }
-                .listRowSeparator(.hidden)
-            }
-            ForEach(sections) { section in
-                Section {
+            Section {
+                ForEach(sections) { section in
                     DisclosureGroup(isExpanded: expandedBinding(for: section.id)) {
                         ForEach(section.rows) { row in
                             NavigationLink {
@@ -102,9 +63,32 @@ struct AccountsView: View {
                     }
                     .accessibilityIdentifier("account-group-\(section.id)")
                 }
+            } header: {
+                if !sections.isEmpty {
+                    HStack {
+                        Text("\(sections.count) 个分组")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            let visibleIDs = Set(sections.map(\.id))
+                            setExpandedSectionIDs(allVisibleSectionsExpanded
+                                ? activeExpandedSectionIDs.subtracting(visibleIDs)
+                                : activeExpandedSectionIDs.union(visibleIDs))
+                        } label: {
+                            Text(allVisibleSectionsExpanded ? "全部折叠" : "全部展开")
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityIdentifier("account-groups-toggle-all")
+                    }
+                    .font(.caption)
+                    .textCase(nil)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                }
             }
             if sections.isEmpty {
-                ContentUnavailableView("暂无匹配账户", systemImage: "building.columns", description: Text("切换分类或调整搜索条件。"))
+                ContentUnavailableView("暂无账户", systemImage: "building.columns", description: Text("账本中的账户会按用途显示在这里。"))
             }
         }
         .ledgerReadingList()

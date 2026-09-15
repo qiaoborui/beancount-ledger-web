@@ -23,6 +23,9 @@ type LedgerWriter struct {
 	logger              *slog.Logger
 	mu                  sync.Mutex
 	validationCache     githubValidationCache
+	// Only the embedded staging writer sets this callback. The workspace actor
+	// runs canonical validation before publishing the staged generation.
+	stagingValidation func() error
 }
 
 // SetLogger attaches the process structured logger for background error
@@ -181,7 +184,11 @@ func (w *LedgerWriter) RunTransactionWithSourceResult(source string, apply func(
 		if len(tx.snapshots) == 0 {
 			return nil
 		}
-		if err := runBeanCheck(w.cfg); err != nil {
+		validate := func() error { return runBeanCheck(w.cfg) }
+		if w.stagingValidation != nil {
+			validate = w.stagingValidation
+		}
+		if err := validate(); err != nil {
 			tx.Restore()
 			return err
 		}

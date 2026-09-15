@@ -14,7 +14,7 @@ struct MoreView: View {
                 }
                 .accessibilityIdentifier("more-settings")
             } footer: {
-                Text(session.serverURL?.host ?? "Ledger")
+                Text("\(session.localLedgerName) · 本地")
             }
             let remaining = [LedgerDestination.overview, .transactions, .accounts]
                 .filter { !session.compactTabDestinations.contains($0) }

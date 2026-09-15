@@ -29,23 +29,24 @@ source_root="${staging_dir}/source"
 
 mkdir -p "${source_root}/internal"
 cp -R "${server_root}/mobilecore" "${source_root}/mobilecore"
-cp -R "${server_root}/internal/ledger" "${source_root}/internal/ledger"
-cp -R "${server_root}/internal/ledgercore" "${source_root}/internal/ledgercore"
+cp -R "${server_root}/mobilegit" "${source_root}/mobilegit"
+cp -R "${server_root}/internal/." "${source_root}/internal/"
+cp "${server_root}/go.mod" "${server_root}/go.sum" "${source_root}/"
 
 cd "${source_root}"
-go mod init github.com/borui/beancount-ledger-web/server
 go mod edit -go=1.26.0
 go mod edit \
   -require="golang.org/x/mobile@${GOMOBILE_VERSION}" \
   -require="golang.org/x/text@${XTEXT_VERSION}" \
   -tool=golang.org/x/mobile/cmd/gobind
 go mod download golang.org/x/mobile golang.org/x/text
+go get -tool "golang.org/x/mobile/cmd/gobind@${GOMOBILE_VERSION}"
 
 "${tool_bin}/gomobile" bind \
   -target=ios,iossimulator \
   -iosversion="${IOS_MIN_VERSION}" \
   -o "${staging_dir}/LedgerCore.xcframework" \
-  ./mobilecore
+  ./mobilecore ./mobilegit
 
 rm -rf "${output}"
 mv "${staging_dir}/LedgerCore.xcframework" "${output}"

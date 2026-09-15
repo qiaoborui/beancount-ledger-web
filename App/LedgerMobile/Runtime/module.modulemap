@@ -1,0 +1,4 @@
+module BeancountRuntime {
+    header "BeancountRuntime.h"
+    export *
+}

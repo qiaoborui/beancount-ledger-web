@@ -75,7 +75,7 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	}
 	c.metrics.observeCache(cacheFilesystemSnapshot, cacheResultMiss)
 	loadStarted := time.Now()
-	lines, err := ReadLedgerLines(mainBeanPath(c.cfg), map[string]bool{})
+	lines, err := readConfiguredLedgerLines(c.cfg)
 	if err != nil {
 		c.metrics.observeOperation(operationFilesystemSnapshot, operationResultError, loadStarted)
 		return nil, err
@@ -252,7 +252,13 @@ type fileStat struct {
 }
 
 func ledgerVersion(cfg Config) (LedgerVersion, error) {
-	stats, err := ledgerVersionFiles(mainBeanPath(cfg), cfg.LedgerRoot, map[string]bool{})
+	var stats []fileStat
+	var err error
+	if cfg.localTransport {
+		_, stats, err = localLedgerSource(cfg)
+	} else {
+		stats, err = ledgerVersionFiles(mainBeanPath(cfg), cfg.LedgerRoot, map[string]bool{})
+	}
 	if err != nil {
 		return LedgerVersion{}, err
 	}

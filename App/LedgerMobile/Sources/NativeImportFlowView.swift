@@ -17,6 +17,7 @@ struct NativeImportFlowView: View {
     @State private var includedEntryIDs: Set<String> = []
     @State private var selectedTagEntryIDs: Set<String> = []
     @State private var bulkTagInput = ""
+    @FocusState private var bulkTagInputFocused: Bool
     @State private var editingEntry: LedgerImportEntry?
     @State private var commitResult: LedgerImportCommitResult?
     @State private var errorMessage: String?
@@ -88,7 +89,7 @@ struct NativeImportFlowView: View {
 
     private var exitConfirmationDetail: String {
         if commitOutcomeNeedsReconciliation {
-            return "服务器可能已完成写入。离开后请先查看导入记录，确认结果再继续操作。"
+            return "账本可能已完成写入。离开后请先查看导入记录，确认结果再继续操作。"
         }
         return pendingExit == .preparation
             ? "返回后会清除本次核对修改，你可以重新生成预览。"
@@ -198,7 +199,7 @@ struct NativeImportFlowView: View {
             Section {
                 Picker("账单渠道", selection: $providerOverride) {
                     Text("自动识别").tag(String?.none)
-                    ForEach(providers) { provider in
+                    ForEach(LedgerMobileImportCapabilities.fileImportProviders(from: providers)) { provider in
                         Text(provider.label).tag(Optional(provider.id))
                     }
                 }
@@ -238,101 +239,82 @@ struct NativeImportFlowView: View {
     }
 
     private func previewView(_ preview: LedgerImportPreview) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: LedgerSpacing.xl) {
-                if let errorMessage {
+        List {
+            if let errorMessage {
+                Section {
                     StatusBanner(message: errorMessage) { self.errorMessage = nil }
                 }
-
-                previewSummary(preview)
-
-                if !preview.warnings.isEmpty {
-                    warningSection(preview.warnings)
-                }
-
-                bulkTagSection
-                entrySection(preview)
             }
-            .padding(.horizontal, LedgerSpacing.lg)
-            .padding(.top, LedgerSpacing.xl)
-            .padding(.bottom, LedgerSpacing.xxl)
-            .ledgerAdaptivePageWidth()
-            .disabled(isCommitting)
+            previewSummary(preview)
+            if !preview.warnings.isEmpty { warningSection(preview.warnings) }
+            bulkTagSection
+            entrySection(preview)
         }
+        .listStyle(.plain)
+        .contentMargins(.top, LedgerLayout.pageTopInset, for: .scrollContent)
+        .tint(LedgerPalette.cobalt)
+        .disabled(isCommitting)
         .accessibilityIdentifier("native-import-preview")
+        .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             commitBar(preview)
         }
     }
 
     private func previewSummary(_ preview: LedgerImportPreview) -> some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-            SectionHeading(title: "预览摘要", detail: confidenceText(preview.providerDetection.confidence))
-            LedgerPanel {
-                VStack(spacing: 0) {
-                    ImportPreviewMetricRow(
-                        icon: "wand.and.stars",
-                        title: providerLabel(preview.provider),
-                        detail: preview.providerDetection.reason,
-                        value: "已识别"
-                    )
-                    Divider().overlay(LedgerPalette.line).padding(.leading, 64)
-                    ImportPreviewMetricRow(
-                        icon: "calendar",
-                        title: importRangeText(preview),
-                        detail: "账单覆盖范围",
-                        value: "\(preview.candidateCount) 条"
-                    )
-                    Divider().overlay(LedgerPalette.line).padding(.leading, 64)
-                    ImportPreviewMetricRow(
-                        icon: "arrow.triangle.2.circlepath",
-                        title: preview.dedupReport,
-                        detail: "服务端去重结果",
-                        value: preview.skippedDuplicateCount > 0 ? "跳过 \(preview.skippedDuplicateCount)" : "无重复"
-                    )
+        Section {
+            DisclosureGroup {
+                LabeledContent("识别结果", value: confidenceText(preview.providerDetection.confidence))
+                Text(preview.providerDetection.reason)
+                    .foregroundStyle(.secondary)
+                LabeledContent("候选交易", value: "\(preview.candidateCount) 条")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(preview.skippedDuplicateCount > 0 ? "已跳过 \(preview.skippedDuplicateCount) 条重复交易" : "无重复交易")
+                    Text(preview.dedupReport).foregroundStyle(.secondary)
                 }
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(providerLabel(preview.provider))
+                        .foregroundStyle(.primary)
+                    Text(importRangeText(preview) + (preview.skippedDuplicateCount > 0 ? " · 已跳过 \(preview.skippedDuplicateCount) 条重复交易" : ""))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 6)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("import-preview-summary")
             }
         }
+        .font(.subheadline)
     }
 
     private func warningSection(_ warnings: [String]) -> some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-            SectionHeading(title: "核对提示", detail: "\(warnings.count) 项")
-            LedgerPanel {
-                VStack(alignment: .leading, spacing: LedgerSpacing.md) {
-                    ForEach(Array(warnings.enumerated()), id: \.offset) { index, warning in
-                        HStack(alignment: .top, spacing: LedgerSpacing.sm) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(LedgerPalette.gold)
-                                .frame(width: 18)
-                            Text(warning)
-                                .font(.system(size: 11))
-                                .foregroundStyle(LedgerPalette.olive)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        if index < warnings.count - 1 {
-                            Divider().overlay(LedgerPalette.line)
-                        }
-                    }
-                }
-                .padding(LedgerSpacing.lg)
+        Section("核对提示") {
+            ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(.subheadline)
+                    .foregroundStyle(LedgerPalette.risk)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
     private func entrySection(_ preview: LedgerImportPreview) -> some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+        Section {
+            ForEach(reviewedEntries) { entry in
+                ImportEntryReviewRow(
+                    entry: entry,
+                    included: includedEntryIDs.contains(entry.id),
+                    tagSelected: selectedTagEntryIDs.contains(entry.id),
+                    onToggle: { toggle(entry.id) },
+                    onToggleTag: { toggleTagSelection(entry.id) },
+                    onEdit: { editingEntry = entry }
+                )
+                .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 16))
+            }
+        } header: {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("候选交易")
-                        .font(.system(size: 15, weight: .semibold))
-                        .tracking(-0.15)
-                        .foregroundStyle(LedgerPalette.ink)
-                    Text("已选择 \(selectedEntries.count) / \(reviewedEntries.count)")
-                        .font(.system(size: 11, weight: .medium).monospacedDigit())
-                        .foregroundStyle(LedgerPalette.secondary)
-                }
+                Text("交易 · 已选 \(selectedEntries.count)/\(reviewedEntries.count)")
                 Spacer(minLength: 0)
                 Button(includedEntryIDs.count == reviewedEntries.count ? "取消全选" : "全选") {
                     if includedEntryIDs.count == reviewedEntries.count {
@@ -341,76 +323,41 @@ struct NativeImportFlowView: View {
                         includedEntryIDs = Set(reviewedEntries.map(\.id))
                     }
                 }
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(LedgerPalette.cobalt)
                 .frame(minHeight: 44)
-                .buttonStyle(PressScaleButtonStyle())
-            }
-
-            LedgerPanel {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(reviewedEntries.enumerated()), id: \.element.id) { index, entry in
-                        ImportEntryReviewRow(
-                            entry: entry,
-                            included: includedEntryIDs.contains(entry.id),
-                            tagSelected: selectedTagEntryIDs.contains(entry.id),
-                            onToggle: { toggle(entry.id) },
-                            onToggleTag: { toggleTagSelection(entry.id) },
-                            onEdit: { editingEntry = entry }
-                        )
-                        if index < reviewedEntries.count - 1 {
-                            Divider().overlay(LedgerPalette.line).padding(.leading, 52)
-                        }
-                    }
-                }
+                .textCase(nil)
             }
         }
     }
 
     private var bulkTagSection: some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-            HStack(alignment: .firstTextBaseline) {
-                SectionHeading(title: "批量标签", detail: "已选 \(selectedTagEntryIDs.count) 条")
-                Spacer()
+        Section {
+            DisclosureGroup {
                 Button(allEntriesSelectedForTags ? "清空" : "全选") {
                     selectedTagEntryIDs = allEntriesSelectedForTags
                         ? []
                         : Set(reviewedEntries.map(\.id))
                 }
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(LedgerPalette.cobalt)
-                .frame(minHeight: 44)
-            }
-            LedgerPanel {
-                VStack(alignment: .leading, spacing: LedgerSpacing.md) {
-                    TextField("travel, trip-2026", text: $bulkTagInput)
-                        .font(.system(size: 14, weight: .medium))
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("import-bulk-tag-input")
-                    HStack(spacing: LedgerSpacing.sm) {
-                        Button("添加标签") { applyBulkTags(mode: .add) }
-                            .foregroundStyle(LedgerPalette.onBrand)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(LedgerPalette.cobalt)
-                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-                            .accessibilityIdentifier("import-bulk-tag-add")
-                        Button("移除标签") { applyBulkTags(mode: .remove) }
-                            .foregroundStyle(LedgerPalette.olive)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(LedgerPalette.tag)
-                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-                            .accessibilityIdentifier("import-bulk-tag-remove")
-                    }
-                    .font(.system(size: 13, weight: .semibold))
-                    .buttonStyle(PressScaleButtonStyle())
+                TextField("travel, trip-2026", text: $bulkTagInput)
+                    .focused($bulkTagInputFocused)
+                    .onSubmit { bulkTagInputFocused = false }
+                    .font(.body)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("import-bulk-tag-input")
+                Button("添加标签") { applyBulkTags(mode: .add) }
                     .disabled(selectedTagEntryIDs.isEmpty)
-                    .opacity(selectedTagEntryIDs.isEmpty ? 0.52 : 1)
-                    Text("交易行中的标签图标用于选择批量操作对象；提交时会发送编辑后的完整标签列表。")
-                        .font(.system(size: 10))
-                        .foregroundStyle(LedgerPalette.secondary)
-                }
-                .padding(LedgerSpacing.lg)
+                    .accessibilityIdentifier("import-bulk-tag-add")
+                Button("移除标签") { applyBulkTags(mode: .remove) }
+                    .disabled(selectedTagEntryIDs.isEmpty)
+                    .accessibilityIdentifier("import-bulk-tag-remove")
+                Text("展开交易可选择标签操作对象，也可全选。核对并确认后保存标签修改。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } label: {
+                LabeledContent("批量标签", value: "已选 \(selectedTagEntryIDs.count) 条")
+                    .font(.subheadline)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("import-bulk-tags")
             }
         }
     }
@@ -441,10 +388,10 @@ struct NativeImportFlowView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(selectedEntries.isEmpty ? "仅归档原始账单" : "准备写入 \(selectedEntries.count) 条交易")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(LedgerPalette.ink)
                     Text(providerLabel(preview.provider) + " · " + importRangeText(preview))
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                        .font(.caption.monospacedDigit())
                         .foregroundStyle(LedgerPalette.secondary)
                 }
                 Spacer(minLength: 0)
@@ -457,14 +404,16 @@ struct NativeImportFlowView: View {
                     confirmationPresented = true
                 }
             } label: {
-                PrimaryButtonLabel(
-                    title: commitButtonTitle,
-                    loading: isCommitting
-                )
+                HStack {
+                    if isCommitting { ProgressView().tint(.white) }
+                    Text(commitButtonTitle)
+                }
+                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(PressScaleButtonStyle())
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(LedgerPalette.cobalt)
             .disabled(isCommitting)
-            .opacity(isCommitting ? 0.72 : 1)
             .accessibilityLabel(commitButtonTitle)
             .accessibilityValue(commitButtonAccessibilityValue)
             .accessibilityHint(commitButtonAccessibilityHint)
@@ -657,14 +606,14 @@ struct NativeImportFlowView: View {
     private var commitButtonAccessibilityHint: String {
         if isCommitting { return "请稍候，完成后会显示保存结果" }
         if commitOutcomeNeedsReconciliation { return "只检查导入归档，不会再次提交" }
-        return "提交前服务器会再次校验预览"
+        return "保存前会再次校验预览与账本"
     }
 
     private var commitConfirmationDetail: String {
         if selectedEntries.isEmpty {
             return "原始账单会进入归档记录，交易账本保持不变。"
         }
-        return "服务器会再次校验预览和原文件，然后写入 \(selectedEntries.count) 条交易。"
+        return "将在这台设备校验预览和账本，写入 \(selectedEntries.count) 条交易。"
     }
 
     private func providerLabel(_ id: String) -> String {
@@ -732,6 +681,7 @@ struct NativeImportFlowView: View {
             }
             bulkTagInput = ""
             errorMessage = nil
+            bulkTagInputFocused = false
         } catch {
             errorMessage = error.localizedDescription
             failureFeedback &+= 1
@@ -839,45 +789,8 @@ struct NativeImportFlowView: View {
             return
         }
         commitOutcomeNeedsReconciliation = true
-        commitErrorMessage = "保存结果待确认：连接中断，服务器可能已完成写入。请勿重复提交；可重新检查导入归档。"
+        commitErrorMessage = "保存结果待确认：操作已中断，请先重新检查导入归档，再继续记账。"
         failureFeedback &+= 1
-    }
-}
-
-private struct ImportPreviewMetricRow: View {
-    let icon: String
-    let title: String
-    let detail: String
-    let value: String
-
-    var body: some View {
-        HStack(alignment: .center, spacing: LedgerSpacing.md) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(LedgerPalette.cobalt)
-                .frame(width: 36, height: 36)
-                .background(LedgerPalette.tag)
-                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.ink)
-                    .lineLimit(2)
-                Text(detail)
-                    .font(.system(size: 10))
-                    .foregroundStyle(LedgerPalette.secondary)
-                    .lineLimit(3)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Text(value)
-                .font(.system(size: 10, weight: .semibold).monospacedDigit())
-                .foregroundStyle(LedgerPalette.cobalt)
-                .padding(.horizontal, 9)
-                .frame(minHeight: 28)
-                .background(LedgerPalette.tag)
-                .clipShape(Capsule())
-        }
-        .padding(LedgerSpacing.lg)
     }
 }
 
@@ -1144,32 +1057,22 @@ private struct ImportEntryReviewRow: View {
                 .accessibilityLabel(included ? "排除 \(entry.payee)" : "包含 \(entry.payee)")
                 .accessibilityIdentifier("import-entry-toggle-\(entry.id)")
 
-                Button(action: onToggleTag) {
-                    Image(systemName: tagSelected ? "tag.fill" : "tag")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(tagSelected ? LedgerPalette.cobalt : LedgerPalette.secondary)
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(PressScaleButtonStyle())
-                .accessibilityLabel(tagSelected ? "取消选择 \(entry.payee) 的标签操作" : "选择 \(entry.payee) 的标签操作")
-                .accessibilityIdentifier("import-entry-tag-toggle-\(entry.id)")
-
                 Button {
                     expanded.toggle()
                 } label: {
                     HStack(alignment: .center, spacing: LedgerSpacing.sm) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(entry.payee.isEmpty ? "未命名交易" : entry.payee)
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.subheadline)
                                 .foregroundStyle(LedgerPalette.ink)
                                 .lineLimit(1)
                             Text("\(entry.date) · \(entry.narration.isEmpty ? "无摘要" : entry.narration)")
-                                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                                .font(.caption.monospacedDigit())
                                 .foregroundStyle(LedgerPalette.secondary)
                                 .lineLimit(2)
                             if let tags = entry.tags, !tags.isEmpty {
                                 Text(tags.prefix(3).map { "#\($0)" }.joined(separator: "  "))
-                                    .font(.system(size: 9, weight: .semibold))
+                                    .font(.caption)
                                     .foregroundStyle(LedgerPalette.olive)
                                     .lineLimit(1)
                             }
@@ -1181,34 +1084,42 @@ private struct ImportEntryReviewRow: View {
                             Text(importCompactAmountText(entry))
                                 .fixedSize(horizontal: true, vertical: false)
                         }
-                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
                         .foregroundStyle(included ? LedgerPalette.warm : LedgerPalette.secondary)
                         .accessibilityLabel(importAmountText(entry))
                         Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.caption2.weight(.semibold))
                             .foregroundStyle(LedgerPalette.secondary)
                             .frame(width: 18)
                     }
-                    .padding(.vertical, LedgerSpacing.md)
-                    .padding(.trailing, LedgerSpacing.sm)
+                    .padding(.vertical, 10)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(PressScaleButtonStyle())
+                .buttonStyle(.plain)
                 .accessibilityIdentifier("import-entry-\(entry.id)")
 
                 Button(action: onEdit) {
                     Image(systemName: "pencil")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.body)
                         .foregroundStyle(LedgerPalette.cobalt)
                         .frame(width: 44, height: 44)
                 }
-                .buttonStyle(PressScaleButtonStyle())
+                .buttonStyle(.borderless)
                 .accessibilityLabel("编辑 \(entry.payee.isEmpty ? "未命名交易" : entry.payee)")
                 .accessibilityIdentifier("import-entry-edit-\(entry.id)")
             }
 
             if expanded {
                 VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+                    Button(action: onToggleTag) {
+                        Label(tagSelected ? "已选为标签操作对象" : "选择为标签操作对象",
+                              systemImage: tagSelected ? "tag.fill" : "tag")
+                            .font(.subheadline)
+                            .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(tagSelected ? "取消选择 \(entry.payee) 的标签操作" : "选择 \(entry.payee) 的标签操作")
+                    .accessibilityIdentifier("import-entry-tag-toggle-\(entry.id)")
                     ImportEntryDetailLine(label: "分类账户", value: entry.categoryAccount)
                     ImportEntryDetailLine(label: "资金账户", value: entry.fundingAccount)
                     ForEach(Array(entry.postings.enumerated()), id: \.offset) { _, posting in
@@ -1228,9 +1139,8 @@ private struct ImportEntryReviewRow: View {
                     }
                 }
                 .padding(.leading, 52)
-                .padding(.trailing, LedgerSpacing.lg)
                 .padding(.bottom, LedgerSpacing.lg)
-                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+                .transition(.opacity)
             }
         }
         .opacity(included ? 1 : 0.58)
@@ -1256,10 +1166,10 @@ private struct ImportEntryDetailLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.caption)
                 .foregroundStyle(LedgerPalette.secondary)
             Text(value)
-                .font(.system(size: 10, weight: .medium).monospaced())
+                .font(.subheadline.monospaced())
                 .foregroundStyle(LedgerPalette.olive)
                 .textSelection(.enabled)
         }

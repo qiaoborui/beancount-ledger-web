@@ -2,25 +2,38 @@
 
 ## Implementation status
 
-This document describes the target architecture and its incremental delivery.
-The foundation provides a shared Go parser, a versioned mobile JSON boundary,
-a standalone XCFramework build, Swift repository interfaces, and an app-private
-generation store. The existing remote application remains the active UI path.
+The production application is local-only. It provides an on-device ledger
+library, creation and directory import, native browsing/search/reports/BQL,
+transaction creation/editing/deletion, file editing/export, and local bill import.
+All financial operations use the active device-private workspace. Persisted
+legacy server preferences stay recoverable; production never instantiates their
+remote repository or network client.
 
-Local onboarding, the local repository implementation, embedded canonical
-Beancount validation, SQLite reports, and provider synchronization are subsequent
-deliverables. The generation store accepts an injected validator; callers must
-wire the canonical validator before enabling financial writes in the product.
-The lightweight Go compile API checks syntax and selected structural/balance
-rules. Full booking, plugins, account lifecycle, and canonical validation belong
-to the embedded Beancount runtime.
+Local repositories invoke the existing Go application services through an
+in-process JSON dispatcher. This transport opens no HTTP listener and has an
+explicit endpoint allowlist with no cloud, AI, Git, authentication or push routes.
+It uses app-private paths and ignores server environment configuration.
+Mutations operate on staging generations; embedded CPython and the canonical
+Beancount loader validate the complete workspace before atomic publication.
+The lightweight parser APIs remain available for diagnostics, while product
+financial writes use the canonical validator. Missing runtimes fail closed.
+
+`LogicalLocalStorage` supplies the workspace, committed-revision notification,
+status, synchronization, and conflict-resolution interfaces. Device storage and
+HTTPS Git storage are implemented. Git uses an embedded pure-Go transport within
+the app process, with default-on automatic synchronization and an immediate-sync
+action. Foreground saves and network recovery trigger synchronization; iOS grants
+background execution opportunities. SQLite indexing and iCloud/S3 provider
+adapters remain future work. Reports reuse the Go read model against a pinned local generation.
+Files/iCloud Drive sharing currently exports a snapshot. Gmail automation and
+hosted AI are outside the local-only product.
 
 ## Product decision
 
-The target architecture supports an app-managed local Beancount workspace. SwiftUI reads
-from a disposable local index, financial writes commit to local `.bean` files
-after validation, and remote providers replicate committed revisions. The
-existing HTTPS workspace remains available during migration.
+The architecture uses an app-managed local Beancount workspace. SwiftUI reads
+through the local repository, financial writes commit to local `.bean` files
+after validation, and storage providers exchange committed revisions. Git is a
+logical local storage provider whose network operations stay below that boundary.
 
 The local workspace is the financial source of truth for the active device.
 SQLite caches, Widget snapshots, search indexes, and sync queues are derived or
@@ -32,16 +45,13 @@ runtime state and can be rebuilt from a committed workspace generation.
 SwiftUI, App Intents
         |
         v
-LedgerRepository
-        |
-        +-- RemoteLedgerRepository -> existing LedgerAPI
-        |
-        `-- LocalLedgerRepository
-               |-- LocalLedgerWorkspace actor
-               |-- LedgerCore XCFramework
-               |-- embedded Beancount validator
-               |-- disposable SQLite read model
-               `-- LedgerSyncEngine -> provider adapters
+LocalLedgerRepository
+        |-- LedgerCore XCFramework (queries/imports/write plans)
+        |-- embedded Beancount validator
+        `-- LogicalLocalStorage
+               |-- DeviceLocalStorage -> LocalLedgerWorkspace
+               `-- GitLocalStorage -> LocalLedgerWorkspace
+                      `-- embedded Git transport -> HTTPS remote
 
 Share extension -> App Group import inbox
 Widget extension <- reduced App Group snapshot
@@ -56,6 +66,13 @@ runtime performs canonical booking and validation in process.
 The Swift/Go boundary uses versioned JSON request and response envelopes. This
 keeps generated gomobile APIs small and makes server/mobile parity fixtures
 easy to compare.
+
+`DispatchJSON` accepts a versioned request with workspace and runtime roots,
+entrypoint, method, allowlisted API path, query and body. Swift owns the paths and
+selects a managed generation for reads or a managed staging directory for writes.
+Endpoint-compatible results populate existing native models. A staging success
+is a proposal; canonical validation and workspace publication must still succeed.
+Relative transaction source paths and content hashes survive generation moves.
 
 `ParseTextJSON` and `CompileTextJSON` accept `version`, `filename`, and `text`.
 `CompileWorkspaceJSON` accepts `version`, `entrypoint`, and
@@ -75,8 +92,11 @@ Application Support/Ledgers/<ledger-id>/
   generations/<revision-id>/revision.json
   generations/<revision-id>/.committed
   current.json
-  index.sqlite
-  sync.sqlite
+  ledger.json
+  sync/<git-configuration-id>/
+    state.json
+    repository.git/
+    candidates/<attempt-id>/
   staging/
 ```
 
@@ -106,8 +126,14 @@ components, symlink traversal, and destinations outside the generation root are
 rejected. External directory copies pin each ancestor with directory descriptors
 and open children with `openat` and `O_NOFOLLOW`. The future Files onboarding
 layer also owns security-scoped access, file coordination, and download readiness.
-Workspace files and staging generations use complete iOS Data Protection.
-Derived indexes must receive the same protection when implemented.
+Workspace files, staging generations, runtime state and Git caches use iOS
+`completeUntilFirstUserAuthentication` protection. Git credentials use device-only
+`AfterFirstUnlockThisDeviceOnly` Keychain accessibility. This explicitly permits
+background synchronization while locked after the first device unlock following
+reboot. Existing workspace attributes and credentials are prepared after a
+successful foreground authentication before background authorization is recorded.
+Face ID and privacy shielding continue to gate the app UI. Manual app locking or
+leaving the ledger revokes background authorization until the next explicit unlock.
 The initial workspace limits are 10,000 entries, 256 MiB per generation, and
 32 path components; revision metadata is capped at 1 MiB. Committed history
 uses additional disk space and requires an explicit future retention policy.
@@ -117,18 +143,23 @@ the existing reduced Widget snapshot and Share Extension import inbox.
 
 ## Repository contract
 
-LedgerSession talks to one repository selected by the active workspace. The
-repository owns bootstrap reads, reports, imports,
-transaction mutations, query history, locking, and refresh. Remote repository
-methods delegate to the current HTTP API. Local repository methods use the
-workspace, core, validator, and local runtime stores. Remote authentication,
-quick-unlock credentials, and Gmail flows are separate capabilities. A typed
-location identifies a remote origin or a local ledger UUID; repository lifetime
-belongs to the active context.
+LedgerSession talks to the local repository selected by the active workspace.
+The repository owns bootstrap reads, reports, imports, transaction mutations,
+query history, locking, and refresh, using the workspace, core, validator, and
+local runtime stores. Production sets `localOnly: true` and refuses remote
+locations before invoking any repository factory. Legacy remote implementations
+remain reachable only through explicitly injected compatibility test composition.
 
 Repository results retain the current `LedgerModels` data shapes while the
 migration is active. This lets existing native screens move to local data
 without a second presentation model.
+
+Local mode uses device-owner authentication (biometrics with device passcode
+fallback), privacy shielding, and per-ledger lock intervals. Authentication and
+import completion recheck the session identity and foreground state before
+activation. Preferences use a private `ledger-local://<UUID>` identity; that
+identity is never sent to URLSession. Widget network credentials are suspended
+when a local ledger becomes active, and only reduced local summaries are shared.
 
 ## Local write transaction
 
@@ -141,7 +172,9 @@ without a second presentation model.
 5. The workspace atomically publishes the new generation and records a local
    revision.
 6. The read model applies the new normalized snapshot and publishes Widget data.
-7. The sync engine queues the committed revision for the configured provider.
+7. The storage provider records pending synchronization. Failure to record sync
+   metadata leaves the successful local financial commit intact; status also
+   derives pending changes from the current workspace revision.
 
 App-created transactions carry `ledger_id` metadata containing a UUID. A
 legacy transaction keeps its source path and content hash until its first
@@ -154,14 +187,16 @@ iOS executes validation inside the app process. The packaged runtime calls
 `beancount.loader.load_file` with hardcore validations and returns structured
 filename, line, code, and message diagnostics.
 
-The workspace scanner records every Beancount `plugin` directive before opening
-a ledger for writes. Core Beancount modules and plugins bundled with the app are
-writable. A workspace containing an unknown plugin opens read-only with an
-actionable compatibility result. Existing committed files remain exportable and
-syncable.
+The validator checks every Beancount `plugin` directive before executing plugins.
+Only its explicit bundled safe-plugin allowlist is accepted. Unknown plugins,
+external paths, and unsupported plugin configuration block import or publication
+with a compatibility error; the original source folder remains unchanged.
+Read-only opening of incompatible ledgers is future work. Canonical validation
+and the Go read-side limits both pass before a generation can become current.
 
 The runtime bundle contains Python, Beancount, required pure-Python packages,
-and separately signed frameworks for binary extension modules. Release checks
+statically registered Beancount/regex extensions, and separately signed frameworks
+for Python standard-library binary extension modules. Release checks
 verify every embedded framework in the exported IPA.
 
 ## Revision and sync semantics
@@ -170,29 +205,52 @@ Every provider implements three capabilities: fetch the remote head, publish a
 new revision against an expected base revision, and return enough material for
 conflict resolution. Provider credentials live in the device-only Keychain.
 
-- GitHub publishes blobs, trees, commits, and a non-forced ref update against
-  the expected SHA. A diverged ref creates a three-way merge request.
-- iCloud Drive stores a coordinated versioned `.ledgerbundle` selected through
+- Git fetches an explicitly selected HTTPS branch into a private bare cache and
+  materializes immutable candidates. It merges files against the durable base,
+  validates the whole candidate, then publishes a local generation. Push uses a
+  non-forced expected-head update. Adding a Git ledger only reads the remote;
+  automatic synchronization then handles saved revisions, foreground entry and
+  network recovery. Users may pause automatic sync or request immediate sync.
+- Future iCloud Drive storage uses a coordinated versioned `.ledgerbundle` selected through
   Files. `NSFileCoordinator` and file versions expose concurrent changes.
-- S3 stores client-encrypted immutable revision bundles plus a small manifest.
+- Future S3 storage uses client-encrypted immutable revision bundles plus a small manifest.
   Conditional ETag updates protect the manifest head.
 
-Different-file changes merge automatically. Changes touching the same stable
-transaction or global directive require review. Every merged generation passes
-canonical validation before publication.
+Different-file changes merge automatically. Divergent changes in the same file,
+including edit/delete conflicts and structural path collisions, preserve both
+versions for review. Users can export both versions and choose local or remote
+for the listed conflicts. Resolution checks the originally observed local
+revision and validates the complete candidate before committing locally. Every
+merged generation passes canonical validation before publication. Transaction-
+level semantic merging is future work.
 
 The UI reports local and remote state independently: committed locally,
 syncing, synced, or conflict. Network availability never controls local commit
 success.
 
+The foreground coordinator debounces saves by two seconds, polls for remote
+changes every five minutes, serializes attempts and retries transient failures
+with capped exponential backoff. Authentication/authorization errors and conflicts
+persist a paused state until credentials or conflict choices are updated.
+`BGProcessingTask` requests a network opportunity with an earliest start of fifteen
+minutes; iOS controls actual execution. Expiration cancels the operation. No
+fixed lock-screen refresh interval is promised.
+
+After successful synchronization, the main app builds a reduced Widget snapshot
+from local reports. Revision and active-ledger authorization checks reject mixed
+or stale results before App Group publication and a WidgetKit reload request.
+The Widget extension reads only that local snapshot; it creates no remote client
+and stores no Git credentials. Web imports appear after the web deployment has
+pushed the same Git branch and the phone receives a synchronization opportunity.
+
 ## Delivery slices
 
 1. Extract a portable Go parsing/core boundary and run the existing server
    through it with golden parity tests.
-2. Add the repository boundary, local workspace generations, local validation,
-   and read-only ledger opening while preserving remote mode.
+2. Add the local-only repository composition, workspace generations, local
+   validation, and ledger library.
 3. Add validated local transaction mutations and revision recovery.
-4. Add GitHub synchronization and native conflict review.
+4. Add logical storage providers, embedded HTTPS Git, and native conflict review.
 5. Move bill import compilation into the local core.
 6. Add iCloud Drive and S3 provider adapters independently.
 
@@ -209,6 +267,8 @@ Foundation checks from the repository root:
 (cd server && go test ./... && go build ./cmd/ledger-web)
 swift test --package-path App/LedgerMobile
 bash scripts/build-ledgercore-xcframework.sh
+bash scripts/build-beancount-ios.sh
+bash scripts/build-beancount-ios-smoke.sh
 # With an already booted simulator:
 bash scripts/test-ledgercore-simulator.sh <simulator-udid>
 ```
@@ -218,9 +278,10 @@ directory points to Command Line Tools. The standalone framework builder uses
 Go 1.26 or newer, pins `golang.org/x/mobile`, and writes
 `server/.build/ledgercore/LedgerCore.xcframework`. Its slices support iOS arm64
 and iOS Simulator arm64/x86_64, with an iOS 17 deployment target. The generated
-framework is an unsigned build input; application linking and archive signing
-are part of the runtime integration slice. Source files and the build script
-are committed; generated binaries remain local build artifacts.
+framework is a static build input linked by the app. Xcode also links the native
+Beancount bridge, embeds Python, and packages/signs its standard-library extension
+frameworks through `build-beancount-ios-resources.sh`. Source files and build
+scripts are committed; generated binaries remain local build artifacts.
 The simulator smoke test links the generated Objective-C API and executes Go
 parsing, balance checks, and include-aware diagnostics in the simulator runtime.
 
@@ -240,7 +301,12 @@ The following gates apply to the complete local product milestone:
 
 ## Distribution gate
 
-Beancount is distributed under GPL-2.0-only. Shipping an embedded runtime
-requires a compatible license decision for the linked iOS deliverable and a
-complete source-availability path. This gate is resolved before an IPA that
-contains Beancount is distributed.
+The current embedded runtime is for private local builds and device testing.
+Beancount 3.2.3 declares GPL-2.0-only and its regex dependency declares
+Apache-2.0 AND CNRI-Python. Those terms create an unresolved combined-binary
+redistribution issue; general willingness to use GPL does not resolve it.
+Public IPA redistribution stays gated pending compatible authorization or a
+verified dependency/architecture change, a complete dependency-license audit,
+and corresponding-source delivery. See `App/LedgerMobile/Runtime/THIRD_PARTY.md`
+for pinned sources and bundled notices. Publishing source changes and reporting
+private device test results must not be described as public binary release approval.
