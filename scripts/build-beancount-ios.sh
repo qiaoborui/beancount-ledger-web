@@ -11,7 +11,20 @@ mkdir -p "$BUILD/downloads" "$BUILD/upstream" "$BUILD/generated/beancount/parser
 fetch() {
     local name="$1" url="$2" hash="$3"
     if [ ! -f "$BUILD/downloads/$name" ]; then
-        curl --fail --location --retry 3 "$url" -o "$BUILD/downloads/$name"
+        # Failed transfers remain temporary and cannot poison the next build's
+        # cache. Retry transient TLS/HTTP transport errors as well as HTTP 5xx.
+        local partial
+        partial="$(mktemp "$BUILD/downloads/$name.XXXXXX")"
+        if ! curl --fail --location --retry 3 --retry-all-errors \
+            --connect-timeout 20 --max-time 600 "$url" -o "$partial"; then
+            rm -f "$partial"
+            return 1
+        fi
+        if ! echo "$hash  $partial" | shasum -a 256 --check; then
+            rm -f "$partial"
+            return 1
+        fi
+        mv "$partial" "$BUILD/downloads/$name"
     fi
     echo "$hash  $BUILD/downloads/$name" | shasum -a 256 --check
 }

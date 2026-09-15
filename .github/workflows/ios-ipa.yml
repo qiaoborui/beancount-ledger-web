@@ -2,28 +2,20 @@ name: iOS SideStore IPA
 
 on:
   workflow_dispatch:
-  # Run trusted repository pushes on the persistent Mac, plus manual builds.
-  push:
-    branches: [main, 'codex/ios-*']
-    paths:
-      - 'App/LedgerMobile/**'
-      - 'scripts/build-ios-ipa.sh'
-      - '.github/workflows/ios-ipa.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-ipa-${{ github.ref }}
-  cancel-in-progress: true
+  group: ios-private-ipa
+  cancel-in-progress: false
 
 jobs:
   ipa:
-    name: Build SideStore IPA
-    # Embedded Beancount GPL-2.0-only / Apache dependency compatibility and
-    # framework packaging must be resolved before artifact redistribution.
-    # See App/LedgerMobile/Runtime/THIRD_PARTY.md. Private Xcode tests remain available.
-    if: ${{ false }}
+    name: Build private SideStore IPA
+    # Manual owner-operated builds stay on the Mac. Public binary distribution
+    # remains gated by App/LedgerMobile/Runtime/THIRD_PARTY.md.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: [self-hosted, macOS, ARM64, ledger-ios]
     timeout-minutes: 45
     steps:
@@ -65,39 +57,49 @@ jobs:
         run: |
           echo /opt/homebrew/bin >> "$GITHUB_PATH"
           /opt/homebrew/bin/xcodegen --version
+          go version
+          python3 --version
+          "$(/opt/homebrew/bin/brew --prefix bison)/bin/bison" --version
+          "$(/opt/homebrew/bin/brew --prefix flex)/bin/flex" --version
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
-      - name: Build and verify IPA
+      - name: Build and verify private IPA on the Mac
         env:
-          IPA_OUTPUT_DIR: ${{ runner.temp }}/ios-ipa
-        run: bash scripts/build-ios-ipa.sh "$IPA_OUTPUT_DIR"
+          IPA_OUTPUT_DIR: ${{ runner.temp }}/ios-private-ipa
+        run: |
+          umask 077
+          private_root="$HOME/Downloads/LedgerMobile-PrivateBuilds"
+          mkdir -p "$private_root"
+          output_dir="$private_root/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          bash scripts/build-ios-ipa.sh --private-local "$output_dir"
+          mkdir -p "$IPA_OUTPUT_DIR"
+          cp -p "$output_dir"/* "$IPA_OUTPUT_DIR"/
 
-      - name: Upload SideStore package
+      - name: Upload private IPA artifact
         id: artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: LedgerMobile-SideStore-${{ github.run_number }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios-ipa/*
+          name: LedgerMobile-Private-SideStore-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-private-ipa/*
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 7
 
-      - name: Download and installation instructions
+      - name: Local installation instructions
         env:
           ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
-          IPA_OUTPUT_DIR: ${{ runner.temp }}/ios-ipa
         run: |
           {
-            echo '## SideStore IPA'
+            echo '## Private SideStore IPA'
             echo
-            echo "[Download build artifact]($ARTIFACT_URL)"
+            echo "[Download the private IPA artifact]($ARTIFACT_URL)"
             echo
-            echo 'Extract the artifact ZIP, then import the .ipa into SideStore.'
+            echo "On the Mac runner, open ~/Downloads/LedgerMobile-PrivateBuilds/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/"
+            echo
+            echo 'The artifact is available to authorized repository users for 7 days.'
+            echo 'The Mac runner also keeps an owner-only local copy.'
+            echo 'Import the local .ipa into SideStore for personal use.'
             echo 'Keep both Widget and Share extensions, and renew with the same Apple ID.'
             echo 'Open Ledger after installation and unlock to refresh widget credentials.'
-            echo
-            echo '```text'
-            cat "$IPA_OUTPUT_DIR/build-info.txt"
-            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
