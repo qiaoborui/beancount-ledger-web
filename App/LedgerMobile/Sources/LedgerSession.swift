@@ -89,7 +89,11 @@ final class LedgerSession: ObservableObject {
 
     @Published private(set) var phase: Phase
     @Published private(set) var ledger: LedgerBootstrap?
-    @Published private(set) var serverURL: URL?
+    @Published private(set) var location: LedgerLocation?
+    var serverURL: URL? {
+        guard case let .remote(url) = location else { return nil }
+        return url
+    }
     @Published var serverInput: String
     @Published var password = ""
     @Published var errorMessage: String?
@@ -115,7 +119,8 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var transactionMutationStates: [String: LedgerTransactionMutationPhase] = [:]
     @Published private(set) var widgetRefreshStatus: LedgerWidgetRefreshStatus
 
-    private let api: any LedgerAPI
+    private let repositoryFactory: LedgerRepositoryFactory
+    private var repositories: [LedgerLocation: any LedgerRepository] = [:]
     private let biometricStore: any BiometricCredentialStore
     private let passkeyAuthenticator: any PasskeyAuthenticating
     private let widgetSnapshotStore: LedgerWidgetSnapshotStore
@@ -151,6 +156,7 @@ final class LedgerSession: ObservableObject {
 
     init(
         api: (any LedgerAPI)? = nil,
+        repositoryFactory: LedgerRepositoryFactory? = nil,
         defaults: UserDefaults = .standard,
         biometricStore: (any BiometricCredentialStore)? = nil,
         passkeyAuthenticator: (any PasskeyAuthenticating)? = nil,
@@ -176,22 +182,33 @@ final class LedgerSession: ObservableObject {
             ?? LedgerWidgetRefreshStatus(phase: .waitingForBiometrics)
         self.importIndexActivity = importIndexActivity
 
-        if let api {
-            self.api = api
+        if let repositoryFactory {
+            self.repositoryFactory = repositoryFactory
         } else {
-            let configuration = URLSessionConfiguration.default
-            configuration.httpCookieStorage = .shared
-            configuration.httpShouldSetCookies = true
-            configuration.timeoutIntervalForRequest = 20
-            configuration.timeoutIntervalForResource = 40
-            self.api = LedgerAPIClient(session: URLSession(configuration: configuration))
+            let resolvedAPI: any LedgerAPI
+            if let api {
+                resolvedAPI = api
+            } else {
+                let configuration = URLSessionConfiguration.default
+                configuration.httpCookieStorage = .shared
+                configuration.httpShouldSetCookies = true
+                configuration.timeoutIntervalForRequest = 20
+                configuration.timeoutIntervalForResource = 40
+                resolvedAPI = LedgerAPIClient(session: URLSession(configuration: configuration))
+            }
+            self.repositoryFactory = { location in
+                guard case let .remote(baseURL) = location else {
+                    throw LedgerRepositoryError.unsupportedLocation(location)
+                }
+                return RemoteLedgerRepository(api: resolvedAPI, baseURL: baseURL)
+            }
         }
 
         let stored = defaults.string(forKey: Self.serverKey) ?? ""
         compactTabDestinations = Self.storedCompactTabs(in: defaults)
         let normalized = try? ServerConfiguration.normalize(stored)
         serverInput = stored
-        serverURL = normalized
+        location = normalized.map(LedgerLocation.remote)
         phase = normalized == nil ? .configuration : .checking
         privacyShielded = false
         if let normalized {
@@ -261,7 +278,7 @@ final class LedgerSession: ObservableObject {
         do {
             let normalized = try ServerConfiguration.normalize(serverInput)
             if serverURL != normalized { resetGlobalSearch() }
-            serverURL = normalized
+            location = .remote(normalized)
             serverInput = normalized.absoluteString
             errorMessage = nil
             phase = .checking
@@ -287,7 +304,7 @@ final class LedgerSession: ObservableObject {
         defer { isAuthenticationBusy = false }
         errorMessage = nil
         do {
-            try await api.login(baseURL: serverURL, password: candidate)
+            try await remoteRepository(at: serverURL).login(password: candidate)
             guard generation == requestGeneration else {
                 clearAuthenticationCookies(for: serverURL)
                 return
@@ -318,7 +335,8 @@ final class LedgerSession: ObservableObject {
         defer { isAuthenticationBusy = false }
         errorMessage = nil
         do {
-            let options = try await api.passkeyLoginOptions(baseURL: serverURL)
+            let repository = try remoteRepository(at: serverURL)
+            let options = try await repository.passkeyLoginOptions()
             let assertion: PasskeyAssertion
             systemAuthenticationInProgress = true
             do {
@@ -328,7 +346,7 @@ final class LedgerSession: ObservableObject {
                     relyingPartyID: Self.passkeyRelyingPartyID
                 )
             }
-            try await api.verifyPasskey(baseURL: serverURL, assertion: assertion)
+            try await repository.verifyPasskey(assertion: assertion)
             guard generation == requestGeneration else {
                 clearAuthenticationCookies(for: serverURL)
                 return
@@ -387,7 +405,7 @@ final class LedgerSession: ObservableObject {
             var quickUnlockFailed = false
             if !usesLocalMarker {
                 do {
-                    try await api.verifyQuickUnlock(baseURL: serverURL, credential: credential)
+                    try await remoteRepository(at: serverURL).verifyQuickUnlock(credential: credential)
                     guard generation == requestGeneration else {
                         clearAuthenticationCookies(for: serverURL)
                         return
@@ -446,19 +464,19 @@ final class LedgerSession: ObservableObject {
 
         if enabled {
             do {
-                let credential = try await api.registerQuickUnlock(
-                    baseURL: serverURL,
+                let repository = try remoteRepository(at: serverURL)
+                let credential = try await repository.registerQuickUnlock(
                     deviceName: "Ledger iOS · \(biometricTitle)",
                     mode: "text"
                 )
                 guard phase == .ready, self.serverURL == serverURL else {
-                    try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                    try? await repository.revokeQuickUnlock(deviceID: credential.deviceID)
                     return
                 }
                 do {
                     try biometricStore.save(credential, for: serverURL)
                 } catch {
-                    try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                    try? await repository.revokeQuickUnlock(deviceID: credential.deviceID)
                     throw error
                 }
                 if let ledger {
@@ -484,13 +502,13 @@ final class LedgerSession: ObservableObject {
             if widgetCredentialStore.isAvailable,
                let widgetCredential = try widgetCredentialStore.load(),
                widgetCredential.serverOrigin == serverURL.absoluteString {
-                try await api.revokeQuickUnlock(baseURL: serverURL, deviceID: widgetCredential.deviceID)
+                try await remoteRepository(at: serverURL).revokeQuickUnlock(deviceID: widgetCredential.deviceID)
                 try widgetCredentialStore.suspend()
                 try widgetCredentialStore.completeRevocation(deviceID: widgetCredential.deviceID)
                 clearWidgetSnapshot()
             }
             if credential.deviceID != "local-biometric" {
-                try await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                try await remoteRepository(at: serverURL).revokeQuickUnlock(deviceID: credential.deviceID)
                 guard phase == .ready, self.serverURL == serverURL else { return }
             }
             biometricStore.deleteCredential(for: serverURL)
@@ -617,8 +635,7 @@ final class LedgerSession: ObservableObject {
         let generation = requestGeneration
         let range = selectedRange
         do {
-            let detail = try await api.accountDetail(
-                baseURL: serverURL,
+            let detail = try await repository(at: serverURL).accountDetail(
                 account: account,
                 currency: currency,
                 start: range.start,
@@ -659,6 +676,7 @@ final class LedgerSession: ObservableObject {
         let range = selectedRange
         let valuationCurrency = ledger?.valuationCurrency ?? storedValuationCurrency(for: serverURL)
         do {
+            let repository = try repository(at: serverURL)
             let resource: LedgerAnalysisResource
             switch kind {
             case .assets:
@@ -677,14 +695,12 @@ final class LedgerSession: ObservableObject {
                     )
                 )
             case .incomeExpense:
-                async let dashboard = api.dashboard(
-                    baseURL: serverURL,
+                async let dashboard = repository.dashboard(
                     start: range.start,
                     end: range.queryEndExclusive,
                     valuationCurrency: valuationCurrency
                 )
-                async let statement = api.incomeStatement(
-                    baseURL: serverURL,
+                async let statement = repository.incomeStatement(
                     start: range.start,
                     end: range.queryEndExclusive,
                     valuationCurrency: valuationCurrency
@@ -697,7 +713,7 @@ final class LedgerSession: ObservableObject {
                     )
                 )
             case .investments:
-                resource = .investments(try await api.investments(baseURL: serverURL))
+                resource = .investments(try await repository.investments())
             }
             guard generation == requestGeneration,
                   self.serverURL == serverURL,
@@ -721,28 +737,28 @@ final class LedgerSession: ObservableObject {
     }
 
     func importDocuments() async throws -> [LedgerImportDocument] {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.importDocuments(baseURL: serverURL)
+        try await performSensitiveRequest { repository in
+            try await repository.importDocuments()
         }
     }
 
     func importProviders() async throws -> [LedgerImportProviderInfo] {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.importProviders(baseURL: serverURL)
+        try await performSensitiveRequest { repository in
+            try await repository.importProviders()
         }
     }
 
     func gmailAutomation() async throws -> (LedgerGmailStatus, [LedgerGmailPendingImport]) {
-        try await performSensitiveRequest { api, serverURL in
-            async let status = api.gmailStatus(baseURL: serverURL)
-            async let pending = api.gmailPendingImports(baseURL: serverURL)
+        try await performGmailRequest { repository in
+            async let status = repository.gmailStatus()
+            async let pending = repository.gmailPendingImports()
             return try await (status, pending)
         }
     }
 
     func connectGmail() async throws -> URL {
-        let url = try await performSensitiveRequest { api, serverURL in
-            let response = try await api.gmailConnect(baseURL: serverURL)
+        let url = try await performGmailRequest { repository in
+            let response = try await repository.gmailConnect()
             return response.url
         }
         guard let serverURL,
@@ -757,28 +773,28 @@ final class LedgerSession: ObservableObject {
     }
 
     func syncGmail(pendingID: String? = nil) async throws -> LedgerGmailSyncResult {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.gmailSync(baseURL: serverURL, pendingID: pendingID)
+        try await performGmailRequest { repository in
+            try await repository.gmailSync(pendingID: pendingID)
         }
     }
 
     func disconnectGmail() async throws {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.gmailDisconnect(baseURL: serverURL)
+        try await performGmailRequest { repository in
+            try await repository.gmailDisconnect()
         }
         if let serverURL { clearPendingGmailOAuthState(for: serverURL) }
         gmailOAuthResult = nil
     }
 
     func gmailPendingImport(id: String) async throws -> LedgerGmailPendingDetail {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.gmailPendingImport(baseURL: serverURL, id: id)
+        try await performGmailRequest { repository in
+            try await repository.gmailPendingImport(id: id)
         }
     }
 
     func dismissGmailPendingImport(id: String) async throws {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.dismissGmailPendingImport(baseURL: serverURL, id: id)
+        try await performGmailRequest { repository in
+            try await repository.dismissGmailPendingImport(id: id)
         }
     }
 
@@ -786,7 +802,7 @@ final class LedgerSession: ObservableObject {
         guard phase == .ready, let serverURL else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
         }
-        return api.gmailPendingEvents(baseURL: serverURL)
+        return try remoteRepository(at: serverURL).gmailPendingEvents()
     }
 
     func previewImport(
@@ -795,9 +811,8 @@ final class LedgerSession: ObservableObject {
         alipayFundRounding: Bool,
         archivePassword: String
     ) async throws -> LedgerImportPreview {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.previewImport(
-                baseURL: serverURL,
+        try await performSensitiveRequest { repository in
+            try await repository.previewImport(
                 file: file,
                 provider: provider,
                 alipayFundRounding: alipayFundRounding,
@@ -810,9 +825,8 @@ final class LedgerSession: ObservableObject {
         preview: LedgerImportPreview,
         entries: [LedgerImportEntry]
     ) async throws -> LedgerImportCommitResult {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.commitImport(
-                baseURL: serverURL,
+        try await performSensitiveRequest { repository in
+            try await repository.commitImport(
                 request: LedgerImportCommitRequest(
                     importID: preview.importID,
                     provider: preview.provider,
@@ -846,8 +860,8 @@ final class LedgerSession: ObservableObject {
         )
 
         do {
-            try await performSensitiveRequest(validatesRequestGeneration: false) { api, baseURL in
-                try await api.updateTransaction(baseURL: baseURL, source: source, entry: entry)
+            try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
+                try await repository.updateTransaction(source: source, entry: entry)
             }
             confirmTransactionMutations(keys: [key], operationID: operationID)
             scheduleTransactionReconciliation()
@@ -872,8 +886,8 @@ final class LedgerSession: ObservableObject {
             kind: .delete, phase: .pending
         ))
         do {
-            try await performSensitiveRequest(validatesRequestGeneration: false) { api, baseURL in
-                try await api.deleteTransaction(baseURL: baseURL, source: source, reason: reason)
+            try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
+                try await repository.deleteTransaction(source: source, reason: reason)
             }
             confirmTransactionMutations(keys: [key], operationID: operationID)
             scheduleTransactionReconciliation()
@@ -925,8 +939,8 @@ final class LedgerSession: ObservableObject {
         }
 
         do {
-            try await performSensitiveRequest(validatesRequestGeneration: false) { api, baseURL in
-                try await api.addTransactionTags(baseURL: baseURL, sources: sources, tags: tags)
+            try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
+                try await repository.addTransactionTags(sources: sources, tags: tags)
             }
             confirmTransactionMutations(keys: keys, operationID: operationID)
             scheduleTransactionReconciliation()
@@ -950,8 +964,8 @@ final class LedgerSession: ObservableObject {
         if !forceRefresh, phase == .ready,
            let loadedAt = globalTransactionsLoadedAt,
            Date().timeIntervalSince(loadedAt) < 60 { return }
-        let payload = try await performSensitiveRequest(validatesRequestGeneration: false) { api, url in
-            let payload = try await api.globalTransactions(baseURL: url)
+        let payload = try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
+            let payload = try await repository.globalTransactions()
             guard payload.sensitiveUnlocked else {
                 throw LedgerAPIError.server(status: 423, message: "服务器敏感数据已锁定")
             }
@@ -1132,23 +1146,23 @@ final class LedgerSession: ObservableObject {
         replacingDeviceID: String? = nil
     ) async {
         do {
-            let credential = try await api.registerQuickUnlock(
-                baseURL: serverURL,
+            let repository = try remoteRepository(at: serverURL)
+            let credential = try await repository.registerQuickUnlock(
                 deviceName: "Ledger iOS · \(biometricTitle)",
                 mode: "text"
             )
             guard phase == .ready, self.serverURL == serverURL else {
-                try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                try? await repository.revokeQuickUnlock(deviceID: credential.deviceID)
                 return
             }
             do {
                 try biometricStore.save(credential, for: serverURL)
             } catch {
-                try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                try? await repository.revokeQuickUnlock(deviceID: credential.deviceID)
                 throw error
             }
             if let replacingDeviceID, replacingDeviceID != credential.deviceID {
-                try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: replacingDeviceID)
+                try? await repository.revokeQuickUnlock(deviceID: replacingDeviceID)
             }
         } catch {
             guard phase == .ready, self.serverURL == serverURL else { return }
@@ -1169,7 +1183,10 @@ final class LedgerSession: ObservableObject {
             return
         }
 
-        await Self.revokePendingWidgetCredential(using: api, store: widgetCredentialStore)
+        await Self.revokePendingWidgetCredential(
+            using: { try self.repository(at: $0) },
+            store: widgetCredentialStore
+        )
         do {
             if try widgetCredentialStore.pendingRevocation() != nil {
                 recordWidgetRefreshStatus(.authorizationRejected)
@@ -1202,7 +1219,10 @@ final class LedgerSession: ObservableObject {
                     return
                 }
                 try widgetCredentialStore.suspend()
-                await Self.revokePendingWidgetCredential(using: api, store: widgetCredentialStore)
+                await Self.revokePendingWidgetCredential(
+                    using: { try self.repository(at: $0) },
+                    store: widgetCredentialStore
+                )
                 if try widgetCredentialStore.pendingRevocation() != nil {
                     recordWidgetRefreshStatus(.authorizationRejected)
                     return
@@ -1217,13 +1237,13 @@ final class LedgerSession: ObservableObject {
         defer { widgetCredentialRegistrationInFlight = false }
         recordWidgetRefreshStatus(.provisioning)
         do {
-            let credential = try await api.registerQuickUnlock(
-                baseURL: serverURL,
+            let repository = try remoteRepository(at: serverURL)
+            let credential = try await repository.registerQuickUnlock(
                 deviceName: "Ledger Widget",
                 mode: "widget"
             )
             guard phase == .ready, self.serverURL == serverURL else {
-                try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                try? await repository.revokeQuickUnlock(deviceID: credential.deviceID)
                 return
             }
             do {
@@ -1242,7 +1262,7 @@ final class LedgerSession: ObservableObject {
                 WidgetCenter.shared.reloadAllTimelines()
                 #endif
             } catch {
-                try? await api.revokeQuickUnlock(baseURL: serverURL, deviceID: credential.deviceID)
+                try? await repository.revokeQuickUnlock(deviceID: credential.deviceID)
                 recordWidgetRefreshStatus(.storageUnavailable)
             }
         } catch {
@@ -1294,16 +1314,18 @@ final class LedgerSession: ObservableObject {
     }
 
     private func suspendWidgetCredential() {
-        let api = self.api
+        let repositoryFactory: LedgerRepositoryFactory = { try self.repository(at: $0) }
         let store = widgetCredentialStore
         let currentCredential = try? store.load()
         do {
             try store.suspend()
         } catch {
-            guard let currentCredential else { return }
+            guard let currentCredential,
+                  let serverURL = URL(string: currentCredential.serverOrigin) else { return }
+            guard let repository = try? remoteRepository(at: serverURL) else { return }
             Task {
                 await Self.revokeWidgetCredential(
-                    using: api,
+                    using: repository,
                     store: store,
                     credential: currentCredential
                 )
@@ -1311,18 +1333,17 @@ final class LedgerSession: ObservableObject {
             return
         }
         Task {
-            await Self.revokePendingWidgetCredential(using: api, store: store)
+            await Self.revokePendingWidgetCredential(using: repositoryFactory, store: store)
         }
     }
 
     private static func revokeWidgetCredential(
-        using api: any LedgerAPI,
+        using repository: any LedgerRemoteQuickUnlock,
         store: any LedgerWidgetCredentialStoring,
         credential: LedgerWidgetCredential
     ) async {
-        guard let serverURL = URL(string: credential.serverOrigin) else { return }
         do {
-            try await api.revokeWidgetQuickUnlock(baseURL: serverURL, credential: credential)
+            try await repository.revokeWidgetQuickUnlock(credential: credential)
         } catch let error as LedgerAPIError {
             guard case let .server(status, _) = error, status == 401 else { return }
         } catch {
@@ -1332,7 +1353,7 @@ final class LedgerSession: ObservableObject {
     }
 
     private static func revokePendingWidgetCredential(
-        using api: any LedgerAPI,
+        using repositoryFactory: LedgerRepositoryFactory,
         store: any LedgerWidgetCredentialStoring
     ) async {
         let credential: LedgerWidgetCredential
@@ -1344,7 +1365,10 @@ final class LedgerSession: ObservableObject {
         }
         guard let serverURL = URL(string: credential.serverOrigin) else { return }
         do {
-            try await api.revokeWidgetQuickUnlock(baseURL: serverURL, credential: credential)
+            guard let repository = try repositoryFactory(.remote(serverURL)) as? any LedgerRemoteQuickUnlock else {
+                return
+            }
+            try await repository.revokeWidgetQuickUnlock(credential: credential)
         } catch let error as LedgerAPIError {
             guard case let .server(status, _) = error, status == 401 else { return }
         } catch {
@@ -1366,8 +1390,8 @@ final class LedgerSession: ObservableObject {
     }
 
     func indexInfo(targetGitSHA: String? = nil) async throws -> LedgerIndexInfo {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.indexInfo(baseURL: serverURL, targetGitSHA: targetGitSHA)
+        try await performSensitiveRequest { repository in
+            try await repository.indexInfo(targetGitSHA: targetGitSHA)
         }
     }
 
@@ -1410,9 +1434,8 @@ final class LedgerSession: ObservableObject {
 
     func runBQL(query: String) async throws -> BQLResult {
         let currency = ledger?.valuationCurrency ?? "CNY"
-        return try await performSensitiveRequest { api, serverURL in
-            try await api.runBQL(
-                baseURL: serverURL,
+        return try await performSensitiveRequest { repository in
+            try await repository.runBQL(
                 query: query,
                 valuationCurrency: currency
             )
@@ -1420,32 +1443,32 @@ final class LedgerSession: ObservableObject {
     }
 
     func loadBQLHistory() async throws -> [BQLHistoryRecord] {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.bqlHistory(baseURL: serverURL)
+        try await performSensitiveRequest { repository in
+            try await repository.bqlHistory()
         }
     }
 
     func saveBQLHistory(query: String) async throws -> BQLHistoryRecord {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.saveBQLHistory(baseURL: serverURL, query: query)
+        try await performSensitiveRequest { repository in
+            try await repository.saveBQLHistory(query: query)
         }
     }
 
     func generateBQLHistoryTitle(id: String) async throws -> BQLHistoryRecord {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.generateBQLHistoryTitle(baseURL: serverURL, id: id)
+        try await performSensitiveRequest { repository in
+            try await repository.generateBQLHistoryTitle(id: id)
         }
     }
 
     func renameBQLHistory(id: String, title: String) async throws -> BQLHistoryRecord {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.renameBQLHistory(baseURL: serverURL, id: id, title: title)
+        try await performSensitiveRequest { repository in
+            try await repository.renameBQLHistory(id: id, title: title)
         }
     }
 
     func deleteBQLHistory(id: String) async throws {
-        try await performSensitiveRequest { api, serverURL in
-            try await api.deleteBQLHistory(baseURL: serverURL, id: id)
+        try await performSensitiveRequest { repository in
+            try await repository.deleteBQLHistory(id: id)
         }
     }
 
@@ -1561,7 +1584,7 @@ final class LedgerSession: ObservableObject {
         clearTransactionMutations()
         defaults.removeObject(forKey: Self.serverKey)
         ledger = nil
-        self.serverURL = nil
+        location = nil
         serverInput = ""
         password = ""
         errorMessage = nil
@@ -1762,9 +1785,9 @@ final class LedgerSession: ObservableObject {
         let range = LedgerDateRange(start: day, end: day, preset: .custom)
         let today = LedgerDateRange.today(now: ledgerNow())
         let currency = ledger?.valuationCurrency ?? "CNY"
-        return try await performSensitiveRequest(validatesRequestGeneration: false) { api, serverURL in
-            let payload = try await api.bootstrap(
-                baseURL: serverURL, start: range.start, end: range.queryEndExclusive,
+        return try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
+            let payload = try await repository.bootstrap(
+                start: range.start, end: range.queryEndExclusive,
                 today: today, valuationCurrency: currency
             )
             guard payload.sensitiveUnlocked else {
@@ -1786,11 +1809,12 @@ final class LedgerSession: ObservableObject {
     private func checkSession(at serverURL: URL, generation: Int, persistOrigin: Bool = false) async {
         errorMessage = nil
         do {
-            let health = try await api.health(baseURL: serverURL)
+            let repository = try remoteRepository(at: serverURL)
+            let health = try await repository.health()
             try health.validateForMobileClient()
-            let auth = try await api.authStatus(baseURL: serverURL)
+            let auth = try await repository.authStatus()
             let passkeyStatus = isTrustedNativePasskeyOrigin(serverURL)
-                ? try? await api.passkeyStatus(baseURL: serverURL)
+                ? try? await repository.passkeyStatus()
                 : nil
             guard generation == requestGeneration else { return }
             accountPeriodBalancesAvailable = health.supportsAccountPeriodBalances
@@ -1832,8 +1856,7 @@ final class LedgerSession: ObservableObject {
     ) async throws {
         let targetRange = range ?? selectedRange
         let targetCurrency = valuationCurrency ?? storedValuationCurrency(for: serverURL)
-        let payload = try await api.bootstrap(
-            baseURL: serverURL,
+        let payload = try await repository(at: serverURL).bootstrap(
             start: targetRange.start,
             end: targetRange.queryEndExclusive,
             today: LedgerDateRange.today(now: ledgerNow()),
@@ -2013,27 +2036,25 @@ final class LedgerSession: ObservableObject {
         let month = LedgerDateRange.current(.month, now: widgetRefreshAttemptAt)
         let today = LedgerDateRange.today(now: widgetRefreshAttemptAt)
         let weekStart = LedgerWidgetDates.weekStart(today)
-        async let weekRequest: LedgerHomeReport? = try? await api.homeReport(
-            baseURL: serverURL, start: weekStart, end: LedgerWidgetDates.adding(7, to: weekStart),
+        guard let repository = try? repository(at: serverURL) else { return }
+        async let weekRequest: LedgerHomeReport? = try? await repository.homeReport(
+            start: weekStart, end: LedgerWidgetDates.adding(7, to: weekStart),
             valuationCurrency: valuationCurrency
         )
-        async let yearRequest: LedgerHomeReport? = try? await api.homeReport(
-            baseURL: serverURL, start: String(today.prefix(4)) + "-01-01",
+        async let yearRequest: LedgerHomeReport? = try? await repository.homeReport(
+            start: String(today.prefix(4)) + "-01-01",
             end: String((Int(today.prefix(4)) ?? 2026) + 1) + "-01-01", valuationCurrency: valuationCurrency
         )
-        async let historyRequest: LedgerHomeReport? = try? await api.homeReport(
-            baseURL: serverURL, start: LedgerWidgetDates.adding(-77, to: weekStart),
+        async let historyRequest: LedgerHomeReport? = try? await repository.homeReport(
+            start: LedgerWidgetDates.adding(-77, to: weekStart),
             end: LedgerWidgetDates.adding(1, to: today), valuationCurrency: valuationCurrency
         )
-        async let reportRequest: LedgerHomeReport? = try? await api.homeReport(
-            baseURL: serverURL,
+        async let reportRequest: LedgerHomeReport? = try? await repository.homeReport(
             start: month.start,
             end: month.queryEndExclusive,
             valuationCurrency: valuationCurrency
         )
-        async let importDocumentsRequest: [LedgerImportDocument]? = try? await api.importDocuments(
-            baseURL: serverURL
-        )
+        async let importDocumentsRequest: [LedgerImportDocument]? = try? await repository.importDocuments()
         let (report, importDocuments, week, year, history) = await (reportRequest, importDocumentsRequest, weekRequest, yearRequest, historyRequest)
         guard generation == requestGeneration, self.serverURL == serverURL else {
             return
@@ -2169,9 +2190,46 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    /// Each location retains one repository for this session's lifetime.
+    func repository(at location: LedgerLocation) throws -> any LedgerRepository {
+        if let cached = repositories[location] { return cached }
+        let repository = try repositoryFactory(location)
+        repositories[location] = repository
+        return repository
+    }
+
+    var activeRepository: (any LedgerRepository)? {
+        get throws {
+            guard let location else { return nil }
+            return try repository(at: location)
+        }
+    }
+
+    private func repository(at serverURL: URL) throws -> any LedgerRepository {
+        try repository(at: .remote(serverURL))
+    }
+
+    private func remoteRepository(at serverURL: URL) throws -> any RemoteLedgerCapabilities {
+        guard let remote = try repository(at: serverURL) as? any RemoteLedgerCapabilities else {
+            throw LedgerRepositoryError.capabilityUnavailable("remote services")
+        }
+        return remote
+    }
+
+    private func performGmailRequest<Value: Sendable>(
+        _ operation: @Sendable (any LedgerRemoteGmail) async throws -> Value
+    ) async throws -> Value {
+        try await performSensitiveRequest { repository in
+            guard let gmail = repository as? any LedgerRemoteGmail else {
+                throw LedgerRepositoryError.capabilityUnavailable("Gmail")
+            }
+            return try await operation(gmail)
+        }
+    }
+
     private func performSensitiveRequest<Value: Sendable>(
         validatesRequestGeneration: Bool = true,
-        _ operation: @Sendable (any LedgerAPI, URL) async throws -> Value
+        _ operation: @Sendable (any LedgerRepository) async throws -> Value
     ) async throws -> Value {
         guard phase == .ready, let serverURL else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
@@ -2179,7 +2237,7 @@ final class LedgerSession: ObservableObject {
         let generation = requestGeneration
         let epoch = sessionEpoch
         do {
-            let value = try await operation(api, serverURL)
+            let value = try await operation(repository(at: serverURL))
             guard (!validatesRequestGeneration || generation == requestGeneration),
                   epoch == sessionEpoch,
                   self.serverURL == serverURL,

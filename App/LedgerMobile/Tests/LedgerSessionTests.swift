@@ -2,8 +2,119 @@ import Foundation
 import XCTest
 @testable import LedgerMobile
 
+/// Compile-time proof that a core repository can omit every remote capability.
+private final class CoreOnlyRepository: LedgerRepository {
+    private var unused: LedgerRepositoryError { .capabilityUnavailable("unused test operation") }
+    func bootstrap(start: String, end: String, today: String, valuationCurrency: String) async throws -> LedgerBootstrap { throw unused }
+    func homeReport(start: String, end: String, valuationCurrency: String) async throws -> LedgerHomeReport { throw unused }
+    func globalTransactions() async throws -> LedgerGlobalTransactions { throw unused }
+    func importDocuments() async throws -> [LedgerImportDocument] { throw unused }
+    func importProviders() async throws -> [LedgerImportProviderInfo] { throw unused }
+    func previewImport(file: LedgerImportSelectedFile, provider: String?, alipayFundRounding: Bool, archivePassword: String) async throws -> LedgerImportPreview { throw unused }
+    func commitImport(request: LedgerImportCommitRequest) async throws -> LedgerImportCommitResult { throw unused }
+    func updateTransaction(source: TransactionSource, entry: LedgerTransactionEntry) async throws { throw unused }
+    func deleteTransaction(source: TransactionSource, reason: String) async throws { throw unused }
+    func addTransactionTags(sources: [TransactionSource], tags: [String]) async throws { throw unused }
+    func indexInfo(targetGitSHA: String?) async throws -> LedgerIndexInfo { throw unused }
+    func accountDetail(account: String, currency: String, start: String, end: String) async throws -> LedgerAccountDetail { throw unused }
+    func dashboard(start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard { throw unused }
+    func incomeStatement(start: String, end: String, valuationCurrency: String) async throws -> LedgerIncomeStatement { throw unused }
+    func investments() async throws -> LedgerInvestmentSummary { throw unused }
+    func runBQL(query: String, valuationCurrency: String) async throws -> BQLResult { throw unused }
+    func bqlHistory() async throws -> [BQLHistoryRecord] { throw unused }
+    func saveBQLHistory(query: String) async throws -> BQLHistoryRecord { throw unused }
+    func generateBQLHistoryTitle(id: String) async throws -> BQLHistoryRecord { throw unused }
+    func renameBQLHistory(id: String, title: String) async throws -> BQLHistoryRecord { throw unused }
+    func deleteBQLHistory(id: String) async throws { throw unused }
+}
+
 @MainActor
 final class LedgerSessionTests: XCTestCase {
+    func testRepositoryFactoryBindsConfiguredRemoteOriginAndReusesIdentity() async throws {
+        let suiteName = "ledger-repository-boundary-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let origin = URL(string: "https://ledger.example.com")!
+        defaults.set(origin.absoluteString, forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let api = SessionMockAPI(payload: Self.payload)
+        var factoryCalls: [LedgerLocation] = []
+        let session = LedgerSession(
+            repositoryFactory: { location in
+                factoryCalls.append(location)
+                guard case let .remote(url) = location else {
+                    throw LedgerRepositoryError.unsupportedLocation(location)
+                }
+                return RemoteLedgerRepository(api: api, baseURL: url)
+            },
+            defaults: defaults
+        )
+
+        let initial = try XCTUnwrap(session.activeRepository)
+        await session.resume()
+        _ = try await session.importProviders()
+
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(session.location, .remote(origin))
+        XCTAssertTrue(initial === (try session.activeRepository))
+        XCTAssertEqual(factoryCalls, [.remote(origin)])
+        let bootstrapURL = await api.bootstrapRequests().first?.baseURL
+        XCTAssertEqual(bootstrapURL, origin)
+    }
+
+    func testRepositoryCacheSeparatesTypedLocationsAndCoreOnlyCapabilities() throws {
+        let suiteName = "ledger-repository-locations-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let firstLocation = LedgerLocation.local(UUID())
+        let secondLocation = LedgerLocation.local(UUID())
+        let remoteLocation = LedgerLocation.remote(URL(string: "https://ledger.example.com")!)
+        var factoryCalls: [LedgerLocation] = []
+        let session = LedgerSession(repositoryFactory: { location in
+            factoryCalls.append(location)
+            return CoreOnlyRepository()
+        }, defaults: defaults)
+
+        let first = try session.repository(at: firstLocation)
+        let second = try session.repository(at: secondLocation)
+        let remote = try session.repository(at: remoteLocation)
+        XCTAssertTrue(first === (try session.repository(at: firstLocation)))
+        XCTAssertFalse(first === second)
+        XCTAssertFalse(first === remote)
+        XCTAssertEqual(factoryCalls, [firstLocation, secondLocation, remoteLocation])
+        XCTAssertFalse(first is any LedgerRemoteAuthentication)
+        XCTAssertFalse(first is any LedgerRemotePasskeys)
+        XCTAssertFalse(first is any LedgerRemoteQuickUnlock)
+        XCTAssertFalse(first is any LedgerRemoteGmail)
+        XCTAssertNil(session.location)
+        XCTAssertNil(session.serverURL)
+        XCTAssertNil(try session.activeRepository)
+    }
+
+    func testDefaultFactoryExplicitlyRejectsLocalLocation() throws {
+        let suiteName = "ledger-repository-local-unavailable-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        let location = LedgerLocation.local(UUID())
+        XCTAssertThrowsError(try session.repository(at: location)) { error in
+            XCTAssertEqual(error as? LedgerRepositoryError, .unsupportedLocation(location))
+        }
+    }
+
+    func testRemoteSessionRequiresRemoteCapabilitiesBeforeLoadingLedger() async {
+        let suiteName = "ledger-repository-capability-gate-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(repositoryFactory: { _ in CoreOnlyRepository() }, defaults: defaults)
+
+        await session.resume()
+
+        XCTAssertEqual(session.phase, .configuration)
+        XCTAssertNil(session.ledger)
+        XCTAssertNotNil(session.errorMessage)
+    }
+
     func testWidgetDayRouteSurvivesColdStart() async {
         let suiteName = "ledger-widget-route-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -2719,6 +2830,7 @@ private actor SessionRequestGate {
 
 private actor SessionMockAPI: LedgerAPI {
     struct BootstrapRequest: Equatable, Sendable {
+        let baseURL: URL
         let start: String
         let end: String
         let today: String
@@ -3029,6 +3141,7 @@ private actor SessionMockAPI: LedgerAPI {
     ) async throws -> LedgerBootstrap {
         bootstrapCalls += 1
         requests.append(BootstrapRequest(
+            baseURL: baseURL,
             start: start,
             end: end,
             today: today,

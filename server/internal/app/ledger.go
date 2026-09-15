@@ -14,33 +14,6 @@ import (
 	"time"
 )
 
-type BeanLine struct {
-	File string `json:"file"`
-	Line int    `json:"line"`
-	Text string `json:"text"`
-}
-
-type Posting struct {
-	Account  string `json:"account"`
-	Amount   int    `json:"amount"`
-	Currency string `json:"currency,omitempty"`
-	Flag     string `json:"flag,omitempty"`
-}
-
-type parsedPosting struct {
-	Posting
-	Blank         bool
-	Quantity      BeanAmount
-	CostAmount    int
-	CostCurrency  string
-	Cost          BeanAmount
-	TotalCost     bool
-	PriceAmount   int
-	PriceCurrency string
-	Price         BeanAmount
-	TotalPrice    bool
-}
-
 type Transaction struct {
 	Date      string                   `json:"date"`
 	Payee     string                   `json:"payee"`
