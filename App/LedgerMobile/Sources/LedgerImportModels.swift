@@ -10,7 +10,7 @@ struct LedgerImportProviderInfo: Decodable, Equatable, Identifiable, Sendable {
 }
 
 enum LedgerMobileImportCapabilities {
-    static let supportsAutomaticEmailImport = true
+    static let supportsAutomaticEmailImport = false
 
     static let supportedManualFileExtensions = [
         ".csv", ".xlsx", ".xls", ".pdf", ".eml", ".html", ".htm", ".zip",
@@ -19,7 +19,7 @@ enum LedgerMobileImportCapabilities {
     private static let supportedManualFileExtensionSet = Set(supportedManualFileExtensions)
 
     static func fileImportProviders(from providers: [LedgerImportProviderInfo]) -> [LedgerImportProviderInfo] {
-        providers
+        providers.filter { $0.id != "gmail-auto" && $0.engine != "gmail" }
     }
 
     static func supportedExtensions(from providers: [LedgerImportProviderInfo]) -> Set<String> {
@@ -197,7 +197,7 @@ enum LedgerImportFileValidationError: LocalizedError, Equatable {
         case .tooLarge:
             "账单文件超过 10MB"
         case let .unsupported(fileExtension):
-            "服务器暂不支持 \(fileExtension.isEmpty ? "该文件类型" : fileExtension)"
+            "暂不支持 \(fileExtension.isEmpty ? "该文件类型" : fileExtension)"
         }
     }
 }

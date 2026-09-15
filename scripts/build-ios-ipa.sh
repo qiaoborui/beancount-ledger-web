@@ -3,6 +3,11 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -f "$repo_root/App/LedgerMobile/Runtime/BeancountRuntime.c" ]]; then
+  echo 'IPA packaging is gated pending the embedded runtime license audit and framework packaging update.' >&2
+  echo 'See App/LedgerMobile/Runtime/THIRD_PARTY.md; use the documented private Xcode build workflow for testing.' >&2
+  exit 1
+fi
 output_dir="${1:?Usage: bash scripts/build-ios-ipa.sh OUTPUT_DIRECTORY}"
 mkdir -p "$output_dir"
 output_dir="$(cd "$output_dir" && pwd)"

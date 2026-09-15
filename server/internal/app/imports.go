@@ -231,12 +231,12 @@ func (s *Server) createImportPreviewFromUploadsWithID(ctx context.Context, impor
 		if err := os.WriteFile(dedupedFile, []byte(""), 0o600); err != nil {
 			return nil, err
 		}
-	} else if githubAPIEnabled(s.cfg) {
+	} else if githubAPIEnabled(s.cfg) || s.cfg.localTransport {
 		dedupedBean, skipped, err := s.dedupGeneratedBeanWithReadModel(ctx, generatedBean, upload.StatementHash)
 		if err != nil {
 			return nil, err
 		}
-		dedupReport = fmt.Sprintf("GitHub API 读模型去重：生成 %d 条，跳过 %d 条已存在，待写入 %d 条。", generatedSummary.CandidateCount, skipped, generatedSummary.CandidateCount-skipped)
+		dedupReport = fmt.Sprintf("账本快照去重：生成 %d 条，跳过 %d 条已存在，待写入 %d 条。", generatedSummary.CandidateCount, skipped, generatedSummary.CandidateCount-skipped)
 		if err := os.WriteFile(dedupedFile, []byte(dedupedBean), 0o600); err != nil {
 			return nil, err
 		}
@@ -823,6 +823,12 @@ func (s *Server) ensureImportRequirements(provider string) (billImporter, error)
 		return nil, fmt.Errorf("provider must be %s", strings.Join(s.importerRegistry().IDs(), ", "))
 	}
 	cfg := importer.ProviderConfig()
+	if s.cfg.localTransport {
+		if _, err := s.readLedgerFileContent(context.Background(), cfg.Config); err != nil {
+			return nil, err
+		}
+		return importer, nil
+	}
 	if githubAPIEnabled(s.cfg) {
 		// GitHub-backed engines read and validate their config during generation;
 		// main.bean and the local dedup script are not used by this path.
@@ -849,7 +855,13 @@ func (s *Server) readLedgerFileContent(ctx context.Context, relative string) ([]
 		}
 		return client.readLedgerFile(ctx, relative)
 	}
-	return os.ReadFile(filepath.Join(s.cfg.LedgerRoot, filepath.FromSlash(relative)))
+	content, err := os.ReadFile(filepath.Join(s.cfg.LedgerRoot, filepath.FromSlash(relative)))
+	if s.cfg.localTransport && errors.Is(err, os.ErrNotExist) {
+		if defaults, supported, defaultErr := s.localDefaultImportConfig(relative); supported {
+			return defaults, defaultErr
+		}
+	}
+	return content, err
 }
 
 func (s *Server) prepareCmbInput(inputFile, originalFilename, importID string) (preparedImportInput, error) {

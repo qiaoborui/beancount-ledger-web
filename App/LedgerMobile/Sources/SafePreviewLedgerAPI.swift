@@ -2,7 +2,38 @@ import Foundation
 
 extension LedgerSession {
     static func appSession(processInfo: ProcessInfo = .processInfo) -> LedgerSession {
+        #if DEBUG && targetEnvironment(simulator)
+        // UI automation exercises the real local runtimes in a dedicated sandbox.
+        // Authentication bypass exists only in simulator builds and only for this
+        // UUID-scoped test catalog, never the user's Application Support ledgers.
+        if processInfo.arguments.contains("--local-ui-testing"),
+           let rawID = processInfo.environment["LEDGER_LOCAL_TEST_ID"], let id = UUID(uuidString: rawID),
+           let defaults = UserDefaults(suiteName: "ledger-local-ui-\(id.uuidString)") {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("LocalUITest-\(id.uuidString)")
+            let catalog: LocalLedgerCatalog
+            if processInfo.arguments.contains("--local-sync-ui-testing") {
+                catalog = LocalLedgerCatalog(rootDirectory: root,
+                    gitTransport: LocalUITestGitTransport(rootDirectory: root),
+                    gitCredentials: LocalUITestGitCredentials())
+            } else {
+                catalog = LocalLedgerCatalog(rootDirectory: root)
+            }
+            return LedgerSession(repositoryFactory: { _ in throw LocalLedgerError.runtimeUnavailable },
+                localOnly: true,
+                localCatalog: catalog, localAuthenticator: LocalUITestAuthenticator(),
+                defaults: defaults, widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: "ledger-local-ui-widget-\(id.uuidString)"),
+                widgetCredentialStore: LocalUITestWidgetStore())
+        }
+        #endif
         #if DEBUG
+        if processInfo.environment["XCTestConfigurationFilePath"] != nil,
+           !processInfo.arguments.contains("--safe-preview") {
+            let suite = "ledger-test-host-\(UUID().uuidString)"
+            return LedgerSession(repositoryFactory: { _ in throw LocalLedgerError.runtimeUnavailable },
+                defaults: UserDefaults(suiteName: suite)!,
+                widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: suite + "-widget"),
+                widgetCredentialStore: LocalUITestWidgetStore())
+        }
         if processInfo.arguments.contains("--safe-preview") {
             let suiteName = "ledger-mobile-safe-preview"
             let defaults = UserDefaults(suiteName: suiteName) ?? .standard
@@ -20,9 +51,112 @@ extension LedgerSession {
             return LedgerSession(api: SafePreviewLedgerAPI(), defaults: defaults, ledgerNow: { previewNow })
         }
         #endif
-        return LedgerSession()
+        return LedgerSession(showsStorageChoice: true, localOnly: true, automaticLocalSyncServicesEnabled: true)
     }
 }
+
+#if DEBUG && targetEnvironment(simulator)
+@MainActor
+private final class LocalUITestAuthenticator: LocalLedgerAuthenticating {
+    let isAvailable = true
+    func authenticate() async throws { }
+}
+
+/// Deterministic Git exchange for toolbar UI tests. This transport has no network
+/// implementation and accepts only the UUID-scoped simulator fixture directory.
+private actor LocalUITestGitTransport: LocalGitTransport {
+    private let rootDirectory: URL
+    private var commits: [String: [String: Data]] = [:]
+    private var parents: [String: String] = [:]
+    private var head = ""
+
+    init(rootDirectory: URL) {
+        self.rootDirectory = rootDirectory.resolvingSymlinksInPath().standardizedFileURL
+    }
+
+    func dispatch(_ request: LocalGitRequest) async throws -> Data {
+        guard request.url == "https://example.invalid/ledger.git" else {
+            throw LocalStorageError.gitFailure("UI fixture accepts only its example.invalid repository")
+        }
+        _ = try fixtureDirectory(request.storageRoot)
+        // Keep each fetch pending across XCUI's post-tap idle wait and first
+        // accessibility snapshot, including a second sync with no commit to push.
+        // This delay exists only in the explicitly requested simulator transport.
+        if request.operation == "fetch" { try await Task.sleep(for: .seconds(8)) }
+        switch request.operation {
+        case "fetch":
+            return try JSONSerialization.data(withJSONObject: ["remoteHead": head, "branchExists": !head.isEmpty])
+        case "commit":
+            let directory = try fixtureDirectory(request.directory)
+            guard let enumerator = FileManager.default.enumerator(at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else {
+                throw LocalStorageError.gitFailure("UI fixture snapshot unavailable")
+            }
+            var files: [String: Data] = [:]
+            while let file = enumerator.nextObject() as? URL {
+                let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+                guard values.isSymbolicLink != true else { throw LocalStorageError.unsafeFile(file.lastPathComponent) }
+                if values.isRegularFile == true {
+                    let relative = String(file.standardizedFileURL.path.dropFirst(directory.path.count + 1))
+                    files[relative] = try Data(contentsOf: file)
+                }
+            }
+            let commit = UUID().uuidString
+            commits[commit] = files
+            parents[commit] = request.parent ?? ""
+            return try JSONSerialization.data(withJSONObject: ["commit": commit])
+        case "push":
+            guard let commit = request.commit, commits[commit] != nil,
+                  request.expectedRemoteHead == head, parents[commit] == head else {
+                throw LocalStorageError.gitFailure("UI fixture remote changed")
+            }
+            head = commit
+            return try JSONSerialization.data(withJSONObject: ["remoteHead": head])
+        case "export":
+            let directory = try fixtureDirectory(request.directory)
+            guard let commit = request.commit, let files = commits[commit] else {
+                throw LocalStorageError.gitFailure("UI fixture commit unavailable")
+            }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            for (path, data) in files {
+                let target = directory.appendingPathComponent(path)
+                try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try data.write(to: target)
+            }
+            return Data("{}".utf8)
+        default:
+            throw LocalStorageError.gitFailure("Unsupported UI fixture Git operation")
+        }
+    }
+
+    private func fixtureDirectory(_ path: String?) throws -> URL {
+        guard let path else { throw LocalStorageError.gitFailure("Missing UI fixture directory") }
+        let directory = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
+        guard directory.path.hasPrefix(rootDirectory.path + "/") else {
+            throw LocalStorageError.unsafeFile("Outside UI fixture directory")
+        }
+        return directory
+    }
+}
+
+private final class LocalUITestGitCredentials: LocalGitCredentialStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [UUID: LocalGitCredential] = [:]
+    func load(for id: UUID) throws -> LocalGitCredential? { lock.withLock { values[id] } }
+    func save(_ credential: LocalGitCredential, for id: UUID) throws { lock.withLock { values[id] = credential } }
+    func remove(for id: UUID) throws { _ = lock.withLock { values.removeValue(forKey: id) } }
+}
+#endif
+#if DEBUG
+private final class LocalUITestWidgetStore: LedgerWidgetCredentialStoring, @unchecked Sendable {
+    let isAvailable = false
+    func load() throws -> LedgerWidgetCredential? { nil }
+    func save(_ credential: LedgerWidgetCredential) throws { }
+    func suspend() throws { }
+    func pendingRevocation() throws -> LedgerWidgetCredential? { nil }
+    func completeRevocation(deviceID: String) throws { }
+}
+#endif
 
 #if DEBUG
 private actor SafePreviewLedgerAPI: LedgerAPI {

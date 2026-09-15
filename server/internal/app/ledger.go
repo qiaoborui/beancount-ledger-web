@@ -14,33 +14,6 @@ import (
 	"time"
 )
 
-type BeanLine struct {
-	File string `json:"file"`
-	Line int    `json:"line"`
-	Text string `json:"text"`
-}
-
-type Posting struct {
-	Account  string `json:"account"`
-	Amount   int    `json:"amount"`
-	Currency string `json:"currency,omitempty"`
-	Flag     string `json:"flag,omitempty"`
-}
-
-type parsedPosting struct {
-	Posting
-	Blank         bool
-	Quantity      BeanAmount
-	CostAmount    int
-	CostCurrency  string
-	Cost          BeanAmount
-	TotalCost     bool
-	PriceAmount   int
-	PriceCurrency string
-	Price         BeanAmount
-	TotalPrice    bool
-}
-
 type Transaction struct {
 	Date      string                   `json:"date"`
 	Payee     string                   `json:"payee"`
@@ -171,7 +144,12 @@ var (
 	wealthAccountRe     = regexp.MustCompile(`(?i)(^|:)(Wealth|Fund|Stock|Bond|HousingFund|Insurance)(:|$)|理财|稳利宝|增利宝|余利宝|余额宝|零钱通|基金|债券|股票|保险|黄金|存单|定期`)
 )
 
-func mainBeanPath(cfg Config) string     { return filepath.Join(cfg.LedgerRoot, "main.bean") }
+func mainBeanPath(cfg Config) string {
+	if cfg.localTransport && cfg.localEntrypoint != "" {
+		return filepath.Join(cfg.LedgerRoot, cfg.localEntrypoint)
+	}
+	return filepath.Join(cfg.LedgerRoot, "main.bean")
+}
 func accountsBeanPath(cfg Config) string { return filepath.Join(cfg.LedgerRoot, "accounts.bean") }
 func transactionsDir(cfg Config) string  { return filepath.Join(cfg.LedgerRoot, "transactions") }
 

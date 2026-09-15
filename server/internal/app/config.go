@@ -21,6 +21,10 @@ const (
 )
 
 type Config struct {
+	// These fields are set exclusively by the embedded mobile transport.
+	localTransport              bool
+	localEntrypoint             string
+	localCanonical              *LocalCanonicalModel
 	SelfHosted                  bool
 	MaintenanceMode             bool
 	AppRoot                     string

@@ -43,15 +43,16 @@ type InvestmentPosition struct {
 }
 
 type InvestmentLot struct {
-	Date          string   `json:"date"`
-	Account       string   `json:"account"`
-	AccountLabel  string   `json:"accountLabel"`
-	Commodity     string   `json:"commodity"`
-	CommodityName string   `json:"commodityName"`
-	Quantity      float64  `json:"quantity"`
-	UnitCost      *float64 `json:"unitCost,omitempty"`
-	CostValue     *float64 `json:"costValue,omitempty"`
-	CostCurrency  string   `json:"costCurrency,omitempty"`
+	canonicalCostKey string
+	Date             string   `json:"date"`
+	Account          string   `json:"account"`
+	AccountLabel     string   `json:"accountLabel"`
+	Commodity        string   `json:"commodity"`
+	CommodityName    string   `json:"commodityName"`
+	Quantity         float64  `json:"quantity"`
+	UnitCost         *float64 `json:"unitCost,omitempty"`
+	CostValue        *float64 `json:"costValue,omitempty"`
+	CostCurrency     string   `json:"costCurrency,omitempty"`
 }
 
 type InvestmentRealizedTrade struct {
@@ -737,11 +738,24 @@ func investmentActivityFromEntries(entries []BeanEntry, securities map[string]bo
 			accountName, commodity := posting.Account, posting.Currency
 			key := accountName + "\x00" + commodity
 			if quantity > 0 {
-				activity.Lots[key] = append(activity.Lots[key], investmentLotFromPosting(entry.Date, posting, accountMap, commodityMap))
+				lot := investmentLotFromPosting(entry.Date, posting, accountMap, commodityMap)
+				if posting.Canonical {
+					activity.Lots[key] = applyCanonicalInvestmentLot(activity.Lots[key], lot)
+				} else {
+					activity.Lots[key] = append(activity.Lots[key], lot)
+				}
 				continue
 			}
-			trade := investmentRealizedTradeFromPosting(entry.Date, posting, accountMap, commodityMap, priceIndex, activity.Lots[key])
-			activity.Lots[key] = consumeInvestmentLots(activity.Lots[key], -quantity)
+			selected := activity.Lots[key]
+			if posting.Canonical {
+				selected, _ = canonicalInvestmentLots(selected, posting)
+			}
+			trade := investmentRealizedTradeFromPosting(entry.Date, posting, accountMap, commodityMap, priceIndex, selected)
+			if posting.Canonical {
+				activity.Lots[key] = applyCanonicalInvestmentLot(activity.Lots[key], investmentLotFromPosting(entry.Date, posting, accountMap, commodityMap))
+			} else {
+				activity.Lots[key] = consumeInvestmentLots(selected, -quantity)
+			}
 			activity.Realized[key] = append(activity.Realized[key], trade)
 		}
 	}
@@ -768,6 +782,9 @@ func investmentLotFromPosting(date string, posting parsedPosting, accountMap map
 		Commodity:     commodity,
 		CommodityName: commodityName(commodityMap, commodity),
 		Quantity:      quantity,
+	}
+	if posting.Canonical {
+		lot.canonicalCostKey = canonicalInvestmentCostKey(posting)
 	}
 	if posting.CostCurrency != "" {
 		if posting.TotalCost {

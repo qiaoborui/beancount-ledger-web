@@ -78,6 +78,9 @@ func createSensitiveToken() (string, error) {
 }
 
 func isAuthenticated(c *gin.Context) bool {
+	if localRequestAuthenticated(c) {
+		return true
+	}
 	if authDisabled() {
 		return true
 	}
@@ -103,6 +106,9 @@ func isAuthenticated(c *gin.Context) bool {
 }
 
 func isSensitiveUnlocked(c *gin.Context) bool {
+	if localRequestAuthenticated(c) {
+		return true
+	}
 	if authDisabled() {
 		return true
 	}

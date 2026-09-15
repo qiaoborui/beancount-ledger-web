@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 struct ImportHistoryView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var session: LedgerSession
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
 
@@ -61,7 +60,7 @@ struct ImportHistoryView: View {
             }
         }
         .background(LedgerPalette.canvas)
-        .ledgerNavigation("导入记录", isRoot: isRoot)
+        .ledgerNavigation("导入", isRoot: isRoot)
         .fileImporter(
             isPresented: $fileImporterPresented,
             allowedContentTypes: Self.supportedFileTypes,
@@ -128,11 +127,7 @@ struct ImportHistoryView: View {
         .task {
             await loadSharedInbox()
             await refreshAll(replacingContent: true)
-            await applyGmailOAuthResult(session.gmailOAuthResult)
             presentDebugImportFlowIfNeeded()
-        }
-        .task(id: gmailEventTaskID) {
-            await listenForGmailPendingEvents()
         }
         .onChange(of: scenePhase) { _, updatedPhase in
             guard updatedPhase == .active else {
@@ -141,11 +136,7 @@ struct ImportHistoryView: View {
             }
             Task {
                 await loadSharedInbox()
-                await loadGmail(replacingContent: false)
             }
-        }
-        .onChange(of: session.gmailOAuthResult) { _, result in
-            Task { await applyGmailOAuthResult(result) }
         }
     }
 
@@ -180,58 +171,51 @@ struct ImportHistoryView: View {
     }
 
     private var content: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: LedgerSpacing.xl) {
-                pageIntro
-
-                if let errorMessage {
+        List {
+            importSection
+            if let errorMessage {
+                Section {
                     StatusBanner(message: errorMessage) { self.errorMessage = nil }
                 }
-
-                sharedInboxSection
-                importSection
-                gmailAutomationSection
-                updateSummary
-                channelSection
-                historySection
-                importSafetyNotice
             }
-            .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-            .padding(.top, LedgerLayout.pageTopInset)
-            .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
-            .ledgerAdaptivePageWidth()
+            sharedInboxSection
+            channelSection
+            historySection
         }
+        .listStyle(.plain)
+        .contentMargins(.top, LedgerLayout.pageTopInset, for: .scrollContent)
+        .tint(LedgerPalette.cobalt)
         .refreshable { await refreshAll(replacingContent: false) }
         .privacySensitive()
         .accessibilityIdentifier("import-history-content")
     }
 
-    private var pageIntro: some View {
-        Text(loadedAt.map { "刚刚检查 · \($0.formatted(date: .omitted, time: .shortened))" } ?? "等待检查")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-    }
-
     @ViewBuilder
     private var sharedInboxSection: some View {
         if !sharedItems.isEmpty || sharedInboxError != nil {
-            VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-                SectionHeading(title: "待导入", detail: "从其他 App 分享的账单")
+            Section {
                 if let sharedInboxError { Text(sharedInboxError).foregroundStyle(.secondary) }
                 ForEach(sharedItems) { item in
-                    HStack {
+                    HStack(spacing: 8) {
                         Button { Task { await reviewSharedItem(item) } } label: {
                             Label(item.name, systemImage: "doc.badge.arrow.up")
+                                .font(.subheadline)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(minHeight: 44)
                         }
+                        .buttonStyle(.borderless)
                         .accessibilityIdentifier("shared-import-review-\(item.name)")
                         .disabled(isReadingFile)
                         Button { sharedItemToRemove = item } label: { Image(systemName: "trash") }
+                            .frame(width: 44, height: 44)
+                            .buttonStyle(.borderless)
                             .accessibilityLabel("移除待导入文件")
                     }
-                    .padding(LedgerSpacing.md)
-                    .background(LedgerPalette.raised, in: RoundedRectangle(cornerRadius: LedgerRadius.md))
                 }
+            } header: {
+                Text("待导入")
+            } footer: {
+                Text("从其他 App 分享的账单，核对后导入。")
             }
         }
     }
@@ -266,71 +250,23 @@ struct ImportHistoryView: View {
     }
 
     private var importSection: some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-            SectionHeading(title: "导入新账单", detail: "预览后确认写入")
-            LedgerPanel {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .center, spacing: LedgerSpacing.lg) {
-                        importFileLead
-                        importFileButton
-                    }
-
-                    VStack(alignment: .leading, spacing: LedgerSpacing.md) {
-                        importFileLead
-                        importFileButton
-                            .frame(maxWidth: .infinity)
-                    }
+        Section {
+            Button {
+                fileImporterPresented = true
+            } label: {
+                HStack {
+                    Label("选择账单文件", systemImage: "doc.badge.plus")
+                    Spacer()
+                    if isReadingFile { ProgressView().controlSize(.small) }
                 }
-                .padding(LedgerSpacing.lg)
+                .font(.body)
+                .frame(minHeight: 44)
             }
+            .disabled(isReadingFile)
+            .accessibilityIdentifier("import-select-file")
+        } footer: {
+            Text("支持 CSV、Excel、PDF、邮件和 ZIP，最大 10MB。预览并确认后写入账本。")
         }
-    }
-
-    private var importFileLead: some View {
-        HStack(alignment: .center, spacing: LedgerSpacing.md) {
-            Image(systemName: "doc.badge.plus")
-                .font(.system(size: 19, weight: .medium))
-                .foregroundStyle(LedgerPalette.cobalt)
-                .frame(width: 44, height: 44)
-                .background(LedgerPalette.tag)
-                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("从“文件”选择账单")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.ink)
-                Text("支持 CSV、Excel、PDF、邮件和 ZIP，单个文件最大 10MB。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(LedgerPalette.secondary)
-                    .lineLimit(2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private var importFileButton: some View {
-        Button {
-            fileImporterPresented = true
-        } label: {
-            Group {
-                if isReadingFile {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(LedgerPalette.onBrand)
-                } else {
-                    Text("选择文件")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-            }
-            .foregroundStyle(LedgerPalette.onBrand)
-            .padding(.horizontal, LedgerSpacing.md)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .background(LedgerPalette.cobalt)
-            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        }
-        .buttonStyle(PressScaleButtonStyle())
-        .disabled(isReadingFile)
-        .accessibilityIdentifier("import-select-file")
     }
 
     private var gmailAutomationSection: some View {
@@ -603,35 +539,22 @@ struct ImportHistoryView: View {
         let needsUpdate = recorded.filter { $0.freshness == .attention || $0.freshness == .overdue }.count
         let missing = statuses.count - recorded.count
 
-        return LedgerPanel {
-            HStack(alignment: .center, spacing: LedgerSpacing.lg) {
-                Image(systemName: needsUpdate > 0 ? "clock.badge.exclamationmark" : "checkmark.circle.fill")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(needsUpdate > 0 ? LedgerPalette.gold : LedgerPalette.success)
-                    .frame(width: 44, height: 44)
-                    .background((needsUpdate > 0 ? LedgerPalette.gold : LedgerPalette.success).opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(summaryTitle(recorded: recorded.count, needsUpdate: needsUpdate))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.ink)
-                    Text("已归档 \(recorded.count) 个渠道 · \(missing) 个渠道暂无记录")
-                        .font(.system(size: 11, weight: .medium).monospacedDigit())
-                        .foregroundStyle(LedgerPalette.secondary)
-                }
-
-                Spacer(minLength: 0)
-
-                if isRefreshing {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(LedgerPalette.cobalt)
-                        .accessibilityLabel("正在刷新导入记录")
-                }
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(summaryTitle(recorded: recorded.count, needsUpdate: needsUpdate))
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                Text("已归档 \(recorded.count) 个渠道 · \(missing) 个渠道暂无记录")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
-            .padding(LedgerSpacing.lg)
+            Spacer(minLength: 0)
+            if isRefreshing {
+                ProgressView().controlSize(.small)
+                    .accessibilityLabel("正在刷新导入记录")
+            }
         }
+        .padding(.vertical, 6)
     }
 
     private func summaryTitle(recorded: Int, needsUpdate: Int) -> String {
@@ -641,67 +564,40 @@ struct ImportHistoryView: View {
     }
 
     private var channelSection: some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-            SectionHeading(title: "渠道状态", detail: "账单覆盖日期")
-            LedgerPanel {
-                VStack(spacing: 0) {
-                    ForEach(Array(statuses.enumerated()), id: \.element.id) { index, status in
-                        ImportChannelRow(status: status)
-                        if index < statuses.count - 1 {
-                            Divider().overlay(LedgerPalette.line).padding(.leading, 64)
-                        }
-                    }
+        Section {
+            DisclosureGroup {
+                ForEach(statuses) { status in
+                    ImportChannelRow(status: status)
                 }
+            } label: {
+                updateSummary
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("import-channel-coverage")
+            }
+        } header: {
+            Text("渠道覆盖")
+        } footer: {
+            if let loadedAt {
+                Text("检查于 \(loadedAt.formatted(date: .omitted, time: .shortened))")
             }
         }
     }
 
     @ViewBuilder
     private var historySection: some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-            SectionHeading(title: "导入记录", detail: "\(sortedDocuments.count) 个归档文件")
+        Section {
             if sortedDocuments.isEmpty {
-                LedgerPanel {
-                    EmptyLedgerState(
-                        icon: "tray",
-                        title: "暂无归档记录",
-                        detail: "完成一次账单导入后，渠道覆盖日期和历史文件会显示在这里。"
-                    )
-                }
+                ContentUnavailableView("暂无归档记录", systemImage: "tray",
+                    description: Text("导入账单后，归档文件会显示在这里。"))
+                    .listRowSeparator(.hidden)
             } else {
-                LedgerPanel {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(sortedDocuments.enumerated()), id: \.element.id) { index, document in
-                            ImportDocumentRow(document: document)
-                            if index < sortedDocuments.count - 1 {
-                                Divider().overlay(LedgerPalette.line).padding(.leading, 64)
-                            }
-                        }
-                    }
+                ForEach(sortedDocuments) { document in
+                    ImportDocumentRow(document: document)
                 }
             }
+        } header: {
+            Text("归档记录 · \(sortedDocuments.count)")
         }
-    }
-
-    private var importSafetyNotice: some View {
-        HStack(alignment: .top, spacing: LedgerSpacing.md) {
-            Image(systemName: "checkmark.shield")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(LedgerPalette.cobalt)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("预览确认后写入")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.ink)
-                Text("服务端会先完成渠道识别、重复交易检查和账本验证，确认页会明确列出本次写入的交易。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(LedgerPalette.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(LedgerSpacing.lg)
-        .background(LedgerPalette.tag.opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
     }
 
     private func loadProviders() async {
@@ -782,11 +678,11 @@ struct ImportHistoryView: View {
     private func refreshAll(replacingContent: Bool) async {
         async let history: Void = load(replacingContent: replacingContent)
         async let providerInfo: Void = loadProviders()
-        async let gmail: Void = loadGmail(replacingContent: replacingContent)
-        _ = await (history, providerInfo, gmail)
+        _ = await (history, providerInfo)
     }
 
     private func loadGmail(replacingContent: Bool) async {
+        guard !session.isLocal else { isLoadingGmail = false; return }
         gmailLoadGeneration += 1
         let generation = gmailLoadGeneration
         if replacingContent || gmailStatus == nil { isLoadingGmail = true }
@@ -940,6 +836,7 @@ struct ImportHistoryView: View {
     }
 
     private func listenForGmailPendingEvents() async {
+        guard !session.isLocal else { return }
         guard scenePhase == .active, gmailStatus?.connected == true else {
             gmailRealtimeConnected = false
             return
@@ -1075,33 +972,27 @@ private struct ImportChannelRow: View {
     var body: some View {
         HStack(spacing: LedgerSpacing.md) {
             Image(systemName: status.provider.systemImage)
-                .font(.system(size: 15, weight: .medium))
+                .font(.body)
                 .foregroundStyle(LedgerPalette.cobalt)
-                .frame(width: 36, height: 36)
-                .background(LedgerPalette.tag)
-                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+                .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(status.provider.label)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.subheadline)
                     .foregroundStyle(LedgerPalette.ink)
-                    .lineLimit(1)
                 Text(channelDetail)
-                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(LedgerPalette.secondary)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(status.freshness.title)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.caption)
                 .foregroundStyle(statusColor)
-                .padding(.horizontal, 9)
-                .frame(minHeight: 28)
-                .background(statusColor.opacity(0.11))
-                .clipShape(Capsule())
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(LedgerSpacing.lg)
+        .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("import-provider-\(status.provider.id)")
     }
@@ -1135,25 +1026,23 @@ private struct ImportDocumentRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: LedgerSpacing.md) {
             Image(systemName: provider?.systemImage ?? "doc.text")
-                .font(.system(size: 14, weight: .medium))
+                .font(.body)
                 .foregroundStyle(LedgerPalette.cobalt)
-                .frame(width: 36, height: 36)
-                .background(LedgerPalette.tag)
-                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+                .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: LedgerSpacing.sm) {
                     Text(provider?.label ?? "其他渠道")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.subheadline)
                         .foregroundStyle(LedgerPalette.ink)
                     Text(LedgerImportHistory.coverageText(document))
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
-                        .foregroundStyle(LedgerPalette.cobalt)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
                 Text(document.name ?? "账单归档文件")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(LedgerPalette.olive)
-                    .lineLimit(1)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
                 HStack(spacing: LedgerSpacing.sm) {
                     Text(LedgerImportHistory.fullArchivedText(document))
                     if let size = LedgerImportHistory.fileSizeText(document) {
@@ -1161,17 +1050,13 @@ private struct ImportDocumentRow: View {
                         Text(size)
                     }
                 }
-                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(LedgerPalette.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(LedgerImportHistory.archivedText(document))
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(LedgerPalette.secondary)
-                .lineLimit(1)
         }
-        .padding(LedgerSpacing.lg)
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("import-document-\(document.id)")
     }

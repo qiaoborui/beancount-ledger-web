@@ -4,7 +4,6 @@ struct SettingsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var compactTabConfigurationPresented = false
-    @State private var changingServerPresented = false
     var isRoot = true
 
     var body: some View {
@@ -28,13 +27,7 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings-compact-tabs")
             }
             Section {
-                Toggle(isOn: Binding(
-                    get: { session.hasBiometricUnlock },
-                    set: { enabled in Task { await session.setBiometricUnlockEnabled(enabled) } }
-                )) {
-                    Label(session.biometricTitle, systemImage: session.biometricSystemImage)
-                }
-                .disabled(session.biometricKind == .unavailable || session.isBiometricSettingBusy)
+                Label("使用设备密码或生物识别解锁", systemImage: "lock.shield")
 
                 Picker(selection: lockIntervalBinding) {
                     ForEach(LedgerLockInterval.allCases) { interval in
@@ -51,53 +44,29 @@ struct SettingsView: View {
             } header: {
                 Text("隐私与安全")
             } footer: {
-                Text(biometricDetail + "。离开 App 后按设定时间锁定，切换应用时始终隐藏账本。")
+                Text("本地账本由这台设备保护。离开 App 后按设定时间锁定，切换应用时始终隐藏账本。")
+            }
+            if session.isLocal {
+                Section("本地账本") {
+                    LabeledContent("名称", value: session.localLedgerName)
+                    Label("数据保存在这台设备", systemImage: "internaldrive")
+                    NavigationLink("浏览、编辑与导出文件") { LocalLedgerFilesView() }
+                        .accessibilityIdentifier("settings-local-files")
+                    NavigationLink("存储与同步") { LocalLedgerStorageView() }
+                        .accessibilityIdentifier("local-storage-settings")
+                }
+                Section {
+                    Button("切换账本") { session.chooseLedger() }
+                } footer: { Text("小组件会在本地账本更新后显示新的摘要。切换账本会保留文件和历史版本。") }
             }
             Section {
-                Button {
-                    Task { await session.retryWidgetBackgroundRefresh() }
-                } label: {
-                    LabeledContent {
-                        if session.isWidgetRefreshBusy {
-                            ProgressView()
-                        } else {
-                            Text(widgetRefreshStatusTitle).foregroundStyle(widgetRefreshStatusColor)
-                        }
-                    } label: {
-                        Label("后台刷新", systemImage: "arrow.clockwise")
-                    }
-                }
-                .disabled(!session.hasBiometricUnlock || session.phase != .ready || session.isWidgetRefreshBusy)
-                .accessibilityIdentifier("settings-widget-background-refresh")
-            } header: {
-                Text("小组件")
-            } footer: {
-                Text(widgetRefreshDetail)
-            }
-            Section("连接") {
-                LabeledContent("服务器") {
-                    Text(session.serverURL?.host ?? "未配置")
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-                Button("更换服务器") { changingServerPresented = true }
-            }
-            Section {
-                Button("退出登录", role: .destructive) { session.logout() }
-            } footer: {
-                Text("退出后保留这台设备的生物识别设置。")
+                LabeledContent("版本", value: "本地版 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
+                    .accessibilityIdentifier("settings-app-version")
             }
         }
         .formStyle(.grouped)
         .font(.subheadline)
         .ledgerNavigation("设置", isRoot: isRoot)
-        .task { session.refreshWidgetRefreshStatus() }
-        .confirmationDialog("更换服务器？", isPresented: $changingServerPresented, titleVisibility: .visible) {
-            Button("更换服务器", role: .destructive) { session.changeServer() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("将清除当前服务器在这台设备上的生物识别凭据，并返回连接页面。")
-        }
         .sheet(isPresented: $compactTabConfigurationPresented) {
             CompactTabConfigurationView(initialDestinations: session.compactTabDestinations) { destinations in
                 session.setCompactTabDestinations(destinations)

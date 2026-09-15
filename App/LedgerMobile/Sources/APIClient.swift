@@ -274,6 +274,260 @@ extension LedgerAPI {
     }
 }
 
+/// Stable identity for either a server origin or an on-device workspace.
+enum LedgerLocation: Hashable, Sendable {
+    case remote(URL)
+    case local(UUID)
+}
+
+enum LedgerRepositoryError: Error, Equatable {
+    case unsupportedLocation(LedgerLocation)
+    case capabilityUnavailable(String)
+}
+
+protocol LedgerRemoteHealth: Sendable {
+    func health() async throws -> HealthStatus
+}
+
+protocol LedgerRemoteAuthentication: Sendable {
+    func authStatus() async throws -> AuthStatus
+    func login(password: String) async throws
+}
+
+protocol LedgerRemotePasskeys: Sendable {
+    func passkeyStatus() async throws -> PasskeyStatus
+    func passkeyLoginOptions() async throws -> PasskeyRequestOptions
+    func verifyPasskey(assertion: PasskeyAssertion) async throws
+}
+
+protocol LedgerRemoteQuickUnlock: Sendable {
+    func registerQuickUnlock(deviceName: String, mode: String) async throws -> QuickUnlockCredential
+    func verifyQuickUnlock(credential: QuickUnlockCredential) async throws
+    func revokeQuickUnlock(deviceID: String) async throws
+    func revokeWidgetQuickUnlock(credential: LedgerWidgetCredential) async throws
+}
+
+protocol LedgerRemoteGmail: Sendable {
+    func gmailStatus() async throws -> LedgerGmailStatus
+    func gmailConnect() async throws -> LedgerGmailConnectResponse
+    func gmailSync(pendingID: String?) async throws -> LedgerGmailSyncResult
+    func gmailDisconnect() async throws
+    func gmailPendingImports() async throws -> [LedgerGmailPendingImport]
+    func gmailPendingImport(id: String) async throws -> LedgerGmailPendingDetail
+    func dismissGmailPendingImport(id: String) async throws
+    func gmailPendingEvents() -> AsyncThrowingStream<Void, Error>
+}
+
+typealias RemoteLedgerCapabilities = LedgerRemoteHealth & LedgerRemoteAuthentication
+    & LedgerRemotePasskeys & LedgerRemoteQuickUnlock & LedgerRemoteGmail
+
+/// Core ledger operations shared by remote and local implementations.
+/// Reference identity lets a session reuse repository-owned caches and indexes.
+protocol LedgerRepository: AnyObject, Sendable {
+    func bootstrap(
+        start: String,
+        end: String,
+        today: String,
+        valuationCurrency: String
+    ) async throws -> LedgerBootstrap
+    func homeReport(
+        start: String,
+        end: String,
+        valuationCurrency: String
+    ) async throws -> LedgerHomeReport
+    func globalTransactions() async throws -> LedgerGlobalTransactions
+    func importDocuments() async throws -> [LedgerImportDocument]
+    func importProviders() async throws -> [LedgerImportProviderInfo]
+    func previewImport(
+        file: LedgerImportSelectedFile,
+        provider: String?,
+        alipayFundRounding: Bool,
+        archivePassword: String
+    ) async throws -> LedgerImportPreview
+    func commitImport(request: LedgerImportCommitRequest) async throws -> LedgerImportCommitResult
+    func updateTransaction(source: TransactionSource, entry: LedgerTransactionEntry) async throws
+    func deleteTransaction(source: TransactionSource, reason: String) async throws
+    func addTransactionTags(sources: [TransactionSource], tags: [String]) async throws
+    func indexInfo(targetGitSHA: String?) async throws -> LedgerIndexInfo
+    func accountDetail(
+        account: String,
+        currency: String,
+        start: String,
+        end: String
+    ) async throws -> LedgerAccountDetail
+    func dashboard(start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard
+    func incomeStatement(start: String, end: String, valuationCurrency: String) async throws -> LedgerIncomeStatement
+    func investments() async throws -> LedgerInvestmentSummary
+    func runBQL(query: String, valuationCurrency: String) async throws -> BQLResult
+    func bqlHistory() async throws -> [BQLHistoryRecord]
+    func saveBQLHistory(query: String) async throws -> BQLHistoryRecord
+    func generateBQLHistoryTitle(id: String) async throws -> BQLHistoryRecord
+    func renameBQLHistory(id: String, title: String) async throws -> BQLHistoryRecord
+    func deleteBQLHistory(id: String) async throws
+}
+
+typealias LedgerRepositoryFactory = @MainActor @Sendable (LedgerLocation) throws -> any LedgerRepository
+
+/// Adapts the existing server API to the repository boundary and keeps the
+/// remote origin out of `LedgerSession` request closures.
+final class RemoteLedgerRepository: LedgerRepository, RemoteLedgerCapabilities {
+    let baseURL: URL
+    private let api: any LedgerAPI
+
+    init(api: any LedgerAPI, baseURL: URL) {
+        self.api = api
+        self.baseURL = baseURL
+    }
+
+    func health() async throws -> HealthStatus { try await api.health(baseURL: baseURL) }
+    func authStatus() async throws -> AuthStatus { try await api.authStatus(baseURL: baseURL) }
+    func passkeyStatus() async throws -> PasskeyStatus { try await api.passkeyStatus(baseURL: baseURL) }
+    func passkeyLoginOptions() async throws -> PasskeyRequestOptions {
+        try await api.passkeyLoginOptions(baseURL: baseURL)
+    }
+    func verifyPasskey(assertion: PasskeyAssertion) async throws {
+        try await api.verifyPasskey(baseURL: baseURL, assertion: assertion)
+    }
+    func login(password: String) async throws { try await api.login(baseURL: baseURL, password: password) }
+    func registerQuickUnlock(deviceName: String, mode: String) async throws -> QuickUnlockCredential {
+        try await api.registerQuickUnlock(baseURL: baseURL, deviceName: deviceName, mode: mode)
+    }
+    func verifyQuickUnlock(credential: QuickUnlockCredential) async throws {
+        try await api.verifyQuickUnlock(baseURL: baseURL, credential: credential)
+    }
+    func revokeQuickUnlock(deviceID: String) async throws {
+        try await api.revokeQuickUnlock(baseURL: baseURL, deviceID: deviceID)
+    }
+    func revokeWidgetQuickUnlock(credential: LedgerWidgetCredential) async throws {
+        try await api.revokeWidgetQuickUnlock(baseURL: baseURL, credential: credential)
+    }
+    func bootstrap(
+        start: String,
+        end: String,
+        today: String,
+        valuationCurrency: String
+    ) async throws -> LedgerBootstrap {
+        try await api.bootstrap(
+            baseURL: baseURL,
+            start: start,
+            end: end,
+            today: today,
+            valuationCurrency: valuationCurrency
+        )
+    }
+    func homeReport(start: String, end: String, valuationCurrency: String) async throws -> LedgerHomeReport {
+        try await api.homeReport(
+            baseURL: baseURL,
+            start: start,
+            end: end,
+            valuationCurrency: valuationCurrency
+        )
+    }
+    func globalTransactions() async throws -> LedgerGlobalTransactions {
+        try await api.globalTransactions(baseURL: baseURL)
+    }
+    func importDocuments() async throws -> [LedgerImportDocument] {
+        try await api.importDocuments(baseURL: baseURL)
+    }
+    func importProviders() async throws -> [LedgerImportProviderInfo] {
+        try await api.importProviders(baseURL: baseURL)
+    }
+    func gmailStatus() async throws -> LedgerGmailStatus { try await api.gmailStatus(baseURL: baseURL) }
+    func gmailConnect() async throws -> LedgerGmailConnectResponse { try await api.gmailConnect(baseURL: baseURL) }
+    func gmailSync(pendingID: String?) async throws -> LedgerGmailSyncResult {
+        try await api.gmailSync(baseURL: baseURL, pendingID: pendingID)
+    }
+    func gmailDisconnect() async throws { try await api.gmailDisconnect(baseURL: baseURL) }
+    func gmailPendingImports() async throws -> [LedgerGmailPendingImport] {
+        try await api.gmailPendingImports(baseURL: baseURL)
+    }
+    func gmailPendingImport(id: String) async throws -> LedgerGmailPendingDetail {
+        try await api.gmailPendingImport(baseURL: baseURL, id: id)
+    }
+    func dismissGmailPendingImport(id: String) async throws {
+        try await api.dismissGmailPendingImport(baseURL: baseURL, id: id)
+    }
+    func gmailPendingEvents() -> AsyncThrowingStream<Void, Error> {
+        api.gmailPendingEvents(baseURL: baseURL)
+    }
+    func previewImport(
+        file: LedgerImportSelectedFile,
+        provider: String?,
+        alipayFundRounding: Bool,
+        archivePassword: String
+    ) async throws -> LedgerImportPreview {
+        try await api.previewImport(
+            baseURL: baseURL,
+            file: file,
+            provider: provider,
+            alipayFundRounding: alipayFundRounding,
+            archivePassword: archivePassword
+        )
+    }
+    func commitImport(request: LedgerImportCommitRequest) async throws -> LedgerImportCommitResult {
+        try await api.commitImport(baseURL: baseURL, request: request)
+    }
+    func updateTransaction(source: TransactionSource, entry: LedgerTransactionEntry) async throws {
+        try await api.updateTransaction(baseURL: baseURL, source: source, entry: entry)
+    }
+    func deleteTransaction(source: TransactionSource, reason: String) async throws {
+        try await api.deleteTransaction(baseURL: baseURL, source: source, reason: reason)
+    }
+    func addTransactionTags(sources: [TransactionSource], tags: [String]) async throws {
+        try await api.addTransactionTags(baseURL: baseURL, sources: sources, tags: tags)
+    }
+    func indexInfo(targetGitSHA: String?) async throws -> LedgerIndexInfo {
+        try await api.indexInfo(baseURL: baseURL, targetGitSHA: targetGitSHA)
+    }
+    func accountDetail(
+        account: String,
+        currency: String,
+        start: String,
+        end: String
+    ) async throws -> LedgerAccountDetail {
+        try await api.accountDetail(
+            baseURL: baseURL,
+            account: account,
+            currency: currency,
+            start: start,
+            end: end
+        )
+    }
+    func dashboard(start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard {
+        try await api.dashboard(
+            baseURL: baseURL,
+            start: start,
+            end: end,
+            valuationCurrency: valuationCurrency
+        )
+    }
+    func incomeStatement(start: String, end: String, valuationCurrency: String) async throws -> LedgerIncomeStatement {
+        try await api.incomeStatement(
+            baseURL: baseURL,
+            start: start,
+            end: end,
+            valuationCurrency: valuationCurrency
+        )
+    }
+    func investments() async throws -> LedgerInvestmentSummary { try await api.investments(baseURL: baseURL) }
+    func runBQL(query: String, valuationCurrency: String) async throws -> BQLResult {
+        try await api.runBQL(baseURL: baseURL, query: query, valuationCurrency: valuationCurrency)
+    }
+    func bqlHistory() async throws -> [BQLHistoryRecord] { try await api.bqlHistory(baseURL: baseURL) }
+    func saveBQLHistory(query: String) async throws -> BQLHistoryRecord {
+        try await api.saveBQLHistory(baseURL: baseURL, query: query)
+    }
+    func generateBQLHistoryTitle(id: String) async throws -> BQLHistoryRecord {
+        try await api.generateBQLHistoryTitle(baseURL: baseURL, id: id)
+    }
+    func renameBQLHistory(id: String, title: String) async throws -> BQLHistoryRecord {
+        try await api.renameBQLHistory(baseURL: baseURL, id: id, title: title)
+    }
+    func deleteBQLHistory(id: String) async throws {
+        try await api.deleteBQLHistory(baseURL: baseURL, id: id)
+    }
+}
+
 struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
     private let session: URLSession
     private let gmailEventSession: URLSession

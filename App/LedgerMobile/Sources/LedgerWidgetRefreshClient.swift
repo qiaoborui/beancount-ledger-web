@@ -173,7 +173,7 @@ struct LedgerWidgetRefreshClient: LedgerWidgetRefreshing, @unchecked Sendable {
 }
 
 actor LedgerWidgetTimelineLoader {
-    static let shared = LedgerWidgetTimelineLoader()
+    static let shared = LedgerWidgetTimelineLoader(localOnly: true)
     static let cacheFreshness: TimeInterval = 2 * 60
     static let successRefreshInterval: TimeInterval = 30 * 60
     static let failureRefreshInterval: TimeInterval = 15 * 60
@@ -181,27 +181,37 @@ actor LedgerWidgetTimelineLoader {
     private let credentialStore: any LedgerWidgetCredentialStoring
     private let snapshotStore: LedgerWidgetSnapshotStore
     private let statusStore: LedgerWidgetRefreshStatusStore
-    private let client: any LedgerWidgetRefreshing
+    private let client: (any LedgerWidgetRefreshing)?
     private var inFlight: Task<LedgerWidgetFetchResult, Never>?
     private var lastAttemptAt: Date?
     private var lastAttemptCredential: LedgerWidgetCredential?
     private var lastAttemptRefreshInterval: TimeInterval?
 
     init(
+        localOnly: Bool = false,
         credentialStore: any LedgerWidgetCredentialStoring = SystemLedgerWidgetCredentialStore(),
         snapshotStore: LedgerWidgetSnapshotStore = .shared,
         statusStore: LedgerWidgetRefreshStatusStore = .shared,
-        client: any LedgerWidgetRefreshing = LedgerWidgetRefreshClient()
+        client: (any LedgerWidgetRefreshing)? = nil,
+        clientFactory: @Sendable () -> any LedgerWidgetRefreshing = { LedgerWidgetRefreshClient() }
     ) {
         self.credentialStore = credentialStore
         self.snapshotStore = snapshotStore
         self.statusStore = statusStore
-        self.client = client
+        self.client = localOnly ? nil : (client ?? clientFactory())
     }
 
     func load(now: Date = Date(), forceRefresh: Bool = false) async -> LedgerWidgetTimelineLoadResult {
         let cachedState = snapshotStore.loadState()
         let cached = cachedState.snapshot
+        // An upgraded widget can run before the app suspends its old credentials.
+        // Production composition reads only the app-published local snapshot.
+        guard let client else {
+            return LedgerWidgetTimelineLoadResult(
+                snapshot: cached,
+                refreshInterval: Self.successRefreshInterval
+            )
+        }
         let credential: LedgerWidgetCredential
         do {
             guard let storedCredential = try credentialStore.load(), storedCredential.enabled else {

@@ -205,6 +205,46 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
         XCTAssertFalse(first.changeNotificationNameValue.contains(suiteName))
     }
 
+    func testLocalOnlyTimelineBeforeAppLaunchKeepsOldCredentialAndNeverCreatesRemoteClient() async throws {
+        let suiteName = "ledger-widget-local-only-tests-\(UUID().uuidString)"
+        let lockDirectory = try temporaryWidgetLockDirectory(for: suiteName)
+        let snapshotStore = LedgerWidgetSnapshotStore(suiteName: suiteName, lockDirectory: lockDirectory)
+        let statusStore = LedgerWidgetRefreshStatusStore(suiteName: suiteName, lockDirectory: lockDirectory)
+        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let cached = Self.snapshot(updatedAt: now.addingTimeInterval(-86_400), amount: 100)
+        try snapshotStore.save(cached)
+        let credentialStore = WidgetRefreshTestCredentialStore(credential: Self.widgetCredential)
+        let client = WidgetRefreshTestClient(outcome: .server(500))
+        let factory = WidgetRefreshTestClientFactory(client: client)
+        // No LedgerSession is created: this models WidgetKit launching after an
+        // upgrade while the old enabled Keychain credential is still present.
+        let loader = LedgerWidgetTimelineLoader(
+            localOnly: true,
+            credentialStore: credentialStore,
+            snapshotStore: snapshotStore,
+            statusStore: statusStore,
+            clientFactory: { factory.makeClient() }
+        )
+
+        for forced in [false, true] {
+            let result = await loader.load(now: now, forceRefresh: forced)
+            XCTAssertEqual(result.snapshot, cached)
+            XCTAssertEqual(result.refreshInterval, LedgerWidgetTimelineLoader.successRefreshInterval)
+        }
+        XCTAssertEqual(factory.callCount, 0)
+        let fetchCalls = await client.callCount()
+        XCTAssertEqual(fetchCalls, 0)
+        XCTAssertEqual(try credentialStore.load(), Self.widgetCredential)
+        XCTAssertNil(statusStore.load())
+
+        snapshotStore.clear()
+        let empty = await loader.load(now: now, forceRefresh: true)
+        XCTAssertNil(empty.snapshot)
+        XCTAssertEqual(factory.callCount, 0)
+    }
+
     func testTimelineLoaderPersistsServerVersionFailureAndKeepsCachedSnapshot() async throws {
         let suiteName = "ledger-widget-refresh-status-tests-\(UUID().uuidString)"
         let lockDirectory = try temporaryWidgetLockDirectory(for: suiteName)
@@ -488,6 +528,27 @@ private final class WidgetRefreshTestCredentialStore: LedgerWidgetCredentialStor
     func completeRevocation(deviceID: String) throws {
         if credential?.deviceID == deviceID { credential = nil }
         suspended = false
+    }
+}
+
+private final class WidgetRefreshTestClientFactory: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+    private let client: any LedgerWidgetRefreshing
+
+    init(client: any LedgerWidgetRefreshing) { self.client = client }
+
+    func makeClient() -> any LedgerWidgetRefreshing {
+        lock.lock()
+        defer { lock.unlock() }
+        calls += 1
+        return client
+    }
+
+    var callCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return calls
     }
 }
 

@@ -98,7 +98,7 @@ private struct LedgerNavigation: ViewModifier {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    PrivacyToolbarButton()
+                    LedgerSyncToolbarButton()
                 }
             }
     }
@@ -412,6 +412,91 @@ struct PrimaryButtonLabel: View {
         .frame(maxWidth: .infinity, minHeight: 48)
         .background(LedgerPalette.cobalt)
         .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+    }
+}
+
+struct LedgerSyncToolbarButton: View {
+    @EnvironmentObject private var session: LedgerSession
+    @State private var settingsPresented = false
+    @State private var failureMessage: String?
+    @State private var requested = false
+    @State private var initialStatus: LocalStorageSyncStatus?
+
+    private var presentation: LocalSyncPresentation {
+        LocalSyncPresentation(status: session.localSyncStatus ?? initialStatus,
+            hasGit: session.localGitConfiguration != nil,
+            busy: session.isStorageSyncBusy || requested,
+            automaticEnabled: session.localAutomaticSyncEnabled)
+    }
+
+    var body: some View {
+        LedgerToolbarButton(action: activate,
+            accessibilityLabel: session.isLocal ? presentation.title : "刷新账本") {
+            Circle()
+                .fill(indicatorColor)
+                .frame(width: 10, height: 10)
+                .frame(width: 20, height: 20)
+        }
+        .disabled(presentation.isBusy || session.phase != .ready)
+        .accessibilityIdentifier("ledger-sync-status")
+        .accessibilityHint(session.isLocal && presentation.action == .storageSettings
+            ? "打开存储与同步设置" : "立即同步账本")
+        .sheet(isPresented: $settingsPresented) {
+            NavigationStack {
+                LocalLedgerStorageView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { settingsPresented = false }
+                        }
+                    }
+            }
+            .ledgerPrivacyProtectedSheet()
+        }
+        .alert("同步未完成", isPresented: Binding(
+            get: { failureMessage != nil }, set: { if !$0 { failureMessage = nil } }
+        )) {
+            Button("存储与同步") { failureMessage = nil; settingsPresented = true }
+            Button("关闭", role: .cancel) { failureMessage = nil }
+        } message: { Text(failureMessage ?? "") }
+        .task(id: session.location) {
+            initialStatus = nil
+            failureMessage = nil
+            let location = session.location
+            let status = try? await session.localRepository?.storageStatus()
+            if !Task.isCancelled, location == session.location { initialStatus = status }
+        }
+    }
+
+    private var indicatorColor: Color {
+        guard session.isLocal else { return LedgerPalette.cobalt }
+        switch presentation.indicator {
+        case .local: return .secondary
+        case .syncing: return LedgerPalette.cobalt
+        case .synced: return LedgerPalette.success
+        case .pending: return LedgerPalette.gold
+        case .attention: return LedgerPalette.risk
+        }
+    }
+
+    private func activate() {
+        guard !presentation.isBusy, session.phase == .ready else { return }
+        if session.isLocal, presentation.action == .storageSettings {
+            settingsPresented = true
+            return
+        }
+        requested = true
+        let location = session.location
+        Task { @MainActor in
+            defer { requested = false }
+            do {
+                if session.isLocal { _ = try await session.synchronizeLocalStorage() }
+                else { await session.refresh() }
+            } catch is CancellationError {
+                return
+            } catch {
+                if session.location == location { failureMessage = error.localizedDescription }
+            }
+        }
     }
 }
 

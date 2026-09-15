@@ -58,7 +58,7 @@ func (s *TransactionService) Reverse(input ReverseTransactionRequest) (LedgerEnt
 	// while allowing comments, retaining all other lossless-model guards.
 	reversible := *original
 	if reversible.Entry == nil {
-		for _, raw := range snapshot.BeanEntries {
+		for _, raw := range snapshotSourceBeanEntries(snapshot) {
 			if raw.Kind != "transaction" || raw.File != original.Source.File || raw.Line != original.Source.Line {
 				continue
 			}

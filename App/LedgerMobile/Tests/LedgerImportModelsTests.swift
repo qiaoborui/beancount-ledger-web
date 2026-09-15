@@ -12,7 +12,7 @@ final class LedgerImportModelsTests: XCTestCase {
         XCTAssertEqual(LedgerImportSelectedFile(name: "账单", data: Data([1])).fileExtension, "")
     }
 
-    func testNativeCapabilityIncludesAutomaticEmailWithoutHidingManualStatementFormats() throws {
+    func testLocalCapabilityKeepsManualStatementFormatsAndExcludesCloudAutomation() throws {
         let providers = [
             LedgerImportProviderInfo(
                 id: "ccb-credit",
@@ -33,8 +33,8 @@ final class LedgerImportModelsTests: XCTestCase {
         ]
         let nativeProviders = LedgerMobileImportCapabilities.fileImportProviders(from: providers)
 
-        XCTAssertTrue(LedgerMobileImportCapabilities.supportsAutomaticEmailImport)
-        XCTAssertEqual(nativeProviders.map(\.id), ["ccb-credit", "gmail-auto"])
+        XCTAssertFalse(LedgerMobileImportCapabilities.supportsAutomaticEmailImport)
+        XCTAssertEqual(nativeProviders.map(\.id), ["ccb-credit"])
         XCTAssertEqual(nativeProviders[0].extensions, ["eml", ".PDF", ".csv"])
         XCTAssertEqual(nativeProviders[0].detail, "邮件或 PDF")
         XCTAssertNoThrow(try LedgerImportFileValidator.validate(
@@ -59,7 +59,7 @@ final class LedgerImportModelsTests: XCTestCase {
         ))
     }
 
-    func testEmailArchiveHistoryRemainsVisibleWithNativeGmailAutomation() {
+    func testEmailArchiveHistoryRemainsVisibleForLocalFileImports() {
         let emailArchive = LedgerImportDocument(
             path: "transactions/2026/documents/imports/statement.eml",
             name: "statement.eml",

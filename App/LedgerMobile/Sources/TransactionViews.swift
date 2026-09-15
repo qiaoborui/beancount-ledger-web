@@ -177,6 +177,7 @@ struct TransactionsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var filters = LedgerTransactionFilter()
     @State private var filterPresented = false
+    @State private var creatingTransaction = false
     @State private var deletionTarget: LedgerTransaction?
     @State private var selectingTags = false
     @State private var selectedTransactionIDs: Set<String> = []
@@ -311,6 +312,12 @@ struct TransactionsView: View {
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
         .toolbar {
+            if session.isLocal {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("记一笔", systemImage: "plus") { creatingTransaction = true }
+                        .accessibilityIdentifier("transaction-create-local")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 if selectingTags {
                     Button("完成") {
@@ -341,6 +348,12 @@ struct TransactionsView: View {
                 .accessibilityValue("\(activeStructuredFilterCount) 个筛选条件")
             }
         }
+            .sheet(isPresented: $creatingTransaction) {
+                TransactionEditorView(accounts: session.ledger?.accounts ?? [], commodities: session.ledger?.commodities ?? []) { entry in
+                    try await session.addLocalTransaction(entry)
+                }
+                .ledgerPrivacyProtectedSheet()
+            }
             .sheet(item: $deletionTarget) { transaction in
                 TransactionDeleteSheet(transaction: transaction) {
                     actionMessage = "交易已删除，原文已在账本中注释保留。"
@@ -448,7 +461,7 @@ struct TransactionsView: View {
         selectingTags = false
         confirmationFeedback &+= 1
         actionMessageStyle = .confirmed
-        actionMessage = "服务器已验证，并为 \(selected.count) 条交易添加标签。"
+        actionMessage = "已验证，并为 \(selected.count) 条交易添加标签。"
     }
 }
 
@@ -807,8 +820,8 @@ private struct TransactionMutationBadge: View {
 
     private var presentation: (title: String, image: String, color: Color) {
         switch phase {
-        case .pending: ("等待服务器确认", "clock.arrow.circlepath", LedgerPalette.cobalt)
-        case .confirmed: ("服务器已确认 · 同步中", "checkmark.circle", LedgerPalette.success)
+        case .pending: ("正在验证并保存", "clock.arrow.circlepath", LedgerPalette.cobalt)
+        case .confirmed: ("已保存 · 正在更新", "checkmark.circle", LedgerPalette.success)
         case .failed: ("未保存 · 已恢复", "arrow.uturn.backward.circle", LedgerPalette.risk)
         }
     }
@@ -943,7 +956,7 @@ private struct TransactionTagEditorSheet: View {
             try await onApply(tags)
             dismiss()
         } catch {
-            errorMessage = "添加失败，已恢复服务器数据。请检查后重试：\(error.localizedDescription)"
+            errorMessage = "添加失败，已恢复原有显示。请检查后重试：\(error.localizedDescription)"
             failureFeedback &+= 1
         }
         applying = false
@@ -1037,7 +1050,7 @@ struct TransactionDetailView: View {
                 ContentUnavailableView {
                     Label("交易来源已变化", systemImage: "arrow.triangle.branch")
                 } description: {
-                    Text("无法安全确认这仍是同一笔交易。服务器数据已保留，请返回流水列表重新打开。")
+                    Text("交易版本已变化。账本原数据已保留，请返回流水列表重新打开。")
                 } actions: {
                     Button("返回流水列表") { dismiss() }
                         .buttonStyle(.borderedProminent)
@@ -1091,7 +1104,7 @@ struct TransactionDetailView: View {
                     transaction = transaction.projecting(entry: entry)
                     synchronizeTransaction(with: session.ledger)
                     confirmationFeedback &+= 1
-                    savedMessage = "服务器已验证并保存，正在同步最新账本版本。"
+                    savedMessage = "已验证并保存，正在更新账本。"
                 }
             )
             .ledgerPrivacyProtectedSheet()
@@ -1271,7 +1284,7 @@ private enum TransactionEditorError: LocalizedError {
 private struct TransactionEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
-    let transaction: LedgerTransaction
+    let transaction: LedgerTransaction?
     let accounts: [LedgerAccount]
     let commodities: [String]
     let onSave: (LedgerTransactionEntry) async throws -> Void
@@ -1287,6 +1300,7 @@ private struct TransactionEditorView: View {
     @State private var failureFeedback = 0
     @State private var initialDraft: Draft?
     @State private var discardPresented = false
+    @State private var newEntryPreview: EntryPreview?
     @FocusState private var keyboardFocused: Bool
 
     init(
@@ -1328,6 +1342,22 @@ private struct TransactionEditorView: View {
         })
     }
 
+    init(accounts: [LedgerAccount], commodities: [String], onSave: @escaping (LedgerTransactionEntry) async throws -> Void) {
+        transaction = nil
+        self.accounts = accounts
+        self.commodities = commodities
+        self.onSave = onSave
+        _date = State(initialValue: Date())
+        _payee = State(initialValue: "")
+        _narration = State(initialValue: "")
+        _tagsText = State(initialValue: "")
+        _metadataText = State(initialValue: "{}")
+        _postings = State(initialValue: [
+            EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Expenses:") })?.account ?? "Expenses:Other", amount: "", currency: commodities.first ?? "CNY"),
+            EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Assets:") })?.account ?? "Assets:Cash", amount: "", currency: "")
+        ])
+    }
+
     private struct Draft: Equatable {
         let date: Date
         let payee: String
@@ -1335,6 +1365,11 @@ private struct TransactionEditorView: View {
         let tags: String
         let metadata: String
         let postings: [EditableTransactionPosting]
+    }
+
+    private struct EntryPreview: Identifiable {
+        let id = UUID()
+        let entry: LedgerTransactionEntry
     }
 
     private var currentDraft: Draft {
@@ -1444,7 +1479,7 @@ private struct TransactionEditorView: View {
             }
             .disabled(saving)
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("编辑交易")
+            .navigationTitle(transaction == nil ? "记一笔" : "编辑交易")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1455,10 +1490,10 @@ private struct TransactionEditorView: View {
                     Button {
                         Task { await save() }
                     } label: {
-                        if saving { ProgressView("正在验证并保存") } else { Text("保存修改") }
+                        if saving { ProgressView("正在验证并保存") } else { Text(transaction == nil ? "预览" : "保存修改") }
                     }
                     .disabled(saving)
-                    .accessibilityLabel(saving ? "正在验证并保存" : "保存修改")
+                    .accessibilityLabel(saving ? "正在验证并保存" : (transaction == nil ? "预览" : "保存修改"))
                     .accessibilityIdentifier("transaction-edit-save")
                 }
                 ToolbarItemGroup(placement: .keyboard) {
@@ -1478,6 +1513,33 @@ private struct TransactionEditorView: View {
             Text("已修改的内容会保留，直到保存或确认放弃。")
         }
         .sensoryFeedback(.error, trigger: failureFeedback)
+        .sheet(item: $newEntryPreview) { preview in
+            let entry = preview.entry
+                NavigationStack {
+                    List {
+                        Section("确认交易") {
+                            LabeledContent("日期", value: entry.date)
+                            LabeledContent("交易对方", value: entry.payee)
+                            LabeledContent("说明", value: entry.narration)
+                            ForEach(Array(entry.postings.enumerated()), id: \.offset) { _, posting in
+                                LabeledContent(posting.account, value: posting.amount.isEmpty ? "自动配平" : "\(posting.amount) \(posting.currency)")
+                                    .font(.subheadline.monospaced())
+                            }
+                            if !entry.tags.isEmpty { Text(entry.tags.map { "#" + $0 }.joined(separator: " ")) }
+                            if !entry.metadata.isEmpty { Text(Self.metadataText(entry.metadata)).font(.footnote.monospaced()) }
+                        }
+                    }
+                    .navigationTitle("交易预览")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("返回编辑") { newEntryPreview = nil }.disabled(saving) }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button(saving ? "正在校验" : "确认保存") { Task { await commitNewEntry(entry) } }
+                                .disabled(saving).accessibilityIdentifier("transaction-create-confirm")
+                        }
+                    }
+                }
+                .interactiveDismissDisabled(saving)
+        }
         .privacySensitive()
     }
 
@@ -1486,11 +1548,30 @@ private struct TransactionEditorView: View {
         keyboardFocused = false
         do {
             let entry = try makeEntry()
+            if transaction == nil {
+                newEntryPreview = EntryPreview(entry: entry)
+                return
+            }
             saving = true
             try await onSave(entry)
             dismiss()
         } catch {
-            errorMessage = "保存失败，已恢复服务器数据。请检查后重试：\(error.localizedDescription)"
+            errorMessage = "保存失败，账本保留原版本：\(error.localizedDescription)"
+            failureFeedback &+= 1
+        }
+        saving = false
+    }
+
+    private func commitNewEntry(_ entry: LedgerTransactionEntry) async {
+        guard !saving else { return }
+        saving = true
+        do {
+            try await onSave(entry)
+            newEntryPreview = nil
+            dismiss()
+        } catch {
+            newEntryPreview = nil
+            errorMessage = error.localizedDescription
             failureFeedback &+= 1
         }
         saving = false
@@ -1548,12 +1629,12 @@ private struct TransactionEditorView: View {
         }
         return LedgerTransactionEntry(
             date: Self.formatDate(date),
-            flag: transaction.editableEntry?.flag,
+            flag: transaction?.editableEntry?.flag,
             payee: cleanedPayee,
             narration: narration.trimmingCharacters(in: .whitespacesAndNewlines),
             metadata: metadata,
             tags: tags,
-            links: transaction.editableEntry?.links ?? [],
+            links: transaction?.editableEntry?.links ?? [],
             postings: cleanedPostings
         )
     }

@@ -11,6 +11,7 @@ web/tsconfig.tsbuildinfo
 # Native iOS build
 App/LedgerMobile/.build/
 App/LedgerMobile/DerivedData/
+App/LedgerMobile/DerivedDataDevice/
 App/LedgerMobile/.swiftpm/
 App/LedgerMobile/LedgerMobile.xcodeproj/
 **/xcuserdata/
@@ -18,6 +19,7 @@ App/LedgerMobile/LedgerMobile.xcodeproj/
 
 # Go build
 server/ledger-web
+server/.build/
 
 # Environment
 .env

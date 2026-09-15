@@ -11,12 +11,15 @@ struct RootView: View {
 
             switch session.phase {
             case .configuration:
-                ServerConfigurationView()
+                LedgerLibraryView()
             case .checking:
                 // A search deep link can arrive before authentication finishes. Keep native
                 // search controllers unmounted until the ready shell has a stable lifetime.
-                ProgressView("正在连接账本")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Group {
+                    if session.isLocal { ProgressView() }
+                    else { ProgressView("正在连接账本") }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             case let .locked(authenticated):
                 LoginView(authenticated: authenticated)
             case .ready:
@@ -67,7 +70,7 @@ struct PrivacyCover: View {
     }
 }
 
-private struct ServerConfigurationView: View {
+struct ServerConfigurationView: View {
     @EnvironmentObject private var session: LedgerSession
     @FocusState private var serverFocused: Bool
 
@@ -125,7 +128,7 @@ private struct LoginView: View {
         NavigationStack {
             Form {
                 Section {
-                    Label(session.serverURL?.host ?? "Ledger", systemImage: "lock.shield")
+                    Label(session.isLocal ? session.localLedgerName : session.serverURL?.host ?? "Ledger", systemImage: "lock.shield")
                         .font(.headline)
                         .padding(.vertical, 8)
                 } footer: {
@@ -152,7 +155,7 @@ private struct LoginView: View {
                     }
                     .disabled(session.isAuthenticationBusy)
                 }
-                Section("账本密码") {
+                if !session.isLocal { Section("账本密码") {
                     SecureField("输入密码", text: $session.password)
                         .textContentType(.password)
                         .submitLabel(.go)
@@ -165,6 +168,7 @@ private struct LoginView: View {
                     .disabled(session.password.isEmpty)
                 }
                 .disabled(session.isAuthenticationBusy)
+                }
                 if session.isAuthenticationBusy {
                     Section { ProgressView("正在安全恢复账本") }
                 }
@@ -172,7 +176,7 @@ private struct LoginView: View {
                     Section { StatusBanner(message: error, onDismiss: session.dismissError) }
                 }
                 Section {
-                    Button("更换服务器") { session.changeServer() }
+                    Button("选择其他账本") { session.chooseLedger() }
                         .disabled(session.isAuthenticationBusy)
                 }
             }

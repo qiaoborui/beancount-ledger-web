@@ -21,6 +21,7 @@ type LedgerVersion struct {
 type LedgerSnapshot struct {
 	LedgerVersion
 	BeanEntries       []BeanEntry       `json:"-"`
+	SourceBeanEntries []BeanEntry       `json:"-"`
 	BeanErrors        []BeanParseError  `json:"-"`
 	OptionsMap        map[string]string `json:"-"`
 	Transactions      []Transaction     `json:"transactions"`
@@ -75,13 +76,25 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	}
 	c.metrics.observeCache(cacheFilesystemSnapshot, cacheResultMiss)
 	loadStarted := time.Now()
-	lines, err := ReadLedgerLines(mainBeanPath(c.cfg), map[string]bool{})
+	lines, err := readConfiguredLedgerLines(c.cfg)
 	if err != nil {
 		c.metrics.observeOperation(operationFilesystemSnapshot, operationResultError, loadStarted)
 		return nil, err
 	}
 	parseStarted := time.Now()
-	compiled := CompileBeanLines(lines)
+	var compiled BeanParseResult
+	var sourceEntries []BeanEntry
+	if c.cfg.localTransport && c.cfg.localCanonical != nil {
+		// The canonical loader has already validated and transformed the
+		// ledger. Parse raw source exclusively for editor drafts and hashes.
+		sourceEntries = ParseBeanLines(lines).Entries
+		compiled.Entries, err = localCanonicalEntries(c.cfg, sourceEntries)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		compiled = CompileBeanLines(lines)
+	}
 	parseResult := operationResultSuccess
 	if len(compiled.Errors) > 0 {
 		parseResult = operationResultWithParseErrors
@@ -89,18 +102,27 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	c.metrics.observeOperation(operationBeanCompile, parseResult, parseStarted)
 	entries := compiled.Entries
 	txns := TransactionsFromBeanEntries(entries)
+	options := OptionsMapFromBeanEntries(entries)
+	if c.cfg.localTransport && c.cfg.localCanonical != nil {
+		txns = localCanonicalTransactions(entries, sourceEntries)
+		options = copyStringMap(c.cfg.localCanonical.Options)
+	}
 	accounts := AccountsFromBeanEntries(entries)
 	prices := PricesFromBeanEntries(entries)
 	balanceAssertions := BalanceAssertionsFromBeanEntries(entries)
 	commodities := CommoditiesFromBeanEntries(entries)
+	if c.cfg.localTransport && c.cfg.localCanonical != nil {
+		commodities = localCanonicalCommodities(entries, c.cfg.localCanonical)
+	}
 	rawBalances := CurrentBalances(txns)
 	priceIndex := NewPriceIndex(prices)
 	accountMap := accountByName(accounts)
 	snapshot := &LedgerSnapshot{
 		LedgerVersion:     version,
 		BeanEntries:       entries,
+		SourceBeanEntries: sourceEntries,
 		BeanErrors:        compiled.Errors,
-		OptionsMap:        OptionsMapFromBeanEntries(entries),
+		OptionsMap:        options,
 		Transactions:      txns,
 		RawBalances:       rawBalances,
 		PriceIndex:        priceIndex,
@@ -252,7 +274,13 @@ type fileStat struct {
 }
 
 func ledgerVersion(cfg Config) (LedgerVersion, error) {
-	stats, err := ledgerVersionFiles(mainBeanPath(cfg), cfg.LedgerRoot, map[string]bool{})
+	var stats []fileStat
+	var err error
+	if cfg.localTransport {
+		_, stats, err = localLedgerSource(cfg)
+	} else {
+		stats, err = ledgerVersionFiles(mainBeanPath(cfg), cfg.LedgerRoot, map[string]bool{})
+	}
 	if err != nil {
 		return LedgerVersion{}, err
 	}

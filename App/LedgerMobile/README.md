@@ -1,10 +1,22 @@
 # LedgerMobile
 
-`LedgerMobile` is the native iOS client for Beancount Ledger Web. Financial
-review, safe transaction editing, and bill imports reuse the server's existing
-validation, confirmation, and rollback boundaries.
-The app connects to an existing HTTPS deployment and reuses the server's cookie
-authentication and privacy lock.
+`LedgerMobile` is a fully local native iOS ledger app. The ledger library offers
+creating a ledger, importing a Beancount folder, and downloading a Git workspace.
+Settings provides ledger switching and storage configuration.
+
+The app keeps an independent copy in the application's private container
+and works without a server. The embedded Go engine handles ledger queries and
+staged edits inside the app process. Embedded CPython and the canonical
+Beancount parser validate staged changes before an atomic generation switch
+publishes them. Local creation, opening, and unlocking use the device's Face ID,
+Touch ID, or passcode through LocalAuthentication; a device passcode is required.
+The production composition creates only local repositories. Git is an optional
+`LogicalLocalStorage` provider: local reads and writes finish on device, while an
+explicit synchronization exchanges validated versions with an HTTPS Git remote.
+
+The embedded build currently supports private local builds and tests. Public
+IPA redistribution is gated by the unresolved combined dependency licensing
+issue documented in [Runtime/THIRD_PARTY.md](Runtime/THIRD_PARTY.md).
 
 ## Native interaction design
 
@@ -22,8 +34,24 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
 
 ## Current scope
 
-- Verify a compatible Ledger Web HTTPS origin before accepting a password.
-- Restore the Cookie session and read the current month's overview.
+- Create a local ledger with common accounts, import a complete Beancount folder,
+  browse and edit `.bean` files, export a copy, and add transactions through a
+  preview and confirmation. Imported files retain their original copies.
+  Exported ledger snapshots omit imported `.git` metadata; the private workspace
+  and original source retain that metadata.
+- Validate local writes with canonical Beancount checks. Includes and documents
+  stay inside the local workspace; supported plugins are explicitly allowlisted.
+  Unsupported plugins and validation failures prevent publication of the change.
+- Configure HTTPS Git storage with device-only Keychain credentials, pull and
+  validate remote changes, and push local revisions with a non-forced ref update.
+  Review file conflicts and export both versions before choosing a resolution.
+- Automatically synchronize after local saves, on foreground entry/network
+  recovery and during iOS-granted background processing opportunities. Disable
+  automatic sync per Git workspace or run it immediately. Authentication failures
+  and conflicts pause automatic attempts; local saves remain independent.
+  Synced local reports update the shared Widget snapshot. Lock-screen work uses
+  first-unlock file protection and device-only first-unlock Git credentials;
+  actual background and Widget refresh times are controlled by iOS.
 - Search and filter transactions by keyword, type, and account, edit safely
   round-trippable entries, and apply tags to up to 200 selected transactions.
 - Browse grouped account balances, account details, related transactions, and
@@ -33,14 +61,15 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
 - Track net worth history, browse hierarchical income and expense statements,
   and inspect investment holdings, market values, costs, and returns.
 - Run one or more read-only BQL statements, switch numeric results between
-  table, bar, pie, and line views, and manage server-synced query history.
+  table, bar, pie, and line views. Query history is device-local.
 - Inspect direct, inverse, and CNY-bridged exchange rates, review recent price
   history, and switch the valuation currency used across overview and analysis.
-- Import CSV, Excel, PDF, EML/HTML, and ZIP bills through the system file picker,
-  review server-detected providers, duplicate warnings, and candidate entries,
+- Import CSV, Excel, PDF, ZIP (including encrypted ZIP), and EML/HTML bills through the system file picker,
+  review detected providers, duplicate warnings, and candidate entries,
   then commit only the selected transactions. The native screen also shows each
   channel's latest coverage date, update freshness, archived filename, archive
-  time, and file size.
+  time, and file size. Local processing uses embedded importers and validates
+  the resulting ledger on device.
 - Refresh data, hide amounts, lock sensitive access, and cover App Switcher
   snapshots while the app is inactive.
 - Keep financial typography stable by switching constrained amounts to compact
@@ -50,18 +79,15 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
   recency. Widget snapshots contain expense analytics, account balances, and
   reduced import metadata only; income, archived document names and paths,
   cookies, passwords, and quick-unlock tokens stay out of the App Group
-  container. After device biometric unlock is enabled, the app provisions a
-  separate revocable read-only credential in a shared device-only Keychain so
-  WidgetKit can refresh this reduced snapshot while the main app is closed.
-  The server expires this credential after 90 days, and the app rotates it
-  during the final 14 days.
+  container. The app publishes reduced snapshots from local reads. Activating a
+  local ledger suspends any previously configured widget network credential.
 - Tap a date in the medium or large expense calendar widget to open that day's
   expense transactions in a separate native sheet. The app validates the civil
   date and preserves the request through unlock. The sheet owns its data; the
   global date range, active page, and existing search filters stay unchanged.
   The calendar uses four intensity levels, outlines today,
   and shows daily amounts in the large family. It reuses the existing reduced
-  widget snapshot and authenticated bootstrap API.
+  widget snapshot and local repository.
 - Add a medium 30-day spending trend and a separate 12-week heatmap. Both use
   the existing daily positive-expense series (before refunds); the trend labels
   this explicitly. Weekly/monthly/yearly overview totals retain the report's
@@ -71,18 +97,11 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
   system accessory rendering treatment. A cached period outside the current
   device date displays a refresh prompt.
 - The optional `insights` widget payload carries week, year, and 12-week history
-  with its own timestamp. The app can populate it through existing authenticated
-  home-report APIs before the new server is deployed. Old-server background
-  refreshes and partial app refresh failures preserve the previous same-currency
-  insights and original timestamp. Background updates of these additional
-  metrics require the extended server endpoint.
-- Keep native Ledger passkey login ready for paid-team signing; Personal Team
-  builds use password login and device-level biometric quick unlock.
-- Enable Face ID or Touch ID from Settings, then unlock with a server-revocable
-  device token protected by the system Keychain. Cold launch requests authentication
-  automatically; returning after the lock interval does the same. Canceling leaves
-  manual retry and password login available.
-- Choose an automatic lock interval per server: immediately, 1, 5, 15, or 30
+  with its own timestamp, populated from local reports.
+- Unlock through Face ID, Touch ID, or the device passcode. Cold launch requests
+  authentication automatically; returning after the lock interval does the same.
+  Canceling leaves a manual retry available.
+- Choose an automatic lock interval per ledger: immediately, 1, 5, 15, or 30
   minutes. App Switcher snapshots remain covered as soon as the app leaves the
   foreground.
 - Open More and Settings from the fourth iPhone tab or the bottom of the iPad
@@ -90,61 +109,108 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
 - Exercise the responsive iPhone and iPad layouts with safe deterministic data
   through the Debug-only visual QA mode.
 
-The next milestones continue mobile web parity for financial review screens.
-Additional ledger writes retain a separate preview-and-confirmation design.
+Financial writes retain preview, validation, and confirmation. Gmail automation,
+hosted AI, and server administration are outside this local-only product.
+iCloud and S3 provider adapters remain future work; Files sharing supports
+explicit snapshot export today.
 
 ## Generate and build
 
+Build all three native dependencies before generating or building the Xcode
+project. Prerequisites are Xcode, XcodeGen, Go (including toolchain download
+support), Python 3, Bison 3.8+, and Flex 2.6.4+. On this development machine Xcode
+is installed as `Xcode-beta.app`; set `DEVELOPER_DIR` to your installation.
+The scripts download pinned build inputs and keep artifacts under ignored
+`server/.build/`. Network access is needed to obtain build dependencies.
+
+From the repository root:
+
 ```bash
+export DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer
+brew install xcodegen bison flex
+bash scripts/build-ledgercore-xcframework.sh
+bash scripts/build-beancount-ios.sh
+
 cd App/LedgerMobile
 xcodegen generate
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
-  xcodebuild \
+xcodebuild \
     -project LedgerMobile.xcodeproj \
     -scheme LedgerMobile \
     -sdk iphonesimulator \
     -destination 'generic/platform=iOS Simulator' \
-    -derivedDataPath /tmp/ledger-mobile-derived-data \
+    -derivedDataPath DerivedData/Local \
     CODE_SIGNING_ALLOWED=NO \
     build-for-testing
 ```
 
-Run model and session tests in the simulator with `xcodebuild test` and
-`-only-testing:LedgerMobileTests`. `swift test` also builds the portable target,
-but App Group storage tests require an environment with container access; an
-unsigned macOS command-line test process may fail those storage checks.
+The resulting dependencies are `LedgerCore.xcframework`,
+`BeancountRuntime.xcframework`, and `Python.xcframework`. The project links the
+first two statically, embeds Python, and runs
+`scripts/build-beancount-ios-resources.sh` to package the standard library,
+Python extension frameworks, and license notices before app signing. Rebuild
+LedgerCore after Go engine changes and BeancountRuntime after runtime changes.
+
+The current embedded dependency slices support iOS arm64 and iOS Simulator
+arm64/x86_64. Mac Catalyst requires additional compatible slices and packaging
+work. Use the iOS or simulator destinations for this local build. `project.yml`
+retains historical Catalyst settings; local Catalyst support remains pending.
+
+## Local integration and UI tests
+
+After building the three dependencies and generating the project, run the real
+Go + CPython integration tests in the app host, alongside workspace, repository,
+and session regressions:
+
+```bash
+cd App/LedgerMobile
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+  xcodebuild test \
+    -project LedgerMobile.xcodeproj \
+    -scheme LedgerMobile \
+    -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' \
+    -derivedDataPath DerivedData/Local \
+    -only-testing:LedgerMobileTests/LocalLedgerIntegrationTests \
+    -only-testing:LedgerMobileTests/LocalLedgerSessionTests \
+    -only-testing:LedgerMobileTests/LocalLedgerRepositoryTests \
+    -only-testing:LedgerMobileTests/LocalLedgerWorkspaceTests \
+    CODE_SIGNING_ALLOWED=NO
+
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+  xcodebuild test \
+    -project LedgerMobile.xcodeproj \
+    -scheme LedgerMobile \
+    -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' \
+    -derivedDataPath DerivedData/Local \
+    -only-testing:LedgerMobileUITests/LocalLedgerUITests \
+    CODE_SIGNING_ALLOWED=NO
+```
+
+Choose an installed simulator with `xcrun simctl list devices available`.
+`LocalLedgerIntegrationTests` uses the production bridges and unique temporary
+ledgers for create/read/add/edit/delete/reopen and failed-validation rollback.
+`LocalLedgerUITests` drives library creation, a confirmed transaction, and app
+restart with an isolated simulator-only authentication fixture. Its
+`--local-ui-testing` launch path is Debug/simulator-only; real-device unlock
+uses system authentication. Keep these tests separate from the deterministic
+`--safe-preview` visual fixtures below.
+
+For a physical app-host integration run, replace the destination with
+`platform=iOS,id=<device-identifier>`, use a device-specific derived-data folder,
+and allow normal development signing. Test only disposable fixtures and verify
+device authentication independently. The simulator-only local UI test skips on
+physical devices.
+
+From the repository root, `bash scripts/build-beancount-ios-smoke.sh` builds and
+runs a small interpreter smoke app on an already booted simulator. It checks
+valid/invalid transactions, balance assertions, and rejected plugin/path input.
+`swift test` in `App/LedgerMobile` covers portable code; the embedded runtime
+and App Group checks require the corresponding app-host environment.
 
 For UI iteration, build and install on the physical iPhone early for direct
 feedback. After the final device-feedback changes, complete regression before
 merging the PR: model/session tests, the full iPhone UI suite, and focused small
 screen, accessibility, and iPad coverage. Keep automated writes in safe-preview
 fixtures and record any independently reproduced baseline failures separately.
-
-Apple Silicon Mac can run the same iPad build through Designed for iPad. After
-`xcodegen generate`, choose `My Mac (Designed for iPad)` as the run destination
-in Xcode. Regenerating the project restores the intended iOS platform settings
-if Xcode's recommended-settings migration added a native macOS target locally.
-
-For a standalone Mac app, build the Mac Catalyst destination. The first build
-may create Catalyst development provisioning profiles through the Apple account
-configured in Xcode:
-
-```bash
-cd App/LedgerMobile
-xcodegen generate
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
-  xcodebuild \
-    -project LedgerMobile.xcodeproj \
-    -scheme LedgerMobile \
-    -configuration Debug \
-    -destination 'platform=macOS,variant=Mac Catalyst,name=My Mac' \
-    -derivedDataPath /tmp/ledger-mobile-catalyst-derived \
-    -allowProvisioningUpdates \
-    build
-```
-
-The Catalyst build includes the regular widgets. Live Activities and Dynamic
-Island remain available in the iOS build.
 
 ## Visual QA
 
@@ -177,20 +243,28 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
     -only-testing:LedgerMobileUITests
 ```
 
-The app requires iOS 17 or later and an HTTPS Beancount Ledger Web origin.
-Enter the origin only, for example `https://ledger.example.com`. The password
-is sent to `/api/auth/login` and is never stored by the app. Biometric quick
-unlock stores only the server-issued device token under
-`biometryCurrentSet` and `WhenUnlockedThisDeviceOnly` Keychain protection.
+The app requires iOS 17 or later and a device passcode for local ledger access.
+Git synchronization supports HTTPS remotes, an explicit branch, and optional
+username/token credentials. Adding a Git ledger only reads the remote. Later
+synchronization runs automatically when enabled, or immediately from the status
+dot. Conflicts require explicit resolution before synchronization resumes.
 
 ## iLoader, SideStore and AltStore installation
 
-### Download an IPA from GitHub Actions
+These notes cover installation and renewal of a private local build. Public
+binary distribution remains gated by [the runtime licensing issue](Runtime/THIRD_PARTY.md).
+Keep the embedded Python framework and standard-library extension frameworks
+when packaging or re-signing; they must receive valid signatures with the app.
+### GitHub Actions packaging, currently gated
 
-Open **Actions → iOS SideStore IPA → Run workflow**, choose the branch and run
-the workflow. Pushes affecting iOS files on `main` or `codex/ios-*` branches also
-build this package automatically. Once the
-run succeeds, download its `LedgerMobile-SideStore-<run>-<attempt>` artifact,
+The SideStore workflow's packaging job and `scripts/build-ios-ipa.sh` are
+disabled for the embedded runtime pending the combined-work license audit.
+Private Xcode builds remain available using the steps above. Resolving the
+license gate also requires updating IPA packaging for the embedded frameworks.
+The following runner and renewal notes preserve the packaging setup for that
+future re-enablement.
+
+After re-enablement, a successful run provides a `LedgerMobile-SideStore-<run>-<attempt>` artifact;
 extract the outer ZIP, and import the contained `.ipa` into SideStore using **+**.
 The artifact includes a SHA-256 checksum and `build-info.txt` with the source
 commit, app version and actual Xcode/SDK versions. Downloads are retained for
@@ -218,15 +292,8 @@ Packaging requires no Apple credentials or repository signing secrets. The
 Release device archive receives ad-hoc signatures that preserve App Group
 entitlements for the installer's discovery step. SideStore supplies the final
 Apple ID signature, provisioning profiles and Keychain groups. Keep both
-extensions when SideStore asks, and renew with the same Apple ID. Personal Team
-builds support password login and Face ID / Touch ID quick unlock.
-
-To build the same package locally with your selected Xcode:
-
-```bash
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
-  bash scripts/build-ios-ipa.sh /tmp/ledger-sidestore-output
-```
+extensions when SideStore asks, and renew with the same Apple ID. Local ledger
+access uses Face ID, Touch ID, or the device passcode.
 
 ### Shared storage and renewal
 
@@ -241,16 +308,19 @@ widget credential's Keychain access group, so renewal with the same Apple team
 preserves the shared namespace. Direct Xcode installations retain their existing
 App Group and Keychain group.
 
-After updating an older re-signed build, open Ledger, complete biometric unlock,
-and tap the widget background-refresh row in Settings to provision its read-only
-credential and republish the snapshot into the correct group. Verify that the
-status becomes successful, then renew with the same installer and verify again.
-Changing Apple teams creates a different shared namespace and requires setting
-up credentials again. A present `ALTAppGroups` value with a missing or ambiguous
+After updating a re-signed build, open Ledger and unlock the local ledger to
+republish its reduced widget snapshot. Renew with the same installer and Apple
+team to preserve the shared namespace. Changing Apple teams creates a different
+shared namespace. A present `ALTAppGroups` value with a missing or ambiguous
 Ledger mapping disables widget credential access and takes precedence over the
 iLoader fallback.
 
-## Native passkey deployment
+## Retained remote compatibility code
+
+The production local-only composition rejects remote repositories. Existing
+remote authentication code and test fixtures remain in the shared source tree
+for compatibility testing. The following deployment notes apply only to a
+separately composed remote client; local ledger access uses device-owner auth.
 
 The checked-in Debug and Release configurations support installation with an
 Apple Personal Team. They use `Supporting/LedgerMobilePersonal.entitlements`

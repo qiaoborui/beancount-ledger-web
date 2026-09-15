@@ -20,6 +20,10 @@ concurrency:
 jobs:
   ipa:
     name: Build SideStore IPA
+    # Embedded Beancount GPL-2.0-only / Apache dependency compatibility and
+    # framework packaging must be resolved before artifact redistribution.
+    # See App/LedgerMobile/Runtime/THIRD_PARTY.md. Private Xcode tests remain available.
+    if: ${{ false }}
     runs-on: [self-hosted, macOS, ARM64, ledger-ios]
     timeout-minutes: 45
     steps:
