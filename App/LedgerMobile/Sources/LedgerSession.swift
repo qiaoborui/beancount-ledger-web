@@ -331,8 +331,9 @@ final class LedgerSession: ObservableObject {
             let expectedLocation = location
             await refreshLocalLedgers()
             guard !Task.isCancelled, sessionEpoch == epoch, location == expectedLocation else { return }
-            phase = .locked(authenticated: true)
-            await unlockLocalLedger()
+            // Keep the startup surface mounted during automatic authentication.
+            // A rejected attempt exposes the manual unlock screen in the catch path.
+            await automaticallyUnlockIfNeeded()
             return
         }
         await refreshLocalLedgers()
@@ -1031,7 +1032,10 @@ final class LedgerSession: ObservableObject {
     }
 
     func automaticallyUnlockIfNeeded() async {
-        guard applicationActive, case .locked = phase, canUseBiometricUnlock,
+        let localStartup = isLocal && phase == .checking
+        let awaitsAutomaticUnlock = phase == .locked(authenticated: true)
+            || phase == .locked(authenticated: false) || localStartup
+        guard applicationActive, awaitsAutomaticUnlock, canUseBiometricUnlock || localStartup,
               !automaticUnlockAttempted, !isAuthenticationBusy,
               !systemAuthenticationInProgress else { return }
         automaticUnlockAttempted = true
@@ -2550,16 +2554,19 @@ final class LedgerSession: ObservableObject {
         let targetCurrency = valuationCurrency ?? storedValuationCurrency(for: contextURL)
         let source = try repository(at: contextURL)
         let local = source as? LocalLedgerRepository
-        let previousRevision = try await local?.workspace.currentRevision()?.id
         let today = LedgerDateRange.today(now: ledgerNow())
-        let payload = try await source.bootstrap(
-            start: targetRange.start,
-            end: targetRange.queryEndExclusive,
-            today: today,
-            valuationCurrency: targetCurrency
-        )
-        guard generation == requestGeneration else { return }
-        let currentRevision = try await local?.workspace.currentRevision()?.id
+        let payload: LedgerBootstrap
+        let presentationRevision: UUID?
+        if let local {
+            let snapshot = try await local.bootstrapSnapshot(start: targetRange.start,
+                end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency)
+            payload = snapshot.payload
+            presentationRevision = snapshot.revisionID
+        } else {
+            payload = try await source.bootstrap(start: targetRange.start,
+                end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency)
+            presentationRevision = nil
+        }
         guard generation == requestGeneration else { return }
         guard payload.sensitiveUnlocked else {
             if preserveCachedLedgerOnSensitiveLock, ledger != nil {
@@ -2591,7 +2598,7 @@ final class LedgerSession: ObservableObject {
         ledger = payload
         localPresentation = local.map {
             LocalPresentation(ledgerID: $0.descriptor.id,
-                revisionID: previousRevision == currentRevision ? currentRevision : nil, today: today)
+                revisionID: presentationRevision, today: today)
         }
         storeValuationCurrency(payload.valuationCurrency, for: contextURL)
         selectedRange = targetRange

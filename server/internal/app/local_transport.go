@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 )
@@ -64,7 +65,10 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 		}
 		cfg.RuntimeDir = stagedRuntime
 	}
-	cache := NewLedgerCache(cfg)
+	cache, err := localRequestCache(cfg, input.Staging)
+	if err != nil {
+		return http.StatusBadRequest, nil, err
+	}
 	runtime := newFilesystemRuntimeStore(cfg.RuntimeDir)
 	writer := NewLedgerWriterWithRuntimeStore(cfg, cache, runtime)
 	if input.Staging {
@@ -95,9 +99,6 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 	}
 	if mutation && !input.Staging {
 		return http.StatusConflict, nil, errors.New("ledger mutations require a staging workspace")
-	}
-	if _, _, err := localLedgerSource(cfg); err != nil {
-		return http.StatusBadRequest, nil, err
 	}
 	body, contentType, err := localRequestBody(input, cfg.LedgerRoot)
 	if err != nil {
@@ -135,6 +136,44 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 	}
 	encoded, err := json.Marshal(payload)
 	return status, encoded, err
+}
+
+// Retain one read model across native page requests. Source content and the
+// canonical plugin output both participate in the key; staging always gets a
+// fresh cache. localConfig still validates paths and symlinks on every request.
+var localPageCache struct {
+	sync.Mutex
+	key   localPageCacheKey
+	cache *LedgerCache
+}
+
+type localPageCacheKey struct {
+	root, entrypoint string
+	version          LedgerVersion
+	canonical        [sha256.Size]byte
+}
+
+func localRequestCache(cfg Config, staging bool) (*LedgerCache, error) {
+	version, err := ledgerVersion(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if staging || filepath.Base(filepath.Dir(filepath.Dir(cfg.LedgerRoot))) != "generations" {
+		return NewLedgerCache(cfg), nil
+	}
+	canonical, err := json.Marshal(cfg.localCanonical)
+	if err != nil {
+		return nil, err
+	}
+	key := localPageCacheKey{root: cfg.LedgerRoot, entrypoint: cfg.localEntrypoint,
+		version: version, canonical: sha256.Sum256(canonical)}
+	localPageCache.Lock()
+	defer localPageCache.Unlock()
+	if localPageCache.cache == nil || localPageCache.key != key {
+		localPageCache.key = key
+		localPageCache.cache = NewLedgerCache(cfg)
+	}
+	return localPageCache.cache, nil
 }
 
 // Keep the allowlist explicit: cloud, AI, Git, push and authentication routes

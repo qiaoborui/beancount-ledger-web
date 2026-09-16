@@ -25,7 +25,7 @@ final class LocalLedgerSessionTests: XCTestCase {
 
     @MainActor
     private final class Authenticator: LocalLedgerAuthenticating {
-        let isAvailable = true
+        var isAvailable = true
         var gate: Gate?
         var rejects = false
         private(set) var calls = 0
@@ -116,6 +116,87 @@ final class LocalLedgerSessionTests: XCTestCase {
             try? FileManager.default.removeItem(at: root)
         }
         return (root, defaults, suite)
+    }
+
+    func testColdRelaunchRestoresValidatedPresentationAfterAuthenticationWithoutRebuilding() async throws {
+        let fixture = try fixture()
+        let firstEngine = ResumeEngine()
+        let catalogRoot = fixture.root.appendingPathComponent("managed")
+        let catalog = LocalLedgerCatalog(rootDirectory: catalogRoot, engine: firstEngine, validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Cold launch fixture")
+        let first = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+            defaults: fixture.defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+            widgetCredentialStore: InertWidgetStore())
+        await first.openLocalLedger(descriptor)
+        let summary = try XCTUnwrap(first.ledger?.summary)
+        await first.lock()
+
+        // New session, repository, workspace and engine: no in-memory cache survives.
+        let reopenedEngine = ResumeEngine()
+        let reopenedCatalog = LocalLedgerCatalog(rootDirectory: catalogRoot, engine: reopenedEngine, validator: { _, _ in })
+        let authenticating = expectation(description: "cold authentication pending")
+        let gate = Gate(authenticating)
+        let reopened = LedgerSession(localOnly: true, localCatalog: reopenedCatalog, localAuthenticator: Authenticator(gate: gate),
+            defaults: fixture.defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+            widgetCredentialStore: InertWidgetStore())
+        var phases: [LedgerSession.Phase] = []
+        let observation = reopened.$phase.removeDuplicates().sink { phases.append($0) }
+        defer { observation.cancel() }
+        let starting = Task { await reopened.start() }
+        await fulfillment(of: [authenticating], timeout: 3)
+        XCTAssertEqual(reopened.phase, .checking, "Automatic authentication must keep one startup surface")
+        XCTAssertNil(reopened.ledger)
+        XCTAssertFalse(reopened.amountsVisible)
+        await gate.release()
+        await starting.value
+        XCTAssertEqual(reopened.phase, .ready)
+        XCTAssertEqual(reopened.ledger?.summary, summary)
+        let calls = await reopenedEngine.bootstrapCalls
+        XCTAssertEqual(calls, 0, "Cold launch must read its saved presentation instead of starting the ledger interpreter")
+        XCTAssertEqual(phases, [.checking, .ready], "A successful cold launch must never mount the login screen")
+        reopened.chooseLedger()
+        first.chooseLedger()
+    }
+
+    func testInactiveColdStartupWaitsForForegroundAndFailedAuthenticationAllowsManualRetry() async throws {
+        for (rejects, available) in [(false, true), (true, true), (true, false)] {
+            let fixture = try fixture()
+            let catalog = LocalLedgerCatalog(rootDirectory: fixture.root.appendingPathComponent("managed"),
+                engine: ResumeEngine(), validator: { _, _ in })
+            let descriptor = try await catalog.create(name: "Foreground startup")
+            fixture.defaults.set(descriptor.id.uuidString, forKey: "ledger.mobile.active-local-ledger")
+            let authenticator = Authenticator()
+            authenticator.rejects = rejects
+            authenticator.isAvailable = available
+            let session = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: authenticator,
+                defaults: fixture.defaults,
+                widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+                widgetCredentialStore: InertWidgetStore())
+            await session.updateActivity(isActive: false, isBackground: false)
+            await session.start()
+            XCTAssertEqual(session.phase, .checking)
+            XCTAssertEqual(authenticator.calls, 0)
+            XCTAssertNil(session.ledger)
+            await session.updateActivity(isActive: true, isBackground: false)
+            await session.automaticallyUnlockIfNeeded()
+            XCTAssertEqual(authenticator.calls, 1)
+            if rejects {
+                XCTAssertEqual(session.phase, .locked(authenticated: true))
+                XCTAssertNotNil(session.errorMessage)
+                XCTAssertNil(session.ledger)
+                XCTAssertFalse(session.amountsVisible)
+                // Scene callbacks after cancellation must not prompt a second time.
+                await session.automaticallyUnlockIfNeeded()
+                XCTAssertEqual(authenticator.calls, 1)
+                authenticator.rejects = false
+                await session.unlockLocalLedger()
+                XCTAssertEqual(authenticator.calls, 2)
+            }
+            XCTAssertEqual(session.phase, .ready)
+            session.chooseLedger()
+        }
     }
 
     func testWarmLocalUnlockKeepsReadyShellAndSkipsUnchangedBootstrap() async throws {

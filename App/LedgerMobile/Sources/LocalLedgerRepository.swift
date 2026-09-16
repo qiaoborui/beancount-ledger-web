@@ -52,9 +52,31 @@ actor LocalLedgerRepository: LedgerRepository {
     func exportSyncConflictVersions() async throws -> URL { try await storage.exportConflictVersions() }
 
     func bootstrap(start: String, end: String, today: String, valuationCurrency: String) async throws -> LedgerBootstrap {
+        try await bootstrapSnapshot(start: start, end: end, today: today, valuationCurrency: valuationCurrency).payload
+    }
+
+    /// Return the revision that produced the presentation, including when a writer
+    /// publishes a new generation while the engine is reading the pinned snapshot.
+    func bootstrapSnapshot(start: String, end: String, today: String, valuationCurrency: String) async throws
+        -> (revisionID: UUID, payload: LedgerBootstrap) {
         var query = range(start, end, valuationCurrency)
         query["today"] = today
-        return try await read("/api/ledger/bootstrap", query: query)
+        let cacheQuery = query
+        let cache = BootstrapPresentationCache(ledgerID: descriptor.id, entrypoint: descriptor.entrypoint,
+            url: workspace.rootDirectory.appendingPathComponent(".bootstrap-presentation.json"))
+        if let restored = try await workspace.withCurrentSnapshot({ revision, _ in
+            cache.load(revisionID: revision.id, query: cacheQuery)
+        }) {
+            presentedRevisionID = restored.revisionID
+            return (restored.revisionID, restored.payload)
+        }
+        let (revisionID, data) = try await readSnapshot("/api/ledger/bootstrap", query: query)
+        let payload = try JSONDecoder().decode(LedgerBootstrap.self, from: data)
+        presentedRevisionID = revisionID
+        if payload.sensitiveUnlocked {
+            cache.save(data, revisionID: revisionID, query: query)
+        }
+        return (revisionID, payload)
     }
     func homeReport(start: String, end: String, valuationCurrency: String) async throws -> LedgerHomeReport {
         try await read("/api/ledger/home-report", query: range(start, end, valuationCurrency))
@@ -321,5 +343,72 @@ actor LocalLedgerRepository: LedgerRepository {
         await storage.didCommit(revision)
         NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
         return try JSONDecoder().decode(T.self, from: data)
+    }
+}
+
+/// A derived presentation of one immutable generation. A reopened app can show
+/// authenticated local content without starting Python or rebuilding analytics.
+/// Date, range, currency, entrypoint and build changes all require a fresh read.
+private struct BootstrapPresentationCache: Sendable {
+    let ledgerID: UUID
+    let entrypoint: String
+    let url: URL
+    private static let maximumBytes = 16 * 1_024 * 1_024
+    private static let applicationVersion = ["CFBundleShortVersionString", "CFBundleVersion"]
+        .map { Bundle.main.object(forInfoDictionaryKey: $0) as? String ?? "development" }
+        .joined(separator: "/")
+
+    private struct Record: Codable {
+        let formatVersion: Int
+        let applicationVersion: String
+        let ledgerID: UUID
+        let revisionID: UUID
+        let entrypoint: String
+        let query: [String: String]
+        let payload: Data
+    }
+
+    struct Restored: Sendable {
+        let revisionID: UUID
+        let payload: LedgerBootstrap
+    }
+
+    func load(revisionID: UUID, query: [String: String]) -> Restored? {
+        // The workspace has checked its managed root and current generation.
+        // Cache failures are misses, so damaged or unsupported data is rebuilt.
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? NSNumber, size.intValue <= Self.maximumBytes,
+              let data = try? Data(contentsOf: url),
+              let record = try? JSONDecoder().decode(Record.self, from: data),
+              record.formatVersion == 1, record.applicationVersion == Self.applicationVersion,
+              record.ledgerID == ledgerID, record.revisionID == revisionID,
+              record.entrypoint == entrypoint, record.query == query,
+              let payload = try? JSONDecoder().decode(LedgerBootstrap.self, from: record.payload),
+              payload.sensitiveUnlocked else { return nil }
+        return Restored(revisionID: revisionID, payload: payload)
+    }
+
+    func save(_ payload: Data, revisionID: UUID, query: [String: String]) {
+        guard payload.count <= Self.maximumBytes else { return }
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+           attributes[.type] as? FileAttributeType != .typeRegular { return }
+        let record = Record(formatVersion: 1, applicationVersion: Self.applicationVersion,
+            ledgerID: ledgerID, revisionID: revisionID, entrypoint: entrypoint, query: query, payload: payload)
+        guard let data = try? JSONEncoder().encode(record), data.count <= Self.maximumBytes else { return }
+        do {
+            #if os(iOS)
+            try data.write(to: url, options: [.atomic, .completeFileProtection])
+            #else
+            try data.write(to: url, options: .atomic)
+            #endif
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            var cacheURL = url
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try cacheURL.setResourceValues(values)
+        } catch {
+            // This disposable read model never determines financial write success.
+        }
     }
 }

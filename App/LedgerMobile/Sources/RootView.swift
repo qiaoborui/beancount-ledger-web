@@ -16,7 +16,7 @@ struct RootView: View {
                 // A search deep link can arrive before authentication finishes. Keep native
                 // search controllers unmounted until the ready shell has a stable lifetime.
                 Group {
-                    if session.isLocal { ProgressView() }
+                    if session.isLocal { PrivacyCover() }
                     else { ProgressView("正在连接账本") }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -32,7 +32,9 @@ struct RootView: View {
             }
         }
         .tint(LedgerPalette.cobalt)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: session.phase)
+        // Local startup presents one authenticated frame; animating the whole
+        // navigation hierarchy cross-fades the cover, toolbar and populated list.
+        .animation(session.isLocal || reduceMotion ? nil : .easeOut(duration: 0.18), value: session.phase)
         .sheet(isPresented: Binding(
             get: { session.canPresentWidgetDay },
             set: { presented in
