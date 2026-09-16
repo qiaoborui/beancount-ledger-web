@@ -49,19 +49,35 @@ struct ExpenseLockScreenWidgetView: View {
     case .accessoryCircular:
       ZStack {
         AccessoryWidgetBackground()
-        VStack(spacing: 2) {
-          Text(entry.period.title).font(.system(size: 9, weight: .medium))
-          Text(amount).font(.system(size: 15, weight: .semibold, design: .rounded))
-            .monospacedDigit().lineLimit(1).minimumScaleFactor(0.5)
-        }.padding(4)
+        VStack(spacing: 1.5) {
+          Image(systemName: "chart.bar.xaxis")
+            .font(.system(size: 9, weight: .semibold))
+          Text(amount)
+            .font(.system(size: 14, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.45)
+          Text(entry.period.title.replacingOccurrences(of: "消费", with: ""))
+            .font(.system(size: 8, weight: .medium))
+        }
+        .padding(3)
       }
     default:
       VStack(alignment: .leading, spacing: 2) {
-        Label(entry.period.title, systemImage: "chart.line.uptrend.xyaxis").font(.caption2)
-        Text(amount).font(.system(size: 21, weight: .semibold, design: .rounded))
-          .monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
-        Text(LedgerWidgetText.updated(updatedAt, now: entry.date)).font(.system(size: 9)).lineLimit(
-          1)
+        Label(entry.period.title, systemImage: "chart.bar.xaxis")
+          .font(.system(size: 10, weight: .medium))
+        Text(amount)
+          .font(.system(size: 21, weight: .semibold, design: .rounded))
+          .monospacedDigit()
+          .lineLimit(1)
+          .minimumScaleFactor(0.6)
+        HStack(spacing: 4) {
+          Text("\(expense.transactionCount) 笔")
+          Text("·")
+          Text(LedgerWidgetText.updated(updatedAt, now: entry.date))
+        }
+        .font(.system(size: 9, weight: .medium))
+        .lineLimit(1)
       }
     }
   }

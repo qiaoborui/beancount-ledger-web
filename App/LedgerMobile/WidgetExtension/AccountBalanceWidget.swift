@@ -157,81 +157,146 @@ struct AccountBalanceWidgetView: View {
     }
 
     private func small(_ account: LedgerWidgetAccountSnapshot, updatedAt: Date) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let style = LedgerWidgetVisualHelper.account(for: account)
+        return VStack(alignment: .leading, spacing: 0) {
             LedgerWidgetHeader(
                 title: account.label,
-                detail: account.isLiability ? "待还" : "账户余额"
+                detail: account.isLiability ? "待还账单 · \(account.currency)" : "\(style.groupLabel) · \(account.currency)",
+                systemName: style.icon,
+                tint: style.tint
             )
             Spacer(minLength: 8)
-            Text(primaryAmount(account, narrow: true))
-                .font(.system(size: 25, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(account.isLiability ? LedgerWidgetColors.expense : LedgerWidgetColors.ink)
-                .lineLimit(1)
-                .privacySensitive()
+            VStack(alignment: .leading, spacing: 2) {
+                Text(account.isLiability ? "待还余额" : "当前余额")
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(LedgerWidgetColors.secondary)
+                Text(primaryAmount(account, narrow: true))
+                    .font(.system(size: 25, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(account.isLiability ? LedgerWidgetColors.expense : LedgerWidgetColors.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                    .privacySensitive()
+            }
             if let valuation = secondaryValuation(account, narrow: true) {
                 Text("估值 \(valuation)")
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(LedgerWidgetColors.secondary)
+                    .foregroundStyle(LedgerWidgetColors.gold)
                     .lineLimit(1)
-                    .padding(.top, 4)
+                    .padding(.top, 3)
                     .privacySensitive()
             }
             Spacer(minLength: 4)
-            Text(LedgerWidgetText.updated(updatedAt, now: entry.date))
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(LedgerWidgetColors.secondary)
+            HStack(spacing: 4) {
+                Text(style.groupLabel)
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(style.tint)
+                Text("·")
+                    .foregroundStyle(LedgerWidgetColors.secondary)
+                Text(LedgerWidgetText.updated(updatedAt, now: entry.date))
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(LedgerWidgetColors.secondary)
+            }
+            .lineLimit(1)
         }
     }
 
     private func medium(_ account: LedgerWidgetAccountSnapshot, updatedAt: Date) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
+        let style = LedgerWidgetVisualHelper.account(for: account)
+        return HStack(spacing: 12) {
+            // Left Hero Section
+            VStack(alignment: .leading, spacing: 0) {
                 LedgerWidgetHeader(
                     title: account.label,
-                    detail: account.isLiability ? "负债账户" : "资产账户"
+                    detail: account.isLiability ? "负债账户" : "资产账户",
+                    systemName: style.icon,
+                    tint: style.tint
                 )
-                Text(account.currency)
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(LedgerWidgetColors.cobalt)
-                    .padding(.horizontal, 8)
-                    .frame(height: 24)
-                    .background(LedgerWidgetColors.tag)
-                    .clipShape(Capsule())
-            }
-            Spacer(minLength: 8)
-            HStack(alignment: .lastTextBaseline, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(account.isLiability ? "当前待还" : "当前余额")
-                        .font(.system(size: 10, weight: .semibold))
+                Spacer(minLength: 6)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(account.isLiability ? "当前待还款" : "可用资产余额")
+                        .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(LedgerWidgetColors.secondary)
                     Text(primaryAmount(account, narrow: false))
-                        .font(.system(size: 29, weight: .semibold, design: .rounded))
+                        .font(.system(size: 27, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(account.isLiability ? LedgerWidgetColors.expense : LedgerWidgetColors.ink)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .privacySensitive()
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: 4)
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(account.isLiability ? LedgerWidgetColors.expense : LedgerWidgetColors.success)
+                        .frame(width: 5, height: 5)
+                    Text(account.isLiability ? "按期对账" : "账面在册")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(LedgerWidgetColors.secondary)
+                    Text("·")
+                        .foregroundStyle(LedgerWidgetColors.secondary)
+                    Text(LedgerWidgetText.updated(updatedAt, now: entry.date))
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(LedgerWidgetColors.secondary)
+                }
+                .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Right Tactile Context Card
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("账户概况")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(LedgerWidgetColors.ink)
+                    Spacer(minLength: 0)
+                    Text(account.currency)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(style.tint)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(style.tint.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+
                 if let valuation = secondaryValuation(account, narrow: false) {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("统一估值")
-                            .font(.system(size: 10, weight: .semibold))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("统一估值 (\(account.valuationCurrency))")
+                            .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(LedgerWidgetColors.secondary)
                         Text(valuation)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .font(.system(size: 13.5, weight: .semibold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(LedgerWidgetColors.gold)
                             .lineLimit(1)
                             .privacySensitive()
                     }
+                    .padding(.top, 1)
                 }
-            }
-            Spacer(minLength: 6)
-            Text(LedgerWidgetText.updated(updatedAt, now: entry.date))
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("类别属性")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(LedgerWidgetColors.secondary)
+                    Text(style.groupLabel)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(LedgerWidgetColors.ink)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+
+                HStack(spacing: 2) {
+                    Text("查看账本明细")
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 8, weight: .bold))
+                }
                 .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(LedgerWidgetColors.secondary)
+                .foregroundStyle(LedgerWidgetColors.cobalt)
+            }
+            .frame(width: 116, alignment: .leading)
+            .widgetSubcard(cornerRadius: 10, padding: 8)
         }
     }
 
