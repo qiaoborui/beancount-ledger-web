@@ -13,7 +13,7 @@ actor LocalLedgerRepository: LedgerRepository {
     nonisolated let storage: any LogicalLocalStorage
     private let engine: any LocalLedgerEngine
     private let validator: LocalLedgerCatalog.Validator
-    private var presentedRevisionID: UUID?
+    private(set) var presentedRevisionID: UUID?
     private var importRevisionIDs: [String: UUID] = [:]
     private var importPreviewDates: [String: Date] = [:]
     private var lastRuntimeMaintenance: Date?

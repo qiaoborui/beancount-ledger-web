@@ -88,6 +88,50 @@ actor GitLocalStorage: LogicalLocalStorage {
         let credential = try credentials.load(for: configuration.id)
         let fetch: FetchResult = try await request("fetch", credential: credential)
         let remoteCommit = fetch.branchExists ? fetch.remoteHead : ""
+
+        // Fast-Path 1: No-op (both remote and local are completely unchanged since last sync)
+        if let revision,
+           fetch.branchExists,
+           !remoteCommit.isEmpty,
+           state.baseCommit == remoteCommit,
+           state.syncedRevisionID == revision.id,
+           state.pendingRevisionID == nil,
+           state.conflictPaths.isEmpty,
+           state.conflictAttemptID == nil {
+            guard try await workspace.currentRevision()?.id == revision.id else {
+                throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+            }
+            state.lastSyncedAt = Date()
+            state.failure = nil
+            try saveState(state)
+            return
+        }
+
+        // Fast-Path 2: Fast-Forward Push (remote has not changed, local has unpushed changes)
+        if let revision,
+           let localRoot,
+           fetch.branchExists,
+           !remoteCommit.isEmpty,
+           state.baseCommit == remoteCommit,
+           state.conflictPaths.isEmpty,
+           state.conflictAttemptID == nil {
+            guard try await workspace.currentRevision()?.id == revision.id else {
+                throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+            }
+            let previousAttempt = state.conflictAttemptID
+            let pinnedRevisionID = revision.id
+            let newCommit = try await self.commitAndPush(root: localRoot, parent: remoteCommit, credential: credential)
+            state.baseCommit = newCommit
+            state.syncedRevisionID = pinnedRevisionID
+            state.pendingRevisionID = nil
+            state.failure = nil
+            state.lastSyncedAt = Date()
+            try saveState(state)
+            discardAttempt(previousAttempt)
+            return
+        }
+
+        // General 3-Way Merge (concurrent edits, initial connection, or conflict recovery)
         let attemptID = UUID()
         let attempt = attemptsRoot.appendingPathComponent(attemptID.uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: attempt, withIntermediateDirectories: true)
@@ -224,12 +268,10 @@ actor GitLocalStorage: LogicalLocalStorage {
         commit.authorName = "Ledger Mobile"
         commit.authorEmail = "ledger@localhost"
         let result = try JSONDecoder().decode(CommitResult.self, from: await transport.dispatch(commit))
-        try protectTree(syncRoot)
         var push = makeRequest("push", credential: credential)
         push.commit = result.commit
         push.expectedRemoteHead = parent
         _ = try await transport.dispatch(push)
-        try protectTree(syncRoot)
         return result.commit
     }
     private func export(commit: String, to directory: URL) async throws {
@@ -241,11 +283,9 @@ actor GitLocalStorage: LogicalLocalStorage {
         request.commit = commit
         request.directory = directory.path
         _ = try await transport.dispatch(request)
-        try protectTree(syncRoot)
     }
     private func request<T: Decodable>(_ operation: String, credential: LocalGitCredential?) async throws -> T {
         let data = try await transport.dispatch(makeRequest(operation, credential: credential))
-        try protectTree(syncRoot)
         return try JSONDecoder().decode(T.self, from: data)
     }
     private func makeRequest(_ operation: String, credential: LocalGitCredential? = nil) -> LocalGitRequest {
