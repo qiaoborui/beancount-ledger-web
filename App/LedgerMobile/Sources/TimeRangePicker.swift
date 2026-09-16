@@ -193,7 +193,7 @@ private struct LedgerTimeRangeSheet: View {
 
                     Spacer()
 
-                    Text("\(selectedYear)年")
+                    Text(verbatim: "\(selectedYear)年")
                         .font(.system(.subheadline, design: .rounded, weight: .bold))
                         .foregroundStyle(LedgerPalette.ink)
 
@@ -259,7 +259,7 @@ private struct LedgerTimeRangeSheet: View {
 
                     Spacer()
 
-                    Text("\(selectedYear)年")
+                    Text(verbatim: "\(selectedYear)年")
                         .font(.system(.subheadline, design: .rounded, weight: .bold))
                         .foregroundStyle(LedgerPalette.ink)
 
@@ -323,7 +323,7 @@ private struct LedgerTimeRangeSheet: View {
                         LedgerFeedback.selection()
                         session.setDraftRange(LedgerDateRange.year(year: y))
                     } label: {
-                        Text("\(y)年")
+                        Text(verbatim: "\(y)年")
                             .font(.system(size: 14, weight: isSelected ? .bold : .medium, design: .rounded))
                             .foregroundStyle(isSelected ? Color(uiColor: .systemBackground) : Color.primary)
                             .frame(maxWidth: .infinity, minHeight: 42)
