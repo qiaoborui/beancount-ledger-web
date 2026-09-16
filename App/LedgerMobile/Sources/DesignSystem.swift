@@ -279,9 +279,55 @@ struct LedgerCardModifier: ViewModifier {
     }
 }
 
+struct LedgerTactileCardModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    var cornerRadius: CGFloat = LedgerRadius.lg
+    var padding: CGFloat = LedgerSpacing.lg
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(LedgerPalette.panel)
+                    .shadow(
+                        color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.045),
+                        radius: 8,
+                        x: 0,
+                        y: 3
+                    )
+                    .shadow(
+                        color: Color.black.opacity(colorScheme == .dark ? 0.18 : 0.015),
+                        radius: 1.5,
+                        x: 0,
+                        y: 1
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.16 : 0.65),
+                                LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.4 : 0.6),
+                                Color.black.opacity(colorScheme == .dark ? 0.2 : 0.03)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.5
+                    )
+            }
+    }
+}
+
 extension View {
     func ledgerCard(cornerRadius: CGFloat = LedgerRadius.md, padding: CGFloat = LedgerSpacing.lg) -> some View {
         modifier(LedgerCardModifier(cornerRadius: cornerRadius, padding: padding))
+    }
+
+    func ledgerTactileCard(cornerRadius: CGFloat = LedgerRadius.lg, padding: CGFloat = LedgerSpacing.lg) -> some View {
+        modifier(LedgerTactileCardModifier(cornerRadius: cornerRadius, padding: padding))
     }
 }
 
@@ -416,11 +462,54 @@ struct StatusBanner: View {
 struct PressScaleButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    var pressedScale: CGFloat = 0.965
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .scaleEffect(reduceMotion ? 1 : configuration.isPressed ? pressedScale : 1)
+            .opacity(configuration.isPressed ? 0.88 : 1)
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.68),
+                value: configuration.isPressed
+            )
+    }
+}
+
+struct TactilePillButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+
+    var backgroundColor: Color = LedgerPalette.cobalt
+    var foregroundColor: Color = LedgerPalette.onBrand
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, LedgerSpacing.lg)
+            .padding(.vertical, 10)
+            .background {
+                RoundedRectangle(cornerRadius: LedgerRadius.pill, style: .continuous)
+                    .fill(backgroundColor)
+                    .shadow(
+                        color: backgroundColor.opacity(configuration.isPressed ? 0.15 : 0.28),
+                        radius: configuration.isPressed ? 2 : 5,
+                        x: 0,
+                        y: configuration.isPressed ? 1 : 2.5
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: LedgerRadius.pill, style: .continuous)
+                    .strokeBorder(
+                        Color.white.opacity(colorScheme == .dark ? 0.2 : 0.4),
+                        lineWidth: 0.5
+                    )
+            }
             .scaleEffect(reduceMotion ? 1 : configuration.isPressed ? 0.96 : 1)
-            .opacity(configuration.isPressed ? 0.86 : 1)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: configuration.isPressed)
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.68),
+                value: configuration.isPressed
+            )
     }
 }
 

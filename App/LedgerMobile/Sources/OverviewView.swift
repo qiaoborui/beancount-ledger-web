@@ -2,6 +2,7 @@ import SwiftUI
 
 struct OverviewView: View {
     @EnvironmentObject private var session: LedgerSession
+    @State private var creatingTransaction = false
 
     var isRoot = true
 
@@ -13,11 +14,80 @@ struct OverviewView: View {
             }
 
             if let ledger = session.ledger {
+                // 1. Monthly Overview Hero Card
                 Section {
                     MonthlyConclusion(ledger: ledger, range: session.selectedRange)
                         .listRowInsets(EdgeInsets())
                 }
 
+                // 2. Quick Actions Dock
+                Section {
+                    OverviewQuickActionsBar(
+                        onAddTransaction: {
+                            if session.isLocal {
+                                creatingTransaction = true
+                            } else {
+                                session.primaryDestinationID = LedgerDestination.transactions.rawValue
+                            }
+                        },
+                        onImport: {
+                            session.primaryDestinationID = LedgerDestination.imports.rawValue
+                        },
+                        onIncomeExpense: {
+                            session.primaryDestinationID = LedgerDestination.incomeExpense.rawValue
+                        },
+                        onAssets: {
+                            session.primaryDestinationID = LedgerDestination.assets.rawValue
+                        }
+                    )
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
+
+                // 3. Top Spending Categories
+                let topCategories = spendingCategories(from: ledger.transactions, accountLabels: accountLabels)
+                if !topCategories.isEmpty {
+                    Section {
+                        OverviewTopCategoriesCard(
+                            categories: topCategories,
+                            totalExpense: ledger.summary.expense,
+                            currency: ledger.summary.currency
+                        )
+                        .listRowInsets(EdgeInsets())
+                    } header: {
+                        HStack {
+                            Text("当月支出排行")
+                                .font(.system(.subheadline, design: .default, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.ink)
+                            Spacer()
+                            Text("Top 分类")
+                                .font(.system(.caption2, design: .default, weight: .medium))
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                        .textCase(nil)
+                    }
+                }
+
+                // 4. Financial Rhythm & Pace
+                if ledger.summary.expense > 0 {
+                    Section {
+                        OverviewSpendingRhythmCard(
+                            ledger: ledger,
+                            range: session.selectedRange
+                        )
+                        .listRowInsets(EdgeInsets())
+                    } header: {
+                        HStack {
+                            Text("消费节奏")
+                                .font(.system(.subheadline, design: .default, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.ink)
+                            Spacer()
+                        }
+                        .textCase(nil)
+                    }
+                }
+
+                // 5. Recent Transactions
                 Section {
                     ForEach(Array(ledger.transactions.prefix(6))) { transaction in
                         NavigationLink {
@@ -60,6 +130,350 @@ struct OverviewView: View {
         .ledgerReadingList()
         .ledgerNavigation("财务概览", isRoot: isRoot, showsTimeRange: true)
         .refreshable { await session.refresh() }
+        .sheet(isPresented: $creatingTransaction) {
+            TransactionEditorView(
+                accounts: session.ledger?.accounts ?? [],
+                commodities: session.ledger?.commodities ?? []
+            ) { entry in
+                try await session.addLocalTransaction(entry)
+            }
+            .ledgerPrivacyProtectedSheet()
+        }
+    }
+
+    private func spendingCategories(
+        from transactions: [LedgerTransaction],
+        accountLabels: [String: String]
+    ) -> [OverviewCategorySpending] {
+        var categoryTotals: [String: (label: String, icon: String, color: Color, amount: Int, count: Int)] = [:]
+        var overallExpense: Int = 0
+
+        for tx in transactions {
+            let presentation = TransactionPresentation(transaction: tx)
+            guard presentation.kind == .expense, presentation.minorUnits > 0 else { continue }
+            let visual = TransactionVisualCategory.resolve(
+                transaction: tx,
+                presentation: presentation,
+                accountLabels: accountLabels
+            )
+            overallExpense += presentation.minorUnits
+            if var existing = categoryTotals[visual.categoryLabel] {
+                existing.amount += presentation.minorUnits
+                existing.count += 1
+                categoryTotals[visual.categoryLabel] = existing
+            } else {
+                categoryTotals[visual.categoryLabel] = (
+                    label: visual.categoryLabel,
+                    icon: visual.iconName,
+                    color: visual.color,
+                    amount: presentation.minorUnits,
+                    count: 1
+                )
+            }
+        }
+
+        guard overallExpense > 0 else { return [] }
+
+        return categoryTotals.values
+            .sorted { $0.amount > $1.amount }
+            .prefix(4)
+            .map { item in
+                OverviewCategorySpending(
+                    id: item.label,
+                    label: item.label,
+                    iconName: item.icon,
+                    color: item.color,
+                    totalMinorUnits: item.amount,
+                    count: item.count,
+                    percentage: Double(item.amount) / Double(overallExpense)
+                )
+            }
+    }
+}
+
+private struct OverviewQuickActionsBar: View {
+    let onAddTransaction: () -> Void
+    let onImport: () -> Void
+    let onIncomeExpense: () -> Void
+    let onAssets: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            QuickActionItem(
+                title: "记一笔",
+                subtitle: "快捷记录",
+                icon: "plus.circle.fill",
+                tint: LedgerPalette.cobalt,
+                action: onAddTransaction
+            )
+            QuickActionItem(
+                title: "账单导入",
+                subtitle: "智能对账",
+                icon: "arrow.down.doc.fill",
+                tint: LedgerPalette.success,
+                action: onImport
+            )
+            QuickActionItem(
+                title: "收支趋势",
+                subtitle: "月度收支",
+                icon: "chart.xyaxis.line",
+                tint: LedgerPalette.gold,
+                action: onIncomeExpense
+            )
+            QuickActionItem(
+                title: "资产分布",
+                subtitle: "账户净值",
+                icon: "building.columns.fill",
+                tint: Color(red: 0.55, green: 0.35, blue: 0.85),
+                action: onAssets
+            )
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct QuickActionItem: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let title: String
+    let subtitle: String
+    let icon: String
+    let tint: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(tint.opacity(0.14))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(tint)
+                }
+                Text(title)
+                    .font(.system(.caption, design: .default, weight: .semibold))
+                    .foregroundStyle(LedgerPalette.ink)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.system(size: 10, weight: .regular))
+                    .foregroundStyle(LedgerPalette.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 4)
+            .background(LedgerPalette.panel)
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.12 : 0.6),
+                                LedgerPalette.cardBorder.opacity(0.5)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.5
+                    )
+            }
+            .shadow(
+                color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.03),
+                radius: 4,
+                x: 0,
+                y: 2
+            )
+        }
+        .buttonStyle(PressScaleButtonStyle(pressedScale: 0.94))
+    }
+}
+
+struct OverviewCategorySpending: Identifiable {
+    let id: String
+    let label: String
+    let iconName: String
+    let color: Color
+    let totalMinorUnits: Int
+    let count: Int
+    let percentage: Double
+}
+
+private struct OverviewTopCategoriesCard: View {
+    @EnvironmentObject private var session: LedgerSession
+    let categories: [OverviewCategorySpending]
+    let totalExpense: Int
+    let currency: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ForEach(categories) { item in
+                VStack(spacing: 6) {
+                    HStack(alignment: .center, spacing: 10) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(item.color.opacity(0.14))
+                                .frame(width: 32, height: 32)
+                            Image(systemName: item.iconName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(item.color)
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(item.label)
+                                    .font(.system(.subheadline, design: .default, weight: .medium))
+                                    .foregroundStyle(LedgerPalette.ink)
+                                Text("\(item.count) 笔")
+                                    .font(.system(.caption2, design: .default))
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
+                        }
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 2) {
+                            AmountLabel(
+                                minorUnits: item.totalMinorUnits,
+                                currency: currency,
+                                font: .system(.subheadline, design: .rounded, weight: .semibold),
+                                color: LedgerPalette.ink
+                            )
+                            Text(String(format: "%.1f%%", item.percentage * 100))
+                                .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                    }
+
+                    // Progress track
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color(uiColor: .tertiarySystemFill))
+                                .frame(height: 5)
+                            Capsule()
+                                .fill(item.color)
+                                .frame(
+                                    width: max(5, min(geo.size.width, geo.size.width * CGFloat(item.percentage))),
+                                    height: 5
+                                )
+                        }
+                    }
+                    .frame(height: 5)
+                }
+                if item.id != categories.last?.id {
+                    Divider()
+                        .overlay(LedgerPalette.line.opacity(0.5))
+                        .padding(.top, 2)
+                }
+            }
+        }
+        .padding(16)
+        .background(LedgerPalette.panel)
+    }
+}
+
+private struct OverviewSpendingRhythmCard: View {
+    @EnvironmentObject private var session: LedgerSession
+    let ledger: LedgerBootstrap
+    let range: LedgerDateRange
+
+    private var daysElapsed: Int {
+        guard let start = LedgerDateRange.parse(range.start),
+              let end = LedgerDateRange.parse(range.end) else { return 30 }
+        let now = Date()
+        let effectiveEnd = min(end, now)
+        let days = (LedgerDateRange.calendar.dateComponents([.day], from: start, to: effectiveEnd).day ?? 0) + 1
+        return max(1, days)
+    }
+
+    private var dailyAverage: Int {
+        guard daysElapsed > 0 else { return 0 }
+        return ledger.summary.expense / daysElapsed
+    }
+
+    private var highestExpense: (title: String, amount: Int)? {
+        let expenseTx = ledger.transactions.compactMap { tx -> (String, Int)? in
+            let presentation = TransactionPresentation(transaction: tx)
+            guard presentation.kind == .expense, presentation.minorUnits > 0 else { return nil }
+            return (presentation.title, presentation.minorUnits)
+        }
+        return expenseTx.max { $0.1 < $1.1 }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Daily average
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 5) {
+                    Image(systemName: "sun.max.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.gold)
+                    Text("日均支出")
+                        .font(.system(.caption, design: .default, weight: .medium))
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
+                AmountLabel(
+                    minorUnits: dailyAverage,
+                    currency: ledger.summary.currency,
+                    font: .system(.title3, design: .rounded, weight: .bold),
+                    color: LedgerPalette.ink
+                )
+                Text("按已过 \(daysElapsed) 天计算")
+                    .font(.system(.caption2, design: .default))
+                    .foregroundStyle(LedgerPalette.secondary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(uiColor: .tertiarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(LedgerPalette.cardBorder.opacity(0.4), lineWidth: 0.5)
+            }
+
+            // Highest single expense
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 5) {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.expense)
+                    Text("单笔最高")
+                        .font(.system(.caption, design: .default, weight: .medium))
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
+                if let highest = highestExpense {
+                    AmountLabel(
+                        minorUnits: highest.amount,
+                        currency: ledger.summary.currency,
+                        font: .system(.title3, design: .rounded, weight: .bold),
+                        color: LedgerPalette.expense
+                    )
+                    Text(highest.title)
+                        .font(.system(.caption2, design: .default))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .lineLimit(1)
+                } else {
+                    Text("无支出")
+                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .foregroundStyle(LedgerPalette.secondary)
+                    Text("—")
+                        .font(.system(.caption2, design: .default))
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(uiColor: .tertiarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(LedgerPalette.cardBorder.opacity(0.4), lineWidth: 0.5)
+            }
+        }
+        .padding(16)
+        .background(LedgerPalette.panel)
     }
 }
 
@@ -226,6 +640,10 @@ private struct MonthlyConclusion: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(uiColor: .tertiarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(LedgerPalette.cardBorder.opacity(0.4), lineWidth: 0.5)
+        }
     }
 
     private var expenseMetricCard: some View {
@@ -261,6 +679,10 @@ private struct MonthlyConclusion: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(uiColor: .tertiarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(LedgerPalette.cardBorder.opacity(0.4), lineWidth: 0.5)
+        }
     }
 
     private func compactComparison(_ comparison: LedgerPeriodComparison, metric: OverviewComparisonMetric, label: String) -> some View {

@@ -1330,7 +1330,7 @@ private enum TransactionEditorError: LocalizedError {
     }
 }
 
-private struct TransactionEditorView: View {
+struct TransactionEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     let transaction: LedgerTransaction?

@@ -249,13 +249,13 @@ struct LedgerDateRange: Equatable, Sendable {
         return LedgerDateRange(start: format(start), end: format(inclusiveEnd), preset: preset)
     }
 
-    private static var calendar: Calendar {
+    static var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
         return calendar
     }
 
-    private static func format(_ date: Date) -> String {
+    static func format(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -264,7 +264,7 @@ struct LedgerDateRange: Equatable, Sendable {
         return formatter.string(from: date)
     }
 
-    private static func parse(_ raw: String) -> Date? {
+    static func parse(_ raw: String) -> Date? {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")
