@@ -341,10 +341,10 @@ struct ImportHistoryView: View {
                 .accessibilityIdentifier("import-select-file")
 
                 HStack(spacing: 6) {
-                    FormatBadge(name: "支付宝", ext: "CSV", color: Color(red: 0.08, green: 0.49, blue: 0.98))
-                    FormatBadge(name: "微信支付", ext: "XLSX", color: Color(red: 0.09, green: 0.70, blue: 0.35))
-                    FormatBadge(name: "银行流水", ext: "PDF", color: Color(red: 0.85, green: 0.28, blue: 0.28))
-                    FormatBadge(name: "压缩包", ext: "ZIP", color: Color(red: 0.55, green: 0.35, blue: 0.85))
+                    FormatBadge(name: "支付宝", ext: "CSV")
+                    FormatBadge(name: "微信支付", ext: "XLSX")
+                    FormatBadge(name: "银行流水", ext: "PDF")
+                    FormatBadge(name: "压缩包", ext: "ZIP")
                 }
             }
             .padding(.vertical, 8)
@@ -1053,20 +1053,19 @@ private struct GmailImportReview: Identifiable {
 private struct FormatBadge: View {
     let name: String
     let ext: String
-    let color: Color
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 4) {
             Circle()
-                .fill(color)
-                .frame(width: 5, height: 5)
+                .fill(LedgerPalette.secondary.opacity(0.6))
+                .frame(width: 4, height: 4)
             Text("\(name) \(ext)")
                 .font(.system(size: 10, weight: .medium, design: .default))
                 .foregroundStyle(LedgerPalette.secondary)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(LedgerPalette.tag)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3.5)
+        .background(Color(uiColor: .tertiarySystemFill))
         .clipShape(Capsule())
     }
 }
@@ -1074,24 +1073,15 @@ private struct FormatBadge: View {
 private struct ImportChannelRow: View {
     let status: LedgerImportChannelStatus
 
-    private var providerTint: Color {
-        switch status.provider.id {
-        case "alipay": Color(red: 0.08, green: 0.49, blue: 0.98)
-        case "wechat": Color(red: 0.09, green: 0.70, blue: 0.35)
-        case "cmb", "ccb-credit", "boc": Color(red: 0.85, green: 0.28, blue: 0.28)
-        default: LedgerPalette.cobalt
-        }
-    }
-
     var body: some View {
         HStack(spacing: LedgerSpacing.md) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(providerTint.opacity(0.14))
+                    .fill(Color(uiColor: .tertiarySystemFill))
                     .frame(width: 34, height: 34)
                 Image(systemName: status.provider.systemImage)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(providerTint)
+                    .foregroundStyle(LedgerPalette.ink)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -1149,24 +1139,15 @@ private struct ImportDocumentRow: View {
         LedgerImportProvider.provider(document.provider)
     }
 
-    private var providerTint: Color {
-        switch document.provider {
-        case "alipay": Color(red: 0.08, green: 0.49, blue: 0.98)
-        case "wechat": Color(red: 0.09, green: 0.70, blue: 0.35)
-        case "cmb", "ccb-credit", "boc": Color(red: 0.85, green: 0.28, blue: 0.28)
-        default: LedgerPalette.cobalt
-        }
-    }
-
     var body: some View {
         HStack(alignment: .top, spacing: LedgerSpacing.md) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(providerTint.opacity(0.12))
+                    .fill(Color(uiColor: .tertiarySystemFill))
                     .frame(width: 36, height: 36)
                 Image(systemName: provider?.systemImage ?? "doc.text")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(providerTint)
+                    .foregroundStyle(LedgerPalette.ink)
             }
 
             VStack(alignment: .leading, spacing: 4) {

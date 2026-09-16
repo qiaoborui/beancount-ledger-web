@@ -203,28 +203,24 @@ private struct OverviewQuickActionsBar: View {
                 title: "记一笔",
                 subtitle: "快捷记录",
                 icon: "plus.circle.fill",
-                tint: LedgerPalette.cobalt,
                 action: onAddTransaction
             )
             QuickActionItem(
                 title: "账单导入",
                 subtitle: "智能对账",
                 icon: "arrow.down.doc.fill",
-                tint: LedgerPalette.success,
                 action: onImport
             )
             QuickActionItem(
                 title: "收支趋势",
                 subtitle: "月度收支",
                 icon: "chart.xyaxis.line",
-                tint: LedgerPalette.gold,
                 action: onIncomeExpense
             )
             QuickActionItem(
                 title: "资产分布",
                 subtitle: "账户净值",
                 icon: "building.columns.fill",
-                tint: Color(red: 0.55, green: 0.35, blue: 0.85),
                 action: onAssets
             )
         }
@@ -237,31 +233,30 @@ private struct QuickActionItem: View {
     let title: String
     let subtitle: String
     let icon: String
-    let tint: Color
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
+            VStack(spacing: 5) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(tint.opacity(0.14))
-                        .frame(width: 40, height: 40)
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(Color(uiColor: .tertiarySystemFill))
+                        .frame(width: 38, height: 38)
                     Image(systemName: icon)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(tint)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Color.primary)
                 }
                 Text(title)
                     .font(.system(.caption, design: .default, weight: .semibold))
                     .foregroundStyle(LedgerPalette.ink)
                     .lineLimit(1)
                 Text(subtitle)
-                    .font(.system(size: 10, weight: .regular))
+                    .font(.system(size: 9.5, weight: .regular))
                     .foregroundStyle(LedgerPalette.secondary)
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .padding(.vertical, 9)
             .padding(.horizontal, 4)
             .background(LedgerPalette.panel)
             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
@@ -271,7 +266,7 @@ private struct QuickActionItem: View {
                         LinearGradient(
                             colors: [
                                 Color.white.opacity(colorScheme == .dark ? 0.12 : 0.6),
-                                LedgerPalette.cardBorder.opacity(0.5)
+                                LedgerPalette.cardBorder.opacity(0.4)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -280,13 +275,13 @@ private struct QuickActionItem: View {
                     )
             }
             .shadow(
-                color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.03),
+                color: Color.black.opacity(colorScheme == .dark ? 0.18 : 0.03),
                 radius: 4,
                 x: 0,
-                y: 2
+                y: 1.5
             )
         }
-        .buttonStyle(PressScaleButtonStyle(pressedScale: 0.94))
+        .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
     }
 }
 
@@ -312,12 +307,12 @@ private struct OverviewTopCategoriesCard: View {
                 VStack(spacing: 6) {
                     HStack(alignment: .center, spacing: 10) {
                         ZStack {
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(item.color.opacity(0.14))
-                                .frame(width: 32, height: 32)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color(uiColor: .tertiarySystemFill))
+                                .frame(width: 30, height: 30)
                             Image(systemName: item.iconName)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(item.color)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Color.primary)
                         }
 
                         VStack(alignment: .leading, spacing: 2) {
@@ -346,21 +341,21 @@ private struct OverviewTopCategoriesCard: View {
                         }
                     }
 
-                    // Progress track
+                    // Progress track (cohesive, elegant tone)
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule()
                                 .fill(Color(uiColor: .tertiarySystemFill))
-                                .frame(height: 5)
+                                .frame(height: 4.5)
                             Capsule()
-                                .fill(item.color)
+                                .fill(Color.primary.opacity(0.72))
                                 .frame(
-                                    width: max(5, min(geo.size.width, geo.size.width * CGFloat(item.percentage))),
-                                    height: 5
+                                    width: max(4.5, min(geo.size.width, geo.size.width * CGFloat(item.percentage))),
+                                    height: 4.5
                                 )
                         }
                     }
-                    .frame(height: 5)
+                    .frame(height: 4.5)
                 }
                 if item.id != categories.last?.id {
                     Divider()

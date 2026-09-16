@@ -174,7 +174,7 @@ struct ExpenseCalendarWidgetView: View {
                 Text("少")
                 ForEach(1...4, id: \.self) { level in
                     RoundedRectangle(cornerRadius: 2.5)
-                        .fill(LedgerWidgetColors.expense.opacity(Double(level) * 0.22))
+                        .fill(expenseHeatColor(for: level))
                         .frame(width: 9, height: 9)
                 }
                 Text("多")
@@ -278,7 +278,7 @@ private struct ExpenseMonthGrid: View {
         .background {
             if amount > 0 {
                 RoundedRectangle(cornerRadius: 4.5, style: .continuous)
-                    .fill(heatColor(for: level))
+                    .fill(expenseHeatColor(for: level))
             } else if !layout.isFuture(day) {
                 RoundedRectangle(cornerRadius: 4.5, style: .continuous)
                     .fill(LedgerWidgetColors.raised.opacity(0.4))
@@ -287,7 +287,7 @@ private struct ExpenseMonthGrid: View {
         .overlay {
             if isToday {
                 RoundedRectangle(cornerRadius: 4.5, style: .continuous)
-                    .strokeBorder(LedgerWidgetColors.cobalt, lineWidth: 1.2)
+                    .strokeBorder(LedgerWidgetColors.ink, lineWidth: 1.2)
             }
         }
         .contentShape(Rectangle())
@@ -298,14 +298,14 @@ private struct ExpenseMonthGrid: View {
         let ratio = min(max(Double(amount) / Double(layout.maxAmount), 0), 1)
         return max(1, min(4, Int(ceil(sqrt(ratio) * 4))))
     }
+}
 
-    private func heatColor(for level: Int) -> Color {
-        switch level {
-        case 1: LedgerWidgetColors.expense.opacity(0.18)
-        case 2: LedgerWidgetColors.expense.opacity(0.38)
-        case 3: LedgerWidgetColors.expense.opacity(0.65)
-        default: LedgerWidgetColors.expense.opacity(0.90)
-        }
+fileprivate func expenseHeatColor(for level: Int) -> Color {
+    switch level {
+    case 1: return LedgerWidgetColors.ink.opacity(0.10)
+    case 2: return LedgerWidgetColors.ink.opacity(0.24)
+    case 3: return LedgerWidgetColors.ink.opacity(0.55)
+    default: return LedgerWidgetColors.ink.opacity(0.85)
     }
 }
 

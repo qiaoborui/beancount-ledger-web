@@ -182,7 +182,7 @@ struct AccountBalanceWidgetView: View {
                 Text("估值 \(valuation)")
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(LedgerWidgetColors.gold)
+                    .foregroundStyle(LedgerWidgetColors.secondary)
                     .lineLimit(1)
                     .padding(.top, 3)
                     .privacySensitive()
@@ -191,7 +191,7 @@ struct AccountBalanceWidgetView: View {
             HStack(spacing: 4) {
                 Text(style.groupLabel)
                     .font(.system(size: 8.5, weight: .medium))
-                    .foregroundStyle(style.tint)
+                    .foregroundStyle(LedgerWidgetColors.secondary)
                 Text("·")
                     .foregroundStyle(LedgerWidgetColors.secondary)
                 Text(LedgerWidgetText.updated(updatedAt, now: entry.date))
@@ -252,11 +252,11 @@ struct AccountBalanceWidgetView: View {
                         .foregroundStyle(LedgerWidgetColors.ink)
                     Spacer(minLength: 0)
                     Text(account.currency)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(style.tint)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(LedgerWidgetColors.secondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(style.tint.opacity(0.12))
+                        .background(LedgerWidgetColors.raised)
                         .clipShape(Capsule())
                 }
 
@@ -268,7 +268,7 @@ struct AccountBalanceWidgetView: View {
                         Text(valuation)
                             .font(.system(size: 13.5, weight: .semibold, design: .rounded))
                             .monospacedDigit()
-                            .foregroundStyle(LedgerWidgetColors.gold)
+                            .foregroundStyle(LedgerWidgetColors.ink)
                             .lineLimit(1)
                             .privacySensitive()
                     }
@@ -293,7 +293,7 @@ struct AccountBalanceWidgetView: View {
                         .font(.system(size: 8, weight: .bold))
                 }
                 .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(LedgerWidgetColors.cobalt)
+                .foregroundStyle(LedgerWidgetColors.secondary)
             }
             .frame(width: 116, alignment: .leading)
             .widgetSubcard(cornerRadius: 10, padding: 8)

@@ -96,7 +96,7 @@ struct ExpenseOverviewWidgetView: View {
                 title: entry.period.title,
                 detail: periodDetail(expense),
                 systemName: "chart.bar.xaxis",
-                tint: LedgerWidgetColors.expense
+                tint: LedgerWidgetColors.cobalt
             )
             Spacer(minLength: 8)
             VStack(alignment: .leading, spacing: 3) {
@@ -126,7 +126,7 @@ struct ExpenseOverviewWidgetView: View {
                     .interpolationMethod(.catmullRom)
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [LedgerWidgetColors.expense.opacity(0.20), LedgerWidgetColors.expense.opacity(0.01)],
+                            colors: [LedgerWidgetColors.chartLine.opacity(0.18), LedgerWidgetColors.chartLine.opacity(0.01)],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -136,7 +136,7 @@ struct ExpenseOverviewWidgetView: View {
                         y: .value("支出", point.amount)
                     )
                     .interpolationMethod(.catmullRom)
-                    .foregroundStyle(LedgerWidgetColors.expense)
+                    .foregroundStyle(LedgerWidgetColors.chartLine)
                     .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
                 }
                 .chartXAxis(.hidden)
@@ -159,7 +159,7 @@ struct ExpenseOverviewWidgetView: View {
                     title: entry.period.title,
                     detail: periodDetail(expense),
                     systemName: "chart.bar.xaxis",
-                    tint: LedgerWidgetColors.expense
+                    tint: LedgerWidgetColors.cobalt
                 )
                 Spacer(minLength: 6)
                 VStack(alignment: .leading, spacing: 2) {
@@ -187,7 +187,7 @@ struct ExpenseOverviewWidgetView: View {
                         .interpolationMethod(.catmullRom)
                         .foregroundStyle(
                             LinearGradient(
-                                colors: [LedgerWidgetColors.expense.opacity(0.22), LedgerWidgetColors.expense.opacity(0.02)],
+                                colors: [LedgerWidgetColors.chartLine.opacity(0.18), LedgerWidgetColors.chartLine.opacity(0.01)],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
@@ -197,7 +197,7 @@ struct ExpenseOverviewWidgetView: View {
                             y: .value("支出", point.amount)
                         )
                         .interpolationMethod(.catmullRom)
-                        .foregroundStyle(LedgerWidgetColors.expense)
+                        .foregroundStyle(LedgerWidgetColors.chartLine)
                         .lineStyle(StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
                     }
                     .chartXAxis(.hidden)
@@ -279,10 +279,10 @@ struct ExpenseOverviewWidgetView: View {
             HStack(spacing: 5) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(style.color.opacity(0.18))
+                        .fill(LedgerWidgetColors.raised)
                     Image(systemName: style.icon)
-                        .font(.system(size: 8.5, weight: .semibold))
-                        .foregroundStyle(style.color)
+                        .font(.system(size: 8.5, weight: .medium))
+                        .foregroundStyle(LedgerWidgetColors.ink)
                 }
                 .frame(width: 16, height: 16)
 
@@ -304,7 +304,7 @@ struct ExpenseOverviewWidgetView: View {
                     .fill(LedgerWidgetColors.raised)
                     .overlay(alignment: .leading) {
                         Capsule()
-                            .fill(style.color.gradient)
+                            .fill(LedgerWidgetColors.ink.opacity(0.72))
                             .frame(width: geometry.size.width * fraction)
                     }
             }

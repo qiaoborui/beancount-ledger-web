@@ -92,15 +92,15 @@ struct ExpenseTrendWidgetView: View {
             .interpolationMethod(.catmullRom)
             .foregroundStyle(
               LinearGradient(
-                colors: [LedgerWidgetColors.expense.opacity(0.24), LedgerWidgetColors.expense.opacity(0.01)],
+                colors: [LedgerWidgetColors.chartLine.opacity(0.18), LedgerWidgetColors.chartLine.opacity(0.01)],
                 startPoint: .top,
                 endPoint: .bottom
               )
             )
           LineMark(x: .value("日期", date), y: .value("消费", point.amount))
             .interpolationMethod(.catmullRom)
-            .foregroundStyle(LedgerWidgetColors.expense)
-            .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+            .foregroundStyle(LedgerWidgetColors.chartLine)
+            .lineStyle(StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
         }
       }
       .chartXAxis(.hidden).chartYAxis(.hidden)
@@ -201,7 +201,7 @@ struct ExpenseHeatmapWidgetView: View {
                         .overlay {
                           if index == points.count - 1 {
                             RoundedRectangle(cornerRadius: 3, style: .continuous).strokeBorder(
-                              LedgerWidgetColors.cobalt, lineWidth: 1.2)
+                              LedgerWidgetColors.ink, lineWidth: 1.2)
                           }
                         }
                         .frame(width: width, height: height)
@@ -244,10 +244,10 @@ struct ExpenseHeatmapWidgetView: View {
 
   private func levelColor(_ level: Int) -> Color {
     switch level {
-    case 0: return LedgerWidgetColors.expense.opacity(0.20)
-    case 1: return LedgerWidgetColors.expense.opacity(0.42)
-    case 2: return LedgerWidgetColors.expense.opacity(0.68)
-    default: return LedgerWidgetColors.expense.opacity(0.92)
+    case 0: return LedgerWidgetColors.ink.opacity(0.10)
+    case 1: return LedgerWidgetColors.ink.opacity(0.25)
+    case 2: return LedgerWidgetColors.ink.opacity(0.55)
+    default: return LedgerWidgetColors.ink.opacity(0.85)
     }
   }
 

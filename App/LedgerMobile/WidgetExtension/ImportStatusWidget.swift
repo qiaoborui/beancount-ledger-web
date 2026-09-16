@@ -169,10 +169,10 @@ struct ImportStatusWidgetView: View {
         return HStack(spacing: 6) {
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(style.tint.gradient)
+                    .fill(LedgerWidgetColors.raised)
                 Image(systemName: style.icon)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LedgerWidgetColors.ink)
             }
             .frame(width: 18, height: 18)
 
@@ -212,10 +212,10 @@ struct ImportStatusWidgetView: View {
         return HStack(spacing: 9) {
             ZStack {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(style.tint.gradient)
+                    .fill(LedgerWidgetColors.raised)
                 Image(systemName: style.icon)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(LedgerWidgetColors.ink)
             }
             .frame(width: 22, height: 22)
 

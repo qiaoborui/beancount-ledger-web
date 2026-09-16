@@ -3,22 +3,23 @@ import UIKit
 import WidgetKit
 
 enum LedgerWidgetColors {
-    static let canvas = Color.dynamic(light: 0xF4F6F9, dark: 0x0A0D14)
-    static let panel = Color.dynamic(light: 0xFFFFFF, dark: 0x12161F)
-    static let raised = Color.dynamic(light: 0xEDF1F7, dark: 0x1A2230)
-    static let tag = Color.dynamic(light: 0xE6EDF7, dark: 0x162234)
-    static let ink = Color.dynamic(light: 0x0C1219, dark: 0xF0F3F8)
-    static let secondary = Color.dynamic(light: 0x5B6573, dark: 0x8D99AA)
-    static let line = Color.dynamic(light: 0xE1E6EE, dark: 0x242D3C)
-    static let cobalt = Color.dynamic(light: 0x0066CC, dark: 0x388BFD)
-    static let expense = Color.dynamic(light: 0xDF3B3B, dark: 0xFF6961)
-    static let expenseSoft = Color.dynamic(light: 0xFDF1F1, dark: 0x2E1616)
-    static let success = Color.dynamic(light: 0x1B873F, dark: 0x34C759)
-    static let successSoft = Color.dynamic(light: 0xEDF8F0, dark: 0x132B1B)
-    static let gold = Color.dynamic(light: 0xD97706, dark: 0xF59E0B)
+    static let canvas = Color.dynamic(light: 0xF2F4F7, dark: 0x0C0E14)
+    static let panel = Color.dynamic(light: 0xFFFFFF, dark: 0x161A22)
+    static let raised = Color.dynamic(light: 0xF0F3F7, dark: 0x202632)
+    static let tag = Color.dynamic(light: 0xEAEEF4, dark: 0x1E2430)
+    static let ink = Color.dynamic(light: 0x0F172A, dark: 0xF1F5F9)
+    static let secondary = Color.dynamic(light: 0x64748B, dark: 0x94A3B8)
+    static let line = Color.dynamic(light: 0xE2E8F0, dark: 0x2A3241)
+    static let cobalt = Color.dynamic(light: 0x0F172A, dark: 0xF1F5F9)
+    static let chartLine = Color.dynamic(light: 0x334155, dark: 0x94A3B8)
+    static let expense = Color.dynamic(light: 0xC0392B, dark: 0xF87171)
+    static let expenseSoft = Color.dynamic(light: 0xFEE2E2, dark: 0x381E1E)
+    static let success = Color.dynamic(light: 0x15803D, dark: 0x4ADE80)
+    static let successSoft = Color.dynamic(light: 0xDCFCE7, dark: 0x142B1A)
+    static let gold = Color.dynamic(light: 0xB45309, dark: 0xFBBF24)
     static let goldSoft = Color.dynamic(light: 0xFEF3C7, dark: 0x332508)
-    static let purple = Color.dynamic(light: 0x7C3AED, dark: 0xA78BFA)
-    static let onBrand = Color(red: 0.985, green: 0.99, blue: 1)
+    static let purple = Color.dynamic(light: 0x6D28D9, dark: 0xA78BFA)
+    static let onBrand = Color.white
 }
 
 private extension Color {
@@ -47,15 +48,15 @@ struct LedgerWidgetBrandMark: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-                .fill(tint.gradient)
+                .fill(LedgerWidgetColors.raised)
             Image(systemName: systemName)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(LedgerWidgetColors.onBrand)
+                .foregroundStyle(LedgerWidgetColors.ink)
         }
-        .frame(width: 25, height: 25)
+        .frame(width: 24, height: 24)
         .overlay {
             RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5)
+                .strokeBorder(LedgerWidgetColors.line.opacity(0.8), lineWidth: 0.5)
         }
     }
 }
@@ -84,10 +85,10 @@ struct LedgerWidgetHeader: View {
             if let badgeText {
                 Text(badgeText)
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(tint)
+                    .foregroundStyle(LedgerWidgetColors.secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(tint.opacity(0.12))
+                    .background(LedgerWidgetColors.raised)
                     .clipShape(Capsule())
             }
         }
@@ -120,46 +121,46 @@ enum LedgerWidgetVisualHelper {
         if lower.contains("food") || lower.contains("dining") || lower.contains("meal")
             || lower.contains("餐饮") || lower.contains("美食") || lower.contains("外卖")
             || lower.contains("买菜") || lower.contains("咖啡") {
-            return CategoryStyle(icon: "fork.knife", color: Color(red: 0.96, green: 0.55, blue: 0.18))
+            return CategoryStyle(icon: "fork.knife", color: LedgerWidgetColors.ink)
         }
         if lower.contains("transport") || lower.contains("travel") || lower.contains("taxi")
             || lower.contains("交通") || lower.contains("出行") || lower.contains("打车")
             || lower.contains("加油") || lower.contains("停车") {
-            return CategoryStyle(icon: "car.fill", color: Color(red: 0.16, green: 0.54, blue: 0.95))
+            return CategoryStyle(icon: "car.fill", color: LedgerWidgetColors.ink)
         }
         if lower.contains("housing") || lower.contains("rent") || lower.contains("utilities")
             || lower.contains("居住") || lower.contains("房租") || lower.contains("物业")
             || lower.contains("水电气") {
-            return CategoryStyle(icon: "house.fill", color: Color(red: 0.12, green: 0.66, blue: 0.72))
+            return CategoryStyle(icon: "house.fill", color: LedgerWidgetColors.ink)
         }
         if lower.contains("shopping") || lower.contains("clothing") || lower.contains("daily")
             || lower.contains("购物") || lower.contains("服饰") || lower.contains("日用")
             || lower.contains("超市") || lower.contains("杂货") {
-            return CategoryStyle(icon: "bag.fill", color: Color(red: 0.92, green: 0.32, blue: 0.55))
+            return CategoryStyle(icon: "bag.fill", color: LedgerWidgetColors.ink)
         }
         if lower.contains("entertainment") || lower.contains("game") || lower.contains("movie")
             || lower.contains("娱乐") || lower.contains("游戏") || lower.contains("电影")
             || lower.contains("演出") || lower.contains("会员") {
-            return CategoryStyle(icon: "popcorn.fill", color: Color(red: 0.65, green: 0.36, blue: 0.88))
+            return CategoryStyle(icon: "popcorn.fill", color: LedgerWidgetColors.ink)
         }
         if lower.contains("book") || lower.contains("education") || lower.contains("study")
             || lower.contains("图书") || lower.contains("学习") || lower.contains("教育")
             || lower.contains("学费") {
-            return CategoryStyle(icon: "book.fill", color: Color(red: 0.72, green: 0.48, blue: 0.28))
+            return CategoryStyle(icon: "book.fill", color: LedgerWidgetColors.ink)
         }
         if lower.contains("digital") || lower.contains("communication") || lower.contains("telecom")
             || lower.contains("数码") || lower.contains("通信") || lower.contains("话费") {
-            return CategoryStyle(icon: "antenna.radiowaves.left.and.right", color: Color(red: 0.35, green: 0.45, blue: 0.88))
+            return CategoryStyle(icon: "antenna.radiowaves.left.and.right", color: LedgerWidgetColors.ink)
         }
         if lower.contains("health") || lower.contains("medical")
             || lower.contains("医疗") || lower.contains("健康") || lower.contains("药品") {
-            return CategoryStyle(icon: "heart.fill", color: Color(red: 0.92, green: 0.28, blue: 0.28))
+            return CategoryStyle(icon: "heart.fill", color: LedgerWidgetColors.ink)
         }
         if lower.contains("salary") || lower.contains("wage") || lower.contains("bonus")
             || lower.contains("工资") || lower.contains("收入") {
-            return CategoryStyle(icon: "banknote.fill", color: Color(red: 0.12, green: 0.68, blue: 0.36))
+            return CategoryStyle(icon: "banknote.fill", color: LedgerWidgetColors.ink)
         }
-        return CategoryStyle(icon: "tag.fill", color: LedgerWidgetColors.cobalt)
+        return CategoryStyle(icon: "tag.fill", color: LedgerWidgetColors.ink)
     }
 
     struct AccountStyle {
@@ -171,18 +172,18 @@ enum LedgerWidgetVisualHelper {
     static func account(for account: LedgerWidgetAccountSnapshot) -> AccountStyle {
         let name = "\(account.account) \(account.label) \(account.group)".lowercased()
         if account.isLiability || name.contains("credit") || name.contains("信用卡") {
-            return AccountStyle(icon: "creditcard.fill", tint: Color(red: 0.88, green: 0.35, blue: 0.35), groupLabel: "信用卡")
+            return AccountStyle(icon: "creditcard.fill", tint: LedgerWidgetColors.ink, groupLabel: "信用卡")
         }
         if name.contains("cash") || name.contains("现金") {
-            return AccountStyle(icon: "banknote.fill", tint: Color(red: 0.12, green: 0.68, blue: 0.36), groupLabel: "现金资产")
+            return AccountStyle(icon: "banknote.fill", tint: LedgerWidgetColors.ink, groupLabel: "现金资产")
         }
         if name.contains("invest") || name.contains("fund") || name.contains("stock") || name.contains("理财") || name.contains("基金") || name.contains("证券") {
-            return AccountStyle(icon: "chart.line.uptrend.xyaxis", tint: Color(red: 0.12, green: 0.68, blue: 0.55), groupLabel: "投资理财")
+            return AccountStyle(icon: "chart.line.uptrend.xyaxis", tint: LedgerWidgetColors.ink, groupLabel: "投资理财")
         }
         if name.contains("loan") || name.contains("mortgage") || name.contains("借款") || name.contains("房贷") {
-            return AccountStyle(icon: "arrow.up.right.circle.fill", tint: Color(red: 0.92, green: 0.45, blue: 0.2), groupLabel: "负债借贷")
+            return AccountStyle(icon: "arrow.up.right.circle.fill", tint: LedgerWidgetColors.ink, groupLabel: "负债借贷")
         }
-        return AccountStyle(icon: "building.columns.fill", tint: Color(red: 0.16, green: 0.54, blue: 0.95), groupLabel: "日常银行")
+        return AccountStyle(icon: "building.columns.fill", tint: LedgerWidgetColors.ink, groupLabel: "日常银行")
     }
 
     struct ImportStyle {
@@ -194,21 +195,21 @@ enum LedgerWidgetVisualHelper {
     static func importChannel(for item: LedgerWidgetImportSnapshot) -> ImportStyle {
         let lower = "\(item.provider) \(item.label)".lowercased()
         if lower.contains("alipay") || lower.contains("支付宝") {
-            return ImportStyle(icon: "qrcode", tint: Color(red: 0.08, green: 0.48, blue: 0.96), displayName: "支付宝")
+            return ImportStyle(icon: "qrcode", tint: LedgerWidgetColors.ink, displayName: "支付宝")
         }
         if lower.contains("wechat") || lower.contains("微信") {
-            return ImportStyle(icon: "bubble.left.and.bubble.right.fill", tint: Color(red: 0.15, green: 0.68, blue: 0.37), displayName: "微信支付")
+            return ImportStyle(icon: "bubble.left.and.bubble.right.fill", tint: LedgerWidgetColors.ink, displayName: "微信支付")
         }
         if lower.contains("cmb") || lower.contains("招行") || lower.contains("招商") {
-            return ImportStyle(icon: "creditcard.fill", tint: Color(red: 0.86, green: 0.22, blue: 0.22), displayName: "招商银行")
+            return ImportStyle(icon: "creditcard.fill", tint: LedgerWidgetColors.ink, displayName: "招商银行")
         }
         if lower.contains("hsbc") || lower.contains("汇丰") {
-            return ImportStyle(icon: "hexagon.fill", tint: Color(red: 0.82, green: 0.15, blue: 0.15), displayName: "汇丰银行")
+            return ImportStyle(icon: "hexagon.fill", tint: LedgerWidgetColors.ink, displayName: "汇丰银行")
         }
         if lower.contains("icbc") || lower.contains("工行") || lower.contains("boc") || lower.contains("中行") || lower.contains("ccb") || lower.contains("建行") || lower.contains("bank") || lower.contains("银行") {
-            return ImportStyle(icon: "building.columns.fill", tint: Color(red: 0.2, green: 0.45, blue: 0.85), displayName: item.label)
+            return ImportStyle(icon: "building.columns.fill", tint: LedgerWidgetColors.ink, displayName: item.label)
         }
-        return ImportStyle(icon: "doc.text.fill", tint: LedgerWidgetColors.cobalt, displayName: item.label)
+        return ImportStyle(icon: "doc.text.fill", tint: LedgerWidgetColors.ink, displayName: item.label)
     }
 }
 

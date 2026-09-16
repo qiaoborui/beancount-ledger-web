@@ -39,12 +39,12 @@ struct TransactionRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(categoryVisual.color.opacity(0.14))
-                    .frame(width: 40, height: 40)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .frame(width: 38, height: 38)
                 Image(systemName: categoryVisual.iconName)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(categoryVisual.color)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(presentation.kind == .income ? LedgerPalette.income : Color.primary)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -816,12 +816,12 @@ private struct TransactionCard: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(categoryVisual.color.opacity(0.14))
-                    .frame(width: 40, height: 40)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .frame(width: 38, height: 38)
                 Image(systemName: categoryVisual.iconName)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(categoryVisual.color)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(presentation.kind == .income ? LedgerPalette.income : Color.primary)
             }
 
             VStack(alignment: .leading, spacing: 4) {
