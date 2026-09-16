@@ -74,11 +74,11 @@ struct TransactionRow: View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .fill(categoryVisual.color.opacity(0.14))
                     .frame(width: 38, height: 38)
                 Image(systemName: categoryVisual.iconName)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(presentation.kind == .income ? LedgerPalette.income : Color.primary)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(categoryVisual.color)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -218,12 +218,201 @@ private struct LedgerTransactionActions: ViewModifier {
     }
 }
 
+struct CookieTransactionPeriodHero: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var session: LedgerSession
+
+    let filteredTransactions: [LedgerTransaction]
+    let allTransactions: [LedgerTransaction]
+    let ledgerSummary: LedgerSummary?
+    @Binding var kindFilter: TransactionKindFilter
+    let currency: String
+
+    private var periodExpense: Int {
+        if let s = ledgerSummary, s.expense > 0 { return s.expense }
+        return allTransactions.reduce(0) { sum, tx in
+            let p = TransactionPresentation(transaction: tx)
+            return p.kind == .expense ? sum + p.minorUnits : sum
+        }
+    }
+
+    private var periodIncome: Int {
+        if let s = ledgerSummary, s.income > 0 { return s.income }
+        return allTransactions.reduce(0) { sum, tx in
+            let p = TransactionPresentation(transaction: tx)
+            return p.kind == .income ? sum + p.minorUnits : sum
+        }
+    }
+
+    private var periodNet: Int {
+        if let s = ledgerSummary { return s.net }
+        return periodIncome - periodExpense
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            // Header Row: Range & Counts, Eye Toggle
+            HStack(alignment: .center) {
+                HStack(spacing: 6) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(LedgerPalette.cobalt)
+
+                    Text(session.selectedRange.displayTitle)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.ink)
+
+                    Text("·  \(filteredTransactions.count) 笔流水")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    LedgerFeedback.selection()
+                    session.toggleAmounts()
+                } label: {
+                    Image(systemName: session.amountsVisible ? "eye" : "eye.slash")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .padding(5)
+                        .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                }
+                .buttonStyle(PressScaleButtonStyle())
+                .accessibilityLabel(session.amountsVisible ? "隐藏金额" : "显示金额")
+            }
+
+            // 3-Column Metrics: 支出 / 收入 / 结余
+            HStack(spacing: 0) {
+                // 支出
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(LedgerPalette.expense)
+                            .frame(width: 6, height: 6)
+                        Text("支出")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
+                    AmountLabel(
+                        minorUnits: periodExpense,
+                        currency: currency,
+                        font: .system(size: 18, weight: .bold, design: .rounded),
+                        color: LedgerPalette.ink
+                    )
+                    .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Rectangle()
+                    .fill(LedgerPalette.line.opacity(0.6))
+                    .frame(width: 1, height: 26)
+                    .padding(.horizontal, 8)
+
+                // 收入
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(LedgerPalette.income)
+                            .frame(width: 6, height: 6)
+                        Text("收入")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
+                    AmountLabel(
+                        minorUnits: periodIncome,
+                        currency: currency,
+                        font: .system(size: 18, weight: .bold, design: .rounded),
+                        color: LedgerPalette.ink
+                    )
+                    .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Rectangle()
+                    .fill(LedgerPalette.line.opacity(0.6))
+                    .frame(width: 1, height: 26)
+                    .padding(.horizontal, 8)
+
+                // 结余
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(periodNet >= 0 ? LedgerPalette.income : LedgerPalette.expense)
+                            .frame(width: 6, height: 6)
+                        Text("结余")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
+                    AmountLabel(
+                        minorUnits: periodNet,
+                        currency: currency,
+                        font: .system(size: 18, weight: .bold, design: .rounded),
+                        color: periodNet >= 0 ? LedgerPalette.ink : LedgerPalette.expense
+                    )
+                    .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+                .overlay(LedgerPalette.line.opacity(0.4))
+
+            // Horizontal Filter Pills: 全部 / 支出 / 收入 / 转账
+            HStack(spacing: 6) {
+                ForEach(TransactionKindFilter.allCases) { filter in
+                    let isSelected = kindFilter == filter
+                    Button {
+                        LedgerFeedback.selection()
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                            kindFilter = filter
+                        }
+                    } label: {
+                        Text(filter.title)
+                            .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                            .foregroundStyle(isSelected ? Color.white : LedgerPalette.ink)
+                            .frame(maxWidth: .infinity, minHeight: 28)
+                            .background(
+                                isSelected ? LedgerPalette.cobalt : Color(uiColor: .tertiarySystemFill),
+                                in: Capsule()
+                            )
+                    }
+                    .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
+                    .accessibilityLabel("按\(filter.title)筛选")
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
+            }
+        }
+        .padding(14)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(LedgerPalette.panel)
+                .shadow(
+                    color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04),
+                    radius: 8,
+                    x: 0,
+                    y: 2
+                )
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(
+                    LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
+                    lineWidth: 0.5
+                )
+        }
+    }
+}
+
 struct TransactionsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var filters = LedgerTransactionFilter()
     @State private var filterPresented = false
     @State private var creatingTransaction = false
+    @State private var duplicateTarget: LedgerTransaction?
+    @State private var editingTarget: LedgerTransaction?
     @State private var deletionTarget: LedgerTransaction?
     @State private var selectingTags = false
     @State private var selectedTransactionIDs: Set<String> = []
@@ -268,7 +457,20 @@ struct TransactionsView: View {
     var body: some View {
         let accountLabels = TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
         List {
-            if activeStructuredFilterCount > 0 {
+            Section {
+                CookieTransactionPeriodHero(
+                    filteredTransactions: filteredTransactions,
+                    allTransactions: transactions,
+                    ledgerSummary: session.ledger?.summary,
+                    kindFilter: $filters.kind,
+                    currency: session.ledger?.valuationCurrency ?? "CNY"
+                )
+            }
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 6, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
+            if activeStructuredFilterCount > (filters.kind == .all ? 0 : 1) {
                 Section {
                     TransactionFilterChips(filters: $filters)
                 }
@@ -318,6 +520,17 @@ struct TransactionsView: View {
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
                             .ledgerTransactionActions(transaction)
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                if session.isLocal {
+                                    Button {
+                                        LedgerFeedback.light()
+                                        duplicateTarget = transaction
+                                    } label: {
+                                        Label("再记一笔", systemImage: "plus.square.on.square")
+                                    }
+                                    .tint(LedgerPalette.cobalt)
+                                }
+                            }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     deletionTarget = transaction
@@ -326,6 +539,19 @@ struct TransactionsView: View {
                                 }
                                 .disabled(transaction.source.hash?.isEmpty != false
                                     || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
+
+                                if session.isLocal && transaction.editableEntry != nil {
+                                    Button {
+                                        LedgerFeedback.light()
+                                        editingTarget = transaction
+                                    } label: {
+                                        Label("编辑", systemImage: "pencil")
+                                    }
+                                    .tint(.orange)
+                                    .disabled(transaction.source.hash?.isEmpty != false
+                                        || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
+                                }
+
                                 Button {
                                     selectingTags = true
                                     toggleTagSelection(transaction)
@@ -423,6 +649,42 @@ struct TransactionsView: View {
                 TransactionEditorView(accounts: session.ledger?.accounts ?? [], commodities: session.ledger?.commodities ?? []) { entry in
                     try await session.addLocalTransaction(entry)
                 }
+                .ledgerPrivacyProtectedSheet()
+            }
+            .sheet(item: $duplicateTarget) { transaction in
+                TransactionEditorView(
+                    accounts: session.ledger?.accounts ?? [],
+                    commodities: session.ledger?.commodities ?? [],
+                    prefillPayee: transaction.payee,
+                    prefillNarration: transaction.narration,
+                    prefillPostings: transaction.postings.map {
+                        EditableTransactionPosting(
+                            account: $0.account,
+                            amount: TransactionEditorView.decimalText($0.amount),
+                            currency: $0.currency ?? "CNY"
+                        )
+                    },
+                    onSave: { entry in
+                        try await session.addLocalTransaction(entry)
+                        actionMessage = "已复制并记录新流水"
+                        actionMessageStyle = .confirmed
+                        confirmationFeedback &+= 1
+                    }
+                )
+                .ledgerPrivacyProtectedSheet()
+            }
+            .sheet(item: $editingTarget) { transaction in
+                TransactionEditorView(
+                    transaction: transaction,
+                    accounts: session.ledger?.accounts ?? [],
+                    commodities: session.ledger?.commodities ?? [],
+                    onSave: { entry in
+                        try await session.updateTransaction(source: transaction.source, entry: entry)
+                        actionMessage = "交易修改已保存"
+                        actionMessageStyle = .confirmed
+                        confirmationFeedback &+= 1
+                    }
+                )
                 .ledgerPrivacyProtectedSheet()
             }
             .sheet(item: $deletionTarget) { transaction in
@@ -860,11 +1122,11 @@ private struct TransactionCard: View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .fill(categoryVisual.color.opacity(0.14))
                     .frame(width: 38, height: 38)
                 Image(systemName: categoryVisual.iconName)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(presentation.kind == .income ? LedgerPalette.income : Color.primary)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(categoryVisual.color)
             }
 
             VStack(alignment: .leading, spacing: 4) {

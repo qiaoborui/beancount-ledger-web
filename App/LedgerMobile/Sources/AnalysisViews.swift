@@ -316,11 +316,16 @@ private struct IncomeExpenseAnalysisContent: View {
                 }
             }
 
-            RankedAmountPanel(
-                title: "支出分类",
-                rows: statement.expenseAnalytics.prefix(6).map { ($0.label, $0.amount, $0.txCount) },
-                currency: statement.valuationCurrency,
-                color: LedgerPalette.expense
+            CookieCategoryDonutCard(
+                statement: statement,
+                currency: statement.valuationCurrency
+            )
+
+            CookieRankedCategoryPanel(
+                title: "支出分类排行",
+                items: statement.expenseAnalytics,
+                totalExpense: statement.totalExpense,
+                currency: statement.valuationCurrency
             )
 
             IncomeExpenseHighlights(statement: statement)
@@ -1101,6 +1106,386 @@ private struct IncomeNodePanel: View {
                     .overlay(alignment: .bottom) { Rectangle().fill(LedgerPalette.line).frame(height: 1).padding(.leading, LedgerSpacing.lg) }
                 }
             }
+        }
+    }
+}
+
+struct CookieCategoryDonutCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var session: LedgerSession
+
+    let statement: LedgerIncomeStatement
+    let currency: String
+
+    enum AnalysisTab: String, CaseIterable, Identifiable {
+        case expense = "支出"
+        case income = "收入"
+        var id: String { rawValue }
+    }
+
+    @State private var selectedTab: AnalysisTab = .expense
+    @State private var selectedSliceID: String?
+
+    private struct SliceItem: Identifiable {
+        let id: String
+        let label: String
+        let icon: String
+        let color: Color
+        let amount: Int
+        let percentage: Double
+    }
+
+    private var activeTotal: Int {
+        selectedTab == .expense ? statement.totalExpense : statement.totalIncome
+    }
+
+    private var slices: [SliceItem] {
+        let total = activeTotal
+        guard total > 0 else { return [] }
+
+        if selectedTab == .expense {
+            let top = statement.expenseAnalytics.prefix(5)
+            var items: [SliceItem] = []
+            var topSum = 0
+
+            for item in top {
+                let visual = TransactionVisualCategory.resolve(account: item.account, label: item.label)
+                let pct = Double(item.amount) / Double(total)
+                topSum += item.amount
+                items.append(SliceItem(
+                    id: item.account,
+                    label: visual.categoryLabel,
+                    icon: visual.iconName,
+                    color: visual.color,
+                    amount: item.amount,
+                    percentage: pct
+                ))
+            }
+
+            let remainder = total - topSum
+            if remainder > 0 {
+                items.append(SliceItem(
+                    id: "other_expense",
+                    label: "其他",
+                    icon: "ellipsis.circle",
+                    color: Color(red: 0.68, green: 0.70, blue: 0.74),
+                    amount: remainder,
+                    percentage: Double(remainder) / Double(total)
+                ))
+            }
+            return items
+        } else {
+            let top = statement.income.filter { $0.amount > 0 }.sorted { $0.amount > $1.amount }.prefix(5)
+            var items: [SliceItem] = []
+            var topSum = 0
+
+            for node in top {
+                let visual = TransactionVisualCategory.resolve(account: node.account, label: node.label)
+                let pct = Double(node.amount) / Double(total)
+                topSum += node.amount
+                items.append(SliceItem(
+                    id: node.account,
+                    label: visual.categoryLabel,
+                    icon: visual.iconName,
+                    color: visual.color,
+                    amount: node.amount,
+                    percentage: pct
+                ))
+            }
+
+            let remainder = total - topSum
+            if remainder > 0 {
+                items.append(SliceItem(
+                    id: "other_income",
+                    label: "其他",
+                    icon: "ellipsis.circle",
+                    color: Color(red: 0.68, green: 0.70, blue: 0.74),
+                    amount: remainder,
+                    percentage: Double(remainder) / Double(total)
+                ))
+            }
+            return items
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            // Header with Switcher
+            HStack {
+                HStack(spacing: 4) {
+                    ForEach(AnalysisTab.allCases) { tab in
+                        let isSelected = selectedTab == tab
+                        Button {
+                            LedgerFeedback.selection()
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                selectedTab = tab
+                                selectedSliceID = nil
+                            }
+                        } label: {
+                            Text(tab.rawValue)
+                                .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
+                                .foregroundStyle(isSelected ? Color.white : LedgerPalette.ink)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 5)
+                                .background(
+                                    isSelected
+                                        ? (tab == .expense ? LedgerPalette.expense : LedgerPalette.income)
+                                        : Color(uiColor: .tertiarySystemFill),
+                                    in: Capsule()
+                                )
+                        }
+                        .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
+                    }
+                }
+
+                Spacer()
+
+                Text(session.selectedRange.displayTitle)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+            }
+
+            if slices.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "chart.pie")
+                        .font(.system(size: 28))
+                        .foregroundStyle(LedgerPalette.secondary)
+                    Text("当前期间暂无\(selectedTab.rawValue)记录")
+                        .font(.system(size: 13))
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 140)
+            } else {
+                // Donut Chart
+                Chart(slices) { slice in
+                    SectorMark(
+                        angle: .value("金额", slice.amount),
+                        innerRadius: .ratio(0.64),
+                        outerRadius: .ratio(selectedSliceID == slice.id ? 1.0 : 0.92),
+                        angularInset: 1.5
+                    )
+                    .cornerRadius(3)
+                    .foregroundStyle(slice.color)
+                    .opacity(selectedSliceID == nil || selectedSliceID == slice.id ? 1.0 : 0.42)
+                }
+                .chartLegend(.hidden)
+                .frame(height: 180)
+                .overlay {
+                    VStack(spacing: 3) {
+                        Text(selectedTab == .expense ? "总支出" : "总收入")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+
+                        AmountLabel(
+                            minorUnits: activeTotal,
+                            currency: currency,
+                            font: .system(size: 18, weight: .bold, design: .rounded),
+                            color: LedgerPalette.ink
+                        )
+                        .lineLimit(1)
+
+                        Text("\(slices.count) 项占比")
+                            .font(.system(size: 10))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
+                }
+
+                // Slices Legend Grid
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(slices) { slice in
+                        Button {
+                            LedgerFeedback.selection()
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                if selectedSliceID == slice.id {
+                                    selectedSliceID = nil
+                                } else {
+                                    selectedSliceID = slice.id
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(slice.color)
+                                    .frame(width: 8, height: 8)
+                                Text(slice.label)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(LedgerPalette.ink)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(String(format: "%.1f%%", slice.percentage * 100))
+                                    .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(
+                                selectedSliceID == slice.id ? slice.color.opacity(0.12) : Color(uiColor: .tertiarySystemFill).opacity(0.4),
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(LedgerPalette.panel)
+                .shadow(
+                    color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04),
+                    radius: 8,
+                    x: 0,
+                    y: 2
+                )
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(
+                    LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
+                    lineWidth: 0.5
+                )
+        }
+    }
+}
+
+struct CookieRankedCategoryPanel: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let title: String
+    let items: [LedgerExpenseCategoryAnalytics]
+    let totalExpense: Int
+    let currency: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(LedgerPalette.ink)
+                Spacer()
+                Text("前 \(min(items.count, 8)) 项")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(LedgerPalette.secondary)
+            }
+
+            if items.isEmpty {
+                AnalysisEmptyRow(message: "所选范围暂无支出分类")
+            } else {
+                ForEach(Array(items.prefix(8).enumerated()), id: \.element.id) { index, item in
+                    let visual = TransactionVisualCategory.resolve(account: item.account, label: item.label)
+                    let pct = totalExpense > 0 ? (Double(item.amount) / Double(totalExpense)) : 0.0
+
+                    VStack(spacing: 8) {
+                        HStack(spacing: 10) {
+                            // Rank number badge
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(rankBadgeBackground(index))
+                                    .frame(width: 20, height: 20)
+                                Text("\(index + 1)")
+                                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                                    .foregroundStyle(rankTextColor(index))
+                            }
+
+                            // Squircle icon
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(visual.color.opacity(0.14))
+                                    .frame(width: 34, height: 34)
+                                Image(systemName: visual.iconName)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(visual.color)
+                            }
+
+                            // Category info
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(visual.categoryLabel)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(LedgerPalette.ink)
+                                    .lineLimit(1)
+                                Text("\(item.txCount) 笔")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
+
+                            Spacer()
+
+                            // Amount & Percentage
+                            VStack(alignment: .trailing, spacing: 2) {
+                                AmountLabel(
+                                    minorUnits: item.amount,
+                                    currency: currency,
+                                    font: .system(size: 14.5, weight: .semibold, design: .rounded),
+                                    color: LedgerPalette.ink
+                                )
+                                Text(String(format: "%.1f%%", pct * 100))
+                                    .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
+                        }
+
+                        // Proportional progress track
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule()
+                                    .fill(Color(uiColor: .tertiarySystemFill))
+                                    .frame(height: 4)
+                                Capsule()
+                                    .fill(visual.color)
+                                    .frame(
+                                        width: max(4, min(geo.size.width, geo.size.width * CGFloat(pct))),
+                                        height: 4
+                                    )
+                            }
+                        }
+                        .frame(height: 4)
+                    }
+
+                    if index < min(items.count - 1, 7) {
+                        Divider()
+                            .overlay(LedgerPalette.line.opacity(0.4))
+                            .padding(.top, 2)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(LedgerPalette.panel)
+                .shadow(
+                    color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04),
+                    radius: 8,
+                    x: 0,
+                    y: 2
+                )
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(
+                    LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
+                    lineWidth: 0.5
+                )
+        }
+    }
+
+    private func rankBadgeBackground(_ index: Int) -> Color {
+        switch index {
+        case 0: return Color(red: 0.98, green: 0.82, blue: 0.25).opacity(0.2)
+        case 1: return Color(red: 0.70, green: 0.75, blue: 0.82).opacity(0.2)
+        case 2: return Color(red: 0.82, green: 0.58, blue: 0.40).opacity(0.2)
+        default: return Color(uiColor: .tertiarySystemFill)
+        }
+    }
+
+    private func rankTextColor(_ index: Int) -> Color {
+        switch index {
+        case 0: return Color(red: 0.85, green: 0.55, blue: 0.05)
+        case 1: return Color(red: 0.45, green: 0.50, blue: 0.58)
+        case 2: return Color(red: 0.72, green: 0.45, blue: 0.25)
+        default: return LedgerPalette.secondary
         }
     }
 }

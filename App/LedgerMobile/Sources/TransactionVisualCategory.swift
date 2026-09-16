@@ -156,4 +156,75 @@ struct TransactionVisualCategory: Equatable {
             return TransactionVisualCategory(iconName: "arrow.left.arrow.right", color: Color(red: 0.0, green: 0.48, blue: 0.88), categoryLabel: label)
         }
     }
+
+    static func resolve(account: String, label: String = "") -> TransactionVisualCategory {
+        let displayLabel = label.isEmpty ? (account.components(separatedBy: ":").last ?? account) : label
+        let lower = account.lowercased()
+
+        if lower.hasPrefix("expenses:food") || lower.hasPrefix("expenses:dining") || lower.hasPrefix("expenses:groceries") || lower.hasPrefix("expenses:meal") {
+            return TransactionVisualCategory(iconName: "fork.knife", color: Color(red: 0.96, green: 0.55, blue: 0.18), categoryLabel: displayLabel)
+        }
+        if lower.hasPrefix("expenses:transport") || lower.hasPrefix("expenses:travel") || lower.hasPrefix("expenses:taxi") {
+            return TransactionVisualCategory(iconName: "car.fill", color: Color(red: 0.16, green: 0.54, blue: 0.95), categoryLabel: displayLabel)
+        }
+        if lower.hasPrefix("expenses:book") || lower.hasPrefix("expenses:education") || lower.hasPrefix("expenses:study") {
+            return TransactionVisualCategory(iconName: "book.fill", color: Color(red: 0.72, green: 0.48, blue: 0.28), categoryLabel: displayLabel)
+        }
+        if lower.hasPrefix("expenses:digital") || lower.hasPrefix("expenses:communication") || lower.hasPrefix("expenses:telecom") {
+            return TransactionVisualCategory(iconName: "antenna.radiowaves.left.and.right", color: Color(red: 0.35, green: 0.45, blue: 0.88), categoryLabel: displayLabel)
+        }
+        if lower.hasPrefix("expenses:shopping") || lower.hasPrefix("expenses:clothing") || lower.hasPrefix("expenses:daily") {
+            return TransactionVisualCategory(iconName: "bag.fill", color: Color(red: 0.92, green: 0.32, blue: 0.55), categoryLabel: displayLabel)
+        }
+        if lower.hasPrefix("expenses:entertainment") || lower.hasPrefix("expenses:game") || lower.hasPrefix("expenses:movie") {
+            return TransactionVisualCategory(iconName: "popcorn.fill", color: Color(red: 0.65, green: 0.36, blue: 0.88), categoryLabel: displayLabel)
+        }
+        if lower.hasPrefix("expenses:housing") || lower.hasPrefix("expenses:rent") || lower.hasPrefix("expenses:utilities") {
+            return TransactionVisualCategory(iconName: "house.fill", color: Color(red: 0.12, green: 0.66, blue: 0.72), categoryLabel: displayLabel)
+        }
+        if lower.hasPrefix("expenses:health") || lower.hasPrefix("expenses:medical") {
+            return TransactionVisualCategory(iconName: "heart.fill", color: Color(red: 0.92, green: 0.28, blue: 0.28), categoryLabel: displayLabel)
+        }
+        if lower.hasPrefix("income:salary") || lower.hasPrefix("income:wage") || lower.hasPrefix("income:bonus") {
+            return TransactionVisualCategory(iconName: "banknote.fill", color: Color(red: 0.12, green: 0.68, blue: 0.36), categoryLabel: displayLabel)
+        }
+        if lower.contains("fund") || lower.contains("invest") || lower.contains("stock") {
+            return TransactionVisualCategory(iconName: "chart.line.uptrend.xyaxis", color: Color(red: 0.08, green: 0.68, blue: 0.55), categoryLabel: displayLabel)
+        }
+
+        // Keyword matching on displayLabel & account
+        let textToMatch = "\(displayLabel) \(account)".lowercased()
+        if textToMatch.contains("餐饮") || textToMatch.contains("美食") || textToMatch.contains("早餐") || textToMatch.contains("午餐") || textToMatch.contains("晚餐") || textToMatch.contains("外卖") || textToMatch.contains("美团") || textToMatch.contains("咖啡") || textToMatch.contains("超市") || textToMatch.contains("买菜") {
+            return TransactionVisualCategory(iconName: "fork.knife", color: Color(red: 0.96, green: 0.55, blue: 0.18), categoryLabel: displayLabel)
+        }
+        if textToMatch.contains("交通") || textToMatch.contains("出行") || textToMatch.contains("打车") || textToMatch.contains("滴滴") || textToMatch.contains("地铁") || textToMatch.contains("公交") || textToMatch.contains("加油") || textToMatch.contains("停车") {
+            return TransactionVisualCategory(iconName: "car.fill", color: Color(red: 0.16, green: 0.54, blue: 0.95), categoryLabel: displayLabel)
+        }
+        if textToMatch.contains("购物") || textToMatch.contains("数码") || textToMatch.contains("淘宝") || textToMatch.contains("京东") || textToMatch.contains("拼多多") || textToMatch.contains("服饰") || textToMatch.contains("衣服") || textToMatch.contains("日用") {
+            return TransactionVisualCategory(iconName: "bag.fill", color: Color(red: 0.92, green: 0.32, blue: 0.55), categoryLabel: displayLabel)
+        }
+        if textToMatch.contains("娱乐") || textToMatch.contains("游戏") || textToMatch.contains("电影") || textToMatch.contains("音乐") || textToMatch.contains("会员") {
+            return TransactionVisualCategory(iconName: "popcorn.fill", color: Color(red: 0.65, green: 0.36, blue: 0.88), categoryLabel: displayLabel)
+        }
+        if textToMatch.contains("房租") || textToMatch.contains("房贷") || textToMatch.contains("水电") || textToMatch.contains("燃气") || textToMatch.contains("物业") || textToMatch.contains("家居") {
+            return TransactionVisualCategory(iconName: "house.fill", color: Color(red: 0.12, green: 0.66, blue: 0.72), categoryLabel: displayLabel)
+        }
+        if textToMatch.contains("医疗") || textToMatch.contains("健康") || textToMatch.contains("医院") || textToMatch.contains("药品") {
+            return TransactionVisualCategory(iconName: "heart.fill", color: Color(red: 0.92, green: 0.28, blue: 0.28), categoryLabel: displayLabel)
+        }
+        if textToMatch.contains("话费") || textToMatch.contains("流量") || textToMatch.contains("宽带") || textToMatch.contains("云服务") {
+            return TransactionVisualCategory(iconName: "antenna.radiowaves.left.and.right", color: Color(red: 0.35, green: 0.45, blue: 0.88), categoryLabel: displayLabel)
+        }
+        if textToMatch.contains("学习") || textToMatch.contains("图书") || textToMatch.contains("书籍") || textToMatch.contains("课程") || textToMatch.contains("培训") {
+            return TransactionVisualCategory(iconName: "book.fill", color: Color(red: 0.72, green: 0.48, blue: 0.28), categoryLabel: displayLabel)
+        }
+        if textToMatch.contains("工资") || textToMatch.contains("薪水") || textToMatch.contains("奖金") || textToMatch.contains("收入") {
+            return TransactionVisualCategory(iconName: "banknote.fill", color: Color(red: 0.12, green: 0.68, blue: 0.36), categoryLabel: displayLabel)
+        }
+
+        if account.hasPrefix("Income:") {
+            return TransactionVisualCategory(iconName: "arrow.down.left", color: Color(red: 0.12, green: 0.68, blue: 0.36), categoryLabel: displayLabel)
+        }
+        return TransactionVisualCategory(iconName: "cart.fill", color: Color(red: 0.95, green: 0.45, blue: 0.22), categoryLabel: displayLabel)
+    }
 }

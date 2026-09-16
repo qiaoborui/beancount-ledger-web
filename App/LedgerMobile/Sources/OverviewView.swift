@@ -292,11 +292,11 @@ private struct OverviewTopCategoriesCard: View {
                     HStack(alignment: .center, spacing: 9) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(Color(uiColor: .tertiarySystemFill))
+                                .fill(item.color.opacity(0.14))
                                 .frame(width: 28, height: 28)
                             Image(systemName: item.iconName)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Color.primary)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(item.color)
                         }
 
                         VStack(alignment: .leading, spacing: 1) {
@@ -332,7 +332,7 @@ private struct OverviewTopCategoriesCard: View {
                                 .fill(Color(uiColor: .tertiarySystemFill))
                                 .frame(height: 3.5)
                             Capsule()
-                                .fill(Color.primary.opacity(0.72))
+                                .fill(item.color)
                                 .frame(
                                     width: max(3.5, min(geo.size.width, geo.size.width * CGFloat(item.percentage))),
                                     height: 3.5
