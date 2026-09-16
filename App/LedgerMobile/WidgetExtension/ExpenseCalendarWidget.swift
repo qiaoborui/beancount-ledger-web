@@ -86,37 +86,53 @@ struct ExpenseCalendarWidgetView: View {
         updatedAt: Date
     ) -> some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Label("消费日历", systemImage: "calendar")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(LedgerWidgetColors.cobalt)
-                Text(expense.periodTitle)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(LedgerWidgetColors.secondary)
-                Spacer(minLength: 0)
-                if let today = layout.today, let url = LedgerWidgetNavigation.transactions(
-                    date: layout.dateString(for: today), isRedacted: !redactionReasons.isEmpty
-                ) {
-                    Link(destination: url) {
-                        calendarMetric(title: "今日消费", value: money(layout.amounts[today] ?? 0, expense), prominent: true)
+            VStack(alignment: .leading, spacing: 4) {
+                LedgerWidgetHeader(
+                    title: "消费日历",
+                    detail: expense.periodTitle,
+                    systemName: "calendar",
+                    tint: LedgerWidgetColors.cobalt
+                )
+                Spacer(minLength: 2)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    if let today = layout.today, let url = LedgerWidgetNavigation.transactions(
+                        date: layout.dateString(for: today), isRedacted: !redactionReasons.isEmpty
+                    ) {
+                        Link(destination: url) {
+                            calendarMetric(
+                                title: "今日消费",
+                                value: money(layout.amounts[today] ?? 0, expense),
+                                prominent: true
+                            )
+                        }
+                    } else {
+                        calendarMetric(title: "月度消费", value: money(expense.amount, expense), prominent: true)
                     }
-                } else {
-                    calendarMetric(title: "月度消费", value: money(expense.amount, expense), prominent: true)
+
+                    if layout.today != nil {
+                        Text("本月 \(money(expense.amount, expense))")
+                            .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                            .foregroundStyle(LedgerWidgetColors.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .padding(.top, 2)
+                            .privacySensitive()
+                    }
                 }
-                if layout.today != nil {
-                    Text("本月 \(money(expense.amount, expense))")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(LedgerWidgetColors.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .privacySensitive()
-                }
+                .widgetSubcard(cornerRadius: 8, padding: 6)
+
                 Spacer(minLength: 0)
-                Text("点日期看支出")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(LedgerWidgetColors.secondary)
+
+                HStack(spacing: 3) {
+                    Image(systemName: "hand.tap")
+                        .font(.system(size: 8))
+                    Text("点日期看流水")
+                }
+                .font(.system(size: 8.5, weight: .medium))
+                .foregroundStyle(LedgerWidgetColors.secondary)
             }
-            .frame(width: 96, alignment: .leading)
+            .frame(width: 98, alignment: .leading)
 
             ExpenseMonthGrid(layout: layout, currency: expense.currency, compact: true)
                 .privacySensitive()
@@ -129,18 +145,24 @@ struct ExpenseCalendarWidgetView: View {
         updatedAt: Date
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label(expense.periodTitle, systemImage: "calendar")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(LedgerWidgetColors.cobalt)
-                    Text("消费日历 · 点日期看支出")
-                        .font(.system(size: 10))
-                        .foregroundStyle(LedgerWidgetColors.secondary)
-                }
+            HStack(alignment: .center) {
+                LedgerWidgetHeader(
+                    title: "消费日历",
+                    detail: "\(expense.periodTitle) · 点选日期查看流水",
+                    systemName: "calendar",
+                    tint: LedgerWidgetColors.cobalt
+                )
                 Spacer(minLength: 8)
-                calendarMetric(title: "月度消费", value: money(expense.amount, expense))
-                    .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("月度总消费")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(LedgerWidgetColors.secondary)
+                    Text(money(expense.amount, expense))
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(LedgerWidgetColors.ink)
+                }
+                .privacySensitive()
             }
             ExpenseMonthGrid(layout: layout, currency: expense.currency, compact: false)
                 .privacySensitive()
@@ -151,16 +173,17 @@ struct ExpenseCalendarWidgetView: View {
                 Spacer(minLength: 0)
                 Text("少")
                 ForEach(1...4, id: \.self) { level in
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(LedgerWidgetColors.expense.opacity(Double(level) * 0.1))
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(expenseHeatColor(for: level))
                         .frame(width: 9, height: 9)
                 }
                 Text("多")
             }
-            .font(.system(size: 10, weight: .medium))
+            .font(.system(size: 9.5, weight: .medium))
             .foregroundStyle(LedgerWidgetColors.secondary)
+
             Text(LedgerWidgetText.updated(updatedAt, now: entry.date))
-                .font(.system(size: 9))
+                .font(.system(size: 8.5))
                 .foregroundStyle(LedgerWidgetColors.secondary)
         }
     }
@@ -170,16 +193,16 @@ struct ExpenseCalendarWidgetView: View {
     }
 
     private func calendarMetric(title: String, value: String, prominent: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 1) {
             Text(title)
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(LedgerWidgetColors.secondary)
             Text(value)
-                .font(.system(size: prominent ? 21 : 18, weight: .semibold))
+                .font(.system(size: prominent ? 19 : 16, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(LedgerWidgetColors.ink)
                 .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .minimumScaleFactor(0.7)
         }
         .privacySensitive()
     }
@@ -199,7 +222,7 @@ private struct ExpenseMonthGrid: View {
             LazyVGrid(columns: columns, spacing: compact ? 2 : 3) {
                 ForEach(weekdayLabels, id: \.self) { label in
                     Text(label)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(LedgerWidgetColors.secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.bottom, compact ? 2 : 4)
@@ -231,34 +254,58 @@ private struct ExpenseMonthGrid: View {
     }
 
     private func dayLabel(_ day: Int, amount: Int) -> some View {
-        VStack(spacing: 2) {
+        let level = heatLevel(amount)
+        let isToday = day == layout.today
+        return VStack(spacing: 1) {
             Text("\(day)")
-                .font(.system(size: compact ? 11 : 12, weight: day == layout.today || amount > 0 ? .semibold : .regular))
+                .font(.system(size: compact ? 10.5 : 12, weight: isToday || amount > 0 ? .semibold : .regular))
+                .foregroundStyle(
+                    level >= 3
+                        ? Color.white
+                        : (layout.isFuture(day) ? LedgerWidgetColors.secondary.opacity(0.4) : LedgerWidgetColors.ink)
+                )
             if !compact {
                 Text(amount == 0 ? " " : MoneyText.formatWidget(minorUnits: amount, currency: currency))
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: 8.5, weight: .medium, design: .rounded))
+                    .foregroundStyle(level >= 3 ? Color.white.opacity(0.9) : LedgerWidgetColors.secondary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.7)
             }
         }
         .monospacedDigit()
-        .foregroundStyle(layout.isFuture(day) ? LedgerWidgetColors.secondary.opacity(0.55) : LedgerWidgetColors.ink)
         .frame(maxWidth: .infinity)
         .frame(height: compact ? 17 : 34)
-        .background(heatColor(amount), in: RoundedRectangle(cornerRadius: 5))
+        .background {
+            if amount > 0 {
+                RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                    .fill(expenseHeatColor(for: level))
+            } else if !layout.isFuture(day) {
+                RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                    .fill(LedgerWidgetColors.raised.opacity(0.4))
+            }
+        }
         .overlay {
-            if day == layout.today {
-                RoundedRectangle(cornerRadius: 5).strokeBorder(LedgerWidgetColors.cobalt, lineWidth: 1.5)
+            if isToday {
+                RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                    .strokeBorder(LedgerWidgetColors.ink, lineWidth: 1.2)
             }
         }
         .contentShape(Rectangle())
     }
 
-    private func heatColor(_ amount: Int) -> Color {
-        guard amount > 0, layout.maxAmount > 0 else { return .clear }
+    private func heatLevel(_ amount: Int) -> Int {
+        guard amount > 0, layout.maxAmount > 0 else { return 0 }
         let ratio = min(max(Double(amount) / Double(layout.maxAmount), 0), 1)
-        let level = max(1, ceil(sqrt(ratio) * 4))
-        return LedgerWidgetColors.expense.opacity(level * 0.1)
+        return max(1, min(4, Int(ceil(sqrt(ratio) * 4))))
+    }
+}
+
+fileprivate func expenseHeatColor(for level: Int) -> Color {
+    switch level {
+    case 1: return LedgerWidgetColors.ink.opacity(0.10)
+    case 2: return LedgerWidgetColors.ink.opacity(0.24)
+    case 3: return LedgerWidgetColors.ink.opacity(0.55)
+    default: return LedgerWidgetColors.ink.opacity(0.85)
     }
 }
 

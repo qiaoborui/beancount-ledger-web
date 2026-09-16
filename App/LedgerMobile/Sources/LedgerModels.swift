@@ -117,6 +117,18 @@ struct LedgerDateRange: Equatable, Sendable {
         return period(starting: start, adding: .month, value: 1, preset: .month)
     }
 
+    static func quarter(year: Int, quarter: Int) -> LedgerDateRange {
+        let q = max(1, min(4, quarter))
+        let quarterStartMonth = (q - 1) * 3 + 1
+        let start = calendar.date(from: DateComponents(year: year, month: quarterStartMonth, day: 1)) ?? Date()
+        return period(starting: start, adding: .month, value: 3, preset: .quarter)
+    }
+
+    static func year(year: Int) -> LedgerDateRange {
+        let start = calendar.date(from: DateComponents(year: year, month: 1, day: 1)) ?? Date()
+        return period(starting: start, adding: .year, value: 1, preset: .year)
+    }
+
     static func current(_ preset: LedgerDateRangePreset, now: Date = Date()) -> LedgerDateRange {
         let components = calendar.dateComponents([.year, .month], from: now)
         let year = components.year ?? 2000
@@ -249,13 +261,13 @@ struct LedgerDateRange: Equatable, Sendable {
         return LedgerDateRange(start: format(start), end: format(inclusiveEnd), preset: preset)
     }
 
-    private static var calendar: Calendar {
+    static var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
         return calendar
     }
 
-    private static func format(_ date: Date) -> String {
+    static func format(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -264,7 +276,7 @@ struct LedgerDateRange: Equatable, Sendable {
         return formatter.string(from: date)
     }
 
-    private static func parse(_ raw: String) -> Date? {
+    static func parse(_ raw: String) -> Date? {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")

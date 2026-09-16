@@ -182,7 +182,7 @@ struct ImportHistoryView: View {
             channelSection
             historySection
         }
-        .listStyle(.plain)
+        .ledgerReadingList()
         .contentMargins(.top, LedgerLayout.pageTopInset, for: .scrollContent)
         .tint(LedgerPalette.cobalt)
         .refreshable { await refreshAll(replacingContent: false) }
@@ -198,18 +198,33 @@ struct ImportHistoryView: View {
                 ForEach(sharedItems) { item in
                     HStack(spacing: 8) {
                         Button { Task { await reviewSharedItem(item) } } label: {
-                            Label(item.name, systemImage: "doc.badge.arrow.up")
-                                .font(.subheadline)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .frame(minHeight: 44)
+                            HStack(spacing: 10) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(LedgerPalette.cobalt.opacity(0.12))
+                                        .frame(width: 32, height: 32)
+                                    Image(systemName: "doc.badge.arrow.up")
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundStyle(LedgerPalette.cobalt)
+                                }
+                                Text(item.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(LedgerPalette.ink)
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minHeight: 44)
                         }
                         .buttonStyle(.borderless)
                         .accessibilityIdentifier("shared-import-review-\(item.name)")
                         .disabled(isReadingFile)
-                        Button { sharedItemToRemove = item } label: { Image(systemName: "trash") }
-                            .frame(width: 44, height: 44)
-                            .buttonStyle(.borderless)
-                            .accessibilityLabel("移除待导入文件")
+                        Button { sharedItemToRemove = item } label: {
+                            Image(systemName: "trash")
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                        .frame(width: 44, height: 44)
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("移除待导入文件")
                     }
                 }
             } header: {
@@ -251,19 +266,88 @@ struct ImportHistoryView: View {
 
     private var importSection: some View {
         Section {
-            Button {
-                fileImporterPresented = true
-            } label: {
-                HStack {
-                    Label("选择账单文件", systemImage: "doc.badge.plus")
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [LedgerPalette.cobalt, LedgerPalette.cobaltLight],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 44, height: 44)
+                            .shadow(
+                                color: LedgerPalette.cobalt.opacity(0.28),
+                                radius: 6,
+                                x: 0,
+                                y: 3
+                            )
+                        Image(systemName: "arrow.up.doc.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("智能账单导入")
+                            .font(.system(.subheadline, design: .default, weight: .bold))
+                            .foregroundStyle(LedgerPalette.ink)
+                        Text("自动识别渠道、解析交易与去重预览")
+                            .font(.system(.caption2, design: .default))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
                     Spacer()
-                    if isReadingFile { ProgressView().controlSize(.small) }
                 }
-                .font(.body)
-                .frame(minHeight: 44)
+
+                Button {
+                    fileImporterPresented = true
+                } label: {
+                    HStack(spacing: 8) {
+                        if isReadingFile {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(LedgerPalette.onBrand)
+                        } else {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        Text(isReadingFile ? "正在读取文件..." : "选择账单文件")
+                            .font(.system(.subheadline, design: .default, weight: .semibold))
+                    }
+                    .foregroundStyle(LedgerPalette.onBrand)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(
+                        LinearGradient(
+                            colors: [LedgerPalette.cobalt, LedgerPalette.cobalt.opacity(0.92)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5)
+                    }
+                    .shadow(
+                        color: LedgerPalette.cobalt.opacity(0.24),
+                        radius: 5,
+                        x: 0,
+                        y: 2.5
+                    )
+                }
+                .disabled(isReadingFile)
+                .buttonStyle(PressScaleButtonStyle(pressedScale: 0.96))
+                .accessibilityIdentifier("import-select-file")
+
+                HStack(spacing: 6) {
+                    FormatBadge(name: "支付宝", ext: "CSV")
+                    FormatBadge(name: "微信支付", ext: "XLSX")
+                    FormatBadge(name: "银行流水", ext: "PDF")
+                    FormatBadge(name: "压缩包", ext: "ZIP")
+                }
             }
-            .disabled(isReadingFile)
-            .accessibilityIdentifier("import-select-file")
+            .padding(.vertical, 8)
         } footer: {
             Text("支持 CSV、Excel、PDF、邮件和 ZIP，最大 10MB。预览并确认后写入账本。")
         }
@@ -966,19 +1050,43 @@ private struct GmailImportReview: Identifiable {
     var id: String { itemID }
 }
 
+private struct FormatBadge: View {
+    let name: String
+    let ext: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(LedgerPalette.secondary.opacity(0.6))
+                .frame(width: 4, height: 4)
+            Text("\(name) \(ext)")
+                .font(.system(size: 10, weight: .medium, design: .default))
+                .foregroundStyle(LedgerPalette.secondary)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3.5)
+        .background(Color(uiColor: .tertiarySystemFill))
+        .clipShape(Capsule())
+    }
+}
+
 private struct ImportChannelRow: View {
     let status: LedgerImportChannelStatus
 
     var body: some View {
         HStack(spacing: LedgerSpacing.md) {
-            Image(systemName: status.provider.systemImage)
-                .font(.body)
-                .foregroundStyle(LedgerPalette.cobalt)
-                .frame(width: 24)
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .frame(width: 34, height: 34)
+                Image(systemName: status.provider.systemImage)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(LedgerPalette.ink)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(status.provider.label)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(LedgerPalette.ink)
                 Text(channelDetail)
                     .font(.caption.monospacedDigit())
@@ -987,12 +1095,20 @@ private struct ImportChannelRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(status.freshness.title)
-                .font(.caption)
-                .foregroundStyle(statusColor)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 6, height: 6)
+                Text(status.freshness.title)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(statusColor)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(statusColor.opacity(0.1))
+            .clipShape(Capsule())
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("import-provider-\(status.provider.id)")
     }
@@ -1025,23 +1141,27 @@ private struct ImportDocumentRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: LedgerSpacing.md) {
-            Image(systemName: provider?.systemImage ?? "doc.text")
-                .font(.body)
-                .foregroundStyle(LedgerPalette.cobalt)
-                .frame(width: 24)
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .frame(width: 36, height: 36)
+                Image(systemName: provider?.systemImage ?? "doc.text")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(LedgerPalette.ink)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: LedgerSpacing.sm) {
                     Text(provider?.label ?? "其他渠道")
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(LedgerPalette.ink)
                     Text(LedgerImportHistory.coverageText(document))
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LedgerPalette.secondary)
                 }
                 Text(document.name ?? "账单归档文件")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LedgerPalette.secondary)
                     .lineLimit(2)
                 HStack(spacing: LedgerSpacing.sm) {
                     Text(LedgerImportHistory.fullArchivedText(document))
@@ -1054,9 +1174,8 @@ private struct ImportDocumentRow: View {
                 .foregroundStyle(LedgerPalette.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("import-document-\(document.id)")
     }

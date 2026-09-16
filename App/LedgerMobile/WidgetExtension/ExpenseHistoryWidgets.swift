@@ -49,32 +49,58 @@ struct ExpenseTrendWidgetView: View {
       start: LedgerWidgetDates.adding(-60, to: insights.history.end),
       end: LedgerWidgetDates.adding(-30, to: insights.history.end))
     let baseline = previous.reduce(0) { $0 + $1.amount }
-    return VStack(alignment: .leading, spacing: 6) {
-      HStack(alignment: .firstTextBaseline) {
-        Text("消费趋势").font(.system(size: 12, weight: .semibold))
-        Text("近 30 天").font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
+    return VStack(alignment: .leading, spacing: 5) {
+      HStack(alignment: .center) {
+        LedgerWidgetHeader(
+          title: "消费趋势",
+          detail: "近 30 天支出走势",
+          systemName: "chart.line.uptrend.xyaxis",
+          tint: LedgerWidgetColors.cobalt
+        )
         Spacer(minLength: 4)
         Text(MoneyText.formatCompact(minorUnits: total, currency: insights.history.currency))
-          .font(.system(size: 19, weight: .semibold, design: .rounded)).monospacedDigit()
-          .lineLimit(1).minimumScaleFactor(0.65)
+          .font(.system(size: 20, weight: .semibold, design: .rounded)).monospacedDigit()
+          .lineLimit(1).minimumScaleFactor(0.7)
       }
-      HStack(spacing: 4) {
+      HStack(spacing: 5) {
         Text("退款前支出 ·")
-        Text("较前 30 天")
-        Text(
-          previous.count == 30 && baseline != 0
-            ? LedgerWidgetText.percentage(
-              (Double(total) - Double(baseline)) / abs(Double(baseline)))
-            : "暂无对比")
+          .font(.system(size: 9.5))
+          .foregroundStyle(LedgerWidgetColors.secondary)
+        if previous.count == 30 && baseline != 0 {
+          let diff = (Double(total) - Double(baseline)) / abs(Double(baseline))
+          let isFavorable = diff <= 0
+          HStack(spacing: 2) {
+            Image(systemName: isFavorable ? "arrow.down.right" : "arrow.up.right")
+              .font(.system(size: 7.5, weight: .bold))
+            Text("较前 30 天 \(LedgerWidgetText.percentage(abs(diff)))")
+          }
+          .font(.system(size: 9, weight: .semibold))
+          .foregroundStyle(isFavorable ? LedgerWidgetColors.success : LedgerWidgetColors.expense)
+          .padding(.horizontal, 5)
+          .padding(.vertical, 1.5)
+          .background(isFavorable ? LedgerWidgetColors.successSoft : LedgerWidgetColors.expenseSoft)
+          .clipShape(Capsule())
+        } else {
+          Text("暂无对比")
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(LedgerWidgetColors.secondary)
+        }
       }
-      .font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
       Chart(points) { point in
         if let date = LedgerWidgetDates.date(point.date) {
           AreaMark(x: .value("日期", date), y: .value("消费", point.amount))
-            .foregroundStyle(LedgerWidgetColors.expense.opacity(0.10))
+            .interpolationMethod(.catmullRom)
+            .foregroundStyle(
+              LinearGradient(
+                colors: [LedgerWidgetColors.chartLine.opacity(0.18), LedgerWidgetColors.chartLine.opacity(0.01)],
+                startPoint: .top,
+                endPoint: .bottom
+              )
+            )
           LineMark(x: .value("日期", date), y: .value("消费", point.amount))
-            .foregroundStyle(LedgerWidgetColors.expense)
-            .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+            .interpolationMethod(.catmullRom)
+            .foregroundStyle(LedgerWidgetColors.chartLine)
+            .lineStyle(StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
         }
       }
       .chartXAxis(.hidden).chartYAxis(.hidden)
@@ -89,7 +115,7 @@ struct ExpenseTrendWidgetView: View {
         Spacer()
         Text(String(points[29].date.suffix(5)).replacingOccurrences(of: "-", with: "/"))
       }
-      .font(.system(size: 9)).foregroundStyle(LedgerWidgetColors.secondary)
+      .font(.system(size: 8.5, weight: .medium)).foregroundStyle(LedgerWidgetColors.secondary)
     }
     .foregroundStyle(LedgerWidgetColors.ink)
     .privacySensitive()
@@ -138,14 +164,17 @@ struct ExpenseHeatmapWidgetView: View {
     -> some View
   {
     let peak = max(points.map(\.amount).max() ?? 0, 1)
+    let spendingDays = points.filter { $0.amount > 0 }.count
     return GeometryReader { bounds in
-      VStack(alignment: .leading, spacing: 7) {
+      VStack(alignment: .leading, spacing: 6) {
         HStack {
-          Text("消费热力图").font(.system(size: 12, weight: .semibold))
-          Text("近 12 周").font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
-          Spacer()
-          Text("\(points.filter { $0.amount > 0 }.count) 个消费日")
-            .font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
+          LedgerWidgetHeader(
+            title: "消费热力图",
+            detail: "近 12 周 · \(spendingDays) 个消费日",
+            systemName: "square.grid.3x3.fill",
+            tint: LedgerWidgetColors.cobalt
+          )
+          Spacer(minLength: 4)
         }
         GeometryReader { geometry in
           let width = max(1, (geometry.size.width - 18 - 33) / 12)
@@ -154,7 +183,7 @@ struct ExpenseHeatmapWidgetView: View {
             VStack(spacing: 3) {
               ForEach(0..<7) { row in
                 Text(["一", "", "三", "", "五", "", "日"][row])
-                  .font(.system(size: 8)).foregroundStyle(LedgerWidgetColors.secondary)
+                  .font(.system(size: 8, weight: .medium)).foregroundStyle(LedgerWidgetColors.secondary)
                   .frame(width: 15, height: height)
               }
             }
@@ -167,12 +196,12 @@ struct ExpenseHeatmapWidgetView: View {
                   {
                     let point = points[index]
                     Link(destination: url) {
-                      RoundedRectangle(cornerRadius: 2)
+                      RoundedRectangle(cornerRadius: 3, style: .continuous)
                         .fill(color(point.amount, peak: peak))
                         .overlay {
                           if index == points.count - 1 {
-                            RoundedRectangle(cornerRadius: 2).strokeBorder(
-                              LedgerWidgetColors.cobalt, lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 3, style: .continuous).strokeBorder(
+                              LedgerWidgetColors.ink, lineWidth: 1.2)
                           }
                         }
                         .frame(width: width, height: height)
@@ -190,15 +219,15 @@ struct ExpenseHeatmapWidgetView: View {
             }
           }
         }
-        .frame(height: max(35, bounds.size.height - 40))
-        HStack(spacing: 3) {
+        .frame(height: max(35, bounds.size.height - 42))
+        HStack(spacing: 4) {
           Text(String(insights.history.start.suffix(5)).replacingOccurrences(of: "-", with: "/"))
           Text("至 " + String(points.last!.date.suffix(5)).replacingOccurrences(of: "-", with: "/"))
           Spacer(minLength: 3)
           Text("少")
           ForEach(0..<4) { level in
-            RoundedRectangle(cornerRadius: 1.5).fill(
-              LedgerWidgetColors.expense.opacity(0.18 + Double(level) * 0.22)
+            RoundedRectangle(cornerRadius: 2, style: .continuous).fill(
+              levelColor(level)
             )
             .frame(width: 7, height: 7)
           }
@@ -206,16 +235,25 @@ struct ExpenseHeatmapWidgetView: View {
           Spacer(minLength: 3)
           Text(LedgerWidgetText.updated(insights.date ?? entry.date, now: entry.date)).lineLimit(1)
         }
-        .font(.system(size: 8)).foregroundStyle(LedgerWidgetColors.secondary)
+        .font(.system(size: 8, weight: .medium)).foregroundStyle(LedgerWidgetColors.secondary)
       }
       .frame(width: bounds.size.width, height: bounds.size.height, alignment: .top)
       .foregroundStyle(LedgerWidgetColors.ink).privacySensitive()
     }
   }
 
+  private func levelColor(_ level: Int) -> Color {
+    switch level {
+    case 0: return LedgerWidgetColors.ink.opacity(0.10)
+    case 1: return LedgerWidgetColors.ink.opacity(0.25)
+    case 2: return LedgerWidgetColors.ink.opacity(0.55)
+    default: return LedgerWidgetColors.ink.opacity(0.85)
+    }
+  }
+
   private func color(_ amount: Int, peak: Int) -> Color {
-    guard amount > 0 else { return LedgerWidgetColors.raised }
+    guard amount > 0 else { return LedgerWidgetColors.raised.opacity(0.4) }
     let level = min(3, Int(sqrt(Double(amount) / Double(peak)) * 4))
-    return LedgerWidgetColors.expense.opacity(0.18 + Double(level) * 0.22)
+    return levelColor(level)
   }
 }

@@ -133,7 +133,12 @@ struct ImportStatusWidgetView: View {
 
     private func statusHeader(imports: [LedgerWidgetImportSnapshot], updatedAt: Date?) -> some View {
         HStack(spacing: 10) {
-            LedgerWidgetHeader(title: "导入状态", detail: "\(imports.count) 个已归档渠道")
+            LedgerWidgetHeader(
+                title: "导入状态",
+                detail: "\(imports.count) 个已归档渠道",
+                systemName: "tray.and.arrow.down.fill",
+                tint: LedgerWidgetColors.cobalt
+            )
             Text(updatedAt.map { LedgerWidgetText.checked($0, now: entry.date) } ?? "暂未检查")
                 .font(.system(size: 8.5, weight: .medium))
                 .foregroundStyle(LedgerWidgetColors.secondary)
@@ -159,35 +164,62 @@ struct ImportStatusWidgetView: View {
     }
 
     private func compactRow(_ item: LedgerWidgetImportSnapshot) -> some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(freshnessColor(item))
-                .frame(width: 7, height: 7)
-            VStack(alignment: .leading, spacing: 2) {
+        let style = LedgerWidgetVisualHelper.importChannel(for: item)
+        let freshColor = freshnessColor(item)
+        return HStack(spacing: 6) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(LedgerWidgetColors.raised)
+                Image(systemName: style.icon)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(LedgerWidgetColors.ink)
+            }
+            .frame(width: 18, height: 18)
+
+            VStack(alignment: .leading, spacing: 1) {
                 Text(item.label)
                     .font(.system(size: 9.5, weight: .semibold))
                     .foregroundStyle(LedgerWidgetColors.ink)
                     .lineLimit(1)
-                Text(item.latestCoverageDate.map(Self.shortDate) ?? "账期未知")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(freshnessColor(item))
-                    .lineLimit(1)
+                HStack(spacing: 3) {
+                    Circle()
+                        .fill(freshColor)
+                        .frame(width: 4, height: 4)
+                    Text(item.latestCoverageDate.map(Self.shortDate) ?? "账期未知")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(freshColor)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
-        .frame(height: 34)
-        .background(LedgerWidgetColors.raised.opacity(0.58))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(LedgerWidgetColors.raised.opacity(0.6))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(LedgerWidgetColors.line.opacity(0.5), lineWidth: 0.5)
+                }
+        }
     }
 
     private func detailedRow(_ item: LedgerWidgetImportSnapshot) -> some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(freshnessColor(item))
-                .frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 2) {
+        let style = LedgerWidgetVisualHelper.importChannel(for: item)
+        let freshColor = freshnessColor(item)
+        return HStack(spacing: 9) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(LedgerWidgetColors.raised)
+                Image(systemName: style.icon)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(LedgerWidgetColors.ink)
+            }
+            .frame(width: 22, height: 22)
+
+            VStack(alignment: .leading, spacing: 1.5) {
                 Text(item.label)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(LedgerWidgetColors.ink)
@@ -197,17 +229,22 @@ struct ImportStatusWidgetView: View {
                     .foregroundStyle(LedgerWidgetColors.secondary)
             }
             Spacer(minLength: 6)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(item.latestCoverageDate.map(Self.fullDate) ?? "账期未知")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(freshnessColor(item))
-                Text("账单覆盖日期")
+            VStack(alignment: .trailing, spacing: 1.5) {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(freshColor)
+                        .frame(width: 5, height: 5)
+                    Text(item.latestCoverageDate.map(Self.fullDate) ?? "账期未知")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(freshColor)
+                }
+                Text("账单覆盖截止")
                     .font(.system(size: 8.5, weight: .medium))
                     .foregroundStyle(LedgerWidgetColors.secondary)
             }
         }
-        .frame(height: 34)
+        .frame(height: 36)
     }
 
     private func freshnessColor(_ item: LedgerWidgetImportSnapshot) -> Color {

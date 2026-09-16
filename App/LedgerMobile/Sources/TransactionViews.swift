@@ -20,6 +20,40 @@ private enum TransactionAmountParser {
     }
 }
 
+enum TransactionDateHeaderFormatter {
+    private static let weekdaySymbols = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+
+    static func format(_ dateString: String) -> String {
+        guard let date = LedgerDateRange.parse(dateString) else { return dateString }
+        let cal = LedgerDateRange.calendar
+        let now = Date()
+
+        let isToday = cal.isDateInToday(date)
+        let isYesterday = cal.isDateInYesterday(date)
+
+        let comp = cal.dateComponents([.year, .month, .day, .weekday], from: date)
+        let currentYear = cal.component(.year, from: now)
+
+        guard let month = comp.month, let day = comp.day, let weekday = comp.weekday,
+              weekday >= 1 && weekday <= 7 else {
+            return dateString
+        }
+
+        let weekdayStr = weekdaySymbols[weekday - 1]
+
+        if isToday {
+            return "今天 · \(month)月\(day)日"
+        } else if isYesterday {
+            return "昨天 · \(month)月\(day)日"
+        } else if comp.year == currentYear {
+            return "\(month)月\(day)日 · \(weekdayStr)"
+        } else if let year = comp.year {
+            return "\(year)年\(month)月\(day)日 · \(weekdayStr)"
+        }
+        return dateString
+    }
+}
+
 struct TransactionRow: View {
     let transaction: LedgerTransaction
     var accountLabels: [String: String] = [:]
@@ -28,16 +62,28 @@ struct TransactionRow: View {
         TransactionPresentation(transaction: transaction)
     }
 
+    private var categoryVisual: TransactionVisualCategory {
+        TransactionVisualCategory.resolve(
+            transaction: transaction,
+            presentation: presentation,
+            accountLabels: accountLabels
+        )
+    }
+
     var body: some View {
-        HStack(spacing: LedgerSpacing.md) {
-            Text(LedgerDateText.shortDate(transaction.date))
-                .font(.system(.caption2, design: .default, weight: .medium).monospacedDigit())
-                .foregroundStyle(LedgerPalette.secondary)
-                .frame(width: 44, alignment: .leading)
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .frame(width: 38, height: 38)
+                Image(systemName: categoryVisual.iconName)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(presentation.kind == .income ? LedgerPalette.income : Color.primary)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(presentation.title)
-                    .font(.subheadline.weight(.medium))
+                    .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(LedgerPalette.ink)
                     .lineLimit(1)
                 TransactionContextLine(transaction: transaction, accountLabels: accountLabels)
@@ -48,12 +94,12 @@ struct TransactionRow: View {
                 minorUnits: presentation.minorUnits,
                 currency: presentation.currency,
                 prefix: amountPrefix(presentation.kind),
-                font: .system(.footnote, design: .default, weight: .semibold),
+                font: .system(size: 15.5, weight: .semibold, design: .rounded),
                 color: amountColor(presentation.kind)
             )
             .lineLimit(1)
         }
-        .padding(.vertical, LedgerLayout.transactionVerticalInset)
+        .padding(.vertical, LedgerLayout.rowVerticalInset)
         .contentShape(Rectangle())
     }
 }
@@ -292,9 +338,31 @@ struct TransactionsView: View {
                         }
                     }
                 } header: {
-                    Text(group.date)
-                        .font(.caption.weight(.medium).monospacedDigit())
-                        .textCase(nil)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(TransactionDateHeaderFormatter.format(group.date))
+                            .font(.system(.footnote, design: .rounded, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.ink)
+                        Spacer()
+                        let dayExpense = group.transactions.filter {
+                            $0.postings.contains { $0.account.hasPrefix("Expenses:") && $0.amount != 0 }
+                        }.reduce(0) { sum, tx in
+                            sum + abs(tx.postings.first { $0.account.hasPrefix("Expenses:") && $0.amount != 0 }?.amount ?? 0)
+                        }
+                        if dayExpense > 0 {
+                            HStack(spacing: 3) {
+                                Text("支出")
+                                    .font(.system(size: 11, weight: .regular))
+                                    .foregroundStyle(LedgerPalette.secondary)
+                                AmountLabel(
+                                    minorUnits: dayExpense,
+                                    currency: session.ledger?.valuationCurrency ?? "CNY",
+                                    font: .system(size: 12, weight: .semibold, design: .rounded),
+                                    color: LedgerPalette.secondary
+                                )
+                            }
+                        }
+                    }
+                    .textCase(nil)
                 }
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
@@ -314,8 +382,11 @@ struct TransactionsView: View {
         .toolbar {
             if session.isLocal {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("记一笔", systemImage: "plus") { creatingTransaction = true }
-                        .accessibilityIdentifier("transaction-create-local")
+                    Button("记一笔", systemImage: "plus") {
+                        LedgerFeedback.light()
+                        creatingTransaction = true
+                    }
+                    .accessibilityIdentifier("transaction-create-local")
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -724,25 +795,27 @@ struct TransactionContextLine: View {
         let note = transaction.payee.isEmpty ? "" : transaction.narration
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-            : AnyLayout(HStackLayout(spacing: 5))
+            : AnyLayout(HStackLayout(spacing: 4))
         layout {
             Text(category)
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(LedgerPalette.olive)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                 .layoutPriority(1)
                 .accessibilityIdentifier("transaction-category-\(transaction.source.line)")
             if !note.isEmpty {
                 Text("· \(note)")
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             if let tags = transaction.tags, !tags.isEmpty {
                 Image(systemName: "tag")
+                    .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .accessibilityLabel(tags.map { "#\($0)" }.joined(separator: " "))
             }
         }
-        .font(.caption)
     }
 }
 
@@ -775,42 +848,61 @@ private struct TransactionCard: View {
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            headingLayout {
-                Text(presentation.title)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(LedgerPalette.ink)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                AmountLabel(
-                    minorUnits: presentation.minorUnits,
-                    currency: presentation.currency,
-                    prefix: amountPrefix(presentation.kind),
-                    font: .subheadline.weight(.semibold),
-                    color: amountColor(presentation.kind)
-                )
-                .lineLimit(1)
-                .layoutPriority(1)
-                .accessibilityIdentifier("transaction-card-amount-\(transaction.source.line)")
+    private var categoryVisual: TransactionVisualCategory {
+        TransactionVisualCategory.resolve(
+            transaction: transaction,
+            presentation: presentation,
+            accountLabels: accountLabels
+        )
+    }
 
-                if let selectionState {
-                    Image(systemName: selectionState ? "checkmark.circle.fill" : "circle")
-                        .font(.system(.title3, design: .default, weight: .semibold))
-                        .foregroundStyle(selectionState ? LedgerPalette.cobalt : LedgerPalette.secondary)
-                        .frame(width: 32, height: 32)
-                        .accessibilityIdentifier("transaction-card-selection-\(transaction.source.line)")
-                }
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .frame(width: 38, height: 38)
+                Image(systemName: categoryVisual.iconName)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(presentation.kind == .income ? LedgerPalette.income : Color.primary)
             }
 
-            TransactionContextLine(transaction: transaction, accountLabels: accountLabels)
+            VStack(alignment: .leading, spacing: 4) {
+                headingLayout {
+                    Text(presentation.title)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(LedgerPalette.ink)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    AmountLabel(
+                        minorUnits: presentation.minorUnits,
+                        currency: presentation.currency,
+                        prefix: amountPrefix(presentation.kind),
+                        font: .system(size: 15.5, weight: .semibold, design: .rounded),
+                        color: amountColor(presentation.kind)
+                    )
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                    .accessibilityIdentifier("transaction-card-amount-\(transaction.source.line)")
 
-            if let mutationPhase {
-                TransactionMutationBadge(phase: mutationPhase)
+                    if let selectionState {
+                        Image(systemName: selectionState ? "checkmark.circle.fill" : "circle")
+                            .font(.system(.title3, design: .default, weight: .semibold))
+                            .foregroundStyle(selectionState ? LedgerPalette.cobalt : LedgerPalette.secondary)
+                            .frame(width: 28, height: 28)
+                            .accessibilityIdentifier("transaction-card-selection-\(transaction.source.line)")
+                    }
+                }
+
+                TransactionContextLine(transaction: transaction, accountLabels: accountLabels)
+
+                if let mutationPhase {
+                    TransactionMutationBadge(phase: mutationPhase)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, LedgerLayout.transactionVerticalInset)
+        .padding(.vertical, LedgerLayout.rowVerticalInset)
         .contentShape(Rectangle())
     }
 }
@@ -1281,7 +1373,7 @@ private enum TransactionEditorError: LocalizedError {
     }
 }
 
-private struct TransactionEditorView: View {
+struct TransactionEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     let transaction: LedgerTransaction?
@@ -1407,7 +1499,23 @@ private struct TransactionEditorView: View {
                     TextField("说明", text: $narration)
                         .focused($keyboardFocused)
                         .accessibilityIdentifier("transaction-edit-narration")
-                    DatePicker("日期", selection: $date, displayedComponents: .date)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            quickDateChip(title: "今天", targetDate: Date())
+                            quickDateChip(
+                                title: "昨天",
+                                targetDate: Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+                            )
+                            quickDateChip(
+                                title: "前天",
+                                targetDate: Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date()
+                            )
+                        }
+                        .padding(.top, 2)
+
+                        DatePicker("日期", selection: $date, displayedComponents: .date)
+                    }
                 }
                 Section {
                     TextField("空格或逗号分隔", text: $tagsText)
@@ -1637,6 +1745,25 @@ private struct TransactionEditorView: View {
             links: transaction?.editableEntry?.links ?? [],
             postings: cleanedPostings
         )
+    }
+
+    private func quickDateChip(title: String, targetDate: Date) -> some View {
+        let isSelected = Calendar.current.isDate(date, inSameDayAs: targetDate)
+        return Button {
+            LedgerFeedback.selection()
+            withAnimation(.spring(response: 0.22, dampingFraction: 0.7)) {
+                date = targetDate
+            }
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: isSelected ? .semibold : .medium, design: .rounded))
+                .foregroundStyle(isSelected ? Color(uiColor: .systemBackground) : Color.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(isSelected ? Color.primary : Color(uiColor: .tertiarySystemFill))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private static func decimalText(_ minorUnits: Int) -> String {

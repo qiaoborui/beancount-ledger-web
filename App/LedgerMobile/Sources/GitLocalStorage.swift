@@ -60,16 +60,19 @@ actor GitLocalStorage: LogicalLocalStorage {
         let lease = try SyncLease(directory: syncRoot)
         defer { lease.release() }
         try prepareProtectedLayout()
-        defer { try? protectTree(syncRoot) }
         synchronizing = true
         defer { synchronizing = false }
         do {
+            let wroteFiles: Bool
             if try await workspace.currentRevision() != nil {
-                try await workspace.withCurrentSnapshot { revision, root in
+                wroteFiles = try await workspace.withCurrentSnapshot { revision, root in
                     try await self.synchronizeSnapshot(revision: revision, localRoot: root, validator: validator)
                 }
             } else {
-                try await synchronizeSnapshot(revision: nil, localRoot: nil, validator: validator)
+                wroteFiles = try await synchronizeSnapshot(revision: nil, localRoot: nil, validator: validator)
+            }
+            if wroteFiles {
+                try? protectTree(syncRoot)
             }
             synchronizing = false
             return try await status()
@@ -83,11 +86,55 @@ actor GitLocalStorage: LogicalLocalStorage {
     }
 
     private func synchronizeSnapshot(revision: LocalLedgerWorkspace.Revision?, localRoot: URL?,
-                                     validator: @escaping LocalLedgerWorkspace.Validator) async throws {
+                                     validator: @escaping LocalLedgerWorkspace.Validator) async throws -> Bool {
         var state = try loadState()
         let credential = try credentials.load(for: configuration.id)
         let fetch: FetchResult = try await request("fetch", credential: credential)
         let remoteCommit = fetch.branchExists ? fetch.remoteHead : ""
+
+        // Fast-Path 1: No-op (both remote and local are completely unchanged since last sync)
+        if let revision,
+           fetch.branchExists,
+           !remoteCommit.isEmpty,
+           state.baseCommit == remoteCommit,
+           state.syncedRevisionID == revision.id,
+           state.pendingRevisionID == nil,
+           state.conflictPaths.isEmpty,
+           state.conflictAttemptID == nil {
+            guard try await workspace.currentRevision()?.id == revision.id else {
+                throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+            }
+            state.lastSyncedAt = Date()
+            state.failure = nil
+            try saveState(state)
+            return false
+        }
+
+        // Fast-Path 2: Fast-Forward Push (remote has not changed, local has unpushed changes)
+        if let revision,
+           let localRoot,
+           fetch.branchExists,
+           !remoteCommit.isEmpty,
+           state.baseCommit == remoteCommit,
+           state.conflictPaths.isEmpty,
+           state.conflictAttemptID == nil {
+            guard try await workspace.currentRevision()?.id == revision.id else {
+                throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+            }
+            let previousAttempt = state.conflictAttemptID
+            let pinnedRevisionID = revision.id
+            let newCommit = try await self.commitAndPush(root: localRoot, parent: remoteCommit, credential: credential)
+            state.baseCommit = newCommit
+            state.syncedRevisionID = pinnedRevisionID
+            state.pendingRevisionID = nil
+            state.failure = nil
+            state.lastSyncedAt = Date()
+            try saveState(state)
+            discardAttempt(previousAttempt)
+            return false
+        }
+
+        // General 3-Way Merge (concurrent edits, initial connection, or conflict recovery)
         let attemptID = UUID()
         let attempt = attemptsRoot.appendingPathComponent(attemptID.uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: attempt, withIntermediateDirectories: true)
@@ -161,6 +208,7 @@ actor GitLocalStorage: LogicalLocalStorage {
         }
         state.lastSyncedAt = Date()
         try saveState(state)
+        return true
     }
 
     func resolveConflicts(keepingLocal: Bool, validator: @escaping LocalLedgerWorkspace.Validator) async throws -> LocalStorageSyncStatus {
@@ -211,25 +259,36 @@ actor GitLocalStorage: LogicalLocalStorage {
 
     private func commitAndPush(root: URL, parent: String, credential: LocalGitCredential?) async throws -> String {
         // Imported folders can retain their original .git metadata locally.
-        // Construct a dedicated immutable Git tree containing only ledger files.
-        let snapshot = attemptsRoot.appendingPathComponent("push-" + UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: snapshot, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: snapshot) }
-        try StorageTree.materialize(StorageTree.read(root), in: snapshot)
-        try protectTree(snapshot)
+        // Construct a dedicated immutable Git tree containing only ledger files if .git exists.
+        let hasGitMetadata = FileManager.default.fileExists(atPath: root.appendingPathComponent(".git").path)
+        let directoryToCommit: String
+        let tempSnapshot: URL?
+        if hasGitMetadata {
+            let snapshot = attemptsRoot.appendingPathComponent("push-" + UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: snapshot, withIntermediateDirectories: true)
+            try StorageTree.materialize(StorageTree.read(root), in: snapshot)
+            directoryToCommit = snapshot.path
+            tempSnapshot = snapshot
+        } else {
+            directoryToCommit = root.path
+            tempSnapshot = nil
+        }
+        defer {
+            if let tempSnapshot {
+                try? FileManager.default.removeItem(at: tempSnapshot)
+            }
+        }
         var commit = makeRequest("commit")
-        commit.directory = snapshot.path
+        commit.directory = directoryToCommit
         commit.parent = parent
         commit.message = "Update local ledger"
         commit.authorName = "Ledger Mobile"
         commit.authorEmail = "ledger@localhost"
         let result = try JSONDecoder().decode(CommitResult.self, from: await transport.dispatch(commit))
-        try protectTree(syncRoot)
         var push = makeRequest("push", credential: credential)
         push.commit = result.commit
         push.expectedRemoteHead = parent
         _ = try await transport.dispatch(push)
-        try protectTree(syncRoot)
         return result.commit
     }
     private func export(commit: String, to directory: URL) async throws {
@@ -241,11 +300,9 @@ actor GitLocalStorage: LogicalLocalStorage {
         request.commit = commit
         request.directory = directory.path
         _ = try await transport.dispatch(request)
-        try protectTree(syncRoot)
     }
     private func request<T: Decodable>(_ operation: String, credential: LocalGitCredential?) async throws -> T {
         let data = try await transport.dispatch(makeRequest(operation, credential: credential))
-        try protectTree(syncRoot)
         return try JSONDecoder().decode(T.self, from: data)
     }
     private func makeRequest(_ operation: String, credential: LocalGitCredential? = nil) -> LocalGitRequest {
@@ -347,12 +404,10 @@ private enum StorageTree {
             guard size >= 0, size <= 64 * 1024 * 1024,
                   size <= 256 * 1024 * 1024 - bytes else { throw LocalStorageError.treeLimitExceeded }
             bytes += size
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            var digest = SHA256()
-            while let chunk = try handle.read(upToCount: 256 * 1024), !chunk.isEmpty { digest.update(data: chunk) }
+            let data = try Data(contentsOf: url)
+            let digest = SHA256.hash(data: data)
             let permissions = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
-            files[path] = File(url: url, digest: Data(digest.finalize()), size: size,
+            files[path] = File(url: url, digest: Data(digest), size: size,
                 executable: (permissions?.intValue ?? 0) & 0o111 != 0)
         }
         return files

@@ -117,9 +117,11 @@ func fetch(ctx context.Context, repository *git.Repository, input request) (any,
 	refName := plumbing.NewBranchReferenceName(input.Branch)
 	tracking := plumbing.ReferenceName("refs/remotes/origin/" + input.Branch)
 	exists := false
+	var remoteHash plumbing.Hash
 	for _, reference := range references {
 		if reference.Name() == refName {
 			exists = true
+			remoteHash = reference.Hash()
 			break
 		}
 	}
@@ -129,12 +131,26 @@ func fetch(ctx context.Context, repository *git.Repository, input request) (any,
 		}
 		return map[string]any{"remoteHead": "", "branchExists": false}, nil
 	}
+
+	// Fast path: if the remote commit is already present in our local repository,
+	// skip the redundant second network connection from FetchContext.
+	head, err := repository.Reference(tracking, true)
+	if err == nil && head.Hash() == remoteHash {
+		if _, err := repository.CommitObject(remoteHash); err == nil {
+			return map[string]any{"remoteHead": remoteHash.String(), "branchExists": true}, nil
+		}
+	} else if _, err := repository.CommitObject(remoteHash); err == nil {
+		if err := repository.Storer.SetReference(plumbing.NewHashReference(tracking, remoteHash)); err == nil {
+			return map[string]any{"remoteHead": remoteHash.String(), "branchExists": true}, nil
+		}
+	}
+
 	err = remote.FetchContext(ctx, &git.FetchOptions{RemoteName: "origin", Auth: auth, Tags: git.NoTags,
 		RefSpecs: []config.RefSpec{config.RefSpec("+" + refName.String() + ":" + tracking.String())}})
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return nil, err
 	}
-	head, err := repository.Reference(tracking, true)
+	head, err = repository.Reference(tracking, true)
 	if err != nil {
 		return nil, err
 	}

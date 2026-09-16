@@ -10,11 +10,27 @@ struct MoreView: View {
                 NavigationLink {
                     SettingsView(isRoot: false)
                 } label: {
-                    Label("设置", systemImage: "gearshape")
+                    HStack(spacing: LedgerSpacing.md) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.gray.opacity(0.14))
+                                .frame(width: 36, height: 36)
+                            Image(systemName: "gearshape.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.gray)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("设置")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(LedgerPalette.ink)
+                            Text("\(session.localLedgerName) · 本地")
+                                .font(.footnote)
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
                 .accessibilityIdentifier("more-settings")
-            } footer: {
-                Text("\(session.localLedgerName) · 本地")
             }
             let remaining = [LedgerDestination.overview, .transactions, .accounts]
                 .filter { !session.compactTabDestinations.contains($0) }
@@ -78,11 +94,27 @@ private struct MoreDestinationButton: View {
     let detail: String
     var accessibilityIdentifier: String? = nil
 
+    private var destinationColor: Color {
+        switch destination {
+        case .overview: Color(red: 0.16, green: 0.54, blue: 0.95)
+        case .transactions: Color(red: 0.96, green: 0.55, blue: 0.18)
+        case .accounts: Color(red: 0.12, green: 0.68, blue: 0.36)
+        case .assets: Color(red: 0.16, green: 0.54, blue: 0.95)
+        case .incomeExpense: Color(red: 0.10, green: 0.72, blue: 0.44)
+        case .investments: Color(red: 0.65, green: 0.36, blue: 0.88)
+        case .imports: Color(red: 0.96, green: 0.55, blue: 0.18)
+        case .currencies: Color(red: 0.12, green: 0.66, blue: 0.72)
+        case .query: Color(red: 0.35, green: 0.45, blue: 0.88)
+        case .settings: Color.gray
+        case .search: Color(red: 0.08, green: 0.68, blue: 0.55)
+        }
+    }
+
     var body: some View {
         Button {
             session.primaryDestinationID = destination.rawValue
         } label: {
-            MoreNavigationRow(icon: destination.systemImage, title: destination.title, detail: detail)
+            MoreNavigationRow(icon: destination.systemImage, color: destinationColor, title: destination.title, detail: detail)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(accessibilityIdentifier ?? "more-\(destination.rawValue)")
@@ -91,20 +123,23 @@ private struct MoreDestinationButton: View {
 
 private struct MoreNavigationRow: View {
     let icon: String
+    var color: Color = LedgerPalette.cobalt
     let title: String
     let detail: String
 
     var body: some View {
         HStack(spacing: LedgerSpacing.md) {
-            Image(systemName: icon)
-                .font(.system(.subheadline, design: .default, weight: .medium))
-                .foregroundStyle(LedgerPalette.cobalt)
-                .frame(width: 36, height: 36)
-                .background(LedgerPalette.tag)
-                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(color.opacity(0.14))
+                    .frame(width: 36, height: 36)
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(color)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.body)
+                    .font(.body.weight(.medium))
                     .foregroundStyle(LedgerPalette.ink)
                 Text(detail)
                     .font(.footnote)

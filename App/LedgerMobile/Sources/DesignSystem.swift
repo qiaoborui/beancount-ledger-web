@@ -2,24 +2,25 @@ import SwiftUI
 import UIKit
 
 enum LedgerPalette {
-    static let canvas = Color(uiColor: .systemBackground)
-    static let panel = Color(uiColor: .systemBackground)
+    static let canvas = Color(uiColor: .systemGroupedBackground)
+    static let panel = Color(uiColor: .secondarySystemGroupedBackground)
     static let raised = Color(uiColor: .tertiarySystemGroupedBackground)
-    static let tag = Color.dynamic(light: 0xDDE7F5, dark: 0x0C1827)
+    static let tag = Color.dynamic(light: 0xEEF2F6, dark: 0x1E2530)
     static let ink = Color.primary
-    static let warm = Color.dynamic(light: 0x21272F, dark: 0xC4CBD4)
-    static let olive = Color.dynamic(light: 0x38404B, dark: 0x9CA6B3)
+    static let warm = Color.dynamic(light: 0x1F242B, dark: 0xD1D7E0)
+    static let olive = Color.dynamic(light: 0x475569, dark: 0x94A3B8)
     static let secondary = Color.secondary
     static let line = Color(uiColor: .separator)
-    static let lineStrong = Color.dynamic(light: 0xB6BFC9, dark: 0x353E49)
-    static let cobalt = Color.dynamic(light: 0x004CA4, dark: 0x2B7AD6)
-    static let cobaltLight = Color.dynamic(light: 0x3A7BCB, dark: 0x6AA7F4)
-    static let income = Color.dynamic(light: 0x006C7B, dark: 0x2CC3D2)
-    static let expense = Color.dynamic(light: 0xA14E2B, dark: 0xF19E6A)
-    static let gold = Color.dynamic(light: 0x916600, dark: 0xE4B65C)
-    static let risk = Color.dynamic(light: 0xC44134, dark: 0xF87868)
-    static let success = Color.dynamic(light: 0x006D3A, dark: 0x60C385)
+    static let lineStrong = Color.dynamic(light: 0xC5CED6, dark: 0x3E4754)
+    static let cobalt = Color.dynamic(light: 0x0055D4, dark: 0x2E82F2)
+    static let cobaltLight = Color.dynamic(light: 0x3B82F6, dark: 0x60A5FA)
+    static let income = Color.dynamic(light: 0x107C41, dark: 0x30D158)
+    static let expense = Color.dynamic(light: 0xD93829, dark: 0xFF6961)
+    static let gold = Color.dynamic(light: 0xB45309, dark: 0xFBBF24)
+    static let risk = Color.dynamic(light: 0xDC2626, dark: 0xFF453A)
+    static let success = Color.dynamic(light: 0x16A34A, dark: 0x34D399)
     static let onBrand = Color(red: 0.985, green: 0.99, blue: 1)
+    static let cardBorder = Color.dynamic(light: 0xE2E8F0, dark: 0x2A3240)
 }
 
 enum LedgerSpacing {
@@ -32,9 +33,10 @@ enum LedgerSpacing {
 }
 
 enum LedgerRadius {
-    static let xs: CGFloat = 4
-    static let sm: CGFloat = 16
-    static let md: CGFloat = 12
+    static let xs: CGFloat = 6
+    static let sm: CGFloat = 10
+    static let md: CGFloat = 14
+    static let lg: CGFloat = 20
     static let pill: CGFloat = 999
 }
 
@@ -109,11 +111,10 @@ extension View {
         modifier(LedgerNavigation(title: title, isRoot: isRoot, showsTimeRange: showsTimeRange))
     }
 
-    /// Reading surfaces share one continuous canvas; forms retain system grouping.
+    /// Reading surfaces share modern Apple grouped card layout with native feel.
     func ledgerReadingList() -> some View {
-        listStyle(.plain)
-            .listSectionSpacing(8)
-            .environment(\.defaultMinListHeaderHeight, 24)
+        listStyle(.insetGrouped)
+            .listSectionSpacing(12)
             .contentMargins(.top, LedgerLayout.pageTopInset, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .background(LedgerPalette.canvas)
@@ -248,12 +249,85 @@ struct LedgerPageContext: View {
 }
 
 struct LedgerPanel<Content: View>: View {
+    var cornerRadius: CGFloat = LedgerRadius.md
     @ViewBuilder let content: Content
 
     var body: some View {
         content
             .background(LedgerPalette.panel)
-            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5)
+            }
+    }
+}
+
+struct LedgerCardModifier: ViewModifier {
+    var cornerRadius: CGFloat = LedgerRadius.md
+    var padding: CGFloat = LedgerSpacing.lg
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(LedgerPalette.panel)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5)
+            }
+    }
+}
+
+struct LedgerTactileCardModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    var cornerRadius: CGFloat = LedgerRadius.lg
+    var padding: CGFloat = LedgerSpacing.lg
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(LedgerPalette.panel)
+                    .shadow(
+                        color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.045),
+                        radius: 8,
+                        x: 0,
+                        y: 3
+                    )
+                    .shadow(
+                        color: Color.black.opacity(colorScheme == .dark ? 0.18 : 0.015),
+                        radius: 1.5,
+                        x: 0,
+                        y: 1
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.16 : 0.65),
+                                LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.4 : 0.6),
+                                Color.black.opacity(colorScheme == .dark ? 0.2 : 0.03)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.5
+                    )
+            }
+    }
+}
+
+extension View {
+    func ledgerCard(cornerRadius: CGFloat = LedgerRadius.md, padding: CGFloat = LedgerSpacing.lg) -> some View {
+        modifier(LedgerCardModifier(cornerRadius: cornerRadius, padding: padding))
+    }
+
+    func ledgerTactileCard(cornerRadius: CGFloat = LedgerRadius.lg, padding: CGFloat = LedgerSpacing.lg) -> some View {
+        modifier(LedgerTactileCardModifier(cornerRadius: cornerRadius, padding: padding))
     }
 }
 
@@ -284,7 +358,7 @@ struct AmountLabel: View {
     let minorUnits: Int
     let currency: String
     var prefix = ""
-    var font: Font = .system(.subheadline, design: .default, weight: .semibold)
+    var font: Font = .system(.subheadline, design: .rounded, weight: .semibold)
     var color: Color = LedgerPalette.ink
     var displayMode: MoneyText.DisplayMode = .adaptive
     var showSign = false
@@ -385,14 +459,128 @@ struct StatusBanner: View {
     }
 }
 
+enum LedgerFeedback {
+    @MainActor static func light() {
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.prepare()
+        generator.impactOccurred()
+    }
+
+    @MainActor static func medium() {
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.prepare()
+        generator.impactOccurred()
+    }
+
+    @MainActor static func selection() {
+        let generator = UISelectionFeedbackGenerator()
+        generator.prepare()
+        generator.selectionChanged()
+    }
+
+    @MainActor static func success() {
+        let generator = UINotificationFeedbackGenerator()
+        generator.prepare()
+        generator.notificationOccurred(.success)
+    }
+}
+
+struct LedgerFrostedCardModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    var cornerRadius: CGFloat = 16
+    var padding: CGFloat = 14
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(LedgerPalette.panel)
+                    .shadow(
+                        color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.035),
+                        radius: 10,
+                        x: 0,
+                        y: 3
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
+                        lineWidth: 0.5
+                    )
+            }
+    }
+}
+
+extension View {
+    func ledgerFrostedCard(cornerRadius: CGFloat = 16, padding: CGFloat = 14) -> some View {
+        modifier(LedgerFrostedCardModifier(cornerRadius: cornerRadius, padding: padding))
+    }
+}
+
 struct PressScaleButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    var pressedScale: CGFloat = 0.95
+    var enablesHaptic: Bool = true
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .scaleEffect(reduceMotion ? 1 : configuration.isPressed ? pressedScale : 1)
+            .opacity(configuration.isPressed ? 0.88 : 1)
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.65),
+                value: configuration.isPressed
+            )
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                if isPressed && enablesHaptic && !reduceMotion {
+                    LedgerFeedback.light()
+                }
+            }
+    }
+}
+
+struct TactilePillButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+
+    var backgroundColor: Color = LedgerPalette.cobalt
+    var foregroundColor: Color = LedgerPalette.onBrand
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, LedgerSpacing.lg)
+            .padding(.vertical, 10)
+            .background {
+                RoundedRectangle(cornerRadius: LedgerRadius.pill, style: .continuous)
+                    .fill(backgroundColor)
+                    .shadow(
+                        color: backgroundColor.opacity(configuration.isPressed ? 0.15 : 0.28),
+                        radius: configuration.isPressed ? 2 : 5,
+                        x: 0,
+                        y: configuration.isPressed ? 1 : 2.5
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: LedgerRadius.pill, style: .continuous)
+                    .strokeBorder(
+                        Color.white.opacity(colorScheme == .dark ? 0.2 : 0.4),
+                        lineWidth: 0.5
+                    )
+            }
             .scaleEffect(reduceMotion ? 1 : configuration.isPressed ? 0.96 : 1)
-            .opacity(configuration.isPressed ? 0.86 : 1)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: configuration.isPressed)
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.68),
+                value: configuration.isPressed
+            )
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                if isPressed && !reduceMotion {
+                    LedgerFeedback.light()
+                }
+            }
     }
 }
 
@@ -432,10 +620,19 @@ struct LedgerSyncToolbarButton: View {
     var body: some View {
         LedgerToolbarButton(action: activate,
             accessibilityLabel: session.isLocal ? presentation.title : "刷新账本") {
-            Circle()
-                .fill(indicatorColor)
-                .frame(width: 10, height: 10)
-                .frame(width: 20, height: 20)
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(indicatorColor)
+                    .frame(width: 8, height: 8)
+                if presentation.isBusy {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(indicatorColor)
+                }
+            }
         }
         .disabled(presentation.isBusy || session.phase != .ready)
         .accessibilityIdentifier("ledger-sync-status")
@@ -505,7 +702,10 @@ struct PrivacyToolbarButton: View {
 
     var body: some View {
         LedgerToolbarButton(
-            action: session.toggleAmounts,
+            action: {
+                LedgerFeedback.selection()
+                session.toggleAmounts()
+            },
             accessibilityLabel: session.amountsVisible ? "隐藏金额" : "显示金额"
         ) {
             Image(systemName: session.amountsVisible ? "eye.slash" : "eye")

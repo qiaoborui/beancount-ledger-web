@@ -705,6 +705,7 @@ final class LedgerSession: ObservableObject {
                 localSyncCoordinator?.resume()
             }
         }
+        let previousRevisionID = await repository.presentedRevisionID
         let status: LocalStorageSyncStatus
         do {
             status = try await repository.synchronize()
@@ -727,8 +728,11 @@ final class LedgerSession: ObservableObject {
             defaults.removeObject(forKey: Self.automaticSyncPausedPrefix + config.id.uuidString)
         }
         succeeded = true
+        let currentRevisionID = try? await repository.workspace.currentRevision()?.id
         if epoch == sessionEpoch, location == expectedLocation, phase == .ready, applicationActive {
-            await refresh()
+            if previousRevisionID == nil || previousRevisionID != currentRevisionID {
+                await refresh()
+            }
         }
         return status
     }
@@ -2177,6 +2181,10 @@ final class LedgerSession: ObservableObject {
 
     func updateDraftEnd(_ date: Date) {
         draftRange = LedgerDateRange.custom(start: min(date, draftRange.startDate), end: date)
+    }
+
+    func setDraftRange(_ range: LedgerDateRange) {
+        draftRange = range
     }
 
     func applyDraftRange() async {

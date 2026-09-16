@@ -193,8 +193,26 @@ struct NativeImportFlowView: View {
                 Section { StatusBanner(message: errorMessage) { self.errorMessage = nil } }
             }
             Section("账单文件") {
-                Label(file.name, systemImage: file.isZIP ? "doc.zipper" : "doc.text")
-                LabeledContent("文件大小", value: fileSizeText)
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(LedgerPalette.cobalt.opacity(0.12))
+                            .frame(width: 38, height: 38)
+                        Image(systemName: file.isZIP ? "doc.zipper" : "doc.text")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(LedgerPalette.cobalt)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(file.name)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(LedgerPalette.ink)
+                            .lineLimit(1)
+                        Text(fileSizeText)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
             }
             Section {
                 Picker("账单渠道", selection: $providerOverride) {
@@ -225,9 +243,22 @@ struct NativeImportFlowView: View {
                 Button {
                     Task { await generatePreview() }
                 } label: {
-                    if isPreparing { ProgressView("正在生成预览") }
-                    else { Text("生成导入预览") }
+                    HStack(spacing: 8) {
+                        if isPreparing {
+                            ProgressView().tint(LedgerPalette.onBrand)
+                            Text("正在生成预览...")
+                        } else {
+                            Image(systemName: "sparkles")
+                            Text("生成导入预览")
+                        }
+                    }
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(LedgerPalette.onBrand)
+                    .frame(maxWidth: .infinity, minHeight: 46)
+                    .background(LedgerPalette.cobalt)
+                    .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
                 }
+                .buttonStyle(PressScaleButtonStyle())
                 .accessibilityIdentifier("import-generate-preview")
             } footer: {
                 Text("预览会检查渠道与重复交易。核对并确认后写入账本，关闭页面会丢弃当前预览。")
@@ -250,7 +281,7 @@ struct NativeImportFlowView: View {
             bulkTagSection
             entrySection(preview)
         }
-        .listStyle(.plain)
+        .ledgerReadingList()
         .contentMargins(.top, LedgerLayout.pageTopInset, for: .scrollContent)
         .tint(LedgerPalette.cobalt)
         .disabled(isCommitting)
@@ -273,14 +304,25 @@ struct NativeImportFlowView: View {
                     Text(preview.dedupReport).foregroundStyle(.secondary)
                 }
             } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(providerLabel(preview.provider))
-                        .foregroundStyle(.primary)
-                    Text(importRangeText(preview) + (preview.skippedDuplicateCount > 0 ? " · 已跳过 \(preview.skippedDuplicateCount) 条重复交易" : ""))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(LedgerPalette.cobalt.opacity(0.12))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.cobalt)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(providerLabel(preview.provider))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(LedgerPalette.ink)
+                        Text(importRangeText(preview) + (preview.skippedDuplicateCount > 0 ? " · 已跳过 \(preview.skippedDuplicateCount) 条重复交易" : ""))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
                 }
-                .padding(.vertical, 6)
+                .padding(.vertical, 4)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("import-preview-summary")
             }
