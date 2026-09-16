@@ -18,10 +18,6 @@ struct LedgerTimeRangeButton: View {
                     .font(.system(.subheadline, design: .rounded, weight: .semibold))
                     .lineLimit(1)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Color(uiColor: .tertiarySystemFill))
-            .clipShape(Capsule())
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }

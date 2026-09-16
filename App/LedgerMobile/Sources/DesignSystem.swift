@@ -460,7 +460,7 @@ struct LedgerSyncToolbarButton: View {
     var body: some View {
         LedgerToolbarButton(action: activate,
             accessibilityLabel: session.isLocal ? presentation.title : "刷新账本") {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 Circle()
                     .fill(indicatorColor)
                     .frame(width: 8, height: 8)
@@ -469,14 +469,10 @@ struct LedgerSyncToolbarButton: View {
                         .controlSize(.mini)
                 } else {
                     Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(indicatorColor)
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(Color(uiColor: .tertiarySystemFill))
-            .clipShape(Capsule())
         }
         .disabled(presentation.isBusy || session.phase != .ready)
         .accessibilityIdentifier("ledger-sync-status")
