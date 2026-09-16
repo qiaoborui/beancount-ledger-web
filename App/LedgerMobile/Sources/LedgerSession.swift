@@ -331,8 +331,9 @@ final class LedgerSession: ObservableObject {
             let expectedLocation = location
             await refreshLocalLedgers()
             guard !Task.isCancelled, sessionEpoch == epoch, location == expectedLocation else { return }
-            phase = .locked(authenticated: true)
-            await unlockLocalLedger()
+            // Keep the startup surface mounted during automatic authentication.
+            // A rejected attempt exposes the manual unlock screen in the catch path.
+            await automaticallyUnlockIfNeeded()
             return
         }
         await refreshLocalLedgers()
@@ -1031,7 +1032,10 @@ final class LedgerSession: ObservableObject {
     }
 
     func automaticallyUnlockIfNeeded() async {
-        guard applicationActive, case .locked = phase, canUseBiometricUnlock,
+        let localStartup = isLocal && phase == .checking
+        let awaitsAutomaticUnlock = phase == .locked(authenticated: true)
+            || phase == .locked(authenticated: false) || localStartup
+        guard applicationActive, awaitsAutomaticUnlock, canUseBiometricUnlock || localStartup,
               !automaticUnlockAttempted, !isAuthenticationBusy,
               !systemAuthenticationInProgress else { return }
         automaticUnlockAttempted = true

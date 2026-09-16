@@ -32,7 +32,9 @@ struct RootView: View {
             }
         }
         .tint(LedgerPalette.cobalt)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: session.phase)
+        // Local startup presents one authenticated frame; animating the whole
+        // navigation hierarchy cross-fades the cover, toolbar and populated list.
+        .animation(session.isLocal || reduceMotion ? nil : .easeOut(duration: 0.18), value: session.phase)
         .sheet(isPresented: Binding(
             get: { session.canPresentWidgetDay },
             set: { presented in
