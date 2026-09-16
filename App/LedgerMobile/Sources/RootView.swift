@@ -16,7 +16,7 @@ struct RootView: View {
                 // A search deep link can arrive before authentication finishes. Keep native
                 // search controllers unmounted until the ready shell has a stable lifetime.
                 Group {
-                    if session.isLocal { ProgressView() }
+                    if session.isLocal { PrivacyCover() }
                     else { ProgressView("正在连接账本") }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

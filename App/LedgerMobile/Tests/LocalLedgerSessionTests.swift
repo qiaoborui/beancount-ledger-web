@@ -118,6 +118,43 @@ final class LocalLedgerSessionTests: XCTestCase {
         return (root, defaults, suite)
     }
 
+    func testColdRelaunchRestoresValidatedPresentationAfterAuthenticationWithoutRebuilding() async throws {
+        let fixture = try fixture()
+        let firstEngine = ResumeEngine()
+        let catalogRoot = fixture.root.appendingPathComponent("managed")
+        let catalog = LocalLedgerCatalog(rootDirectory: catalogRoot, engine: firstEngine, validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Cold launch fixture")
+        let first = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+            defaults: fixture.defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+            widgetCredentialStore: InertWidgetStore())
+        await first.openLocalLedger(descriptor)
+        let summary = try XCTUnwrap(first.ledger?.summary)
+        await first.lock()
+
+        // New session, repository, workspace and engine: no in-memory cache survives.
+        let reopenedEngine = ResumeEngine()
+        let reopenedCatalog = LocalLedgerCatalog(rootDirectory: catalogRoot, engine: reopenedEngine, validator: { _, _ in })
+        let authenticating = expectation(description: "cold authentication pending")
+        let gate = Gate(authenticating)
+        let reopened = LedgerSession(localOnly: true, localCatalog: reopenedCatalog, localAuthenticator: Authenticator(gate: gate),
+            defaults: fixture.defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+            widgetCredentialStore: InertWidgetStore())
+        let starting = Task { await reopened.start() }
+        await fulfillment(of: [authenticating], timeout: 3)
+        XCTAssertNil(reopened.ledger)
+        XCTAssertFalse(reopened.amountsVisible)
+        await gate.release()
+        await starting.value
+        XCTAssertEqual(reopened.phase, .ready)
+        XCTAssertEqual(reopened.ledger?.summary, summary)
+        let calls = await reopenedEngine.bootstrapCalls
+        XCTAssertEqual(calls, 0, "Cold launch must read its saved presentation instead of starting the ledger interpreter")
+        reopened.chooseLedger()
+        first.chooseLedger()
+    }
+
     func testWarmLocalUnlockKeepsReadyShellAndSkipsUnchangedBootstrap() async throws {
         let fixture = try await openedResumeFixture()
         let engine = fixture.engine, session = fixture.session, authenticator = fixture.authenticator
