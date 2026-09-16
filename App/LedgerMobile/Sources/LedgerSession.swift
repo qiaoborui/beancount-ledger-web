@@ -2179,6 +2179,10 @@ final class LedgerSession: ObservableObject {
         draftRange = LedgerDateRange.custom(start: min(date, draftRange.startDate), end: date)
     }
 
+    func setDraftRange(_ range: LedgerDateRange) {
+        draftRange = range
+    }
+
     func applyDraftRange() async {
         let range = draftRange
         rangePickerPresented = false

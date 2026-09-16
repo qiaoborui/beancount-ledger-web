@@ -117,6 +117,18 @@ struct LedgerDateRange: Equatable, Sendable {
         return period(starting: start, adding: .month, value: 1, preset: .month)
     }
 
+    static func quarter(year: Int, quarter: Int) -> LedgerDateRange {
+        let q = max(1, min(4, quarter))
+        let quarterStartMonth = (q - 1) * 3 + 1
+        let start = calendar.date(from: DateComponents(year: year, month: quarterStartMonth, day: 1)) ?? Date()
+        return period(starting: start, adding: .month, value: 3, preset: .quarter)
+    }
+
+    static func year(year: Int) -> LedgerDateRange {
+        let start = calendar.date(from: DateComponents(year: year, month: 1, day: 1)) ?? Date()
+        return period(starting: start, adding: .year, value: 1, preset: .year)
+    }
+
     static func current(_ preset: LedgerDateRangePreset, now: Date = Date()) -> LedgerDateRange {
         let components = calendar.dateComponents([.year, .month], from: now)
         let year = components.year ?? 2000

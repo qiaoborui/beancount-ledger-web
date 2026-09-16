@@ -1499,7 +1499,23 @@ struct TransactionEditorView: View {
                     TextField("说明", text: $narration)
                         .focused($keyboardFocused)
                         .accessibilityIdentifier("transaction-edit-narration")
-                    DatePicker("日期", selection: $date, displayedComponents: .date)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            quickDateChip(title: "今天", targetDate: Date())
+                            quickDateChip(
+                                title: "昨天",
+                                targetDate: Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+                            )
+                            quickDateChip(
+                                title: "前天",
+                                targetDate: Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date()
+                            )
+                        }
+                        .padding(.top, 2)
+
+                        DatePicker("日期", selection: $date, displayedComponents: .date)
+                    }
                 }
                 Section {
                     TextField("空格或逗号分隔", text: $tagsText)
@@ -1729,6 +1745,25 @@ struct TransactionEditorView: View {
             links: transaction?.editableEntry?.links ?? [],
             postings: cleanedPostings
         )
+    }
+
+    private func quickDateChip(title: String, targetDate: Date) -> some View {
+        let isSelected = Calendar.current.isDate(date, inSameDayAs: targetDate)
+        return Button {
+            LedgerFeedback.selection()
+            withAnimation(.spring(response: 0.22, dampingFraction: 0.7)) {
+                date = targetDate
+            }
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: isSelected ? .semibold : .medium, design: .rounded))
+                .foregroundStyle(isSelected ? Color(uiColor: .systemBackground) : Color.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(isSelected ? Color.primary : Color(uiColor: .tertiarySystemFill))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private static func decimalText(_ minorUnits: Int) -> String {
