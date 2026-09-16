@@ -60,16 +60,19 @@ actor GitLocalStorage: LogicalLocalStorage {
         let lease = try SyncLease(directory: syncRoot)
         defer { lease.release() }
         try prepareProtectedLayout()
-        defer { try? protectTree(syncRoot) }
         synchronizing = true
         defer { synchronizing = false }
         do {
+            let wroteFiles: Bool
             if try await workspace.currentRevision() != nil {
-                try await workspace.withCurrentSnapshot { revision, root in
+                wroteFiles = try await workspace.withCurrentSnapshot { revision, root in
                     try await self.synchronizeSnapshot(revision: revision, localRoot: root, validator: validator)
                 }
             } else {
-                try await synchronizeSnapshot(revision: nil, localRoot: nil, validator: validator)
+                wroteFiles = try await synchronizeSnapshot(revision: nil, localRoot: nil, validator: validator)
+            }
+            if wroteFiles {
+                try? protectTree(syncRoot)
             }
             synchronizing = false
             return try await status()
@@ -83,7 +86,7 @@ actor GitLocalStorage: LogicalLocalStorage {
     }
 
     private func synchronizeSnapshot(revision: LocalLedgerWorkspace.Revision?, localRoot: URL?,
-                                     validator: @escaping LocalLedgerWorkspace.Validator) async throws {
+                                     validator: @escaping LocalLedgerWorkspace.Validator) async throws -> Bool {
         var state = try loadState()
         let credential = try credentials.load(for: configuration.id)
         let fetch: FetchResult = try await request("fetch", credential: credential)
@@ -104,7 +107,7 @@ actor GitLocalStorage: LogicalLocalStorage {
             state.lastSyncedAt = Date()
             state.failure = nil
             try saveState(state)
-            return
+            return false
         }
 
         // Fast-Path 2: Fast-Forward Push (remote has not changed, local has unpushed changes)
@@ -128,7 +131,7 @@ actor GitLocalStorage: LogicalLocalStorage {
             state.lastSyncedAt = Date()
             try saveState(state)
             discardAttempt(previousAttempt)
-            return
+            return false
         }
 
         // General 3-Way Merge (concurrent edits, initial connection, or conflict recovery)
@@ -205,6 +208,7 @@ actor GitLocalStorage: LogicalLocalStorage {
         }
         state.lastSyncedAt = Date()
         try saveState(state)
+        return true
     }
 
     func resolveConflicts(keepingLocal: Bool, validator: @escaping LocalLedgerWorkspace.Validator) async throws -> LocalStorageSyncStatus {
@@ -255,14 +259,27 @@ actor GitLocalStorage: LogicalLocalStorage {
 
     private func commitAndPush(root: URL, parent: String, credential: LocalGitCredential?) async throws -> String {
         // Imported folders can retain their original .git metadata locally.
-        // Construct a dedicated immutable Git tree containing only ledger files.
-        let snapshot = attemptsRoot.appendingPathComponent("push-" + UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: snapshot, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: snapshot) }
-        try StorageTree.materialize(StorageTree.read(root), in: snapshot)
-        try protectTree(snapshot)
+        // Construct a dedicated immutable Git tree containing only ledger files if .git exists.
+        let hasGitMetadata = FileManager.default.fileExists(atPath: root.appendingPathComponent(".git").path)
+        let directoryToCommit: String
+        let tempSnapshot: URL?
+        if hasGitMetadata {
+            let snapshot = attemptsRoot.appendingPathComponent("push-" + UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: snapshot, withIntermediateDirectories: true)
+            try StorageTree.materialize(StorageTree.read(root), in: snapshot)
+            directoryToCommit = snapshot.path
+            tempSnapshot = snapshot
+        } else {
+            directoryToCommit = root.path
+            tempSnapshot = nil
+        }
+        defer {
+            if let tempSnapshot {
+                try? FileManager.default.removeItem(at: tempSnapshot)
+            }
+        }
         var commit = makeRequest("commit")
-        commit.directory = snapshot.path
+        commit.directory = directoryToCommit
         commit.parent = parent
         commit.message = "Update local ledger"
         commit.authorName = "Ledger Mobile"
@@ -387,12 +404,10 @@ private enum StorageTree {
             guard size >= 0, size <= 64 * 1024 * 1024,
                   size <= 256 * 1024 * 1024 - bytes else { throw LocalStorageError.treeLimitExceeded }
             bytes += size
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            var digest = SHA256()
-            while let chunk = try handle.read(upToCount: 256 * 1024), !chunk.isEmpty { digest.update(data: chunk) }
+            let data = try Data(contentsOf: url)
+            let digest = SHA256.hash(data: data)
             let permissions = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
-            files[path] = File(url: url, digest: Data(digest.finalize()), size: size,
+            files[path] = File(url: url, digest: Data(digest), size: size,
                 executable: (permissions?.intValue ?? 0) & 0o111 != 0)
         }
         return files
