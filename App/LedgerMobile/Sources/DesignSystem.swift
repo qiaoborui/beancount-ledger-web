@@ -2,24 +2,25 @@ import SwiftUI
 import UIKit
 
 enum LedgerPalette {
-    static let canvas = Color(uiColor: .systemBackground)
-    static let panel = Color(uiColor: .systemBackground)
+    static let canvas = Color(uiColor: .systemGroupedBackground)
+    static let panel = Color(uiColor: .secondarySystemGroupedBackground)
     static let raised = Color(uiColor: .tertiarySystemGroupedBackground)
-    static let tag = Color.dynamic(light: 0xDDE7F5, dark: 0x0C1827)
+    static let tag = Color.dynamic(light: 0xEEF2F6, dark: 0x1E2530)
     static let ink = Color.primary
-    static let warm = Color.dynamic(light: 0x21272F, dark: 0xC4CBD4)
-    static let olive = Color.dynamic(light: 0x38404B, dark: 0x9CA6B3)
+    static let warm = Color.dynamic(light: 0x1F242B, dark: 0xD1D7E0)
+    static let olive = Color.dynamic(light: 0x475569, dark: 0x94A3B8)
     static let secondary = Color.secondary
     static let line = Color(uiColor: .separator)
-    static let lineStrong = Color.dynamic(light: 0xB6BFC9, dark: 0x353E49)
-    static let cobalt = Color.dynamic(light: 0x004CA4, dark: 0x2B7AD6)
-    static let cobaltLight = Color.dynamic(light: 0x3A7BCB, dark: 0x6AA7F4)
-    static let income = Color.dynamic(light: 0x006C7B, dark: 0x2CC3D2)
-    static let expense = Color.dynamic(light: 0xA14E2B, dark: 0xF19E6A)
-    static let gold = Color.dynamic(light: 0x916600, dark: 0xE4B65C)
-    static let risk = Color.dynamic(light: 0xC44134, dark: 0xF87868)
-    static let success = Color.dynamic(light: 0x006D3A, dark: 0x60C385)
+    static let lineStrong = Color.dynamic(light: 0xC5CED6, dark: 0x3E4754)
+    static let cobalt = Color.dynamic(light: 0x0055D4, dark: 0x2E82F2)
+    static let cobaltLight = Color.dynamic(light: 0x3B82F6, dark: 0x60A5FA)
+    static let income = Color.dynamic(light: 0x107C41, dark: 0x30D158)
+    static let expense = Color.dynamic(light: 0xD93829, dark: 0xFF6961)
+    static let gold = Color.dynamic(light: 0xB45309, dark: 0xFBBF24)
+    static let risk = Color.dynamic(light: 0xDC2626, dark: 0xFF453A)
+    static let success = Color.dynamic(light: 0x16A34A, dark: 0x34D399)
     static let onBrand = Color(red: 0.985, green: 0.99, blue: 1)
+    static let cardBorder = Color.dynamic(light: 0xE2E8F0, dark: 0x2A3240)
 }
 
 enum LedgerSpacing {
@@ -32,9 +33,10 @@ enum LedgerSpacing {
 }
 
 enum LedgerRadius {
-    static let xs: CGFloat = 4
-    static let sm: CGFloat = 16
-    static let md: CGFloat = 12
+    static let xs: CGFloat = 6
+    static let sm: CGFloat = 10
+    static let md: CGFloat = 14
+    static let lg: CGFloat = 20
     static let pill: CGFloat = 999
 }
 
@@ -109,11 +111,10 @@ extension View {
         modifier(LedgerNavigation(title: title, isRoot: isRoot, showsTimeRange: showsTimeRange))
     }
 
-    /// Reading surfaces share one continuous canvas; forms retain system grouping.
+    /// Reading surfaces share modern Apple grouped card layout with native feel.
     func ledgerReadingList() -> some View {
-        listStyle(.plain)
-            .listSectionSpacing(8)
-            .environment(\.defaultMinListHeaderHeight, 24)
+        listStyle(.insetGrouped)
+            .listSectionSpacing(12)
             .contentMargins(.top, LedgerLayout.pageTopInset, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .background(LedgerPalette.canvas)
@@ -248,12 +249,39 @@ struct LedgerPageContext: View {
 }
 
 struct LedgerPanel<Content: View>: View {
+    var cornerRadius: CGFloat = LedgerRadius.md
     @ViewBuilder let content: Content
 
     var body: some View {
         content
             .background(LedgerPalette.panel)
-            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5)
+            }
+    }
+}
+
+struct LedgerCardModifier: ViewModifier {
+    var cornerRadius: CGFloat = LedgerRadius.md
+    var padding: CGFloat = LedgerSpacing.lg
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(LedgerPalette.panel)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5)
+            }
+    }
+}
+
+extension View {
+    func ledgerCard(cornerRadius: CGFloat = LedgerRadius.md, padding: CGFloat = LedgerSpacing.lg) -> some View {
+        modifier(LedgerCardModifier(cornerRadius: cornerRadius, padding: padding))
     }
 }
 
@@ -284,7 +312,7 @@ struct AmountLabel: View {
     let minorUnits: Int
     let currency: String
     var prefix = ""
-    var font: Font = .system(.subheadline, design: .default, weight: .semibold)
+    var font: Font = .system(.subheadline, design: .rounded, weight: .semibold)
     var color: Color = LedgerPalette.ink
     var displayMode: MoneyText.DisplayMode = .adaptive
     var showSign = false
@@ -432,10 +460,23 @@ struct LedgerSyncToolbarButton: View {
     var body: some View {
         LedgerToolbarButton(action: activate,
             accessibilityLabel: session.isLocal ? presentation.title : "刷新账本") {
-            Circle()
-                .fill(indicatorColor)
-                .frame(width: 10, height: 10)
-                .frame(width: 20, height: 20)
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(indicatorColor)
+                    .frame(width: 8, height: 8)
+                if presentation.isBusy {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(indicatorColor)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Color(uiColor: .tertiarySystemFill))
+            .clipShape(Capsule())
         }
         .disabled(presentation.isBusy || session.phase != .ready)
         .accessibilityIdentifier("ledger-sync-status")

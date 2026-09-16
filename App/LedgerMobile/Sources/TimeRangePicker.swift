@@ -7,16 +7,21 @@ struct LedgerTimeRangeButton: View {
         Button {
             session.presentRangePicker()
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 if session.isRangeLoading {
                     ProgressView().controlSize(.mini)
                 } else {
                     Image(systemName: "calendar")
+                        .font(.system(size: 13, weight: .semibold))
                 }
                 Text(session.selectedRange.toolbarTitle())
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
                     .lineLimit(1)
             }
-            .font(.subheadline.weight(.medium))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color(uiColor: .tertiarySystemFill))
+            .clipShape(Capsule())
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }

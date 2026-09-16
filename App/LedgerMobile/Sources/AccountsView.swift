@@ -38,28 +38,34 @@ struct AccountsView: View {
                             }
                         }
                     } label: {
-                        Label {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(AccountGroupSymbol.color(for: section.id).opacity(0.14))
+                                    .frame(width: 34, height: 34)
+                                Image(systemName: AccountGroupSymbol.symbol(for: section.id))
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(AccountGroupSymbol.color(for: section.id))
+                            }
                             let layout = dynamicTypeSize.isAccessibilitySize
                                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
                                 : AnyLayout(HStackLayout())
                             layout {
-                                Text(section.title).font(.subheadline.weight(.medium))
+                                Text(section.title).font(.subheadline.weight(.semibold))
                                 if !dynamicTypeSize.isAccessibilitySize { Spacer() }
-                                VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 4) {
-                                    Text("\(section.rows.count) 个账户").font(.caption).foregroundStyle(.secondary)
+                                VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 3) {
+                                    Text("\(section.rows.count) 个账户").font(.caption2).foregroundStyle(.secondary)
                                     AmountLabel(
                                         minorUnits: section.rows.filter {
                                             $0.periodBalancesAvailable ? !$0.periodValuationMissing : !$0.valuationMissing
                                         }.reduce(0) { $0 + ($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation) },
                                         currency: session.ledger?.valuationCurrency ?? "CNY",
-                                        font: .subheadline.weight(.medium)
+                                        font: .system(.subheadline, design: .rounded, weight: .semibold)
                                     )
                                 }
                             }
-                        } icon: {
-                            Image(systemName: AccountGroupSymbol.symbol(for: section.id))
-                                .foregroundStyle(LedgerPalette.cobalt)
                         }
+                        .padding(.vertical, 3)
                     }
                     .accessibilityIdentifier("account-group-\(section.id)")
                 }
@@ -130,6 +136,21 @@ private enum AccountGroupSymbol {
         case "income": "arrow.down.circle"
         case "equity": "scalemass"
         default: "folder"
+        }
+    }
+
+    static func color(for group: String) -> Color {
+        switch group {
+        case "cash": Color(red: 0.12, green: 0.68, blue: 0.36)
+        case "credit": Color(red: 0.96, green: 0.55, blue: 0.18)
+        case "liability": Color(red: 0.88, green: 0.32, blue: 0.28)
+        case "wealth": Color(red: 0.65, green: 0.36, blue: 0.88)
+        case "receivable": Color(red: 0.16, green: 0.62, blue: 0.88)
+        case "asset": Color(red: 0.16, green: 0.54, blue: 0.95)
+        case "expense": Color(red: 0.95, green: 0.45, blue: 0.22)
+        case "income": Color(red: 0.10, green: 0.72, blue: 0.44)
+        case "equity": Color(red: 0.45, green: 0.55, blue: 0.68)
+        default: LedgerPalette.cobalt
         }
     }
 
@@ -678,6 +699,29 @@ private struct AccountRowView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let row: AccountBalanceRow
 
+    private var accountIcon: (name: String, color: Color) {
+        let act = row.account.lowercased()
+        if act.contains("alipay") || row.label.contains("支付宝") {
+            return ("a.square.fill", Color(red: 0.08, green: 0.52, blue: 0.95))
+        }
+        if act.contains("wechat") || act.contains("wx") || row.label.contains("微信") {
+            return ("message.fill", Color(red: 0.12, green: 0.75, blue: 0.38))
+        }
+        if act.contains("card") || act.contains("credit") || row.label.contains("信用卡") {
+            return ("creditcard.fill", Color(red: 0.96, green: 0.55, blue: 0.18))
+        }
+        if act.contains("bank") || row.label.contains("银行") || row.label.contains("储蓄") {
+            return ("building.columns.fill", Color(red: 0.16, green: 0.54, blue: 0.95))
+        }
+        if act.contains("cash") || row.label.contains("现金") {
+            return ("banknote.fill", Color(red: 0.12, green: 0.68, blue: 0.36))
+        }
+        if act.contains("invest") || act.contains("stock") || act.contains("fund") || row.label.contains("基金") || row.label.contains("股票") {
+            return ("chart.line.uptrend.xyaxis", Color(red: 0.65, green: 0.36, blue: 0.88))
+        }
+        return (AccountGroupSymbol.symbol(for: row.group), AccountGroupSymbol.color(for: row.group))
+    }
+
     private var headingLayout: AnyLayout {
         dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
@@ -685,83 +729,94 @@ private struct AccountRowView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            headingLayout {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(row.label)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(LedgerPalette.ink)
-                    Text(row.account)
-                        .font(.system(.caption2, design: .default))
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                if row.periodBalancesAvailable && row.periodValuationMissing {
-                    Text("缺少期间汇率")
-                        .font(.system(.caption2, design: .default, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.risk)
-                } else {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(row.periodBalancesAvailable ? "期末" : "当前")
-                            .font(.system(.caption2, design: .default, weight: .semibold))
-                            .foregroundStyle(LedgerPalette.secondary)
-                        AmountLabel(
-                            minorUnits: row.periodBalancesAvailable ? row.closingValuation : row.valuation,
-                            currency: row.valuationCurrency,
-                            font: .system(.footnote, design: .default, weight: .semibold)
-                        )
-                        .lineLimit(1)
-                    }
-                }
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(accountIcon.color.opacity(0.14))
+                    .frame(width: 36, height: 36)
+                Image(systemName: accountIcon.name)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(accountIcon.color)
             }
 
-            if row.periodBalancesAvailable && !row.periodValuationMissing {
-                HStack(spacing: LedgerSpacing.lg) {
-                    HStack(spacing: 5) {
-                        Text("期初")
+            VStack(alignment: .leading, spacing: 4) {
+                headingLayout {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.label)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(LedgerPalette.ink)
+                        Text(row.account)
+                            .font(.system(.caption2, design: .default))
+                            .foregroundStyle(LedgerPalette.secondary)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if row.periodBalancesAvailable && row.periodValuationMissing {
+                        Text("缺少期间汇率")
+                            .font(.system(.caption2, design: .default, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.risk)
+                    } else {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(row.periodBalancesAvailable ? "期末" : "当前")
+                                .font(.system(.caption2, design: .default, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.secondary)
+                            AmountLabel(
+                                minorUnits: row.periodBalancesAvailable ? row.closingValuation : row.valuation,
+                                currency: row.valuationCurrency,
+                                font: .system(.subheadline, design: .rounded, weight: .semibold)
+                            )
+                            .lineLimit(1)
+                        }
+                    }
+                }
+
+                if row.periodBalancesAvailable && !row.periodValuationMissing {
+                    HStack(spacing: LedgerSpacing.lg) {
+                        HStack(spacing: 4) {
+                            Text("期初")
+                                .font(.system(.caption2, design: .default, weight: .medium))
+                                .foregroundStyle(LedgerPalette.secondary)
+                            AmountLabel(
+                                minorUnits: row.openingValuation,
+                                currency: row.valuationCurrency,
+                                font: .system(.caption2, design: .rounded, weight: .medium),
+                                color: LedgerPalette.secondary
+                            )
+                            .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 0)
+
+                        HStack(spacing: 4) {
+                            Text("变化")
+                                .font(.system(.caption2, design: .default, weight: .medium))
+                                .foregroundStyle(LedgerPalette.secondary)
+                            AmountLabel(
+                                minorUnits: row.periodValuationChange,
+                                currency: row.valuationCurrency,
+                                prefix: row.periodValuationChange > 0 ? "+" : "",
+                                font: .system(.caption2, design: .rounded, weight: .semibold),
+                                color: row.periodValuationChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
+                            )
+                            .lineLimit(1)
+                        }
+                    }
+                }
+
+                if row.nativeCurrency != row.valuationCurrency {
+                    HStack(spacing: 4) {
+                        Text(row.periodBalancesAvailable ? "原币期末" : "原币余额")
                             .font(.system(.caption2, design: .default, weight: .medium))
                             .foregroundStyle(LedgerPalette.secondary)
+                        Spacer(minLength: 0)
                         AmountLabel(
-                            minorUnits: row.openingValuation,
-                            currency: row.valuationCurrency,
-                            font: .system(.caption2, design: .default, weight: .medium),
+                            minorUnits: row.periodBalancesAvailable ? row.closingNativeAmount : row.nativeAmount,
+                            currency: row.nativeCurrency,
+                            font: .system(.caption2, design: .rounded, weight: .medium),
                             color: LedgerPalette.secondary
                         )
-                        .lineLimit(1)
                     }
-
-                    Spacer(minLength: 0)
-
-                    HStack(spacing: 5) {
-                        Text("变化")
-                            .font(.system(.caption2, design: .default, weight: .medium))
-                            .foregroundStyle(LedgerPalette.secondary)
-                        AmountLabel(
-                            minorUnits: row.periodValuationChange,
-                            currency: row.valuationCurrency,
-                            prefix: row.periodValuationChange > 0 ? "+" : "",
-                            font: .system(.caption2, design: .default, weight: .semibold),
-                            color: row.periodValuationChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
-                        )
-                        .lineLimit(1)
-                    }
-                }
-            }
-
-            if row.nativeCurrency != row.valuationCurrency {
-                HStack(spacing: 5) {
-                    Text(row.periodBalancesAvailable ? "原币期末" : "原币余额")
-                        .font(.system(.caption2, design: .default, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    Spacer(minLength: 0)
-                    AmountLabel(
-                        minorUnits: row.periodBalancesAvailable ? row.closingNativeAmount : row.nativeAmount,
-                        currency: row.nativeCurrency,
-                        font: .system(.caption2, design: .default, weight: .medium),
-                        color: LedgerPalette.secondary
-                    )
                 }
             }
         }

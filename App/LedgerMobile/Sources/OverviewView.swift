@@ -17,6 +17,7 @@ struct OverviewView: View {
                     MonthlyConclusion(ledger: ledger, range: session.selectedRange)
                         .listRowInsets(EdgeInsets())
                 }
+
                 Section {
                     ForEach(Array(ledger.transactions.prefix(6))) { transaction in
                         NavigationLink {
@@ -29,13 +30,28 @@ struct OverviewView: View {
                     if ledger.transactions.isEmpty {
                         Text("所选范围暂无流水").foregroundStyle(.secondary)
                     }
-                    Button("查看全部流水") {
+                    Button {
                         session.primaryDestinationID = LedgerDestination.transactions.rawValue
+                    } label: {
+                        HStack {
+                            Text("查看全部流水")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(LedgerPalette.cobalt)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(.caption2, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                        .padding(.vertical, 3)
                     }
                 } header: {
-                    Text("最近流水")
-                        .font(.caption.weight(.medium))
-                        .textCase(nil)
+                    HStack {
+                        Text("最近流水")
+                            .font(.system(.subheadline, design: .default, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.ink)
+                        Spacer()
+                    }
+                    .textCase(nil)
                 }
             } else {
                 EmptyLedgerState(icon: "chart.line.uptrend.xyaxis", title: "暂无财务数据", detail: "下拉刷新重新读取账本。")
@@ -49,68 +65,221 @@ struct OverviewView: View {
 
 private struct MonthlyConclusion: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @EnvironmentObject private var session: LedgerSession
+
     let ledger: LedgerBootstrap
     let range: LedgerDateRange
 
+    private var savingsRate: Double? {
+        guard ledger.summary.income > 0 else { return nil }
+        return Double(ledger.summary.net) / Double(ledger.summary.income)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("\(range.metricScope)结论").font(.subheadline.weight(.medium))
+        VStack(alignment: .leading, spacing: 16) {
+            // Header: Scope & Transaction Count
+            HStack(alignment: .center) {
+                HStack(spacing: 6) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                    Text("\(range.metricScope)概览")
+                        .font(.system(.subheadline, design: .default, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.ink)
+                }
                 Spacer()
-                Text("\(ledger.transactions.count) 笔").font(.caption).foregroundStyle(.secondary)
+                Text("\(ledger.transactions.count) 笔流水")
+                    .font(.system(.caption2, design: .default, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(LedgerPalette.tag)
+                    .clipShape(Capsule())
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            netMetric
-            Divider().padding(.horizontal, 16)
+
+            // Net Metric Hero
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(range.metricScope)净结余")
+                    .font(.system(.caption, design: .default, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    AmountLabel(
+                        minorUnits: ledger.summary.net,
+                        currency: ledger.summary.currency,
+                        font: .system(size: 32, weight: .bold, design: .rounded),
+                        color: ledger.summary.net < 0 ? LedgerPalette.risk : LedgerPalette.ink
+                    )
+                    .tracking(-0.5)
+                    .lineLimit(1)
+
+                    primaryComparisonBadge
+                }
+            }
+
+            // Income & Expense Split Cards
             if dynamicTypeSize.isAccessibilitySize {
-                incomeMetric
-                expenseMetric
+                VStack(spacing: 10) {
+                    incomeMetricCard
+                    expenseMetricCard
+                }
             } else {
-                HStack(alignment: .top, spacing: 0) {
-                    incomeMetric
-                    expenseMetric
+                HStack(spacing: 12) {
+                    incomeMetricCard
+                    expenseMetricCard
+                }
+            }
+
+            // Savings Rate Progress Bar
+            if let rate = savingsRate, session.amountsVisible {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("储蓄结余率")
+                            .font(.system(.caption2, design: .default, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                        Spacer()
+                        Text(String(format: "%.1f%%", max(0, rate * 100)))
+                            .font(.system(.caption2, design: .rounded, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(rate >= 0.2 ? LedgerPalette.income : LedgerPalette.warm)
+                    }
+
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color(uiColor: .tertiarySystemFill))
+                                .frame(height: 6)
+
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [LedgerPalette.cobalt, LedgerPalette.income],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: max(6, min(geo.size.width, geo.size.width * CGFloat(max(0, min(1.0, rate))))), height: 6)
+                        }
+                    }
+                    .frame(height: 6)
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(18)
+        .background(LedgerPalette.panel)
+    }
+
+    private var primaryComparisonBadge: some View {
+        Group {
+            if let comparisons = netComparisons {
+                let comp = comparisons.yearOverYear.percentage != nil ? comparisons.yearOverYear : comparisons.monthOverMonth
+                if let delta = comp.delta, session.amountsVisible {
+                    let favorable = delta >= 0
+                    let percentText = comp.percentage.map { String(format: "%+.1f%%", $0 * 100) } ?? ""
+                    let label = comp.currentRange == comparisons.yearOverYear.currentRange ? "同比" : "环比"
+                    HStack(spacing: 3) {
+                        Image(systemName: delta >= 0 ? "arrow.up.right" : "arrow.down.right")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("\(percentText) \(label)")
+                            .font(.system(.caption2, design: .rounded, weight: .semibold).monospacedDigit())
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .foregroundStyle(favorable ? LedgerPalette.income : LedgerPalette.risk)
+                    .background((favorable ? LedgerPalette.income : LedgerPalette.risk).opacity(0.12))
+                    .clipShape(Capsule())
                 }
             }
         }
     }
 
-    private var netMetric: some View {
-        OverviewPeriodMetric(
-            label: "\(range.metricScope)结余",
-            minorUnits: ledger.summary.net,
-            currency: ledger.summary.currency,
-            detail: "收入减去支出",
-            color: ledger.summary.net < 0 ? LedgerPalette.risk : LedgerPalette.ink,
-            primary: true,
-            comparisons: netComparisons,
-            metric: .net,
-            showsMonthOverMonth: false
-        )
+    private var incomeMetricCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .fill(LedgerPalette.income.opacity(0.14))
+                        .frame(width: 22, height: 22)
+                    Image(systemName: "arrow.down.left")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(LedgerPalette.income)
+                }
+                Text("收入")
+                    .font(.system(.caption, design: .default, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+            }
+
+            AmountLabel(
+                minorUnits: ledger.summary.income,
+                currency: ledger.summary.currency,
+                prefix: "+",
+                font: .system(.title3, design: .rounded, weight: .bold),
+                color: LedgerPalette.income
+            )
+            .lineLimit(1)
+
+            if let comp = ledger.comparisons?.income.monthOverMonth {
+                compactComparison(comp, metric: .income, label: "环比")
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .tertiarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private var incomeMetric: some View {
-        OverviewPeriodMetric(
-            label: "\(range.metricScope)收入",
-            minorUnits: ledger.summary.income,
-            currency: ledger.summary.currency,
-            detail: "当前范围汇总",
-            color: LedgerPalette.income,
-            comparisons: ledger.comparisons?.income,
-            metric: .income
-        )
+    private var expenseMetricCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .fill(LedgerPalette.expense.opacity(0.14))
+                        .frame(width: 22, height: 22)
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(LedgerPalette.expense)
+                }
+                Text("支出")
+                    .font(.system(.caption, design: .default, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+            }
+
+            AmountLabel(
+                minorUnits: ledger.summary.expense,
+                currency: ledger.summary.currency,
+                prefix: "−",
+                font: .system(.title3, design: .rounded, weight: .bold),
+                color: LedgerPalette.expense
+            )
+            .lineLimit(1)
+
+            if let comp = ledger.comparisons?.expense.monthOverMonth {
+                compactComparison(comp, metric: .expense, label: "环比")
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .tertiarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private var expenseMetric: some View {
-        OverviewPeriodMetric(
-            label: "\(range.metricScope)支出",
-            minorUnits: ledger.summary.expense,
-            currency: ledger.summary.currency,
-            detail: "当前范围汇总",
-            color: LedgerPalette.expense,
-            comparisons: ledger.comparisons?.expense,
-            metric: .expense
-        )
+    private func compactComparison(_ comparison: LedgerPeriodComparison, metric: OverviewComparisonMetric, label: String) -> some View {
+        Group {
+            if session.amountsVisible, let delta = comparison.delta, delta != 0 {
+                let favorable = metric == .expense ? delta < 0 : delta > 0
+                let arrow = delta > 0 ? "↑" : "↓"
+                let pct = comparison.percentage.map { String(format: "%.1f%%", abs($0 * 100)) } ?? ""
+                HStack(spacing: 2) {
+                    Text("\(label) \(arrow)\(pct)")
+                        .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
+                        .foregroundStyle(favorable ? LedgerPalette.income : LedgerPalette.risk)
+                }
+            } else {
+                Text("\(label) 持平")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+            }
+        }
     }
 
     private var netComparisons: LedgerMetricPeriodComparisons? {
@@ -155,74 +324,12 @@ private struct MonthlyConclusion: View {
         guard let income, let expense else { return nil }
         return income - expense
     }
-
-    private var verticalDivider: some View {
-        Divider().overlay(LedgerPalette.line)
-    }
-
-    private var horizontalDivider: some View {
-        Divider().overlay(LedgerPalette.line)
-    }
 }
 
 private enum OverviewComparisonMetric: Equatable {
     case income
     case expense
     case net
-}
-
-private struct OverviewPeriodMetric: View {
-    let label: String
-    let minorUnits: Int
-    let currency: String
-    let detail: String
-    var color = LedgerPalette.ink
-    var primary = false
-    let comparisons: LedgerMetricPeriodComparisons?
-    let metric: OverviewComparisonMetric
-    var showsMonthOverMonth = true
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-            Text(label)
-                .font(.system(.caption2, design: .default, weight: .semibold))
-                .foregroundStyle(LedgerPalette.secondary)
-            AmountLabel(
-                minorUnits: minorUnits,
-                currency: currency,
-                font: primary ? .title2.weight(.semibold) : .subheadline.weight(.semibold),
-                color: color
-            )
-            .tracking(primary ? -0.65 : -0.35)
-            .lineLimit(1)
-
-            if let comparisons {
-                Divider().overlay(LedgerPalette.line)
-                if showsMonthOverMonth {
-                    OverviewComparisonRow(
-                        label: "环比",
-                        comparison: comparisons.monthOverMonth,
-                        currency: currency,
-                        metric: metric
-                    )
-                }
-                OverviewComparisonRow(
-                    label: "同比",
-                    comparison: comparisons.yearOverYear,
-                    currency: currency,
-                    metric: metric
-                )
-            } else {
-                Text(detail)
-                    .font(.system(.caption2, design: .default))
-                    .foregroundStyle(LedgerPalette.secondary)
-                    .lineLimit(2)
-            }
-        }
-        .padding(LedgerSpacing.lg)
-        .frame(maxWidth: .infinity, minHeight: 156, alignment: .topLeading)
-        .background(LedgerPalette.panel)
-    }
 }
 
 private struct OverviewComparisonRow: View {

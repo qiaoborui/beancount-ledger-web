@@ -28,12 +28,24 @@ struct TransactionRow: View {
         TransactionPresentation(transaction: transaction)
     }
 
+    private var categoryVisual: TransactionVisualCategory {
+        TransactionVisualCategory.resolve(
+            transaction: transaction,
+            presentation: presentation,
+            accountLabels: accountLabels
+        )
+    }
+
     var body: some View {
-        HStack(spacing: LedgerSpacing.md) {
-            Text(LedgerDateText.shortDate(transaction.date))
-                .font(.system(.caption2, design: .default, weight: .medium).monospacedDigit())
-                .foregroundStyle(LedgerPalette.secondary)
-                .frame(width: 44, alignment: .leading)
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(categoryVisual.color.opacity(0.14))
+                    .frame(width: 40, height: 40)
+                Image(systemName: categoryVisual.iconName)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(categoryVisual.color)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(presentation.title)
@@ -48,12 +60,12 @@ struct TransactionRow: View {
                 minorUnits: presentation.minorUnits,
                 currency: presentation.currency,
                 prefix: amountPrefix(presentation.kind),
-                font: .system(.footnote, design: .default, weight: .semibold),
+                font: .system(.subheadline, design: .rounded, weight: .semibold),
                 color: amountColor(presentation.kind)
             )
             .lineLimit(1)
         }
-        .padding(.vertical, LedgerLayout.transactionVerticalInset)
+        .padding(.vertical, LedgerLayout.rowVerticalInset)
         .contentShape(Rectangle())
     }
 }
@@ -292,9 +304,27 @@ struct TransactionsView: View {
                         }
                     }
                 } header: {
-                    Text(group.date)
-                        .font(.caption.weight(.medium).monospacedDigit())
-                        .textCase(nil)
+                    HStack {
+                        Text(group.date)
+                            .font(.system(.caption, design: .default, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(LedgerPalette.ink)
+                        Spacer()
+                        let dayExpense = group.transactions.filter {
+                            $0.postings.contains { $0.account.hasPrefix("Expenses:") && $0.amount != 0 }
+                        }.reduce(0) { sum, tx in
+                            sum + abs(tx.postings.first { $0.account.hasPrefix("Expenses:") && $0.amount != 0 }?.amount ?? 0)
+                        }
+                        if dayExpense > 0 {
+                            AmountLabel(
+                                minorUnits: dayExpense,
+                                currency: session.ledger?.valuationCurrency ?? "CNY",
+                                prefix: "支出 ",
+                                font: .system(.caption2, design: .rounded, weight: .medium),
+                                color: LedgerPalette.secondary
+                            )
+                        }
+                    }
+                    .textCase(nil)
                 }
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
@@ -775,42 +805,61 @@ private struct TransactionCard: View {
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            headingLayout {
-                Text(presentation.title)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(LedgerPalette.ink)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                AmountLabel(
-                    minorUnits: presentation.minorUnits,
-                    currency: presentation.currency,
-                    prefix: amountPrefix(presentation.kind),
-                    font: .subheadline.weight(.semibold),
-                    color: amountColor(presentation.kind)
-                )
-                .lineLimit(1)
-                .layoutPriority(1)
-                .accessibilityIdentifier("transaction-card-amount-\(transaction.source.line)")
+    private var categoryVisual: TransactionVisualCategory {
+        TransactionVisualCategory.resolve(
+            transaction: transaction,
+            presentation: presentation,
+            accountLabels: accountLabels
+        )
+    }
 
-                if let selectionState {
-                    Image(systemName: selectionState ? "checkmark.circle.fill" : "circle")
-                        .font(.system(.title3, design: .default, weight: .semibold))
-                        .foregroundStyle(selectionState ? LedgerPalette.cobalt : LedgerPalette.secondary)
-                        .frame(width: 32, height: 32)
-                        .accessibilityIdentifier("transaction-card-selection-\(transaction.source.line)")
-                }
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(categoryVisual.color.opacity(0.14))
+                    .frame(width: 40, height: 40)
+                Image(systemName: categoryVisual.iconName)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(categoryVisual.color)
             }
 
-            TransactionContextLine(transaction: transaction, accountLabels: accountLabels)
+            VStack(alignment: .leading, spacing: 4) {
+                headingLayout {
+                    Text(presentation.title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(LedgerPalette.ink)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    AmountLabel(
+                        minorUnits: presentation.minorUnits,
+                        currency: presentation.currency,
+                        prefix: amountPrefix(presentation.kind),
+                        font: .system(.subheadline, design: .rounded, weight: .semibold),
+                        color: amountColor(presentation.kind)
+                    )
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                    .accessibilityIdentifier("transaction-card-amount-\(transaction.source.line)")
 
-            if let mutationPhase {
-                TransactionMutationBadge(phase: mutationPhase)
+                    if let selectionState {
+                        Image(systemName: selectionState ? "checkmark.circle.fill" : "circle")
+                            .font(.system(.title3, design: .default, weight: .semibold))
+                            .foregroundStyle(selectionState ? LedgerPalette.cobalt : LedgerPalette.secondary)
+                            .frame(width: 28, height: 28)
+                            .accessibilityIdentifier("transaction-card-selection-\(transaction.source.line)")
+                    }
+                }
+
+                TransactionContextLine(transaction: transaction, accountLabels: accountLabels)
+
+                if let mutationPhase {
+                    TransactionMutationBadge(phase: mutationPhase)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, LedgerLayout.transactionVerticalInset)
+        .padding(.vertical, LedgerLayout.rowVerticalInset)
         .contentShape(Rectangle())
     }
 }
