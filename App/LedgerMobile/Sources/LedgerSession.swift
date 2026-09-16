@@ -2554,16 +2554,19 @@ final class LedgerSession: ObservableObject {
         let targetCurrency = valuationCurrency ?? storedValuationCurrency(for: contextURL)
         let source = try repository(at: contextURL)
         let local = source as? LocalLedgerRepository
-        let previousRevision = try await local?.workspace.currentRevision()?.id
         let today = LedgerDateRange.today(now: ledgerNow())
-        let payload = try await source.bootstrap(
-            start: targetRange.start,
-            end: targetRange.queryEndExclusive,
-            today: today,
-            valuationCurrency: targetCurrency
-        )
-        guard generation == requestGeneration else { return }
-        let currentRevision = try await local?.workspace.currentRevision()?.id
+        let payload: LedgerBootstrap
+        let presentationRevision: UUID?
+        if let local {
+            let snapshot = try await local.bootstrapSnapshot(start: targetRange.start,
+                end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency)
+            payload = snapshot.payload
+            presentationRevision = snapshot.revisionID
+        } else {
+            payload = try await source.bootstrap(start: targetRange.start,
+                end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency)
+            presentationRevision = nil
+        }
         guard generation == requestGeneration else { return }
         guard payload.sensitiveUnlocked else {
             if preserveCachedLedgerOnSensitiveLock, ledger != nil {
@@ -2595,7 +2598,7 @@ final class LedgerSession: ObservableObject {
         ledger = payload
         localPresentation = local.map {
             LocalPresentation(ledgerID: $0.descriptor.id,
-                revisionID: previousRevision == currentRevision ? currentRevision : nil, today: today)
+                revisionID: presentationRevision, today: today)
         }
         storeValuationCurrency(payload.valuationCurrency, for: contextURL)
         selectedRange = targetRange

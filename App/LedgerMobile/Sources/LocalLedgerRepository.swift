@@ -52,6 +52,13 @@ actor LocalLedgerRepository: LedgerRepository {
     func exportSyncConflictVersions() async throws -> URL { try await storage.exportConflictVersions() }
 
     func bootstrap(start: String, end: String, today: String, valuationCurrency: String) async throws -> LedgerBootstrap {
+        try await bootstrapSnapshot(start: start, end: end, today: today, valuationCurrency: valuationCurrency).payload
+    }
+
+    /// Return the revision that produced the presentation, including when a writer
+    /// publishes a new generation while the engine is reading the pinned snapshot.
+    func bootstrapSnapshot(start: String, end: String, today: String, valuationCurrency: String) async throws
+        -> (revisionID: UUID, payload: LedgerBootstrap) {
         var query = range(start, end, valuationCurrency)
         query["today"] = today
         let cacheQuery = query
@@ -61,7 +68,7 @@ actor LocalLedgerRepository: LedgerRepository {
             cache.load(revisionID: revision.id, query: cacheQuery)
         }) {
             presentedRevisionID = restored.revisionID
-            return restored.payload
+            return (restored.revisionID, restored.payload)
         }
         let (revisionID, data) = try await readSnapshot("/api/ledger/bootstrap", query: query)
         let payload = try JSONDecoder().decode(LedgerBootstrap.self, from: data)
@@ -69,7 +76,7 @@ actor LocalLedgerRepository: LedgerRepository {
         if payload.sensitiveUnlocked {
             cache.save(data, revisionID: revisionID, query: query)
         }
-        return payload
+        return (revisionID, payload)
     }
     func homeReport(start: String, end: String, valuationCurrency: String) async throws -> LedgerHomeReport {
         try await read("/api/ledger/home-report", query: range(start, end, valuationCurrency))

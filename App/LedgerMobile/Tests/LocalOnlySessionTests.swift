@@ -66,12 +66,18 @@ final class LocalOnlySessionTests: XCTestCase {
         defaults.set(ledger.id.uuidString, forKey: "ledger.mobile.active-local-ledger")
         let session = LedgerSession(repositoryFactory: { location in
             throw LedgerRepositoryError.unsupportedLocation(location)
-        }, localCatalog: catalog, defaults: defaults)
+        }, localCatalog: catalog, localAuthenticator: Authenticator(), defaults: defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: suite, lockDirectory: root),
+            widgetCredentialStore: WidgetCredentials())
         await session.updateActivity(isActive: false, isBackground: false)
         await session.start()
-        XCTAssertEqual(session.phase, .locked(authenticated: true), "An inactive cold launch must leave an unlockable screen instead of an indefinite spinner")
+        XCTAssertEqual(session.phase, .checking, "Keep the same startup surface until the scene is active")
         XCTAssertNil(session.ledger)
         XCTAssertFalse(session.amountsVisible)
+        await session.updateActivity(isActive: true, isBackground: false)
+        await session.automaticallyUnlockIfNeeded()
+        XCTAssertEqual(session.phase, .ready, "The foreground callback must complete the pending cold launch")
+        session.chooseLedger()
     }
 
     func testStorageConfigurationSerializesAgainstSyncAndDisconnect() async throws {

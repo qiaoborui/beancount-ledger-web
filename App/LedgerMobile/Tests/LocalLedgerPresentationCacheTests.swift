@@ -3,10 +3,89 @@ import XCTest
 @testable import LedgerMobile
 
 final class LocalLedgerPresentationCacheTests: XCTestCase {
+    private final class ScanCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var scans = 0
+        var value: Int { lock.withLock { scans } }
+        func increment() { lock.withLock { scans += 1 } }
+    }
+
+    private final class CountingFileManager: FileManager, @unchecked Sendable {
+        let counter: ScanCounter
+        init(counter: ScanCounter) { self.counter = counter; super.init() }
+        override func contentsOfDirectory(at url: URL, includingPropertiesForKeys keys: [URLResourceKey]?,
+                                          options mask: FileManager.DirectoryEnumerationOptions = []) throws -> [URL] {
+            if url.lastPathComponent == "workspace" { counter.increment() }
+            return try super.contentsOfDirectory(at: url, includingPropertiesForKeys: keys, options: mask)
+        }
+    }
+
+    func testCachedBootstrapValidatesTheSnapshotTreeOnce() async throws {
+        let (descriptor, original, engine) = try await fixture()
+        let changes = (0..<1_000).map { LocalLedgerWorkspace.Change.write(Data("; safe performance fixture".utf8), to: "entries/\($0).bean") }
+        let previous = try await original.currentRevision()
+        try await original.commit(expectedRevisionID: previous?.id, changes: changes) { _ in }
+        let seed = LocalLedgerRepository(descriptor: descriptor, workspace: original, engine: engine, validator: { _, _ in })
+        _ = try await load(seed)
+        let scans = ScanCounter()
+        let workspace = LocalLedgerWorkspace(rootDirectory: original.rootDirectory,
+            fileManager: CountingFileManager(counter: scans))
+        let coldEngine = Engine()
+        let reopened = LocalLedgerRepository(descriptor: descriptor, workspace: workspace, engine: coldEngine, validator: { _, _ in })
+        let started = ContinuousClock.now
+        _ = try await load(reopened)
+        print("Cached bootstrap: \(started.duration(to: .now)), snapshot scans: \(scans.value)")
+        XCTAssertEqual(scans.value, 1, "Validate the immutable tree once per snapshot read")
+        let calls = await coldEngine.calls
+        XCTAssertEqual(calls, 0)
+    }
+
+    private actor Gate {
+        let entered: XCTestExpectation
+        private var continuation: CheckedContinuation<Void, Never>?
+        init(_ entered: XCTestExpectation) { self.entered = entered }
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                self.continuation = continuation
+                entered.fulfill()
+            }
+        }
+        func release() { continuation?.resume(); continuation = nil }
+    }
+
+    func testBootstrapReturnsItsPinnedRevisionWhenPublicationOverlapsTheRead() async throws {
+        let (descriptor, workspace, engine) = try await fixture()
+        let current = try await workspace.currentRevision()
+        let oldRevision = try XCTUnwrap(current)
+        let repository = LocalLedgerRepository(descriptor: descriptor, workspace: workspace,
+            engine: engine, validator: { _, _ in })
+        let entered = expectation(description: "bootstrap engine reading old generation")
+        let gate = Gate(entered)
+        await engine.pauseNextRead(gate)
+        let reading = Task {
+            try await repository.bootstrapSnapshot(start: "2026-09-01", end: "2026-10-01",
+                today: "2026-09-16", valuationCurrency: "CNY")
+        }
+        await fulfillment(of: [entered], timeout: 3)
+        let next = try await workspace.commit(expectedRevisionID: oldRevision.id,
+            changes: [.write(Data("; concurrently published".utf8), to: "main.bean")]) { _ in }
+        await gate.release()
+        let snapshot = try await reading.value
+        XCTAssertEqual(snapshot.revisionID, oldRevision.id)
+        XCTAssertNotEqual(snapshot.revisionID, next.id)
+        await engine.configure(expense: 777)
+        let refreshed = try await repository.bootstrapSnapshot(start: "2026-09-01", end: "2026-10-01",
+            today: "2026-09-16", valuationCurrency: "CNY")
+        XCTAssertEqual(refreshed.revisionID, next.id)
+        XCTAssertEqual(refreshed.payload.summary.expense, 777)
+    }
+
     private actor Engine: LocalLedgerEngine {
         private(set) var calls = 0
         var unlocked = true
         var expense = 100
+        private var gate: Gate?
+        func pauseNextRead(_ gate: Gate) { self.gate = gate }
         func configure(unlocked: Bool = true, expense: Int = 100) {
             self.unlocked = unlocked
             self.expense = expense
@@ -14,6 +93,7 @@ final class LocalLedgerPresentationCacheTests: XCTestCase {
         func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
             guard request.path == "/api/ledger/bootstrap" else { return Data("{}".utf8) }
             calls += 1
+            if let gate { self.gate = nil; await gate.wait() }
             return try JSONSerialization.data(withJSONObject: [
                 "start": request.query["start"] ?? "", "end": request.query["end"] ?? "",
                 "summary": ["currency": "CNY", "income": 0, "expense": expense, "net": -expense],

@@ -129,7 +129,7 @@ actor LocalLedgerWorkspace {
 
     nonisolated let rootDirectory: URL
 
-    private let fileManager = FileManager()
+    private let fileManager: FileManager
     private let generationsDirectory: URL
     private let stagingDirectory: URL
     private let currentRevisionFile: URL
@@ -143,10 +143,12 @@ actor LocalLedgerWorkspace {
 
     init(
         rootDirectory: URL,
+        fileManager: FileManager = FileManager(),
         treeLimits: TreeLimits = TreeLimits(),
         copyEntryHook: @escaping @Sendable (String) throws -> Void = { _ in }
     ) {
         let root = rootDirectory.standardizedFileURL
+        self.fileManager = fileManager
         self.rootDirectory = root
         generationsDirectory = root.appendingPathComponent("generations", isDirectory: true)
         stagingDirectory = root.appendingPathComponent("staging", isDirectory: true)
@@ -349,7 +351,9 @@ actor LocalLedgerWorkspace {
         _ operation: @Sendable (Revision, URL) async throws -> Value
     ) async throws -> Value {
         let revision = try requiredCurrentRevision()
-        let workspace = try workspaceURL(for: revision)
+        // requiredCurrentRevision validated this immutable tree in this actor turn.
+        // Recheck its directory boundaries without repeating the full traversal.
+        let workspace = try workspaceLocation(for: revision)
         return try await operation(revision, workspace)
     }
 
@@ -797,6 +801,12 @@ actor LocalLedgerWorkspace {
     }
 
     private func workspaceURL(for revision: Revision) throws -> URL {
+        let workspace = try workspaceLocation(for: revision)
+        _ = try validateTree(at: workspace)
+        return workspace
+    }
+
+    private func workspaceLocation(for revision: Revision) throws -> URL {
         let generation = generationDirectory(for: revision.id)
         guard try itemKind(at: generation) == .directory else {
             throw WorkspaceError.corruptRevision
@@ -805,7 +815,6 @@ actor LocalLedgerWorkspace {
         guard try itemKind(at: workspace) == .directory else {
             throw WorkspaceError.corruptRevision
         }
-        _ = try validateTree(at: workspace)
         return workspace
     }
 
