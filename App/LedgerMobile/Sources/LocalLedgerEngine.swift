@@ -43,43 +43,65 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     static let shared = EmbeddedLocalLedgerEngine()
     // Committed generation directories are immutable. Keep only the most recent
     // model; mutable stages always load their current contents independently.
-    private var canonicalCache: (workspace: String, entrypoint: String, model: BQLCell)?
+    private var canonicalCache: (workspace: String, entrypoint: String, model: Data)?
 
     func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
         #if canImport(LedgerCore)
-        var request = request
+        let canonical: Data
         if !request.staging, let cached = canonicalCache,
            cached.workspace == request.workspaceRoot, cached.entrypoint == request.entrypoint {
-            request.canonical = cached.model
+            canonical = cached.model
         } else {
             let model = try await EmbeddedBeancountValidator.shared.canonicalModel(
                 workspace: URL(fileURLWithPath: request.workspaceRoot), entryFile: request.entrypoint)
-            request.canonical = model
+            canonical = model
             if !request.staging {
                 canonicalCache = (request.workspaceRoot, request.entrypoint, model)
             }
         }
-        let encoded = try JSONEncoder().encode(request)
+        let encoded = try LocalLedgerJSON.requestData(request, canonical: canonical)
         let response = MobilecoreDispatchJSON(String(decoding: encoded, as: UTF8.self))
-        let data = Data(response.utf8)
+        return try LocalLedgerJSON.resultData(Data(response.utf8))
+        #else
+        throw LocalLedgerError.runtimeUnavailable
+        #endif
+    }
+}
+
+/// Keep large bridge payloads in JSON form. BQLCell remains the typed value for
+/// user queries; decoding every ledger field into it adds a full recursive pass.
+enum LocalLedgerJSON {
+    static func requestData(_ request: LocalLedgerEngineRequest, canonical: Data) throws -> Data {
+        var request = request
+        request.canonical = nil
+        var encoded = try JSONEncoder().encode(request)
+        // Both fragments are encoder-produced JSON objects. Splice the model
+        // without decoding/re-encoding thousands of booked entries per page.
+        encoded.removeLast()
+        encoded.append(Data(",\"canonical\":".utf8))
+        encoded.append(canonical)
+        encoded.append(UInt8(ascii: "}"))
+        return encoded
+    }
+
+    static func resultData(_ data: Data) throws -> Data {
         struct Envelope: Decodable {
             struct Diagnostic: Decodable { let message: String }
             let ok: Bool
             let status: Int
-            let result: BQLCell?
             let diagnostics: [Diagnostic]?
         }
+        // Decode only the small header with strict types; preserve result
+        // integers and nested JSON without a BQLCell/Double round trip.
         let envelope = try JSONDecoder().decode(Envelope.self, from: data)
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         guard envelope.ok, (200..<300).contains(envelope.status) else {
-            var message = envelope.diagnostics?.map(\.message).joined(separator: "\n") ?? "本地账本操作失败"
-            if case let .object(result) = envelope.result, case let .string(error) = result["error"] {
-                message = error
-            }
+            let result = object?["result"] as? [String: Any]
+            let message = result?["error"] as? String
+                ?? envelope.diagnostics?.map(\.message).joined(separator: "\n")
+                ?? "本地账本操作失败"
             throw LocalLedgerError.operationFailed(message)
         }
-        return try JSONEncoder().encode(envelope.result ?? .null)
-        #else
-        throw LocalLedgerError.runtimeUnavailable
-        #endif
+        return try JSONSerialization.data(withJSONObject: object?["result"] ?? NSNull(), options: [.fragmentsAllowed])
     }
 }

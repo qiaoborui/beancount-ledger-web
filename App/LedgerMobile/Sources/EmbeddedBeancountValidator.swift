@@ -14,14 +14,25 @@ actor EmbeddedBeancountValidator {
         var errorDescription: String? { message }
     }
 
-    private struct Result: Decodable {
+    private struct Result {
         struct Diagnostic: Decodable {
             let message: String
             let filename: String?
             let lineno: Int?
         }
         let errors: [Diagnostic]
-        let canonical: BQLCell?
+        let canonical: Data?
+
+        init(data: Data) throws {
+            struct Diagnostics: Decodable { let errors: [Diagnostic] }
+            errors = try JSONDecoder().decode(Diagnostics.self, from: data).errors
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            if errors.isEmpty, let model = object?["canonical"] as? [String: Any] {
+                canonical = try JSONSerialization.data(withJSONObject: model)
+            } else {
+                canonical = nil
+            }
+        }
     }
 
     func validate(workspace: URL, entryFile: String = "main.bean") throws {
@@ -30,9 +41,9 @@ actor EmbeddedBeancountValidator {
 
     /// The canonical loader's booked, plugin-transformed entries are the
     /// financial read model. Source files remain the editable representation.
-    func canonicalModel(workspace: URL, entryFile: String = "main.bean") throws -> BQLCell {
+    func canonicalModel(workspace: URL, entryFile: String = "main.bean") throws -> Data {
         let result = try load(workspace: workspace, entryFile: entryFile)
-        guard let canonical = result.canonical, case .object = canonical else {
+        guard let canonical = result.canonical else {
             throw ValidationError(message: "本地 Beancount 运行时缺少完整读取模型，请重新构建运行时")
         }
         return canonical
@@ -53,7 +64,7 @@ actor EmbeddedBeancountValidator {
         }
         guard let pointer else { throw ValidationError(message: "本地校验器内存不足") }
         defer { BRFree(pointer) }
-        let result = try JSONDecoder().decode(Result.self, from: Data(String(cString: pointer).utf8))
+        let result = try Result(data: Data(String(cString: pointer).utf8))
         guard result.errors.isEmpty else {
             let message = result.errors.prefix(20).map { diagnostic in
                 let location = diagnostic.filename.map { "\($0):\(diagnostic.lineno ?? 0) " } ?? ""
