@@ -5,6 +5,7 @@ struct LedgerTimeRangeButton: View {
 
     var body: some View {
         Button {
+            LedgerFeedback.selection()
             session.presentRangePicker()
         } label: {
             HStack(spacing: 5) {

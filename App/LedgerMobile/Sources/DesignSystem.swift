@@ -459,19 +459,85 @@ struct StatusBanner: View {
     }
 }
 
+enum LedgerFeedback {
+    @MainActor static func light() {
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.prepare()
+        generator.impactOccurred()
+    }
+
+    @MainActor static func medium() {
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.prepare()
+        generator.impactOccurred()
+    }
+
+    @MainActor static func selection() {
+        let generator = UISelectionFeedbackGenerator()
+        generator.prepare()
+        generator.selectionChanged()
+    }
+
+    @MainActor static func success() {
+        let generator = UINotificationFeedbackGenerator()
+        generator.prepare()
+        generator.notificationOccurred(.success)
+    }
+}
+
+struct LedgerFrostedCardModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    var cornerRadius: CGFloat = 16
+    var padding: CGFloat = 14
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(LedgerPalette.panel)
+                    .shadow(
+                        color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.035),
+                        radius: 10,
+                        x: 0,
+                        y: 3
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
+                        lineWidth: 0.5
+                    )
+            }
+    }
+}
+
+extension View {
+    func ledgerFrostedCard(cornerRadius: CGFloat = 16, padding: CGFloat = 14) -> some View {
+        modifier(LedgerFrostedCardModifier(cornerRadius: cornerRadius, padding: padding))
+    }
+}
+
 struct PressScaleButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    var pressedScale: CGFloat = 0.965
+    var pressedScale: CGFloat = 0.95
+    var enablesHaptic: Bool = true
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(reduceMotion ? 1 : configuration.isPressed ? pressedScale : 1)
             .opacity(configuration.isPressed ? 0.88 : 1)
             .animation(
-                reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.68),
+                reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.65),
                 value: configuration.isPressed
             )
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                if isPressed && enablesHaptic && !reduceMotion {
+                    LedgerFeedback.light()
+                }
+            }
     }
 }
 
@@ -510,6 +576,11 @@ struct TactilePillButtonStyle: ButtonStyle {
                 reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.68),
                 value: configuration.isPressed
             )
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                if isPressed && !reduceMotion {
+                    LedgerFeedback.light()
+                }
+            }
     }
 }
 
@@ -631,7 +702,10 @@ struct PrivacyToolbarButton: View {
 
     var body: some View {
         LedgerToolbarButton(
-            action: session.toggleAmounts,
+            action: {
+                LedgerFeedback.selection()
+                session.toggleAmounts()
+            },
             accessibilityLabel: session.amountsVisible ? "隐藏金额" : "显示金额"
         ) {
             Image(systemName: session.amountsVisible ? "eye.slash" : "eye")

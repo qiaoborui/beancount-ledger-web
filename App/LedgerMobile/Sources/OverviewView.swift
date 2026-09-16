@@ -18,6 +18,7 @@ struct OverviewView: View {
                 Section {
                     MonthlyConclusion(ledger: ledger, range: session.selectedRange)
                         .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
                 }
 
                 // 2. Quick Actions Dock
@@ -54,6 +55,7 @@ struct OverviewView: View {
                             currency: ledger.summary.currency
                         )
                         .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
                     } header: {
                         HStack {
                             Text("当月支出排行")
@@ -76,6 +78,7 @@ struct OverviewView: View {
                             range: session.selectedRange
                         )
                         .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
                     } header: {
                         Text("消费节奏")
                             .font(.footnote.weight(.semibold))
@@ -236,12 +239,21 @@ private struct QuickActionButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            LedgerFeedback.light()
+            action()
+        } label: {
             VStack(spacing: 6) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .fill(isProminent ? Color.primary : Color(uiColor: .tertiarySystemFill))
-                        .frame(width: 44, height: 44)
+                        .frame(width: 46, height: 46)
+                        .shadow(
+                            color: isProminent ? Color.primary.opacity(0.16) : Color.clear,
+                            radius: 6,
+                            x: 0,
+                            y: 2
+                        )
                     Image(systemName: icon)
                         .font(.system(size: 16, weight: isProminent ? .semibold : .medium))
                         .foregroundStyle(isProminent ? Color(uiColor: .systemBackground) : Color.primary)
@@ -267,6 +279,7 @@ struct OverviewCategorySpending: Identifiable {
 }
 
 private struct OverviewTopCategoriesCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var session: LedgerSession
     let categories: [OverviewCategorySpending]
     let totalExpense: Int
@@ -335,12 +348,29 @@ private struct OverviewTopCategoriesCard: View {
                 }
             }
         }
-        .padding(14)
-        .background(LedgerPalette.panel)
+        .padding(15)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(LedgerPalette.panel)
+                .shadow(
+                    color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.035),
+                    radius: 8,
+                    x: 0,
+                    y: 2
+                )
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(
+                    LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
+                    lineWidth: 0.5
+                )
+        }
     }
 }
 
 private struct OverviewSpendingRhythmCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var session: LedgerSession
     let ledger: LedgerBootstrap
     let range: LedgerDateRange
@@ -431,12 +461,29 @@ private struct OverviewSpendingRhythmCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(14)
-        .background(LedgerPalette.panel)
+        .padding(15)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(LedgerPalette.panel)
+                .shadow(
+                    color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.035),
+                    radius: 8,
+                    x: 0,
+                    y: 2
+                )
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(
+                    LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
+                    lineWidth: 0.5
+                )
+        }
     }
 }
 
 private struct MonthlyConclusion: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var session: LedgerSession
 
@@ -485,6 +532,7 @@ private struct MonthlyConclusion: View {
                     )
                     .tracking(-0.3)
                     .lineLimit(1)
+                    .accessibilityIdentifier("overview-monthly-net")
 
                     primaryComparisonBadge
 
@@ -562,8 +610,24 @@ private struct MonthlyConclusion: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(14)
-        .background(LedgerPalette.panel)
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(LedgerPalette.panel)
+                .shadow(
+                    color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.035),
+                    radius: 10,
+                    x: 0,
+                    y: 3
+                )
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(
+                    LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
+                    lineWidth: 0.5
+                )
+        }
     }
 
     private var primaryComparisonBadge: some View {
