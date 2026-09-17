@@ -3,6 +3,9 @@ import Combine
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum LedgerLockInterval: Int, CaseIterable, Equatable, Sendable, Identifiable {
     case immediately = 0
@@ -868,7 +871,38 @@ final class LedgerSession: ObservableObject {
         return await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
     }
 
+    #if os(iOS)
+    /// Flushes any pending sync right as the app transitions to the background.
+    /// Obtains a short background execution assertion from iOS so writes and pushes finish.
+    func flushBackgroundLocalSyncIfNeeded() async {
+        guard automaticLocalSyncServicesEnabled, isLocal else { return }
+        let descriptor = localLedgers.first { location == .local($0.id) }
+        guard let descriptor, allowsAutomaticSync(descriptor) else { return }
+
+        var backgroundTaskID = UIBackgroundTaskIdentifier.invalid
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "ledger.flush-local-sync") {
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            backgroundTaskID = .invalid
+        }
+
+        let success = await performBackgroundLocalSync()
+        LocalLedgerBackgroundSyncService.shared.recordExecution(kind: .sceneFlush, success: success)
+
+        if backgroundTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            backgroundTaskID = .invalid
+        }
+    }
+    #endif
+
     private func runAutomaticLocalSync(background: Bool) async -> LocalLedgerAutoSyncCoordinator.Outcome {
+        if isStorageSyncBusy && background {
+            // Give any concurrent foreground save/sync up to 2 seconds to finish yielding.
+            for _ in 0..<20 {
+                if !isStorageSyncBusy { break }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
         guard !Task.isCancelled, !isStorageSyncBusy, let localCatalog else { return .retryableFailure }
         if !background, (!applicationActive || phase != .ready) { return .retryableFailure }
         isStorageSyncBusy = true

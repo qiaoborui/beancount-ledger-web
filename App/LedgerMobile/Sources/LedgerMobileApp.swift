@@ -40,6 +40,11 @@ struct LedgerMobileApp: App {
                             isBackground: phase == .background
                         )
                         await session.automaticallyUnlockIfNeeded()
+                        #if os(iOS)
+                        if phase == .background {
+                            await session.flushBackgroundLocalSyncIfNeeded()
+                        }
+                        #endif
                     }
                 }
                 .onOpenURL { url in
