@@ -2721,19 +2721,16 @@ struct CookieFastTransactionEditorBody: View {
     }
 
     private var heroAmountDisplay: some View {
-        HStack(alignment: .lastTextBaseline, spacing: 6) {
+        HStack(alignment: .lastTextBaseline, spacing: 5) {
             // Interactive Currency Picker
-            HStack(alignment: .center, spacing: 3) {
+            HStack(alignment: .center, spacing: 2) {
                 Text(currencySymbol)
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(kind.themeColor.opacity(0.55))
             }
             .foregroundStyle(kind.themeColor)
-            .alignmentGuide(.lastTextBaseline) { d in
-                d[.lastTextBaseline] - 4
-            }
             .contentShape(Rectangle())
             .overlay {
                 Menu {
