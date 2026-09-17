@@ -379,6 +379,38 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(income.minorUnits, 400_000)
     }
 
+    func testTransactionPresentationClassifiesRefundsAndClawbacks() {
+        let refundTxn = LedgerTransaction(
+            date: "2026-09-02",
+            payee: "淘宝",
+            narration: "退款 - 衣服",
+            postings: [
+                LedgerPosting(account: "Assets:Alipay", amount: 10000, currency: "CNY"),
+                LedgerPosting(account: "Expenses:Clothing", amount: -10000, currency: "CNY"),
+            ],
+            source: TransactionSource(file: "test.bean", line: 1, hash: nil, gitSHA: nil)
+        )
+        let refundPres = TransactionPresentation(transaction: refundTxn)
+        XCTAssertEqual(refundPres.kind, .income)
+        XCTAssertTrue(refundPres.isRefund)
+        XCTAssertEqual(refundPres.minorUnits, 10000)
+
+        let clawbackTxn = LedgerTransaction(
+            date: "2026-09-03",
+            payee: "公司",
+            narration: "扣回公积金",
+            postings: [
+                LedgerPosting(account: "Assets:Bank", amount: -2000, currency: "CNY"),
+                LedgerPosting(account: "Income:Salary", amount: 2000, currency: "CNY"),
+            ],
+            source: TransactionSource(file: "test.bean", line: 2, hash: nil, gitSHA: nil)
+        )
+        let clawbackPres = TransactionPresentation(transaction: clawbackTxn)
+        XCTAssertEqual(clawbackPres.kind, .expense)
+        XCTAssertFalse(clawbackPres.isRefund)
+        XCTAssertEqual(clawbackPres.minorUnits, 2000)
+    }
+
     func testTransactionCategoryUsesLabelsForExpenseIncomeAndRefund() {
         XCTAssertEqual(categoryLabel([("Expenses:Food:Dining", 8500)], labels: ["Expenses:Food:Dining": "餐饮"]), "餐饮")
         XCTAssertEqual(categoryLabel([("Expenses:Food:Dining", -8500)], labels: ["Expenses:Food:Dining": "餐饮"]), "餐饮")

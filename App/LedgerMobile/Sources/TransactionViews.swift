@@ -355,14 +355,12 @@ struct TransactionsView: View {
     private func groupExpense(for transactions: [LedgerTransaction]) -> Int {
         var total = 0
         for tx in transactions {
-            for posting in tx.postings {
-                if posting.account.hasPrefix("Expenses:") && posting.amount != 0 {
-                    total += abs(posting.amount)
-                    break
-                }
-            }
+            let txExpense = tx.postings
+                .filter { $0.account.hasPrefix("Expenses:") }
+                .reduce(0) { $0 + $1.amount }
+            total += txExpense
         }
-        return total
+        return max(0, total)
     }
 
     var body: some View {
@@ -1332,7 +1330,7 @@ struct TransactionDetailView: View {
 
                         Spacer()
 
-                        Text(kindBadgeText(presentation.kind))
+                        Text(kindBadgeText(presentation))
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(amountColor(presentation.kind))
                             .padding(.horizontal, 9)
@@ -1667,8 +1665,11 @@ struct TransactionDetailView: View {
         }
     }
 
-    private func kindBadgeText(_ kind: TransactionKind) -> String {
-        switch kind {
+    private func kindBadgeText(_ presentation: TransactionPresentation) -> String {
+        if presentation.isRefund {
+            return "退款"
+        }
+        switch presentation.kind {
         case .expense: return "支出"
         case .income: return "收入"
         case .transfer: return "转账"

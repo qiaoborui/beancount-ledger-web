@@ -1144,7 +1144,7 @@ struct CookieCategoryDonutCard: View {
         guard total > 0 else { return [] }
 
         if selectedTab == .expense {
-            let top = statement.expenseAnalytics.prefix(5)
+            let top = statement.expenseAnalytics.filter { $0.amount > 0 }.prefix(5)
             var items: [SliceItem] = []
             var topSum = 0
 
@@ -1358,6 +1358,10 @@ struct CookieRankedCategoryPanel: View {
     let totalExpense: Int
     let currency: String
 
+    private var positiveItems: [LedgerExpenseCategoryAnalytics] {
+        items.filter { $0.amount > 0 }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -1365,15 +1369,15 @@ struct CookieRankedCategoryPanel: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(LedgerPalette.ink)
                 Spacer()
-                Text("前 \(min(items.count, 8)) 项")
+                Text("前 \(min(positiveItems.count, 8)) 项")
                     .font(.system(size: 11.5))
                     .foregroundStyle(LedgerPalette.secondary)
             }
 
-            if items.isEmpty {
+            if positiveItems.isEmpty {
                 AnalysisEmptyRow(message: "所选范围暂无支出分类")
             } else {
-                ForEach(Array(items.prefix(8).enumerated()), id: \.element.id) { index, item in
+                ForEach(Array(positiveItems.prefix(8).enumerated()), id: \.element.id) { index, item in
                     let visual = TransactionVisualCategory.resolve(account: item.account, label: item.label)
                     let pct = totalExpense > 0 ? (Double(item.amount) / Double(totalExpense)) : 0.0
 

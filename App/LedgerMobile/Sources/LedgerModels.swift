@@ -695,6 +695,11 @@ enum LedgerMetadataValue: Codable, Equatable, Sendable {
         case let .bool(value): try container.encode(value)
         }
     }
+
+    var stringValue: String? {
+        if case let .string(val) = self { return val }
+        return nil
+    }
 }
 
 struct LedgerTransaction: Codable, Identifiable, Equatable, Sendable {
@@ -1748,6 +1753,7 @@ struct TransactionPresentation: Equatable {
     let subtitle: String
     let minorUnits: Int
     let currency: String
+    let isRefund: Bool
 
     init(transaction: LedgerTransaction) {
         title = transaction.payee.isEmpty
@@ -1760,24 +1766,51 @@ struct TransactionPresentation: Equatable {
             subtitle = transaction.postings.first?.account ?? ""
         }
 
-        if let posting = transaction.postings.first(where: { $0.account.hasPrefix("Expenses:") && $0.amount != 0 }) {
-            kind = .expense
-            minorUnits = abs(posting.amount)
-            currency = posting.currency ?? "CNY"
-            return
+        let expensePostings = transaction.postings.filter { $0.account.hasPrefix("Expenses:") && $0.amount != 0 }
+        let incomePostings = transaction.postings.filter { $0.account.hasPrefix("Income:") && $0.amount != 0 }
+
+        if !expensePostings.isEmpty {
+            let netExpense = expensePostings.reduce(0) { $0 + $1.amount }
+            if netExpense < 0 {
+                kind = .income
+                minorUnits = abs(netExpense)
+                currency = expensePostings.first?.currency ?? "CNY"
+                isRefund = true
+                return
+            } else if netExpense > 0 {
+                kind = .expense
+                minorUnits = netExpense
+                currency = expensePostings.first?.currency ?? "CNY"
+                isRefund = false
+                return
+            }
         }
 
-        if let posting = transaction.postings.first(where: { $0.account.hasPrefix("Income:") && $0.amount != 0 }) {
-            kind = .income
-            minorUnits = abs(posting.amount)
-            currency = posting.currency ?? "CNY"
-            return
+        if !incomePostings.isEmpty {
+            let netIncome = incomePostings.reduce(0) { $0 + $1.amount }
+            if netIncome > 0 {
+                kind = .expense
+                minorUnits = netIncome
+                currency = incomePostings.first?.currency ?? "CNY"
+                isRefund = false
+                return
+            } else if netIncome < 0 {
+                kind = .income
+                minorUnits = abs(netIncome)
+                currency = incomePostings.first?.currency ?? "CNY"
+                let metadataType = transaction.metadata?["type"]?.stringValue ?? ""
+                isRefund = transaction.narration.contains("退款")
+                    || transaction.payee.contains("退款")
+                    || metadataType.contains("退款")
+                return
+            }
         }
 
         let posting = transaction.postings.max { abs($0.amount) < abs($1.amount) }
         kind = .transfer
         minorUnits = abs(posting?.amount ?? 0)
         currency = posting?.currency ?? "CNY"
+        isRefund = false
     }
 }
 

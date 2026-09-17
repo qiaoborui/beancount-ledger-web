@@ -785,11 +785,11 @@ private enum SafePreviewLedgerData {
         let valuationCurrency = commodities.contains(requested) ? requested : "CNY"
         let visible = transactions.filter { $0.date >= start && $0.date < end }
         let incomeCNY = visible.reduce(0) { total, transaction in
-            total + transaction.postings.filter { $0.account.hasPrefix("Income:") }.reduce(0) { $0 + abs($1.amount) }
+            total + transaction.postings.filter { $0.account.hasPrefix("Income:") }.reduce(0) { $0 + max(0, -$1.amount) }
         }
-        let expenseCNY = visible.reduce(0) { total, transaction in
-            total + transaction.postings.filter { $0.account.hasPrefix("Expenses:") }.reduce(0) { $0 + abs($1.amount) }
-        }
+        let expenseCNY = max(0, visible.reduce(0) { total, transaction in
+            total + transaction.postings.filter { $0.account.hasPrefix("Expenses:") }.reduce(0) { $0 + $1.amount }
+        })
         let income = converted(incomeCNY, from: "CNY", to: valuationCurrency) ?? 0
         let expense = converted(expenseCNY, from: "CNY", to: valuationCurrency) ?? 0
         let comparisons = periodComparisons(

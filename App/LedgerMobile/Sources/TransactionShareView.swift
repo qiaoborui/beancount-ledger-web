@@ -13,11 +13,12 @@ struct TransactionShareTextFormatter {
     ) -> String {
         if transactions.count == 1, let tx = transactions.first {
             let p = TransactionPresentation(transaction: tx)
-            let kindStr = p.kind == .expense ? "支出" : (p.kind == .income ? "收入" : "转账")
+            let kindStr = p.isRefund ? "退款" : (p.kind == .expense ? "支出" : (p.kind == .income ? "收入" : "转账"))
+            let sign = p.isRefund ? "+" : (p.kind == .expense ? "-" : (p.kind == .income ? "+" : ""))
             var lines = [
                 "【Ledger 记账凭证】",
                 "类型：\(kindStr)",
-                "金额：\(MoneyText.format(minorUnits: p.minorUnits, currency: p.currency))",
+                "金额：\(sign)\(MoneyText.format(minorUnits: p.minorUnits, currency: p.currency))",
                 "时间：\(tx.date)"
             ]
             let desc = tx.payee.isEmpty ? (tx.narration.isEmpty ? p.title : tx.narration) : (tx.narration.isEmpty ? tx.payee : "\(tx.payee) - \(tx.narration)")
@@ -119,6 +120,9 @@ struct SingleTransactionReceiptCard: View {
     }
 
     private var kindBadgeText: String {
+        if presentation.isRefund {
+            return "退款"
+        }
         switch presentation.kind {
         case .expense: return "支出"
         case .income: return "收入"

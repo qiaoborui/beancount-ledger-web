@@ -517,11 +517,11 @@ func dashboardDailyExpenseSeries(txns []Transaction, priceIndex PriceIndex, star
 		}
 		var expense int
 		for _, posting := range txn.Postings {
-			if strings.HasPrefix(posting.Account, "Expenses:") && posting.Amount > 0 {
+			if strings.HasPrefix(posting.Account, "Expenses:") {
 				expense += postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 			}
 		}
-		if expense <= 0 {
+		if expense == 0 {
 			continue
 		}
 		row := byDate[txn.Date]
@@ -530,11 +530,15 @@ func dashboardDailyExpenseSeries(txns []Transaction, priceIndex PriceIndex, star
 			byDate[txn.Date] = row
 		}
 		row.Amount += expense
-		row.TxCount++
+		if expense > 0 {
+			row.TxCount++
+		}
 	}
 	dates := make([]string, 0, len(byDate))
-	for date := range byDate {
-		dates = append(dates, date)
+	for date, row := range byDate {
+		if row.Amount > 0 {
+			dates = append(dates, date)
+		}
 	}
 	sort.Strings(dates)
 	out := make([]DashboardDailyExpense, 0, len(dates))
@@ -556,20 +560,26 @@ func dashboardWeekdayExpense(txns []Transaction, priceIndex PriceIndex, start, e
 		}
 		var expense int
 		for _, posting := range txn.Postings {
-			if strings.HasPrefix(posting.Account, "Expenses:") && posting.Amount > 0 {
+			if strings.HasPrefix(posting.Account, "Expenses:") {
 				expense += postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 			}
 		}
-		if expense <= 0 {
+		if expense == 0 {
 			continue
 		}
 		row := rows[weekdayLabel(txn.Date)]
 		row.Amount += expense
-		row.TxCount++
+		if expense > 0 {
+			row.TxCount++
+		}
 	}
 	out := make([]DashboardWeekdayExpense, 0, len(order))
 	for _, label := range order {
-		out = append(out, *rows[label])
+		row := rows[label]
+		if row.Amount < 0 {
+			row.Amount = 0
+		}
+		out = append(out, *row)
 	}
 	return out
 }
