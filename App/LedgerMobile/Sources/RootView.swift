@@ -4,6 +4,8 @@ struct RootView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var testingTagReport: String? = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--open-tag-report=") })?.replacingOccurrences(of: "--open-tag-report=", with: "")
+    @State private var testingEventTags: Bool = ProcessInfo.processInfo.arguments.contains("--open-event-tags")
 
     var body: some View {
         ZStack {
@@ -46,6 +48,26 @@ struct RootView: View {
                     WidgetDayTransactionsView(day: day)
                 }
                 .id(day)
+                .ledgerPrivacyProtectedSheet()
+            }
+        }
+        .sheet(isPresented: $testingEventTags) {
+            EventTagListView()
+                .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: Binding(
+            get: { testingTagReport != nil },
+            set: { if !$0 { testingTagReport = nil } }
+        )) {
+            if let tag = testingTagReport {
+                NavigationStack {
+                    EventTagReportView(tag: tag)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("关闭") { testingTagReport = nil }
+                            }
+                        }
+                }
                 .ledgerPrivacyProtectedSheet()
             }
         }

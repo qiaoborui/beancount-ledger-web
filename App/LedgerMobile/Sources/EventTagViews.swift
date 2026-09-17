@@ -175,7 +175,6 @@ private struct EventTagSummaryCard: View {
                 AmountLabel(
                     minorUnits: summary.netSpend,
                     currency: summary.currency,
-                    prefix: "¥",
                     font: .system(size: 18, weight: .bold, design: .rounded),
                     color: LedgerPalette.expense
                 )
@@ -220,6 +219,7 @@ struct EventTagReportView: View {
     let tag: String
 
     @State private var sharePresented = false
+    @State private var selectedDailyDate: String? = nil
 
     private var allTransactions: [LedgerTransaction] {
         session.visibleTransactions
@@ -307,7 +307,6 @@ struct EventTagReportView: View {
                 AmountLabel(
                     minorUnits: report.netSpend,
                     currency: report.currency,
-                    prefix: "¥",
                     font: .system(size: 32, weight: .bold, design: .rounded),
                     color: LedgerPalette.expense
                 )
@@ -431,19 +430,29 @@ struct EventTagReportView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(LedgerPalette.ink)
                 Spacer()
-                Text("共 \(report.dailySeries.count) 天有消费")
-                    .font(.system(size: 12))
-                    .foregroundStyle(LedgerPalette.secondary)
+                if let selectedDate = selectedDailyDate,
+                   let point = report.dailySeries.first(where: { $0.date == selectedDate }) {
+                    Text("\(formatShortDate(selectedDate)) · \(MoneyText.format(minorUnits: point.amount, currency: report.currency))")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                } else {
+                    Text("共 \(report.dailySeries.count) 天有消费")
+                        .font(.system(size: 12))
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
             }
 
             Chart(report.dailySeries) { point in
-                let dateStr = String(point.date.suffix(5))
-                let amountVal = Double(point.amount) / 100.0
+                let isSelected = selectedDailyDate == point.date
                 BarMark(
-                    x: .value("日期", dateStr),
-                    y: .value("金额", amountVal)
+                    x: .value("日期", point.date),
+                    y: .value("金额", Double(point.amount) / 100.0)
                 )
-                .foregroundStyle(LedgerPalette.cobalt)
+                .foregroundStyle(
+                    isSelected
+                        ? LedgerPalette.cobalt
+                        : (selectedDailyDate == nil ? LedgerPalette.cobalt : LedgerPalette.cobalt.opacity(0.45))
+                )
                 .cornerRadius(4)
             }
             .frame(height: 120)
@@ -459,14 +468,36 @@ struct EventTagReportView: View {
                 }
             }
             .chartXAxis {
-                AxisMarks { value in
+                let tickDates = xAxisLabels(for: report.dailySeries)
+                AxisMarks(values: tickDates) { value in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                        .foregroundStyle(LedgerPalette.line)
+                    AxisTick().foregroundStyle(LedgerPalette.lineStrong)
                     AxisValueLabel {
                         if let dateStr = value.as(String.self) {
-                            Text(dateStr)
-                                .font(.system(size: 10))
+                            Text(formatShortDate(dateStr))
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
                                 .foregroundStyle(LedgerPalette.secondary)
                         }
                     }
+                }
+            }
+            .chartOverlay { proxy in
+                GeometryReader { geometry in
+                    Rectangle()
+                        .fill(.clear)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    guard let plotFrame = proxy.plotFrame else { return }
+                                    let frame = geometry[plotFrame]
+                                    let x = value.location.x - frame.minX
+                                    guard x >= 0, x <= frame.width,
+                                          let dateStr: String = proxy.value(atX: x) else { return }
+                                    selectedDailyDate = dateStr
+                                }
+                        )
                 }
             }
         }
@@ -477,6 +508,34 @@ struct EventTagReportView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
         )
+    }
+
+    private func xAxisLabels(for points: [EventTagDailyPoint]) -> [String] {
+        guard !points.isEmpty else { return [] }
+        if points.count <= 5 {
+            return points.map(\.date)
+        }
+        let count = 5
+        let last = Double(points.count - 1)
+        var selected: [String] = []
+        for offset in 0..<count {
+            let index = Int((Double(offset) * last / Double(count - 1)).rounded())
+            let date = points[index].date
+            if !selected.contains(date) {
+                selected.append(date)
+            }
+        }
+        return selected
+    }
+
+    private func formatShortDate(_ dateStr: String) -> String {
+        let parts = dateStr.split(separator: "-")
+        if parts.count == 3 {
+            let m = Int(parts[1]) ?? 0
+            let d = Int(parts[2]) ?? 0
+            return "\(m)/\(d)"
+        }
+        return String(dateStr.suffix(5))
     }
 
     private var transactionsSection: some View {
@@ -670,7 +729,6 @@ struct EventReportShareCard: View {
                     AmountLabel(
                         minorUnits: report.netSpend,
                         currency: report.currency,
-                        prefix: "¥",
                         font: .system(size: 32, weight: .bold, design: .rounded),
                         color: LedgerPalette.expense
                     )

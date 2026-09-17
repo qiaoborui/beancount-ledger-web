@@ -237,6 +237,10 @@ final class LedgerSession: ObservableObject {
             ?? LedgerWidgetRefreshStatus(phase: .waitingForBiometrics)
         self.importIndexActivity = importIndexActivity
 
+        if let initialTab = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--initial-tab=") })?.replacingOccurrences(of: "--initial-tab=", with: "") {
+            primaryDestinationID = initialTab
+        }
+
         if localOnly {
             // Production local-only composition has no HTTP client or remote
             // repository factory. Providers own their own explicit sync transport.

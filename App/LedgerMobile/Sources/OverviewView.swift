@@ -3,8 +3,6 @@ import SwiftUI
 struct OverviewView: View {
     @EnvironmentObject private var session: LedgerSession
     @State private var creatingTransaction = false
-    @State private var pendingInboxPresented = false
-    @State private var eventTagListPresented = false
 
     var isRoot = true
 
@@ -21,61 +19,6 @@ struct OverviewView: View {
                     MonthlyConclusion(ledger: ledger, range: session.selectedRange)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
-                }
-
-                // 2. Pending Inbox Card (when pending items exist)
-                let pendingCount = ledger.transactions.filter { $0.isPendingReview }.count
-                if pendingCount > 0 {
-                    Section {
-                        Button {
-                            pendingInboxPresented = true
-                        } label: {
-                            HStack(spacing: 12) {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(Color.orange.opacity(0.14))
-                                        .frame(width: 40, height: 40)
-                                    Image(systemName: "tray.full.fill")
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .foregroundStyle(Color.orange)
-                                }
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(spacing: 6) {
-                                        Text("待整理账单")
-                                            .font(.system(size: 15, weight: .semibold))
-                                            .foregroundStyle(LedgerPalette.ink)
-                                        Text("\(pendingCount) 笔")
-                                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                                            .foregroundStyle(Color.orange)
-                                            .padding(.horizontal, 7)
-                                            .padding(.vertical, 2)
-                                            .background(Color.orange.opacity(0.12), in: Capsule())
-                                    }
-                                    Text("发现未明确分类或待核对的交易，点击快速收尾")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(LedgerPalette.secondary)
-                                        .lineLimit(1)
-                                }
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(LedgerPalette.secondary)
-                            }
-                            .padding(14)
-                            .background(LedgerPalette.panel)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .stroke(Color.orange.opacity(0.25), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(PressScaleButtonStyle(pressedScale: 0.98))
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                    }
                 }
 
                 // 2. Quick Actions Dock
@@ -192,14 +135,6 @@ struct OverviewView: View {
                 try await session.addLocalTransaction(entry)
             }
             .ledgerPrivacyProtectedSheet()
-        }
-        .sheet(isPresented: $pendingInboxPresented) {
-            PendingInboxView()
-                .ledgerPrivacyProtectedSheet()
-        }
-        .sheet(isPresented: $eventTagListPresented) {
-            EventTagListView()
-                .ledgerPrivacyProtectedSheet()
         }
     }
 

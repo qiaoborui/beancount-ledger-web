@@ -82,17 +82,10 @@ struct TransactionRow: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 5) {
-                    Text(presentation.title)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(LedgerPalette.ink)
-                        .lineLimit(1)
-                    if transaction.isPendingReview {
-                        Circle()
-                            .fill(Color.orange)
-                            .frame(width: 6, height: 6)
-                    }
-                }
+                Text(presentation.title)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(LedgerPalette.ink)
+                    .lineLimit(1)
                 TransactionContextLine(transaction: transaction, accountLabels: accountLabels)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -239,8 +232,6 @@ private struct LedgerTransactionActions: ViewModifier {
 struct CookieTransactionFilterBar: View {
     let filteredCount: Int
     @Binding var kindFilter: TransactionKindFilter
-    var pendingCount: Int = 0
-    var onTapPending: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 8) {
@@ -266,27 +257,6 @@ struct CookieTransactionFilterBar: View {
                     .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
                     .accessibilityLabel("按\(filter.title)筛选")
                     .accessibilityAddTraits(isSelected ? .isSelected : [])
-                }
-
-                if pendingCount > 0 {
-                    Button {
-                        LedgerFeedback.selection()
-                        onTapPending?()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(Color.orange)
-                                .frame(width: 6, height: 6)
-                            Text("待整理 \(pendingCount)")
-                                .font(.system(size: 12, weight: .semibold))
-                        }
-                        .foregroundStyle(Color.orange)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(Color.orange.opacity(0.12), in: Capsule())
-                    }
-                    .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
-                    .accessibilityLabel("查看待整理账单")
                 }
             }
 
@@ -315,7 +285,6 @@ struct TransactionsView: View {
     @State private var batchSharePresented = false
     @State private var singleShareTarget: LedgerTransaction?
     @State private var tagEditorPresented = false
-    @State private var pendingInboxPresented = false
     @State private var eventTagListPresented = false
     @State private var actionMessage: String?
     @State private var actionMessageStyle: LedgerStatusStyle = .failure
@@ -400,9 +369,7 @@ struct TransactionsView: View {
             Section {
                 CookieTransactionFilterBar(
                     filteredCount: filteredTransactions.count,
-                    kindFilter: $filters.kind,
-                    pendingCount: transactions.filter { $0.isPendingReview }.count,
-                    onTapPending: { pendingInboxPresented = true }
+                    kindFilter: $filters.kind
                 )
             }
             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
@@ -493,6 +460,15 @@ struct TransactionsView: View {
                 } else {
                     Menu {
                         Button {
+                            filterPresented = true
+                        } label: {
+                            Label(
+                                activeStructuredFilterCount > 0 ? "筛选交易 (\(activeStructuredFilterCount))" : "筛选交易",
+                                systemImage: activeStructuredFilterCount > 0 ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
+                            )
+                        }
+
+                        Button {
                             selectedTransactionIDs.removeAll()
                             isSelecting = true
                         } label: {
@@ -505,30 +481,12 @@ struct TransactionsView: View {
                         } label: {
                             Label("事件与项目核算", systemImage: "tag")
                         }
-
-                        let pendingCount = transactions.filter { $0.isPendingReview }.count
-                        if pendingCount > 0 {
-                            Button {
-                                pendingInboxPresented = true
-                            } label: {
-                                Label("待整理收件箱 (\(pendingCount))", systemImage: "tray.full")
-                            }
-                        }
                     } label: {
-                        Image(systemName: "ellipsis")
+                        Image(systemName: activeStructuredFilterCount > 0 ? "ellipsis.circle.fill" : "ellipsis")
                     }
                     .accessibilityLabel("流水操作")
                     .accessibilityIdentifier("transaction-actions")
                 }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { filterPresented = true } label: {
-                    Image(systemName: activeStructuredFilterCount > 0
-                        ? "line.3.horizontal.decrease.circle.fill"
-                        : "line.3.horizontal.decrease.circle")
-                }
-                .accessibilityLabel("筛选交易")
-                .accessibilityValue("\(activeStructuredFilterCount) 个筛选条件")
             }
         }
             .sheet(isPresented: $creatingTransaction) {
@@ -592,10 +550,6 @@ struct TransactionsView: View {
                     onOpenEventReports: { eventTagListPresented = true }
                 )
                 .ledgerPrivacyProtectedSheet()
-            }
-            .sheet(isPresented: $pendingInboxPresented) {
-                PendingInboxView()
-                    .ledgerPrivacyProtectedSheet()
             }
             .sheet(isPresented: $eventTagListPresented) {
                 EventTagListView()
