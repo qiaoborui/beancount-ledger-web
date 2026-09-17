@@ -25,6 +25,8 @@ private final class CoreOnlyRepository: LedgerRepository {
     func saveBQLHistory(query: String) async throws -> BQLHistoryRecord { throw unused }
     func generateBQLHistoryTitle(id: String) async throws -> BQLHistoryRecord { throw unused }
     func renameBQLHistory(id: String, title: String) async throws -> BQLHistoryRecord { throw unused }
+    func reconciliation(start: String, end: String) async throws -> LedgerReconciliationResponse { throw unused }
+    func reconcile(request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult { throw unused }
     func deleteBQLHistory(id: String) async throws { throw unused }
 }
 

@@ -999,6 +999,46 @@ final class LedgerSession: ObservableObject {
         await refresh()
     }
 
+    func reconcileAccount(
+        account: String,
+        actualAmount: String,
+        balanceDate: String,
+        adjustmentDate: String
+    ) async throws -> LedgerReconciliationResult {
+        guard phase == .ready else {
+            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+        }
+        let request = LedgerReconcileRequest(
+            account: account,
+            actualAmount: actualAmount,
+            balanceDate: balanceDate,
+            adjustmentDate: adjustmentDate
+        )
+        let result = try await performSensitiveRequest { repository in
+            try await repository.reconcile(request: request)
+        }
+        await refresh()
+        return result
+    }
+
+    func fetchReconciliationRows(start: String, end: String) async throws -> [LedgerReconciliationRow] {
+        guard phase == .ready else {
+            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+        }
+        let response = try await performSensitiveRequest { repository in
+            try await repository.reconciliation(start: start, end: end)
+        }
+        return response.rows
+    }
+
+    func accountStatus(for account: String) -> LedgerAccountStatus? {
+        ledger?.accountStatuses.first { $0.account == account }
+    }
+
+    func reconciliationRow(for account: String) -> LedgerReconciliationRow? {
+        ledger?.reconciliationRows.first { $0.account == account }
+    }
+
     func login() async {
         guard case let .locked(authenticated) = phase,
               let contextURL,
@@ -3187,10 +3227,12 @@ extension LedgerBootstrap {
             monthEndNetWorth: monthEndNetWorth,
             netWorthWindows: netWorthWindows,
             transactions: transactions,
+            reconciliationRows: reconciliationRows,
             accounts: accounts,
             commodities: commodities,
             prices: prices,
             valuationCurrency: valuationCurrency,
+            accountStatuses: accountStatuses,
             sensitiveUnlocked: sensitiveUnlocked
         )
     }

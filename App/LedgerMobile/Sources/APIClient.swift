@@ -136,11 +136,25 @@ protocol LedgerAPI: Sendable {
     func generateBQLHistoryTitle(baseURL: URL, id: String) async throws -> BQLHistoryRecord
     func renameBQLHistory(baseURL: URL, id: String, title: String) async throws -> BQLHistoryRecord
     func deleteBQLHistory(baseURL: URL, id: String) async throws
+    func reconciliation(baseURL: URL, start: String, end: String) async throws -> LedgerReconciliationResponse
+    func reconcile(baseURL: URL, request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult
+    func accountStatuses(baseURL: URL) async throws -> [LedgerAccountStatus]
     func lock(baseURL: URL) async throws
     func logout(baseURL: URL) async throws
 }
 
 extension LedgerAPI {
+    func reconciliation(baseURL: URL, start: String, end: String) async throws -> LedgerReconciliationResponse {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持对账查询")
+    }
+
+    func reconcile(baseURL: URL, request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持对账写入")
+    }
+
+    func accountStatuses(baseURL: URL) async throws -> [LedgerAccountStatus] {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持账户状态查询")
+    }
     func homeReport(
         baseURL: URL,
         start: String,
@@ -363,6 +377,8 @@ protocol LedgerRepository: AnyObject, Sendable {
     func saveBQLHistory(query: String) async throws -> BQLHistoryRecord
     func generateBQLHistoryTitle(id: String) async throws -> BQLHistoryRecord
     func renameBQLHistory(id: String, title: String) async throws -> BQLHistoryRecord
+    func reconciliation(start: String, end: String) async throws -> LedgerReconciliationResponse
+    func reconcile(request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult
     func deleteBQLHistory(id: String) async throws
 }
 
@@ -377,6 +393,14 @@ final class RemoteLedgerRepository: LedgerRepository, RemoteLedgerCapabilities {
     init(api: any LedgerAPI, baseURL: URL) {
         self.api = api
         self.baseURL = baseURL
+    }
+
+    func reconciliation(start: String, end: String) async throws -> LedgerReconciliationResponse {
+        try await api.reconciliation(baseURL: baseURL, start: start, end: end)
+    }
+
+    func reconcile(request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult {
+        try await api.reconcile(baseURL: baseURL, request: request)
     }
 
     func health() async throws -> HealthStatus { try await api.health(baseURL: baseURL) }
@@ -839,6 +863,29 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             method: "POST",
             body: request
         )
+    }
+
+    func reconciliation(baseURL: URL, start: String, end: String) async throws -> LedgerReconciliationResponse {
+        var components = URLComponents(url: baseURL.appending(path: "/api/ledger/reconciliation"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "start", value: start),
+            URLQueryItem(name: "end", value: end),
+        ]
+        guard let url = components?.url else { throw LedgerAPIError.invalidResponse }
+        return try await request(URLRequest(url: url))
+    }
+
+    func reconcile(baseURL: URL, request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult {
+        try await send(
+            baseURL: baseURL,
+            path: "/api/ledger/reconciliation",
+            method: "POST",
+            body: request
+        )
+    }
+
+    func accountStatuses(baseURL: URL) async throws -> [LedgerAccountStatus] {
+        try await get(baseURL: baseURL, path: "/api/ledger/account-status")
     }
 
     func updateTransaction(

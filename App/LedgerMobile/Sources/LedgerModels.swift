@@ -488,10 +488,12 @@ struct LedgerBootstrap: Decodable {
     let monthEndNetWorth: [LedgerNetWorthPoint]
     let netWorthWindows: LedgerNetWorthWindows?
     let transactions: [LedgerTransaction]
+    let reconciliationRows: [LedgerReconciliationRow]
     let accounts: [LedgerAccount]
     let commodities: [String]
     let prices: [LedgerPrice]
     let valuationCurrency: String
+    let accountStatuses: [LedgerAccountStatus]
     let sensitiveUnlocked: Bool
 
     private enum CodingKeys: String, CodingKey {
@@ -504,10 +506,12 @@ struct LedgerBootstrap: Decodable {
         case monthEndNetWorth
         case netWorthWindows
         case transactions
+        case reconciliationRows
         case accounts
         case commodities
         case prices
         case valuationCurrency
+        case accountStatuses
         case sensitiveUnlocked
     }
 
@@ -521,10 +525,12 @@ struct LedgerBootstrap: Decodable {
         monthEndNetWorth: [LedgerNetWorthPoint] = [],
         netWorthWindows: LedgerNetWorthWindows? = nil,
         transactions: [LedgerTransaction],
+        reconciliationRows: [LedgerReconciliationRow] = [],
         accounts: [LedgerAccount],
         commodities: [String] = [],
         prices: [LedgerPrice] = [],
         valuationCurrency: String,
+        accountStatuses: [LedgerAccountStatus] = [],
         sensitiveUnlocked: Bool
     ) {
         self.start = start
@@ -536,10 +542,12 @@ struct LedgerBootstrap: Decodable {
         self.monthEndNetWorth = monthEndNetWorth
         self.netWorthWindows = netWorthWindows
         self.transactions = transactions
+        self.reconciliationRows = reconciliationRows
         self.accounts = accounts
         self.commodities = commodities
         self.prices = prices
         self.valuationCurrency = valuationCurrency
+        self.accountStatuses = accountStatuses
         self.sensitiveUnlocked = sensitiveUnlocked
     }
 
@@ -554,12 +562,72 @@ struct LedgerBootstrap: Decodable {
         monthEndNetWorth = try container.decodeIfPresent([LedgerNetWorthPoint].self, forKey: .monthEndNetWorth) ?? []
         netWorthWindows = try container.decodeIfPresent(LedgerNetWorthWindows.self, forKey: .netWorthWindows)
         transactions = try container.decode([LedgerTransaction].self, forKey: .transactions)
+        reconciliationRows = try container.decodeIfPresent([LedgerReconciliationRow].self, forKey: .reconciliationRows) ?? []
         accounts = try container.decode([LedgerAccount].self, forKey: .accounts)
         commodities = try container.decodeIfPresent([String].self, forKey: .commodities) ?? []
         prices = try container.decodeIfPresent([LedgerPrice].self, forKey: .prices) ?? []
         valuationCurrency = try container.decode(String.self, forKey: .valuationCurrency)
+        accountStatuses = try container.decodeIfPresent([LedgerAccountStatus].self, forKey: .accountStatuses) ?? []
         sensitiveUnlocked = try container.decode(Bool.self, forKey: .sensitiveUnlocked)
     }
+}
+
+// MARK: - Reconciliation & Balance Assertion
+
+struct LedgerBalanceAssertion: Codable, Equatable, Sendable {
+    let date: String
+    let account: String
+    let amount: Int
+    let currency: String
+}
+
+struct LedgerAccountStatus: Codable, Equatable, Identifiable, Sendable {
+    var id: String { account }
+    let account: String
+    let status: String // "green" | "red" | "yellow" | "grey"
+    let lastEntryDate: String?
+    let lastEntryType: String?
+    let assertionAmount: Int?
+    let computedBalance: Int?
+
+    var isReconciled: Bool { status == "green" }
+    var hasIssue: Bool { status == "red" }
+    var needsReconciliation: Bool { status == "yellow" }
+}
+
+struct LedgerReconciliationRow: Codable, Equatable, Identifiable, Sendable {
+    var id: String { account }
+    let account: String
+    let alias: String?
+    let label: String
+    let currency: String
+    let ledgerBalance: Int
+    let status: String // "pending" | "asserted"
+    let lastAssertion: LedgerBalanceAssertion?
+
+    var isAsserted: Bool { status == "asserted" }
+}
+
+struct LedgerReconciliationResponse: Codable, Equatable, Sendable {
+    let start: String
+    let end: String
+    let monthPrefix: String
+    let rows: [LedgerReconciliationRow]
+}
+
+struct LedgerReconcileRequest: Codable, Equatable, Sendable {
+    let account: String
+    let actualAmount: String
+    let balanceDate: String
+    let adjustmentDate: String
+}
+
+struct LedgerReconciliationResult: Codable, Equatable, Sendable {
+    let ok: Bool
+    let ledgerBalance: Int
+    let actual: Int
+    let diff: Int
+    let beanText: String?
 }
 
 struct LedgerSummary: Decodable, Equatable {

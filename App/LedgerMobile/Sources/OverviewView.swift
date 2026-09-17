@@ -3,6 +3,7 @@ import SwiftUI
 struct OverviewView: View {
     @EnvironmentObject private var session: LedgerSession
     @State private var creatingTransaction = false
+    @State private var showingReconciliation = false
 
     var isRoot = true
 
@@ -43,6 +44,19 @@ struct OverviewView: View {
                     )
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
+                }
+
+                // 2.5 Reconciliation Reminder (if pending accounts exist)
+                let pendingCount = ledger.accountStatuses.filter { $0.status == "yellow" || $0.status == "red" }.count
+                if pendingCount > 0 {
+                    Section {
+                        OverviewReconciliationBanner(
+                            pendingCount: pendingCount,
+                            onTap: { showingReconciliation = true }
+                        )
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                        .listRowBackground(Color.clear)
+                    }
                 }
 
                 // 3. Top Spending Categories
@@ -135,6 +149,11 @@ struct OverviewView: View {
                 try await session.addLocalTransaction(entry)
             }
             .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: $showingReconciliation) {
+            NavigationStack {
+                ReconciliationView()
+            }
         }
     }
 
@@ -793,5 +812,55 @@ private struct OverviewComparisonRow: View {
 
     private var accessibilityText: String {
         "\(label)，\(valueText)，当前 \(comparison.currentRange.start) 至 \(comparison.currentRange.end)，对比 \(comparison.baselineRange.start) 至 \(comparison.baselineRange.end)"
+    }
+}
+
+private struct OverviewReconciliationBanner: View {
+    let pendingCount: Int
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(LedgerPalette.gold.opacity(0.15))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.gold)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("有 \(pendingCount) 个账户待核对余额")
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.ink)
+                    Text("核对账面与实际余额，保持账目闭环")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
+
+                Spacer()
+
+                HStack(spacing: 4) {
+                    Text("去对账")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+            }
+            .padding(12)
+            .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(LedgerPalette.gold.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PressScaleButtonStyle())
     }
 }
