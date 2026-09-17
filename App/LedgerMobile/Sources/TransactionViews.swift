@@ -187,6 +187,7 @@ private struct LedgerTransactionActions: ViewModifier {
                 currency: session.ledger?.valuationCurrency ?? "CNY",
                 accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
             )
+            .environmentObject(session)
         case .edit:
             TransactionEditorView(
                 transaction: action.transaction,
@@ -582,6 +583,7 @@ struct TransactionsView: View {
                     currency: session.ledger?.valuationCurrency ?? "CNY",
                     accountLabels: accountLabels
                 )
+                .environmentObject(session)
                 .ledgerPrivacyProtectedSheet()
             }
             .sheet(item: $singleShareTarget) { tx in
@@ -590,6 +592,7 @@ struct TransactionsView: View {
                     currency: session.ledger?.valuationCurrency ?? "CNY",
                     accountLabels: accountLabels
                 )
+                .environmentObject(session)
                 .ledgerPrivacyProtectedSheet()
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -1712,6 +1715,7 @@ struct TransactionDetailView: View {
                 currency: session.ledger?.valuationCurrency ?? presentation.currency,
                 accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
             )
+            .environmentObject(session)
             .ledgerPrivacyProtectedSheet()
         }
         .sheet(isPresented: $deletionPresented) {

@@ -72,6 +72,22 @@ struct TransactionShareTextFormatter {
     }
 }
 
+// MARK: - Safe Share Amount Label (No EnvironmentObject dependency)
+
+struct ShareAmountText: View {
+    let minorUnits: Int
+    let currency: String
+    var prefix: String = ""
+    var font: Font = .system(size: 14, weight: .semibold, design: .rounded)
+    var color: Color = LedgerPalette.ink
+
+    var body: some View {
+        Text(prefix + MoneyText.format(minorUnits: abs(minorUnits), currency: currency))
+            .font(font.monospacedDigit())
+            .foregroundStyle(color)
+    }
+}
+
 // MARK: - Single Transaction Receipt Card (For Image Sharing)
 
 struct SingleTransactionReceiptCard: View {
@@ -150,7 +166,7 @@ struct SingleTransactionReceiptCard: View {
                 }
                 .padding(.top, 4)
 
-                AmountLabel(
+                ShareAmountText(
                     minorUnits: presentation.minorUnits,
                     currency: presentation.currency,
                     prefix: amountPrefix,
@@ -336,7 +352,7 @@ struct CombinedTransactionStatementCard: View {
                     Text("支出合计")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(LedgerPalette.secondary)
-                    AmountLabel(
+                    ShareAmountText(
                         minorUnits: totalExpense,
                         currency: currency,
                         font: .system(size: 15, weight: .bold, design: .rounded),
@@ -355,7 +371,7 @@ struct CombinedTransactionStatementCard: View {
                     Text("收入合计")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(LedgerPalette.secondary)
-                    AmountLabel(
+                    ShareAmountText(
                         minorUnits: totalIncome,
                         currency: currency,
                         font: .system(size: 15, weight: .bold, design: .rounded),
@@ -374,10 +390,10 @@ struct CombinedTransactionStatementCard: View {
                     Text("收支差额")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(LedgerPalette.secondary)
-                    AmountLabel(
-                        minorUnits: netAmount,
+                    ShareAmountText(
+                        minorUnits: abs(netAmount),
                         currency: currency,
-                        prefix: netAmount > 0 ? "+" : "",
+                        prefix: netAmount > 0 ? "+" : (netAmount < 0 ? "-" : ""),
                         font: .system(size: 15, weight: .bold, design: .rounded),
                         color: netAmount >= 0 ? LedgerPalette.ink : LedgerPalette.expense
                     )
@@ -430,7 +446,7 @@ struct CombinedTransactionStatementCard: View {
 
                         Spacer()
 
-                        AmountLabel(
+                        ShareAmountText(
                             minorUnits: p.minorUnits,
                             currency: p.currency,
                             prefix: sign,
@@ -570,10 +586,9 @@ struct TransactionShareSheet: View {
                     Button("关闭") { dismiss() }
                 }
             }
-            .task(id: selectedTab) {
-                if selectedTab == .card && renderedUIImage == nil {
-                    renderCard()
-                }
+            .task {
+                await Task.yield()
+                renderCard()
             }
         }
     }
@@ -626,25 +641,7 @@ struct TransactionShareSheet: View {
                             item: imageURL,
                             preview: SharePreview(
                                 isSingle ? "记账凭证" : "消费对账清单",
-                                image: Image(uiImage: renderedUIImage ?? UIImage())
-                            )
-                        ) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "square.and.arrow.up")
-                                Text("系统分享")
-                            }
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.white)
-                            .frame(maxWidth: .infinity, minHeight: 46)
-                            .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        }
-                        .buttonStyle(PressScaleButtonStyle())
-                    } else if let uiImage = renderedUIImage {
-                        ShareLink(
-                            item: Image(uiImage: uiImage),
-                            preview: SharePreview(
-                                isSingle ? "记账凭证" : "消费对账清单",
-                                image: Image(uiImage: uiImage)
+                                icon: Image(systemName: "doc.text.image")
                             )
                         ) {
                             HStack(spacing: 6) {
@@ -661,10 +658,17 @@ struct TransactionShareSheet: View {
                         Button {
                             renderCard()
                         } label: {
-                            ProgressView()
-                                .frame(maxWidth: .infinity, minHeight: 46)
-                                .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                    .tint(.white)
+                                Text("生成图片中...")
+                            }
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.white)
+                            .frame(maxWidth: .infinity, minHeight: 46)
+                            .background(LedgerPalette.cobalt.opacity(0.8), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
+                        .disabled(true)
                     }
                 }
             }
@@ -737,32 +741,40 @@ struct TransactionShareSheet: View {
 
     @MainActor
     private func renderCard() {
-        let renderer: ImageRenderer<AnyView>
+        let card: AnyView
         if isSingle, let tx = transactions.first {
-            renderer = ImageRenderer(content: AnyView(
+            card = AnyView(
                 SingleTransactionReceiptCard(
                     transaction: tx,
                     accountLabels: accountLabels
                 )
-            ))
+            )
         } else {
-            renderer = ImageRenderer(content: AnyView(
+            card = AnyView(
                 CombinedTransactionStatementCard(
                     transactions: transactions,
                     currency: currency,
                     accountLabels: accountLabels
                 )
-            ))
+            )
         }
-        renderer.scale = displayScale > 1.0 ? displayScale : 3.0
+        let renderer = ImageRenderer(content: card)
+        renderer.scale = 3.0
         if let uiImage = renderer.uiImage {
             self.renderedUIImage = uiImage
             if let data = uiImage.pngData() {
                 let tempDir = FileManager.default.temporaryDirectory
-                let fileName = isSingle ? "Ledger-Receipt-\(transactions.first?.date ?? "tx").png" : "Ledger-Statement-\(transactions.count)tx.png"
+                let safeDate = transactions.first?.date.replacingOccurrences(of: "-", with: "") ?? "tx"
+                let fileName = isSingle ? "Ledger-Receipt-\(safeDate).png" : "Ledger-Statement-\(transactions.count)tx.png"
                 let fileURL = tempDir.appendingPathComponent(fileName)
-                try? data.write(to: fileURL)
-                self.tempImageURL = fileURL
+                do {
+                    try data.write(to: fileURL)
+                    self.tempImageURL = fileURL
+                } catch {
+                    #if DEBUG
+                    print("[Share] Failed to write temp image: \(error)")
+                    #endif
+                }
             }
         }
     }
@@ -773,6 +785,13 @@ struct TransactionShareSheet: View {
             UIPasteboard.general.image = image
             showNotice("已拷贝长图到剪贴板")
             LedgerFeedback.success()
+        } else if let url = tempImageURL, let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
+            UIPasteboard.general.image = img
+            showNotice("已拷贝长图到剪贴板")
+            LedgerFeedback.success()
+        } else {
+            renderCard()
+            showNotice("正在生成图片，请稍候")
         }
         #endif
     }
