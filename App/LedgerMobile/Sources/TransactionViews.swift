@@ -2486,17 +2486,26 @@ struct CookieFastTransactionEditorBody: View {
 
     @State private var saving = false
     @State private var errorMessage: String?
-    @State private var showAccountPicker = false
-    @State private var accountPickerPurpose: AccountPickerPurpose = .funding
+    @State private var activeAccountPickerPurpose: AccountPickerPurpose?
     @State private var showDatePickerSheet = false
     @State private var failureFeedback = 0
 
-    private enum AccountPickerPurpose: Equatable {
+    private enum AccountPickerPurpose: Identifiable, Equatable {
         case funding
         case transferSource
         case transferTarget
         case customCategory
         case splitPosting(Int)
+
+        var id: String {
+            switch self {
+            case .funding: return "funding"
+            case .transferSource: return "transferSource"
+            case .transferTarget: return "transferTarget"
+            case .customCategory: return "customCategory"
+            case .splitPosting(let idx): return "splitPosting_\(idx)"
+            }
+        }
     }
 
     private var availableCurrencies: [String] {
@@ -2623,8 +2632,8 @@ struct CookieFastTransactionEditorBody: View {
                     .disabled(saving)
                 }
             }
-            .sheet(isPresented: $showAccountPicker) {
-                accountPickerSheet
+            .sheet(item: $activeAccountPickerPurpose) { purpose in
+                accountPickerSheet(for: purpose)
             }
             .sheet(isPresented: $showDatePickerSheet) {
                 datePickerSheet
@@ -2826,8 +2835,7 @@ struct CookieFastTransactionEditorBody: View {
                         // Account Selector Button
                         Button {
                             LedgerFeedback.light()
-                            accountPickerPurpose = .splitPosting(index)
-                            showAccountPicker = true
+                            activeAccountPickerPurpose = .splitPosting(index)
                         } label: {
                             HStack(spacing: 8) {
                                 ZStack {
@@ -3028,7 +3036,7 @@ struct CookieFastTransactionEditorBody: View {
         return ScrollView {
             LazyVGrid(columns: columns, spacing: 14) {
                 ForEach(currentCategories) { cat in
-                    let isSelected = selectedCategoryID == cat.id
+                    let isSelected = selectedCategoryID == cat.id && customExpenseAccount == nil && customIncomeAccount == nil
                     Button {
                         LedgerFeedback.selection()
                         withAnimation(.spring(response: 0.2, dampingFraction: 0.75)) {
@@ -3063,21 +3071,20 @@ struct CookieFastTransactionEditorBody: View {
 
                 Button {
                     LedgerFeedback.light()
-                    accountPickerPurpose = .customCategory
-                    showAccountPicker = true
+                    activeAccountPickerPurpose = .customCategory
                 } label: {
                     VStack(spacing: 6) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(Color(uiColor: .tertiarySystemFill))
+                                .fill(customCategoryDisplayName != nil ? kind.themeColor.opacity(0.12) : Color(uiColor: .tertiarySystemFill))
                                 .frame(width: 48, height: 48)
 
                             Image(systemName: "ellipsis")
                                 .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(LedgerPalette.secondary)
+                                .foregroundStyle(customCategoryDisplayName != nil ? kind.themeColor : LedgerPalette.secondary)
                         }
 
-                        Text(customCategoryDisplayName ?? "自定义")
+                        Text(customCategoryDisplayName ?? "更多分类")
                             .font(.system(size: 12, weight: customCategoryDisplayName != nil ? .semibold : .regular))
                             .foregroundStyle(customCategoryDisplayName != nil ? kind.themeColor : LedgerPalette.secondary)
                             .lineLimit(1)
@@ -3105,8 +3112,7 @@ struct CookieFastTransactionEditorBody: View {
     private var transferRouteCard: some View {
         VStack(spacing: 16) {
             Button {
-                accountPickerPurpose = .transferSource
-                showAccountPicker = true
+                activeAccountPickerPurpose = .transferSource
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "arrow.up.circle.fill")
@@ -3135,8 +3141,7 @@ struct CookieFastTransactionEditorBody: View {
                 .foregroundStyle(LedgerPalette.cobalt)
 
             Button {
-                accountPickerPurpose = .transferTarget
-                showAccountPicker = true
+                activeAccountPickerPurpose = .transferTarget
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "arrow.down.circle.fill")
@@ -3169,8 +3174,7 @@ struct CookieFastTransactionEditorBody: View {
                 if !isSplitMode && kind != .transfer {
                     Button {
                         LedgerFeedback.light()
-                        accountPickerPurpose = .funding
-                        showAccountPicker = true
+                        activeAccountPickerPurpose = .funding
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: kind == .expense ? "creditcard.fill" : "building.columns.fill")
@@ -3257,9 +3261,9 @@ struct CookieFastTransactionEditorBody: View {
         }
     }
 
-    private var accountPickerSheet: some View {
+    private func accountPickerSheet(for purpose: AccountPickerPurpose) -> some View {
         let choices: [LedgerAccountChoice] = {
-            switch accountPickerPurpose {
+            switch purpose {
             case .funding, .transferSource, .transferTarget:
                 return assetAccounts.map {
                     LedgerAccountChoice(account: $0.account, label: $0.displayLabel, group: $0.group, active: $0.active)
@@ -3276,13 +3280,23 @@ struct CookieFastTransactionEditorBody: View {
             }
         }()
 
+        let title: String = {
+            switch purpose {
+            case .funding: return kind == .expense ? "选择付款账户" : "选择收款账户"
+            case .transferSource: return "选择转出账户"
+            case .transferTarget: return "选择转入账户"
+            case .customCategory: return kind == .expense ? "选择支出分类" : "选择收入分类"
+            case .splitPosting(let idx): return "选择第 \(idx + 1) 条分录账户"
+            }
+        }()
+
         return NavigationStack {
             LedgerAccountPicker(
-                title: accountPickerTitle,
+                title: title,
                 accounts: choices,
                 selection: Binding(
                     get: {
-                        switch accountPickerPurpose {
+                        switch purpose {
                         case .funding: return assetAccount
                         case .transferSource: return transferSourceAccount
                         case .transferTarget: return transferTargetAccount
@@ -3293,32 +3307,35 @@ struct CookieFastTransactionEditorBody: View {
                         }
                     },
                     set: { newAcc in
-                        switch accountPickerPurpose {
+                        switch purpose {
                         case .funding: assetAccount = newAcc
                         case .transferSource: transferSourceAccount = newAcc
                         case .transferTarget: transferTargetAccount = newAcc
                         case .customCategory:
-                            if kind == .expense { customExpenseAccount = newAcc }
-                            else { customIncomeAccount = newAcc }
+                            if kind == .expense {
+                                customExpenseAccount = newAcc
+                                if let matchedCat = CookieCategoryItem.expenseCategories.first(where: { newAcc.hasPrefix($0.defaultAccountPrefix) }) {
+                                    selectedCategoryID = matchedCat.id
+                                } else {
+                                    selectedCategoryID = ""
+                                }
+                            } else {
+                                customIncomeAccount = newAcc
+                                if let matchedCat = CookieCategoryItem.incomeCategories.first(where: { newAcc.hasPrefix($0.defaultAccountPrefix) }) {
+                                    selectedCategoryID = matchedCat.id
+                                } else {
+                                    selectedCategoryID = ""
+                                }
+                            }
                         case .splitPosting(let idx):
                             if splitPostings.indices.contains(idx) {
                                 splitPostings[idx].account = newAcc
                             }
                         }
-                        showAccountPicker = false
+                        activeAccountPickerPurpose = nil
                     }
                 )
             )
-        }
-    }
-
-    private var accountPickerTitle: String {
-        switch accountPickerPurpose {
-        case .funding: return kind == .expense ? "选择付款账户" : "选择收款账户"
-        case .transferSource: return "选择转出账户"
-        case .transferTarget: return "选择转入账户"
-        case .customCategory: return kind == .expense ? "选择支出分类账户" : "选择收入分类账户"
-        case .splitPosting(let idx): return "选择第 \(idx + 1) 条分录账户"
         }
     }
 
@@ -3417,11 +3434,31 @@ struct CookieFastTransactionEditorBody: View {
 
             if p1.account.hasPrefix("Expenses:") {
                 kind = .expense
-                customExpenseAccount = p1.account
+                if let matchedCat = CookieCategoryItem.expenseCategories.first(where: { p1.account.hasPrefix($0.defaultAccountPrefix) }) {
+                    selectedCategoryID = matchedCat.id
+                    if resolveExpenseAccount() == p1.account {
+                        customExpenseAccount = nil
+                    } else {
+                        customExpenseAccount = p1.account
+                    }
+                } else {
+                    selectedCategoryID = ""
+                    customExpenseAccount = p1.account
+                }
                 assetAccount = p2.account
             } else if p1.account.hasPrefix("Income:") {
                 kind = .income
-                customIncomeAccount = p1.account
+                if let matchedCat = CookieCategoryItem.incomeCategories.first(where: { p1.account.hasPrefix($0.defaultAccountPrefix) }) {
+                    selectedCategoryID = matchedCat.id
+                    if resolveIncomeAccount() == p1.account {
+                        customIncomeAccount = nil
+                    } else {
+                        customIncomeAccount = p1.account
+                    }
+                } else {
+                    selectedCategoryID = ""
+                    customIncomeAccount = p1.account
+                }
                 assetAccount = p2.account
             } else {
                 kind = .transfer
