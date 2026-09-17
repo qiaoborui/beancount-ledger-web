@@ -280,10 +280,8 @@ struct TransactionsView: View {
     @State private var duplicateTarget: LedgerTransaction?
     @State private var editingTarget: LedgerTransaction?
     @State private var deletionTarget: LedgerTransaction?
-    @State private var selectingTags = false
+    @State private var isSelecting = false
     @State private var selectedTransactionIDs: Set<String> = []
-    @State private var selectingForShare = false
-    @State private var selectedForShareIDs: Set<String> = []
     @State private var batchSharePresented = false
     @State private var singleShareTarget: LedgerTransaction?
     @State private var tagEditorPresented = false
@@ -324,35 +322,29 @@ struct TransactionsView: View {
             .sorted { $0.date > $1.date }
     }
 
-    private var selectedShareTransactions: [LedgerTransaction] {
-        filteredTransactions.filter { selectedForShareIDs.contains($0.id) }
+    private var selectedTransactions: [LedgerTransaction] {
+        filteredTransactions.filter { selectedTransactionIDs.contains($0.id) }
     }
 
-    private var selectedShareExpense: Int {
-        selectedShareTransactions.reduce(0) { sum, tx in
-            let p = TransactionPresentation(transaction: tx)
-            return p.kind == .expense ? sum + p.minorUnits : sum
-        }
+    private var allVisibleSelected: Bool {
+        !filteredTransactions.isEmpty && filteredTransactions.allSatisfy { selectedTransactionIDs.contains($0.id) }
     }
 
-    private var allVisibleShareSelected: Bool {
-        !filteredTransactions.isEmpty && filteredTransactions.allSatisfy { selectedForShareIDs.contains($0.id) }
-    }
-
-    private func toggleAllVisibleForShare() {
-        if allVisibleShareSelected {
-            selectedForShareIDs.removeAll()
+    private func toggleAllVisible() {
+        if allVisibleSelected {
+            selectedTransactionIDs.removeAll()
         } else {
-            selectedForShareIDs = Set(filteredTransactions.map(\.id))
+            selectedTransactionIDs = Set(filteredTransactions.map(\.id))
         }
+        selectionFeedback &+= 1
     }
 
-    private func toggleShareSelection(_ transaction: LedgerTransaction) {
+    private func toggleSelection(_ transaction: LedgerTransaction) {
         LedgerFeedback.selection()
-        if selectedForShareIDs.contains(transaction.id) {
-            selectedForShareIDs.remove(transaction.id)
+        if selectedTransactionIDs.contains(transaction.id) {
+            selectedTransactionIDs.remove(transaction.id)
         } else {
-            selectedForShareIDs.insert(transaction.id)
+            selectedTransactionIDs.insert(transaction.id)
         }
     }
 
@@ -459,33 +451,20 @@ struct TransactionsView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                if selectingForShare {
+                if isSelecting {
                     Button("完成") {
-                        selectingForShare = false
-                        selectedForShareIDs.removeAll()
-                    }
-                    .fontWeight(.semibold)
-                    .accessibilityLabel("完成分享选择")
-                } else if selectingTags {
-                    Button("完成") {
-                        selectingTags = false
+                        isSelecting = false
                         selectedTransactionIDs.removeAll()
                     }
-                    .accessibilityLabel("完成标签选择")
+                    .fontWeight(.semibold)
+                    .accessibilityLabel("完成多选")
                 } else {
                     Menu {
                         Button {
-                            selectedForShareIDs.removeAll()
-                            selectingForShare = true
+                            selectedTransactionIDs.removeAll()
+                            isSelecting = true
                         } label: {
-                            Label("批量合并分享", systemImage: "square.and.arrow.up.on.square")
-                        }
-                        .accessibilityIdentifier("transaction-batch-share")
-
-                        Button {
-                            selectingTags = true
-                        } label: {
-                            Label("选择交易添加标签", systemImage: "checkmark.circle")
+                            Label("多选流水", systemImage: "checkmark.circle")
                         }
                         .accessibilityIdentifier("transaction-tag-selection")
                     } label: {
@@ -579,7 +558,7 @@ struct TransactionsView: View {
             }
             .sheet(isPresented: $batchSharePresented) {
                 TransactionShareSheet(
-                    transactions: selectedShareTransactions,
+                    transactions: selectedTransactions,
                     currency: session.ledger?.valuationCurrency ?? "CNY",
                     accountLabels: accountLabels
                 )
@@ -596,40 +575,19 @@ struct TransactionsView: View {
                 .ledgerPrivacyProtectedSheet()
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if selectingForShare {
-                    TransactionBatchShareBar(
-                        selectedCount: selectedForShareIDs.count,
-                        totalCount: filteredTransactions.count,
-                        selectedExpense: selectedShareExpense,
-                        currency: session.ledger?.valuationCurrency ?? "CNY",
-                        allSelected: allVisibleShareSelected,
-                        onToggleAll: toggleAllVisibleForShare,
-                        onShare: {
-                            LedgerFeedback.light()
-                            batchSharePresented = true
-                        },
-                        onCancel: {
-                            selectingForShare = false
-                            selectedForShareIDs.removeAll()
-                        }
-                    )
-                } else if selectingTags {
-                    TransactionTagSelectionBar(
+                if isSelecting {
+                    TransactionBatchActionBar(
                         selectedCount: selectedTransactionIDs.count,
-                        totalCount: min(filteredTransactions.filter(isTagEligible).count, TransactionTagSelectionRules.maximumCount),
-                        allSelected: allVisibleEligibleSelected,
-                        onToggleAll: toggleAllVisibleForTags,
-                        onAddTags: { tagEditorPresented = true },
-                        onCancel: {
-                            selectingTags = false
-                            selectedTransactionIDs.removeAll()
-                        }
+                        totalCount: filteredTransactions.count,
+                        allSelected: allVisibleSelected,
+                        onToggleAll: toggleAllVisible,
+                        onAddTags: handleAddTags,
+                        onShare: handleShare
                     )
                 }
             }
             .onChange(of: transactions.map(\.id)) { _, ids in
                 selectedTransactionIDs.formIntersection(ids)
-                selectedForShareIDs.formIntersection(ids)
             }
         .sensoryFeedback(.success, trigger: confirmationFeedback)
         .sensoryFeedback(.selection, trigger: selectionFeedback)
@@ -637,24 +595,10 @@ struct TransactionsView: View {
 
     @ViewBuilder
     private func transactionRow(for transaction: LedgerTransaction) -> some View {
-        if selectingForShare {
-            let isSelected = selectedForShareIDs.contains(transaction.id)
-            Button {
-                toggleShareSelection(transaction)
-            } label: {
-                TransactionCard(
-                    transaction: transaction,
-                    accountLabels: accountLabels,
-                    selectionState: isSelected
-                )
-            }
-            .buttonStyle(.plain)
-            .listRowBackground(isSelected ? LedgerPalette.cobalt.opacity(0.08) : LedgerPalette.canvas)
-            .accessibilityIdentifier("transaction-share-row-\(transaction.source.line)")
-        } else if selectingTags {
+        if isSelecting {
             let isSelected = selectedTransactionIDs.contains(transaction.id)
             Button {
-                toggleTagSelection(transaction)
+                toggleSelection(transaction)
             } label: {
                 TransactionSelectableCard(
                     transaction: transaction,
@@ -719,20 +663,14 @@ struct TransactionsView: View {
                 }
 
                 Button {
-                    selectingTags = true
-                    toggleTagSelection(transaction)
+                    isSelecting = true
+                    selectedTransactionIDs = [transaction.id]
                 } label: {
-                    Label("添加标签", systemImage: "tag")
+                    Label("多选", systemImage: "checklist")
                 }
                 .tint(LedgerPalette.cobalt)
-                .disabled(!isTagEligible(transaction))
             }
         }
-    }
-
-    private var allVisibleEligibleSelected: Bool {
-        let eligible = filteredTransactions.filter(isTagEligible).prefix(TransactionTagSelectionRules.maximumCount)
-        return !eligible.isEmpty && eligible.allSatisfy { selectedTransactionIDs.contains($0.id) }
     }
 
     private func isTagEligible(_ transaction: LedgerTransaction) -> Bool {
@@ -740,39 +678,25 @@ struct TransactionsView: View {
             && session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites != true
     }
 
-    private func toggleTagSelection(_ transaction: LedgerTransaction) {
-        guard isTagEligible(transaction) else {
+    private func handleAddTags() {
+        let eligible = selectedTransactions.filter(isTagEligible)
+        if eligible.isEmpty {
             actionMessageStyle = .failure
-            actionMessage = "该交易缺少并发校验信息，请刷新后重试。"
+            actionMessage = "所选交易缺少并发校验信息，暂无法添加标签。"
             return
         }
-        if selectedTransactionIDs.contains(transaction.id) {
-            selectedTransactionIDs.remove(transaction.id)
-            selectionFeedback &+= 1
-        } else if selectedTransactionIDs.count < TransactionTagSelectionRules.maximumCount {
-            selectedTransactionIDs.insert(transaction.id)
-            selectionFeedback &+= 1
-        } else {
+        if eligible.count > TransactionTagSelectionRules.maximumCount {
             actionMessageStyle = .failure
-            actionMessage = "一次最多选择 200 条交易。"
+            actionMessage = "一次最多为 \(TransactionTagSelectionRules.maximumCount) 笔交易添加标签。"
+            return
         }
+        tagEditorPresented = true
     }
 
-    private func toggleAllVisibleForTags() {
-        let previousSelection = selectedTransactionIDs
-        defer { if previousSelection != selectedTransactionIDs { selectionFeedback &+= 1 } }
-        let eligible = filteredTransactions.filter(isTagEligible)
-        if allVisibleEligibleSelected {
-            selectedTransactionIDs.subtract(eligible.map(\.id))
-        } else {
-            let updated = TransactionTagSelectionRules.adding(eligible.map(\.id), to: selectedTransactionIDs)
-            if updated.count == TransactionTagSelectionRules.maximumCount,
-               eligible.contains(where: { !updated.contains($0.id) }) {
-                actionMessageStyle = .failure
-                actionMessage = "一次最多选择 200 条交易。"
-            }
-            selectedTransactionIDs = updated
-        }
+    private func handleShare() {
+        guard !selectedTransactionIDs.isEmpty else { return }
+        LedgerFeedback.light()
+        batchSharePresented = true
     }
 
     private func applyTags(_ tags: [String]) async throws {
@@ -780,7 +704,7 @@ struct TransactionsView: View {
         guard !selected.isEmpty else { throw LedgerTagValidationError.empty }
         try await session.addTransactionTags(sources: selected.map(\.source), tags: tags)
         selectedTransactionIDs.removeAll()
-        selectingTags = false
+        isSelecting = false
         confirmationFeedback &+= 1
         actionMessageStyle = .confirmed
         actionMessage = "已验证，并为 \(selected.count) 条交易添加标签。"
@@ -1186,104 +1110,66 @@ private struct TransactionSelectableCard: View {
         TransactionCard(transaction: transaction, accountLabels: accountLabels, selectionState: selected)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityLabel("\(selected ? "已选择" : "未选择")，\(transaction.payee)，用于添加标签")
+        .accessibilityLabel("\(selected ? "已选择" : "未选择")，\(transaction.payee)")
     }
 }
 
-private struct TransactionTagSelectionBar: View {
+private struct TransactionBatchActionBar: View {
     let selectedCount: Int
     let totalCount: Int
     let allSelected: Bool
     let onToggleAll: () -> Void
     let onAddTags: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        HStack(spacing: LedgerSpacing.sm) {
-            Button(allSelected ? "清空" : "全选") { onToggleAll() }
-                .font(.system(.caption, design: .default, weight: .semibold))
-                .foregroundStyle(LedgerPalette.cobalt)
-                .frame(minWidth: 48, minHeight: 44)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("已选 \(selectedCount) 条")
-                    .font(.system(.caption, design: .default, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(LedgerPalette.ink)
-                Text("当前可选 \(totalCount) 条")
-                    .font(.system(.caption2, design: .default).monospacedDigit())
-                    .foregroundStyle(LedgerPalette.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Button("取消", action: onCancel)
-                .font(.system(.caption, design: .default, weight: .semibold))
-                .foregroundStyle(LedgerPalette.secondary)
-                .frame(minHeight: 44)
-            Button("添加标签", action: onAddTags)
-                .font(.system(.footnote, design: .default, weight: .semibold))
-                .foregroundStyle(LedgerPalette.onBrand)
-                .padding(.horizontal, LedgerSpacing.md)
-                .frame(minHeight: 44)
-                .background(LedgerPalette.cobalt)
-                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-                .disabled(selectedCount == 0)
-                .opacity(selectedCount == 0 ? 0.52 : 1)
-        }
-        .buttonStyle(PressScaleButtonStyle())
-        .padding(.horizontal, LedgerSpacing.lg)
-        .padding(.vertical, LedgerSpacing.sm)
-        .ledgerFloatingActionSurface()
-    }
-}
-
-private struct TransactionBatchShareBar: View {
-    let selectedCount: Int
-    let totalCount: Int
-    let selectedExpense: Int
-    let currency: String
-    let allSelected: Bool
-    let onToggleAll: () -> Void
     let onShare: () -> Void
-    let onCancel: () -> Void
 
     var body: some View {
         HStack(spacing: LedgerSpacing.sm) {
             Button(allSelected ? "清空" : "全选") { onToggleAll() }
                 .font(.system(.caption, design: .default, weight: .semibold))
                 .foregroundStyle(LedgerPalette.cobalt)
-                .frame(minWidth: 48, minHeight: 44)
+                .frame(minWidth: 44, minHeight: 40)
+
             VStack(alignment: .leading, spacing: 2) {
                 Text("已选 \(selectedCount) 笔")
                     .font(.system(.caption, design: .default, weight: .semibold).monospacedDigit())
                     .foregroundStyle(LedgerPalette.ink)
-                if selectedExpense > 0 {
-                    Text("支出 \(MoneyText.format(minorUnits: selectedExpense, currency: currency))")
-                        .font(.system(.caption2, design: .default).monospacedDigit())
-                        .foregroundStyle(LedgerPalette.secondary)
-                } else {
-                    Text("当前可选 \(totalCount) 笔")
-                        .font(.system(.caption2, design: .default).monospacedDigit())
-                        .foregroundStyle(LedgerPalette.secondary)
-                }
+                Text("当前可选 \(totalCount) 笔")
+                    .font(.system(.caption2, design: .default).monospacedDigit())
+                    .foregroundStyle(LedgerPalette.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Button("取消", action: onCancel)
-                .font(.system(.caption, design: .default, weight: .semibold))
-                .foregroundStyle(LedgerPalette.secondary)
-                .frame(minHeight: 44)
+
+            Button(action: onAddTags) {
+                HStack(spacing: 3) {
+                    Image(systemName: "tag")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("添加标签")
+                }
+            }
+            .font(.system(.footnote, design: .default, weight: .semibold))
+            .foregroundStyle(selectedCount > 0 ? LedgerPalette.cobalt : LedgerPalette.secondary)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 38)
+            .background(LedgerPalette.cobalt.opacity(selectedCount > 0 ? 0.12 : 0.06))
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+            .disabled(selectedCount == 0)
+            .accessibilityIdentifier("transaction-bulk-tag-trigger")
+
             Button(action: onShare) {
                 HStack(spacing: 4) {
                     Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                     Text("合并分享")
                 }
             }
             .font(.system(.footnote, design: .default, weight: .semibold))
             .foregroundStyle(LedgerPalette.onBrand)
-            .padding(.horizontal, LedgerSpacing.md)
-            .frame(minHeight: 44)
-            .background(LedgerPalette.cobalt)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 38)
+            .background(selectedCount > 0 ? LedgerPalette.cobalt : LedgerPalette.secondary.opacity(0.35))
             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
             .disabled(selectedCount == 0)
-            .opacity(selectedCount == 0 ? 0.52 : 1)
+            .accessibilityIdentifier("transaction-batch-share")
         }
         .buttonStyle(PressScaleButtonStyle())
         .padding(.horizontal, LedgerSpacing.lg)

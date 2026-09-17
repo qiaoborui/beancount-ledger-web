@@ -42,19 +42,9 @@ struct TransactionShareTextFormatter {
 
         // Multiple transactions
         let sorted = transactions.sorted { $0.date > $1.date }
-        var totalExpense = 0
-        var totalIncome = 0
-        for tx in sorted {
-            let p = TransactionPresentation(transaction: tx)
-            if p.kind == .expense { totalExpense += p.minorUnits }
-            else if p.kind == .income { totalIncome += p.minorUnits }
-        }
-
         var lines = [
-            "【Ledger 消费对账清单】",
-            "交易笔数：共 \(sorted.count) 笔",
-            "支出合计：\(MoneyText.format(minorUnits: totalExpense, currency: currency))",
-            "收入合计：\(MoneyText.format(minorUnits: totalIncome, currency: currency))",
+            "【Ledger 流水明细】",
+            "共 \(sorted.count) 笔流水",
             "----------------------------"
         ]
 
@@ -62,7 +52,7 @@ struct TransactionShareTextFormatter {
             let p = TransactionPresentation(transaction: tx)
             let sign = p.kind == .expense ? "-" : (p.kind == .income ? "+" : "")
             let amt = MoneyText.format(minorUnits: p.minorUnits, currency: p.currency)
-            let name = tx.payee.isEmpty ? (tx.narration.isEmpty ? p.title : tx.narration) : tx.payee
+            let name = tx.payee.isEmpty ? (tx.narration.isEmpty ? p.title : tx.narration) : (tx.narration.isEmpty ? tx.payee : "\(tx.payee) · \(tx.narration)")
             lines.append("\(idx + 1). [\(tx.date)] \(name) \(sign)\(amt)")
         }
 
@@ -290,32 +280,14 @@ struct CombinedTransactionStatementCard: View {
         transactions.sorted { $0.date > $1.date }
     }
 
-    private var totalExpense: Int {
-        sortedTransactions.reduce(0) { sum, tx in
-            let p = TransactionPresentation(transaction: tx)
-            return p.kind == .expense ? sum + p.minorUnits : sum
-        }
-    }
-
-    private var totalIncome: Int {
-        sortedTransactions.reduce(0) { sum, tx in
-            let p = TransactionPresentation(transaction: tx)
-            return p.kind == .income ? sum + p.minorUnits : sum
-        }
-    }
-
-    private var netAmount: Int {
-        totalIncome - totalExpense
-    }
-
     private var dateSpanDescription: String {
         let dates = sortedTransactions.map(\.date)
-        guard let first = dates.last, let last = dates.first else { return "交易清单" }
+        guard let first = dates.last, let last = dates.first else { return "流水清单" }
         return first == last ? first : "\(first) ~ \(last)"
     }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             // Header
             VStack(spacing: 6) {
                 HStack(spacing: 8) {
@@ -326,14 +298,14 @@ struct CombinedTransactionStatementCard: View {
                         .font(.system(size: 14, weight: .black, design: .rounded))
                         .tracking(1.5)
                         .foregroundStyle(LedgerPalette.ink)
-                    Text("· 消费对账清单")
+                    Text("· 流水明细")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(LedgerPalette.ink)
                     Spacer()
                     Text("共 \(sortedTransactions.count) 笔")
                         .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
                         .foregroundStyle(LedgerPalette.cobalt)
-                        .padding(.horizontal, 7)
+                        .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
                 }
@@ -346,71 +318,13 @@ struct CombinedTransactionStatementCard: View {
                 }
             }
 
-            // 3-Column Summary Stats Box
-            HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("支出合计")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    ShareAmountText(
-                        minorUnits: totalExpense,
-                        currency: currency,
-                        font: .system(size: 15, weight: .bold, design: .rounded),
-                        color: LedgerPalette.expense
-                    )
-                    .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Rectangle()
-                    .fill(LedgerPalette.line.opacity(0.5))
-                    .frame(width: 1, height: 24)
-                    .padding(.horizontal, 6)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("收入合计")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    ShareAmountText(
-                        minorUnits: totalIncome,
-                        currency: currency,
-                        font: .system(size: 15, weight: .bold, design: .rounded),
-                        color: LedgerPalette.income
-                    )
-                    .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Rectangle()
-                    .fill(LedgerPalette.line.opacity(0.5))
-                    .frame(width: 1, height: 24)
-                    .padding(.horizontal, 6)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("收支差额")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    ShareAmountText(
-                        minorUnits: abs(netAmount),
-                        currency: currency,
-                        prefix: netAmount > 0 ? "+" : (netAmount < 0 ? "-" : ""),
-                        font: .system(size: 15, weight: .bold, design: .rounded),
-                        color: netAmount >= 0 ? LedgerPalette.ink : LedgerPalette.expense
-                    )
-                    .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(12)
-            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
             ReceiptDashedLine()
                 .frame(height: 1)
 
-            // Item List (display up to 35 items)
+            // Item List (display up to 50 items)
             VStack(spacing: 8) {
-                let displayed = Array(sortedTransactions.prefix(35))
-                ForEach(displayed) { tx in
+                let displayed = Array(sortedTransactions.prefix(50))
+                ForEach(Array(displayed.enumerated()), id: \.element.id) { index, tx in
                     let p = TransactionPresentation(transaction: tx)
                     let visual = TransactionVisualCategory.resolve(
                         transaction: tx,
@@ -420,25 +334,30 @@ struct CombinedTransactionStatementCard: View {
                     let sign = p.kind == .expense ? "-" : (p.kind == .income ? "+" : "")
                     let color = p.kind == .expense ? LedgerPalette.ink : (p.kind == .income ? LedgerPalette.income : LedgerPalette.secondary)
 
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(visual.color.opacity(0.14))
-                                .frame(width: 28, height: 28)
+                                .frame(width: 30, height: 30)
                             Image(systemName: visual.iconName)
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(visual.color)
                         }
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(p.title)
-                                .font(.system(size: 12.5, weight: .medium))
+                                .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(LedgerPalette.ink)
                                 .lineLimit(1)
                             HStack(spacing: 4) {
                                 Text(tx.date)
                                 Text("·")
                                 Text(visual.categoryLabel)
+                                if !tx.narration.isEmpty && !tx.payee.isEmpty {
+                                    Text("·")
+                                    Text(tx.narration)
+                                        .lineLimit(1)
+                                }
                             }
                             .font(.system(size: 10.5))
                             .foregroundStyle(LedgerPalette.secondary)
@@ -450,16 +369,20 @@ struct CombinedTransactionStatementCard: View {
                             minorUnits: p.minorUnits,
                             currency: p.currency,
                             prefix: sign,
-                            font: .system(size: 13, weight: .semibold, design: .rounded),
+                            font: .system(size: 14, weight: .semibold, design: .rounded),
                             color: color
                         )
                         .lineLimit(1)
                     }
                     .padding(.vertical, 2)
+
+                    if index < displayed.count - 1 {
+                        Divider().overlay(LedgerPalette.line.opacity(0.3))
+                    }
                 }
 
-                if sortedTransactions.count > 35 {
-                    Text("... 以及另外 \(sortedTransactions.count - 35) 笔交易")
+                if sortedTransactions.count > 50 {
+                    Text("... 以及另外 \(sortedTransactions.count - 50) 笔交易")
                         .font(.system(size: 11))
                         .foregroundStyle(LedgerPalette.secondary)
                         .padding(.top, 4)
@@ -471,13 +394,9 @@ struct CombinedTransactionStatementCard: View {
 
             // Footer
             HStack {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 10.5))
-                    Text("Beancount 复式对账已校验")
-                        .font(.system(size: 10.5, weight: .medium))
-                }
-                .foregroundStyle(LedgerPalette.success)
+                Text("共 \(sortedTransactions.count) 笔流水")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
 
                 Spacer()
 
