@@ -208,6 +208,17 @@ struct SingleTransactionReceiptCard: View {
             ReceiptDashedLine()
                 .frame(height: 1)
 
+            // Money Flow
+            let moneyFlow = TransactionMoneyFlow.build(
+                transaction: transaction,
+                accountLabels: accountLabels,
+                defaultCurrency: presentation.currency
+            )
+            TransactionMoneyFlowView(flow: moneyFlow, compact: true)
+
+            ReceiptDashedLine()
+                .frame(height: 1)
+
             // Info rows
             VStack(spacing: 9) {
                 receiptRow(title: "交易时间", value: TransactionDateHeaderFormatter.format(transaction.date))

@@ -4,8 +4,13 @@ struct RootView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    #if DEBUG
     @State private var testingTagReport: String? = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--open-tag-report=") })?.replacingOccurrences(of: "--open-tag-report=", with: "")
     @State private var testingEventTags: Bool = ProcessInfo.processInfo.arguments.contains("--open-event-tags")
+    @State private var testingTransactionDetail: Bool = ProcessInfo.processInfo.arguments.contains("--open-transaction-detail")
+    @State private var testingCreateTransaction: Bool = ProcessInfo.processInfo.arguments.contains("--open-create-transaction")
+    @State private var testingTransactionShare: Bool = ProcessInfo.processInfo.arguments.contains("--open-transaction-share")
+    #endif
 
     var body: some View {
         ZStack {
@@ -37,6 +42,11 @@ struct RootView: View {
         // Local startup presents one authenticated frame; animating the whole
         // navigation hierarchy cross-fades the cover, toolbar and populated list.
         .animation(session.isLocal || reduceMotion ? nil : .easeOut(duration: 0.18), value: session.phase)
+        .onAppear {
+            if let tab = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--tab=") })?.replacingOccurrences(of: "--tab=", with: "") {
+                session.primaryDestinationID = tab
+            }
+        }
         .sheet(isPresented: Binding(
             get: { session.canPresentWidgetDay },
             set: { presented in
@@ -51,6 +61,7 @@ struct RootView: View {
                 .ledgerPrivacyProtectedSheet()
             }
         }
+        #if DEBUG
         .sheet(isPresented: $testingEventTags) {
             EventTagListView()
                 .ledgerPrivacyProtectedSheet()
@@ -71,6 +82,39 @@ struct RootView: View {
                 .ledgerPrivacyProtectedSheet()
             }
         }
+        .sheet(isPresented: $testingTransactionDetail) {
+            if let tx = session.visibleTransactions.first ?? session.ledger?.transactions.first {
+                NavigationStack {
+                    TransactionDetailView(transaction: tx)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("关闭") { testingTransactionDetail = false }
+                            }
+                        }
+                }
+                .ledgerPrivacyProtectedSheet()
+            }
+        }
+        .sheet(isPresented: $testingCreateTransaction) {
+            TransactionEditorView(
+                accounts: session.ledger?.accounts ?? [],
+                commodities: session.ledger?.commodities ?? []
+            ) { entry in
+                try await session.addLocalTransaction(entry)
+            }
+            .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: $testingTransactionShare) {
+            if let tx = session.visibleTransactions.first ?? session.ledger?.transactions.first {
+                TransactionShareSheet(
+                    transactions: [tx],
+                    currency: tx.postings.first?.currency ?? session.ledger?.valuationCurrency ?? "CNY",
+                    accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
+                )
+                .ledgerPrivacyProtectedSheet()
+            }
+        }
+        #endif
     }
 }
 

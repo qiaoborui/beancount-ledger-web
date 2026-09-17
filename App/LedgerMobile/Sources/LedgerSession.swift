@@ -129,6 +129,7 @@ final class LedgerSession: ObservableObject {
     @Published var errorMessage: String?
     @Published var amountsVisible = false
     @Published var primaryDestinationID = "overview"
+    @Published var pendingTransactionFilter: LedgerTransactionFilter?
     @Published private(set) var pendingWidgetExpenseDay: String?
     @Published private(set) var compactTabDestinations = LedgerDestination.defaultCompactTabs
     @Published private(set) var selectedRange: LedgerDateRange
@@ -2517,6 +2518,21 @@ final class LedgerSession: ObservableObject {
 
     func dismissWidgetDay() {
         pendingWidgetExpenseDay = nil
+    }
+
+    func navigateToTransactions(
+        kind: TransactionKindFilter = .all,
+        account: String? = nil,
+        tag: String? = nil,
+        query: String = ""
+    ) {
+        var filter = LedgerTransactionFilter()
+        filter.kind = kind
+        filter.account = account
+        if let tag, !tag.isEmpty { filter.tags = [tag] }
+        filter.query = query
+        self.pendingTransactionFilter = filter
+        self.primaryDestinationID = LedgerDestination.transactions.rawValue
     }
 
     /// A day drill-down owns its payload and never replaces the global range or ledger.

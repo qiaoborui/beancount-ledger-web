@@ -1681,7 +1681,7 @@ struct LedgerTransactionFilter: Equatable, Sendable {
             break
         }
 
-        if let account, !transaction.postings.contains(where: { $0.account == account }) {
+        if let account, !transaction.postings.contains(where: { $0.account == account || $0.account.hasPrefix(account + ":") }) {
             return false
         }
 
