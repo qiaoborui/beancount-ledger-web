@@ -291,7 +291,11 @@ private enum AssetTrendMode: String, CaseIterable, Identifiable {
 }
 
 private struct IncomeExpenseAnalysisContent: View {
+    @EnvironmentObject private var session: LedgerSession
     let data: LedgerIncomeExpenseAnalysis
+
+    @State private var eventTagListPresented = false
+    @State private var selectedEventTag: String?
 
     private var dashboard: LedgerDashboard { data.dashboard }
     private var statement: LedgerIncomeStatement { data.statement }
@@ -328,6 +332,77 @@ private struct IncomeExpenseAnalysisContent: View {
                 currency: statement.valuationCurrency
             )
 
+            // Event & Tag Project Accounting Card
+            let allSummaries = EventTagCalculator.summarizeAllTags(
+                from: session.visibleTransactions,
+                accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
+            )
+            if !allSummaries.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        HStack(spacing: 6) {
+                            Image(systemName: "tag.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(LedgerPalette.cobalt)
+                            Text("事件与项目独立核算")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.ink)
+                        }
+                        Spacer()
+                        Button("全部 \(allSummaries.count) 个 →") {
+                            eventTagListPresented = true
+                        }
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                    }
+
+                    VStack(spacing: 8) {
+                        ForEach(Array(allSummaries.prefix(3))) { summary in
+                            Button {
+                                selectedEventTag = summary.tag
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("#" + summary.tag)
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(LedgerPalette.ink)
+                                        if let start = summary.startDate, let end = summary.endDate {
+                                            Text(start == end ? start : "\(start) ~ \(end)")
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(LedgerPalette.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        Text(MoneyText.format(minorUnits: summary.netSpend, currency: summary.currency))
+                                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                                            .foregroundStyle(LedgerPalette.expense)
+                                        Text("\(summary.transactionCount) 笔")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(LedgerPalette.secondary)
+                                    }
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(LedgerPalette.secondary)
+                                        .padding(.leading, 4)
+                                }
+                                .padding(12)
+                                .background(Color(uiColor: .tertiarySystemGroupedBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                            .buttonStyle(PressScaleButtonStyle(pressedScale: 0.98))
+                        }
+                    }
+                }
+                .padding(16)
+                .background(LedgerPalette.panel)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
+                )
+            }
+
             IncomeExpenseHighlights(statement: statement)
 
             IncomeNodePanel(title: "收入账户", nodes: flattened(statement.income), currency: statement.valuationCurrency, color: LedgerPalette.income)
@@ -345,6 +420,26 @@ private struct IncomeExpenseAnalysisContent: View {
                         )
                     }
                 }
+            }
+        }
+        .sheet(isPresented: $eventTagListPresented) {
+            EventTagListView()
+                .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: Binding(
+            get: { selectedEventTag != nil },
+            set: { if !$0 { selectedEventTag = nil } }
+        )) {
+            if let tag = selectedEventTag {
+                NavigationStack {
+                    EventTagReportView(tag: tag)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("关闭") { selectedEventTag = nil }
+                            }
+                        }
+                }
+                .ledgerPrivacyProtectedSheet()
             }
         }
     }

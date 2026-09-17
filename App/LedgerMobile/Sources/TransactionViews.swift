@@ -82,10 +82,17 @@ struct TransactionRow: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(presentation.title)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(LedgerPalette.ink)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(presentation.title)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(LedgerPalette.ink)
+                        .lineLimit(1)
+                    if transaction.isPendingReview {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 6, height: 6)
+                    }
+                }
                 TransactionContextLine(transaction: transaction, accountLabels: accountLabels)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -232,6 +239,8 @@ private struct LedgerTransactionActions: ViewModifier {
 struct CookieTransactionFilterBar: View {
     let filteredCount: Int
     @Binding var kindFilter: TransactionKindFilter
+    var pendingCount: Int = 0
+    var onTapPending: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 8) {
@@ -257,6 +266,27 @@ struct CookieTransactionFilterBar: View {
                     .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
                     .accessibilityLabel("按\(filter.title)筛选")
                     .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
+
+                if pendingCount > 0 {
+                    Button {
+                        LedgerFeedback.selection()
+                        onTapPending?()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.orange)
+                                .frame(width: 6, height: 6)
+                            Text("待整理 \(pendingCount)")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.orange)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(Color.orange.opacity(0.12), in: Capsule())
+                    }
+                    .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
+                    .accessibilityLabel("查看待整理账单")
                 }
             }
 
@@ -285,6 +315,8 @@ struct TransactionsView: View {
     @State private var batchSharePresented = false
     @State private var singleShareTarget: LedgerTransaction?
     @State private var tagEditorPresented = false
+    @State private var pendingInboxPresented = false
+    @State private var eventTagListPresented = false
     @State private var actionMessage: String?
     @State private var actionMessageStyle: LedgerStatusStyle = .failure
     @State private var confirmationFeedback = 0
@@ -368,7 +400,9 @@ struct TransactionsView: View {
             Section {
                 CookieTransactionFilterBar(
                     filteredCount: filteredTransactions.count,
-                    kindFilter: $filters.kind
+                    kindFilter: $filters.kind,
+                    pendingCount: transactions.filter { $0.isPendingReview }.count,
+                    onTapPending: { pendingInboxPresented = true }
                 )
             }
             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
@@ -465,6 +499,21 @@ struct TransactionsView: View {
                             Label("多选流水", systemImage: "checkmark.circle")
                         }
                         .accessibilityIdentifier("transaction-tag-selection")
+
+                        Button {
+                            eventTagListPresented = true
+                        } label: {
+                            Label("事件与项目核算", systemImage: "tag")
+                        }
+
+                        let pendingCount = transactions.filter { $0.isPendingReview }.count
+                        if pendingCount > 0 {
+                            Button {
+                                pendingInboxPresented = true
+                            } label: {
+                                Label("待整理收件箱 (\(pendingCount))", systemImage: "tray.full")
+                            }
+                        }
                     } label: {
                         Image(systemName: "ellipsis")
                     }
@@ -539,9 +588,18 @@ struct TransactionsView: View {
                     tags: $filters.tags,
                     accounts: availableAccounts,
                     availableTags: availableTags,
-                    onDone: { filterPresented = false }
+                    onDone: { filterPresented = false },
+                    onOpenEventReports: { eventTagListPresented = true }
                 )
                 .ledgerPrivacyProtectedSheet()
+            }
+            .sheet(isPresented: $pendingInboxPresented) {
+                PendingInboxView()
+                    .ledgerPrivacyProtectedSheet()
+            }
+            .sheet(isPresented: $eventTagListPresented) {
+                EventTagListView()
+                    .ledgerPrivacyProtectedSheet()
             }
             .sheet(isPresented: $tagEditorPresented) {
                 TransactionTagEditorSheet(
@@ -846,6 +904,7 @@ private struct TransactionFilterSheet: View {
     let accounts: [String]
     let availableTags: [String]
     let onDone: () -> Void
+    var onOpenEventReports: (() -> Void)? = nil
 
     @State private var tagQuery = ""
 
@@ -930,7 +989,23 @@ private struct TransactionFilterSheet: View {
                         }
                     }
                 } footer: {
-                    Text("选择多个标签时，显示包含其中任一标签的交易。")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("选择多个标签时，显示包含其中任一标签的交易。")
+                        if let onOpenEventReports {
+                            Button {
+                                onDone()
+                                onOpenEventReports()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "chart.bar.doc.horizontal")
+                                    Text("打开事件与项目独立核算看板")
+                                }
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.cobalt)
+                            }
+                            .padding(.top, 2)
+                        }
+                    }
                 }
 
                 if kind != .all || account != nil || !tags.isEmpty {
@@ -1280,6 +1355,7 @@ struct TransactionDetailView: View {
     @State private var confirmedSourceFile: String?
     @State private var sourceUnavailable = false
     @State private var sharePresented = false
+    @State private var selectedEventTag: String?
     private let snapshotOnly: Bool
 
     init(transaction: LedgerTransaction, snapshotOnly: Bool = false) {
@@ -1304,6 +1380,26 @@ struct TransactionDetailView: View {
             VStack(spacing: 16) {
                 if let savedMessage {
                     StatusBanner(message: savedMessage, style: .confirmed) { self.savedMessage = nil }
+                }
+
+                if transaction.isPendingReview {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Color.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("待核对交易")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color.orange)
+                            Text(transaction.pendingReasons.map(\.label).joined(separator: " · "))
+                                .font(.system(size: 12))
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(Color.orange.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
 
                 // Cookie Receipt Voucher Card
@@ -1381,12 +1477,21 @@ struct TransactionDetailView: View {
                                 Spacer()
                                 HStack(spacing: 4) {
                                     ForEach(tags, id: \.self) { tag in
-                                        Text("#\(tag)")
+                                        Button {
+                                            selectedEventTag = tag
+                                        } label: {
+                                            HStack(spacing: 3) {
+                                                Text("#\(tag)")
+                                                Image(systemName: "chevron.right")
+                                                    .font(.system(size: 7, weight: .bold))
+                                            }
                                             .font(.system(size: 11, weight: .medium))
                                             .foregroundStyle(LedgerPalette.cobalt)
                                             .padding(.horizontal, 7)
                                             .padding(.vertical, 3)
                                             .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                                        }
+                                        .buttonStyle(PressScaleButtonStyle(pressedScale: 0.96))
                                     }
                                 }
                             }
@@ -1642,6 +1747,22 @@ struct TransactionDetailView: View {
                 }
             )
             .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: Binding(
+            get: { selectedEventTag != nil },
+            set: { if !$0 { selectedEventTag = nil } }
+        )) {
+            if let tag = selectedEventTag {
+                NavigationStack {
+                    EventTagReportView(tag: tag)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("关闭") { selectedEventTag = nil }
+                            }
+                        }
+                }
+                .ledgerPrivacyProtectedSheet()
+            }
         }
         // Resolution reads the session, so observe values after @Published's willSet emission.
         .onChange(of: session.ledger?.transactions, initial: true) { _, _ in
@@ -3321,7 +3442,7 @@ struct TransactionEditorView: View {
     }
 }
 
-private func amountPrefix(_ kind: TransactionKind) -> String {
+func amountPrefix(_ kind: TransactionKind) -> String {
     switch kind {
     case .expense: return "−"
     case .income: return "+"
@@ -3329,7 +3450,7 @@ private func amountPrefix(_ kind: TransactionKind) -> String {
     }
 }
 
-private func amountColor(_ kind: TransactionKind) -> Color {
+func amountColor(_ kind: TransactionKind) -> Color {
     switch kind {
     case .expense: return LedgerPalette.expense
     case .income: return LedgerPalette.income

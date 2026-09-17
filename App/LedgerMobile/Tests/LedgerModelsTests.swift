@@ -711,4 +711,100 @@ final class LedgerModelsTests: XCTestCase {
       ]
     }
     """#
+
+    func testPendingTransactionClassifierIdentifiesUncategorizedAndFlagged() {
+        let uncategorizedTx = LedgerTransaction(
+            date: "2026-09-17",
+            payee: "某商户",
+            narration: "购物",
+            tags: ["待确认"],
+            postings: [
+                LedgerPosting(account: "Expenses:Unknown", amount: 5000, currency: "CNY"),
+                LedgerPosting(account: "Assets:WeChat:Wallet", amount: -5000, currency: "CNY")
+            ],
+            editableEntry: LedgerTransactionEntry(
+                date: "2026-09-17",
+                flag: "!",
+                payee: "某商户",
+                narration: "购物",
+                metadata: [:],
+                tags: ["待确认"],
+                postings: [
+                    LedgerTransactionEntryPosting(account: "Expenses:Unknown", amount: "50.00", currency: "CNY"),
+                    LedgerTransactionEntryPosting(account: "Assets:WeChat:Wallet", amount: "-50.00", currency: "CNY")
+                ]
+            ),
+            source: TransactionSource(file: "2026.bean", line: 1)
+        )
+
+        let reasons = uncategorizedTx.pendingReasons
+        XCTAssertTrue(uncategorizedTx.isPendingReview)
+        XCTAssertTrue(reasons.contains { if case .uncategorized = $0 { return true }; return false })
+        XCTAssertTrue(reasons.contains { if case .needsReviewFlag = $0 { return true }; return false })
+        XCTAssertTrue(reasons.contains { if case .pendingTag = $0 { return true }; return false })
+
+        // Test replacing account
+        let updated = uncategorizedTx.entryReplacingAccount(from: "Expenses:Unknown", to: "Expenses:Food:Dinner")
+        XCTAssertEqual(updated.postings.first?.account, "Expenses:Food:Dinner")
+
+        // Test marking verified
+        let verified = uncategorizedTx.entryMarkingVerified()
+        XCTAssertNil(verified.flag)
+        XCTAssertFalse(verified.tags.contains("待确认"))
+    }
+
+    func testEventTagCalculatorAggregatesSpendAndDailyRhythm() {
+        let tx1 = LedgerTransaction(
+            date: "2026-04-01",
+            payee: "新干线",
+            narration: "东京-京都",
+            tags: ["2026-日本旅行"],
+            postings: [
+                LedgerPosting(account: "Expenses:Transport:Train", amount: 15000, currency: "CNY"),
+                LedgerPosting(account: "Assets:Bank:Card", amount: -15000, currency: "CNY")
+            ],
+            source: TransactionSource(file: "2026.bean", line: 10)
+        )
+
+        let tx2 = LedgerTransaction(
+            date: "2026-04-02",
+            payee: "一兰拉面",
+            narration: "午餐",
+            tags: ["2026-日本旅行"],
+            postings: [
+                LedgerPosting(account: "Expenses:Food:Dining", amount: 5000, currency: "CNY"),
+                LedgerPosting(account: "Assets:Cash", amount: -5000, currency: "CNY")
+            ],
+            source: TransactionSource(file: "2026.bean", line: 20)
+        )
+
+        let txRefund = LedgerTransaction(
+            date: "2026-04-03",
+            payee: "新干线",
+            narration: "车票退款",
+            tags: ["2026-日本旅行"],
+            postings: [
+                LedgerPosting(account: "Expenses:Transport:Train", amount: -3000, currency: "CNY"),
+                LedgerPosting(account: "Assets:Bank:Card", amount: 3000, currency: "CNY")
+            ],
+            source: TransactionSource(file: "2026.bean", line: 30)
+        )
+
+        let report = EventTagCalculator.generateReport(tag: "2026-日本旅行", from: [tx1, tx2, txRefund])
+        XCTAssertEqual(report.tag, "2026-日本旅行")
+        XCTAssertEqual(report.transactions.count, 3)
+        // tx1: 15000 + tx2: 5000 - txRefund: 3000 = 17000
+        XCTAssertEqual(report.totalExpense, 17000)
+        XCTAssertEqual(report.startDate, "2026-04-01")
+        XCTAssertEqual(report.endDate, "2026-04-03")
+        XCTAssertEqual(report.daysCount, 3)
+        XCTAssertEqual(report.dailyAverage, 17000 / 3)
+        XCTAssertEqual(report.categoryBreakdown.count, 2)
+
+        let summaries = EventTagCalculator.summarizeAllTags(from: [tx1, tx2, txRefund])
+        XCTAssertEqual(summaries.count, 1)
+        XCTAssertEqual(summaries.first?.tag, "2026-日本旅行")
+        XCTAssertEqual(summaries.first?.totalExpense, 17000)
+    }
 }
+
