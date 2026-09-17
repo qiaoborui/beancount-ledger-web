@@ -2712,34 +2712,40 @@ struct CookieFastTransactionEditorBody: View {
     }
 
     private var heroAmountDisplay: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            // Interactive Currency Picker Menu
-            Menu {
-                ForEach(availableCurrencies, id: \.self) { curr in
-                    Button {
-                        selectedCurrency = curr
-                        LedgerFeedback.selection()
-                    } label: {
-                        if curr == selectedCurrency {
-                            Label("\(curr) (\(Self.currencySymbol(for: curr)))", systemImage: "checkmark")
-                        } else {
-                            Text("\(curr) (\(Self.currencySymbol(for: curr)))")
+        HStack(alignment: .lastTextBaseline, spacing: 6) {
+            // Interactive Currency Picker
+            HStack(alignment: .center, spacing: 3) {
+                Text(currencySymbol)
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(kind.themeColor.opacity(0.55))
+            }
+            .foregroundStyle(kind.themeColor)
+            .alignmentGuide(.lastTextBaseline) { d in
+                d[.lastTextBaseline] - 4
+            }
+            .contentShape(Rectangle())
+            .overlay {
+                Menu {
+                    ForEach(availableCurrencies, id: \.self) { curr in
+                        Button {
+                            selectedCurrency = curr
+                            LedgerFeedback.selection()
+                        } label: {
+                            if curr == selectedCurrency {
+                                Label("\(curr) (\(Self.currencySymbol(for: curr)))", systemImage: "checkmark")
+                            } else {
+                                Text("\(curr) (\(Self.currencySymbol(for: curr)))")
+                            }
                         }
                     }
+                } label: {
+                    Color.white.opacity(0.001)
+                        .contentShape(Rectangle())
                 }
-            } label: {
-                HStack(spacing: 3) {
-                    Text(currencySymbol)
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .foregroundStyle(kind.themeColor)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(kind.themeColor.opacity(0.12), in: Capsule())
             }
-            .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
+            .accessibilityElement(children: .combine)
             .accessibilityLabel("选择货币，当前\(selectedCurrency)")
 
             Text(calculator.displayText)
