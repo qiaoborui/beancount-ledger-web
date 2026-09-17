@@ -38,7 +38,7 @@ struct OverviewView: View {
                             session.primaryDestinationID = LedgerDestination.incomeExpense.rawValue
                         },
                         onAssets: {
-                            session.primaryDestinationID = LedgerDestination.assets.rawValue
+                            session.primaryDestinationID = LedgerDestination.accounts.rawValue
                         }
                     )
                     .listRowInsets(EdgeInsets())

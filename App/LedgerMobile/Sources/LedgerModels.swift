@@ -21,7 +21,7 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
     var title: String {
         switch self {
         case .overview: "财务概览"
-        case .assets: "资产"
+        case .assets: "资产分析"
         case .incomeExpense: "收支分析"
         case .investments: "投资"
         case .currencies: "货币与汇率"
@@ -37,7 +37,7 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
     var compactTitle: String {
         switch self {
         case .overview: "概览"
-        case .assets: "资产"
+        case .assets: "资产分析"
         case .incomeExpense: "收支"
         case .investments: "投资"
         case .currencies: "货币"

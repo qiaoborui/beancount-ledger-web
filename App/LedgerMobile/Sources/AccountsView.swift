@@ -48,6 +48,23 @@ struct CookieNetWorthHeroCard: View {
 
                 Spacer()
 
+                NavigationLink {
+                    LedgerAnalysisView(kind: .assets, isRoot: false)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("分析")
+                            .font(.system(size: 11.5, weight: .medium))
+                    }
+                    .foregroundStyle(LedgerPalette.cobalt)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4.5)
+                    .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                }
+                .buttonStyle(PressScaleButtonStyle())
+                .accessibilityLabel("查看资产分析与净值趋势")
+
                 Button {
                     LedgerFeedback.selection()
                     session.toggleAmounts()

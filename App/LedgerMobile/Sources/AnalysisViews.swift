@@ -8,7 +8,7 @@ enum LedgerAnalysisKind: String, CaseIterable, Hashable {
 
     var title: String {
         switch self {
-        case .assets: "资产"
+        case .assets: "资产分析"
         case .incomeExpense: "收支分析"
         case .investments: "投资"
         }

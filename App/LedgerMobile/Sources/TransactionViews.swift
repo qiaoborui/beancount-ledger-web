@@ -218,149 +218,13 @@ private struct LedgerTransactionActions: ViewModifier {
     }
 }
 
-struct CookieTransactionPeriodHero: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @EnvironmentObject private var session: LedgerSession
-
-    let filteredTransactions: [LedgerTransaction]
-    let allTransactions: [LedgerTransaction]
-    let ledgerSummary: LedgerSummary?
+struct CookieTransactionFilterBar: View {
+    let filteredCount: Int
     @Binding var kindFilter: TransactionKindFilter
-    let currency: String
-
-    private var periodExpense: Int {
-        if let s = ledgerSummary, s.expense > 0 { return s.expense }
-        return allTransactions.reduce(0) { sum, tx in
-            let p = TransactionPresentation(transaction: tx)
-            return p.kind == .expense ? sum + p.minorUnits : sum
-        }
-    }
-
-    private var periodIncome: Int {
-        if let s = ledgerSummary, s.income > 0 { return s.income }
-        return allTransactions.reduce(0) { sum, tx in
-            let p = TransactionPresentation(transaction: tx)
-            return p.kind == .income ? sum + p.minorUnits : sum
-        }
-    }
-
-    private var periodNet: Int {
-        if let s = ledgerSummary { return s.net }
-        return periodIncome - periodExpense
-    }
 
     var body: some View {
-        VStack(spacing: 12) {
-            // Header Row: Range & Counts, Eye Toggle
-            HStack(alignment: .center) {
-                HStack(spacing: 6) {
-                    Image(systemName: "calendar")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(LedgerPalette.cobalt)
-
-                    Text(session.selectedRange.displayTitle)
-                        .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.ink)
-
-                    Text("·  \(filteredTransactions.count) 笔流水")
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(LedgerPalette.secondary)
-                }
-
-                Spacer()
-
-                Button {
-                    LedgerFeedback.selection()
-                    session.toggleAmounts()
-                } label: {
-                    Image(systemName: session.amountsVisible ? "eye" : "eye.slash")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .padding(5)
-                        .background(Color(uiColor: .tertiarySystemFill), in: Circle())
-                }
-                .buttonStyle(PressScaleButtonStyle())
-                .accessibilityLabel(session.amountsVisible ? "隐藏金额" : "显示金额")
-            }
-
-            // 3-Column Metrics: 支出 / 收入 / 结余
-            HStack(spacing: 0) {
-                // 支出
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(LedgerPalette.expense)
-                            .frame(width: 6, height: 6)
-                        Text("支出")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(LedgerPalette.secondary)
-                    }
-                    AmountLabel(
-                        minorUnits: periodExpense,
-                        currency: currency,
-                        font: .system(size: 18, weight: .bold, design: .rounded),
-                        color: LedgerPalette.ink
-                    )
-                    .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Rectangle()
-                    .fill(LedgerPalette.line.opacity(0.6))
-                    .frame(width: 1, height: 26)
-                    .padding(.horizontal, 8)
-
-                // 收入
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(LedgerPalette.income)
-                            .frame(width: 6, height: 6)
-                        Text("收入")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(LedgerPalette.secondary)
-                    }
-                    AmountLabel(
-                        minorUnits: periodIncome,
-                        currency: currency,
-                        font: .system(size: 18, weight: .bold, design: .rounded),
-                        color: LedgerPalette.ink
-                    )
-                    .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Rectangle()
-                    .fill(LedgerPalette.line.opacity(0.6))
-                    .frame(width: 1, height: 26)
-                    .padding(.horizontal, 8)
-
-                // 结余
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(periodNet >= 0 ? LedgerPalette.income : LedgerPalette.expense)
-                            .frame(width: 6, height: 6)
-                        Text("结余")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(LedgerPalette.secondary)
-                    }
-                    AmountLabel(
-                        minorUnits: periodNet,
-                        currency: currency,
-                        font: .system(size: 18, weight: .bold, design: .rounded),
-                        color: periodNet >= 0 ? LedgerPalette.ink : LedgerPalette.expense
-                    )
-                    .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            Divider()
-                .overlay(LedgerPalette.line.opacity(0.4))
-
-            // Horizontal Filter Pills: 全部 / 支出 / 收入 / 转账
-            HStack(spacing: 6) {
+        HStack(spacing: 8) {
+            HStack(spacing: 4) {
                 ForEach(TransactionKindFilter.allCases) { filter in
                     let isSelected = kindFilter == filter
                     Button {
@@ -370,9 +234,10 @@ struct CookieTransactionPeriodHero: View {
                         }
                     } label: {
                         Text(filter.title)
-                            .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                             .foregroundStyle(isSelected ? Color.white : LedgerPalette.ink)
-                            .frame(maxWidth: .infinity, minHeight: 28)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
                             .background(
                                 isSelected ? LedgerPalette.cobalt : Color(uiColor: .tertiarySystemFill),
                                 in: Capsule()
@@ -383,27 +248,17 @@ struct CookieTransactionPeriodHero: View {
                     .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
             }
+
+            Spacer()
+
+            Text("\(filteredCount) 笔")
+                .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                .foregroundStyle(LedgerPalette.secondary)
         }
-        .padding(14)
-        .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(LedgerPalette.panel)
-                .shadow(
-                    color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04),
-                    radius: 8,
-                    x: 0,
-                    y: 2
-                )
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(
-                    LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
-                    lineWidth: 0.5
-                )
-        }
+        .padding(.vertical, 2)
     }
 }
+
 
 struct TransactionsView: View {
     @EnvironmentObject private var session: LedgerSession
@@ -458,15 +313,12 @@ struct TransactionsView: View {
         let accountLabels = TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
         List {
             Section {
-                CookieTransactionPeriodHero(
-                    filteredTransactions: filteredTransactions,
-                    allTransactions: transactions,
-                    ledgerSummary: session.ledger?.summary,
-                    kindFilter: $filters.kind,
-                    currency: session.ledger?.valuationCurrency ?? "CNY"
+                CookieTransactionFilterBar(
+                    filteredCount: filteredTransactions.count,
+                    kindFilter: $filters.kind
                 )
             }
-            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 6, trailing: 16))
+            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
 
