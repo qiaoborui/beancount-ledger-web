@@ -42,20 +42,41 @@ struct TransactionShareTextFormatter {
 
         // Multiple transactions
         let sorted = transactions.sorted { $0.date > $1.date }
+        let dates = sorted.map(\.date)
+        let dateRange = dates.last == dates.first ? (dates.first ?? "") : "\(dates.last ?? "") ~ \(dates.first ?? "")"
+
         var lines = [
             "【Ledger 流水明细】",
-            "共 \(sorted.count) 笔流水",
+            "时间：\(dateRange)（共 \(sorted.count) 笔）",
             "----------------------------"
         ]
 
-        for (idx, tx) in sorted.enumerated() {
-            let p = TransactionPresentation(transaction: tx)
-            let sign = p.kind == .expense ? "-" : (p.kind == .income ? "+" : "")
-            let amt = MoneyText.format(minorUnits: p.minorUnits, currency: p.currency)
-            let name = tx.payee.isEmpty ? (tx.narration.isEmpty ? p.title : tx.narration) : (tx.narration.isEmpty ? tx.payee : "\(tx.payee) · \(tx.narration)")
-            lines.append("\(idx + 1). [\(tx.date)] \(name) \(sign)\(amt)")
+        let grouped = Dictionary(grouping: sorted, by: \.date)
+        let sortedDates = grouped.keys.sorted(by: >)
+
+        for date in sortedDates {
+            lines.append("[\(date)]")
+            for tx in (grouped[date] ?? []) {
+                let p = TransactionPresentation(transaction: tx)
+                let sign = p.kind == .expense ? "-" : (p.kind == .income ? "+" : "")
+                let amt = MoneyText.format(minorUnits: p.minorUnits, currency: p.currency)
+                let title = tx.payee.isEmpty ? (tx.narration.isEmpty ? p.title : tx.narration) : tx.payee
+
+                var detailParts: [String] = []
+                if !tx.payee.isEmpty && !tx.narration.isEmpty {
+                    detailParts.append(tx.narration)
+                }
+                if let posting = tx.postings.first(where: { $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:") }) {
+                    let acctLabel = accountLabels[posting.account] ?? posting.account.components(separatedBy: ":").last ?? posting.account
+                    detailParts.append(acctLabel)
+                }
+                let detailStr = detailParts.isEmpty ? "" : " · \(detailParts.joined(separator: " · "))"
+                lines.append("  · \(title)  \(sign)\(amt)\(detailStr)")
+            }
+            lines.append("")
         }
 
+        if lines.last == "" { lines.removeLast() }
         lines.append("----------------------------")
         lines.append("由 Beancount Ledger 生成")
         return lines.joined(separator: "\n")
@@ -283,143 +304,271 @@ struct CombinedTransactionStatementCard: View {
     private var dateSpanDescription: String {
         let dates = sortedTransactions.map(\.date)
         guard let first = dates.last, let last = dates.first else { return "流水清单" }
-        return first == last ? first : "\(first) ~ \(last)"
+        if first == last {
+            return TransactionDateHeaderFormatter.format(first)
+        } else {
+            let start = first.replacingOccurrences(of: "-", with: ".")
+            let end = last.replacingOccurrences(of: "-", with: ".")
+            return "\(start) — \(end)"
+        }
     }
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 16) {
             // Header
-            VStack(spacing: 6) {
-                HStack(spacing: 8) {
-                    Image(systemName: "list.bullet.rectangle.portrait.fill")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(LedgerPalette.cobalt)
-                    Text("LEDGER")
-                        .font(.system(size: 14, weight: .black, design: .rounded))
-                        .tracking(1.5)
-                        .foregroundStyle(LedgerPalette.ink)
-                    Text("· 流水明细")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.ink)
-                    Spacer()
-                    Text("共 \(sortedTransactions.count) 笔")
-                        .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
-                        .foregroundStyle(LedgerPalette.cobalt)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
-                }
-
-                HStack {
-                    Text(dateSpanDescription)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    Spacer()
-                }
-            }
+            statementHeader
 
             ReceiptDashedLine()
                 .frame(height: 1)
 
-            // Item List (display up to 50 items)
-            VStack(spacing: 8) {
-                let displayed = Array(sortedTransactions.prefix(50))
-                ForEach(Array(displayed.enumerated()), id: \.element.id) { index, tx in
-                    let p = TransactionPresentation(transaction: tx)
-                    let visual = TransactionVisualCategory.resolve(
-                        transaction: tx,
-                        presentation: p,
-                        accountLabels: accountLabels
-                    )
-                    let sign = p.kind == .expense ? "-" : (p.kind == .income ? "+" : "")
-                    let color = p.kind == .expense ? LedgerPalette.ink : (p.kind == .income ? LedgerPalette.income : LedgerPalette.secondary)
-
-                    HStack(spacing: 10) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(visual.color.opacity(0.14))
-                                .frame(width: 30, height: 30)
-                            Image(systemName: visual.iconName)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(visual.color)
-                        }
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(p.title)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(LedgerPalette.ink)
-                                .lineLimit(1)
-                            HStack(spacing: 4) {
-                                Text(tx.date)
-                                Text("·")
-                                Text(visual.categoryLabel)
-                                if !tx.narration.isEmpty && !tx.payee.isEmpty {
-                                    Text("·")
-                                    Text(tx.narration)
-                                        .lineLimit(1)
-                                }
-                            }
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(LedgerPalette.secondary)
-                        }
-
-                        Spacer()
-
-                        ShareAmountText(
-                            minorUnits: p.minorUnits,
-                            currency: p.currency,
-                            prefix: sign,
-                            font: .system(size: 14, weight: .semibold, design: .rounded),
-                            color: color
-                        )
-                        .lineLimit(1)
-                    }
-                    .padding(.vertical, 2)
-
-                    if index < displayed.count - 1 {
-                        Divider().overlay(LedgerPalette.line.opacity(0.3))
-                    }
-                }
-
-                if sortedTransactions.count > 50 {
-                    Text("... 以及另外 \(sortedTransactions.count - 50) 笔交易")
-                        .font(.system(size: 11))
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .padding(.top, 4)
-                }
-            }
+            // Body grouped by date
+            statementBody
 
             ReceiptDashedLine()
                 .frame(height: 1)
 
             // Footer
-            HStack {
-                Text("共 \(sortedTransactions.count) 笔流水")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(LedgerPalette.secondary)
-
-                Spacer()
-
-                Text("生成自 Beancount Ledger")
-                    .font(.system(size: 10))
-                    .foregroundStyle(LedgerPalette.secondary.opacity(0.8))
-            }
+            statementFooter
         }
         .padding(20)
-        .frame(width: 350)
+        .frame(width: 360)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(colorScheme == .dark ? Color(uiColor: .secondarySystemBackground) : Color.white)
                 .shadow(
-                    color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
-                    radius: 12,
+                    color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.08),
+                    radius: 16,
                     x: 0,
-                    y: 4
+                    y: 6
                 )
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(LedgerPalette.line.opacity(0.4), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(LedgerPalette.line.opacity(0.4), lineWidth: 0.75)
+        }
+    }
+
+    // MARK: - Header
+
+    private var statementHeader: some View {
+        VStack(spacing: 10) {
+            HStack(alignment: .center) {
+                HStack(spacing: 6) {
+                    Image(systemName: "list.bullet.rectangle.portrait.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                    Text("LEDGER")
+                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .tracking(1.8)
+                        .foregroundStyle(LedgerPalette.ink)
+                    Text("·")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(LedgerPalette.secondary.opacity(0.5))
+                    Text("流水对账明细")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.ink)
+                }
+
+                Spacer()
+
+                Text("共 \(sortedTransactions.count) 笔")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(LedgerPalette.cobalt)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3.5)
+                    .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+            }
+
+            HStack(spacing: 5) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+                Text(dateSpanDescription)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: - Body (Grouped by Date)
+
+    private var statementBody: some View {
+        VStack(spacing: 14) {
+            let totalDisplayed = Array(sortedTransactions.prefix(45))
+            let truncated = sortedTransactions.count > 45
+            let displayedGrouped = Dictionary(grouping: totalDisplayed, by: \.date)
+            let sortedKeys = displayedGrouped.keys.sorted(by: >)
+
+            ForEach(sortedKeys, id: \.self) { date in
+                let txs = displayedGrouped[date] ?? []
+                VStack(alignment: .leading, spacing: 8) {
+                    // Date section header
+                    HStack(spacing: 6) {
+                        Text(TransactionDateHeaderFormatter.format(date))
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(LedgerPalette.ink)
+                        Spacer()
+                        Text("\(txs.count) 笔")
+                            .font(.system(size: 10.5, weight: .medium, design: .rounded).monospacedDigit())
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
+                    .padding(.horizontal, 2)
+
+                    // Group card container
+                    VStack(spacing: 0) {
+                        ForEach(Array(txs.enumerated()), id: \.element.id) { index, tx in
+                            transactionRow(tx)
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 10)
+
+                            if index < txs.count - 1 {
+                                Divider()
+                                    .overlay(LedgerPalette.line.opacity(0.3))
+                                    .padding(.leading, 54)
+                            }
+                        }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(colorScheme == .dark ? Color.white.opacity(0.04) : Color(uiColor: .systemGray6).opacity(0.55))
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(LedgerPalette.line.opacity(0.3), lineWidth: 0.5)
+                    }
+                }
+            }
+
+            if truncated {
+                Text("... 仅展示前 45 笔，共 \(sortedTransactions.count) 笔流水")
+                    .font(.system(size: 11))
+                    .foregroundStyle(LedgerPalette.secondary)
+                    .padding(.top, 2)
+            }
+        }
+    }
+
+    // MARK: - Row
+
+    private func transactionRow(_ tx: LedgerTransaction) -> some View {
+        let p = TransactionPresentation(transaction: tx)
+        let visual = TransactionVisualCategory.resolve(
+            transaction: tx,
+            presentation: p,
+            accountLabels: accountLabels
+        )
+        let sign = p.kind == .expense ? "-" : (p.kind == .income ? "+" : "")
+        let color = p.kind == .expense ? LedgerPalette.ink : (p.kind == .income ? LedgerPalette.income : LedgerPalette.secondary)
+
+        let title: String = {
+            if !tx.payee.isEmpty {
+                return tx.payee
+            }
+            if !tx.narration.isEmpty {
+                return tx.narration
+            }
+            return visual.categoryLabel
+        }()
+
+        let subtitleDetail: String = {
+            if !tx.payee.isEmpty && !tx.narration.isEmpty {
+                return "\(visual.categoryLabel) · \(tx.narration)"
+            }
+            return visual.categoryLabel
+        }()
+
+        let account = fundingAccount(for: tx)
+
+        return HStack(spacing: 12) {
+            // Category Icon
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(visual.color.opacity(0.13))
+                    .frame(width: 36, height: 36)
+                Image(systemName: visual.iconName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(visual.color)
+            }
+
+            // Title & Subtitle
+            VStack(alignment: .leading, spacing: 2.5) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(LedgerPalette.ink)
+                    .lineLimit(1)
+
+                HStack(spacing: 4) {
+                    Text(subtitleDetail)
+                        .lineLimit(1)
+
+                    if let tag = tx.tags?.first, !tag.isEmpty {
+                        Text("#\(tag)")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(LedgerPalette.cobalt)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(LedgerPalette.cobalt.opacity(0.08), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
+                }
+                .font(.system(size: 11.5))
+                .foregroundStyle(LedgerPalette.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            // Amount & Funding Account
+            VStack(alignment: .trailing, spacing: 2) {
+                ShareAmountText(
+                    minorUnits: p.minorUnits,
+                    currency: p.currency,
+                    prefix: sign,
+                    font: .system(size: 15.5, weight: .bold, design: .rounded),
+                    color: color
+                )
+                .lineLimit(1)
+
+                if let account, !account.isEmpty {
+                    Text(account)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    private func fundingAccount(for tx: LedgerTransaction) -> String? {
+        if let posting = tx.postings.first(where: {
+            $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:")
+        }) {
+            if let custom = accountLabels[posting.account], !custom.isEmpty {
+                return custom
+            }
+            let segs = posting.account.components(separatedBy: ":")
+            return segs.last ?? posting.account
+        }
+        return nil
+    }
+
+    // MARK: - Footer
+
+    private var statementFooter: some View {
+        HStack {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(LedgerPalette.success)
+                Text("复式平衡凭证 · 真实流水记录")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+            }
+
+            Spacer()
+
+            Text("Beancount Ledger")
+                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(LedgerPalette.secondary.opacity(0.8))
         }
     }
 }
