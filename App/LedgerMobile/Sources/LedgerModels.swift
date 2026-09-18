@@ -21,7 +21,7 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
     var title: String {
         switch self {
         case .overview: "财务概览"
-        case .assets: "资产"
+        case .assets: "资产分析"
         case .incomeExpense: "收支分析"
         case .investments: "投资"
         case .currencies: "货币与汇率"
@@ -37,7 +37,7 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
     var compactTitle: String {
         switch self {
         case .overview: "概览"
-        case .assets: "资产"
+        case .assets: "资产分析"
         case .incomeExpense: "收支"
         case .investments: "投资"
         case .currencies: "货币"
@@ -488,10 +488,12 @@ struct LedgerBootstrap: Decodable {
     let monthEndNetWorth: [LedgerNetWorthPoint]
     let netWorthWindows: LedgerNetWorthWindows?
     let transactions: [LedgerTransaction]
+    let reconciliationRows: [LedgerReconciliationRow]
     let accounts: [LedgerAccount]
     let commodities: [String]
     let prices: [LedgerPrice]
     let valuationCurrency: String
+    let accountStatuses: [LedgerAccountStatus]
     let sensitiveUnlocked: Bool
 
     private enum CodingKeys: String, CodingKey {
@@ -504,10 +506,12 @@ struct LedgerBootstrap: Decodable {
         case monthEndNetWorth
         case netWorthWindows
         case transactions
+        case reconciliationRows
         case accounts
         case commodities
         case prices
         case valuationCurrency
+        case accountStatuses
         case sensitiveUnlocked
     }
 
@@ -521,10 +525,12 @@ struct LedgerBootstrap: Decodable {
         monthEndNetWorth: [LedgerNetWorthPoint] = [],
         netWorthWindows: LedgerNetWorthWindows? = nil,
         transactions: [LedgerTransaction],
+        reconciliationRows: [LedgerReconciliationRow] = [],
         accounts: [LedgerAccount],
         commodities: [String] = [],
         prices: [LedgerPrice] = [],
         valuationCurrency: String,
+        accountStatuses: [LedgerAccountStatus] = [],
         sensitiveUnlocked: Bool
     ) {
         self.start = start
@@ -536,10 +542,12 @@ struct LedgerBootstrap: Decodable {
         self.monthEndNetWorth = monthEndNetWorth
         self.netWorthWindows = netWorthWindows
         self.transactions = transactions
+        self.reconciliationRows = reconciliationRows
         self.accounts = accounts
         self.commodities = commodities
         self.prices = prices
         self.valuationCurrency = valuationCurrency
+        self.accountStatuses = accountStatuses
         self.sensitiveUnlocked = sensitiveUnlocked
     }
 
@@ -554,12 +562,72 @@ struct LedgerBootstrap: Decodable {
         monthEndNetWorth = try container.decodeIfPresent([LedgerNetWorthPoint].self, forKey: .monthEndNetWorth) ?? []
         netWorthWindows = try container.decodeIfPresent(LedgerNetWorthWindows.self, forKey: .netWorthWindows)
         transactions = try container.decode([LedgerTransaction].self, forKey: .transactions)
+        reconciliationRows = try container.decodeIfPresent([LedgerReconciliationRow].self, forKey: .reconciliationRows) ?? []
         accounts = try container.decode([LedgerAccount].self, forKey: .accounts)
         commodities = try container.decodeIfPresent([String].self, forKey: .commodities) ?? []
         prices = try container.decodeIfPresent([LedgerPrice].self, forKey: .prices) ?? []
         valuationCurrency = try container.decode(String.self, forKey: .valuationCurrency)
+        accountStatuses = try container.decodeIfPresent([LedgerAccountStatus].self, forKey: .accountStatuses) ?? []
         sensitiveUnlocked = try container.decode(Bool.self, forKey: .sensitiveUnlocked)
     }
+}
+
+// MARK: - Reconciliation & Balance Assertion
+
+struct LedgerBalanceAssertion: Codable, Equatable, Sendable {
+    let date: String
+    let account: String
+    let amount: Int
+    let currency: String
+}
+
+struct LedgerAccountStatus: Codable, Equatable, Identifiable, Sendable {
+    var id: String { account }
+    let account: String
+    let status: String // "green" | "red" | "yellow" | "grey"
+    let lastEntryDate: String?
+    let lastEntryType: String?
+    let assertionAmount: Int?
+    let computedBalance: Int?
+
+    var isReconciled: Bool { status == "green" }
+    var hasIssue: Bool { status == "red" }
+    var needsReconciliation: Bool { status == "yellow" }
+}
+
+struct LedgerReconciliationRow: Codable, Equatable, Identifiable, Sendable {
+    var id: String { account }
+    let account: String
+    let alias: String?
+    let label: String
+    let currency: String
+    let ledgerBalance: Int
+    let status: String // "pending" | "asserted"
+    let lastAssertion: LedgerBalanceAssertion?
+
+    var isAsserted: Bool { status == "asserted" }
+}
+
+struct LedgerReconciliationResponse: Codable, Equatable, Sendable {
+    let start: String
+    let end: String
+    let monthPrefix: String
+    let rows: [LedgerReconciliationRow]
+}
+
+struct LedgerReconcileRequest: Codable, Equatable, Sendable {
+    let account: String
+    let actualAmount: String
+    let balanceDate: String
+    let adjustmentDate: String
+}
+
+struct LedgerReconciliationResult: Codable, Equatable, Sendable {
+    let ok: Bool
+    let ledgerBalance: Int
+    let actual: Int
+    let diff: Int
+    let beanText: String?
 }
 
 struct LedgerSummary: Decodable, Equatable {
@@ -695,6 +763,11 @@ enum LedgerMetadataValue: Codable, Equatable, Sendable {
         case let .bool(value): try container.encode(value)
         }
     }
+
+    var stringValue: String? {
+        if case let .string(val) = self { return val }
+        return nil
+    }
 }
 
 struct LedgerTransaction: Codable, Identifiable, Equatable, Sendable {
@@ -762,6 +835,13 @@ struct TransactionSource: Codable, Equatable, Sendable {
         case line
         case hash
         case gitSHA = "gitSha"
+    }
+
+    init(file: String, line: Int, hash: String? = nil, gitSHA: String? = nil) {
+        self.file = file
+        self.line = line
+        self.hash = hash
+        self.gitSHA = gitSHA
     }
 }
 
@@ -1669,7 +1749,7 @@ struct LedgerTransactionFilter: Equatable, Sendable {
             break
         }
 
-        if let account, !transaction.postings.contains(where: { $0.account == account }) {
+        if let account, !transaction.postings.contains(where: { $0.account == account || $0.account.hasPrefix(account + ":") }) {
             return false
         }
 
@@ -1748,6 +1828,7 @@ struct TransactionPresentation: Equatable {
     let subtitle: String
     let minorUnits: Int
     let currency: String
+    let isRefund: Bool
 
     init(transaction: LedgerTransaction) {
         title = transaction.payee.isEmpty
@@ -1760,24 +1841,51 @@ struct TransactionPresentation: Equatable {
             subtitle = transaction.postings.first?.account ?? ""
         }
 
-        if let posting = transaction.postings.first(where: { $0.account.hasPrefix("Expenses:") && $0.amount != 0 }) {
-            kind = .expense
-            minorUnits = abs(posting.amount)
-            currency = posting.currency ?? "CNY"
-            return
+        let expensePostings = transaction.postings.filter { $0.account.hasPrefix("Expenses:") && $0.amount != 0 }
+        let incomePostings = transaction.postings.filter { $0.account.hasPrefix("Income:") && $0.amount != 0 }
+
+        if !expensePostings.isEmpty {
+            let netExpense = expensePostings.reduce(0) { $0 + $1.amount }
+            if netExpense < 0 {
+                kind = .income
+                minorUnits = abs(netExpense)
+                currency = expensePostings.first?.currency ?? "CNY"
+                isRefund = true
+                return
+            } else if netExpense > 0 {
+                kind = .expense
+                minorUnits = netExpense
+                currency = expensePostings.first?.currency ?? "CNY"
+                isRefund = false
+                return
+            }
         }
 
-        if let posting = transaction.postings.first(where: { $0.account.hasPrefix("Income:") && $0.amount != 0 }) {
-            kind = .income
-            minorUnits = abs(posting.amount)
-            currency = posting.currency ?? "CNY"
-            return
+        if !incomePostings.isEmpty {
+            let netIncome = incomePostings.reduce(0) { $0 + $1.amount }
+            if netIncome > 0 {
+                kind = .expense
+                minorUnits = netIncome
+                currency = incomePostings.first?.currency ?? "CNY"
+                isRefund = false
+                return
+            } else if netIncome < 0 {
+                kind = .income
+                minorUnits = abs(netIncome)
+                currency = incomePostings.first?.currency ?? "CNY"
+                let metadataType = transaction.metadata?["type"]?.stringValue ?? ""
+                isRefund = transaction.narration.contains("退款")
+                    || transaction.payee.contains("退款")
+                    || metadataType.contains("退款")
+                return
+            }
         }
 
         let posting = transaction.postings.max { abs($0.amount) < abs($1.amount) }
         kind = .transfer
         minorUnits = abs(posting?.amount ?? 0)
         currency = posting?.currency ?? "CNY"
+        isRefund = false
     }
 }
 
@@ -1961,5 +2069,457 @@ enum LedgerDateText {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.date(from: raw)
+    }
+}
+
+// MARK: - Pending Transactions (待整理收件箱)
+
+enum PendingTransactionReason: Hashable, Identifiable, Sendable {
+    case uncategorized(account: String)
+    case needsReviewFlag
+    case pendingTag(String)
+    case missingPayee
+
+    var id: String {
+        switch self {
+        case .uncategorized(let acc): return "uncategorized:\(acc)"
+        case .needsReviewFlag: return "needsReviewFlag"
+        case .pendingTag(let tag): return "pendingTag:\(tag)"
+        case .missingPayee: return "missingPayee"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .uncategorized(let acc):
+            let short = acc.replacingOccurrences(of: "Expenses:", with: "").replacingOccurrences(of: "Income:", with: "")
+            return "分类未明确 (\(short))"
+        case .needsReviewFlag:
+            return "标记待核对 (!)"
+        case .pendingTag(let tag):
+            return "带有 #\(tag) 标签"
+        case .missingPayee:
+            return "缺少商户信息"
+        }
+    }
+
+    var badgeText: String {
+        switch self {
+        case .uncategorized: return "未分类"
+        case .needsReviewFlag: return "待核对"
+        case .pendingTag: return "待确认"
+        case .missingPayee: return "缺商户"
+        }
+    }
+}
+
+enum PendingTransactionClassifier {
+    private static let pendingTagNames: Set<String> = [
+        "待确认", "待整理", "todo", "review", "待查", "核对", "待分类"
+    ]
+
+    private static let unknownAccountPrefixes: [String] = [
+        "expenses:unknown", "expenses:other", "expenses:uncategorized",
+        "expenses:待分类", "expenses:未分类", "expenses:待整理",
+        "income:unknown", "equity:ufo", "expenses:pending"
+    ]
+
+    private static let genericPayeePlaceholders: Set<String> = [
+        "商户", "特约商户", "微信支付", "支付宝", "扫二维码付款",
+        "微信支付商户", "美团平台商户", "财付通", "银行交易"
+    ]
+
+    static func evaluate(_ transaction: LedgerTransaction) -> [PendingTransactionReason] {
+        var reasons: [PendingTransactionReason] = []
+
+        // 1. Unknown / Uncategorized postings
+        for posting in transaction.postings {
+            let lower = posting.account.lowercased()
+            if unknownAccountPrefixes.contains(where: { lower.hasPrefix($0) }) {
+                reasons.append(.uncategorized(account: posting.account))
+            }
+        }
+
+        // 2. Needs review flag / metadata
+        let isFlagged = transaction.editableEntry?.flag == "!"
+            || transaction.editableEntry?.needsReview == true
+            || transaction.metadata?["needs_review"]?.stringValue?.lowercased() == "true"
+            || transaction.metadata?["status"]?.stringValue?.lowercased() == "pending"
+        if isFlagged {
+            reasons.append(.needsReviewFlag)
+        }
+
+        // 3. Pending tags
+        if let tags = transaction.tags {
+            for tag in tags {
+                if pendingTagNames.contains(tag.lowercased()) {
+                    reasons.append(.pendingTag(tag))
+                }
+            }
+        }
+
+        // 4. Missing or generic payee
+        let trimmedPayee = transaction.payee.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedPayee.isEmpty {
+            reasons.append(.missingPayee)
+        } else if genericPayeePlaceholders.contains(trimmedPayee) {
+            let trimmedNarration = transaction.narration.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedNarration.isEmpty || genericPayeePlaceholders.contains(trimmedNarration) {
+                reasons.append(.missingPayee)
+            }
+        }
+
+        return reasons
+    }
+}
+
+extension LedgerTransaction {
+    var pendingReasons: [PendingTransactionReason] {
+        PendingTransactionClassifier.evaluate(self)
+    }
+
+    var isPendingReview: Bool {
+        !pendingReasons.isEmpty
+    }
+
+    /// Generates an updated entry replacing an account (e.g. Expenses:Unknown -> Expenses:Food:Dinner).
+    func entryReplacingAccount(from oldAccount: String, to newAccount: String) -> LedgerTransactionEntry {
+        let baseline = editableEntry
+        let date = baseline?.date ?? self.date
+        let flag = baseline?.flag
+        let payee = baseline?.payee ?? self.payee
+        let narration = baseline?.narration ?? self.narration
+        let metadata = baseline?.metadata ?? self.metadata ?? [:]
+        let tags = baseline?.tags ?? self.tags ?? []
+        let links = baseline?.links ?? []
+
+        let postings: [LedgerTransactionEntryPosting]
+        if let baselinePostings = baseline?.postings {
+            postings = baselinePostings.map { posting in
+                if posting.account == oldAccount || (oldAccount.isEmpty && posting.account.lowercased().contains("unknown")) {
+                    return LedgerTransactionEntryPosting(
+                        account: newAccount,
+                        flag: posting.flag,
+                        amount: posting.amount,
+                        currency: posting.currency,
+                        costKind: posting.costKind,
+                        costAmount: posting.costAmount,
+                        costCurrency: posting.costCurrency,
+                        costSpec: posting.costSpec,
+                        priceKind: posting.priceKind,
+                        priceAmount: posting.priceAmount,
+                        priceCurrency: posting.priceCurrency
+                    )
+                }
+                return posting
+            }
+        } else {
+            postings = self.postings.map { posting in
+                let targetAccount = (posting.account == oldAccount || (oldAccount.isEmpty && posting.account.lowercased().contains("unknown")))
+                    ? newAccount
+                    : posting.account
+                let amountStr = String(format: "%.2f", Double(posting.amount) / 100.0)
+                return LedgerTransactionEntryPosting(
+                    account: targetAccount,
+                    flag: nil,
+                    amount: amountStr,
+                    currency: posting.currency ?? "CNY"
+                )
+            }
+        }
+
+        return LedgerTransactionEntry(
+            date: date,
+            flag: flag,
+            payee: payee,
+            narration: narration,
+            metadata: metadata,
+            tags: tags,
+            links: links,
+            postings: postings
+        )
+    }
+
+    /// Generates an updated entry clearing the pending review flags and tags.
+    func entryMarkingVerified() -> LedgerTransactionEntry {
+        let baseline = editableEntry
+        let date = baseline?.date ?? self.date
+        let flag = (baseline?.flag == "!") ? nil : baseline?.flag
+        let payee = baseline?.payee ?? self.payee
+        let narration = baseline?.narration ?? self.narration
+        var metadata = baseline?.metadata ?? self.metadata ?? [:]
+        metadata.removeValue(forKey: "needs_review")
+        metadata.removeValue(forKey: "status")
+
+        let pendingTags: Set<String> = ["待确认", "待整理", "todo", "review", "待查", "核对", "待分类"]
+        let originalTags = baseline?.tags ?? self.tags ?? []
+        let cleanedTags = originalTags.filter { !pendingTags.contains($0.lowercased()) }
+        let links = baseline?.links ?? []
+
+        let postings: [LedgerTransactionEntryPosting]
+        if let baselinePostings = baseline?.postings {
+            postings = baselinePostings
+        } else {
+            postings = self.postings.map { posting in
+                let amountStr = String(format: "%.2f", Double(posting.amount) / 100.0)
+                return LedgerTransactionEntryPosting(
+                    account: posting.account,
+                    flag: nil,
+                    amount: amountStr,
+                    currency: posting.currency ?? "CNY"
+                )
+            }
+        }
+
+        return LedgerTransactionEntry(
+            date: date,
+            flag: flag,
+            payee: payee,
+            narration: narration,
+            metadata: metadata,
+            tags: cleanedTags,
+            links: links,
+            postings: postings
+        )
+    }
+
+    /// Generates an updated entry with new payee and/or narration.
+    func entryUpdatingPayee(_ newPayee: String, narration newNarration: String? = nil) -> LedgerTransactionEntry {
+        let baseline = editableEntry
+        let date = baseline?.date ?? self.date
+        let flag = baseline?.flag
+        let payee = newPayee.trimmingCharacters(in: .whitespacesAndNewlines)
+        let narration = (newNarration ?? baseline?.narration ?? self.narration).trimmingCharacters(in: .whitespacesAndNewlines)
+        let metadata = baseline?.metadata ?? self.metadata ?? [:]
+        let tags = baseline?.tags ?? self.tags ?? []
+        let links = baseline?.links ?? []
+
+        let postings: [LedgerTransactionEntryPosting]
+        if let baselinePostings = baseline?.postings {
+            postings = baselinePostings
+        } else {
+            postings = self.postings.map { posting in
+                let amountStr = String(format: "%.2f", Double(posting.amount) / 100.0)
+                return LedgerTransactionEntryPosting(
+                    account: posting.account,
+                    flag: nil,
+                    amount: amountStr,
+                    currency: posting.currency ?? "CNY"
+                )
+            }
+        }
+
+        return LedgerTransactionEntry(
+            date: date,
+            flag: flag,
+            payee: payee,
+            narration: narration,
+            metadata: metadata,
+            tags: tags,
+            links: links,
+            postings: postings
+        )
+    }
+}
+
+// MARK: - Event & Tag Project Accounting (标签 / 事件独立核算)
+
+struct EventTagCategoryBreakdown: Identifiable, Equatable, Sendable {
+    let account: String
+    let label: String
+    let amount: Int // minor units (cents)
+    let percentage: Double // 0.0 to 1.0
+    var id: String { account }
+}
+
+struct EventTagDailyPoint: Identifiable, Equatable, Sendable {
+    let date: String
+    let amount: Int // net expense in cents
+    var id: String { date }
+}
+
+struct EventTagSummary: Identifiable, Equatable, Sendable {
+    let tag: String
+    let transactionCount: Int
+    let totalExpense: Int // net of refunds
+    let totalIncome: Int
+    let netSpend: Int
+    let currency: String
+    let startDate: String?
+    let endDate: String?
+    let daysCount: Int
+    let dailyAverage: Int
+    var id: String { tag }
+}
+
+struct EventTagReport: Equatable, Sendable {
+    let tag: String
+    let transactions: [LedgerTransaction]
+    let totalExpense: Int // net of refunds
+    let totalIncome: Int
+    let netSpend: Int
+    let currency: String
+    let startDate: String?
+    let endDate: String?
+    let daysCount: Int
+    let dailyAverage: Int
+    let categoryBreakdown: [EventTagCategoryBreakdown]
+    let dailySeries: [EventTagDailyPoint]
+}
+
+enum EventTagCalculator {
+    static func generateReport(
+        tag: String,
+        from transactions: [LedgerTransaction],
+        accountLabels: [String: String] = [:]
+    ) -> EventTagReport {
+        let matched = transactions
+            .filter { ($0.tags ?? []).contains(tag) }
+            .sorted { $0.date > $1.date }
+
+        guard !matched.isEmpty else {
+            return EventTagReport(
+                tag: tag,
+                transactions: [],
+                totalExpense: 0,
+                totalIncome: 0,
+                netSpend: 0,
+                currency: "CNY",
+                startDate: nil,
+                endDate: nil,
+                daysCount: 0,
+                dailyAverage: 0,
+                categoryBreakdown: [],
+                dailySeries: []
+            )
+        }
+
+        var totalExpense = 0
+        var totalIncome = 0
+        var categoryTotals: [String: Int] = [:]
+        var dailyTotals: [String: Int] = [:]
+        var primaryCurrency = "CNY"
+
+        for tx in matched {
+            // Net expenses
+            let expensePostings = tx.postings.filter { $0.account.hasPrefix("Expenses:") }
+            let netTxExpense = expensePostings.reduce(0) { $0 + $1.amount }
+            if netTxExpense > 0 {
+                totalExpense += netTxExpense
+            } else if netTxExpense < 0 {
+                totalExpense += netTxExpense // refunds reduce expense
+            }
+
+            // Category breakdown
+            for p in expensePostings {
+                categoryTotals[p.account, default: 0] += p.amount
+                if let curr = p.currency, !curr.isEmpty { primaryCurrency = curr }
+            }
+
+            // Income
+            let incomePostings = tx.postings.filter { $0.account.hasPrefix("Income:") }
+            let netTxIncome = incomePostings.reduce(0) { $0 + $1.amount }
+            if netTxIncome < 0 {
+                totalIncome += abs(netTxIncome)
+            }
+
+            // Daily series (signed expense)
+            if netTxExpense != 0 {
+                dailyTotals[tx.date, default: 0] += netTxExpense
+            }
+        }
+
+        totalExpense = max(0, totalExpense)
+        let netSpend = max(0, totalExpense - totalIncome)
+
+        // Date range & days count
+        let sortedDates = matched.map(\.date).sorted()
+        let startDate = sortedDates.first
+        let endDate = sortedDates.last
+
+        var daysCount = 1
+        if let s = startDate, let e = endDate,
+           let d1 = LedgerDateRange.parse(s), let d2 = LedgerDateRange.parse(e) {
+            let diff = Calendar.current.dateComponents([.day], from: d1, to: d2).day ?? 0
+            daysCount = max(1, abs(diff) + 1)
+        }
+
+        let dailyAverage = daysCount > 0 ? totalExpense / daysCount : totalExpense
+
+        // Category breakdown
+        let positiveCategories = categoryTotals.filter { $0.value > 0 }
+        let totalCatAmount = positiveCategories.values.reduce(0, +)
+        let categoryBreakdown = positiveCategories
+            .map { account, amount in
+                let label = accountLabels[account] ?? account.replacingOccurrences(of: "Expenses:", with: "")
+                let percentage = totalCatAmount > 0 ? Double(amount) / Double(totalCatAmount) : 0.0
+                return EventTagCategoryBreakdown(
+                    account: account,
+                    label: label,
+                    amount: amount,
+                    percentage: percentage
+                )
+            }
+            .sorted { $0.amount > $1.amount }
+
+        // Daily series
+        let dailySeries = dailyTotals
+            .map { date, amount in
+                EventTagDailyPoint(date: date, amount: max(0, amount))
+            }
+            .sorted { $0.date < $1.date }
+
+        return EventTagReport(
+            tag: tag,
+            transactions: matched,
+            totalExpense: totalExpense,
+            totalIncome: totalIncome,
+            netSpend: netSpend,
+            currency: primaryCurrency,
+            startDate: startDate,
+            endDate: endDate,
+            daysCount: daysCount,
+            dailyAverage: dailyAverage,
+            categoryBreakdown: categoryBreakdown,
+            dailySeries: dailySeries
+        )
+    }
+
+    static func summarizeAllTags(
+        from transactions: [LedgerTransaction],
+        accountLabels: [String: String] = [:]
+    ) -> [EventTagSummary] {
+        var tagsSet = Set<String>()
+        for tx in transactions {
+            if let tags = tx.tags {
+                for t in tags where !t.isEmpty {
+                    tagsSet.insert(t)
+                }
+            }
+        }
+
+        var summaries: [EventTagSummary] = []
+        for tag in tagsSet {
+            let report = generateReport(tag: tag, from: transactions, accountLabels: accountLabels)
+            summaries.append(EventTagSummary(
+                tag: tag,
+                transactionCount: report.transactions.count,
+                totalExpense: report.totalExpense,
+                totalIncome: report.totalIncome,
+                netSpend: report.netSpend,
+                currency: report.currency,
+                startDate: report.startDate,
+                endDate: report.endDate,
+                daysCount: report.daysCount,
+                dailyAverage: report.dailyAverage
+            ))
+        }
+
+        return summaries.sorted {
+            if let e1 = $0.endDate, let e2 = $1.endDate, e1 != e2 {
+                return e1 > e2
+            }
+            return $0.totalExpense > $1.totalExpense
+        }
     }
 }

@@ -74,11 +74,11 @@ struct TransactionRow: View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .fill(categoryVisual.color.opacity(0.14))
                     .frame(width: 38, height: 38)
                 Image(systemName: categoryVisual.iconName)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(presentation.kind == .income ? LedgerPalette.income : Color.primary)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(categoryVisual.color)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -134,7 +134,7 @@ private struct LedgerTransactionActions: ViewModifier {
     @State private var action: Action?
     @State private var confirmationFeedback = 0
 
-    private enum Kind { case edit, tags, delete }
+    private enum Kind { case edit, tags, delete, share }
     private struct Action: Identifiable {
         let id = UUID()
         let kind: Kind
@@ -155,6 +155,9 @@ private struct LedgerTransactionActions: ViewModifier {
     func body(content: Content) -> some View {
         content
             .contextMenu {
+                Button("分享交易", systemImage: "square.and.arrow.up") { present(.share) }
+                    .disabled(resolved == nil)
+                    .accessibilityIdentifier("transaction-context-share")
                 Button("编辑", systemImage: "pencil") { present(.edit) }
                     .disabled(resolved.map { !canWrite($0) || $0.editableEntry == nil } ?? true)
                     .accessibilityIdentifier("transaction-context-edit")
@@ -178,6 +181,13 @@ private struct LedgerTransactionActions: ViewModifier {
     @ViewBuilder
     private func actionSheet(_ action: Action) -> some View {
         switch action.kind {
+        case .share:
+            TransactionShareSheet(
+                transactions: [action.transaction],
+                currency: session.ledger?.valuationCurrency ?? "CNY",
+                accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
+            )
+            .environmentObject(session)
         case .edit:
             TransactionEditorView(
                 transaction: action.transaction,
@@ -200,7 +210,8 @@ private struct LedgerTransactionActions: ViewModifier {
     }
 
     private func present(_ kind: Kind) {
-        guard let current = resolved, canWrite(current) else { return }
+        guard let current = resolved else { return }
+        if kind != .share && !canWrite(current) { return }
         if case .edit = kind, current.editableEntry == nil { return }
         action = Action(kind: kind, transaction: current)
     }
@@ -218,16 +229,63 @@ private struct LedgerTransactionActions: ViewModifier {
     }
 }
 
+struct CookieTransactionFilterBar: View {
+    let filteredCount: Int
+    @Binding var kindFilter: TransactionKindFilter
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                ForEach(TransactionKindFilter.allCases) { filter in
+                    let isSelected = kindFilter == filter
+                    Button {
+                        LedgerFeedback.selection()
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                            kindFilter = filter
+                        }
+                    } label: {
+                        Text(filter.title)
+                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                            .foregroundStyle(isSelected ? Color.white : LedgerPalette.ink)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                isSelected ? LedgerPalette.cobalt : Color(uiColor: .tertiarySystemFill),
+                                in: Capsule()
+                            )
+                    }
+                    .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
+                    .accessibilityLabel("按\(filter.title)筛选")
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
+            }
+
+            Spacer()
+
+            Text("\(filteredCount) 笔")
+                .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                .foregroundStyle(LedgerPalette.secondary)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+
 struct TransactionsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var filters = LedgerTransactionFilter()
     @State private var filterPresented = false
     @State private var creatingTransaction = false
+    @State private var duplicateTarget: LedgerTransaction?
+    @State private var editingTarget: LedgerTransaction?
     @State private var deletionTarget: LedgerTransaction?
-    @State private var selectingTags = false
+    @State private var isSelecting = false
     @State private var selectedTransactionIDs: Set<String> = []
+    @State private var batchSharePresented = false
+    @State private var singleShareTarget: LedgerTransaction?
     @State private var tagEditorPresented = false
+    @State private var eventTagListPresented = false
     @State private var actionMessage: String?
     @State private var actionMessageStyle: LedgerStatusStyle = .failure
     @State private var confirmationFeedback = 0
@@ -265,10 +323,60 @@ struct TransactionsView: View {
             .sorted { $0.date > $1.date }
     }
 
+    private var selectedTransactions: [LedgerTransaction] {
+        filteredTransactions.filter { selectedTransactionIDs.contains($0.id) }
+    }
+
+    private var allVisibleSelected: Bool {
+        !filteredTransactions.isEmpty && filteredTransactions.allSatisfy { selectedTransactionIDs.contains($0.id) }
+    }
+
+    private func toggleAllVisible() {
+        if allVisibleSelected {
+            selectedTransactionIDs.removeAll()
+        } else {
+            selectedTransactionIDs = Set(filteredTransactions.map(\.id))
+        }
+        selectionFeedback &+= 1
+    }
+
+    private func toggleSelection(_ transaction: LedgerTransaction) {
+        LedgerFeedback.selection()
+        if selectedTransactionIDs.contains(transaction.id) {
+            selectedTransactionIDs.remove(transaction.id)
+        } else {
+            selectedTransactionIDs.insert(transaction.id)
+        }
+    }
+
+    private var accountLabels: [String: String] {
+        TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
+    }
+
+    private func groupExpense(for transactions: [LedgerTransaction]) -> Int {
+        var total = 0
+        for tx in transactions {
+            let txExpense = tx.postings
+                .filter { $0.account.hasPrefix("Expenses:") }
+                .reduce(0) { $0 + $1.amount }
+            total += txExpense
+        }
+        return max(0, total)
+    }
+
     var body: some View {
-        let accountLabels = TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
         List {
-            if activeStructuredFilterCount > 0 {
+            Section {
+                CookieTransactionFilterBar(
+                    filteredCount: filteredTransactions.count,
+                    kindFilter: $filters.kind
+                )
+            }
+            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
+            if activeStructuredFilterCount > (filters.kind == .all ? 0 : 1) {
                 Section {
                     TransactionFilterChips(filters: $filters)
                 }
@@ -291,51 +399,7 @@ struct TransactionsView: View {
             ForEach(groupedTransactions, id: \.date) { group in
                 Section {
                     ForEach(group.transactions) { transaction in
-                        if selectingTags {
-                            Button {
-                                toggleTagSelection(transaction)
-                            } label: {
-                                TransactionSelectableCard(
-                                    transaction: transaction,
-                                    selected: selectedTransactionIDs.contains(transaction.id),
-                                    accountLabels: accountLabels
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .listRowBackground(selectedTransactionIDs.contains(transaction.id)
-                                ? LedgerPalette.cobalt.opacity(0.08) : LedgerPalette.canvas)
-                            .accessibilityIdentifier("transaction-select-row-\(transaction.source.line)")
-                        } else {
-                            NavigationLink {
-                                TransactionDetailView(transaction: transaction)
-                            } label: {
-                                TransactionCard(
-                                    transaction: transaction,
-                                    accountLabels: accountLabels,
-                                    mutationPhase: session.transactionMutationPhase(for: transaction)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
-                            .ledgerTransactionActions(transaction)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    deletionTarget = transaction
-                                } label: {
-                                    Label("删除", systemImage: "trash")
-                                }
-                                .disabled(transaction.source.hash?.isEmpty != false
-                                    || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
-                                Button {
-                                    selectingTags = true
-                                    toggleTagSelection(transaction)
-                                } label: {
-                                    Label("添加标签", systemImage: "tag")
-                                }
-                                .tint(LedgerPalette.cobalt)
-                                .disabled(!isTagEligible(transaction))
-                            }
-                        }
+                        transactionRow(for: transaction)
                     }
                 } header: {
                     HStack(alignment: .firstTextBaseline) {
@@ -343,11 +407,7 @@ struct TransactionsView: View {
                             .font(.system(.footnote, design: .rounded, weight: .semibold))
                             .foregroundStyle(LedgerPalette.ink)
                         Spacer()
-                        let dayExpense = group.transactions.filter {
-                            $0.postings.contains { $0.account.hasPrefix("Expenses:") && $0.amount != 0 }
-                        }.reduce(0) { sum, tx in
-                            sum + abs(tx.postings.first { $0.account.hasPrefix("Expenses:") && $0.amount != 0 }?.amount ?? 0)
-                        }
+                        let dayExpense = groupExpense(for: group.transactions)
                         if dayExpense > 0 {
                             HStack(spacing: 3) {
                                 Text("支出")
@@ -390,33 +450,43 @@ struct TransactionsView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                if selectingTags {
+                if isSelecting {
                     Button("完成") {
-                        selectingTags = false
+                        isSelecting = false
                         selectedTransactionIDs.removeAll()
                     }
-                    .accessibilityLabel("完成标签选择")
+                    .fontWeight(.semibold)
+                    .accessibilityLabel("完成多选")
                 } else {
                     Menu {
-                        Button("选择交易添加标签", systemImage: "checkmark.circle") {
-                            selectingTags = true
+                        Button {
+                            filterPresented = true
+                        } label: {
+                            Label(
+                                activeStructuredFilterCount > 0 ? "筛选交易 (\(activeStructuredFilterCount))" : "筛选交易",
+                                systemImage: activeStructuredFilterCount > 0 ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
+                            )
+                        }
+
+                        Button {
+                            selectedTransactionIDs.removeAll()
+                            isSelecting = true
+                        } label: {
+                            Label("多选流水", systemImage: "checkmark.circle")
                         }
                         .accessibilityIdentifier("transaction-tag-selection")
+
+                        Button {
+                            eventTagListPresented = true
+                        } label: {
+                            Label("事件与项目核算", systemImage: "tag")
+                        }
                     } label: {
-                        Image(systemName: "ellipsis")
+                        Image(systemName: activeStructuredFilterCount > 0 ? "ellipsis.circle.fill" : "ellipsis")
                     }
                     .accessibilityLabel("流水操作")
                     .accessibilityIdentifier("transaction-actions")
                 }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { filterPresented = true } label: {
-                    Image(systemName: activeStructuredFilterCount > 0
-                        ? "line.3.horizontal.decrease.circle.fill"
-                        : "line.3.horizontal.decrease.circle")
-                }
-                .accessibilityLabel("筛选交易")
-                .accessibilityValue("\(activeStructuredFilterCount) 个筛选条件")
             }
         }
             .sheet(isPresented: $creatingTransaction) {
@@ -425,9 +495,45 @@ struct TransactionsView: View {
                 }
                 .ledgerPrivacyProtectedSheet()
             }
+            .sheet(item: $duplicateTarget) { transaction in
+                TransactionEditorView(
+                    accounts: session.ledger?.accounts ?? [],
+                    commodities: session.ledger?.commodities ?? [],
+                    prefillPayee: transaction.payee,
+                    prefillNarration: transaction.narration,
+                    prefillPostings: transaction.postings.map {
+                        EditableTransactionPosting(
+                            account: $0.account,
+                            amount: TransactionEditorView.decimalText($0.amount),
+                            currency: $0.currency ?? "CNY"
+                        )
+                    },
+                    onSave: { entry in
+                        try await session.addLocalTransaction(entry)
+                        actionMessage = "已复制并记录新流水"
+                        actionMessageStyle = .confirmed
+                        confirmationFeedback &+= 1
+                    }
+                )
+                .ledgerPrivacyProtectedSheet()
+            }
+            .sheet(item: $editingTarget) { transaction in
+                TransactionEditorView(
+                    transaction: transaction,
+                    accounts: session.ledger?.accounts ?? [],
+                    commodities: session.ledger?.commodities ?? [],
+                    onSave: { entry in
+                        try await session.updateTransaction(source: transaction.source, entry: entry)
+                        actionMessage = "交易修改已保存"
+                        actionMessageStyle = .confirmed
+                        confirmationFeedback &+= 1
+                    }
+                )
+                .ledgerPrivacyProtectedSheet()
+            }
             .sheet(item: $deletionTarget) { transaction in
                 TransactionDeleteSheet(transaction: transaction) {
-                    actionMessage = "交易已删除，原文已在账本中注释保留。"
+                    actionMessage = "交易已从账本删除"
                     actionMessageStyle = .confirmed
                     confirmationFeedback &+= 1
                 }
@@ -440,11 +546,14 @@ struct TransactionsView: View {
                     tags: $filters.tags,
                     accounts: availableAccounts,
                     availableTags: availableTags,
-                    onDone: { filterPresented = false }
+                    onDone: { filterPresented = false },
+                    onOpenEventReports: { eventTagListPresented = true }
                 )
                 .ledgerPrivacyProtectedSheet()
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $eventTagListPresented) {
+                EventTagListView()
+                    .ledgerPrivacyProtectedSheet()
             }
             .sheet(isPresented: $tagEditorPresented) {
                 TransactionTagEditorSheet(
@@ -457,31 +566,133 @@ struct TransactionsView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             }
+            .sheet(isPresented: $batchSharePresented) {
+                TransactionShareSheet(
+                    transactions: selectedTransactions,
+                    currency: session.ledger?.valuationCurrency ?? "CNY",
+                    accountLabels: accountLabels
+                )
+                .environmentObject(session)
+                .ledgerPrivacyProtectedSheet()
+            }
+            .sheet(item: $singleShareTarget) { tx in
+                TransactionShareSheet(
+                    transactions: [tx],
+                    currency: session.ledger?.valuationCurrency ?? "CNY",
+                    accountLabels: accountLabels
+                )
+                .environmentObject(session)
+                .ledgerPrivacyProtectedSheet()
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if selectingTags {
-                    TransactionTagSelectionBar(
+                if isSelecting {
+                    TransactionBatchActionBar(
                         selectedCount: selectedTransactionIDs.count,
-                        totalCount: min(filteredTransactions.filter(isTagEligible).count, TransactionTagSelectionRules.maximumCount),
-                        allSelected: allVisibleEligibleSelected,
-                        onToggleAll: toggleAllVisibleForTags,
-                        onAddTags: { tagEditorPresented = true },
-                        onCancel: {
-                            selectingTags = false
-                            selectedTransactionIDs.removeAll()
-                        }
+                        totalCount: filteredTransactions.count,
+                        allSelected: allVisibleSelected,
+                        onToggleAll: toggleAllVisible,
+                        onAddTags: handleAddTags,
+                        onShare: handleShare
                     )
                 }
             }
             .onChange(of: transactions.map(\.id)) { _, ids in
                 selectedTransactionIDs.formIntersection(ids)
             }
+            .onChange(of: session.pendingTransactionFilter) { _, newFilter in
+                if let newFilter {
+                    filters = newFilter
+                    session.pendingTransactionFilter = nil
+                }
+            }
+            .onAppear {
+                if let pending = session.pendingTransactionFilter {
+                    filters = pending
+                    session.pendingTransactionFilter = nil
+                }
+            }
         .sensoryFeedback(.success, trigger: confirmationFeedback)
         .sensoryFeedback(.selection, trigger: selectionFeedback)
     }
 
-    private var allVisibleEligibleSelected: Bool {
-        let eligible = filteredTransactions.filter(isTagEligible).prefix(TransactionTagSelectionRules.maximumCount)
-        return !eligible.isEmpty && eligible.allSatisfy { selectedTransactionIDs.contains($0.id) }
+    @ViewBuilder
+    private func transactionRow(for transaction: LedgerTransaction) -> some View {
+        if isSelecting {
+            let isSelected = selectedTransactionIDs.contains(transaction.id)
+            Button {
+                toggleSelection(transaction)
+            } label: {
+                TransactionSelectableCard(
+                    transaction: transaction,
+                    selected: isSelected,
+                    accountLabels: accountLabels
+                )
+            }
+            .buttonStyle(.plain)
+            .listRowBackground(isSelected ? LedgerPalette.cobalt.opacity(0.08) : LedgerPalette.canvas)
+            .accessibilityIdentifier("transaction-select-row-\(transaction.source.line)")
+        } else {
+            NavigationLink {
+                TransactionDetailView(transaction: transaction)
+            } label: {
+                TransactionCard(
+                    transaction: transaction,
+                    accountLabels: accountLabels,
+                    mutationPhase: session.transactionMutationPhase(for: transaction)
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
+            .ledgerTransactionActions(transaction)
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                Button {
+                    LedgerFeedback.light()
+                    singleShareTarget = transaction
+                } label: {
+                    Label("分享", systemImage: "square.and.arrow.up")
+                }
+                .tint(LedgerPalette.cobalt)
+
+                if session.isLocal {
+                    Button {
+                        LedgerFeedback.light()
+                        duplicateTarget = transaction
+                    } label: {
+                        Label("再记一笔", systemImage: "plus.square.on.square")
+                    }
+                    .tint(LedgerPalette.gold)
+                }
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) {
+                    deletionTarget = transaction
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+                .disabled(transaction.source.hash?.isEmpty != false
+                    || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
+
+                if session.isLocal && transaction.editableEntry != nil {
+                    Button {
+                        LedgerFeedback.light()
+                        editingTarget = transaction
+                    } label: {
+                        Label("编辑", systemImage: "pencil")
+                    }
+                    .tint(.orange)
+                    .disabled(transaction.source.hash?.isEmpty != false
+                        || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
+                }
+
+                Button {
+                    isSelecting = true
+                    selectedTransactionIDs = [transaction.id]
+                } label: {
+                    Label("多选", systemImage: "checklist")
+                }
+                .tint(LedgerPalette.cobalt)
+            }
+        }
     }
 
     private func isTagEligible(_ transaction: LedgerTransaction) -> Bool {
@@ -489,39 +700,25 @@ struct TransactionsView: View {
             && session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites != true
     }
 
-    private func toggleTagSelection(_ transaction: LedgerTransaction) {
-        guard isTagEligible(transaction) else {
+    private func handleAddTags() {
+        let eligible = selectedTransactions.filter(isTagEligible)
+        if eligible.isEmpty {
             actionMessageStyle = .failure
-            actionMessage = "该交易缺少并发校验信息，请刷新后重试。"
+            actionMessage = "所选交易缺少并发校验信息，暂无法添加标签。"
             return
         }
-        if selectedTransactionIDs.contains(transaction.id) {
-            selectedTransactionIDs.remove(transaction.id)
-            selectionFeedback &+= 1
-        } else if selectedTransactionIDs.count < TransactionTagSelectionRules.maximumCount {
-            selectedTransactionIDs.insert(transaction.id)
-            selectionFeedback &+= 1
-        } else {
+        if eligible.count > TransactionTagSelectionRules.maximumCount {
             actionMessageStyle = .failure
-            actionMessage = "一次最多选择 200 条交易。"
+            actionMessage = "一次最多为 \(TransactionTagSelectionRules.maximumCount) 笔交易添加标签。"
+            return
         }
+        tagEditorPresented = true
     }
 
-    private func toggleAllVisibleForTags() {
-        let previousSelection = selectedTransactionIDs
-        defer { if previousSelection != selectedTransactionIDs { selectionFeedback &+= 1 } }
-        let eligible = filteredTransactions.filter(isTagEligible)
-        if allVisibleEligibleSelected {
-            selectedTransactionIDs.subtract(eligible.map(\.id))
-        } else {
-            let updated = TransactionTagSelectionRules.adding(eligible.map(\.id), to: selectedTransactionIDs)
-            if updated.count == TransactionTagSelectionRules.maximumCount,
-               eligible.contains(where: { !updated.contains($0.id) }) {
-                actionMessageStyle = .failure
-                actionMessage = "一次最多选择 200 条交易。"
-            }
-            selectedTransactionIDs = updated
-        }
+    private func handleShare() {
+        guard !selectedTransactionIDs.isEmpty else { return }
+        LedgerFeedback.light()
+        batchSharePresented = true
     }
 
     private func applyTags(_ tags: [String]) async throws {
@@ -529,7 +726,7 @@ struct TransactionsView: View {
         guard !selected.isEmpty else { throw LedgerTagValidationError.empty }
         try await session.addTransactionTags(sources: selected.map(\.source), tags: tags)
         selectedTransactionIDs.removeAll()
-        selectingTags = false
+        isSelecting = false
         confirmationFeedback &+= 1
         actionMessageStyle = .confirmed
         actionMessage = "已验证，并为 \(selected.count) 条交易添加标签。"
@@ -673,6 +870,7 @@ private struct TransactionFilterSheet: View {
     let accounts: [String]
     let availableTags: [String]
     let onDone: () -> Void
+    var onOpenEventReports: (() -> Void)? = nil
 
     @State private var tagQuery = ""
 
@@ -757,7 +955,23 @@ private struct TransactionFilterSheet: View {
                         }
                     }
                 } footer: {
-                    Text("选择多个标签时，显示包含其中任一标签的交易。")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("选择多个标签时，显示包含其中任一标签的交易。")
+                        if let onOpenEventReports {
+                            Button {
+                                onDone()
+                                onOpenEventReports()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "chart.bar.doc.horizontal")
+                                    Text("打开事件与项目独立核算看板")
+                                }
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.cobalt)
+                            }
+                            .padding(.top, 2)
+                        }
+                    }
                 }
 
                 if kind != .all || account != nil || !tags.isEmpty {
@@ -860,11 +1074,11 @@ private struct TransactionCard: View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .fill(categoryVisual.color.opacity(0.14))
                     .frame(width: 38, height: 38)
                 Image(systemName: categoryVisual.iconName)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(presentation.kind == .income ? LedgerPalette.income : Color.primary)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(categoryVisual.color)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -935,46 +1149,66 @@ private struct TransactionSelectableCard: View {
         TransactionCard(transaction: transaction, accountLabels: accountLabels, selectionState: selected)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityLabel("\(selected ? "已选择" : "未选择")，\(transaction.payee)，用于添加标签")
+        .accessibilityLabel("\(selected ? "已选择" : "未选择")，\(transaction.payee)")
     }
 }
 
-private struct TransactionTagSelectionBar: View {
+private struct TransactionBatchActionBar: View {
     let selectedCount: Int
     let totalCount: Int
     let allSelected: Bool
     let onToggleAll: () -> Void
     let onAddTags: () -> Void
-    let onCancel: () -> Void
+    let onShare: () -> Void
 
     var body: some View {
         HStack(spacing: LedgerSpacing.sm) {
             Button(allSelected ? "清空" : "全选") { onToggleAll() }
                 .font(.system(.caption, design: .default, weight: .semibold))
                 .foregroundStyle(LedgerPalette.cobalt)
-                .frame(minWidth: 48, minHeight: 44)
+                .frame(minWidth: 44, minHeight: 40)
+
             VStack(alignment: .leading, spacing: 2) {
-                Text("已选 \(selectedCount) 条")
+                Text("已选 \(selectedCount) 笔")
                     .font(.system(.caption, design: .default, weight: .semibold).monospacedDigit())
                     .foregroundStyle(LedgerPalette.ink)
-                Text("当前可选 \(totalCount) 条")
+                Text("当前可选 \(totalCount) 笔")
                     .font(.system(.caption2, design: .default).monospacedDigit())
                     .foregroundStyle(LedgerPalette.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Button("取消", action: onCancel)
-                .font(.system(.caption, design: .default, weight: .semibold))
-                .foregroundStyle(LedgerPalette.secondary)
-                .frame(minHeight: 44)
-            Button("添加标签", action: onAddTags)
-                .font(.system(.footnote, design: .default, weight: .semibold))
-                .foregroundStyle(LedgerPalette.onBrand)
-                .padding(.horizontal, LedgerSpacing.md)
-                .frame(minHeight: 44)
-                .background(LedgerPalette.cobalt)
-                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-                .disabled(selectedCount == 0)
-                .opacity(selectedCount == 0 ? 0.52 : 1)
+
+            Button(action: onAddTags) {
+                HStack(spacing: 3) {
+                    Image(systemName: "tag")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("添加标签")
+                }
+            }
+            .font(.system(.footnote, design: .default, weight: .semibold))
+            .foregroundStyle(selectedCount > 0 ? LedgerPalette.cobalt : LedgerPalette.secondary)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 38)
+            .background(LedgerPalette.cobalt.opacity(selectedCount > 0 ? 0.12 : 0.06))
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+            .disabled(selectedCount == 0)
+            .accessibilityIdentifier("transaction-bulk-tag-trigger")
+
+            Button(action: onShare) {
+                HStack(spacing: 4) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("合并分享")
+                }
+            }
+            .font(.system(.footnote, design: .default, weight: .semibold))
+            .foregroundStyle(LedgerPalette.onBrand)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 38)
+            .background(selectedCount > 0 ? LedgerPalette.cobalt : LedgerPalette.secondary.opacity(0.35))
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
+            .disabled(selectedCount == 0)
+            .accessibilityIdentifier("transaction-batch-share")
         }
         .buttonStyle(PressScaleButtonStyle())
         .padding(.horizontal, LedgerSpacing.lg)
@@ -1055,6 +1289,261 @@ private struct TransactionTagEditorSheet: View {
     }
 }
 
+struct ReceiptDashedLine: View {
+    var body: some View {
+        Line()
+            .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+            .foregroundStyle(LedgerPalette.line.opacity(0.7))
+            .frame(height: 1)
+    }
+
+    private struct Line: Shape {
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            path.move(to: CGPoint(x: 0, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.width, y: rect.midY))
+            return path
+        }
+    }
+}
+
+struct TransactionMoneyFlowLeg: Identifiable, Sendable {
+    let id: String
+    let account: String
+    let label: String
+    let iconName: String
+    let iconColor: Color
+    let amount: Int
+    let currency: String
+}
+
+struct TransactionMoneyFlow: Sendable {
+    let fromLegs: [TransactionMoneyFlowLeg]
+    let toLegs: [TransactionMoneyFlowLeg]
+    let totalAmount: Int
+    let currency: String
+    let isDirect1to1: Bool
+
+    static func build(
+        transaction: LedgerTransaction,
+        accountLabels: [String: String],
+        defaultCurrency: String
+    ) -> TransactionMoneyFlow {
+        let p = TransactionPresentation(transaction: transaction)
+        let mainCurr = p.currency.isEmpty ? defaultCurrency : p.currency
+
+        var outflows: [TransactionMoneyFlowLeg] = []
+        var inflows: [TransactionMoneyFlowLeg] = []
+
+        for (i, posting) in transaction.postings.enumerated() {
+            let acct = posting.account
+            let label = accountLabels[acct] ?? acct.split(separator: ":").last.map(String.init) ?? acct
+            let visual = TransactionVisualCategory.resolve(account: acct, label: label)
+            let curr = posting.currency ?? mainCurr
+            let amt = abs(posting.amount)
+            let leg = TransactionMoneyFlowLeg(
+                id: "\(acct)-\(i)",
+                account: acct,
+                label: label,
+                iconName: visual.iconName,
+                iconColor: visual.color,
+                amount: amt,
+                currency: curr
+            )
+
+            if p.isRefund {
+                if posting.amount < 0 {
+                    outflows.append(leg)
+                } else {
+                    inflows.append(leg)
+                }
+            } else if p.kind == .income {
+                if posting.amount < 0 {
+                    outflows.append(leg)
+                } else {
+                    inflows.append(leg)
+                }
+            } else {
+                if posting.amount < 0 {
+                    outflows.append(leg)
+                } else {
+                    inflows.append(leg)
+                }
+            }
+        }
+
+        if outflows.isEmpty && !inflows.isEmpty {
+            outflows = [inflows.removeFirst()]
+        } else if inflows.isEmpty && !outflows.isEmpty {
+            inflows = [outflows.removeFirst()]
+        }
+
+        let total = outflows.reduce(0) { $0 + $1.amount }
+        let is1to1 = outflows.count == 1 && inflows.count == 1
+
+        return TransactionMoneyFlow(
+            fromLegs: outflows,
+            toLegs: inflows,
+            totalAmount: total > 0 ? total : p.minorUnits,
+            currency: mainCurr,
+            isDirect1to1: is1to1
+        )
+    }
+}
+
+struct TransactionMoneyFlowView: View {
+    let flow: TransactionMoneyFlow
+    var compact: Bool = false
+
+    var body: some View {
+        if flow.fromLegs.isEmpty && flow.toLegs.isEmpty {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.swap")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                    Text("资金流向")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.secondary)
+                    Spacer()
+                }
+
+                if flow.isDirect1to1, let from = flow.fromLegs.first, let to = flow.toLegs.first {
+                    direct1to1Flow(from: from, to: to)
+                } else {
+                    multiLegFlow
+                }
+            }
+            .padding(compact ? 10 : 12)
+            .background(Color(uiColor: .tertiarySystemGroupedBackground).opacity(0.8))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+    }
+
+    private func direct1to1Flow(from: TransactionMoneyFlowLeg, to: TransactionMoneyFlowLeg) -> some View {
+        HStack(spacing: 6) {
+            legBox(leg: from, title: "流出 / 来源", alignment: .leading)
+
+            VStack(spacing: 3) {
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(LedgerPalette.cobalt)
+
+                Text(MoneyText.format(minorUnits: flow.totalAmount, currency: flow.currency))
+                    .font(.system(size: 10.5, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(LedgerPalette.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(width: 68)
+
+            legBox(leg: to, title: "流入 / 去向", alignment: .trailing)
+        }
+    }
+
+    private func legBox(leg: TransactionMoneyFlowLeg, title: String, alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 3) {
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(LedgerPalette.secondary)
+
+            HStack(spacing: 6) {
+                if alignment == .leading {
+                    iconBadge(leg: leg)
+                }
+
+                VStack(alignment: alignment, spacing: 1) {
+                    Text(leg.label)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.ink)
+                        .lineLimit(1)
+                    Text(shortAccount(leg.account))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .lineLimit(1)
+                }
+
+                if alignment == .trailing {
+                    iconBadge(leg: leg)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
+    }
+
+    private func iconBadge(leg: TransactionMoneyFlowLeg) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(leg.iconColor.opacity(0.15))
+                .frame(width: 28, height: 28)
+            Image(systemName: leg.iconName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(leg.iconColor)
+        }
+    }
+
+    private func shortAccount(_ acct: String) -> String {
+        let parts = acct.split(separator: ":")
+        if parts.count >= 2 {
+            return parts.suffix(2).joined(separator: ":")
+        }
+        return acct
+    }
+
+    private var multiLegFlow: some View {
+        VStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("资金来源")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+                ForEach(flow.fromLegs) { leg in
+                    legRow(leg: leg, isOutflow: true)
+                }
+            }
+
+            HStack {
+                Rectangle().fill(LedgerPalette.line.opacity(0.6)).frame(height: 0.5)
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(LedgerPalette.cobalt)
+                    .padding(.horizontal, 4)
+                Rectangle().fill(LedgerPalette.line.opacity(0.6)).frame(height: 0.5)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("资金去向")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+                ForEach(flow.toLegs) { leg in
+                    legRow(leg: leg, isOutflow: false)
+                }
+            }
+        }
+    }
+
+    private func legRow(leg: TransactionMoneyFlowLeg, isOutflow: Bool) -> some View {
+        HStack(spacing: 8) {
+            iconBadge(leg: leg)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(leg.label)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(LedgerPalette.ink)
+                    .lineLimit(1)
+                Text(shortAccount(leg.account))
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(LedgerPalette.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Text((isOutflow ? "-" : "+") + MoneyText.format(minorUnits: leg.amount, currency: leg.currency))
+                .font(.system(size: 12.5, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(isOutflow ? LedgerPalette.expense : LedgerPalette.income)
+        }
+    }
+}
+
 struct TransactionDetailView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dismiss) private var dismiss
@@ -1062,11 +1551,14 @@ struct TransactionDetailView: View {
     @State private var transaction: LedgerTransaction
     @State private var editorPresented = false
     @State private var deletionPresented = false
+    @State private var duplicatePresented = false
     @State private var savedMessage: String?
     @State private var confirmationFeedback = 0
     @State private var confirmedEntry: LedgerTransactionEntry?
     @State private var confirmedSourceFile: String?
     @State private var sourceUnavailable = false
+    @State private var sharePresented = false
+    @State private var selectedEventTag: String?
     private let snapshotOnly: Bool
 
     init(transaction: LedgerTransaction, snapshotOnly: Bool = false) {
@@ -1078,65 +1570,299 @@ struct TransactionDetailView: View {
         TransactionPresentation(transaction: transaction)
     }
 
+    private var categoryVisual: TransactionVisualCategory {
+        TransactionVisualCategory.resolve(
+            transaction: transaction,
+            presentation: presentation,
+            accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
+        )
+    }
+
     var body: some View {
-        List {
-            Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(presentation.title).font(.headline)
-                    if !presentation.subtitle.isEmpty {
-                        Text(presentation.subtitle).foregroundStyle(.secondary)
-                    }
-                    AmountLabel(
-                        minorUnits: presentation.minorUnits,
-                        currency: presentation.currency,
-                        prefix: amountPrefix(presentation.kind),
-                        font: .title2.weight(.semibold),
-                        color: amountColor(presentation.kind)
-                    )
+        ScrollView {
+            VStack(spacing: 16) {
+                if let savedMessage {
+                    StatusBanner(message: savedMessage, style: .confirmed) { self.savedMessage = nil }
                 }
-                .padding(.vertical, 12)
-                LabeledContent("日期", value: transaction.date)
-            }
-            Section("分录") {
-                ForEach(Array(transaction.postings.enumerated()), id: \.offset) { _, posting in
-                    NavigationLink {
-                        AccountDetailView(account: posting.account, currency: posting.currency ?? presentation.currency)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(accountLabel(posting.account)).font(.subheadline).foregroundStyle(.primary)
-                            if accountLabel(posting.account) != posting.account {
-                                Text(posting.account).font(.caption).foregroundStyle(.secondary)
-                            }
-                            AmountLabel(
-                                minorUnits: posting.amount,
-                                currency: posting.currency ?? presentation.currency,
-                                font: .body.weight(.medium)
-                            )
+
+                if transaction.isPendingReview {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Color.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("待核对交易")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color.orange)
+                            Text(transaction.pendingReasons.map(\.label).joined(separator: " · "))
+                                .font(.system(size: 12))
+                                .foregroundStyle(LedgerPalette.secondary)
                         }
-                        .padding(.vertical, 4)
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(Color.orange.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+
+                // Cookie Receipt Voucher Card
+                VStack(spacing: 16) {
+                    // Category & Kind Header
+                    HStack(spacing: 10) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(categoryVisual.color.opacity(0.14))
+                                .frame(width: 42, height: 42)
+                            Image(systemName: categoryVisual.iconName)
+                                .font(.system(size: 19, weight: .semibold))
+                                .foregroundStyle(categoryVisual.color)
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(categoryVisual.categoryLabel)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.ink)
+                            Text(transaction.date)
+                                .font(.system(size: 12))
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+
+                        Spacer()
+
+                        Text(kindBadgeText(presentation))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(amountColor(presentation.kind))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(amountColor(presentation.kind).opacity(0.12), in: Capsule())
+                    }
+
+                    // Hero Amount
+                    VStack(spacing: 6) {
+                        AmountLabel(
+                            minorUnits: presentation.minorUnits,
+                            currency: presentation.currency,
+                            prefix: amountPrefix(presentation.kind),
+                            font: .system(size: 36, weight: .bold, design: .rounded),
+                            color: amountColor(presentation.kind)
+                        )
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+
+                        Text(presentation.title)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.ink)
+                            .multilineTextAlignment(.center)
+
+                        if !presentation.subtitle.isEmpty {
+                            Text(presentation.subtitle)
+                                .font(.system(size: 14))
+                                .foregroundStyle(LedgerPalette.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                    }
+                    .padding(.vertical, 6)
+
+                    // Receipt Dashed Divider
+                    ReceiptDashedLine()
+                        .frame(height: 1)
+                        .padding(.horizontal, -4)
+
+                    // Money Flow
+                    let moneyFlow = TransactionMoneyFlow.build(
+                        transaction: transaction,
+                        accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? []),
+                        defaultCurrency: session.ledger?.valuationCurrency ?? "CNY"
+                    )
+                    TransactionMoneyFlowView(flow: moneyFlow)
+
+                    ReceiptDashedLine()
+                        .frame(height: 1)
+                        .padding(.horizontal, -4)
+
+                    // Info Rows
+                    VStack(spacing: 10) {
+                        receiptInfoRow(title: "交易时间", value: TransactionDateHeaderFormatter.format(transaction.date))
+
+                        if let tags = transaction.tags, !tags.isEmpty {
+                            HStack(alignment: .center) {
+                                Text("交易标签")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(LedgerPalette.secondary)
+                                Spacer()
+                                HStack(spacing: 4) {
+                                    ForEach(tags, id: \.self) { tag in
+                                        Button {
+                                            selectedEventTag = tag
+                                        } label: {
+                                            HStack(spacing: 3) {
+                                                Text("#\(tag)")
+                                                Image(systemName: "chevron.right")
+                                                    .font(.system(size: 7, weight: .bold))
+                                            }
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(LedgerPalette.cobalt)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                                        }
+                                        .buttonStyle(PressScaleButtonStyle(pressedScale: 0.96))
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-            }
-            if let tags = transaction.tags, !tags.isEmpty {
-                Section("标签") {
-                    Text(tags.map { "#\($0)" }.joined(separator: "  "))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                .ledgerFrostedCard(cornerRadius: 18, padding: 18)
+
+                // Double Entry Breakdown Card
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Text("复式分录")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.ink)
+                        Spacer()
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 11))
+                            Text("借贷平衡")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundStyle(LedgerPalette.success)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(LedgerPalette.success.opacity(0.12), in: Capsule())
+                    }
+
+                    VStack(spacing: 0) {
+                        ForEach(Array(transaction.postings.enumerated()), id: \.offset) { index, posting in
+                            NavigationLink {
+                                AccountDetailView(account: posting.account, currency: posting.currency ?? presentation.currency)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(accountLabel(posting.account))
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundStyle(LedgerPalette.ink)
+                                        if accountLabel(posting.account) != posting.account {
+                                            Text(posting.account)
+                                                .font(.system(size: 11, design: .monospaced))
+                                                .foregroundStyle(LedgerPalette.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    Spacer()
+                                    AmountLabel(
+                                        minorUnits: posting.amount,
+                                        currency: posting.currency ?? presentation.currency,
+                                        font: .system(size: 14.5, weight: .semibold, design: .rounded),
+                                        color: posting.amount >= 0 ? LedgerPalette.ink : LedgerPalette.expense
+                                    )
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(LedgerPalette.secondary)
+                                }
+                                .padding(.vertical, 10)
+                            }
+                            .buttonStyle(PressScaleButtonStyle())
+
+                            if index < transaction.postings.count - 1 {
+                                Divider().overlay(LedgerPalette.line.opacity(0.5))
+                            }
+                        }
+                    }
+                }
+                .ledgerFrostedCard(cornerRadius: 18, padding: 18)
+
+                // Ledger File Source Card
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledContent("来源文件", value: transaction.source.file)
+                            .font(.system(size: 12, design: .monospaced))
+                            .textSelection(.enabled)
+                        LabeledContent("行号", value: String(transaction.source.line))
+                            .font(.system(size: 12))
+                        if let h = transaction.source.hash, !h.isEmpty {
+                            LabeledContent("哈希指纹", value: String(h.prefix(12)))
+                                .font(.system(size: 12, design: .monospaced))
+                        }
+                    }
+                    .padding(.top, 6)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 12))
+                        Text("账本源码来源")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundStyle(LedgerPalette.secondary)
+                }
+                .ledgerFrostedCard(cornerRadius: 14, padding: 14)
+
+                // Bottom Action Buttons
+                if !snapshotOnly {
+                    HStack(spacing: 12) {
+                        // Share Receipt Button
+                        Button {
+                            LedgerFeedback.light()
+                            sharePresented = true
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(LedgerPalette.cobalt)
+                                .frame(width: 46, height: 46)
+                                .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                        .accessibilityLabel("分享记账凭证")
+
+                        // Duplicate ("再记一笔")
+                        Button {
+                            LedgerFeedback.light()
+                            duplicatePresented = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus.square.on.square")
+                                Text("再记一笔")
+                            }
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(LedgerPalette.cobalt)
+                            .frame(maxWidth: .infinity, minHeight: 46)
+                            .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+
+                        // Edit
+                        Button {
+                            LedgerFeedback.light()
+                            editorPresented = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "pencil")
+                                Text("编辑交易")
+                            }
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.white)
+                            .frame(maxWidth: .infinity, minHeight: 46)
+                            .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                        .disabled(
+                            transaction.source.hash?.isEmpty != false
+                                || transaction.editableEntry == nil
+                                || sourceUnavailable
+                                || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true
+                        )
+                    }
+                    .padding(.top, 4)
                 }
             }
-            Section {
-                DisclosureGroup("账本来源") {
-                    Text(transaction.source.file).font(.footnote).textSelection(.enabled)
-                    LabeledContent("行号", value: String(transaction.source.line))
-                }
-            }
-            if let savedMessage {
-                Section { StatusBanner(message: savedMessage, style: .confirmed) { self.savedMessage = nil } }
-            }
+            .padding(.horizontal, LedgerSpacing.lg)
+            .padding(.vertical, LedgerSpacing.md)
+            .ledgerAdaptivePageWidth()
         }
-        .listStyle(.insetGrouped)
-        .accessibilityHidden(sourceUnavailable)
         .background(LedgerPalette.canvas)
+        .accessibilityHidden(sourceUnavailable)
         .overlay {
             if sourceUnavailable {
                 ContentUnavailableView {
@@ -1155,8 +1881,16 @@ struct TransactionDetailView: View {
         .navigationTitle("交易详情")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    LedgerFeedback.light()
+                    sharePresented = true
+                } label: {
+                    Label("分享凭证", systemImage: "square.and.arrow.up")
+                }
+                .accessibilityIdentifier("transaction-share")
+            }
             if !snapshotOnly {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(role: .destructive) { deletionPresented = true } label: {
@@ -1179,9 +1913,37 @@ struct TransactionDetailView: View {
                 }
             }
         }
+        .sheet(isPresented: $sharePresented) {
+            TransactionShareSheet(
+                transactions: [transaction],
+                currency: session.ledger?.valuationCurrency ?? presentation.currency,
+                accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
+            )
+            .environmentObject(session)
+            .ledgerPrivacyProtectedSheet()
+        }
         .sheet(isPresented: $deletionPresented) {
             TransactionDeleteSheet(transaction: transaction) { dismiss() }
                 .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: $duplicatePresented) {
+            TransactionEditorView(
+                accounts: session.ledger?.accounts ?? [],
+                commodities: session.ledger?.commodities ?? [],
+                prefillPayee: transaction.payee,
+                prefillNarration: transaction.narration,
+                prefillPostings: transaction.postings.map {
+                    EditableTransactionPosting(
+                        account: $0.account,
+                        amount: TransactionEditorView.decimalText($0.amount),
+                        currency: $0.currency ?? "CNY"
+                    )
+                },
+                onSave: { entry in
+                    try await session.addLocalTransaction(entry)
+                }
+            )
+            .ledgerPrivacyProtectedSheet()
         }
         .sheet(isPresented: $editorPresented) {
             TransactionEditorView(
@@ -1201,6 +1963,22 @@ struct TransactionDetailView: View {
             )
             .ledgerPrivacyProtectedSheet()
         }
+        .sheet(isPresented: Binding(
+            get: { selectedEventTag != nil },
+            set: { if !$0 { selectedEventTag = nil } }
+        )) {
+            if let tag = selectedEventTag {
+                NavigationStack {
+                    EventTagReportView(tag: tag)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("关闭") { selectedEventTag = nil }
+                            }
+                        }
+                }
+                .ledgerPrivacyProtectedSheet()
+            }
+        }
         // Resolution reads the session, so observe values after @Published's willSet emission.
         .onChange(of: session.ledger?.transactions, initial: true) { _, _ in
             synchronizeTransaction(with: session.ledger)
@@ -1209,6 +1987,29 @@ struct TransactionDetailView: View {
             synchronizeTransaction(with: session.ledger)
         }
         .sensoryFeedback(.success, trigger: confirmationFeedback)
+    }
+
+    private func receiptInfoRow(title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 13))
+                .foregroundStyle(LedgerPalette.secondary)
+            Spacer()
+            Text(value)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(LedgerPalette.ink)
+        }
+    }
+
+    private func kindBadgeText(_ presentation: TransactionPresentation) -> String {
+        if presentation.isRefund {
+            return "退款"
+        }
+        switch presentation.kind {
+        case .expense: return "支出"
+        case .income: return "收入"
+        case .transfer: return "转账"
+        }
     }
 
     private func accountLabel(_ path: String) -> String {
@@ -1308,7 +2109,7 @@ private struct TransactionDeleteSheet: View {
     }
 }
 
-private struct EditableTransactionPosting: Identifiable, Equatable {
+struct EditableTransactionPosting: Identifiable, Equatable {
     let id: UUID
     var account: String
     var amount: String
@@ -1351,6 +2152,1460 @@ private struct EditableTransactionPosting: Identifiable, Equatable {
     }
 }
 
+// MARK: - Cookie Fast Bookkeeping Components
+
+enum CookieEntryKind: String, CaseIterable, Identifiable {
+    case expense = "支出"
+    case income = "收入"
+    case transfer = "转账"
+
+    var id: String { rawValue }
+
+    var themeColor: Color {
+        switch self {
+        case .expense: LedgerPalette.expense
+        case .income: LedgerPalette.income
+        case .transfer: LedgerPalette.cobalt
+        }
+    }
+}
+
+struct CookieCategoryItem: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let icon: String
+    let color: Color
+    let defaultAccountPrefix: String
+
+    static let expenseCategories: [CookieCategoryItem] = [
+        CookieCategoryItem(id: "food", name: "餐饮", icon: "fork.knife", color: Color(red: 0.96, green: 0.55, blue: 0.18), defaultAccountPrefix: "Expenses:Food"),
+        CookieCategoryItem(id: "transport", name: "交通", icon: "car.fill", color: Color(red: 0.16, green: 0.54, blue: 0.95), defaultAccountPrefix: "Expenses:Transport"),
+        CookieCategoryItem(id: "shopping", name: "购物", icon: "bag.fill", color: Color(red: 0.92, green: 0.32, blue: 0.55), defaultAccountPrefix: "Expenses:Shopping"),
+        CookieCategoryItem(id: "daily", name: "居家日常", icon: "house.fill", color: Color(red: 0.12, green: 0.66, blue: 0.72), defaultAccountPrefix: "Expenses:Housing"),
+        CookieCategoryItem(id: "digital", name: "数码电子", icon: "antenna.radiowaves.left.and.right", color: Color(red: 0.35, green: 0.45, blue: 0.88), defaultAccountPrefix: "Expenses:Digital"),
+        CookieCategoryItem(id: "entertainment", name: "休闲娱乐", icon: "popcorn.fill", color: Color(red: 0.65, green: 0.36, blue: 0.88), defaultAccountPrefix: "Expenses:Entertainment"),
+        CookieCategoryItem(id: "health", name: "医疗健康", icon: "heart.fill", color: Color(red: 0.92, green: 0.28, blue: 0.28), defaultAccountPrefix: "Expenses:Health"),
+        CookieCategoryItem(id: "education", name: "学习提升", icon: "book.fill", color: Color(red: 0.72, green: 0.48, blue: 0.28), defaultAccountPrefix: "Expenses:Education"),
+        CookieCategoryItem(id: "other", name: "其它支出", icon: "cart.fill", color: Color(red: 0.95, green: 0.45, blue: 0.22), defaultAccountPrefix: "Expenses:Other")
+    ]
+
+    static let incomeCategories: [CookieCategoryItem] = [
+        CookieCategoryItem(id: "salary", name: "工资薪水", icon: "banknote.fill", color: Color(red: 0.12, green: 0.68, blue: 0.36), defaultAccountPrefix: "Income:Salary"),
+        CookieCategoryItem(id: "investment", name: "理财收益", icon: "chart.line.uptrend.xyaxis", color: Color(red: 0.08, green: 0.68, blue: 0.55), defaultAccountPrefix: "Income:Investment"),
+        CookieCategoryItem(id: "bonus", name: "奖金福利", icon: "gift.fill", color: Color(red: 0.92, green: 0.28, blue: 0.28), defaultAccountPrefix: "Income:Bonus"),
+        CookieCategoryItem(id: "reimbursement", name: "报销返还", icon: "arrow.uturn.left.circle.fill", color: Color(red: 0.16, green: 0.54, blue: 0.95), defaultAccountPrefix: "Income:Reimbursement"),
+        CookieCategoryItem(id: "other_income", name: "其它收入", icon: "arrow.down.circle.fill", color: Color(red: 0.12, green: 0.68, blue: 0.36), defaultAccountPrefix: "Income:Other")
+    ]
+}
+
+struct CookieKeypadCalculator {
+    private(set) var expression: String = "0"
+
+    var displayText: String {
+        expression.isEmpty ? "0" : expression
+    }
+
+    var pendingOperation: String? {
+        if let lastOpIndex = expression.lastIndex(where: { $0 == "+" || $0 == "-" }),
+           lastOpIndex != expression.startIndex {
+            return String(expression[lastOpIndex])
+        }
+        return nil
+    }
+
+    var evaluatedResult: Decimal? {
+        evaluate(expression)
+    }
+
+    var isCalculationPending: Bool {
+        guard pendingOperation != nil else { return false }
+        let parts = expression.components(separatedBy: CharacterSet(charactersIn: "+-"))
+        return parts.count >= 2 && !(parts.last?.isEmpty ?? true)
+    }
+
+    mutating func appendDigit(_ digit: String) {
+        if expression == "0" && digit != "." {
+            expression = digit
+        } else {
+            if digit == "." {
+                let currentNumberPart = expression.components(separatedBy: CharacterSet(charactersIn: "+-")).last ?? ""
+                if currentNumberPart.contains(".") { return }
+                if currentNumberPart.isEmpty {
+                    expression += "0."
+                    return
+                }
+            } else {
+                let currentNumberPart = expression.components(separatedBy: CharacterSet(charactersIn: "+-")).last ?? ""
+                if let dotIndex = currentNumberPart.firstIndex(of: ".") {
+                    let decimals = currentNumberPart[currentNumberPart.index(after: dotIndex)...]
+                    if decimals.count >= 2 { return }
+                }
+            }
+            expression += digit
+        }
+    }
+
+    mutating func appendOperator(_ op: String) {
+        guard !expression.isEmpty else { return }
+        if let last = expression.last, last == "+" || last == "-" {
+            expression.removeLast()
+            expression.append(contentsOf: op)
+            return
+        }
+        if isCalculationPending, let result = evaluatedResult {
+            expression = formatDecimal(result) + op
+        } else {
+            expression += op
+        }
+    }
+
+    mutating func deleteLast() {
+        if expression.count <= 1 {
+            expression = "0"
+        } else {
+            expression.removeLast()
+            if expression.isEmpty {
+                expression = "0"
+            }
+        }
+    }
+
+    mutating func clear() {
+        expression = "0"
+    }
+
+    mutating func evaluateToResult() {
+        if let result = evaluatedResult {
+            expression = formatDecimal(result)
+        }
+    }
+
+    private func evaluate(_ expr: String) -> Decimal? {
+        var trimmed = expr.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasSuffix("+") || trimmed.hasSuffix("-") {
+            trimmed.removeLast()
+        }
+        guard !trimmed.isEmpty else { return nil }
+
+        var tokens: [String] = []
+        var currentToken = ""
+        for (idx, char) in trimmed.enumerated() {
+            if (char == "+" || char == "-") && idx > 0 {
+                tokens.append(currentToken)
+                tokens.append(String(char))
+                currentToken = ""
+            } else {
+                currentToken.append(char)
+            }
+        }
+        if !currentToken.isEmpty { tokens.append(currentToken) }
+
+        guard !tokens.isEmpty, let firstDecimal = Decimal(string: tokens[0], locale: Locale(identifier: "en_US_POSIX")) else {
+            return nil
+        }
+        var total = firstDecimal
+        var i = 1
+        while i + 1 < tokens.count {
+            let op = tokens[i]
+            if let val = Decimal(string: tokens[i + 1], locale: Locale(identifier: "en_US_POSIX")) {
+                if op == "+" { total += val }
+                else if op == "-" { total -= val }
+            }
+            i += 2
+        }
+        return total
+    }
+
+    private func formatDecimal(_ dec: Decimal) -> String {
+        let number = NSDecimalNumber(decimal: dec)
+        let handler = NSDecimalNumberHandler(
+            roundingMode: .plain,
+            scale: 2,
+            raiseOnExactness: false,
+            raiseOnOverflow: false,
+            raiseOnUnderflow: false,
+            raiseOnDivideByZero: false
+        )
+        let rounded = number.rounding(accordingToBehavior: handler)
+        let formatter = NumberFormatter()
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 2
+        formatter.decimalSeparator = "."
+        formatter.groupingSeparator = ""
+        formatter.numberStyle = .decimal
+        return formatter.string(from: rounded) ?? "\(rounded)"
+    }
+}
+
+struct CookieKeypadView: View {
+    @Binding var calculator: CookieKeypadCalculator
+    let actionTitle: String
+    let actionColor: Color
+    let saving: Bool
+    let onCommit: () -> Void
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                keypadButton("7") { calculator.appendDigit("7") }
+                keypadButton("8") { calculator.appendDigit("8") }
+                keypadButton("9") { calculator.appendDigit("9") }
+                keypadDeleteButton()
+            }
+            HStack(spacing: 6) {
+                keypadButton("4") { calculator.appendDigit("4") }
+                keypadButton("5") { calculator.appendDigit("5") }
+                keypadButton("6") { calculator.appendDigit("6") }
+                keypadOperatorButton("+") { calculator.appendOperator("+") }
+            }
+            HStack(spacing: 6) {
+                keypadButton("1") { calculator.appendDigit("1") }
+                keypadButton("2") { calculator.appendDigit("2") }
+                keypadButton("3") { calculator.appendDigit("3") }
+                keypadOperatorButton("-") { calculator.appendOperator("-") }
+            }
+            HStack(spacing: 6) {
+                keypadButton(".") { calculator.appendDigit(".") }
+                keypadButton("0") { calculator.appendDigit("0") }
+                keypadButton("=") { calculator.evaluateToResult() }
+                keypadActionButton()
+            }
+        }
+        .padding(.horizontal, LedgerSpacing.md)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+    }
+
+    private func keypadButton(_ label: String, action: @escaping () -> Void) -> some View {
+        Button {
+            LedgerFeedback.selection()
+            action()
+        } label: {
+            Text(label)
+                .font(.system(size: 22, weight: .medium, design: .rounded))
+                .foregroundStyle(LedgerPalette.ink)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(LedgerPalette.panel)
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+    }
+
+    private func keypadOperatorButton(_ op: String, action: @escaping () -> Void) -> some View {
+        Button {
+            LedgerFeedback.selection()
+            action()
+        } label: {
+            Text(op)
+                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .foregroundStyle(LedgerPalette.cobalt)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(Color(uiColor: .tertiarySystemFill))
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+    }
+
+    private func keypadDeleteButton() -> some View {
+        Button {
+            LedgerFeedback.selection()
+            calculator.deleteLast()
+        } label: {
+            Image(systemName: "delete.backward")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(LedgerPalette.ink)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(Color(uiColor: .tertiarySystemFill))
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        }
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+                LedgerFeedback.medium()
+                calculator.clear()
+            }
+        )
+        .buttonStyle(PressScaleButtonStyle())
+    }
+
+    private func keypadActionButton() -> some View {
+        Button(action: onCommit) {
+            ZStack {
+                if saving {
+                    ProgressView()
+                        .tint(.white)
+                } else {
+                    Text(actionTitle)
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.white)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(actionColor)
+            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .shadow(color: actionColor.opacity(0.35), radius: 4, x: 0, y: 2)
+        }
+        .disabled(saving)
+        .buttonStyle(PressScaleButtonStyle())
+    }
+}
+
+struct CookieFastTransactionEditorBody: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let transaction: LedgerTransaction?
+    let accounts: [LedgerAccount]
+    let commodities: [String]
+    let initialDate: Date
+    let initialPayee: String
+    let initialNarration: String
+    let initialTags: String
+    let initialPostings: [EditableTransactionPosting]
+    let onSave: (LedgerTransactionEntry) async throws -> Void
+    let onSwitchToAdvanced: () -> Void
+
+    @State private var kind: CookieEntryKind = .expense
+    @State private var calculator = CookieKeypadCalculator()
+    @State private var selectedCategoryID: String = "food"
+    @State private var customExpenseAccount: String?
+    @State private var customIncomeAccount: String?
+
+    @State private var assetAccount: String = ""
+    @State private var transferSourceAccount: String = ""
+    @State private var transferTargetAccount: String = ""
+
+    @State private var date: Date = Date()
+    @State private var payee: String = ""
+    @State private var narration: String = ""
+    @State private var tagsText: String = ""
+    @State private var selectedCurrency: String = "CNY"
+
+    // Multi-posting / Split mode
+    @State private var isSplitMode: Bool = false
+    @State private var splitPostings: [EditableTransactionPosting] = []
+    @State private var activePostingIndex: Int = 0
+
+    @State private var saving = false
+    @State private var errorMessage: String?
+    @State private var activeAccountPickerPurpose: AccountPickerPurpose?
+    @State private var showDatePickerSheet = false
+    @State private var failureFeedback = 0
+
+    private enum AccountPickerPurpose: Identifiable, Equatable {
+        case funding
+        case transferSource
+        case transferTarget
+        case customCategory
+        case splitPosting(Int)
+
+        var id: String {
+            switch self {
+            case .funding: return "funding"
+            case .transferSource: return "transferSource"
+            case .transferTarget: return "transferTarget"
+            case .customCategory: return "customCategory"
+            case .splitPosting(let idx): return "splitPosting_\(idx)"
+            }
+        }
+    }
+
+    private var availableCurrencies: [String] {
+        var list = ["CNY", "USD", "EUR", "HKD", "JPY", "GBP"]
+        for c in commodities where !list.contains(c) && !c.isEmpty {
+            list.append(c)
+        }
+        if !list.contains(selectedCurrency) && !selectedCurrency.isEmpty {
+            list.append(selectedCurrency)
+        }
+        return list
+    }
+
+    static func currencySymbol(for code: String) -> String {
+        switch code {
+        case "CNY", "RMB": return "¥"
+        case "USD": return "$"
+        case "EUR": return "€"
+        case "GBP": return "£"
+        case "HKD": return "HK$"
+        case "JPY": return "¥"
+        default: return code
+        }
+    }
+
+    private var currentCategories: [CookieCategoryItem] {
+        kind == .income ? CookieCategoryItem.incomeCategories : CookieCategoryItem.expenseCategories
+    }
+
+    private var activeAccounts: [LedgerAccount] {
+        accounts.filter(\.active)
+    }
+
+    private var assetAccounts: [LedgerAccount] {
+        let matching = activeAccounts.filter {
+            $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:CN:CreditCard") || $0.account.hasPrefix("Liabilities:CreditCard")
+        }
+        return matching.isEmpty ? activeAccounts : matching
+    }
+
+    private var expenseAccounts: [LedgerAccount] {
+        activeAccounts.filter { $0.account.hasPrefix("Expenses:") }
+    }
+
+    private var incomeAccounts: [LedgerAccount] {
+        activeAccounts.filter { $0.account.hasPrefix("Income:") }
+    }
+
+    private var splitBalanceSum: Decimal {
+        splitPostings.reduce(Decimal.zero) { sum, p in
+            sum + (Decimal(string: p.amount) ?? Decimal.zero)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if let errorMessage {
+                    StatusBanner(message: errorMessage) { self.errorMessage = nil }
+                        .padding(.horizontal, LedgerSpacing.md)
+                        .padding(.top, LedgerSpacing.xs)
+                }
+
+                typeSwitcher
+                    .padding(.horizontal, LedgerSpacing.lg)
+                    .padding(.top, LedgerSpacing.xs)
+                    .padding(.bottom, LedgerSpacing.sm)
+
+                heroAmountDisplay
+                    .padding(.horizontal, LedgerSpacing.lg)
+                    .padding(.bottom, LedgerSpacing.xs)
+
+                if isSplitMode {
+                    splitPostingsView
+                        .frame(maxHeight: .infinity)
+                } else if kind == .transfer {
+                    transferRouteCard
+                        .padding(.horizontal, LedgerSpacing.lg)
+                        .padding(.vertical, LedgerSpacing.sm)
+                        .frame(maxHeight: .infinity, alignment: .center)
+                } else {
+                    categoryGrid
+                        .frame(maxHeight: .infinity)
+                }
+
+                controlBar
+                    .padding(.horizontal, LedgerSpacing.lg)
+                    .padding(.vertical, LedgerSpacing.xs)
+
+                Divider()
+                    .overlay(LedgerPalette.line)
+
+                CookieKeypadView(
+                    calculator: $calculator,
+                    actionTitle: calculator.isCalculationPending ? "=" : (transaction == nil ? "保存" : "完成"),
+                    actionColor: kind.themeColor,
+                    saving: saving,
+                    onCommit: {
+                        if calculator.isCalculationPending {
+                            calculator.evaluateToResult()
+                            updateActivePostingAmount()
+                            LedgerFeedback.selection()
+                        } else {
+                            Task { await save() }
+                        }
+                    }
+                )
+                .background(LedgerPalette.canvas)
+            }
+            .background(LedgerPalette.canvas)
+            .navigationTitle(transaction == nil ? "记一笔" : "编辑交易")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                        .disabled(saving)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("高级") {
+                        LedgerFeedback.light()
+                        onSwitchToAdvanced()
+                    }
+                    .font(.system(size: 15, weight: .medium))
+                    .disabled(saving)
+                }
+            }
+            .sheet(item: $activeAccountPickerPurpose) { purpose in
+                accountPickerSheet(for: purpose)
+            }
+            .sheet(isPresented: $showDatePickerSheet) {
+                datePickerSheet
+            }
+            .sensoryFeedback(.error, trigger: failureFeedback)
+            .onAppear {
+                setupFromInitialValues()
+            }
+            .onChange(of: calculator.displayText) { _, _ in
+                if isSplitMode {
+                    updateActivePostingAmount()
+                }
+            }
+        }
+    }
+
+    private var typeSwitcher: some View {
+        Group {
+            if isSplitMode {
+                HStack(spacing: 8) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "plus.forwardslash.minus")
+                            .font(.system(size: 13, weight: .bold))
+                        Text("多分录拆分模式")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .foregroundStyle(LedgerPalette.cobalt)
+
+                    Spacer()
+
+                    Button {
+                        LedgerFeedback.light()
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                            isSplitMode = false
+                        }
+                    } label: {
+                        Text("返回单分类")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+            } else {
+                HStack(spacing: 6) {
+                    ForEach(CookieEntryKind.allCases) { entryKind in
+                        Button {
+                            LedgerFeedback.selection()
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                kind = entryKind
+                                if entryKind == .income && !CookieCategoryItem.incomeCategories.contains(where: { $0.id == selectedCategoryID }) {
+                                    selectedCategoryID = CookieCategoryItem.incomeCategories.first?.id ?? "salary"
+                                } else if entryKind == .expense && !CookieCategoryItem.expenseCategories.contains(where: { $0.id == selectedCategoryID }) {
+                                    selectedCategoryID = CookieCategoryItem.expenseCategories.first?.id ?? "food"
+                                }
+                            }
+                        } label: {
+                            Text(entryKind.rawValue)
+                                .font(.system(size: 15, weight: kind == entryKind ? .semibold : .medium))
+                                .foregroundStyle(kind == entryKind ? Color.white : LedgerPalette.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background {
+                                    if kind == entryKind {
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .fill(entryKind.themeColor)
+                                            .shadow(color: entryKind.themeColor.opacity(0.3), radius: 4, x: 0, y: 2)
+                                    } else {
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .fill(LedgerPalette.panel)
+                                    }
+                                }
+                        }
+                        .buttonStyle(PressScaleButtonStyle())
+                    }
+                }
+                .padding(4)
+                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+    }
+
+    private var heroAmountDisplay: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 5) {
+            // Interactive Currency Picker
+            HStack(alignment: .center, spacing: 2) {
+                Text(currencySymbol)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(kind.themeColor.opacity(0.55))
+            }
+            .foregroundStyle(kind.themeColor)
+            .contentShape(Rectangle())
+            .overlay {
+                Menu {
+                    ForEach(availableCurrencies, id: \.self) { curr in
+                        Button {
+                            selectedCurrency = curr
+                            LedgerFeedback.selection()
+                        } label: {
+                            if curr == selectedCurrency {
+                                Label("\(curr) (\(Self.currencySymbol(for: curr)))", systemImage: "checkmark")
+                            } else {
+                                Text("\(curr) (\(Self.currencySymbol(for: curr)))")
+                            }
+                        }
+                    }
+                } label: {
+                    Color.white.opacity(0.001)
+                        .contentShape(Rectangle())
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("选择货币，当前\(selectedCurrency)")
+
+            Text(calculator.displayText)
+                .font(.system(size: 38, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(LedgerPalette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+
+            Spacer()
+
+            if isSplitMode && splitPostings.indices.contains(activePostingIndex) {
+                Text("分录 \(activePostingIndex + 1)/\(splitPostings.count)")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(LedgerPalette.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+            } else if calculator.isCalculationPending, let res = calculator.evaluatedResult {
+                Text(verbatim: "= \(res)")
+                    .font(.system(size: 16, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(LedgerPalette.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(LedgerPalette.panel, in: Capsule())
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+
+    private var splitPostingsView: some View {
+        ScrollView {
+            VStack(spacing: 10) {
+                // Header with balance info
+                HStack {
+                    Text("拆分分录明细")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.secondary)
+                    Spacer()
+                    let sum = splitBalanceSum
+                    if abs(sum) < 0.001 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 11))
+                            Text("借贷平衡")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundStyle(LedgerPalette.success)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(LedgerPalette.success.opacity(0.12), in: Capsule())
+                    } else {
+                        HStack(spacing: 6) {
+                            Text("差额: \(formattedDecimal(-sum))")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(Color.orange)
+                            Button("配平") {
+                                autoBalanceSplit()
+                            }
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Color.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.orange, in: Capsule())
+                        }
+                    }
+                }
+                .padding(.horizontal, LedgerSpacing.lg)
+                .padding(.top, 4)
+
+                // Postings list
+                ForEach(Array(splitPostings.enumerated()), id: \.offset) { index, posting in
+                    let isSelected = index == activePostingIndex
+                    let isPositive = !posting.amount.hasPrefix("-")
+                    let visual = TransactionVisualCategory.resolve(account: posting.account, label: accountDisplayName(posting.account))
+
+                    HStack(spacing: 10) {
+                        // Account Selector Button
+                        Button {
+                            LedgerFeedback.light()
+                            activeAccountPickerPurpose = .splitPosting(index)
+                        } label: {
+                            HStack(spacing: 8) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(visual.color.opacity(0.15))
+                                        .frame(width: 32, height: 32)
+                                    Image(systemName: visual.iconName)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(visual.color)
+                                }
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(posting.account.isEmpty ? "选择账户" : accountDisplayName(posting.account))
+                                        .font(.system(size: 13.5, weight: .medium))
+                                        .foregroundStyle(posting.account.isEmpty ? Color.orange : LedgerPalette.ink)
+                                        .lineLimit(1)
+                                    if !posting.account.isEmpty {
+                                        Text(posting.account)
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundStyle(LedgerPalette.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        // Amount Button
+                        Button {
+                            selectPosting(index: index)
+                        } label: {
+                            Text(posting.amount.isEmpty ? "0.00" : posting.amount)
+                                .font(.system(size: 15, weight: isSelected ? .bold : .semibold, design: .rounded).monospacedDigit())
+                                .foregroundStyle(isPositive ? LedgerPalette.ink : LedgerPalette.expense)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
+                                .background(
+                                    isSelected ? kind.themeColor.opacity(0.14) : Color(uiColor: .tertiarySystemFill).opacity(0.4),
+                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .stroke(isSelected ? kind.themeColor : Color.clear, lineWidth: 1.5)
+                                )
+                        }
+                        .buttonStyle(.plain)
+
+                        // Delete button
+                        if splitPostings.count > 2 {
+                            Button {
+                                removePosting(at: index)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(LedgerPalette.secondary)
+                                    .padding(4)
+                            }
+                            .buttonStyle(PressScaleButtonStyle(pressedScale: 0.9))
+                        }
+                    }
+                    .padding(10)
+                    .background(
+                        isSelected ? LedgerPalette.panel : Color(uiColor: .secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(isSelected ? kind.themeColor.opacity(0.4) : LedgerPalette.cardBorder, lineWidth: 0.8)
+                    )
+                    .padding(.horizontal, LedgerSpacing.lg)
+                }
+
+                // Add Posting Button
+                Button {
+                    addSplitPosting()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 13))
+                        Text("添加分录")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(LedgerPalette.cobalt)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(LedgerPalette.cobalt.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(PressScaleButtonStyle(pressedScale: 0.97))
+                .padding(.horizontal, LedgerSpacing.lg)
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    private func updateActivePostingAmount() {
+        guard isSplitMode, splitPostings.indices.contains(activePostingIndex) else { return }
+        let amtStr = calculator.displayText
+        let clean = amtStr.replacingOccurrences(of: "-", with: "")
+        let isNegative = splitPostings[activePostingIndex].amount.hasPrefix("-")
+        splitPostings[activePostingIndex].amount = (isNegative ? "-" : "") + clean
+    }
+
+    private func selectPosting(index: Int) {
+        guard splitPostings.indices.contains(index) else { return }
+        activePostingIndex = index
+        let rawAmt = splitPostings[index].amount.replacingOccurrences(of: "-", with: "")
+        var newCalc = CookieKeypadCalculator()
+        for ch in rawAmt {
+            newCalc.appendDigit(String(ch))
+        }
+        calculator = newCalc
+        LedgerFeedback.selection()
+    }
+
+    private func toggleSplitMode() {
+        if !isSplitMode {
+            calculator.evaluateToResult()
+            let amt = calculator.evaluatedResult ?? Decimal.zero
+            let amtStr = String(format: "%.2f", NSDecimalNumber(decimal: amt).doubleValue)
+            let negAmtStr = String(format: "-%.2f", NSDecimalNumber(decimal: amt).doubleValue)
+
+            if splitPostings.isEmpty {
+                switch kind {
+                case .expense:
+                    splitPostings = [
+                        EditableTransactionPosting(account: resolveExpenseAccount(), amount: amtStr, currency: selectedCurrency),
+                        EditableTransactionPosting(account: assetAccount, amount: negAmtStr, currency: selectedCurrency)
+                    ]
+                case .income:
+                    splitPostings = [
+                        EditableTransactionPosting(account: resolveIncomeAccount(), amount: negAmtStr, currency: selectedCurrency),
+                        EditableTransactionPosting(account: assetAccount, amount: amtStr, currency: selectedCurrency)
+                    ]
+                case .transfer:
+                    splitPostings = [
+                        EditableTransactionPosting(account: transferTargetAccount, amount: amtStr, currency: selectedCurrency),
+                        EditableTransactionPosting(account: transferSourceAccount, amount: negAmtStr, currency: selectedCurrency)
+                    ]
+                }
+            }
+            isSplitMode = true
+            selectPosting(index: 0)
+        } else {
+            isSplitMode = false
+        }
+    }
+
+    private func addSplitPosting() {
+        let diff = -splitBalanceSum
+        let diffStr = String(format: "%.2f", NSDecimalNumber(decimal: diff).doubleValue)
+        let newPosting = EditableTransactionPosting(
+            account: "",
+            amount: diffStr,
+            currency: selectedCurrency
+        )
+        splitPostings.append(newPosting)
+        selectPosting(index: splitPostings.count - 1)
+        LedgerFeedback.selection()
+    }
+
+    private func removePosting(at index: Int) {
+        guard splitPostings.count > 2 else { return }
+        splitPostings.remove(at: index)
+        if activePostingIndex >= splitPostings.count {
+            activePostingIndex = splitPostings.count - 1
+        }
+        selectPosting(index: activePostingIndex)
+        LedgerFeedback.light()
+    }
+
+    private func autoBalanceSplit() {
+        let sum = splitBalanceSum
+        guard abs(sum) >= 0.001 else { return }
+        let diff = -sum
+        if splitPostings.indices.contains(activePostingIndex) {
+            let current = Decimal(string: splitPostings[activePostingIndex].amount) ?? Decimal.zero
+            let balanced = current + diff
+            splitPostings[activePostingIndex].amount = String(format: "%.2f", NSDecimalNumber(decimal: balanced).doubleValue)
+            selectPosting(index: activePostingIndex)
+        } else {
+            addSplitPosting()
+        }
+        LedgerFeedback.success()
+    }
+
+    private func formattedDecimal(_ val: Decimal) -> String {
+        String(format: "%.2f", NSDecimalNumber(decimal: val).doubleValue)
+    }
+
+    private var categoryGrid: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
+
+        return ScrollView {
+            LazyVGrid(columns: columns, spacing: 14) {
+                ForEach(currentCategories) { cat in
+                    let isSelected = selectedCategoryID == cat.id && customExpenseAccount == nil && customIncomeAccount == nil
+                    Button {
+                        LedgerFeedback.selection()
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.75)) {
+                            selectedCategoryID = cat.id
+                            customExpenseAccount = nil
+                            customIncomeAccount = nil
+                        }
+                    } label: {
+                        VStack(spacing: 6) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(isSelected ? cat.color : cat.color.opacity(0.12))
+                                    .frame(width: 48, height: 48)
+                                    .shadow(color: isSelected ? cat.color.opacity(0.35) : .clear, radius: 6, x: 0, y: 3)
+
+                                Image(systemName: cat.icon)
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundStyle(isSelected ? Color.white : cat.color)
+                            }
+                            .scaleEffect(isSelected ? 1.08 : 1.0)
+
+                            Text(cat.name)
+                                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                                .foregroundStyle(isSelected ? LedgerPalette.ink : LedgerPalette.secondary)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                }
+
+                Button {
+                    LedgerFeedback.light()
+                    activeAccountPickerPurpose = .customCategory
+                } label: {
+                    VStack(spacing: 6) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(customCategoryDisplayName != nil ? kind.themeColor.opacity(0.12) : Color(uiColor: .tertiarySystemFill))
+                                .frame(width: 48, height: 48)
+
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(customCategoryDisplayName != nil ? kind.themeColor : LedgerPalette.secondary)
+                        }
+
+                        Text(customCategoryDisplayName ?? "更多分类")
+                            .font(.system(size: 12, weight: customCategoryDisplayName != nil ? .semibold : .regular))
+                            .foregroundStyle(customCategoryDisplayName != nil ? kind.themeColor : LedgerPalette.secondary)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScaleButtonStyle())
+            }
+            .padding(.horizontal, LedgerSpacing.lg)
+            .padding(.vertical, LedgerSpacing.sm)
+        }
+    }
+
+    private var customCategoryDisplayName: String? {
+        if kind == .expense, let custom = customExpenseAccount {
+            return accounts.first(where: { $0.account == custom })?.displayLabel ?? custom.components(separatedBy: ":").last
+        }
+        if kind == .income, let custom = customIncomeAccount {
+            return accounts.first(where: { $0.account == custom })?.displayLabel ?? custom.components(separatedBy: ":").last
+        }
+        return nil
+    }
+
+    private var transferRouteCard: some View {
+        VStack(spacing: 16) {
+            Button {
+                activeAccountPickerPurpose = .transferSource
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(LedgerPalette.expense)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("转出账户")
+                            .font(.caption)
+                            .foregroundStyle(LedgerPalette.secondary)
+                        Text(accountDisplayName(transferSourceAccount))
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.ink)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
+                .padding(14)
+                .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(PressScaleButtonStyle())
+
+            Image(systemName: "arrow.down")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(LedgerPalette.cobalt)
+
+            Button {
+                activeAccountPickerPurpose = .transferTarget
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(LedgerPalette.income)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("转入账户")
+                            .font(.caption)
+                            .foregroundStyle(LedgerPalette.secondary)
+                        Text(accountDisplayName(transferTargetAccount))
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.ink)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
+                .padding(14)
+                .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(PressScaleButtonStyle())
+        }
+    }
+
+    private var controlBar: some View {
+        VStack(spacing: 8) {
+            // Row 1: Action pills with breathing room
+            HStack(spacing: 8) {
+                if !isSplitMode && kind != .transfer {
+                    Button {
+                        LedgerFeedback.light()
+                        activeAccountPickerPurpose = .funding
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: kind == .expense ? "creditcard.fill" : "building.columns.fill")
+                                .font(.system(size: 11))
+                            Text(accountDisplayName(assetAccount))
+                                .font(.system(size: 12.5, weight: .medium))
+                                .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundStyle(LedgerPalette.ink)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(LedgerPalette.panel, in: Capsule())
+                        .overlay(Capsule().stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                }
+
+                Button {
+                    LedgerFeedback.light()
+                    showDatePickerSheet = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 11))
+                        Text(dateChipLabel)
+                            .font(.system(size: 12.5, weight: .medium))
+                    }
+                    .foregroundStyle(LedgerPalette.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(LedgerPalette.panel, in: Capsule())
+                    .overlay(Capsule().stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
+                }
+                .buttonStyle(PressScaleButtonStyle())
+
+                // Split mode toggle
+                Button {
+                    LedgerFeedback.selection()
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                        toggleSplitMode()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: isSplitMode ? "list.bullet.rectangle.fill" : "plus.forwardslash.minus")
+                            .font(.system(size: 11))
+                        Text(isSplitMode ? "分录 (\(splitPostings.count))" : "拆分分录")
+                            .font(.system(size: 12.5, weight: .medium))
+                    }
+                    .foregroundStyle(isSplitMode ? Color.white : LedgerPalette.cobalt)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(isSplitMode ? LedgerPalette.cobalt : LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                }
+                .buttonStyle(PressScaleButtonStyle())
+
+                Spacer()
+            }
+
+            // Row 2: Full-width narration / payee input pill
+            HStack(spacing: 8) {
+                Image(systemName: "pencil")
+                    .font(.system(size: 12))
+                    .foregroundStyle(LedgerPalette.secondary)
+                TextField("备注 / 交易对方", text: $narration)
+                    .font(.system(size: 13.5))
+                    .textInputAutocapitalization(.never)
+                if !narration.isEmpty {
+                    Button {
+                        narration = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
+        }
+    }
+
+    private func accountPickerSheet(for purpose: AccountPickerPurpose) -> some View {
+        let choices: [LedgerAccountChoice] = {
+            switch purpose {
+            case .funding, .transferSource, .transferTarget:
+                return assetAccounts.map {
+                    LedgerAccountChoice(account: $0.account, label: $0.displayLabel, group: $0.group, active: $0.active)
+                }
+            case .customCategory:
+                let list = kind == .expense ? expenseAccounts : incomeAccounts
+                return list.map {
+                    LedgerAccountChoice(account: $0.account, label: $0.displayLabel, group: $0.group, active: $0.active)
+                }
+            case .splitPosting:
+                return activeAccounts.map {
+                    LedgerAccountChoice(account: $0.account, label: $0.displayLabel, group: $0.group, active: $0.active)
+                }
+            }
+        }()
+
+        let title: String = {
+            switch purpose {
+            case .funding: return kind == .expense ? "选择付款账户" : "选择收款账户"
+            case .transferSource: return "选择转出账户"
+            case .transferTarget: return "选择转入账户"
+            case .customCategory: return kind == .expense ? "选择支出分类" : "选择收入分类"
+            case .splitPosting(let idx): return "选择第 \(idx + 1) 条分录账户"
+            }
+        }()
+
+        return NavigationStack {
+            LedgerAccountPicker(
+                title: title,
+                accounts: choices,
+                selection: Binding(
+                    get: {
+                        switch purpose {
+                        case .funding: return assetAccount
+                        case .transferSource: return transferSourceAccount
+                        case .transferTarget: return transferTargetAccount
+                        case .customCategory:
+                            return (kind == .expense ? customExpenseAccount : customIncomeAccount) ?? ""
+                        case .splitPosting(let idx):
+                            return splitPostings.indices.contains(idx) ? splitPostings[idx].account : ""
+                        }
+                    },
+                    set: { newAcc in
+                        switch purpose {
+                        case .funding: assetAccount = newAcc
+                        case .transferSource: transferSourceAccount = newAcc
+                        case .transferTarget: transferTargetAccount = newAcc
+                        case .customCategory:
+                            if kind == .expense {
+                                customExpenseAccount = newAcc
+                                if let matchedCat = CookieCategoryItem.expenseCategories.first(where: { newAcc.hasPrefix($0.defaultAccountPrefix) }) {
+                                    selectedCategoryID = matchedCat.id
+                                } else {
+                                    selectedCategoryID = ""
+                                }
+                            } else {
+                                customIncomeAccount = newAcc
+                                if let matchedCat = CookieCategoryItem.incomeCategories.first(where: { newAcc.hasPrefix($0.defaultAccountPrefix) }) {
+                                    selectedCategoryID = matchedCat.id
+                                } else {
+                                    selectedCategoryID = ""
+                                }
+                            }
+                        case .splitPosting(let idx):
+                            if splitPostings.indices.contains(idx) {
+                                splitPostings[idx].account = newAcc
+                            }
+                        }
+                        activeAccountPickerPurpose = nil
+                    }
+                )
+            )
+        }
+    }
+
+    private var datePickerSheet: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                HStack(spacing: 12) {
+                    quickDateButton(title: "今天", targetDate: Date())
+                    quickDateButton(title: "昨天", targetDate: Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date())
+                    quickDateButton(title: "前天", targetDate: Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date())
+                }
+                .padding(.top, 16)
+
+                DatePicker("选择日期", selection: $date, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .padding()
+                    .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal)
+
+                Spacer()
+            }
+            .background(LedgerPalette.canvas)
+            .navigationTitle("记账日期")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { showDatePickerSheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func quickDateButton(title: String, targetDate: Date) -> some View {
+        let isSameDay = Calendar.current.isDate(date, inSameDayAs: targetDate)
+        return Button {
+            LedgerFeedback.selection()
+            date = targetDate
+            showDatePickerSheet = false
+        } label: {
+            Text(title)
+                .font(.system(size: 14, weight: isSameDay ? .semibold : .medium))
+                .foregroundStyle(isSameDay ? Color.white : LedgerPalette.ink)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(isSameDay ? LedgerPalette.cobalt : LedgerPalette.panel, in: Capsule())
+        }
+        .buttonStyle(PressScaleButtonStyle())
+    }
+
+    private var currencySymbol: String {
+        Self.currencySymbol(for: selectedCurrency)
+    }
+
+    private var dateChipLabel: String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "今天" }
+        if cal.isDateInYesterday(date) { return "昨天" }
+        let comp = cal.dateComponents([.month, .day], from: date)
+        if let m = comp.month, let d = comp.day {
+            return "\(m)月\(d)日"
+        }
+        return Self.formatDate(date)
+    }
+
+    private func accountDisplayName(_ path: String) -> String {
+        guard !path.isEmpty else { return "选择账户" }
+        return accounts.first(where: { $0.account == path })?.displayLabel ?? path.components(separatedBy: ":").last ?? path
+    }
+
+    private func setupFromInitialValues() {
+        date = initialDate
+        payee = initialPayee
+        narration = initialNarration
+        tagsText = initialTags
+
+        if initialPostings.count > 2 {
+            isSplitMode = true
+            splitPostings = initialPostings
+            if let first = initialPostings.first, !first.currency.isEmpty {
+                selectedCurrency = first.currency
+            }
+            selectPosting(index: 0)
+        } else if initialPostings.count == 2 {
+            let p1 = initialPostings[0]
+            let p2 = initialPostings[1]
+
+            selectedCurrency = p1.currency.isEmpty ? "CNY" : p1.currency
+
+            let amtStr = p1.amount.replacingOccurrences(of: "-", with: "")
+            if !amtStr.isEmpty && amtStr != "0" && amtStr != "0.00" {
+                var calc = CookieKeypadCalculator()
+                for ch in amtStr { calc.appendDigit(String(ch)) }
+                calculator = calc
+            }
+
+            if p1.account.hasPrefix("Expenses:") {
+                kind = .expense
+                if let matchedCat = CookieCategoryItem.expenseCategories.first(where: { p1.account.hasPrefix($0.defaultAccountPrefix) }) {
+                    selectedCategoryID = matchedCat.id
+                    if resolveExpenseAccount() == p1.account {
+                        customExpenseAccount = nil
+                    } else {
+                        customExpenseAccount = p1.account
+                    }
+                } else {
+                    selectedCategoryID = ""
+                    customExpenseAccount = p1.account
+                }
+                assetAccount = p2.account
+            } else if p1.account.hasPrefix("Income:") {
+                kind = .income
+                if let matchedCat = CookieCategoryItem.incomeCategories.first(where: { p1.account.hasPrefix($0.defaultAccountPrefix) }) {
+                    selectedCategoryID = matchedCat.id
+                    if resolveIncomeAccount() == p1.account {
+                        customIncomeAccount = nil
+                    } else {
+                        customIncomeAccount = p1.account
+                    }
+                } else {
+                    selectedCategoryID = ""
+                    customIncomeAccount = p1.account
+                }
+                assetAccount = p2.account
+            } else {
+                kind = .transfer
+                transferTargetAccount = p1.account
+                transferSourceAccount = p2.account
+            }
+        }
+
+        if assetAccount.isEmpty {
+            assetAccount = assetAccounts.first(where: { $0.account.contains("Wechat") || $0.account.contains("Alipay") || $0.account.contains("Bank") })?.account
+                ?? assetAccounts.first?.account ?? "Assets:CN:Bank:Checking"
+        }
+        if transferSourceAccount.isEmpty {
+            transferSourceAccount = assetAccount
+        }
+        if transferTargetAccount.isEmpty {
+            transferTargetAccount = assetAccounts.first(where: { $0.account != transferSourceAccount })?.account
+                ?? assetAccounts.last?.account ?? "Assets:CN:Wechat:Balance"
+        }
+    }
+
+    private func resolveExpenseAccount() -> String {
+        if let custom = customExpenseAccount, !custom.isEmpty { return custom }
+        guard let item = CookieCategoryItem.expenseCategories.first(where: { $0.id == selectedCategoryID }) else {
+            return expenseAccounts.first?.account ?? "Expenses:Food:Meals"
+        }
+        if let matched = expenseAccounts.first(where: { $0.account.hasPrefix(item.defaultAccountPrefix) }) {
+            return matched.account
+        }
+        return item.defaultAccountPrefix
+    }
+
+    private func resolveIncomeAccount() -> String {
+        if let custom = customIncomeAccount, !custom.isEmpty { return custom }
+        guard let item = CookieCategoryItem.incomeCategories.first(where: { $0.id == selectedCategoryID }) else {
+            return incomeAccounts.first?.account ?? "Income:Salary"
+        }
+        if let matched = incomeAccounts.first(where: { $0.account.hasPrefix(item.defaultAccountPrefix) }) {
+            return matched.account
+        }
+        return item.defaultAccountPrefix
+    }
+
+    private func save() async {
+        guard !saving else { return }
+        calculator.evaluateToResult()
+
+        let payeeName: String = {
+            let p = payee.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !p.isEmpty { return p }
+            if isSplitMode { return "拆分账单" }
+            if kind == .transfer { return "转账" }
+            let item = currentCategories.first(where: { $0.id == selectedCategoryID })
+            return item?.name ?? "记账"
+        }()
+
+        let cleanNarration = narration.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsedTags: [String] = (try? LedgerTagRules.parse(tagsText)) ?? []
+
+        let postings: [LedgerTransactionEntryPosting]
+
+        if isSplitMode {
+            updateActivePostingAmount()
+            for (idx, p) in splitPostings.enumerated() {
+                if p.account.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    errorMessage = "第 \(idx + 1) 条分录请选择账户"
+                    failureFeedback &+= 1
+                    return
+                }
+            }
+            let sum = splitBalanceSum
+            if abs(sum) >= 0.01 {
+                errorMessage = "分录尚未平衡，借贷差额为 \(formattedDecimal(sum))，请点击「配平」"
+                failureFeedback &+= 1
+                return
+            }
+            postings = splitPostings.map { p in
+                LedgerTransactionEntryPosting(
+                    account: p.account,
+                    amount: p.amount,
+                    currency: p.currency.isEmpty ? selectedCurrency : p.currency
+                )
+            }
+        } else {
+            guard let amountVal = calculator.evaluatedResult, amountVal > 0 else {
+                errorMessage = "请输入有效金额"
+                failureFeedback &+= 1
+                return
+            }
+
+            let amountText = String(format: "%.2f", NSDecimalNumber(decimal: amountVal).doubleValue)
+            let negativeAmountText = String(format: "-%.2f", NSDecimalNumber(decimal: amountVal).doubleValue)
+
+            switch kind {
+            case .expense:
+                let expAcc = resolveExpenseAccount()
+                let fundingAcc = assetAccount
+                postings = [
+                    LedgerTransactionEntryPosting(account: expAcc, amount: amountText, currency: selectedCurrency),
+                    LedgerTransactionEntryPosting(account: fundingAcc, amount: negativeAmountText, currency: selectedCurrency)
+                ]
+            case .income:
+                let incAcc = resolveIncomeAccount()
+                let receivingAcc = assetAccount
+                postings = [
+                    LedgerTransactionEntryPosting(account: incAcc, amount: negativeAmountText, currency: selectedCurrency),
+                    LedgerTransactionEntryPosting(account: receivingAcc, amount: amountText, currency: selectedCurrency)
+                ]
+            case .transfer:
+                postings = [
+                    LedgerTransactionEntryPosting(account: transferTargetAccount, amount: amountText, currency: selectedCurrency),
+                    LedgerTransactionEntryPosting(account: transferSourceAccount, amount: negativeAmountText, currency: selectedCurrency)
+                ]
+            }
+        }
+
+        let entry = LedgerTransactionEntry(
+            date: Self.formatDate(date),
+            flag: transaction?.editableEntry?.flag,
+            payee: payeeName,
+            narration: cleanNarration,
+            metadata: [:],
+            tags: parsedTags,
+            links: [],
+            postings: postings
+        )
+
+        saving = true
+        do {
+            try await onSave(entry)
+            LedgerFeedback.success()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+            failureFeedback &+= 1
+        }
+        saving = false
+    }
+
+    private static func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Transaction Editor View
+
 private enum TransactionEditorError: LocalizedError {
     case payeeRequired
     case metadataInvalid
@@ -1376,11 +3631,17 @@ private enum TransactionEditorError: LocalizedError {
 struct TransactionEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
+    enum EditorMode {
+        case fast
+        case advanced
+    }
+
     let transaction: LedgerTransaction?
     let accounts: [LedgerAccount]
     let commodities: [String]
     let onSave: (LedgerTransactionEntry) async throws -> Void
 
+    @State private var mode: EditorMode
     @State private var date: Date
     @State private var payee: String
     @State private var narration: String
@@ -1399,6 +3660,7 @@ struct TransactionEditorView: View {
         transaction: LedgerTransaction,
         accounts: [LedgerAccount],
         commodities: [String],
+        initialMode: EditorMode? = nil,
         onSave: @escaping (LedgerTransactionEntry) async throws -> Void
     ) {
         let baseline = transaction.editableEntry
@@ -1406,6 +3668,10 @@ struct TransactionEditorView: View {
         self.accounts = accounts
         self.commodities = commodities
         self.onSave = onSave
+
+        let hasComplexCostOrPrice = baseline?.postings.contains(where: { $0.costKind != nil || $0.priceKind != nil }) ?? false
+        _mode = State(initialValue: initialMode ?? (hasComplexCostOrPrice ? .advanced : .fast))
+
         _date = State(initialValue: Self.parseDate(baseline?.date ?? transaction.date) ?? Date())
         _payee = State(initialValue: baseline?.payee ?? transaction.payee)
         _narration = State(initialValue: baseline?.narration ?? transaction.narration)
@@ -1434,20 +3700,33 @@ struct TransactionEditorView: View {
         })
     }
 
-    init(accounts: [LedgerAccount], commodities: [String], onSave: @escaping (LedgerTransactionEntry) async throws -> Void) {
-        transaction = nil
+    init(
+        accounts: [LedgerAccount],
+        commodities: [String],
+        initialMode: EditorMode? = nil,
+        prefillPayee: String = "",
+        prefillNarration: String = "",
+        prefillPostings: [EditableTransactionPosting]? = nil,
+        onSave: @escaping (LedgerTransactionEntry) async throws -> Void
+    ) {
+        self.transaction = nil
         self.accounts = accounts
         self.commodities = commodities
         self.onSave = onSave
+        _mode = State(initialValue: initialMode ?? .fast)
         _date = State(initialValue: Date())
-        _payee = State(initialValue: "")
-        _narration = State(initialValue: "")
+        _payee = State(initialValue: prefillPayee)
+        _narration = State(initialValue: prefillNarration)
         _tagsText = State(initialValue: "")
         _metadataText = State(initialValue: "{}")
-        _postings = State(initialValue: [
-            EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Expenses:") })?.account ?? "Expenses:Other", amount: "", currency: commodities.first ?? "CNY"),
-            EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Assets:") })?.account ?? "Assets:Cash", amount: "", currency: "")
-        ])
+        if let prefillPostings, !prefillPostings.isEmpty {
+            _postings = State(initialValue: prefillPostings)
+        } else {
+            _postings = State(initialValue: [
+                EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Expenses:") })?.account ?? "Expenses:Other", amount: "", currency: commodities.first ?? "CNY"),
+                EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Assets:") })?.account ?? "Assets:Cash", amount: "", currency: "")
+            ])
+        }
     }
 
     private struct Draft: Equatable {
@@ -1487,6 +3766,31 @@ struct TransactionEditorView: View {
     }
 
     var body: some View {
+        Group {
+            if mode == .fast {
+                CookieFastTransactionEditorBody(
+                    transaction: transaction,
+                    accounts: accounts,
+                    commodities: commodities,
+                    initialDate: date,
+                    initialPayee: payee,
+                    initialNarration: narration,
+                    initialTags: tagsText,
+                    initialPostings: postings,
+                    onSave: onSave,
+                    onSwitchToAdvanced: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            mode = .advanced
+                        }
+                    }
+                )
+            } else {
+                advancedFormView
+            }
+        }
+    }
+
+    private var advancedFormView: some View {
         NavigationStack {
             Form {
                 if let errorMessage {
@@ -1587,12 +3891,22 @@ struct TransactionEditorView: View {
             }
             .disabled(saving)
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle(transaction == nil ? "记一笔" : "编辑交易")
+            .navigationTitle(transaction == nil ? "记一笔 (高级)" : "编辑交易 (高级)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消", action: requestDismiss).disabled(saving)
                         .accessibilityIdentifier("transaction-edit-cancel")
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("极速") {
+                        LedgerFeedback.light()
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            mode = .fast
+                        }
+                    }
+                    .font(.system(size: 15, weight: .medium))
+                    .disabled(saving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -1623,32 +3937,36 @@ struct TransactionEditorView: View {
         .sensoryFeedback(.error, trigger: failureFeedback)
         .sheet(item: $newEntryPreview) { preview in
             let entry = preview.entry
-                NavigationStack {
-                    List {
-                        Section("确认交易") {
-                            LabeledContent("日期", value: entry.date)
-                            LabeledContent("交易对方", value: entry.payee)
-                            LabeledContent("说明", value: entry.narration)
-                            ForEach(Array(entry.postings.enumerated()), id: \.offset) { _, posting in
-                                LabeledContent(posting.account, value: posting.amount.isEmpty ? "自动配平" : "\(posting.amount) \(posting.currency)")
-                                    .font(.subheadline.monospaced())
-                            }
-                            if !entry.tags.isEmpty { Text(entry.tags.map { "#" + $0 }.joined(separator: " ")) }
-                            if !entry.metadata.isEmpty { Text(Self.metadataText(entry.metadata)).font(.footnote.monospaced()) }
+            NavigationStack {
+                List {
+                    Section("确认交易") {
+                        LabeledContent("日期", value: entry.date)
+                        LabeledContent("交易对方", value: entry.payee)
+                        LabeledContent("说明", value: entry.narration)
+                        ForEach(Array(entry.postings.enumerated()), id: \.offset) { _, posting in
+                            LabeledContent(posting.account, value: posting.amount.isEmpty ? "自动配平" : "\(posting.amount) \(posting.currency)")
+                                .font(.subheadline.monospaced())
                         }
-                    }
-                    .navigationTitle("交易预览")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("返回编辑") { newEntryPreview = nil }.disabled(saving) }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button(saving ? "正在校验" : "确认保存") { Task { await commitNewEntry(entry) } }
-                                .disabled(saving).accessibilityIdentifier("transaction-create-confirm")
-                        }
+                        if !entry.tags.isEmpty { Text(entry.tags.map { "#" + $0 }.joined(separator: " ")) }
+                        if !entry.metadata.isEmpty { Text(Self.metadataText(entry.metadata)).font(.footnote.monospaced()) }
                     }
                 }
-                .interactiveDismissDisabled(saving)
+                .navigationTitle("交易预览")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("返回编辑") { newEntryPreview = nil }.disabled(saving) }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(saving ? "正在校验" : "确认保存") { Task { await commitNewEntry(entry) } }
+                            .disabled(saving).accessibilityIdentifier("transaction-create-confirm")
+                    }
+                }
+            }
+            .interactiveDismissDisabled(saving)
         }
         .privacySensitive()
+    }
+
+    static func decimalText(_ minorUnits: Int) -> String {
+        String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), Double(minorUnits) / 100)
     }
 
     private func save() async {
@@ -1766,10 +4084,6 @@ struct TransactionEditorView: View {
         .buttonStyle(.plain)
     }
 
-    private static func decimalText(_ minorUnits: Int) -> String {
-        String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), Double(minorUnits) / 100)
-    }
-
     private static func parseDate(_ raw: String) -> Date? {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -1807,7 +4121,7 @@ struct TransactionEditorView: View {
     }
 }
 
-private func amountPrefix(_ kind: TransactionKind) -> String {
+func amountPrefix(_ kind: TransactionKind) -> String {
     switch kind {
     case .expense: return "−"
     case .income: return "+"
@@ -1815,7 +4129,7 @@ private func amountPrefix(_ kind: TransactionKind) -> String {
     }
 }
 
-private func amountColor(_ kind: TransactionKind) -> Color {
+func amountColor(_ kind: TransactionKind) -> Color {
     switch kind {
     case .expense: return LedgerPalette.expense
     case .income: return LedgerPalette.income

@@ -1,10 +1,167 @@
 import Charts
 import SwiftUI
 
+enum AccountFilterCategory: String, CaseIterable, Identifiable {
+    case all = "全部"
+    case cash = "资金"
+    case credit = "信用"
+    case wealth = "理财"
+    case receivable = "应收"
+
+    var id: String { rawValue }
+
+    func matches(section: AccountBalanceSection) -> Bool {
+        switch self {
+        case .all:
+            return true
+        case .cash:
+            return section.id == "cash" || (section.id == "asset" && !section.title.contains("理财") && !section.title.contains("投资"))
+        case .credit:
+            return section.id == "credit" || section.id == "liability"
+        case .wealth:
+            return section.id == "wealth" || section.title.contains("理财") || section.title.contains("投资") || section.title.contains("基金")
+        case .receivable:
+            return section.id == "receivable" || section.title.contains("应收") || section.title.contains("借出")
+        }
+    }
+}
+
+struct CookieNetWorthHeroCard: View {
+    @EnvironmentObject private var session: LedgerSession
+    let totals: BalanceSheetTotals
+    let currency: String
+    var onReconcile: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center) {
+                HStack(spacing: 6) {
+                    Text("净资产")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.secondary)
+
+                    if session.privacyShielded {
+                        Image(systemName: "lock.shield.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(LedgerPalette.gold)
+                    }
+                }
+
+                Spacer()
+
+                if let onReconcile {
+                    Button(action: onReconcile) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.seal")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("对账")
+                                .font(.system(size: 11.5, weight: .medium))
+                        }
+                        .foregroundStyle(LedgerPalette.cobalt)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4.5)
+                        .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                    .accessibilityLabel("账户对账与余额校准")
+                }
+
+                NavigationLink {
+                    LedgerAnalysisView(kind: .assets, isRoot: false)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("分析")
+                            .font(.system(size: 11.5, weight: .medium))
+                    }
+                    .foregroundStyle(LedgerPalette.cobalt)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4.5)
+                    .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                }
+                .buttonStyle(PressScaleButtonStyle())
+                .accessibilityLabel("查看资产分析与净值趋势")
+
+                Button {
+                    LedgerFeedback.selection()
+                    session.toggleAmounts()
+                } label: {
+                    Image(systemName: session.amountsVisible ? "eye" : "eye.slash")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .padding(6)
+                        .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                }
+                .buttonStyle(PressScaleButtonStyle())
+                .accessibilityLabel(session.amountsVisible ? "隐藏金额" : "显示金额")
+            }
+
+            AmountLabel(
+                minorUnits: totals.netWorth,
+                currency: currency,
+                font: .system(size: 32, weight: .bold, design: .rounded),
+                color: LedgerPalette.ink
+            )
+
+            Divider()
+                .overlay(LedgerPalette.line.opacity(0.6))
+
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(LedgerPalette.income)
+                            .frame(width: 6, height: 6)
+                        Text("总资产")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
+                    AmountLabel(
+                        minorUnits: totals.assets,
+                        currency: currency,
+                        font: .system(size: 16, weight: .semibold, design: .rounded),
+                        color: LedgerPalette.ink
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Rectangle()
+                    .fill(LedgerPalette.line.opacity(0.6))
+                    .frame(width: 1, height: 28)
+                    .padding(.horizontal, 12)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(LedgerPalette.expense)
+                            .frame(width: 6, height: 6)
+                        Text("总负债")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
+                    AmountLabel(
+                        minorUnits: totals.liabilities,
+                        currency: currency,
+                        prefix: totals.liabilities > 0 ? "-" : "",
+                        font: .system(size: 16, weight: .semibold, design: .rounded),
+                        color: LedgerPalette.ink
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .ledgerFrostedCard(cornerRadius: 18, padding: 18)
+    }
+}
+
 struct AccountsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var expandedSectionIDs: Set<String> = []
+    @State private var selectedFilter: AccountFilterCategory = .all
+    @State private var showingReconciliationView = false
+    @State private var selectedAccountForReconciliation: AccountBalanceRow? = nil
     var isRoot = true
 
     private var activeExpandedSectionIDs: Set<String> {
@@ -15,11 +172,32 @@ struct AccountsView: View {
         !sections.isEmpty && sections.allSatisfy { activeExpandedSectionIDs.contains($0.id) }
     }
 
-    private var sections: [AccountBalanceSection] {
+    private var allSections: [AccountBalanceSection] {
         guard let ledger = session.ledger else { return [] }
         return ledger.accountSections(
             periodBalancesAvailable: session.accountPeriodBalancesAvailable && ledger.periodAccountBalancesAvailable
         ).filter { !$0.rows.isEmpty }
+    }
+
+    private var sections: [AccountBalanceSection] {
+        allSections.filter { section in
+            selectedFilter.matches(section: section)
+        }
+    }
+
+    private var totals: BalanceSheetTotals {
+        guard let ledger = session.ledger else {
+            return BalanceSheetTotals(assets: 0, liabilities: 0, netWorth: 0)
+        }
+        let periodAvailable = session.accountPeriodBalancesAvailable && ledger.periodAccountBalancesAvailable
+        if periodAvailable {
+            let assetSections = allSections.filter { $0.id == "cash" || $0.id == "asset" || $0.id == "wealth" || $0.id == "receivable" }
+            let liabilitySections = allSections.filter { $0.id == "credit" || $0.id == "liability" }
+            let assets = assetSections.flatMap(\.rows).reduce(0) { $0 + ($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation) }
+            let liabilities = liabilitySections.flatMap(\.rows).reduce(0) { $0 + abs($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation) }
+            return BalanceSheetTotals(assets: assets, liabilities: liabilities, netWorth: assets - liabilities)
+        }
+        return ledger.balanceSheetTotals
     }
 
     var body: some View {
@@ -27,6 +205,71 @@ struct AccountsView: View {
             if let error = session.errorMessage {
                 Section { StatusBanner(message: error, onDismiss: session.dismissError) }
             }
+
+            // Cookie Net Worth Hero Card
+            Section {
+                CookieNetWorthHeroCard(
+                    totals: totals,
+                    currency: session.ledger?.valuationCurrency ?? "CNY",
+                    onReconcile: { showingReconciliationView = true }
+                )
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 6, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
+            // Cookie Category Filter Pills
+            Section {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(AccountFilterCategory.allCases) { filter in
+                            let isSelected = selectedFilter == filter
+                            let count: Int = {
+                                if filter == .all {
+                                    return allSections.reduce(0) { $0 + $1.rows.count }
+                                }
+                                return allSections.filter { filter.matches(section: $0) }.reduce(0) { $0 + $1.rows.count }
+                            }()
+
+                            Button {
+                                LedgerFeedback.selection()
+                                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                    selectedFilter = filter
+                                }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Text(filter.rawValue)
+                                        .font(.system(size: 13.5, weight: isSelected ? .semibold : .medium))
+                                    Text("\(count)")
+                                        .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                                        .foregroundStyle(isSelected ? Color.white.opacity(0.85) : LedgerPalette.secondary)
+                                }
+                                .foregroundStyle(isSelected ? Color.white : LedgerPalette.ink)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background {
+                                    if isSelected {
+                                        Capsule()
+                                            .fill(LedgerPalette.cobalt)
+                                            .shadow(color: LedgerPalette.cobalt.opacity(0.3), radius: 4, x: 0, y: 2)
+                                    } else {
+                                        Capsule()
+                                            .fill(LedgerPalette.panel)
+                                            .overlay(Capsule().stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
+                                    }
+                                }
+                            }
+                            .buttonStyle(PressScaleButtonStyle())
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 2)
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
             Section {
                 ForEach(sections) { section in
                     DisclosureGroup(isExpanded: expandedBinding(for: section.id)) {
@@ -35,6 +278,21 @@ struct AccountsView: View {
                                 AccountDetailView(account: row.account, currency: row.nativeCurrency)
                             } label: {
                                 AccountRowView(row: row)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button {
+                                    selectedAccountForReconciliation = row
+                                } label: {
+                                    Label("校对余额", systemImage: "checkmark.seal")
+                                }
+                                .tint(LedgerPalette.cobalt)
+                            }
+                            .contextMenu {
+                                Button {
+                                    selectedAccountForReconciliation = row
+                                } label: {
+                                    Label("校对余额 (对账)", systemImage: "checkmark.seal")
+                                }
                             }
                         }
                     } label: {
@@ -94,14 +352,36 @@ struct AccountsView: View {
                 }
             }
             if sections.isEmpty {
-                ContentUnavailableView("暂无账户", systemImage: "building.columns", description: Text("账本中的账户会按用途显示在这里。"))
+                ContentUnavailableView("暂无账户", systemImage: "building.columns", description: Text("当前筛选分类下暂无账户。"))
             }
         }
         .ledgerReadingList()
         .accessibilityIdentifier("accounts-list")
         .ledgerNavigation("账户", isRoot: isRoot, showsTimeRange: true)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingReconciliationView = true
+                } label: {
+                    Image(systemName: "checkmark.seal")
+                }
+                .accessibilityLabel("账户对账")
+            }
+        }
         .navigationDestination(item: $session.externalAccount) { account in
             AccountDetailView(account: account.account, currency: account.currency)
+        }
+        .sheet(isPresented: $showingReconciliationView) {
+            NavigationStack {
+                ReconciliationView()
+            }
+        }
+        .sheet(item: $selectedAccountForReconciliation) { row in
+            SingleAccountReconciliationSheet(
+                account: row.account,
+                label: row.label,
+                currency: row.nativeCurrency
+            )
         }
         .refreshable { await session.refresh() }
     }
@@ -178,6 +458,7 @@ struct AccountDetailView: View {
     @State private var detail: LedgerAccountDetail?
     @State private var errorMessage: String?
     @State private var reloadToken = 0
+    @State private var showingReconcileSheet = false
 
     private var requestKey: AccountDetailRequestKey {
         AccountDetailRequestKey(
@@ -228,9 +509,25 @@ struct AccountDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { LedgerTimeRangeButton() }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingReconcileSheet = true
+                } label: {
+                    Image(systemName: "checkmark.seal")
+                }
+                .accessibilityLabel("校对余额")
+            }
         }
         .toolbar(.visible, for: .navigationBar)
-
+        .sheet(isPresented: $showingReconcileSheet, onDismiss: {
+            reloadToken += 1
+        }) {
+            SingleAccountReconciliationSheet(
+                account: account,
+                label: detail?.label,
+                currency: currency
+            )
+        }
         .task(id: requestKey) {
             await load(replacingContent: detail == nil)
         }
@@ -240,7 +537,11 @@ struct AccountDetailView: View {
         let accountLabels = TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
         return ScrollView {
             LazyVStack(spacing: LedgerSpacing.md) {
-                AccountDetailHero(detail: detail, range: session.selectedRange)
+                AccountDetailHero(
+                    detail: detail,
+                    range: session.selectedRange,
+                    onReconcile: { showingReconcileSheet = true }
+                )
 
                 if let errorMessage {
                     StatusBanner(message: errorMessage) {
@@ -324,6 +625,7 @@ private struct AccountDetailRequestKey: Hashable {
 private struct AccountDetailHero: View {
     let detail: LedgerAccountDetail
     let range: LedgerDateRange
+    var onReconcile: (() -> Void)? = nil
 
     private var openingBalance: Int {
         detail.openingBalance ?? detail.rows.first.map { $0.balance - $0.change } ?? detail.currentBalance
@@ -369,20 +671,40 @@ private struct AccountDetailHero: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(detail.account.hasPrefix("Liabilities:") ? "\(range.metricScope)期末待还" : "\(range.metricScope)期末余额")
-                    .font(.system(.caption2, design: .default, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.secondary)
-                AmountLabel(
-                    minorUnits: closingBalance,
-                    currency: detail.currency,
-                    font: .title2.weight(.semibold),
-                    color: detail.account.hasPrefix("Liabilities:")
-                        ? LedgerPalette.expense
-                        : LedgerPalette.gold
-                )
-                .tracking(-0.75)
-                .lineLimit(1)
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(detail.account.hasPrefix("Liabilities:") ? "\(range.metricScope)期末待还" : "\(range.metricScope)期末余额")
+                        .font(.system(.caption2, design: .default, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.secondary)
+                    AmountLabel(
+                        minorUnits: closingBalance,
+                        currency: detail.currency,
+                        font: .title2.weight(.semibold),
+                        color: detail.account.hasPrefix("Liabilities:")
+                            ? LedgerPalette.expense
+                            : LedgerPalette.gold
+                    )
+                    .tracking(-0.75)
+                    .lineLimit(1)
+                }
+
+                if let onReconcile {
+                    Spacer()
+                    Button(action: onReconcile) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("校对")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundStyle(LedgerPalette.cobalt)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                    .accessibilityLabel("校对余额")
+                }
             }
 
             HStack(spacing: LedgerSpacing.xl) {
@@ -696,6 +1018,7 @@ private struct AccountHistoryRow: View {
 }
 
 private struct AccountRowView: View {
+    @EnvironmentObject private var session: LedgerSession
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let row: AccountBalanceRow
 
@@ -742,9 +1065,16 @@ private struct AccountRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 headingLayout {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(row.label)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(LedgerPalette.ink)
+                        HStack(spacing: 5) {
+                            Text(row.label)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(LedgerPalette.ink)
+                            if let status = session.accountStatus(for: row.account) {
+                                Circle()
+                                    .fill(status.statusColor)
+                                    .frame(width: 6, height: 6)
+                            }
+                        }
                         Text(row.account)
                             .font(.system(.caption2, design: .default))
                             .foregroundStyle(LedgerPalette.secondary)

@@ -252,6 +252,9 @@ func ExpenseAnalyticsInCurrency(txns []Transaction, start, end string, accounts 
 
 	categories := []ExpenseCategoryAnalytics{}
 	for account, row := range current {
+		if row.amount <= 0 {
+			continue
+		}
 		share := (*float64)(nil)
 		if totalExpense > 0 {
 			value := float64(row.amount) / float64(totalExpense)
@@ -325,7 +328,9 @@ func collectExpenseCategoriesWithPriceIndex(txns []Transaction, start, end strin
 			}
 			amount := postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 			row.amount += amount
-			row.txns[id] = true
+			if posting.Amount > 0 {
+				row.txns[id] = true
+			}
 
 			payeeName := txn.Payee
 			if payeeName == "" {
@@ -336,7 +341,9 @@ func collectExpenseCategoriesWithPriceIndex(txns []Transaction, start, end strin
 				payee.txns = map[string]bool{}
 			}
 			payee.amount += amount
-			payee.txns[id] = true
+			if posting.Amount > 0 {
+				payee.txns[id] = true
+			}
 			row.payees[payeeName] = payee
 			categories[posting.Account] = row
 		}
@@ -347,7 +354,9 @@ func collectExpenseCategoriesWithPriceIndex(txns []Transaction, start, end strin
 func categoryTopPayees(rows map[string]expensePayeeAccumulator) []PayeeAnalytics {
 	out := []PayeeAnalytics{}
 	for payee, row := range rows {
-		out = append(out, PayeeAnalytics{Payee: payee, Amount: row.amount, TxCount: len(row.txns)})
+		if row.amount > 0 {
+			out = append(out, PayeeAnalytics{Payee: payee, Amount: row.amount, TxCount: len(row.txns)})
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Amount != out[j].Amount {
@@ -402,7 +411,7 @@ func summarizePayeesWithPriceIndex(txns []Transaction, start, end string, priceI
 				expense += postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 			}
 		}
-		if expense <= 0 {
+		if expense == 0 {
 			continue
 		}
 		payee := txn.Payee
@@ -414,12 +423,16 @@ func summarizePayeesWithPriceIndex(txns []Transaction, start, end string, priceI
 			row.txns = map[string]bool{}
 		}
 		row.amount += expense
-		row.txns[txn.Source.File+":"+formatInt(txn.Source.Line)] = true
+		if expense > 0 {
+			row.txns[txn.Source.File+":"+formatInt(txn.Source.Line)] = true
+		}
 		rows[payee] = row
 	}
 	out := []PayeeAnalytics{}
 	for payee, row := range rows {
-		out = append(out, PayeeAnalytics{Payee: payee, Amount: row.amount, TxCount: len(row.txns)})
+		if row.amount > 0 {
+			out = append(out, PayeeAnalytics{Payee: payee, Amount: row.amount, TxCount: len(row.txns)})
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Amount > out[j].Amount })
 	if len(out) > 8 {
@@ -452,7 +465,36 @@ func summarizePaymentAccountsWithPriceIndex(txns []Transaction, start, end strin
 				expense += postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
 			}
 		}
-		if expense <= 0 {
+		if expense == 0 {
+			continue
+		}
+
+		if expense < 0 {
+			refundAmount := -expense
+			for _, posting := range txn.Postings {
+				if !(strings.HasPrefix(posting.Account, "Assets:") || strings.HasPrefix(posting.Account, "Liabilities:")) {
+					continue
+				}
+				account := accounts[posting.Account]
+				group := account.Group
+				if group == "" {
+					group = accountGroup(posting.Account, account.Metadata, account.Alias)
+				}
+				if group != "cash" && group != "credit" && group != "liability" {
+					continue
+				}
+				inflow := posting.Amount
+				if inflow <= 0 {
+					continue
+				}
+				inflow, ok := priceIndex.Valuation(inflow, posting.Currency, valuationCurrency, "")
+				if !ok {
+					continue
+				}
+				row := rows[posting.Account]
+				row.amount -= min(inflow, refundAmount)
+				rows[posting.Account] = row
+			}
 			continue
 		}
 
@@ -517,8 +559,10 @@ func summarizePaymentAccountsWithPriceIndex(txns []Transaction, start, end strin
 	}
 	out := []AccountAnalytics{}
 	for account, row := range rows {
-		label, alias := accountLabelAlias(account, accounts)
-		out = append(out, AccountAnalytics{Account: account, Alias: alias, Label: label, Amount: row.amount, TxCount: len(row.txns)})
+		if row.amount > 0 {
+			label, alias := accountLabelAlias(account, accounts)
+			out = append(out, AccountAnalytics{Account: account, Alias: alias, Label: label, Amount: row.amount, TxCount: len(row.txns)})
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Amount > out[j].Amount })
 	if len(out) > 8 {

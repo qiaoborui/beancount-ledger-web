@@ -38,12 +38,13 @@ struct OverviewView: View {
                             session.primaryDestinationID = LedgerDestination.incomeExpense.rawValue
                         },
                         onAssets: {
-                            session.primaryDestinationID = LedgerDestination.assets.rawValue
+                            session.primaryDestinationID = LedgerDestination.accounts.rawValue
                         }
                     )
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                 }
+
 
                 // 3. Top Spending Categories
                 let topCategories = spendingCategories(from: ledger.transactions, accountLabels: accountLabels)
@@ -143,35 +144,40 @@ struct OverviewView: View {
         accountLabels: [String: String]
     ) -> [OverviewCategorySpending] {
         var categoryTotals: [String: (label: String, icon: String, color: Color, amount: Int, count: Int)] = [:]
-        var overallExpense: Int = 0
 
         for tx in transactions {
+            let expensePostings = tx.postings.filter { $0.account.hasPrefix("Expenses:") && $0.amount != 0 }
+            guard !expensePostings.isEmpty else { continue }
             let presentation = TransactionPresentation(transaction: tx)
-            guard presentation.kind == .expense, presentation.minorUnits > 0 else { continue }
             let visual = TransactionVisualCategory.resolve(
                 transaction: tx,
                 presentation: presentation,
                 accountLabels: accountLabels
             )
-            overallExpense += presentation.minorUnits
+            let txExpense = expensePostings.reduce(0) { $0 + $1.amount }
+
             if var existing = categoryTotals[visual.categoryLabel] {
-                existing.amount += presentation.minorUnits
-                existing.count += 1
+                existing.amount += txExpense
+                if txExpense > 0 {
+                    existing.count += 1
+                }
                 categoryTotals[visual.categoryLabel] = existing
             } else {
                 categoryTotals[visual.categoryLabel] = (
                     label: visual.categoryLabel,
                     icon: visual.iconName,
                     color: visual.color,
-                    amount: presentation.minorUnits,
-                    count: 1
+                    amount: txExpense,
+                    count: txExpense > 0 ? 1 : 0
                 )
             }
         }
 
+        let positiveCategories = categoryTotals.values.filter { $0.amount > 0 }
+        let overallExpense = positiveCategories.reduce(0) { $0 + $1.amount }
         guard overallExpense > 0 else { return [] }
 
-        return categoryTotals.values
+        return positiveCategories
             .sorted { $0.amount > $1.amount }
             .prefix(4)
             .map { item in
@@ -181,7 +187,7 @@ struct OverviewView: View {
                     iconName: item.icon,
                     color: item.color,
                     totalMinorUnits: item.amount,
-                    count: item.count,
+                    count: max(1, item.count),
                     percentage: Double(item.amount) / Double(overallExpense)
                 )
             }
@@ -292,11 +298,11 @@ private struct OverviewTopCategoriesCard: View {
                     HStack(alignment: .center, spacing: 9) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(Color(uiColor: .tertiarySystemFill))
+                                .fill(item.color.opacity(0.14))
                                 .frame(width: 28, height: 28)
                             Image(systemName: item.iconName)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Color.primary)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(item.color)
                         }
 
                         VStack(alignment: .leading, spacing: 1) {
@@ -332,7 +338,7 @@ private struct OverviewTopCategoriesCard: View {
                                 .fill(Color(uiColor: .tertiarySystemFill))
                                 .frame(height: 3.5)
                             Capsule()
-                                .fill(Color.primary.opacity(0.72))
+                                .fill(item.color)
                                 .frame(
                                     width: max(3.5, min(geo.size.width, geo.size.width * CGFloat(item.percentage))),
                                     height: 3.5
@@ -392,7 +398,7 @@ private struct OverviewSpendingRhythmCard: View {
     private var highestExpense: (title: String, amount: Int)? {
         let expenseTx = ledger.transactions.compactMap { tx -> (String, Int)? in
             let presentation = TransactionPresentation(transaction: tx)
-            guard presentation.kind == .expense, presentation.minorUnits > 0 else { return nil }
+            guard presentation.kind == .expense, !presentation.isRefund, presentation.minorUnits > 0 else { return nil }
             return (presentation.title, presentation.minorUnits)
         }
         return expenseTx.max { $0.1 < $1.1 }
@@ -790,3 +796,5 @@ private struct OverviewComparisonRow: View {
         "\(label)，\(valueText)，当前 \(comparison.currentRange.start) 至 \(comparison.currentRange.end)，对比 \(comparison.baselineRange.start) 至 \(comparison.baselineRange.end)"
     }
 }
+
+

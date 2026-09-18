@@ -3,6 +3,9 @@ import Combine
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum LedgerLockInterval: Int, CaseIterable, Equatable, Sendable, Identifiable {
     case immediately = 0
@@ -126,6 +129,7 @@ final class LedgerSession: ObservableObject {
     @Published var errorMessage: String?
     @Published var amountsVisible = false
     @Published var primaryDestinationID = "overview"
+    @Published var pendingTransactionFilter: LedgerTransactionFilter?
     @Published private(set) var pendingWidgetExpenseDay: String?
     @Published private(set) var compactTabDestinations = LedgerDestination.defaultCompactTabs
     @Published private(set) var selectedRange: LedgerDateRange
@@ -233,6 +237,10 @@ final class LedgerSession: ObservableObject {
         widgetRefreshStatus = resolvedWidgetRefreshStatusStore.load()
             ?? LedgerWidgetRefreshStatus(phase: .waitingForBiometrics)
         self.importIndexActivity = importIndexActivity
+
+        if let initialTab = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--initial-tab=") })?.replacingOccurrences(of: "--initial-tab=", with: "") {
+            primaryDestinationID = initialTab
+        }
 
         if localOnly {
             // Production local-only composition has no HTTP client or remote
@@ -868,7 +876,38 @@ final class LedgerSession: ObservableObject {
         return await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
     }
 
+    #if os(iOS)
+    /// Flushes any pending sync right as the app transitions to the background.
+    /// Obtains a short background execution assertion from iOS so writes and pushes finish.
+    func flushBackgroundLocalSyncIfNeeded() async {
+        guard automaticLocalSyncServicesEnabled, isLocal else { return }
+        let descriptor = localLedgers.first { location == .local($0.id) }
+        guard let descriptor, allowsAutomaticSync(descriptor) else { return }
+
+        var backgroundTaskID = UIBackgroundTaskIdentifier.invalid
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "ledger.flush-local-sync") {
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            backgroundTaskID = .invalid
+        }
+
+        let success = await performBackgroundLocalSync()
+        LocalLedgerBackgroundSyncService.shared.recordExecution(kind: .sceneFlush, success: success)
+
+        if backgroundTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            backgroundTaskID = .invalid
+        }
+    }
+    #endif
+
     private func runAutomaticLocalSync(background: Bool) async -> LocalLedgerAutoSyncCoordinator.Outcome {
+        if isStorageSyncBusy && background {
+            // Give any concurrent foreground save/sync up to 2 seconds to finish yielding.
+            for _ in 0..<20 {
+                if !isStorageSyncBusy { break }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
         guard !Task.isCancelled, !isStorageSyncBusy, let localCatalog else { return .retryableFailure }
         if !background, (!applicationActive || phase != .ready) { return .retryableFailure }
         isStorageSyncBusy = true
@@ -958,6 +997,46 @@ final class LedgerSession: ObservableObject {
         try await localRepository.addTransaction(entry: entry)
         guard epoch == sessionEpoch else { throw CancellationError() }
         await refresh()
+    }
+
+    func reconcileAccount(
+        account: String,
+        actualAmount: String,
+        balanceDate: String,
+        adjustmentDate: String
+    ) async throws -> LedgerReconciliationResult {
+        guard phase == .ready else {
+            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+        }
+        let request = LedgerReconcileRequest(
+            account: account,
+            actualAmount: actualAmount,
+            balanceDate: balanceDate,
+            adjustmentDate: adjustmentDate
+        )
+        let result = try await performSensitiveRequest { repository in
+            try await repository.reconcile(request: request)
+        }
+        await refresh()
+        return result
+    }
+
+    func fetchReconciliationRows(start: String, end: String) async throws -> [LedgerReconciliationRow] {
+        guard phase == .ready else {
+            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+        }
+        let response = try await performSensitiveRequest { repository in
+            try await repository.reconciliation(start: start, end: end)
+        }
+        return response.rows
+    }
+
+    func accountStatus(for account: String) -> LedgerAccountStatus? {
+        ledger?.accountStatuses.first { $0.account == account }
+    }
+
+    func reconciliationRow(for account: String) -> LedgerReconciliationRow? {
+        ledger?.reconciliationRows.first { $0.account == account }
     }
 
     func login() async {
@@ -2481,6 +2560,21 @@ final class LedgerSession: ObservableObject {
         pendingWidgetExpenseDay = nil
     }
 
+    func navigateToTransactions(
+        kind: TransactionKindFilter = .all,
+        account: String? = nil,
+        tag: String? = nil,
+        query: String = ""
+    ) {
+        var filter = LedgerTransactionFilter()
+        filter.kind = kind
+        filter.account = account
+        if let tag, !tag.isEmpty { filter.tags = [tag] }
+        filter.query = query
+        self.pendingTransactionFilter = filter
+        self.primaryDestinationID = LedgerDestination.transactions.rawValue
+    }
+
     /// A day drill-down owns its payload and never replaces the global range or ledger.
     func widgetDayLedger(_ day: String) async throws -> LedgerBootstrap {
         guard LedgerWidgetLink.isValidDay(day) else {
@@ -3133,10 +3227,12 @@ extension LedgerBootstrap {
             monthEndNetWorth: monthEndNetWorth,
             netWorthWindows: netWorthWindows,
             transactions: transactions,
+            reconciliationRows: reconciliationRows,
             accounts: accounts,
             commodities: commodities,
             prices: prices,
             valuationCurrency: valuationCurrency,
+            accountStatuses: accountStatuses,
             sensitiveUnlocked: sensitiveUnlocked
         )
     }

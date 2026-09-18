@@ -229,6 +229,18 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         SafePreviewLedgerData.accountDetail(account: account, currency: currency, start: start, end: end)
     }
 
+    func reconciliation(baseURL: URL, start: String, end: String) async throws -> LedgerReconciliationResponse {
+        SafePreviewLedgerData.reconciliation(start: start, end: end)
+    }
+
+    func reconcile(baseURL: URL, request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult {
+        SafePreviewLedgerData.reconcile(request: request)
+    }
+
+    func accountStatuses(baseURL: URL) async throws -> [LedgerAccountStatus] {
+        SafePreviewLedgerData.accountStatuses
+    }
+
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {
         if let committedImportDocument {
             return [committedImportDocument] + SafePreviewLedgerData.importDocuments
@@ -558,16 +570,84 @@ private enum SafePreviewLedgerData {
         transaction(date: "2026-08-21", payee: "云端出行", narration: "差旅交通", postings: [("Expenses:Transport:Public", 57_600, "CNY"), ("Liabilities:CreditCard", -57_600, "CNY")], line: 61, tags: ["travel", "trip-2026-shanghai"]),
         transaction(date: "2026-08-18", payee: "工资", narration: "八月薪资", postings: [("Assets:Bank:Daily", 4_800_000, "CNY"), ("Income:Salary", -4_800_000, "CNY")], line: 52),
         transaction(date: "2026-08-15", payee: "教育储备", narration: "家庭长期计划转入", postings: [("Assets:Bank:FamilyEducationReserve", 2_000_000, "CNY"), ("Assets:Bank:Daily", -2_000_000, "CNY")], line: 44),
-        transaction(date: "2026-08-12", payee: "山岚咖啡", narration: "朋友聚会", postings: [("Expenses:Food:Dining", 23_600, "CNY"), ("Assets:Bank:Daily", -23_600, "CNY")], line: 37),
+        transaction(date: "2026-08-12", payee: "山岚咖啡", narration: "朋友聚会", postings: [("Expenses:Food:Dining", 23_600, "CNY"), ("Assets:Bank:Daily", -23_600, "CNY")], line: 37, tags: ["trip-2026-shanghai"]),
         transaction(date: "2026-08-09", payee: "房屋租金", narration: "八月房租", postings: [("Expenses:Housing:Rent", 380_000, "CNY"), ("Assets:Bank:Daily", -380_000, "CNY")], line: 29),
         transaction(date: "2026-08-06", payee: "差旅报销", narration: "七月差旅", postings: [("Assets:Bank:Daily", 250_000, "CNY"), ("Income:Reimbursement", -250_000, "CNY")], line: 21, tags: ["reimbursement"]),
-        transaction(date: "2026-08-03", payee: "海岸生鲜", narration: "家庭采购", postings: [("Expenses:Food:Groceries", 42_500, "CNY"), ("Liabilities:CreditCard", -42_500, "CNY")], line: 14),
+        transaction(date: "2026-08-03", payee: "海岸生鲜", narration: "家庭采购", postings: [("Expenses:Food:Groceries", 42_500, "CNY"), ("Liabilities:CreditCard", -42_500, "CNY")], line: 14, tags: ["trip-2026-shanghai"]),
         transaction(date: "2026-07-12", payee: "教育储备", narration: "暑期计划转入", postings: [("Assets:Bank:FamilyEducationReserve", 1_580_000, "CNY"), ("Assets:Bank:Daily", -1_580_000, "CNY")], line: 118),
         transaction(date: "2026-06-18", payee: "教育储备", narration: "家庭奖金转入", postings: [("Assets:Bank:FamilyEducationReserve", 2_360_000, "CNY"), ("Assets:Bank:Daily", -2_360_000, "CNY")], line: 96),
         transaction(date: "2026-05-09", payee: "教育储备", narration: "五月定期转入", postings: [("Assets:Bank:FamilyEducationReserve", 1_260_000, "CNY"), ("Assets:Bank:Daily", -1_260_000, "CNY")], line: 73),
         transaction(date: "2026-04-16", payee: "教育储备", narration: "春季计划转入", postings: [("Assets:Bank:FamilyEducationReserve", 1_880_000, "CNY"), ("Assets:Bank:Daily", -1_880_000, "CNY")], line: 51),
         transaction(date: "2026-03-08", payee: "教育储备", narration: "年度储备启动", postings: [("Assets:Bank:FamilyEducationReserve", 3_420_000, "CNY"), ("Assets:Bank:Daily", -3_420_000, "CNY")], line: 27),
     ]
+
+    static let reconciliationRows = [
+        LedgerReconciliationRow(
+            account: "Assets:Bank:Daily",
+            alias: "日常账户",
+            label: "日常账户",
+            currency: "CNY",
+            ledgerBalance: 8_756_432,
+            status: "pending",
+            lastAssertion: LedgerBalanceAssertion(date: "2026-08-01", account: "Assets:Bank:Daily", amount: 8_000_000, currency: "CNY")
+        ),
+        LedgerReconciliationRow(
+            account: "Assets:Bank:FamilyEducationReserve",
+            alias: "家庭长期储备与教育基金",
+            label: "家庭长期储备与教育基金",
+            currency: "CNY",
+            ledgerBalance: 128_763_450,
+            status: "asserted",
+            lastAssertion: LedgerBalanceAssertion(date: "2026-08-15", account: "Assets:Bank:FamilyEducationReserve", amount: 128_763_450, currency: "CNY")
+        ),
+        LedgerReconciliationRow(
+            account: "Liabilities:CreditCard",
+            alias: "信用卡",
+            label: "信用卡",
+            currency: "CNY",
+            ledgerBalance: -289_900,
+            status: "pending",
+            lastAssertion: nil
+        ),
+        LedgerReconciliationRow(
+            account: "Assets:Cash:USD",
+            alias: "美元备用金",
+            label: "美元备用金",
+            currency: "USD",
+            ledgerBalance: 42_875,
+            status: "asserted",
+            lastAssertion: LedgerBalanceAssertion(date: "2026-08-01", account: "Assets:Cash:USD", amount: 42_875, currency: "USD")
+        )
+    ]
+
+    static let accountStatuses = [
+        LedgerAccountStatus(account: "Assets:Bank:Daily", status: "yellow", lastEntryDate: "2026-08-26", lastEntryType: "transaction", assertionAmount: 8_000_000, computedBalance: 8_756_432),
+        LedgerAccountStatus(account: "Assets:Bank:FamilyEducationReserve", status: "green", lastEntryDate: "2026-08-15", lastEntryType: "balance", assertionAmount: 128_763_450, computedBalance: 128_763_450),
+        LedgerAccountStatus(account: "Liabilities:CreditCard", status: "yellow", lastEntryDate: "2026-08-28", lastEntryType: "transaction", assertionAmount: nil, computedBalance: -289_900),
+        LedgerAccountStatus(account: "Assets:Cash:USD", status: "green", lastEntryDate: "2026-08-01", lastEntryType: "balance", assertionAmount: 42_875, computedBalance: 42_875)
+    ]
+
+    static func reconciliation(start: String, end: String) -> LedgerReconciliationResponse {
+        LedgerReconciliationResponse(
+            start: start,
+            end: end,
+            monthPrefix: String(start.prefix(7)),
+            rows: reconciliationRows
+        )
+    }
+
+    static func reconcile(request: LedgerReconcileRequest) -> LedgerReconciliationResult {
+        let actual = Int((Double(request.actualAmount) ?? 0) * 100)
+        let ledgerBal = balances.first(where: { $0.account == request.account })?.amount ?? 0
+        let diff = actual - ledgerBal
+        return LedgerReconciliationResult(
+            ok: true,
+            ledgerBalance: ledgerBal,
+            actual: actual,
+            diff: diff,
+            beanText: "\(request.balanceDate) balance \(request.account) \(request.actualAmount) CNY"
+        )
+    }
 
     static let importDocuments = [
         LedgerImportDocument(
@@ -785,11 +865,11 @@ private enum SafePreviewLedgerData {
         let valuationCurrency = commodities.contains(requested) ? requested : "CNY"
         let visible = transactions.filter { $0.date >= start && $0.date < end }
         let incomeCNY = visible.reduce(0) { total, transaction in
-            total + transaction.postings.filter { $0.account.hasPrefix("Income:") }.reduce(0) { $0 + abs($1.amount) }
+            total + transaction.postings.filter { $0.account.hasPrefix("Income:") }.reduce(0) { $0 + max(0, -$1.amount) }
         }
-        let expenseCNY = visible.reduce(0) { total, transaction in
-            total + transaction.postings.filter { $0.account.hasPrefix("Expenses:") }.reduce(0) { $0 + abs($1.amount) }
-        }
+        let expenseCNY = max(0, visible.reduce(0) { total, transaction in
+            total + transaction.postings.filter { $0.account.hasPrefix("Expenses:") }.reduce(0) { $0 + $1.amount }
+        })
         let income = converted(incomeCNY, from: "CNY", to: valuationCurrency) ?? 0
         let expense = converted(expenseCNY, from: "CNY", to: valuationCurrency) ?? 0
         let comparisons = periodComparisons(
@@ -851,10 +931,12 @@ private enum SafePreviewLedgerData {
                 twelveMonth: emptyDelta
             ),
             transactions: visible,
+            reconciliationRows: reconciliationRows,
             accounts: accounts,
             commodities: commodities,
             prices: prices,
             valuationCurrency: valuationCurrency,
+            accountStatuses: accountStatuses,
             sensitiveUnlocked: true
         )
     }

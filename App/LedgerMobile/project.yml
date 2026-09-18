@@ -8,7 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    CURRENT_PROJECT_VERSION: "12"
+    CURRENT_PROJECT_VERSION: "26"
     MARKETING_VERSION: "0.1.0"
     TARGETED_DEVICE_FAMILY: "1,2"
 
@@ -63,8 +63,10 @@ targets:
         NSSupportsLiveActivities: true
         UIBackgroundModes:
           - processing
+          - fetch
         BGTaskSchedulerPermittedIdentifiers:
           - com.qiaoborui.ledger.mobile.local-sync
+          - com.qiaoborui.ledger.mobile.refresh
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false

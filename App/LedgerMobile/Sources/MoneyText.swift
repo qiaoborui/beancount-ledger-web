@@ -80,7 +80,7 @@ enum MoneyText {
         minorUnits == .min ? .max : abs(minorUnits)
     }
 
-    private static func currencySymbol(for currency: String) -> String {
+    static func currencySymbol(for currency: String) -> String {
         let commonSymbols = [
             "CNY": "¥",
             "USD": "$",
