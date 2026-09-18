@@ -45,6 +45,8 @@ go get -tool "golang.org/x/mobile/cmd/gobind@${GOMOBILE_VERSION}"
 "${tool_bin}/gomobile" bind \
   -target=ios,iossimulator \
   -iosversion="${IOS_MIN_VERSION}" \
+  -ldflags="-s -w" \
+  -trimpath \
   -o "${staging_dir}/LedgerCore.xcframework" \
   ./mobilecore ./mobilegit
 
