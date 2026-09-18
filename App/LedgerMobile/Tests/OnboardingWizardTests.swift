@@ -114,4 +114,81 @@ final class OnboardingWizardTests: XCTestCase {
         XCTAssertTrue(content.contains("Assets:Cash:USD  200.00 USD"))
         XCTAssertTrue(content.contains("Equity:Opening-Balances  -200.00 USD"))
     }
+
+    func testCreateCustomLedgerGeneratesImportTemplates() async throws {
+        let root = try tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let catalog = LocalLedgerCatalog(rootDirectory: root, engine: MockEngine(), validator: { _, _ in })
+        let accounts = [
+            OnboardingAccountSelection(name: "支付宝余额", account: "Assets:Wallet:Alipay:Balance", currency: "CNY"),
+            OnboardingAccountSelection(name: "微信零钱", account: "Assets:Wallet:WeChat:LingQian", currency: "CNY"),
+            OnboardingAccountSelection(name: "工行储蓄卡", account: "Assets:Bank:ICBC", currency: "CNY"),
+            OnboardingAccountSelection(name: "招行信用卡", account: "Liabilities:CreditCard:CMB", currency: "CNY", isLiability: true)
+        ]
+        let categories = [
+            OnboardingCategorySelection(name: "餐饮美食", account: "Expenses:Food", currency: "CNY"),
+            OnboardingCategorySelection(name: "日用百货", account: "Expenses:Shopping", currency: "CNY")
+        ]
+
+        let descriptor = try await catalog.createCustom(
+            name: "导入测试账本",
+            currency: "CNY",
+            accounts: accounts,
+            categories: categories
+        )
+
+        let workspace = await catalog.workspace(for: descriptor)
+
+        // Verify Alipay config generated
+        let alipayData = try await workspace.readFile(at: "imports/alipay-config.yaml")
+        let alipayText = String(decoding: alipayData, as: UTF8.self)
+        XCTAssertTrue(alipayText.contains("title: 支付宝账单导入配置"))
+        XCTAssertTrue(alipayText.contains("Assets:Wallet:Alipay:Balance"))
+        XCTAssertTrue(alipayText.contains("Assets:Bank:ICBC"))
+        XCTAssertTrue(alipayText.contains("Liabilities:CreditCard:CMB"))
+        XCTAssertTrue(alipayText.contains("Expenses:Food"))
+
+        // Verify WeChat config generated
+        let wechatData = try await workspace.readFile(at: "imports/wechat-config.yaml")
+        let wechatText = String(decoding: wechatData, as: UTF8.self)
+        XCTAssertTrue(wechatText.contains("title: 微信支付账单导入配置"))
+        XCTAssertTrue(wechatText.contains("Assets:Wallet:WeChat:LingQian"))
+        XCTAssertTrue(wechatText.contains("Assets:Bank:ICBC"))
+        XCTAssertTrue(wechatText.contains("Liabilities:CreditCard:CMB"))
+        XCTAssertTrue(wechatText.contains("Expenses:Food"))
+    }
+
+    func testCategoryPresetsTaxonomyAndSearch() {
+        let expenseSections = CategoryPresets.sections(for: .expense)
+        let incomeSections = CategoryPresets.sections(for: .income)
+
+        // Comprehensive categories taxonomy
+        XCTAssertGreaterThanOrEqual(expenseSections.count, 14)
+        XCTAssertGreaterThanOrEqual(incomeSections.count, 7)
+
+        // Verify key categories exist
+        XCTAssertTrue(expenseSections.contains { $0.code == "Food" })
+        XCTAssertTrue(expenseSections.contains { $0.code == "Shopping" })
+        XCTAssertTrue(expenseSections.contains { $0.code == "Transport" })
+        XCTAssertTrue(expenseSections.contains { $0.code == "Health" })
+        XCTAssertTrue(expenseSections.contains { $0.code == "Education" })
+        XCTAssertTrue(expenseSections.contains { $0.code == "Pets" })
+        XCTAssertTrue(expenseSections.contains { $0.code == "Vehicle" })
+
+        XCTAssertTrue(incomeSections.contains { $0.code == "Career" })
+        XCTAssertTrue(incomeSections.contains { $0.code == "Freelance" })
+        XCTAssertTrue(incomeSections.contains { $0.code == "Investment" })
+        XCTAssertTrue(incomeSections.contains { $0.code == "Refund" })
+
+        // Test search
+        let cmbSearch = AccountPresets.search(query: "CMB")
+        XCTAssertFalse(cmbSearch.isEmpty)
+        XCTAssertTrue(cmbSearch.contains { $0.code == "CMB" })
+
+        let wechatSearch = AccountPresets.search(query: "微信")
+        XCTAssertFalse(wechatSearch.isEmpty)
+        XCTAssertTrue(wechatSearch.contains { $0.name.contains("微信") })
+    }
 }
+

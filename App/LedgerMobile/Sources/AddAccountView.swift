@@ -7,11 +7,13 @@ struct AddAccountView: View {
     @State private var selectedCategory: AccountTypeCategory = .bank
     @State private var selectedPreset: AccountPresetItem? = AccountPresets.presets.first(where: { $0.id == "bank_cmb" })
     @State private var isCustom = false
+    @State private var showingInstitutionPicker = false
 
     @State private var customName: String = ""
     @State private var accountDetail: String = ""
     @State private var currency: String = "CNY"
     @State private var openingBalance: String = ""
+    @State private var useLedgerInceptionDate: Bool = true
     @State private var openDate: Date = Date()
 
     // 高级选项
@@ -64,6 +66,9 @@ struct AddAccountView: View {
     }
 
     private var dateString: String {
+        if useLedgerInceptionDate {
+            return "1970-01-01"
+        }
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: openDate)
@@ -102,76 +107,75 @@ struct AddAccountView: View {
                 }
 
                 // ── 2. 选择机构或自定义 ──
-                Section("选择机构") {
-                    let catPresets = AccountPresets.presets(for: selectedCategory)
-                    if !catPresets.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: LedgerSpacing.sm) {
-                                ForEach(catPresets) { preset in
-                                    let isSelected = !isCustom && selectedPreset?.id == preset.id
-                                    Button {
-                                        LedgerFeedback.selection()
-                                        selectedPreset = preset
-                                        isCustom = false
-                                        isCustomPathEdited = false
-                                        if let suggested = preset.suggestedCurrency {
-                                            currency = suggested
-                                        }
-                                    } label: {
-                                        VStack(spacing: 6) {
-                                            ZStack {
-                                                Circle()
-                                                    .fill(isSelected ? LedgerPalette.cobalt : LedgerPalette.panel)
-                                                    .frame(width: 44, height: 44)
-                                                Image(systemName: preset.icon)
-                                                    .font(.system(size: 18, weight: .medium))
-                                                    .foregroundStyle(isSelected ? Color.white : LedgerPalette.ink)
-                                            }
-                                            Text(preset.name)
-                                                .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
-                                                .foregroundStyle(isSelected ? LedgerPalette.cobalt : LedgerPalette.ink)
-                                                .lineLimit(1)
-                                        }
-                                        .padding(.vertical, 4)
-                                        .padding(.horizontal, 6)
-                                        .background(isSelected ? LedgerPalette.cobalt.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-
-                                // 自定义卡片
-                                Button {
-                                    LedgerFeedback.selection()
-                                    isCustom = true
-                                    selectedPreset = nil
-                                    isCustomPathEdited = false
-                                } label: {
-                                    VStack(spacing: 6) {
-                                        ZStack {
-                                            Circle()
-                                                .fill(isCustom ? LedgerPalette.cobalt : LedgerPalette.panel)
-                                                .frame(width: 44, height: 44)
-                                            Image(systemName: "pencil.and.outline")
-                                                .font(.system(size: 18, weight: .medium))
-                                                .foregroundStyle(isCustom ? Color.white : LedgerPalette.ink)
-                                        }
-                                        Text("自定义")
-                                            .font(.system(size: 11.5, weight: isCustom ? .semibold : .regular))
-                                            .foregroundStyle(isCustom ? LedgerPalette.cobalt : LedgerPalette.ink)
-                                            .lineLimit(1)
-                                    }
-                                    .padding(.vertical, 4)
-                                    .padding(.horizontal, 6)
-                                    .background(isCustom ? LedgerPalette.cobalt.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
-                                }
-                                .buttonStyle(.plain)
+                Section("机构与银行") {
+                    if let preset = selectedPreset, !isCustom {
+                        HStack(spacing: LedgerSpacing.md) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(LedgerPalette.cobalt.opacity(0.12))
+                                    .frame(width: 44, height: 44)
+                                Image(systemName: preset.icon)
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(LedgerPalette.cobalt)
                             }
-                            .padding(.vertical, 4)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(preset.name)
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(LedgerPalette.ink)
+                                Text(preset.defaultAccount)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
+                            Spacer()
+                            Button("更换") {
+                                showingInstitutionPicker = true
+                            }
+                            .font(.subheadline)
+                            .foregroundStyle(LedgerPalette.cobalt)
                         }
+                        .padding(.vertical, 2)
+                    } else {
+                        HStack(spacing: LedgerSpacing.md) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(LedgerPalette.panel)
+                                    .frame(width: 44, height: 44)
+                                Image(systemName: "pencil.and.outline")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(LedgerPalette.ink)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("自定义机构名称")
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(LedgerPalette.ink)
+                                Text("手动输入任意机构或卡种")
+                                    .font(.caption2)
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
+                            Spacer()
+                            Button("从列表选择") {
+                                showingInstitutionPicker = true
+                            }
+                            .font(.subheadline)
+                            .foregroundStyle(LedgerPalette.cobalt)
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    // 机构选择列表按钮入口
+                    Button {
+                        showingInstitutionPicker = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "list.bullet.rectangle")
+                            Text("浏览全部银行与机构列表 (\(AccountPresets.presets.count) 家)...")
+                        }
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(LedgerPalette.cobalt)
                     }
 
                     if isCustom {
-                        TextField("输入账户或机构名称（如：自如押金）", text: $customName)
+                        TextField("输入机构或账户名称（如：自如押金、招商二类卡）", text: $customName)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .onChange(of: customName) { _, _ in
@@ -203,7 +207,7 @@ struct AddAccountView: View {
 
                     // 期初余额
                     HStack {
-                        Text(selectedCategory.isLiability ? "当前欠款/负债" : "当前账户余额")
+                        Text(selectedCategory.isLiability ? "当前待还欠款" : "当前账户余额")
                         Spacer()
                         TextField("0.00", text: $openingBalance)
                             .keyboardType(.decimalPad)
@@ -211,13 +215,29 @@ struct AddAccountView: View {
                             .font(.system(.body, design: .rounded).monospacedDigit())
                     }
 
-                    // 开户日期
-                    DatePicker("生效日期", selection: $openDate, displayedComponents: .date)
+                    // 开户日期模式
+                    Toggle("账本起始日生效 (推荐)", isOn: $useLedgerInceptionDate)
+
+                    if !useLedgerInceptionDate {
+                        DatePicker("生效日期", selection: $openDate, displayedComponents: .date)
+                    }
                 } header: {
                     Text("余额与币种")
                 } footer: {
-                    Text("填写当前卡内金额将自动通过期初余额（Equity:Opening-Balances）配平。如不确定可留空后续通过对账录入。")
-                        .font(.caption2)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if selectedCategory.isLiability {
+                            Text("⚠️ 仅需录入当前未还账单欠款，如已还清或无欠款请留空。切勿填写信用总额度。")
+                                .font(.caption2)
+                                .foregroundStyle(LedgerPalette.secondary)
+                        } else {
+                            Text("填写当前卡内金额将自动通过期初余额（Equity:Opening-Balances）配平。如不确定可留空。")
+                                .font(.caption2)
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                        Text("推荐使用账本起始生效 (1970-01-01)，避免后续补录历史账单时因交易先于开户日期而触发 Beancount 校验冲突。")
+                            .font(.caption2)
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
                 }
 
                 // ── 4. 高级设置：Beancount 路径 ──
@@ -288,6 +308,24 @@ struct AddAccountView: View {
                     .disabled(!canSubmit)
                     .fontWeight(.semibold)
                 }
+            }
+            .sheet(isPresented: $showingInstitutionPicker) {
+                InstitutionPickerSheet(
+                    onSelect: { preset in
+                        selectedPreset = preset
+                        selectedCategory = preset.category
+                        isCustom = false
+                        isCustomPathEdited = false
+                        if let suggested = preset.suggestedCurrency {
+                            currency = suggested
+                        }
+                    },
+                    onSelectCustom: {
+                        isCustom = true
+                        selectedPreset = nil
+                        isCustomPathEdited = false
+                    }
+                )
             }
             .onAppear {
                 if let ledgerCurrency = session.ledger?.valuationCurrency {

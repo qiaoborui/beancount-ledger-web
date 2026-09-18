@@ -246,7 +246,35 @@ actor LocalLedgerCatalog {
 
         let content = lines.joined(separator: "\n") + "\n"
         let validate = publicationValidator(for: descriptor)
-        try await workspace.commit(changes: [.write(Data(content.utf8), to: descriptor.entrypoint)]) { root in
+
+        let alipayWallet = effectiveAccounts.first { $0.account.contains("Alipay") }?.account
+        let wechatWallet = effectiveAccounts.first { $0.account.contains("WeChat") }?.account
+        let bankAcct = effectiveAccounts.first { $0.account.hasPrefix("Assets:Bank") }?.account
+        let creditAcct = effectiveAccounts.first { $0.account.hasPrefix("Liabilities:CreditCard") }?.account
+        let catAccounts = effectiveCategories.map(\.account)
+
+        let alipayYaml = LedgerImportTemplates.generateAlipayConfig(
+            currency: currency,
+            walletAccount: alipayWallet,
+            bankAccount: bankAcct,
+            creditAccount: creditAcct,
+            categories: catAccounts
+        )
+        let wechatYaml = LedgerImportTemplates.generateWechatConfig(
+            currency: currency,
+            walletAccount: wechatWallet,
+            bankAccount: bankAcct,
+            creditAccount: creditAcct,
+            categories: catAccounts
+        )
+
+        let changes: [LocalLedgerWorkspace.Change] = [
+            .write(Data(content.utf8), to: descriptor.entrypoint),
+            .write(Data(alipayYaml.utf8), to: "imports/alipay-config.yaml"),
+            .write(Data(wechatYaml.utf8), to: "imports/wechat-config.yaml")
+        ]
+
+        try await workspace.commit(changes: changes) { root in
             try await validate(root, descriptor.entrypoint)
         }
         try persist(descriptor)
@@ -267,7 +295,7 @@ actor LocalLedgerCatalog {
         return descriptor
     }
 
-    private func workspace(for descriptor: LocalLedgerDescriptor) -> LocalLedgerWorkspace {
+    func workspace(for descriptor: LocalLedgerDescriptor) -> LocalLedgerWorkspace {
         LocalLedgerWorkspace(rootDirectory: rootDirectory.appendingPathComponent(descriptor.id.uuidString))
     }
 
