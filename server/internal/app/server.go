@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"

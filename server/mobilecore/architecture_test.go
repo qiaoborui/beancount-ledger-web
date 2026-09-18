@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMobileCoreUsesOnlyBindingSafeDependencies(t *testing.T) {
@@ -23,6 +24,7 @@ func TestMobileCoreUsesOnlyBindingSafeDependencies(t *testing.T) {
 		"strings":                        true,
 		"github.com/borui/beancount-ledger-web/server/internal/ledgercore": true,
 		"github.com/borui/beancount-ledger-web/server/internal/app":        true,
+		"time/tzdata": true,
 	}
 	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -102,5 +104,15 @@ func assertStringFields(t *testing.T, name string, fields *ast.FieldList) {
 	identifier, ok := fields.List[0].Type.(*ast.Ident)
 	if !ok || identifier.Name != "string" {
 		t.Fatalf("%s must use only string, got %#v", name, fields.List[0].Type)
+	}
+}
+
+func TestMobileCoreLoadsShanghaiTimezone(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("failed to load Asia/Shanghai timezone: %v", err)
+	}
+	if location.String() != "Asia/Shanghai" {
+		t.Fatalf("unexpected location string: %s", location.String())
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	_ "time/tzdata"
 
 	"github.com/borui/beancount-ledger-web/server/internal/ledgercore"
 )
