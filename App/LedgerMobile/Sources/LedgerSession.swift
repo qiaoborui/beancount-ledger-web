@@ -999,6 +999,53 @@ final class LedgerSession: ObservableObject {
         await refresh()
     }
 
+    func addAccount(
+        account: String,
+        alias: String,
+        currency: String,
+        date: String,
+        openingBalance: String? = nil
+    ) async throws {
+        guard phase == .ready else {
+            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+        }
+        let input = LedgerAccountInput(date: date, account: account, alias: alias, currency: currency)
+        let epoch = sessionEpoch
+        if let localRepository {
+            try await localRepository.addAccount(input: input)
+            guard epoch == sessionEpoch else { throw CancellationError() }
+
+            if let openingBalance = openingBalance?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !openingBalance.isEmpty,
+               let balanceDecimal = Decimal(string: openingBalance),
+               balanceDecimal != 0 {
+                let isLiability = account.hasPrefix("Liabilities:")
+                let isPositive = balanceDecimal > 0
+                let accountAmount = isLiability ? (isPositive ? "-\(balanceDecimal)" : "\(abs(balanceDecimal))") : "\(balanceDecimal)"
+                let equityAmount = isLiability ? "\(balanceDecimal)" : (isPositive ? "-\(balanceDecimal)" : "\(abs(balanceDecimal))")
+                let entry = LedgerTransactionEntry(
+                    date: date,
+                    flag: "*",
+                    payee: "",
+                    narration: "期初余额",
+                    tags: [],
+                    links: [],
+                    postings: [
+                        LedgerTransactionEntryPosting(account: account, amount: accountAmount, currency: currency),
+                        LedgerTransactionEntryPosting(account: "Equity:Opening-Balances", amount: equityAmount, currency: currency)
+                    ]
+                )
+                try await localRepository.addTransaction(entry: entry)
+                guard epoch == sessionEpoch else { throw CancellationError() }
+            }
+        } else {
+            _ = try await performSensitiveRequest { repository in
+                try await repository.addAccount(input: input)
+            }
+        }
+        await refresh()
+    }
+
     func reconcileAccount(
         account: String,
         actualAmount: String,

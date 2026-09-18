@@ -135,13 +135,21 @@ actor LocalLedgerCatalog {
 
         1970-01-01 commodity \(currency)
         1970-01-01 open Assets:Cash \(currency)
+          alias: "现金"
         1970-01-01 open Assets:Bank \(currency)
+          alias: "银行存款"
         1970-01-01 open Liabilities:CreditCard \(currency)
+          alias: "信用卡"
         1970-01-01 open Equity:Opening-Balances
+          alias: "期初余额"
         1970-01-01 open Income:Salary \(currency)
+          alias: "工资收入"
         1970-01-01 open Expenses:Food \(currency)
+          alias: "餐饮美食"
         1970-01-01 open Expenses:Transport \(currency)
+          alias: "交通出行"
         1970-01-01 open Expenses:Other \(currency)
+          alias: "其他支出"
 
         """
         let validate = publicationValidator(for: descriptor)

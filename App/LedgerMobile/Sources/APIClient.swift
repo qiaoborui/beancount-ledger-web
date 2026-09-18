@@ -139,6 +139,7 @@ protocol LedgerAPI: Sendable {
     func reconciliation(baseURL: URL, start: String, end: String) async throws -> LedgerReconciliationResponse
     func reconcile(baseURL: URL, request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult
     func accountStatuses(baseURL: URL) async throws -> [LedgerAccountStatus]
+    func addAccount(baseURL: URL, input: LedgerAccountInput) async throws
     func lock(baseURL: URL) async throws
     func logout(baseURL: URL) async throws
 }
@@ -154,6 +155,10 @@ extension LedgerAPI {
 
     func accountStatuses(baseURL: URL) async throws -> [LedgerAccountStatus] {
         throw LedgerAPIError.incompatibleServer("服务器暂不支持账户状态查询")
+    }
+
+    func addAccount(baseURL: URL, input: LedgerAccountInput) async throws {
+        throw LedgerAPIError.incompatibleServer("服务器暂不支持添加账户")
     }
     func homeReport(
         baseURL: URL,
@@ -379,7 +384,14 @@ protocol LedgerRepository: AnyObject, Sendable {
     func renameBQLHistory(id: String, title: String) async throws -> BQLHistoryRecord
     func reconciliation(start: String, end: String) async throws -> LedgerReconciliationResponse
     func reconcile(request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult
+    func addAccount(input: LedgerAccountInput) async throws
     func deleteBQLHistory(id: String) async throws
+}
+
+extension LedgerRepository {
+    func addAccount(input: LedgerAccountInput) async throws {
+        throw LedgerRepositoryError.capabilityUnavailable("add account")
+    }
 }
 
 typealias LedgerRepositoryFactory = @MainActor @Sendable (LedgerLocation) throws -> any LedgerRepository
@@ -393,6 +405,10 @@ final class RemoteLedgerRepository: LedgerRepository, RemoteLedgerCapabilities {
     init(api: any LedgerAPI, baseURL: URL) {
         self.api = api
         self.baseURL = baseURL
+    }
+
+    func addAccount(input: LedgerAccountInput) async throws {
+        try await api.addAccount(baseURL: baseURL, input: input)
     }
 
     func reconciliation(start: String, end: String) async throws -> LedgerReconciliationResponse {
@@ -920,6 +936,18 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             path: "/api/ledger/transactions/tags",
             method: "POST",
             body: LedgerTransactionTagsRequest(sources: sources, tags: tags)
+        )
+    }
+
+    func addAccount(
+        baseURL: URL,
+        input: LedgerAccountInput
+    ) async throws {
+        let _: EmptySuccess = try await send(
+            baseURL: baseURL,
+            path: "/api/ledger/accounts",
+            method: "POST",
+            body: input
         )
     }
 

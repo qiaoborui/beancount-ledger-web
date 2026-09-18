@@ -754,6 +754,8 @@ struct LedgerAccountPicker: View {
     @Binding var selection: String
 
     @State private var query = ""
+    @State private var showingAddAccount = false
+    @State private var showingAddCategory = false
 
     private var filteredAccounts: [LedgerAccountChoice] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -806,6 +808,33 @@ struct LedgerAccountPicker: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .ledgerSearch(text: $query, prompt: "搜索账户名称或路径")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        showingAddAccount = true
+                    } label: {
+                        Label("新建账户", systemImage: "building.columns")
+                    }
+                    Button {
+                        showingAddCategory = true
+                    } label: {
+                        Label("新建分类", systemImage: "tag")
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("新建账户或分类")
+            }
+        }
+        .sheet(isPresented: $showingAddAccount) {
+            AddAccountView()
+                .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: $showingAddCategory) {
+            AddCategoryView()
+                .ledgerPrivacyProtectedSheet()
+        }
         .overlay {
             if filteredAccounts.isEmpty {
                 EmptyLedgerState(

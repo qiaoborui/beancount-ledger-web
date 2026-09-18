@@ -529,14 +529,42 @@ func (w *LedgerWriter) AppendEntriesWithOperationIDs(source string, entries []Le
 	return texts, nil
 }
 
+func (w *LedgerWriter) resolveAccountsFile(tx *LedgerWriteTransaction) (string, []byte, error) {
+	file := accountsBeanPath(w.cfg)
+	exists, err := tx.Exists(file)
+	if err != nil {
+		return "", nil, err
+	}
+	if exists {
+		before, err := tx.ReadFile(file)
+		return file, before, err
+	}
+
+	mainFile := mainBeanPath(w.cfg)
+	mainExists, err := tx.Exists(mainFile)
+	if err != nil {
+		return "", nil, err
+	}
+	if mainExists {
+		mainBefore, err := tx.ReadFile(mainFile)
+		if err != nil {
+			return "", nil, err
+		}
+		if includeRe.Match(mainBefore) && strings.Contains(string(mainBefore), "accounts.bean") {
+			return file, []byte(""), nil
+		}
+		return mainFile, mainBefore, nil
+	}
+	return file, []byte(""), nil
+}
+
 func (w *LedgerWriter) AppendAccount(input AccountInput) error {
 	input.Currency = defaultAccountCurrency(input.Account, input.Currency)
 	return w.RunTransactionWithSource(ledgerWriteSourceAccountAppend, func(tx *LedgerWriteTransaction) error {
 		if err := w.validateCurrencies(tx, []string{input.Currency}); err != nil {
 			return err
 		}
-		file := accountsBeanPath(w.cfg)
-		before, err := tx.ReadFile(file)
+		file, before, err := w.resolveAccountsFile(tx)
 		if err != nil {
 			return err
 		}
@@ -566,8 +594,7 @@ func (w *LedgerWriter) ApplyAccountOperations(operations []AccountOperation) ([]
 		if err := w.validateCurrencies(tx, currencies); err != nil {
 			return err
 		}
-		file := accountsBeanPath(w.cfg)
-		before, err := tx.ReadFile(file)
+		file, before, err := w.resolveAccountsFile(tx)
 		if err != nil {
 			return err
 		}

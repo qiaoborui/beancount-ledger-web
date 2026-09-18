@@ -479,3 +479,30 @@ func TestLedgerWriteTransactionAppendsAccount(t *testing.T) {
 		t.Fatalf("account was not appended:\n%s", text)
 	}
 }
+
+func TestLedgerWriteTransactionAppendsAccountToSingleMainBean(t *testing.T) {
+	dir := t.TempDir()
+	mainBean := filepath.Join(dir, "main.bean")
+	mustWrite(t, mainBean, "option \"title\" \"Single File\"\noption \"operating_currency\" \"CNY\"\n1970-01-01 commodity CNY\n1970-01-01 open Assets:Cash CNY\n")
+
+	beanCheck := filepath.Join(t.TempDir(), "bean-check")
+	mustWrite(t, beanCheck, "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(beanCheck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEAN_CHECK_BIN", beanCheck)
+
+	cfg := Config{
+		LedgerRoot: dir,
+	}
+	writer := NewLedgerWriter(cfg, NewLedgerCache(cfg))
+	err := writer.AppendAccount(AccountInput{Date: "2026-01-02", Account: "Assets:Bank:CMB", Alias: "招商银行", Currency: "CNY"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(mustRead(t, mainBean))
+	if !strings.Contains(text, "open Assets:Bank:CMB CNY") || !strings.Contains(text, `alias: "招商银行"`) {
+		t.Fatalf("account was not appended to main.bean:\n%s", text)
+	}
+}
+

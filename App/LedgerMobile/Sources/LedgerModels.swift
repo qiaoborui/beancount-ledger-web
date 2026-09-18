@@ -919,10 +919,10 @@ struct LedgerTransactionEntry: Codable, Equatable, Sendable {
     init(
         date: String,
         flag: String? = nil,
-        payee: String,
+        payee: String = "",
         narration: String,
-        metadata: [String: LedgerMetadataValue],
-        tags: [String],
+        metadata: [String: LedgerMetadataValue] = [:],
+        tags: [String] = [],
         links: [String] = [],
         postings: [LedgerTransactionEntryPosting]
     ) {

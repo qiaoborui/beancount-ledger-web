@@ -51,6 +51,31 @@ struct MoreView: View {
                 }
             }
             Section("账本工具") {
+                NavigationLink {
+                    CategoriesManagementView()
+                } label: {
+                    HStack(spacing: LedgerSpacing.md) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.orange.opacity(0.14))
+                                .frame(width: 36, height: 36)
+                            Image(systemName: "tag.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.orange)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("分类管理")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(LedgerPalette.ink)
+                            Text("查看与新增收支分类")
+                                .font(.footnote)
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .accessibilityIdentifier("more-categories")
+
                 MoreDestinationButton(destination: .imports, detail: "账单导入与归档", accessibilityIdentifier: "more-imports")
                 MoreDestinationButton(destination: .currencies, detail: "估值货币与汇率", accessibilityIdentifier: "more-currencies")
                 MoreDestinationButton(destination: .query, detail: "查询与历史", accessibilityIdentifier: "more-query")

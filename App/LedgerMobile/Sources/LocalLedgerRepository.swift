@@ -140,6 +140,9 @@ actor LocalLedgerRepository: LedgerRepository {
     func addTransaction(entry: LedgerTransactionEntry) async throws {
         let _: BQLCell = try await mutate("/api/ledger/append", method: "POST", body: json(entry))
     }
+    func addAccount(input: LedgerAccountInput) async throws {
+        let _: BQLCell = try await mutate("/api/ledger/accounts", method: "POST", body: json(input))
+    }
     func indexInfo(targetGitSHA: String?) async throws -> LedgerIndexInfo {
         try await read("/api/ledger/index-info")
     }
