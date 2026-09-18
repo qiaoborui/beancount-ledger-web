@@ -14,6 +14,11 @@ if ! mkdir "$output_dir"; then
   echo 'Choose a fresh output directory; existing files are preserved.' >&2
   exit 1
 fi
+if [[ -z "${DEVELOPER_DIR:-}" && -d "/Applications/Xcode-beta.app/Contents/Developer" ]]; then
+  export DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer"
+elif [[ -z "${DEVELOPER_DIR:-}" && -d "/Applications/Xcode.app/Contents/Developer" ]]; then
+  export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+fi
 output_dir="$(cd "$output_dir" && pwd)"
 build_dir="$(mktemp -d "${TMPDIR:-/tmp}/ledger-ios-ipa.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
