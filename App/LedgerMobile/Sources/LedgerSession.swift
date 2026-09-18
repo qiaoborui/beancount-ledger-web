@@ -409,6 +409,15 @@ final class LedgerSession: ObservableObject {
     }
 
     func createLocalLedger(name: String, currency: String) async {
+        await createCustomLocalLedger(name: name, currency: currency, accounts: [], categories: [])
+    }
+
+    func createCustomLocalLedger(
+        name: String,
+        currency: String,
+        accounts: [OnboardingAccountSelection],
+        categories: [OnboardingCategorySelection]
+    ) async {
         guard !isLocalOperationBusy, !isAuthenticationBusy, let localCatalog else { return }
         isLocalOperationBusy = true
         errorMessage = nil
@@ -418,7 +427,12 @@ final class LedgerSession: ObservableObject {
         do {
             try await authenticateLocalLedger(epoch: epoch, location: expectedLocation)
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
-            let descriptor = try await localCatalog.create(name: name, currency: currency)
+            let descriptor = try await localCatalog.createCustom(
+                name: name,
+                currency: currency,
+                accounts: accounts,
+                categories: categories
+            )
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
             await refreshLocalLedgers()
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
