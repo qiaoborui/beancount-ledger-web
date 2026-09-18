@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 /// The library opens local workspaces, independent of their storage provider.
 struct LedgerLibraryView: View {
     @EnvironmentObject private var session: LedgerSession
+    @State private var showingWizard = false
     @State private var creating = false
     @State private var importing = false
     @State private var addingGit = false
@@ -12,16 +13,54 @@ struct LedgerLibraryView: View {
         NavigationStack {
             List {
                 Section {
-                    Label {
-                        VStack(alignment: .leading, spacing: LedgerSpacing.xs) {
-                            Text("账本在这台设备上").font(.headline)
-                            Text("离线查看与记账，保存为 Beancount 文件。")
-                                .font(.subheadline).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+                        HStack(spacing: LedgerSpacing.md) {
+                            ZStack {
+                                Circle()
+                                    .fill(LinearGradient(
+                                        colors: [Color.blue.opacity(0.18), Color.indigo.opacity(0.24)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ))
+                                    .frame(width: 44, height: 44)
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundStyle(LedgerPalette.cobalt)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("新手开账向导")
+                                    .font(.headline)
+                                    .foregroundStyle(LedgerPalette.ink)
+                                Text("1 分钟快速建立常用账户与分类")
+                                    .font(.caption)
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
                         }
-                    } icon: {
-                        Image(systemName: "internaldrive").foregroundStyle(LedgerPalette.cobalt)
+                        Text("无需编写代码或配置 Git，可视化勾选微信、支付宝、银行卡与日常分类，数据 100% 离线存放在本设备。")
+                            .font(.footnote)
+                            .foregroundStyle(LedgerPalette.secondary)
+                            .lineSpacing(2)
+
+                        Button {
+                            showingWizard = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "wand.and.stars")
+                                Text("开启新手向导")
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("local-ledger-open-wizard")
                     }
-                    .padding(.vertical, LedgerSpacing.sm)
+                    .padding(.vertical, LedgerSpacing.xs)
+                }
+
+                Section("快速操作") {
                     Button { creating = true } label: { Label("新建本地账本", systemImage: "plus") }
                         .accessibilityIdentifier("local-ledger-create")
                     Button { importing = true } label: { Label("导入账本文件夹", systemImage: "folder") }
@@ -51,6 +90,7 @@ struct LedgerLibraryView: View {
             .navigationTitle("账本")
             .disabled(session.isLocalOperationBusy)
             .task { await session.refreshLocalLedgers() }
+            .sheet(isPresented: $showingWizard) { OnboardingWizardView() }
             .sheet(isPresented: $creating) { LocalLedgerSetupView(importing: false) }
             .sheet(isPresented: $importing) { LocalLedgerSetupView(importing: true) }
             .sheet(isPresented: $addingGit) { GitLedgerSetupView() }
@@ -66,10 +106,37 @@ private struct LocalLedgerSetupView: View {
     @State private var currency = "CNY"
     @State private var entrypoint = "main.bean"
     @State private var selectingFolder = false
+    @State private var showingWizard = false
 
     var body: some View {
         NavigationStack {
             Form {
+                if !importing {
+                    Section {
+                        Button {
+                            showingWizard = true
+                        } label: {
+                            HStack(spacing: LedgerSpacing.md) {
+                                Image(systemName: "wand.and.stars")
+                                    .font(.title3)
+                                    .foregroundStyle(LedgerPalette.cobalt)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("使用新手向导开账（推荐）")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(LedgerPalette.ink)
+                                    Text("可视化配置微信、支付宝、银行卡与日常分类")
+                                        .font(.caption)
+                                        .foregroundStyle(LedgerPalette.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
                 Section("账本信息") {
                     TextField("名称", text: $name).accessibilityIdentifier("local-ledger-name")
                     if importing {
@@ -120,6 +187,12 @@ private struct LocalLedgerSetupView: View {
                     }
                 case let .failure(error): session.errorMessage = error.localizedDescription
                 }
+            }
+            .sheet(isPresented: $showingWizard) {
+                OnboardingWizardView()
+            }
+            .onChange(of: session.phase) { _, newPhase in
+                if newPhase == .ready { dismiss() }
             }
         }
     }

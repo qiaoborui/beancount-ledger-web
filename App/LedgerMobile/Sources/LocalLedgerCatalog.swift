@@ -16,6 +16,34 @@ struct LocalLedgerDescriptor: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct OnboardingAccountSelection: Codable, Equatable, Sendable {
+    public let name: String
+    public let account: String
+    public let currency: String
+    public let initialBalance: String?
+    public let isLiability: Bool
+
+    public init(name: String, account: String, currency: String = "CNY", initialBalance: String? = nil, isLiability: Bool = false) {
+        self.name = name
+        self.account = account
+        self.currency = currency
+        self.initialBalance = initialBalance
+        self.isLiability = isLiability
+    }
+}
+
+public struct OnboardingCategorySelection: Codable, Equatable, Sendable {
+    public let name: String
+    public let account: String
+    public let currency: String
+
+    public init(name: String, account: String, currency: String = "CNY") {
+        self.name = name
+        self.account = account
+        self.currency = currency
+    }
+}
+
 actor LocalLedgerCatalog {
     typealias Validator = @Sendable (URL, String) async throws -> Void
     nonisolated let rootDirectory: URL
@@ -124,34 +152,99 @@ actor LocalLedgerCatalog {
     }
 
     func create(name: String, currency: String = "CNY") async throws -> LocalLedgerDescriptor {
+        try await createCustom(name: name, currency: currency, accounts: [], categories: [])
+    }
+
+    func createCustom(
+        name: String,
+        currency: String = "CNY",
+        accounts: [OnboardingAccountSelection] = [],
+        categories: [OnboardingCategorySelection] = []
+    ) async throws -> LocalLedgerDescriptor {
         guard currency.range(of: "^[A-Z][A-Z0-9._-]{0,23}$", options: .regularExpression) != nil else {
             throw LocalLedgerError.invalidConfiguration("请输入有效的币种代码")
         }
         let descriptor = try makeDescriptor(name: name, entrypoint: "main.bean")
         let workspace = workspace(for: descriptor)
-        let content = """
-        option "title" "\(escape(descriptor.name))"
-        option "operating_currency" "\(currency)"
 
-        1970-01-01 commodity \(currency)
-        1970-01-01 open Assets:Cash \(currency)
-          alias: "现金"
-        1970-01-01 open Assets:Bank \(currency)
-          alias: "银行存款"
-        1970-01-01 open Liabilities:CreditCard \(currency)
-          alias: "信用卡"
-        1970-01-01 open Equity:Opening-Balances
-          alias: "期初余额"
-        1970-01-01 open Income:Salary \(currency)
-          alias: "工资收入"
-        1970-01-01 open Expenses:Food \(currency)
-          alias: "餐饮美食"
-        1970-01-01 open Expenses:Transport \(currency)
-          alias: "交通出行"
-        1970-01-01 open Expenses:Other \(currency)
-          alias: "其他支出"
+        var lines: [String] = []
+        lines.append("option \"title\" \"\(escape(descriptor.name))\"")
+        lines.append("option \"operating_currency\" \"\(currency)\"")
+        lines.append("")
 
-        """
+        var allCurrencies = Set<String>()
+        allCurrencies.insert(currency)
+        for a in accounts {
+            if !a.currency.isEmpty { allCurrencies.insert(a.currency) }
+        }
+        for c in categories {
+            if !c.currency.isEmpty { allCurrencies.insert(c.currency) }
+        }
+        for cur in allCurrencies.sorted() {
+            lines.append("1970-01-01 commodity \(cur)")
+        }
+        lines.append("")
+
+        lines.append("1970-01-01 open Equity:Opening-Balances")
+        lines.append("  alias: \"期初余额\"")
+
+        let effectiveAccounts = accounts.isEmpty ? [
+            OnboardingAccountSelection(name: "现金", account: "Assets:Cash", currency: currency),
+            OnboardingAccountSelection(name: "银行存款", account: "Assets:Bank", currency: currency),
+            OnboardingAccountSelection(name: "信用卡", account: "Liabilities:CreditCard", currency: currency, isLiability: true)
+        ] : accounts
+
+        for a in effectiveAccounts {
+            lines.append("1970-01-01 open \(a.account) \(a.currency)")
+            if !a.name.isEmpty {
+                lines.append("  alias: \"\(escape(a.name))\"")
+            }
+        }
+        lines.append("")
+
+        let effectiveCategories = categories.isEmpty ? [
+            OnboardingCategorySelection(name: "工资收入", account: "Income:Salary", currency: currency),
+            OnboardingCategorySelection(name: "餐饮美食", account: "Expenses:Food", currency: currency),
+            OnboardingCategorySelection(name: "交通出行", account: "Expenses:Transport", currency: currency),
+            OnboardingCategorySelection(name: "其他支出", account: "Expenses:Other", currency: currency)
+        ] : categories
+
+        for c in effectiveCategories {
+            lines.append("1970-01-01 open \(c.account) \(c.currency)")
+            if !c.name.isEmpty {
+                lines.append("  alias: \"\(escape(c.name))\"")
+            }
+        }
+        lines.append("")
+
+        let initialBalanceAccounts = effectiveAccounts.compactMap { acct -> (OnboardingAccountSelection, Decimal)? in
+            guard let raw = acct.initialBalance?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty,
+                  let dec = Decimal(string: raw), dec > 0 else { return nil }
+            return (acct, dec)
+        }
+
+        if !initialBalanceAccounts.isEmpty {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy-MM-dd"
+            let today = formatter.string(from: Date())
+
+            for (acct, dec) in initialBalanceAccounts {
+                let formatted = String(format: "%.2f", NSDecimalNumber(decimal: dec).doubleValue)
+                if acct.isLiability {
+                    lines.append("\(today) * \"期初余额\" \"初始化账户欠款 - \(escape(acct.name))\"")
+                    lines.append("  \(acct.account)  -\(formatted) \(acct.currency)")
+                    lines.append("  Equity:Opening-Balances  \(formatted) \(acct.currency)")
+                } else {
+                    lines.append("\(today) * \"期初余额\" \"初始化账户余额 - \(escape(acct.name))\"")
+                    lines.append("  \(acct.account)  \(formatted) \(acct.currency)")
+                    lines.append("  Equity:Opening-Balances  -\(formatted) \(acct.currency)")
+                }
+                lines.append("")
+            }
+        }
+
+        let content = lines.joined(separator: "\n") + "\n"
         let validate = publicationValidator(for: descriptor)
         try await workspace.commit(changes: [.write(Data(content.utf8), to: descriptor.entrypoint)]) { root in
             try await validate(root, descriptor.entrypoint)
