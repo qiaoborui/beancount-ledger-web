@@ -35,48 +35,80 @@ struct OnboardingWizardView: View {
         AccountDraft(id: "alipay_bal", name: "支付宝余额", account: "Assets:Wallet:Alipay:Balance", icon: "creditcard.and.123", category: .wallet, isSelected: true, initialBalance: "", isLiability: false),
         AccountDraft(id: "alipay_yeb", name: "余额宝", account: "Assets:Wallet:Alipay:YuEBao", icon: "chart.line.uptrend.xyaxis", category: .wallet, isSelected: true, initialBalance: "", isLiability: false),
         AccountDraft(id: "wechat_lqt", name: "微信零钱通", account: "Assets:Wallet:WeChat:LingQianTong", icon: "arrow.triangle.swap", category: .wallet, isSelected: false, initialBalance: "", isLiability: false),
-        // 银行卡
+        AccountDraft(id: "wallet_unionpay", name: "云闪付", account: "Assets:Wallet:UnionPay", icon: "creditcard", category: .wallet, isSelected: false, initialBalance: "", isLiability: false),
+
+        // 银行储蓄卡
         AccountDraft(id: "bank_cmb", name: "招商银行储蓄卡", account: "Assets:Bank:CMB", icon: "building.columns", category: .bank, isSelected: true, initialBalance: "", isLiability: false),
         AccountDraft(id: "bank_icbc", name: "工商银行储蓄卡", account: "Assets:Bank:ICBC", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
         AccountDraft(id: "bank_ccb", name: "建设银行储蓄卡", account: "Assets:Bank:CCB", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
         AccountDraft(id: "bank_boc", name: "中国银行储蓄卡", account: "Assets:Bank:BOC", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
+        AccountDraft(id: "bank_abc", name: "农业银行储蓄卡", account: "Assets:Bank:ABC", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
         AccountDraft(id: "bank_comm", name: "交通银行储蓄卡", account: "Assets:Bank:COMM", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
-        // 信用消费
+        AccountDraft(id: "bank_psbc", name: "邮政储蓄储蓄卡", account: "Assets:Bank:PSBC", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
+
+        // 信用卡与信用消费
         AccountDraft(id: "credit_cmb", name: "招行信用卡", account: "Liabilities:CreditCard:CMB", icon: "creditcard.fill", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
+        AccountDraft(id: "credit_icbc", name: "工行信用卡", account: "Liabilities:CreditCard:ICBC", icon: "creditcard.fill", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
         AccountDraft(id: "credit_huabei", name: "蚂蚁花呗", account: "Liabilities:CreditCard:Huabei", icon: "hand.tap", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
         AccountDraft(id: "credit_baitiao", name: "京东白条", account: "Liabilities:CreditCard:Baitiao", icon: "cart.fill", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
+        AccountDraft(id: "credit_meituan", name: "美团月付", account: "Liabilities:CreditCard:MeituanYuefu", icon: "fork.knife", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
+
         // 现金
-        AccountDraft(id: "cash_cny", name: "现金零钱", account: "Assets:Cash:CNY", icon: "banknote", category: .cash, isSelected: true, initialBalance: "", isLiability: false)
+        AccountDraft(id: "cash_cny", name: "人民币现金", account: "Assets:Cash:CNY", icon: "banknote", category: .cash, isSelected: true, initialBalance: "", isLiability: false)
     ]
 
-    // ── 分类选择状态 ──
+    // ── 分类选择状态（基于全面预设字典动态初始化）──
     struct CategoryDraft: Identifiable, Equatable {
         let id: String
         let name: String
         let account: String
         let icon: String
         let kind: CategoryKind
+        let detail: String
         var isSelected: Bool
     }
 
-    @State private var categoryDrafts: [CategoryDraft] = [
-        CategoryDraft(id: "food", name: "餐饮美食", account: "Expenses:Food", icon: "fork.knife", kind: .expense, isSelected: true),
-        CategoryDraft(id: "home", name: "居家生活", account: "Expenses:Home", icon: "house.fill", kind: .expense, isSelected: true),
-        CategoryDraft(id: "transport", name: "交通出行", account: "Expenses:Transport", icon: "car.fill", kind: .expense, isSelected: true),
-        CategoryDraft(id: "shopping", name: "日用购物", account: "Expenses:Shopping", icon: "bag.fill", kind: .expense, isSelected: true),
-        CategoryDraft(id: "entertainment", name: "休闲娱乐", account: "Expenses:Entertainment", icon: "gamecontroller.fill", kind: .expense, isSelected: true),
-        CategoryDraft(id: "health", name: "医疗保健", account: "Expenses:Health", icon: "cross.case.fill", kind: .expense, isSelected: true),
-        CategoryDraft(id: "education", name: "学习提升", account: "Expenses:Education", icon: "book.fill", kind: .expense, isSelected: true),
-        CategoryDraft(id: "other_exp", name: "其他支出", account: "Expenses:Other", icon: "ellipsis.circle", kind: .expense, isSelected: true),
-        CategoryDraft(id: "salary", name: "工资薪酬", account: "Income:Salary", icon: "briefcase.fill", kind: .income, isSelected: true),
-        CategoryDraft(id: "investments", name: "理财收益", account: "Income:Investments", icon: "chart.line.uptrend.xyaxis", kind: .income, isSelected: true),
-        CategoryDraft(id: "other_inc", name: "其他收入", account: "Income:Other", icon: "plus.circle", kind: .income, isSelected: true)
-    ]
+    @State private var categoryDrafts: [CategoryDraft] = CategoryPresets.sections.map { section in
+        let subnames = section.items.map(\.name).joined(separator: "、")
+        let isRecommended = ["exp_food", "exp_daily", "exp_transport", "exp_home", "exp_fun", "exp_health", "inc_career", "inc_invest"].contains(section.id)
+        return CategoryDraft(
+            id: section.id,
+            name: section.name,
+            account: section.rootAccount,
+            icon: section.icon,
+            kind: section.kind,
+            detail: subnames,
+            isSelected: isRecommended
+        )
+    }
 
+    @State private var selectedCategoryTab: CategoryKind = .expense
     @State private var isCreating = false
     @State private var customAccountName = ""
     @State private var customAccountCategory: AccountTypeCategory = .bank
     @State private var showingAddCustomAccount = false
+    @State private var showingInstitutionPicker = false
+
+    // 财务期初统计计算
+    private var totalAssetBalance: Decimal {
+        accountDrafts.filter { $0.isSelected && !$0.isLiability }.reduce(Decimal.zero) { sum, draft in
+            let raw = draft.initialBalance.trimmingCharacters(in: .whitespacesAndNewlines)
+            let val = Decimal(string: raw) ?? 0
+            return sum + max(val, 0)
+        }
+    }
+
+    private var totalLiabilityBalance: Decimal {
+        accountDrafts.filter { $0.isSelected && $0.isLiability }.reduce(Decimal.zero) { sum, draft in
+            let raw = draft.initialBalance.trimmingCharacters(in: .whitespacesAndNewlines)
+            let val = Decimal(string: raw) ?? 0
+            return sum + max(val, 0)
+        }
+    }
+
+    private var netWorth: Decimal {
+        totalAssetBalance - totalLiabilityBalance
+    }
 
     var body: some View {
         NavigationStack {
@@ -110,6 +142,30 @@ struct OnboardingWizardView: View {
             }
             .sheet(isPresented: $showingAddCustomAccount) {
                 addCustomAccountSheet
+            }
+            .sheet(isPresented: $showingInstitutionPicker) {
+                InstitutionPickerSheet(
+                    onSelect: { preset in
+                        if let idx = accountDrafts.firstIndex(where: { $0.account == preset.defaultAccount }) {
+                            accountDrafts[idx].isSelected = true
+                        } else {
+                            let newDraft = AccountDraft(
+                                id: preset.id,
+                                name: preset.name,
+                                account: preset.defaultAccount,
+                                icon: preset.icon,
+                                category: preset.category,
+                                isSelected: true,
+                                initialBalance: "",
+                                isLiability: preset.category.isLiability
+                            )
+                            accountDrafts.append(newDraft)
+                        }
+                    },
+                    onSelectCustom: {
+                        showingAddCustomAccount = true
+                    }
+                )
             }
             .overlay {
                 if isCreating {
@@ -233,15 +289,15 @@ struct OnboardingWizardView: View {
         .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
     }
 
-    // MARK: - 步骤 2: 常用账户与期初余额
+    // MARK: - 步骤 2: 常用账户与期初余额（分组清晰）
     private var accountsStepView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: LedgerSpacing.lg) {
                 VStack(alignment: .leading, spacing: LedgerSpacing.xs) {
-                    Text("选择您的日常资金账户")
+                    Text("选择日常资金账户")
                         .font(.title3.weight(.bold))
                         .foregroundStyle(LedgerPalette.ink)
-                    Text("勾选您平时使用的支付钱包与银行卡。可在右侧直接填入当前大概余额（后续随时可修改）：")
+                    Text("勾选您平时的支付钱包、储蓄卡及信用卡，右侧可录入当前大概余额（后续随时可修改）：")
                         .font(.footnote)
                         .foregroundStyle(LedgerPalette.secondary)
                 }
@@ -266,15 +322,98 @@ struct OnboardingWizardView: View {
                 .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                 .padding(.horizontal, LedgerSpacing.md)
 
-                // 账户列表
+                // ── 1. 移动支付与电子钱包 ──
+                accountSectionHeader(title: "移动支付 & 电子钱包", icon: "iphone")
                 VStack(spacing: LedgerSpacing.sm) {
                     ForEach($accountDrafts) { $draft in
-                        accountRow(draft: $draft)
+                        if draft.category == .wallet {
+                            accountRow(draft: $draft)
+                        }
                     }
                 }
                 .padding(.horizontal, LedgerSpacing.md)
 
-                // 自定义账户添加按钮
+                // ── 2. 银行储蓄卡 ──
+                HStack {
+                    accountSectionHeader(title: "银行储蓄卡", icon: "building.columns")
+                    Spacer()
+                    Button {
+                        showingInstitutionPicker = true
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text("更多银行...")
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                    }
+                    .padding(.trailing, LedgerSpacing.md)
+                }
+
+                VStack(spacing: LedgerSpacing.sm) {
+                    ForEach($accountDrafts) { $draft in
+                        if draft.category == .bank {
+                            accountRow(draft: $draft)
+                        }
+                    }
+                }
+                .padding(.horizontal, LedgerSpacing.md)
+
+                // ── 3. 信用卡与消费信贷 ──
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        accountSectionHeader(title: "信用卡与信用消费 (负债)", icon: "creditcard.fill")
+                        Spacer()
+                        Button {
+                            showingInstitutionPicker = true
+                        } label: {
+                            HStack(spacing: 2) {
+                                Text("更多信贷...")
+                                Image(systemName: "chevron.right")
+                            }
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(LedgerPalette.cobalt)
+                        }
+                        .padding(.trailing, LedgerSpacing.md)
+                    }
+
+                    // 友好提示卡片：解释欠款 vs 额度
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(Color.orange)
+                            .padding(.top, 1)
+                        Text("💡 信用卡填的是当前待还欠款（若已还清请留空）。切勿填写信用总额度（如5万元额度），避免净资产被扣减。")
+                            .font(.caption2)
+                            .foregroundStyle(LedgerPalette.secondary)
+                            .lineSpacing(2)
+                    }
+                    .padding(8)
+                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    .padding(.horizontal, LedgerSpacing.md)
+                }
+
+                VStack(spacing: LedgerSpacing.sm) {
+                    ForEach($accountDrafts) { $draft in
+                        if draft.isLiability {
+                            accountRow(draft: $draft)
+                        }
+                    }
+                }
+                .padding(.horizontal, LedgerSpacing.md)
+
+                // ── 4. 现金账户 ──
+                accountSectionHeader(title: "现钞与备用金", icon: "banknote")
+                VStack(spacing: LedgerSpacing.sm) {
+                    ForEach($accountDrafts) { $draft in
+                        if draft.category == .cash {
+                            accountRow(draft: $draft)
+                        }
+                    }
+                }
+                .padding(.horizontal, LedgerSpacing.md)
+
+                // ── 5. 自定义账户添加按钮 ──
                 Button {
                     showingAddCustomAccount = true
                 } label: {
@@ -293,6 +432,19 @@ struct OnboardingWizardView: View {
             }
             .padding(.bottom, LedgerSpacing.xl)
         }
+    }
+
+    private func accountSectionHeader(title: String, icon: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(LedgerPalette.cobalt)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(LedgerPalette.ink)
+        }
+        .padding(.horizontal, LedgerSpacing.md)
+        .padding(.top, LedgerSpacing.xs)
     }
 
     private func accountRow(draft: Binding<AccountDraft>) -> some View {
@@ -328,7 +480,7 @@ struct OnboardingWizardView: View {
                     Text(currencySymbol(for: selectedCurrency))
                         .font(.footnote)
                         .foregroundStyle(LedgerPalette.secondary)
-                    TextField(draft.wrappedValue.isLiability ? "欠款余额" : "期初余额", text: draft.initialBalance)
+                    TextField(draft.wrappedValue.isLiability ? "待还欠款" : "期初余额", text: draft.initialBalance)
                         .keyboardType(.decimalPad)
                         .font(.subheadline.monospacedDigit())
                         .multilineTextAlignment(.trailing)
@@ -343,75 +495,73 @@ struct OnboardingWizardView: View {
         .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
     }
 
-    // MARK: - 步骤 3: 常用记账分类
+    // MARK: - 步骤 3: 丰富全面的收支分类
     private var categoriesStepView: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: LedgerSpacing.lg) {
+            VStack(alignment: .leading, spacing: LedgerSpacing.md) {
                 VStack(alignment: .leading, spacing: LedgerSpacing.xs) {
                     Text("选择日常收支分类")
                         .font(.title3.weight(.bold))
                         .foregroundStyle(LedgerPalette.ink)
-                    Text("已为您预置日常高频分类，勾选您需要的项目：")
+                    Text("提供标准丰富的生活收支分类体系，按需勾选开启：")
                         .font(.footnote)
                         .foregroundStyle(LedgerPalette.secondary)
                 }
                 .padding(.horizontal, LedgerSpacing.md)
                 .padding(.top, LedgerSpacing.sm)
 
-                // 快捷全选
+                // 支出/收入选项卡切换
+                let selectedExpenseCount = categoryDrafts.filter { $0.kind == .expense && $0.isSelected }.count
+                let selectedIncomeCount = categoryDrafts.filter { $0.kind == .income && $0.isSelected }.count
+
+                Picker("分类类型", selection: $selectedCategoryTab) {
+                    Text("支出分类 (\(selectedExpenseCount) 已选)").tag(CategoryKind.expense)
+                    Text("收入分类 (\(selectedIncomeCount) 已选)").tag(CategoryKind.income)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, LedgerSpacing.md)
+
+                // 快捷操作按钮
                 HStack {
-                    Spacer()
-                    Button("全选") {
-                        for i in categoryDrafts.indices { categoryDrafts[i].isSelected = true }
+                    Button("推荐常用") {
+                        for i in categoryDrafts.indices {
+                            let item = categoryDrafts[i]
+                            categoryDrafts[i].isSelected = ["exp_food", "exp_daily", "exp_transport", "exp_home", "exp_fun", "exp_health", "inc_career", "inc_invest"].contains(item.id)
+                        }
+                    }
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(LedgerPalette.cobalt)
+
+                    Text("|").font(.caption).foregroundStyle(.tertiary)
+
+                    Button("当前大类全选") {
+                        for i in categoryDrafts.indices where categoryDrafts[i].kind == selectedCategoryTab {
+                            categoryDrafts[i].isSelected = true
+                        }
                     }
                     .font(.footnote)
                     .foregroundStyle(LedgerPalette.cobalt)
+
                     Text("|").font(.caption).foregroundStyle(.tertiary)
-                    Button("清空") {
-                        for i in categoryDrafts.indices { categoryDrafts[i].isSelected = false }
+
+                    Button("当前大类清空") {
+                        for i in categoryDrafts.indices where categoryDrafts[i].kind == selectedCategoryTab {
+                            categoryDrafts[i].isSelected = false
+                        }
                     }
                     .font(.footnote)
                     .foregroundStyle(LedgerPalette.secondary)
+
+                    Spacer()
                 }
                 .padding(.horizontal, LedgerSpacing.md)
 
-                // 分类网格/列表
+                // 分类卡片列表
                 VStack(spacing: LedgerSpacing.sm) {
                     ForEach($categoryDrafts) { $draft in
-                        Button {
-                            draft.isSelected.toggle()
-                        } label: {
-                            HStack(spacing: LedgerSpacing.md) {
-                                Image(systemName: draft.isSelected ? "checkmark.circle.fill" : "circle")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(draft.isSelected ? (draft.kind == .income ? LedgerPalette.income : LedgerPalette.cobalt) : LedgerPalette.secondary)
-
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill((draft.kind == .income ? LedgerPalette.income : Color.orange).opacity(0.12))
-                                        .frame(width: 32, height: 32)
-                                    Image(systemName: draft.icon)
-                                        .font(.system(size: 15))
-                                        .foregroundStyle(draft.kind == .income ? LedgerPalette.income : Color.orange)
-                                }
-
-                                Text(draft.name)
-                                    .font(.callout.weight(.medium))
-                                    .foregroundStyle(LedgerPalette.ink)
-
-                                Spacer()
-
-                                Text(draft.kind == .income ? "收入" : "支出")
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(draft.kind == .income ? LedgerPalette.income : LedgerPalette.secondary)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background((draft.kind == .income ? LedgerPalette.income : LedgerPalette.secondary).opacity(0.1), in: Capsule())
-                            }
-                            .padding(LedgerSpacing.md)
-                            .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+                        if draft.kind == selectedCategoryTab {
+                            categoryCardRow(draft: $draft)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, LedgerSpacing.md)
@@ -422,7 +572,51 @@ struct OnboardingWizardView: View {
         }
     }
 
-    // MARK: - 步骤 4: 命名与确认开账
+    private func categoryCardRow(draft: Binding<CategoryDraft>) -> some View {
+        Button {
+            draft.wrappedValue.isSelected.toggle()
+        } label: {
+            HStack(alignment: .top, spacing: LedgerSpacing.md) {
+                Image(systemName: draft.wrappedValue.isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(draft.wrappedValue.isSelected ? (draft.wrappedValue.kind == .income ? LedgerPalette.income : LedgerPalette.cobalt) : LedgerPalette.secondary)
+                    .padding(.top, 2)
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill((draft.wrappedValue.kind == .income ? LedgerPalette.income : Color.orange).opacity(0.12))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: draft.wrappedValue.icon)
+                        .font(.system(size: 15))
+                        .foregroundStyle(draft.wrappedValue.kind == .income ? LedgerPalette.income : Color.orange)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(draft.wrappedValue.name)
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(LedgerPalette.ink)
+                        Spacer()
+                        Text(draft.wrappedValue.account)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
+
+                    if !draft.wrappedValue.detail.isEmpty {
+                        Text(draft.wrappedValue.detail)
+                            .font(.caption2)
+                            .foregroundStyle(LedgerPalette.secondary)
+                            .lineLimit(2)
+                    }
+                }
+            }
+            .padding(LedgerSpacing.md)
+            .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 步骤 4: 命名与确认开账（透明展示资产负债与净资产）
     private var summaryStepView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: LedgerSpacing.lg) {
@@ -430,7 +624,7 @@ struct OnboardingWizardView: View {
                     Text("即将开启您的新账本")
                         .font(.title3.weight(.bold))
                         .foregroundStyle(LedgerPalette.ink)
-                    Text("核对配置信息，确认后即可创建专属账本：")
+                    Text("核对账户资产与负债配置，确认后即可创建专属账本：")
                         .font(.footnote)
                         .foregroundStyle(LedgerPalette.secondary)
                 }
@@ -449,54 +643,75 @@ struct OnboardingWizardView: View {
                 }
                 .padding(.horizontal, LedgerSpacing.md)
 
-                // 统计卡片
-                let selectedAccountCount = accountDrafts.filter(\.isSelected).count
-                let accountsWithBalanceCount = accountDrafts.filter { $0.isSelected && Double($0.initialBalance) != nil && (Double($0.initialBalance) ?? 0) > 0 }.count
-                let selectedCategoryCount = categoryDrafts.filter(\.isSelected).count
-
-                VStack(spacing: LedgerSpacing.md) {
+                // 财务期初平衡卡片（直观展示资产、待还负债与期初净资产）
+                VStack(spacing: LedgerSpacing.sm) {
                     HStack {
-                        summaryStatItem(title: "主要币种", value: selectedCurrency, icon: "dollarsign.circle.fill", color: .blue)
-                        Divider()
-                        summaryStatItem(title: "初始账户", value: "\(selectedAccountCount) 个", icon: "creditcard.fill", color: .green)
-                        Divider()
-                        summaryStatItem(title: "记账分类", value: "\(selectedCategoryCount) 个", icon: "tag.fill", color: .orange)
+                        Text("期初财务概况")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(LedgerPalette.secondary)
+                        Spacer()
+                        Text("自动通过 Equity:Opening-Balances 配平")
+                            .font(.caption2)
+                            .foregroundStyle(LedgerPalette.secondary)
                     }
-                    .frame(height: 70)
-                    .padding(.horizontal, LedgerSpacing.sm)
 
-                    if accountsWithBalanceCount > 0 {
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark.shield.fill")
-                                .foregroundStyle(LedgerPalette.income)
-                            Text("已设定 \(accountsWithBalanceCount) 个账户的期初余额，将自动生成平衡的开账记录。")
-                                .font(.footnote)
-                                .foregroundStyle(LedgerPalette.secondary)
-                        }
-                        .padding(.top, 4)
+                    HStack {
+                        financialMetric(
+                            title: "初始总资产",
+                            amount: totalAssetBalance,
+                            currency: selectedCurrency,
+                            color: LedgerPalette.income
+                        )
+                        Divider()
+                        financialMetric(
+                            title: "待还总负债",
+                            amount: totalLiabilityBalance,
+                            currency: selectedCurrency,
+                            color: totalLiabilityBalance > 0 ? Color.orange : LedgerPalette.secondary
+                        )
+                        Divider()
+                        financialMetric(
+                            title: "期初净资产",
+                            amount: netWorth,
+                            currency: selectedCurrency,
+                            color: LedgerPalette.cobalt
+                        )
                     }
+                    .frame(height: 60)
                 }
                 .padding(LedgerSpacing.md)
                 .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.md))
                 .padding(.horizontal, LedgerSpacing.md)
 
-                // 本地存储保障说明
-                HStack(alignment: .top, spacing: LedgerSpacing.md) {
-                    Image(systemName: "lock.shield")
-                        .font(.title3)
-                        .foregroundStyle(LedgerPalette.cobalt)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("完全本地与隐私安全")
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(LedgerPalette.ink)
-                        Text("账本文件严格保存在本台设备的沙盒中，不需要也不强制配置 Git。后续您可随时在「设置」中导出账本或按需连接 Git。")
-                            .font(.footnote)
-                            .foregroundStyle(LedgerPalette.secondary)
-                            .lineSpacing(2)
-                    }
+                // 统计卡片
+                let selectedAccountCount = accountDrafts.filter(\.isSelected).count
+                let selectedCategoryCount = categoryDrafts.filter(\.isSelected).count
+
+                HStack {
+                    summaryStatItem(title: "主要币种", value: selectedCurrency, icon: "dollarsign.circle.fill", color: .blue)
+                    Divider()
+                    summaryStatItem(title: "初始账户", value: "\(selectedAccountCount) 个", icon: "creditcard.fill", color: .green)
+                    Divider()
+                    summaryStatItem(title: "记账分类", value: "\(selectedCategoryCount) 个", icon: "tag.fill", color: .orange)
                 }
+                .frame(height: 65)
                 .padding(LedgerSpacing.md)
                 .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.md))
+                .padding(.horizontal, LedgerSpacing.md)
+
+                // 本地存储与模板保障说明
+                VStack(spacing: LedgerSpacing.sm) {
+                    featureBenefitRow(
+                        icon: "doc.text.fill",
+                        title: "已预置账单导入模板",
+                        desc: "已为您准备好微信与支付宝的 imports/*.yaml 规则模板，后续直接导入账单即可智能匹配。"
+                    )
+                    featureBenefitRow(
+                        icon: "lock.shield.fill",
+                        title: "100% 本地安全掌控",
+                        desc: "所有文件存放在本机沙盒，无需配置 Git 亦可畅快记账，后续随时可导出备份。"
+                    )
+                }
                 .padding(.horizontal, LedgerSpacing.md)
 
                 Spacer(minLength: LedgerSpacing.xl)
@@ -505,13 +720,56 @@ struct OnboardingWizardView: View {
         }
     }
 
+    private func financialMetric(title: String, amount: Decimal, currency: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(LedgerPalette.secondary)
+            Text("\(currencySymbol(for: currency))\(amount as NSDecimalNumber, formatter: metricFormatter)")
+                .font(.callout.weight(.bold).monospacedDigit())
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var metricFormatter: NumberFormatter {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
+        return f
+    }
+
+    private func featureBenefitRow(icon: String, title: String, desc: String) -> some View {
+        HStack(alignment: .top, spacing: LedgerSpacing.md) {
+            Image(systemName: icon)
+                .font(.body)
+                .foregroundStyle(LedgerPalette.cobalt)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(LedgerPalette.ink)
+                Text(desc)
+                    .font(.caption2)
+                    .foregroundStyle(LedgerPalette.secondary)
+                    .lineSpacing(2)
+            }
+            Spacer()
+        }
+        .padding(LedgerSpacing.md)
+        .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
+    }
+
     private func summaryStatItem(title: String, value: String, icon: String, color: Color) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 18))
+                .font(.system(size: 16))
                 .foregroundStyle(color)
             Text(value)
-                .font(.headline.weight(.semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(LedgerPalette.ink)
             Text(title)
                 .font(.caption2)
