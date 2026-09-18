@@ -10,6 +10,7 @@ web/tsconfig.tsbuildinfo
 
 # Native iOS build
 dist/
+dist-build/
 App/LedgerMobile/.build/
 App/LedgerMobile/DerivedData/
 App/LedgerMobile/DerivedDataDevice/
