@@ -229,6 +229,18 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         SafePreviewLedgerData.accountDetail(account: account, currency: currency, start: start, end: end)
     }
 
+    func reconciliation(baseURL: URL, start: String, end: String) async throws -> LedgerReconciliationResponse {
+        SafePreviewLedgerData.reconciliation(start: start, end: end)
+    }
+
+    func reconcile(baseURL: URL, request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult {
+        SafePreviewLedgerData.reconcile(request: request)
+    }
+
+    func accountStatuses(baseURL: URL) async throws -> [LedgerAccountStatus] {
+        SafePreviewLedgerData.accountStatuses
+    }
+
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {
         if let committedImportDocument {
             return [committedImportDocument] + SafePreviewLedgerData.importDocuments
@@ -569,6 +581,74 @@ private enum SafePreviewLedgerData {
         transaction(date: "2026-03-08", payee: "教育储备", narration: "年度储备启动", postings: [("Assets:Bank:FamilyEducationReserve", 3_420_000, "CNY"), ("Assets:Bank:Daily", -3_420_000, "CNY")], line: 27),
     ]
 
+    static let reconciliationRows = [
+        LedgerReconciliationRow(
+            account: "Assets:Bank:Daily",
+            alias: "日常账户",
+            label: "日常账户",
+            currency: "CNY",
+            ledgerBalance: 8_756_432,
+            status: "pending",
+            lastAssertion: LedgerBalanceAssertion(date: "2026-08-01", account: "Assets:Bank:Daily", amount: 8_000_000, currency: "CNY")
+        ),
+        LedgerReconciliationRow(
+            account: "Assets:Bank:FamilyEducationReserve",
+            alias: "家庭长期储备与教育基金",
+            label: "家庭长期储备与教育基金",
+            currency: "CNY",
+            ledgerBalance: 128_763_450,
+            status: "asserted",
+            lastAssertion: LedgerBalanceAssertion(date: "2026-08-15", account: "Assets:Bank:FamilyEducationReserve", amount: 128_763_450, currency: "CNY")
+        ),
+        LedgerReconciliationRow(
+            account: "Liabilities:CreditCard",
+            alias: "信用卡",
+            label: "信用卡",
+            currency: "CNY",
+            ledgerBalance: -289_900,
+            status: "pending",
+            lastAssertion: nil
+        ),
+        LedgerReconciliationRow(
+            account: "Assets:Cash:USD",
+            alias: "美元备用金",
+            label: "美元备用金",
+            currency: "USD",
+            ledgerBalance: 42_875,
+            status: "asserted",
+            lastAssertion: LedgerBalanceAssertion(date: "2026-08-01", account: "Assets:Cash:USD", amount: 42_875, currency: "USD")
+        )
+    ]
+
+    static let accountStatuses = [
+        LedgerAccountStatus(account: "Assets:Bank:Daily", status: "yellow", lastEntryDate: "2026-08-26", lastEntryType: "transaction", assertionAmount: 8_000_000, computedBalance: 8_756_432),
+        LedgerAccountStatus(account: "Assets:Bank:FamilyEducationReserve", status: "green", lastEntryDate: "2026-08-15", lastEntryType: "balance", assertionAmount: 128_763_450, computedBalance: 128_763_450),
+        LedgerAccountStatus(account: "Liabilities:CreditCard", status: "yellow", lastEntryDate: "2026-08-28", lastEntryType: "transaction", assertionAmount: nil, computedBalance: -289_900),
+        LedgerAccountStatus(account: "Assets:Cash:USD", status: "green", lastEntryDate: "2026-08-01", lastEntryType: "balance", assertionAmount: 42_875, computedBalance: 42_875)
+    ]
+
+    static func reconciliation(start: String, end: String) -> LedgerReconciliationResponse {
+        LedgerReconciliationResponse(
+            start: start,
+            end: end,
+            monthPrefix: String(start.prefix(7)),
+            rows: reconciliationRows
+        )
+    }
+
+    static func reconcile(request: LedgerReconcileRequest) -> LedgerReconciliationResult {
+        let actual = Int((Double(request.actualAmount) ?? 0) * 100)
+        let ledgerBal = balances.first(where: { $0.account == request.account })?.amount ?? 0
+        let diff = actual - ledgerBal
+        return LedgerReconciliationResult(
+            ok: true,
+            ledgerBalance: ledgerBal,
+            actual: actual,
+            diff: diff,
+            beanText: "\(request.balanceDate) balance \(request.account) \(request.actualAmount) CNY"
+        )
+    }
+
     static let importDocuments = [
         LedgerImportDocument(
             path: "transactions/2026/documents/imports/ccb-credit-2026-08.eml",
@@ -851,10 +931,12 @@ private enum SafePreviewLedgerData {
                 twelveMonth: emptyDelta
             ),
             transactions: visible,
+            reconciliationRows: reconciliationRows,
             accounts: accounts,
             commodities: commodities,
             prices: prices,
             valuationCurrency: valuationCurrency,
+            accountStatuses: accountStatuses,
             sensitiveUnlocked: true
         )
     }

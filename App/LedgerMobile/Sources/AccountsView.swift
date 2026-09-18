@@ -30,6 +30,7 @@ struct CookieNetWorthHeroCard: View {
     @EnvironmentObject private var session: LedgerSession
     let totals: BalanceSheetTotals
     let currency: String
+    var onReconcile: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -47,6 +48,23 @@ struct CookieNetWorthHeroCard: View {
                 }
 
                 Spacer()
+
+                if let onReconcile {
+                    Button(action: onReconcile) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.seal")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("对账")
+                                .font(.system(size: 11.5, weight: .medium))
+                        }
+                        .foregroundStyle(LedgerPalette.cobalt)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4.5)
+                        .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                    .accessibilityLabel("账户对账与余额校准")
+                }
 
                 NavigationLink {
                     LedgerAnalysisView(kind: .assets, isRoot: false)
@@ -142,6 +160,8 @@ struct AccountsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var expandedSectionIDs: Set<String> = []
     @State private var selectedFilter: AccountFilterCategory = .all
+    @State private var showingReconciliationView = false
+    @State private var selectedAccountForReconciliation: AccountBalanceRow? = nil
     var isRoot = true
 
     private var activeExpandedSectionIDs: Set<String> {
@@ -190,7 +210,8 @@ struct AccountsView: View {
             Section {
                 CookieNetWorthHeroCard(
                     totals: totals,
-                    currency: session.ledger?.valuationCurrency ?? "CNY"
+                    currency: session.ledger?.valuationCurrency ?? "CNY",
+                    onReconcile: { showingReconciliationView = true }
                 )
                 .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 6, trailing: 16))
                 .listRowBackground(Color.clear)
@@ -258,6 +279,21 @@ struct AccountsView: View {
                             } label: {
                                 AccountRowView(row: row)
                             }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button {
+                                    selectedAccountForReconciliation = row
+                                } label: {
+                                    Label("校对余额", systemImage: "checkmark.seal")
+                                }
+                                .tint(LedgerPalette.cobalt)
+                            }
+                            .contextMenu {
+                                Button {
+                                    selectedAccountForReconciliation = row
+                                } label: {
+                                    Label("校对余额 (对账)", systemImage: "checkmark.seal")
+                                }
+                            }
                         }
                     } label: {
                         HStack(spacing: 12) {
@@ -322,8 +358,30 @@ struct AccountsView: View {
         .ledgerReadingList()
         .accessibilityIdentifier("accounts-list")
         .ledgerNavigation("账户", isRoot: isRoot, showsTimeRange: true)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingReconciliationView = true
+                } label: {
+                    Image(systemName: "checkmark.seal")
+                }
+                .accessibilityLabel("账户对账")
+            }
+        }
         .navigationDestination(item: $session.externalAccount) { account in
             AccountDetailView(account: account.account, currency: account.currency)
+        }
+        .sheet(isPresented: $showingReconciliationView) {
+            NavigationStack {
+                ReconciliationView()
+            }
+        }
+        .sheet(item: $selectedAccountForReconciliation) { row in
+            SingleAccountReconciliationSheet(
+                account: row.account,
+                label: row.label,
+                currency: row.nativeCurrency
+            )
         }
         .refreshable { await session.refresh() }
     }
@@ -400,6 +458,7 @@ struct AccountDetailView: View {
     @State private var detail: LedgerAccountDetail?
     @State private var errorMessage: String?
     @State private var reloadToken = 0
+    @State private var showingReconcileSheet = false
 
     private var requestKey: AccountDetailRequestKey {
         AccountDetailRequestKey(
@@ -450,9 +509,25 @@ struct AccountDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { LedgerTimeRangeButton() }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingReconcileSheet = true
+                } label: {
+                    Image(systemName: "checkmark.seal")
+                }
+                .accessibilityLabel("校对余额")
+            }
         }
         .toolbar(.visible, for: .navigationBar)
-
+        .sheet(isPresented: $showingReconcileSheet, onDismiss: {
+            reloadToken += 1
+        }) {
+            SingleAccountReconciliationSheet(
+                account: account,
+                label: detail?.label,
+                currency: currency
+            )
+        }
         .task(id: requestKey) {
             await load(replacingContent: detail == nil)
         }
@@ -462,7 +537,11 @@ struct AccountDetailView: View {
         let accountLabels = TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
         return ScrollView {
             LazyVStack(spacing: LedgerSpacing.md) {
-                AccountDetailHero(detail: detail, range: session.selectedRange)
+                AccountDetailHero(
+                    detail: detail,
+                    range: session.selectedRange,
+                    onReconcile: { showingReconcileSheet = true }
+                )
 
                 if let errorMessage {
                     StatusBanner(message: errorMessage) {
@@ -546,6 +625,7 @@ private struct AccountDetailRequestKey: Hashable {
 private struct AccountDetailHero: View {
     let detail: LedgerAccountDetail
     let range: LedgerDateRange
+    var onReconcile: (() -> Void)? = nil
 
     private var openingBalance: Int {
         detail.openingBalance ?? detail.rows.first.map { $0.balance - $0.change } ?? detail.currentBalance
@@ -591,20 +671,40 @@ private struct AccountDetailHero: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(detail.account.hasPrefix("Liabilities:") ? "\(range.metricScope)期末待还" : "\(range.metricScope)期末余额")
-                    .font(.system(.caption2, design: .default, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.secondary)
-                AmountLabel(
-                    minorUnits: closingBalance,
-                    currency: detail.currency,
-                    font: .title2.weight(.semibold),
-                    color: detail.account.hasPrefix("Liabilities:")
-                        ? LedgerPalette.expense
-                        : LedgerPalette.gold
-                )
-                .tracking(-0.75)
-                .lineLimit(1)
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(detail.account.hasPrefix("Liabilities:") ? "\(range.metricScope)期末待还" : "\(range.metricScope)期末余额")
+                        .font(.system(.caption2, design: .default, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.secondary)
+                    AmountLabel(
+                        minorUnits: closingBalance,
+                        currency: detail.currency,
+                        font: .title2.weight(.semibold),
+                        color: detail.account.hasPrefix("Liabilities:")
+                            ? LedgerPalette.expense
+                            : LedgerPalette.gold
+                    )
+                    .tracking(-0.75)
+                    .lineLimit(1)
+                }
+
+                if let onReconcile {
+                    Spacer()
+                    Button(action: onReconcile) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("校对")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundStyle(LedgerPalette.cobalt)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                    .accessibilityLabel("校对余额")
+                }
             }
 
             HStack(spacing: LedgerSpacing.xl) {
@@ -918,6 +1018,7 @@ private struct AccountHistoryRow: View {
 }
 
 private struct AccountRowView: View {
+    @EnvironmentObject private var session: LedgerSession
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let row: AccountBalanceRow
 
@@ -964,9 +1065,16 @@ private struct AccountRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 headingLayout {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(row.label)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(LedgerPalette.ink)
+                        HStack(spacing: 5) {
+                            Text(row.label)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(LedgerPalette.ink)
+                            if let status = session.accountStatus(for: row.account) {
+                                Circle()
+                                    .fill(status.statusColor)
+                                    .frame(width: 6, height: 6)
+                            }
+                        }
                         Text(row.account)
                             .font(.system(.caption2, design: .default))
                             .foregroundStyle(LedgerPalette.secondary)

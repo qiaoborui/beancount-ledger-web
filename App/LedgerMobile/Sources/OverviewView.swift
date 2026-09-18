@@ -45,6 +45,7 @@ struct OverviewView: View {
                     .listRowBackground(Color.clear)
                 }
 
+
                 // 3. Top Spending Categories
                 let topCategories = spendingCategories(from: ledger.transactions, accountLabels: accountLabels)
                 if !topCategories.isEmpty {
@@ -795,3 +796,5 @@ private struct OverviewComparisonRow: View {
         "\(label)，\(valueText)，当前 \(comparison.currentRange.start) 至 \(comparison.currentRange.end)，对比 \(comparison.baselineRange.start) 至 \(comparison.baselineRange.end)"
     }
 }
+
+

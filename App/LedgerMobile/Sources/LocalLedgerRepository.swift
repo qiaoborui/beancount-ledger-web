@@ -119,6 +119,12 @@ actor LocalLedgerRepository: LedgerRepository {
         importPreviewDates.removeValue(forKey: request.importID)
         return result
     }
+    func reconciliation(start: String, end: String) async throws -> LedgerReconciliationResponse {
+        try await read("/api/ledger/reconciliation", query: ["start": start, "end": end])
+    }
+    func reconcile(request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult {
+        try await mutate("/api/ledger/reconciliation", method: "POST", body: json(request))
+    }
     func updateTransaction(source: TransactionSource, entry: LedgerTransactionEntry) async throws {
         let _: BQLCell = try await mutate("/api/ledger/transactions", method: "PUT",
             body: json(LedgerTransactionUpdateRequest(source: source, entry: entry)))

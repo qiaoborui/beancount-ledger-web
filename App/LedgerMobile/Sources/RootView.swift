@@ -10,6 +10,8 @@ struct RootView: View {
     @State private var testingTransactionDetail: Bool = ProcessInfo.processInfo.arguments.contains("--open-transaction-detail")
     @State private var testingCreateTransaction: Bool = ProcessInfo.processInfo.arguments.contains("--open-create-transaction")
     @State private var testingTransactionShare: Bool = ProcessInfo.processInfo.arguments.contains("--open-transaction-share")
+    @State private var testingReconciliation: Bool = ProcessInfo.processInfo.arguments.contains("--open-reconciliation")
+    @State private var testingSingleReconcile: Bool = ProcessInfo.processInfo.arguments.contains("--open-single-reconcile")
     #endif
 
     var body: some View {
@@ -113,6 +115,19 @@ struct RootView: View {
                 )
                 .ledgerPrivacyProtectedSheet()
             }
+        }
+        .sheet(isPresented: $testingReconciliation) {
+            NavigationStack {
+                ReconciliationView()
+            }
+            .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: $testingSingleReconcile) {
+            SingleAccountReconciliationSheet(
+                account: "Assets:Bank:Daily",
+                label: "日常账户",
+                currency: "CNY"
+            )
         }
         #endif
     }
