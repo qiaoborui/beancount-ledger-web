@@ -4,6 +4,8 @@ struct SettingsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var compactTabConfigurationPresented = false
+    @State private var editingCurrentLedger = false
+    @State private var confirmingDeleteCurrent = false
     var isRoot = true
 
     var body: some View {
@@ -48,7 +50,22 @@ struct SettingsView: View {
             }
             if session.isLocal {
                 Section("本地账本") {
-                    LabeledContent("名称", value: session.localLedgerName)
+                    Button {
+                        editingCurrentLedger = true
+                    } label: {
+                        HStack {
+                            Text("名称")
+                                .foregroundStyle(LedgerPalette.ink)
+                            Spacer()
+                            Text(session.localLedgerName)
+                                .foregroundStyle(LedgerPalette.secondary)
+                            Image(systemName: "pencil")
+                                .font(.caption)
+                                .foregroundStyle(LedgerPalette.cobalt)
+                        }
+                    }
+                    .accessibilityIdentifier("settings-edit-current-ledger")
+
                     Label("数据保存在这台设备", systemImage: "internaldrive")
                     NavigationLink("浏览、编辑与导出文件") { LocalLedgerFilesView() }
                         .accessibilityIdentifier("settings-local-files")
@@ -57,7 +74,12 @@ struct SettingsView: View {
                 }
                 Section {
                     Button("切换账本") { session.chooseLedger() }
-                } footer: { Text("小组件会在本地账本更新后显示新的摘要。切换账本会保留文件和历史版本。") }
+                    Button("删除当前账本", role: .destructive) {
+                        confirmingDeleteCurrent = true
+                    }
+                    .foregroundStyle(LedgerPalette.risk)
+                    .accessibilityIdentifier("settings-delete-current-ledger")
+                } footer: { Text("小组件会在本地账本更新后显示新的摘要。切换账本会保留文件；删除账本将永久抹除所有本地数据。") }
             }
             Section {
                 LabeledContent("版本", value: "本地版 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
@@ -72,6 +94,23 @@ struct SettingsView: View {
                 session.setCompactTabDestinations(destinations)
             }
             .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: $editingCurrentLedger) {
+            if let current = session.currentLocalLedgerDescriptor {
+                EditLedgerSheet(ledger: current)
+            }
+        }
+        .confirmationDialog("确定删除当前账本“\(session.localLedgerName)”？", isPresented: $confirmingDeleteCurrent, titleVisibility: .visible) {
+            Button("永久删除账本", role: .destructive) {
+                if let current = session.currentLocalLedgerDescriptor {
+                    Task {
+                        try? await session.deleteLocalLedger(current)
+                    }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("此操作将永久删除该账本在此设备上的所有文件、交易与配置，且不可恢复。")
         }
     }
 
