@@ -253,14 +253,16 @@ final class BookkeepingPipelineTests: XCTestCase {
 
         """
         let preview = try await repository.prepareBeanTransactions(text)
-        let fragment = try XCTUnwrap(preview.files.files.first { $0.path.contains("imported-") })
-        XCTAssertEqual(fragment.after, Data(text.utf8))
+        let mainFile = try XCTUnwrap(preview.files.files.first { $0.path == "main.bean" })
+        let afterText = String(decoding: mainFile.after ?? Data(), as: UTF8.self)
+        XCTAssertTrue(afterText.contains("Expenses:Books"))
         _ = try await repository.commitPrepared(preview)
         do { _ = try await repository.prepareBeanTransactions(text); XCTFail("Duplicate accepted") } catch { }
         for directive in ["include \"other.bean\"", "plugin \"beancount.plugins.auto_accounts\"", "2020-01-01 open Assets:New CNY"] {
             XCTAssertThrowsError(try BeanTransactionParser.transactionCount(directive + "\n" + text))
         }
         let main = try await repository.readFile(path: "main.bean")
+        XCTAssertTrue(main.text.contains("Expenses:Books"))
         XCTAssertTrue(main.text.hasPrefix("; preserve source comment"))
         #else
         throw XCTSkip("Requires the app-linked iOS Go and canonical Beancount runtimes")

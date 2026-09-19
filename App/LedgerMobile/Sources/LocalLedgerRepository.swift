@@ -170,18 +170,24 @@ actor LocalLedgerRepository: LedgerRepository {
         _ = try BeanTransactionParser.transactionCount(text)
         guard let revision = try await workspace.currentRevision() else { throw LocalLedgerError.previewRequired }
         let evidence = BookkeepingDraft.Evidence.make(.beancount, original: text)
-        let filename = "imported-" + evidence.fingerprint + ".bean"
         let validator = validator, entrypoint = descriptor.entrypoint
         let files = try await workspace.prepare(expectedRevisionID: revision.id, mutateStage: { root in
             let main = root.appendingPathComponent(entrypoint)
-            let destination = main.deletingLastPathComponent().appendingPathComponent(filename)
-            guard !FileManager.default.fileExists(atPath: destination.path) else {
-                throw BookkeepingError.reviewRequired("相同文件内容已导入，请核对现有记录。")
+            guard FileManager.default.fileExists(atPath: main.path) else {
+                throw BookkeepingError.reviewRequired("未找到入口文件：\(entrypoint)")
             }
-            try Data(text.utf8).write(to: destination, options: .withoutOverwriting)
-            var entry = try Data(contentsOf: main)
-            entry.append(Data(("\ninclude \"" + filename + "\"\n").utf8))
-            try entry.write(to: main)
+            let raw = try Data(contentsOf: main)
+            guard let content = String(data: raw, encoding: .utf8) else {
+                throw BookkeepingError.reviewRequired("入口文件编码异常")
+            }
+            let marker = "; import-fingerprint: " + evidence.fingerprint
+            if content.contains(marker) {
+                throw BookkeepingError.reviewRequired("相同交易内容已导入，请核对现有记录。")
+            }
+            var next = content
+            if !next.hasSuffix("\n") { next += "\n" }
+            next += "\n" + marker + "\n" + text.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+            try Data(next.utf8).write(to: main)
         }, validator: { root in try await validator(root, entrypoint) })
         let preview = PreparedBookkeepingChange(id: UUID(), ledgerID: descriptor.id, draftRevision: UUID(),
             files: files, createdAt: Date())

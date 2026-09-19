@@ -47,6 +47,7 @@ struct NativeImportFlowView: View {
     @State private var classificationManualReasons: [String: String] = [:]
     @State private var classificationRunID = UUID()
     @State private var classificationEvidence: [String: [ImportClassificationRequest.Example]] = [:]
+    @State private var warningsExpanded = false
 
     private enum ImportExitAction { case close, preparation }
 
@@ -282,8 +283,6 @@ struct NativeImportFlowView: View {
                     }
                 }
             }
-        } footer: {
-            Text("自动补齐分类和资金账户。日期、金额、币种及商家描述来自账单；证据不足的字段集中核对。")
         }
         .font(.subheadline)
     }
@@ -318,8 +317,6 @@ struct NativeImportFlowView: View {
                 }
                 Button("确认这笔草稿") { applyEditedEntry(entry) }
                     .accessibilityIdentifier("import-suggestion-confirm-\(entry.id)")
-                Text("日期、金额、币种、商家和描述沿用账单。保存前会校验完整账本。")
-                    .foregroundStyle(.secondary)
                 if let evidence = classificationEvidence[entry.id], !evidence.isEmpty {
                     DisclosureGroup("参考历史 · \(evidence.count) 条") {
                         ForEach(Array(evidence.enumerated()), id: \.offset) { _, example in
@@ -333,7 +330,7 @@ struct NativeImportFlowView: View {
                 }
             } label: {
                 Text(pending.isEmpty ? "草稿已补全 · 点按核对" : "导入信息待确认 · 查看建议")
-                    .foregroundStyle(pending.isEmpty ? LedgerPalette.secondary : LedgerPalette.risk)
+                    .foregroundStyle(pending.isEmpty ? LedgerPalette.secondary : LedgerPalette.cobalt)
             }
             .font(.caption)
             .foregroundStyle(.primary)
@@ -343,7 +340,7 @@ struct NativeImportFlowView: View {
                 Label(reason, systemImage: "exclamationmark.circle")
             }
             .font(.caption)
-            .foregroundStyle(LedgerPalette.risk)
+            .foregroundStyle(LedgerPalette.warm)
             .buttonStyle(.borderless)
         }
     }
@@ -572,12 +569,32 @@ struct NativeImportFlowView: View {
     }
 
     private func warningSection(_ warnings: [String]) -> some View {
-        Section("核对提示") {
-            ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
-                Label(warning, systemImage: "exclamationmark.triangle")
-                    .font(.subheadline)
-                    .foregroundStyle(LedgerPalette.risk)
-                    .fixedSize(horizontal: false, vertical: true)
+        Section {
+            DisclosureGroup(isExpanded: $warningsExpanded) {
+                ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
+                    HStack(alignment: .top, spacing: LedgerSpacing.xs) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(LedgerPalette.warm)
+                        Text(warning)
+                            .font(.caption)
+                            .foregroundStyle(LedgerPalette.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 2)
+                }
+            } label: {
+                HStack(spacing: LedgerSpacing.sm) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(LedgerPalette.warm)
+                    Text("\(warnings.count) 条账单核对提示")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(LedgerPalette.ink)
+                    Spacer()
+                    Text(warningsExpanded ? "收起" : "展开查看")
+                        .font(.caption)
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
             }
         }
     }
@@ -766,22 +783,21 @@ struct NativeImportFlowView: View {
 
                 if let documentFile = result.documentFile {
                     LedgerPanel {
-                        HStack(alignment: .top, spacing: LedgerSpacing.md) {
+                        HStack(alignment: .center, spacing: LedgerSpacing.md) {
                             Image(systemName: "archivebox.fill")
                                 .font(.system(size: 15, weight: .medium))
                                 .foregroundStyle(LedgerPalette.cobalt)
                                 .frame(width: 36, height: 36)
                                 .background(LedgerPalette.tag)
                                 .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("归档位置")
-                                    .font(.system(size: 12, weight: .semibold))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("账单已归档")
+                                    .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(LedgerPalette.ink)
-                                Text(documentFile)
-                                    .font(.system(size: 10, weight: .medium).monospaced())
+                                Text(URL(fileURLWithPath: documentFile).lastPathComponent)
+                                    .font(.system(size: 11, weight: .medium).monospaced())
                                     .foregroundStyle(LedgerPalette.secondary)
-                                    .textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                    .lineLimit(1)
                             }
                             Spacer(minLength: 0)
                         }

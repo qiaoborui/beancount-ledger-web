@@ -13,6 +13,13 @@ struct BookkeepingPreviewView: View {
         // transaction text first and attachments afterward.
         preview.files.files.filter { !$0.path.hasPrefix(".ledger-write-receipts/") }.sorted { left, right in
             if left.path.hasSuffix(".bean") != right.path.hasSuffix(".bean") { return left.path.hasSuffix(".bean") }
+            let leftDiff = Self.diff(before: left.before, after: left.after)
+            let rightDiff = Self.diff(before: right.before, after: right.after)
+            let leftIncludeOnly = Self.isIncludeOnlyDiff(leftDiff)
+            let rightIncludeOnly = Self.isIncludeOnlyDiff(rightDiff)
+            if leftIncludeOnly != rightIncludeOnly {
+                return !leftIncludeOnly
+            }
             if (left.before == nil) != (right.before == nil) { return left.before == nil }
             return left.path < right.path
         }
@@ -47,9 +54,10 @@ struct BookkeepingPreviewView: View {
                 }
 
                 ForEach(visibleFiles) { file in
+                    let diffString = file.path.hasSuffix(".bean") ? Self.diff(before: file.before, after: file.after) : ""
+                    let isIncludeOnly = file.path.hasSuffix(".bean") && Self.isIncludeOnlyDiff(diffString)
                     Section {
                         if file.path.hasSuffix(".bean") {
-                            let diffString = Self.diff(before: file.before, after: file.after)
                             DiffCodeBlock(diffString: diffString)
                                 .accessibilityIdentifier("bookkeeping-file-diff")
                         } else {
@@ -66,10 +74,15 @@ struct BookkeepingPreviewView: View {
                         }
                     } header: {
                         HStack(spacing: 6) {
-                            Image(systemName: file.path.hasSuffix(".bean") ? "doc.text.fill" : "paperclip")
+                            Image(systemName: file.path.hasSuffix(".bean") ? (isIncludeOnly ? "link" : "doc.text.fill") : "paperclip")
                                 .foregroundStyle(LedgerPalette.cobalt)
                             Text(file.path)
                                 .font(.caption.weight(.semibold).monospaced())
+                            if isIncludeOnly {
+                                Text("（入口关联引用）")
+                                    .font(.caption2)
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
                         }
                     }
                 }
@@ -123,6 +136,16 @@ struct BookkeepingPreviewView: View {
             + "\n" + old[prefix..<(old.count - suffix)].map { "- " + $0 }.joined(separator: "\n")
             + "\n" + new[prefix..<(new.count - suffix)].map { "+ " + $0 }.joined(separator: "\n")
             + "\n" + new[(new.count - suffix)..<min(new.count, new.count - suffix + 2)].map { "  " + $0 }.joined(separator: "\n")
+    }
+
+    static func isIncludeOnlyDiff(_ diff: String) -> Bool {
+        let added = diff.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix("+") }
+            .map { $0.dropFirst().trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !added.isEmpty else { return false }
+        return added.allSatisfy { $0.hasPrefix("include ") || $0.hasPrefix(";") }
     }
 
     private func save() async {
