@@ -215,7 +215,7 @@ enum LedgerImportFileValidator {
         let rawExtension = (name as NSString).pathExtension.lowercased()
         let fileExtension = rawExtension.isEmpty ? "" : "." + rawExtension
         let supported = LedgerMobileImportCapabilities.supportedExtensions(from: providers)
-        guard supported.contains(fileExtension) else {
+        guard supported.contains(fileExtension) || fileExtension == ".bean" else {
             throw LedgerImportFileValidationError.unsupported(fileExtension)
         }
     }

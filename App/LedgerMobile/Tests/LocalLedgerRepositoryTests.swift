@@ -3,6 +3,30 @@ import XCTest
 @testable import LedgerMobile
 
 final class LocalLedgerRepositoryTests: XCTestCase {
+    func testPreparedImportRetainsOriginalUntilExactChangeIsConfirmed() async throws {
+        let engine = Engine()
+        let catalog = LocalLedgerCatalog(rootDirectory: try root(), engine: engine, validator: { root, entry in
+            _ = try Data(contentsOf: root.appendingPathComponent(entry))
+        })
+        let descriptor = try await catalog.create(name: "Prepared import fixture")
+        let repository = catalog.repository(for: descriptor)
+        let source = try await repository.previewImport(file: .init(name: "prepared", data: Data("fixture".utf8)),
+            provider: "alipay", alipayFundRounding: false, archivePassword: "")
+        let before = try await repository.readFile(path: "main.bean")
+        await engine.configure(text: "; prepared archive\n", response: Data(#"{"ok":true,"count":0}"#.utf8))
+        let preview = try await repository.prepareImport(.init(importID: source.importID, provider: "alipay", entries: []))
+        let original = repository.workspace.rootDirectory.appendingPathComponent("runtime/imports/prepared/original")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: original.path))
+        let unchanged = try await repository.readFile(path: "main.bean")
+        XCTAssertEqual(unchanged.text, before.text)
+        XCTAssertEqual(unchanged.revisionID, before.revisionID)
+        let result = try await repository.commitPrepared(preview)
+        XCTAssertEqual(result?.count, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: original.path))
+        let saved = try await repository.readFile(path: "main.bean")
+        XCTAssertTrue(saved.text.hasSuffix("; prepared archive\n"))
+    }
+
     private actor Engine: LocalLedgerEngine {
         var requests: [LocalLedgerEngineRequest] = []
         var mutationText = "; accepted\n"

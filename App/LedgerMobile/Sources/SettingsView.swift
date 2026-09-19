@@ -50,11 +50,27 @@ struct SettingsView: View {
             }
             if session.isLocal {
                 if let ledgerID = session.currentLocalLedgerDescriptor?.id {
-                    Section {
+                    Section("AI 与智能记账") {
                         NavigationLink { ImportClassificationSettingsView(ledgerID: ledgerID) } label: {
-                            Label("智能分类", systemImage: "sparkles")
+                            HStack {
+                                Label("智能分类", systemImage: "sparkles")
+                                Spacer()
+                                Text(ImportClassificationSettings.shared.isEnabled(for: ledgerID) ? "已启用" : "未配置")
+                                    .font(.footnote)
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
                         }
                         .accessibilityIdentifier("settings-classification")
+                        NavigationLink { BookkeepingSettingsView() } label: {
+                            HStack {
+                                Label("语义解析", systemImage: "text.bubble")
+                                Spacer()
+                                Text(BookkeepingSettings.shared.hasKey ? (BookkeepingSettings.shared.configuration.model.isEmpty ? "已配置" : BookkeepingSettings.shared.configuration.model) : "未配置")
+                                    .font(.footnote)
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
+                        }
+                        .accessibilityIdentifier("settings-semantic-parser")
                     }
                 }
                 Section("本地账本") {

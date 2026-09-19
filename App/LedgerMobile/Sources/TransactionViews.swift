@@ -2450,6 +2450,9 @@ struct CookieKeypadView: View {
 }
 
 struct CookieFastTransactionEditorBody: View {
+    @EnvironmentObject private var session: LedgerSession
+    @State private var preparedBookkeeping: PreparedBookkeepingChange?
+    @State private var naturalLanguagePresented = false
     @Environment(\.dismiss) private var dismiss
 
     let transaction: LedgerTransaction?
@@ -2569,6 +2572,32 @@ struct CookieFastTransactionEditorBody: View {
                         .padding(.top, LedgerSpacing.xs)
                 }
 
+                if transaction == nil {
+                    Button {
+                        LedgerFeedback.light()
+                        naturalLanguagePresented = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "sparkles")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(LedgerPalette.cobalt)
+                            Text("用一句话记账")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(LedgerPalette.ink)
+                        }
+                        .padding(.horizontal, LedgerSpacing.md)
+                        .padding(.vertical, 6)
+                        .background(LedgerPalette.panel)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule().stroke(LedgerPalette.cobalt.opacity(0.35), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("bookkeeping-natural-entry")
+                    .padding(.top, 2)
+                    .padding(.bottom, 4)
+                }
                 typeSwitcher
                     .padding(.horizontal, LedgerSpacing.lg)
                     .padding(.top, LedgerSpacing.xs)
@@ -2639,6 +2668,10 @@ struct CookieFastTransactionEditorBody: View {
                 datePickerSheet
             }
             .sensoryFeedback(.error, trigger: failureFeedback)
+            .sheet(isPresented: $naturalLanguagePresented) { NaturalLanguageBookkeepingView() }
+            .sheet(item: $preparedBookkeeping) { preview in
+                BookkeepingPreviewView(preview: preview) { _ in dismiss() }
+            }
             .onAppear {
                 setupFromInitialValues()
             }
@@ -3546,8 +3579,8 @@ struct CookieFastTransactionEditorBody: View {
                 return
             }
 
-            let amountText = String(format: "%.2f", NSDecimalNumber(decimal: amountVal).doubleValue)
-            let negativeAmountText = String(format: "-%.2f", NSDecimalNumber(decimal: amountVal).doubleValue)
+            let amountText = ExactBookkeepingAmount.text(amountVal)
+            let negativeAmountText = ExactBookkeepingAmount.text(-amountVal)
 
             switch kind {
             case .expense:
@@ -3585,6 +3618,11 @@ struct CookieFastTransactionEditorBody: View {
 
         saving = true
         do {
+            if transaction == nil, let repository = session.localRepository {
+                preparedBookkeeping = try await repository.prepareBookkeeping(.manual(entry))
+                saving = false
+                return
+            }
             try await onSave(entry)
             LedgerFeedback.success()
             dismiss()
@@ -3629,6 +3667,9 @@ private enum TransactionEditorError: LocalizedError {
 }
 
 struct TransactionEditorView: View {
+    @EnvironmentObject private var session: LedgerSession
+    @State private var preparedBookkeeping: PreparedBookkeepingChange?
+    @State private var naturalLanguagePresented = false
     @Environment(\.dismiss) private var dismiss
 
     enum EditorMode {
@@ -3788,11 +3829,38 @@ struct TransactionEditorView: View {
                 advancedFormView
             }
         }
+        .sheet(isPresented: $naturalLanguagePresented) { NaturalLanguageBookkeepingView() }
+        .sheet(item: $preparedBookkeeping) { preview in
+            BookkeepingPreviewView(preview: preview) { _ in dismiss() }
+        }
     }
 
     private var advancedFormView: some View {
         NavigationStack {
             Form {
+                if transaction == nil {
+                    Section {
+                        Button {
+                            LedgerFeedback.light()
+                            naturalLanguagePresented = true
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("用一句话记账")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(LedgerPalette.ink)
+                                    Text("输入日常口语描述，自动拆分多账户分录与金额")
+                                        .font(.caption2)
+                                        .foregroundStyle(LedgerPalette.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: "sparkles")
+                                    .foregroundStyle(LedgerPalette.cobalt)
+                            }
+                        }
+                        .accessibilityIdentifier("bookkeeping-natural-entry")
+                    }
+                }
                 if let errorMessage {
                     Section { StatusBanner(message: errorMessage) { self.errorMessage = nil } }
                 }
@@ -3975,7 +4043,13 @@ struct TransactionEditorView: View {
         do {
             let entry = try makeEntry()
             if transaction == nil {
-                newEntryPreview = EntryPreview(entry: entry)
+                if let repository = session.localRepository {
+                    saving = true
+                    preparedBookkeeping = try await repository.prepareBookkeeping(.manual(entry))
+                    saving = false
+                } else {
+                    newEntryPreview = EntryPreview(entry: entry)
+                }
                 return
             }
             saving = true

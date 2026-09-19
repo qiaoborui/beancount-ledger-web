@@ -186,80 +186,143 @@ activation. Preferences use a private `ledger-local://<UUID>` identity; that
 identity is never sent to URLSession. Widget network credentials are suspended
 when a local ledger becomes active, and only reduced local summaries are shared.
 
-## Optional Jev import classification
+## Unified bookkeeping pipeline
 
-Open **Settings → 智能分类**, save a personal TypeSafe API Key, and explicitly
-enable the feature for the active ledger. The import preview also links to these
-settings. Consent is recorded separately per ledger. The key is stored in the
-main app's unsynchronized, device-only Keychain with `WhenUnlocked` protection;
-it is excluded from ledger files, exports, Git, App Group and preferences.
-Removing the key disables classification for every ledger on the device.
+The native inputs converge on a reviewable local change set:
 
-During import review, the app prepares the category/counterpart account, funding
-account, transaction nature and existing tags. Statement dates, exact posting
-amounts, currency, merchant, description and source metadata remain unchanged.
-The workflow supports simple two-posting expenses, income, transfers, refunds and
-repayments, with account roots and signed funding amounts checked together.
-Complex splits and priced postings stay visible for manual review.
+```text
+Natural language -> semantic parser (BYOK compatible API / future device parser)
+Manual entry ----> exact structured records
+Statements ------> existing engine extraction and source-aware deduplication
+                           |
+                           v
+                BookkeepingDraft + source evidence
+                           |
+                Local candidates and confirmed history
+                           |
+                Optional account/classification provider
+                (Jev today; protocol supports device models)
+                           |
+                Editable review of missing facts and proposals
+                           |
+                Existing local engine renders exact postings
+                           |
+.bean transaction text -> original-byte import, preserving comments/postings
+                           |
+                Private staged workspace + canonical Beancount validation
+                           |
+                PreparedBookkeepingChange: actual file diff + ledger revision
+                           |
+                User confirms -> revision check -> atomic local publication
+                           |
+                Optional storage synchronization
+```
 
-Local retrieval ranks confirmed history by merchant, description and specific
-payment identity, returning up to five examples dated on or before the incoming
-transaction. The payload includes date, merchant, description, amount, signed
-funding amount, currency, payment method, card last four digits, recognized import
-provider, transaction type, current accounts, eligible account names/labels and
-relevant existing tags. History includes dates, merchant, description, payment
-method, card last four digits, account roles and tags. Source paths, order and
-merchant IDs, arbitrary metadata, attachments, balances and complete ledger files
-are excluded. The consent screen discloses the text and financial context sent to
-TypeSafe. Account eligibility respects transaction date and currency.
+Whole-ledger directory imports keep their separate catalog import workflow and
+never classify existing transactions. The `.bean` transaction-file route accepts
+transaction directives and comments only; account declarations, includes, plugins
+and configuration belong to the whole-ledger workflow. The native parser checks
+the fragment and the canonical validator checks it in the destination ledger.
+The exact UTF-8 fragment is stored in a content-addressed `.bean` file beside the
+entrypoint and included from that entrypoint. Importing identical bytes again is
+rejected. Users review possible semantic duplicates with different source text.
 
-An ephemeral, cookie-free HTTP client calls `https://api.typesafe.ai/v1/systemone`
-with `jev-1.13.0`. Three independent `Choice` questions select category, funding
-account and transaction nature; one `Noul` question per candidate tag assesses its
-applicability. Each Choice includes a review outcome. Redirects are rejected.
-The complete eligible account set is supplied up to 254 accounts plus review;
-larger charts retain manual review. Distributions must contain exactly the
-allowed options, finite probabilities summing to one within rounding tolerance,
-and a selected maximum-probability option. Tag probabilities are validated too.
+`BookkeepingSemanticParser` and `BookkeepingClassifier` are separate replaceable
+capabilities. `BookkeepingPipeline` assembles account context and proposals outside
+SwiftUI. `BookkeepingDraft` carries multiple transaction records, exact posting
+strings, source fingerprint/location/original text, unresolved questions and
+account proposals. Existing statement commit requests retain the engine's source
+metadata, archive receipts and deduplication identity. Legacy statement summary
+amounts remain display values; the new writer path requires exact posting strings.
 
-Unique card identities, specific account labels or at least three consistent
-confirmed payment mappings can establish a local funding hint. Card suffixes
-must agree with explicit issuer and credit/debit evidence; ambiguous or partially
-identified cards remain suggestions. Generic WeChat/Alipay payment channels never
-create hard bank-card mappings. Known issuer/type constraints also gate model
-funding results, including high-confidence responses.
+### Natural language and manual entry
 
-Each account decision requires probability ≥ 0.95, confidence ≥ 0.9 and a lead
-≥ 0.2 for automatic filling. Category filling additionally requires a confident,
-compatible transaction nature. Funding and category decisions can be filled or
-confirmed independently; confirming one retains the other pending decisions.
-Existing tags with probability ≥ 0.98 are merged within the ledger tag rules;
-unapplied tags with probability ≥ 0.5 remain pending review, including tag-limit
-overflow. Historical trip/event tags require current contextual evidence.
-These are conservative initial policies whose accuracy, latency and coverage
-still need evaluation on consented representative data.
+Open **Add transaction -> 用一句话记账**. Configure **语义解析设置** there or
+in Settings with an HTTPS OpenAI-compatible base URL (including `/v1`), model
+name and personal API Key. The endpoint must support `/chat/completions` and
+`response_format: {"type":"json_object"}`. Each explicit **发送并解析** action
+sends the entered text, captured reference date/timezone and account candidates
+to that endpoint. There is no automatic cloud fallback or background parsing.
+Keys use a separate unsynchronized, device-only, `WhenUnlocked` Keychain item.
+Changing endpoint requires reentering the key. Redirects, embedded URL credentials,
+queries and fragments are rejected; request and response bodies are bounded.
 
-Review shows progress, stop/resume controls, separate funding/category choices,
-transaction nature, tag suggestions, matching history, original-draft restoration
-and whole-draft confirmation. A pending-only filter returns to the full list when
-the final pending item is resolved. Every transaction still passes explicit
-import confirmation and canonical local validation. Account replacements update
-both posting roles atomically and preserve exact decimal strings and polarity.
+The semantic response describes source quantities and signed addition/subtraction
+terms. Code verifies source tokens/spans and computes with checked Decimal
+arithmetic. For a 128 purchase with 48 advanced for a colleague, postings become
+80 expense, 48 receivable and -128 payment. The response cannot introduce an
+invented numeric literal to balance the entry. Unknown accounts and missing facts
+remain questions. Dates, accounts, amounts and currencies can be edited before
+preview. Arabic decimal amounts are supported; Chinese number words and unsupported
+cost/rate semantics require clarification or manual entry. Explicit review is
+required even when the model output parses successfully.
 
-Results remain in the current preview. Manual edits win over in-flight answers.
-Preview changes, ledger changes, privacy shielding, disabling the feature, key
-changes and opening the save confirmation cancel classification; stale responses
-are discarded. Service/auth/quota failures preserve completed suggestions and
-the manual import path. Calls are sequential and retries explicit to keep paid
-request counts predictable.
+The natural-language editor can explicitly request **补充账户建议** when the
+ledger's Jev classification setting is enabled. Only unresolved accounts are sent
+for candidate decisions; proposals remain separate until the user selects one.
+Candidates respect economic role, account dates and currency. Each request can
+include up to five confirmed history examples for that merchant. Input edits,
+settings changes, privacy shielding, cancellation or ledger changes invalidate
+in-flight results. Tests inject an offline classifier to verify provider independence.
 
-Validation: run `ImportClassificationTests`, `LedgerImportModelsTests` and the
-classification settings/import review UI tests in the `LedgerMobile` scheme.
-API tests use synthetic transactions and a mock transport; UI fixtures exercise
-independent field confirmation and recovery of the full transaction list.
-Live Jev quality testing requires a personal key and consented data. A model
-confidence value describes distribution concentration; overall accounting
-correctness is additionally checked by application rules and local validation.
+### Optional Jev account classification
+
+Open **Settings -> 智能分类**, save a personal TypeSafe key and enable the active
+ledger. Statement review calls Jev automatically; natural-language account advice
+requires its explicit button. The consent screen describes both uses. Keys are
+excluded from ledger files, exports, Git, App Group and preferences. Removing the
+key disables classification for every ledger on the device.
+
+Statement classification supplies two independent `Choice` questions to
+`https://api.typesafe.ai/v1/systemone`, model `jev-1.13.0`: category/counterpart
+account and payment/receipt account. Transaction nature is a local description of
+the selected posting roots and signs. Jev generates neither transaction text nor
+tags. Source dates, exact posting amounts, currency, description, metadata and
+existing tags are preserved. Complex/priced statement postings remain editable
+for manual review. Generic per-posting decisions support split natural-language
+drafts, with explicit acceptance of each account proposal.
+
+Local statement history retrieval uses merchant, description and payment identity,
+returning up to five confirmed examples on/before the transaction date. The
+request contains the transaction facts, eligible account names/labels and selected
+history. Original statements, attachments, balances, full ledger contents, source
+paths and order IDs stay local. Natural-language account advice additionally
+sends the entered description. The ephemeral cookie-free transport rejects
+redirects. Full finite distributions, candidate membership, sums and the selected
+maximum are checked. Up to 254 eligible candidates plus review are supported;
+larger sets request manual selection instead of silently truncating coverage.
+
+Unique card identities and established payment mappings can provide local funding
+hints. Issuer, credit/debit and suffix constraints gate model funding results.
+Generic payment channels alone never establish a bank-card identity. Statement
+account autofill requires probability >= 0.95, confidence >= 0.9 and lead >= 0.2,
+plus compatible posting roots/signs. These thresholds are review policies, not
+measured accuracy guarantees. Manual edits win; stale answers are discarded.
+Service failures retain the draft and existing suggestions.
+
+### Prepared changes and validation
+
+`LocalLedgerWorkspace.prepare` uses a private staging copy and the same local
+writers/canonical validator as commit. It publishes no ledger revision. The
+preview contains actual changed file bytes, source ledger revision and draft
+revision. Repository-owned opaque tokens expire after 15 minutes, are bounded to
+four retained previews (up to 64 MiB of changed bytes per preview), and are
+single-use. Returning to editing discards a token. The financial preview shows
+transaction text and attachments; internal write receipts remain bound to the
+commit token.
+Confirmation copies exactly those prepared bytes into a fresh stage, checks the
+expected revision, validates again and atomically publishes. Inference runs before
+workspace locking. Concurrent edits/sync require a fresh preview. Failures retain
+the previous generation; original statement runtime is consumed only after a
+successful import publication.
+
+Run `BookkeepingPipelineTests`, `ImportClassificationTests`,
+`LocalLedgerRepositoryTests`, `LocalLedgerWorkspaceTests`, `LedgerImportModelsTests`
+and the native creation/import/settings UI tests. Synthetic integration tests use
+the app-linked Go engine and canonical Python Beancount runtime, including split
+entries, precision, original-byte import, rejected directives/duplicates, failed
+validation and stale revisions. Transport tests use mocked model responses.
+Live model quality and latency require consented data and working provider keys.
 
 ## Local write transaction
 

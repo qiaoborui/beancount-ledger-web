@@ -25,6 +25,7 @@ struct NativeImportFlowView: View {
     @State private var isPreparing = false
     @State private var isCommitting = false
     @State private var confirmationPresented = false
+    @State private var preparedBookkeeping: PreparedBookkeepingChange?
     @State private var cleanupWarningDismissed = false
     @State private var commitErrorMessage: String?
     @State private var commitOutcomeNeedsReconciliation = false
@@ -171,6 +172,13 @@ struct NativeImportFlowView: View {
             )
             .ledgerPrivacyProtectedSheet()
         }
+        .sheet(item: $preparedBookkeeping) { prepared in
+            BookkeepingPreviewView(preview: prepared) { result in
+                guard let result else { return }
+                commitResult = result
+                onCommitted(result)
+            }
+        }
         .sensoryFeedback(.success, trigger: editSaveFeedback)
         .sensoryFeedback(.error, trigger: failureFeedback)
         .ledgerPrivacyProtectedSheet()
@@ -200,7 +208,7 @@ struct NativeImportFlowView: View {
         isClassifying = true
         defer { if classificationRunID == runID { isClassifying = false } }
         do {
-            let key = try classificationSettings.apiKey()
+            let classifier = try classificationSettings.classifier()
             let settingsRevision = classificationSettings.revision
             try await session.loadGlobalTransactions(forceRefresh: true)
             try Task.checkCancellation()
@@ -208,17 +216,8 @@ struct NativeImportFlowView: View {
             let accounts = session.ledger?.accounts ?? []
             let history = session.visibleGlobalTransactions
             let entries = reviewedEntries
-            let client = ImportClassificationClient()
-            try await ImportClassificationBatch.run(entries, makeInput: { entry in
-                let input = ImportClassificationContext.request(for: entry, accounts: accounts, history: history)
-                if input == nil {
-                    classificationCompletedIDs.insert(entry.id)
-                    classificationManualReasons[entry.id] = "这笔交易包含复杂分录或缺少可用账户，请打开编辑核对。"
-                }
-                return input
-            }, classify: { input in
-                try await client.classify(input, apiKey: key)
-            }, canContinue: {
+            try await BookkeepingPipeline.classifyImports(entries, accounts: accounts, history: history,
+                provider: classifier, canContinue: {
                 preview?.importID == importID && session.currentLocalLedgerDescriptor?.id == ledgerID
                     && !session.privacyShielded && session.phase == .ready
                     && classificationSettings.isEnabled(for: ledgerID) && classificationSettings.revision == settingsRevision
@@ -228,14 +227,17 @@ struct NativeImportFlowView: View {
             }, isEligible: { id in
                 includedEntryIDs.contains(id) && !classificationCompletedIDs.contains(id)
                     && !manuallyReviewedIDs.contains(id) && editingEntry?.id != id
-            }, accept: { job, result in
+            }, unsupported: { entry in
+                classificationCompletedIDs.insert(entry.id)
+                classificationManualReasons[entry.id] = "这笔交易包含复杂分录或缺少可用账户，请打开编辑核对。"
+            }, accept: { job, result, updated in
                 let entry = job.entry
                 guard let index = reviewedEntries.firstIndex(where: { $0.id == entry.id }) else { return }
                 classificationResults[entry.id] = result
                 classificationEvidence[entry.id] = job.input.history
                 classificationCompletedIDs.insert(entry.id)
                 classificationOriginals[entry.id] = entry
-                reviewedEntries[index] = ImportClassificationContext.autofilled(entry, suggestion: result, input: job.input)
+                reviewedEntries[index] = updated
             })
         } catch is CancellationError {
             return
@@ -281,7 +283,7 @@ struct NativeImportFlowView: View {
                 }
             }
         } footer: {
-            Text("自动补齐分类、资金账户和标签。日期、金额、币种及商家描述来自账单；证据不足的字段集中核对。")
+            Text("自动补齐分类和资金账户。日期、金额、币种及商家描述来自账单；证据不足的字段集中核对。")
         }
         .font(.subheadline)
     }
@@ -684,7 +686,8 @@ struct NativeImportFlowView: View {
                     startCommitReconciliation()
                 } else {
                     classificationPaused = true
-                    confirmationPresented = true
+                    if session.localRepository != nil { Task { await prepareLocalImport() } }
+                    else { confirmationPresented = true }
                 }
             } label: {
                 HStack {
@@ -1026,6 +1029,24 @@ struct NativeImportFlowView: View {
             errorMessage = error.localizedDescription
             failureFeedback &+= 1
         }
+    }
+
+    private func prepareLocalImport() async {
+        guard let preview, let repository = session.localRepository, !isCommitting,
+              session.phase == .ready, !session.privacyShielded else { return }
+        let entries = selectedEntries
+        isCommitting = true
+        commitErrorMessage = nil
+        defer { isCommitting = false }
+        do {
+            let prepared = try await repository.prepareImport(.init(importID: preview.importID,
+                provider: preview.provider, entries: entries))
+            guard !Task.isCancelled, session.phase == .ready, !session.privacyShielded,
+                  session.currentLocalLedgerDescriptor?.id == repository.descriptor.id, selectedEntries == entries else {
+                await repository.discardPrepared(prepared); return
+            }
+            preparedBookkeeping = prepared
+        } catch { commitErrorMessage = error.localizedDescription }
     }
 
     private func startCommit() {

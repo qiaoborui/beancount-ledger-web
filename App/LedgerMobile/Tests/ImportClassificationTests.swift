@@ -94,7 +94,7 @@ final class ImportClassificationTests: XCTestCase {
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             XCTAssertEqual(json["model"] as? String, "jev-1.13.0")
             let questions = try XCTUnwrap(json["questions"] as? [String: [String: Any]])
-            XCTAssertEqual(Set(questions.keys), ["category", "funding", "nature"])
+            XCTAssertEqual(Set(questions.keys), ["category", "funding"])
             XCTAssertEqual(questions["category"]?["type"] as? String, "choice")
             XCTAssertNotNil((questions["category"]?["criteria"] as? [String: String])?["review"])
             XCTAssertFalse(String(decoding: body, as: UTF8.self).contains("fixture-key"))
@@ -293,27 +293,19 @@ final class ImportClassificationTests: XCTestCase {
         XCTAssertFalse(pending.contains("funding"))
     }
 
-    func testNoulTagJudgmentsUseKnownCandidatesAndRejectMalformedProbabilities() async throws {
+    func testJevOnlyJudgesAccountsAndPreservesUserTags() async throws {
         let history = [transaction(payee: "瑞幸咖啡", tags: ["coffee"])]
         let input = try XCTUnwrap(ImportClassificationContext.request(for: entry(), accounts: accounts(), history: history))
-        XCTAssertEqual(input.tagCandidates, ["coffee"])
-        for probability in [0.99, 2.0] {
-            ClassificationURLProtocol.handler = { request in
-                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.body(request)) as? [String: Any])
-                let questions = try XCTUnwrap(json["questions"] as? [String: [String: Any]])
-                XCTAssertEqual(questions["tag0"]?["type"] as? String, "noul")
-                var response = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(Self.response().utf8)) as? [String: Any])
-                var answers = response["answers"] as! [String: Any]
-                answers["tag0"] = ["type": "noul", "noul": probability]
-                response["answers"] = answers
-                return (200, String(decoding: try JSONSerialization.data(withJSONObject: response), as: UTF8.self))
-            }
-            do {
-                let result = try await client().classify(input, apiKey: "fixture-key")
-                XCTAssertEqual(probability, 0.99)
-                XCTAssertEqual(result.suggestedTags, ["coffee"])
-            } catch { XCTAssertEqual(probability, 2.0) }
+        XCTAssertTrue(input.tagCandidates.isEmpty)
+        ClassificationURLProtocol.handler = { request in
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.body(request)) as? [String: Any])
+            let questions = try XCTUnwrap(json["questions"] as? [String: [String: Any]])
+            XCTAssertEqual(Set(questions.keys), ["category", "funding"])
+            return (200, Self.response())
         }
+        let result = try await client().classify(input, apiKey: "fixture-key")
+        XCTAssertTrue(result.tags.isEmpty)
+        XCTAssertEqual(result.nature.value, "expense")
     }
 
     @MainActor

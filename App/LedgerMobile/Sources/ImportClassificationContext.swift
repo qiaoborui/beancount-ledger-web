@@ -46,7 +46,7 @@ enum ImportClassificationContext {
             currentCategory: entry.categoryAccount,
             accounts: options.map { .init(account: $0.account, label: clipped($0.alias ?? $0.label)) },
             fundingHint: fundingHint(entry: entry, accounts: funds, history: history),
-            tagCandidates: Array(Set(examples.flatMap(\.tags))).sorted().prefix(24).map { $0 }, history: examples
+            tagCandidates: [], history: examples
         )
     }
 

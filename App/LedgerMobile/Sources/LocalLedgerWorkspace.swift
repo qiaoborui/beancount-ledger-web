@@ -317,6 +317,65 @@ actor LocalLedgerWorkspace {
         )
     }
 
+    struct PreparedFiles: Sendable {
+        struct File: Sendable, Identifiable {
+            var id: String { path }
+            let path: String
+            let before: Data?
+            let after: Data?
+        }
+        let revisionID: UUID
+        let files: [File]
+        var changes: [Change] {
+            files.map { file in file.after.map { .write($0, to: file.path) } ?? .remove(file.path) }
+        }
+    }
+
+    /// Run the same local writer and canonical validator as commit, without
+    /// publishing. Only exact byte changes leave this private staging copy.
+    /// Callers perform inference before entering this operation.
+    func prepare(expectedRevisionID: UUID, mutateStage: Validator,
+                 validator: Validator) async throws -> PreparedFiles {
+        try beginTransaction()
+        defer { endTransaction() }
+        try prepareLayout()
+        try acquireTransactionLock()
+        try removeAbandonedStages()
+        let parent = try requiredCurrentRevision()
+        guard parent.id == expectedRevisionID else { throw WorkspaceError.staleRevision }
+        let previous = try workspaceURL(for: parent)
+        let stage = try makeStage()
+        defer { removeIfPresent(stage) }
+        let workspace = stage.appendingPathComponent("workspace", isDirectory: true)
+        try createProtectedDirectory(workspace)
+        try copyDirectoryContents(from: previous, to: workspace, sourceRoot: previous,
+            expectedSourceIdentity: directoryIdentity(at: previous), requiresExternalSource: false)
+        try await mutateStage(workspace)
+        try Task.checkCancellation()
+        _ = try validateTree(at: workspace)
+        try await validator(workspace)
+        try Task.checkCancellation()
+        let oldPaths = Set(try validateTree(at: previous))
+        let newPaths = Set(try validateTree(at: workspace))
+        var files: [PreparedFiles.File] = []
+        var previewBytes = 0
+        for path in oldPaths.union(newPaths).sorted() {
+            if oldPaths.contains(path), newPaths.contains(path),
+               fileManager.contentsEqual(atPath: try secureDescendant(path, of: previous, allowMissingLeaf: false).path,
+                                         andPath: try secureDescendant(path, of: workspace, allowMissingLeaf: false).path) { continue }
+            let before = try oldPaths.contains(path)
+                ? readRegularFile(at: secureDescendant(path, of: previous, allowMissingLeaf: false), displayPath: path) : nil
+            let after = try newPaths.contains(path)
+                ? readRegularFile(at: secureDescendant(path, of: workspace, allowMissingLeaf: false), displayPath: path) : nil
+            if before != after {
+                previewBytes += (before?.count ?? 0) + (after?.count ?? 0)
+                guard previewBytes <= 64 * 1024 * 1024 else { throw WorkspaceError.treeLimitExceeded }
+                files.append(.init(path: path, before: before, after: after))
+            }
+        }
+        return PreparedFiles(revisionID: parent.id, files: files)
+    }
+
     /// Preview creation shares the cross-instance write lock with publication
     /// and retention cleanup. Ordinary snapshot reads remain concurrent.
     func withImportPreviewSnapshot<Value: Sendable>(

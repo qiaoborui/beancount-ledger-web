@@ -17,6 +17,12 @@ actor LocalLedgerRepository: LedgerRepository {
     private var importRevisionIDs: [String: UUID] = [:]
     private var importPreviewDates: [String: Date] = [:]
     private var lastRuntimeMaintenance: Date?
+    private struct PreparedOperation: Sendable {
+        let preview: PreparedBookkeepingChange
+        let importID: String?
+        let result: Data?
+    }
+    private var preparedOperations: [UUID: PreparedOperation] = [:]
 
     init(descriptor: LocalLedgerDescriptor, workspace: LocalLedgerWorkspace,
          engine: any LocalLedgerEngine = EmbeddedLocalLedgerEngine.shared,
@@ -139,6 +145,98 @@ actor LocalLedgerRepository: LedgerRepository {
     }
     func addTransaction(entry: LedgerTransactionEntry) async throws {
         let _: BQLCell = try await mutate("/api/ledger/append", method: "POST", body: json(entry))
+    }
+
+    func prepareBookkeeping(_ draft: BookkeepingDraft) async throws -> PreparedBookkeepingChange {
+        try draft.validate()
+        guard let revision = try await workspace.currentRevision() else { throw LocalLedgerError.previewRequired }
+        let bodies = try draft.records.map { try json($0) }
+        return try await prepare(draftRevision: draft.revision, expected: revision.id,
+            operations: bodies.map { ("/api/ledger/append", $0) })
+    }
+
+    func prepareImport(_ request: LedgerImportCommitRequest) async throws -> PreparedBookkeepingChange {
+        guard let expected = importRevisionIDs[request.importID], let date = importPreviewDates[request.importID],
+              Date().timeIntervalSince(date) < LocalLedgerWorkspace.importPreviewRetention else {
+            throw LocalLedgerError.previewRequired
+        }
+        // Archive-only imports deliberately have no transaction records.
+        if !request.entries.isEmpty { try BookkeepingDraft.imported(request.entries).validate() }
+        return try await prepare(draftRevision: UUID(), expected: expected,
+            operations: [("/api/ledger/imports/commit", try json(request))], importID: request.importID)
+    }
+
+    func prepareBeanTransactions(_ text: String) async throws -> PreparedBookkeepingChange {
+        _ = try BeanTransactionParser.transactionCount(text)
+        guard let revision = try await workspace.currentRevision() else { throw LocalLedgerError.previewRequired }
+        let evidence = BookkeepingDraft.Evidence.make(.beancount, original: text)
+        let filename = "imported-" + evidence.fingerprint + ".bean"
+        let validator = validator, entrypoint = descriptor.entrypoint
+        let files = try await workspace.prepare(expectedRevisionID: revision.id, mutateStage: { root in
+            let main = root.appendingPathComponent(entrypoint)
+            let destination = main.deletingLastPathComponent().appendingPathComponent(filename)
+            guard !FileManager.default.fileExists(atPath: destination.path) else {
+                throw BookkeepingError.reviewRequired("相同文件内容已导入，请核对现有记录。")
+            }
+            try Data(text.utf8).write(to: destination, options: .withoutOverwriting)
+            var entry = try Data(contentsOf: main)
+            entry.append(Data(("\ninclude \"" + filename + "\"\n").utf8))
+            try entry.write(to: main)
+        }, validator: { root in try await validator(root, entrypoint) })
+        let preview = PreparedBookkeepingChange(id: UUID(), ledgerID: descriptor.id, draftRevision: UUID(),
+            files: files, createdAt: Date())
+        if preparedOperations.count >= 4 { preparedOperations.removeAll() }
+        preparedOperations[preview.id] = .init(preview: preview, importID: nil, result: nil)
+        return preview
+    }
+
+    private func prepare(draftRevision: UUID, expected: UUID, operations: [(String, BQLCell)],
+                         importID: String? = nil) async throws -> PreparedBookkeepingChange {
+        let engine = engine, validator = validator, entrypoint = descriptor.entrypoint
+        let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
+        let box = ResultBox()
+        let files = try await workspace.prepare(expectedRevisionID: expected, mutateStage: { root in
+            for (path, body) in operations {
+                let data = try await engine.dispatch(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+                    entrypoint: entrypoint, method: "POST", path: path, body: body, staging: true))
+                if importID != nil { _ = try JSONDecoder().decode(LedgerImportCommitResult.self, from: data) }
+                else { _ = try JSONDecoder().decode(BQLCell.self, from: data) }
+                await box.set(data)
+            }
+        }, validator: { root in try await validator(root, entrypoint) })
+        let preview = PreparedBookkeepingChange(id: UUID(), ledgerID: descriptor.id,
+            draftRevision: draftRevision, files: files, createdAt: Date())
+        preparedOperations = preparedOperations.filter { Date().timeIntervalSince($0.value.preview.createdAt) < 900 }
+        // Bound retained source/attachment bytes; previews are cheap to regenerate.
+        if preparedOperations.count >= 4 { preparedOperations.removeAll() }
+        preparedOperations[preview.id] = .init(preview: preview, importID: importID, result: await box.data)
+        return preview
+    }
+
+    func discardPrepared(_ preview: PreparedBookkeepingChange) { preparedOperations.removeValue(forKey: preview.id) }
+
+    /// The opaque token resolves to repository-owned bytes. Confirming never
+    /// reruns inference or rendering against a different source revision.
+    func commitPrepared(_ preview: PreparedBookkeepingChange) async throws -> LedgerImportCommitResult? {
+        guard let operation = preparedOperations.removeValue(forKey: preview.id),
+              preview.ledgerID == descriptor.id, Date().timeIntervalSince(operation.preview.createdAt) < 900 else {
+            throw BookkeepingError.expiredPreview
+        }
+        let validator = validator, entrypoint = descriptor.entrypoint
+        let revision = try await workspace.commit(expectedRevisionID: operation.preview.files.revisionID,
+            changes: operation.preview.files.changes, consumingImportID: operation.importID,
+            validator: { root in try await validator(root, entrypoint) })
+        presentedRevisionID = revision.id
+        if let importID = operation.importID {
+            importRevisionIDs.removeValue(forKey: importID)
+            importPreviewDates.removeValue(forKey: importID)
+        }
+        await storage.didCommit(revision)
+        NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
+        if operation.importID != nil, let result = operation.result {
+            return try JSONDecoder().decode(LedgerImportCommitResult.self, from: result)
+        }
+        return nil
     }
     func addAccount(input: LedgerAccountInput) async throws {
         let _: BQLCell = try await mutate("/api/ledger/accounts", method: "POST", body: json(input))

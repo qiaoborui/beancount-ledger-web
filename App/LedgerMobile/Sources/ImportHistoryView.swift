@@ -63,20 +63,30 @@ struct ImportHistoryView: View {
         .ledgerNavigation("导入", isRoot: isRoot)
         .fileImporter(
             isPresented: $fileImporterPresented,
-            allowedContentTypes: Self.supportedFileTypes,
+            allowedContentTypes: Self.supportedFileTypes + [UTType(filenameExtension: "bean", conformingTo: .plainText)!],
             allowsMultipleSelection: false
         ) { result in
             Task { await handleFileSelection(result) }
         }
         .sheet(item: $activeImportFile, onDismiss: { activeSharedItem = nil }) { file in
-            NativeImportFlowView(file: file, providers: providers) { _ in
-                let completedItem = activeSharedItem
-                Task {
-                    if let completedItem { await removeSharedItem(completedItem) }
-                    await load(replacingContent: false)
+            if file.fileExtension == ".bean" {
+                BeanTransactionImportView(file: file) {
+                    let completedItem = activeSharedItem
+                    Task {
+                        if let completedItem { await removeSharedItem(completedItem) }
+                        await load(replacingContent: false)
+                    }
+                }.environmentObject(session)
+            } else {
+                NativeImportFlowView(file: file, providers: providers) { _ in
+                    let completedItem = activeSharedItem
+                    Task {
+                        if let completedItem { await removeSharedItem(completedItem) }
+                        await load(replacingContent: false)
+                    }
                 }
+                .environmentObject(session)
             }
-            .environmentObject(session)
         }
         .sheet(item: $gmailReview) { review in
             NativeImportFlowView(preview: review.preview, providers: providers) { _ in
