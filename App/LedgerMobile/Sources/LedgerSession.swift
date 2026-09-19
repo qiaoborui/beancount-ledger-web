@@ -121,6 +121,10 @@ final class LedgerSession: ObservableObject {
         if case .local = location { return true }
         return false
     }
+    var currentLocalLedgerDescriptor: LocalLedgerDescriptor? {
+        guard case let .local(id) = location else { return nil }
+        return localLedgers.first(where: { $0.id == id })
+    }
     @Published private(set) var localLedgers: [LocalLedgerDescriptor] = []
     @Published private(set) var localLedgerName = "本地账本"
     @Published private(set) var isLocalOperationBusy = false
@@ -472,6 +476,47 @@ final class LedgerSession: ObservableObject {
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
             try await activateLocalLedger(descriptor)
         } catch is CancellationError { } catch { errorMessage = error.localizedDescription }
+    }
+
+    @discardableResult
+    func updateLocalLedger(_ descriptor: LocalLedgerDescriptor, name: String, entrypoint: String? = nil) async throws -> LocalLedgerDescriptor {
+        guard let localCatalog else { throw LedgerRepositoryError.capabilityUnavailable("local storage") }
+        isLocalOperationBusy = true
+        errorMessage = nil
+        defer { isLocalOperationBusy = false }
+        do {
+            let updated = try await localCatalog.update(ledgerID: descriptor.id, name: name, entrypoint: entrypoint)
+            if case let .local(id) = location, id == descriptor.id {
+                localLedgerName = updated.name
+                repositories[.local(descriptor.id)] = localCatalog.repository(for: updated)
+            }
+            await refreshLocalLedgers()
+            return updated
+        } catch {
+            errorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
+    func deleteLocalLedger(_ descriptor: LocalLedgerDescriptor) async throws {
+        guard let localCatalog else { throw LedgerRepositoryError.capabilityUnavailable("local storage") }
+        isLocalOperationBusy = true
+        errorMessage = nil
+        defer { isLocalOperationBusy = false }
+        do {
+            try await localCatalog.delete(ledgerID: descriptor.id)
+            repositories.removeValue(forKey: .local(descriptor.id))
+            if defaults.string(forKey: Self.activeLocalLedgerKey) == descriptor.id.uuidString {
+                defaults.removeObject(forKey: Self.activeLocalLedgerKey)
+            }
+            if case let .local(id) = location, id == descriptor.id {
+                chooseLedger()
+            }
+            await refreshLocalLedgers()
+        } catch {
+            errorMessage = error.localizedDescription
+            throw error
+        }
     }
 
     private func authenticateLocalLedger(epoch: Int, location expectedLocation: LedgerLocation?) async throws {

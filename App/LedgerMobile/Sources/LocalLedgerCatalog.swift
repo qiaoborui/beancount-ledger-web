@@ -1,6 +1,6 @@
 import Foundation
 
-struct LocalLedgerDescriptor: Codable, Equatable, Identifiable, Sendable {
+struct LocalLedgerDescriptor: Codable, Equatable, Hashable, Identifiable, Sendable {
     let id: UUID
     let name: String
     let entrypoint: String
@@ -122,6 +122,63 @@ actor LocalLedgerCatalog {
         }
         if let git = old.git { try gitCredentials.remove(for: git.id) }
         let updated = LocalLedgerDescriptor(id: old.id, name: old.name, entrypoint: old.entrypoint, createdAt: old.createdAt)
+        try persist(updated)
+        return updated
+    }
+
+    /// Delete a local ledger by ID and removes its workspace directory and associated credentials.
+    func delete(ledgerID: UUID) throws {
+        if let existing = try? list().first(where: { $0.id == ledgerID }), let git = existing.git {
+            try? gitCredentials.remove(for: git.id)
+        }
+        let directory = rootDirectory.appendingPathComponent(ledgerID.uuidString)
+        if FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.removeItem(at: directory)
+        }
+    }
+
+    /// Updates an existing ledger's name and/or entrypoint.
+    @discardableResult
+    func update(ledgerID: UUID, name: String, entrypoint: String? = nil) async throws -> LocalLedgerDescriptor {
+        guard let old = try list().first(where: { $0.id == ledgerID }) else {
+            throw LocalLedgerError.invalidConfiguration("找不到指定的本地账本")
+        }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, trimmedName.count <= 120, !trimmedName.contains("\n"), !trimmedName.contains("\r") else {
+            throw LocalLedgerError.invalidConfiguration("账本名称需要为 1–120 个字符")
+        }
+
+        let targetEntrypoint: String
+        if let entrypoint {
+            let trimmedEntry = entrypoint.trimmingCharacters(in: .whitespacesAndNewlines)
+            let parts = trimmedEntry.split(separator: "/", omittingEmptySubsequences: false)
+            guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
+                  !trimmedEntry.contains("\\"), !trimmedEntry.contains("\0"), trimmedEntry.hasSuffix(".bean") else {
+                throw LocalLedgerError.invalidConfiguration("请选择账本目录内的 .bean 入口文件")
+            }
+            let fileURL = rootDirectory.appendingPathComponent(ledgerID.uuidString).appendingPathComponent(trimmedEntry)
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                throw LocalLedgerError.invalidConfiguration("入口文件 \(trimmedEntry) 在账本目录中不存在")
+            }
+            targetEntrypoint = trimmedEntry
+        } else {
+            targetEntrypoint = old.entrypoint
+        }
+
+        let updated = LocalLedgerDescriptor(
+            id: old.id,
+            name: trimmedName,
+            entrypoint: targetEntrypoint,
+            createdAt: old.createdAt,
+            git: old.git
+        )
+
+        if targetEntrypoint != old.entrypoint {
+            let workspaceURL = rootDirectory.appendingPathComponent(ledgerID.uuidString)
+            let validate = publicationValidator(for: updated)
+            try await validate(workspaceURL, targetEntrypoint)
+        }
+
         try persist(updated)
         return updated
     }
