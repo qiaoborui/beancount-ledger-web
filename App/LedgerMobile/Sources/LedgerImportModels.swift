@@ -412,7 +412,7 @@ struct LedgerImportEntry: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-private extension LedgerImportPosting {
+extension LedgerImportPosting {
     func replacing(account: String? = nil, amount: String? = nil) -> LedgerImportPosting {
         LedgerImportPosting(
             account: account ?? self.account,

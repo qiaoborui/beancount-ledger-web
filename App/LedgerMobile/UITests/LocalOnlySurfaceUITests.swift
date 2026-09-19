@@ -2,6 +2,35 @@ import XCTest
 
 @MainActor
 final class LocalOnlySurfaceUITests: XCTestCase {
+    func testSmartClassificationSettingsAreOptInForEachLocalLedger() throws {
+        #if targetEnvironment(simulator)
+        let app = XCUIApplication()
+        app.launchArguments = ["--local-ui-testing"]
+        app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
+        app.launch()
+        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        app.buttons["local-ledger-create"].tap()
+        app.buttons["local-ledger-confirm-create"].tap()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 40))
+        app.tabBars.buttons["更多"].tap()
+        app.buttons["more-settings"].tap()
+        let settings = app.buttons["settings-classification"]
+        for _ in 0..<4 where !settings.isHittable { app.swipeUp() }
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.tap()
+        XCTAssertTrue(app.navigationBars["智能分类"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.switches["classification-enabled"].value as? String, "0")
+        XCTAssertTrue(app.secureTextFields["classification-api-key"].exists)
+        XCTAssertFalse(app.buttons["classification-save-key"].isEnabled)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "classification-settings-opt-in"
+        shot.lifetime = .keepAlways
+        add(shot)
+        #else
+        throw XCTSkip("Uses the isolated simulator ledger fixture")
+        #endif
+    }
+
     func testLocalSettingsAndImportsExposeDeviceFeatures() throws {
         #if targetEnvironment(simulator)
         let app = XCUIApplication()

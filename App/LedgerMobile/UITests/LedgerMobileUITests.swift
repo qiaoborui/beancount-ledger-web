@@ -751,6 +751,59 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 3))
     }
 
+    func testImportClassificationReviewsFieldsIndependentlyAndRestoresFullList() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--safe-import-flow", "--safe-classification-review"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
+        if isPad { app.buttons["sidebar-imports"].tap() }
+        else {
+            app.tabBars.buttons["更多"].tap()
+            let entry = app.buttons["more-imports"]
+            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+            entry.tap()
+        }
+        XCTAssertTrue(app.buttons["import-generate-preview"].waitForExistence(timeout: 4))
+        app.buttons["import-generate-preview"].tap()
+        let list = app.collectionViews["native-import-preview"]
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '导入信息待确认' OR label BEGINSWITH '草稿已补全'")).firstMatch
+        func reveal(_ id: String) -> XCUIElement {
+            // DisclosureGroup identifiers propagate to nested form rows in
+            // SwiftUI. Locate group headers by their user-visible labels.
+            let element: XCUIElement
+            switch id {
+            case "result": element = result
+            case "funding": element = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '付款 / 收款账户'")).firstMatch
+            case "category": element = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '分类 / 对应账户'")).firstMatch
+            case "tags": element = app.buttons["标签建议"].firstMatch
+            default: element = app.buttons[id].firstMatch
+            }
+            revealAboveImportActions(element, in: list)
+            return element
+        }
+        reveal("result").tap()
+        reveal("funding").tap()
+        reveal("import-suggestion-funding-Liabilities:CreditCard").tap()
+        XCTAssertTrue(result.label.contains("待确认"))
+        capture("classification-funding-selected-category-pending")
+        reveal("funding").tap()
+        reveal("category").tap()
+        reveal("import-suggestion-category-Expenses:Education:Books").tap()
+        XCTAssertTrue(result.label.contains("待确认"))
+        reveal("category").tap()
+        reveal("tags").tap()
+        reveal("import-suggestion-tag-travel").tap()
+        XCTAssertTrue(result.label.contains("已补全"))
+        capture("classification-all-fields-reviewed")
+        reveal("result").tap()
+        XCTAssertTrue(reveal("import-entry-edit-safe-import-2").isHittable)
+        XCTAssertEqual(app.buttons["import-commit"].label, "写入 2 条交易")
+        capture("classification-full-list-restored")
+        app.buttons["import-commit"].tap()
+        XCTAssertTrue(app.alerts["确认写入账本？"].waitForExistence(timeout: 3))
+        app.alerts.buttons["继续核对"].tap()
+    }
+
     func testImportPreviewFinalRowStaysAboveCommitSurface() throws {
         XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
         app = XCUIApplication()
