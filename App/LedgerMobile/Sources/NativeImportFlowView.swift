@@ -151,6 +151,17 @@ struct NativeImportFlowView: View {
                             .disabled(isPreparing)
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if preview != nil, commitResult == nil,
+                       let ledgerID = session.currentLocalLedgerDescriptor?.id {
+                        NavigationLink {
+                            ImportClassificationSettingsView(ledgerID: ledgerID)
+                        } label: {
+                            Image(systemName: "sparkles")
+                        }
+                        .accessibilityIdentifier("import-classification-settings")
+                    }
+                }
             }
         }
         .interactiveDismissDisabled(isPreparing || isCommitting || hasDraftChanges)
@@ -167,6 +178,7 @@ struct NativeImportFlowView: View {
             ImportEntryEditor(
                 entry: entry,
                 accounts: importAccountChoices(for: entry),
+                suggestion: classificationResults[entry.id],
                 onSave: { updated in
                     applyEditedEntry(updated)
                 }
@@ -247,44 +259,6 @@ struct NativeImportFlowView: View {
             classificationError = (error as? ImportClassificationError)?.localizedDescription
                 ?? "智能分类暂时不可用，已完成的建议保留，你可以继续核对或重试。"
         }
-    }
-
-    private var classificationSection: some View {
-        Section {
-            if let ledgerID = session.currentLocalLedgerDescriptor?.id {
-                NavigationLink { ImportClassificationSettingsView(ledgerID: ledgerID) } label: {
-                    Label("智能分类", systemImage: "sparkles")
-                }
-                .accessibilityIdentifier("import-classification-settings")
-                if classificationSettings.isEnabled(for: ledgerID) {
-                    if isClassifying {
-                        HStack {
-                            ProgressView()
-                            Text("已处理 \(classificationCompletedIDs.count)/\(reviewedEntries.count) 条")
-                            Spacer()
-                            Button("停止") { classificationPaused = true }
-                        }
-                    } else {
-                        Text("已判断 \(classificationResults.count) 条 · 待确认 \(classificationNeedsReview.count) 条")
-                            .foregroundStyle(.secondary)
-                        Button(classificationPaused ? "继续分类" : "重试剩余交易") {
-                            classificationError = nil
-                            classificationPaused = false
-                            classificationRetry &+= 1
-                        }
-                        .disabled(classificationCompletedIDs.count >= reviewedEntries.count)
-                    }
-                    if let classificationError {
-                        Text(classificationError).foregroundStyle(LedgerPalette.risk)
-                    }
-                    if !classificationNeedsReview.isEmpty {
-                        Toggle("只看待确认交易", isOn: $onlyClassificationReview)
-                            .accessibilityIdentifier("import-classification-review-filter")
-                    }
-                }
-            }
-        }
-        .font(.subheadline)
     }
 
     @ViewBuilder
@@ -506,6 +480,15 @@ struct NativeImportFlowView: View {
         .accessibilityIdentifier("native-import-preparation")
     }
 
+    private func friendlyAccountLabel(_ account: String) -> String {
+        if account.isEmpty { return "待指定账户" }
+        if let match = session.ledger?.accounts.first(where: { $0.account == account }) {
+            if let alias = match.alias, !alias.isEmpty { return alias }
+            if !match.label.isEmpty { return match.label }
+        }
+        return account.split(separator: ":").last.map(String.init) ?? account
+    }
+
     private func previewView(_ preview: LedgerImportPreview) -> some View {
         List {
             if let errorMessage {
@@ -514,8 +497,6 @@ struct NativeImportFlowView: View {
                 }
             }
             previewSummary(preview)
-            if session.currentLocalLedgerDescriptor != nil { classificationSection }
-            if !preview.warnings.isEmpty { warningSection(preview.warnings) }
             bulkTagSection
             entrySection(preview)
         }
@@ -533,13 +514,16 @@ struct NativeImportFlowView: View {
     private func previewSummary(_ preview: LedgerImportPreview) -> some View {
         Section {
             DisclosureGroup {
-                LabeledContent("识别结果", value: confidenceText(preview.providerDetection.confidence))
-                Text(preview.providerDetection.reason)
-                    .foregroundStyle(.secondary)
+                LabeledContent("识别渠道", value: providerLabel(preview.provider))
+                LabeledContent("交易区间", value: importRangeText(preview))
                 LabeledContent("候选交易", value: "\(preview.candidateCount) 条")
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(preview.skippedDuplicateCount > 0 ? "已跳过 \(preview.skippedDuplicateCount) 条重复交易" : "无重复交易")
-                    Text(preview.dedupReport).foregroundStyle(.secondary)
+                if preview.skippedDuplicateCount > 0 {
+                    LabeledContent("已跳过重复", value: "\(preview.skippedDuplicateCount) 条")
+                }
+                if !preview.providerDetection.reason.isEmpty {
+                    Text(preview.providerDetection.reason)
+                        .font(.caption)
+                        .foregroundStyle(LedgerPalette.secondary)
                 }
             } label: {
                 HStack(spacing: 12) {
@@ -564,39 +548,74 @@ struct NativeImportFlowView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("import-preview-summary")
             }
-        }
-        .font(.subheadline)
-    }
 
-    private func warningSection(_ warnings: [String]) -> some View {
-        Section {
-            DisclosureGroup(isExpanded: $warningsExpanded) {
-                ForEach(Array(warnings.enumerated()), id: \.offset) { _, warning in
-                    HStack(alignment: .top, spacing: LedgerSpacing.xs) {
-                        Image(systemName: "exclamationmark.triangle")
+            if let ledgerID = session.currentLocalLedgerDescriptor?.id,
+               classificationSettings.isEnabled(for: ledgerID) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(LedgerPalette.cobalt)
+                    if isClassifying {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("智能匹配中 (\(classificationCompletedIDs.count)/\(reviewedEntries.count))...")
                             .font(.caption)
-                            .foregroundStyle(LedgerPalette.warm)
-                        Text(warning)
+                            .foregroundStyle(LedgerPalette.secondary)
+                        Spacer()
+                        Button("停止") { classificationPaused = true }
                             .font(.caption)
-                            .foregroundStyle(LedgerPalette.ink)
-                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(classificationResults.isEmpty ? "智能分类已就绪" : "已自动完成智能匹配 · \(classificationResults.count) 条已填充")
+                            .font(.caption)
+                            .foregroundStyle(LedgerPalette.secondary)
+                        Spacer()
+                        if classificationCompletedIDs.count < reviewedEntries.count {
+                            Button("继续分类") {
+                                classificationError = nil
+                                classificationPaused = false
+                                classificationRetry &+= 1
+                            }
+                            .font(.caption)
+                        }
                     }
-                    .padding(.vertical, 2)
                 }
-            } label: {
-                HStack(spacing: LedgerSpacing.sm) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(LedgerPalette.warm)
-                    Text("\(warnings.count) 条账单核对提示")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(LedgerPalette.ink)
-                    Spacer()
-                    Text(warningsExpanded ? "收起" : "展开查看")
+                .padding(.vertical, 2)
+                if let classificationError {
+                    Text(classificationError)
                         .font(.caption)
-                        .foregroundStyle(LedgerPalette.secondary)
+                        .foregroundStyle(LedgerPalette.risk)
+                }
+            }
+
+            if !preview.warnings.isEmpty {
+                DisclosureGroup(isExpanded: $warningsExpanded) {
+                    ForEach(Array(preview.warnings.enumerated()), id: \.offset) { _, warning in
+                        HStack(alignment: .top, spacing: LedgerSpacing.xs) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(LedgerPalette.warm)
+                            Text(warning)
+                                .font(.caption)
+                                .foregroundStyle(LedgerPalette.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                } label: {
+                    HStack(spacing: LedgerSpacing.sm) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(LedgerPalette.warm)
+                        Text("\(preview.warnings.count) 条账单核对提示")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(LedgerPalette.warm)
+                        Spacer()
+                        Text(warningsExpanded ? "收起" : "展开查看")
+                            .font(.caption2)
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
                 }
             }
         }
+        .font(.subheadline)
     }
 
     private func entrySection(_ preview: LedgerImportPreview) -> some View {
@@ -606,17 +625,31 @@ struct NativeImportFlowView: View {
                     entry: entry,
                     included: includedEntryIDs.contains(entry.id),
                     tagSelected: selectedTagEntryIDs.contains(entry.id),
+                    isAIClassified: classificationResults[entry.id] != nil,
+                    categoryLabel: friendlyAccountLabel(entry.categoryAccount),
+                    fundingLabel: friendlyAccountLabel(entry.fundingAccount),
                     onToggle: { toggle(entry.id) },
                     onToggleTag: { toggleTagSelection(entry.id) },
                     onEdit: { editingEntry = entry }
                 )
                 .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 16))
-                classificationRow(entry)
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--safe-classification-review") {
+                    classificationRow(entry)
+                }
+#endif
             }
         } header: {
             HStack(alignment: .firstTextBaseline) {
-                Text("交易 · 已选 \(selectedEntries.count)/\(reviewedEntries.count)")
+                Text("交易明细 · 已选 \(selectedEntries.count)/\(reviewedEntries.count)")
                 Spacer(minLength: 0)
+                if !classificationNeedsReview.isEmpty {
+                    Toggle("只看待核对", isOn: $onlyClassificationReview)
+                        .toggleStyle(.button)
+                        .font(.caption)
+                        .tint(LedgerPalette.cobalt)
+                        .accessibilityIdentifier("import-classification-review-filter")
+                }
                 Button(includedEntryIDs.count == reviewedEntries.count ? "取消全选" : "全选") {
                     if includedEntryIDs.count == reviewedEntries.count {
                         includedEntryIDs = []
@@ -1165,6 +1198,7 @@ private struct ImportEntryEditor: View {
 
     let entry: LedgerImportEntry
     let accounts: [LedgerAccountChoice]
+    let suggestion: ImportClassificationSuggestion?
     let onSave: (LedgerImportEntry) -> Void
 
     @State private var date: Date
@@ -1181,10 +1215,12 @@ private struct ImportEntryEditor: View {
     init(
         entry: LedgerImportEntry,
         accounts: [LedgerAccountChoice],
+        suggestion: ImportClassificationSuggestion? = nil,
         onSave: @escaping (LedgerImportEntry) -> Void
     ) {
         self.entry = entry
         self.accounts = accounts
+        self.suggestion = suggestion
         self.onSave = onSave
         _date = State(initialValue: Self.parseDate(entry.date) ?? Date())
         _flag = State(initialValue: entry.flag == "!" ? "!" : "*")
@@ -1261,12 +1297,68 @@ private struct ImportEntryEditor: View {
                         LabeledContent("来源账户", value: accountChoice(fundingAccount).label)
                     }
                     .accessibilityIdentifier("import-edit-source-account")
+
+                    if let candidates = suggestion?.funding.candidates, !candidates.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(candidates, id: \.value) { candidate in
+                                    Button {
+                                        fundingAccount = candidate.value
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Text(accountChoice(candidate.value).label)
+                                            Text("\(Int((candidate.probability * 100).rounded()))%")
+                                                .font(.caption2)
+                                                .opacity(0.8)
+                                        }
+                                        .font(.caption)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(fundingAccount == candidate.value ? LedgerPalette.cobalt.opacity(0.15) : Color.secondary.opacity(0.1))
+                                        .foregroundStyle(fundingAccount == candidate.value ? LedgerPalette.cobalt : LedgerPalette.ink)
+                                        .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+
                     NavigationLink {
                         LedgerAccountPicker(title: "选择目标账户", accounts: accounts, selection: $categoryAccount)
                     } label: {
                         LabeledContent("目标账户", value: accountChoice(categoryAccount).label)
                     }
                     .accessibilityIdentifier("import-edit-target-account")
+
+                    if let candidates = suggestion?.category.candidates, !candidates.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(candidates, id: \.value) { candidate in
+                                    Button {
+                                        categoryAccount = candidate.value
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Text(accountChoice(candidate.value).label)
+                                            Text("\(Int((candidate.probability * 100).rounded()))%")
+                                                .font(.caption2)
+                                                .opacity(0.8)
+                                        }
+                                        .font(.caption)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(categoryAccount == candidate.value ? LedgerPalette.cobalt.opacity(0.15) : Color.secondary.opacity(0.1))
+                                        .foregroundStyle(categoryAccount == candidate.value ? LedgerPalette.cobalt : LedgerPalette.ink)
+                                        .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+
                     if fundingAccount == categoryAccount {
                         Text("来源账户和目标账户需使用不同账户。").foregroundStyle(LedgerPalette.risk)
                     }
@@ -1299,6 +1391,39 @@ private struct ImportEntryEditor: View {
                         .autocorrectionDisabled()
                         .focused($focusedField, equals: .tags)
                         .accessibilityIdentifier("import-edit-tags")
+
+                    if let tags = suggestion?.tags, !tags.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(tags.filter { $0.probability >= 0.5 }, id: \.value) { tag in
+                                    Button {
+                                        var current = tagsText.split(whereSeparator: { $0.isWhitespace || $0 == "," }).map(String.init)
+                                        if current.contains(tag.value) {
+                                            current.removeAll { $0 == tag.value }
+                                        } else {
+                                            current.append(tag.value)
+                                        }
+                                        tagsText = current.joined(separator: " ")
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Text("#\(tag.value)")
+                                            Text("\(Int((tag.probability * 100).rounded()))%")
+                                                .font(.caption2)
+                                                .opacity(0.8)
+                                        }
+                                        .font(.caption)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(tagsText.contains(tag.value) ? LedgerPalette.olive.opacity(0.15) : Color.secondary.opacity(0.1))
+                                        .foregroundStyle(tagsText.contains(tag.value) ? LedgerPalette.olive : LedgerPalette.ink)
+                                        .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
                 } header: {
                     Text("标签")
                 } footer: {
@@ -1397,11 +1522,22 @@ private struct ImportEntryReviewRow: View {
     let entry: LedgerImportEntry
     let included: Bool
     let tagSelected: Bool
+    let isAIClassified: Bool
+    let categoryLabel: String
+    let fundingLabel: String
     let onToggle: () -> Void
     let onToggleTag: () -> Void
     let onEdit: () -> Void
 
     @State private var expanded = false
+
+    private var categoryMissing: Bool {
+        entry.categoryAccount.isEmpty || entry.categoryAccount.lowercased().contains("unknown")
+    }
+
+    private var fundingMissing: Bool {
+        entry.fundingAccount.isEmpty || entry.fundingAccount.lowercased().contains("unknown")
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1422,18 +1558,41 @@ private struct ImportEntryReviewRow: View {
                     HStack(alignment: .center, spacing: LedgerSpacing.sm) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(entry.payee.isEmpty ? "未命名交易" : entry.payee)
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.medium))
                                 .foregroundStyle(LedgerPalette.ink)
                                 .lineLimit(1)
                             Text("\(entry.date) · \(entry.narration.isEmpty ? "无摘要" : entry.narration)")
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(LedgerPalette.secondary)
-                                .lineLimit(2)
-                            if let tags = entry.tags, !tags.isEmpty {
-                                Text(tags.prefix(3).map { "#\($0)" }.joined(separator: "  "))
-                                    .font(.caption)
-                                    .foregroundStyle(LedgerPalette.olive)
+                                .lineLimit(1)
+                            HStack(alignment: .center, spacing: 5) {
+                                Text(categoryLabel)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(categoryMissing ? LedgerPalette.risk : LedgerPalette.cobalt)
                                     .lineLimit(1)
+
+                                Image(systemName: "arrow.left")
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundStyle(LedgerPalette.secondary.opacity(0.6))
+
+                                Text(fundingLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(fundingMissing ? LedgerPalette.risk : LedgerPalette.olive)
+                                    .lineLimit(1)
+
+                                if isAIClassified {
+                                    Image(systemName: "sparkles")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(LedgerPalette.cobalt)
+                                }
+
+                                if let tags = entry.tags, !tags.isEmpty {
+                                    Spacer(minLength: 4)
+                                    Text(tags.prefix(2).map { "#\($0)" }.joined(separator: " "))
+                                        .font(.caption2)
+                                        .foregroundStyle(LedgerPalette.secondary)
+                                        .lineLimit(1)
+                                }
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1451,7 +1610,7 @@ private struct ImportEntryReviewRow: View {
                             .foregroundStyle(LedgerPalette.secondary)
                             .frame(width: 18)
                     }
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 8)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
