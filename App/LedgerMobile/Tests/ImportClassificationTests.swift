@@ -16,7 +16,7 @@ final class ImportClassificationTests: XCTestCase {
         XCTAssertEqual(related.count, 5)
         XCTAssertEqual(related.map(\.date), ["2026-09-08", "2026-09-07", "2026-09-06", "2026-09-05", "2026-09-04"])
         let request = try XCTUnwrap(ImportClassificationContext.request(for: entry, accounts: accounts(), history: history))
-        XCTAssertEqual(request.accounts.map(\.account), ["Expenses:Coffee", "Income:Salary"])
+        XCTAssertEqual(request.accounts.map(\.account), ["Assets:Bank", "Expenses:Coffee", "Income:Salary"])
         let encoded = String(decoding: try JSONEncoder().encode(request), as: UTF8.self)
         for secret in ["private-order", "private-merchant-id", "private-source", "private-tag", "private-history-path", "private-metadata"] {
             XCTAssertFalse(encoded.contains(secret), secret)
@@ -26,7 +26,7 @@ final class ImportClassificationTests: XCTestCase {
 
     func testAccountReplacementPreservesExactDecimalsAndRefundDirection() throws {
         let original = try entry(amount: "-18.123456789")
-        let changed = try XCTUnwrap(ImportClassificationContext.applying("Expenses:Coffee", to: original, allowed: ["Expenses:Coffee"]))
+        let changed = try XCTUnwrap(ImportClassificationContext.applying(category: "Expenses:Coffee", funding: original.fundingAccount, to: original, allowed: ["Expenses:Coffee"]))
         XCTAssertEqual(changed.postings.map(\.amount), original.postings.map(\.amount))
         XCTAssertEqual(changed.fundingAccount, original.fundingAccount)
         XCTAssertEqual(changed.tags, original.tags)
@@ -34,8 +34,8 @@ final class ImportClassificationTests: XCTestCase {
         XCTAssertEqual(changed.orderID, original.orderID)
         XCTAssertEqual(changed.narration, original.narration)
         XCTAssertEqual(changed.postings.map(\.account), ["Expenses:Coffee", "Assets:Bank"])
-        XCTAssertNil(ImportClassificationContext.applying("Expenses:Invented", to: original, allowed: ["Expenses:Coffee"]))
-        XCTAssertNil(ImportClassificationContext.applying("Assets:Bank", to: original, allowed: ["Assets:Bank"]))
+        XCTAssertNil(ImportClassificationContext.applying(category: "Expenses:Invented", funding: original.fundingAccount, to: original, allowed: ["Expenses:Coffee"]))
+        XCTAssertNil(ImportClassificationContext.applying(category: "Assets:Bank", funding: original.fundingAccount, to: original, allowed: ["Assets:Bank"]))
     }
 
     func testComplexAndPricedTransactionsStayForManualReview() throws {
@@ -58,13 +58,14 @@ final class ImportClassificationTests: XCTestCase {
         XCTAssertNil(ImportClassificationContext.request(for: try entry(), accounts: many, history: []))
     }
 
-    func testUncertainAndSpecialTransactionsRemainSuggestions() {
+    func testUncertainAndIncompatibleTransactionsRemainSuggestions() throws {
+        let entry = try entry()
         for nature in ["transfer", "refund", "repayment", "review"] {
-            XCTAssertFalse(suggestion(nature: nature).canPrefill)
+            XCTAssertFalse(suggestion(nature: nature).canPrefill(for: entry))
         }
-        XCTAssertFalse(suggestion(confidence: 0.5).canPrefill)
-        XCTAssertFalse(suggestion(probability: 0.7).canPrefill)
-        XCTAssertTrue(suggestion().canPrefill)
+        XCTAssertFalse(suggestion(confidence: 0.5).canPrefill(for: entry))
+        XCTAssertFalse(suggestion(probability: 0.7).canPrefill(for: entry))
+        XCTAssertTrue(suggestion().canPrefill(for: entry))
     }
 
     func testIncomingFundsCannotAutomaticallyBecomeAnExpense() throws {
@@ -93,25 +94,26 @@ final class ImportClassificationTests: XCTestCase {
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             XCTAssertEqual(json["model"] as? String, "jev-1.13.0")
             let questions = try XCTUnwrap(json["questions"] as? [String: [String: Any]])
-            XCTAssertEqual(Set(questions.keys), ["category", "nature"])
+            XCTAssertEqual(Set(questions.keys), ["category", "funding", "nature"])
             XCTAssertEqual(questions["category"]?["type"] as? String, "choice")
             XCTAssertNotNil((questions["category"]?["criteria"] as? [String: String])?["review"])
             XCTAssertFalse(String(decoding: body, as: UTF8.self).contains("fixture-key"))
             return (200, Self.response())
         }
         let result = try await client().classify(input, apiKey: "fixture-key")
-        XCTAssertEqual(result.category, "Expenses:Coffee")
-        XCTAssertTrue(result.canPrefill)
+        XCTAssertEqual(result.category.value, "Expenses:Coffee")
+        XCTAssertEqual(result.funding.value, "Assets:Bank")
+        XCTAssertTrue(result.canPrefill(for: try entry()))
     }
 
     func testMalformedAndOutOfSetModelAnswersAreRejected() async throws {
         let input = try XCTUnwrap(ImportClassificationContext.request(for: entry(), accounts: accounts(), history: []))
         let invalid = [
-            Self.response().replacingOccurrences(of: "\"choice\":\"a0\"", with: "\"choice\":\"invented\""),
-            Self.response().replacingOccurrences(of: "\"a0\":0.98", with: "\"a0\":-0.98"),
-            Self.response().replacingOccurrences(of: "\"a0\":0.98", with: "\"a0\":0.1"),
+            Self.response().replacingOccurrences(of: "\"choice\":\"a1\"", with: "\"choice\":\"invented\""),
+            Self.response().replacingOccurrences(of: "\"a1\":0.98", with: "\"a1\":-0.98"),
+            Self.response().replacingOccurrences(of: "\"a1\":0.98", with: "\"a1\":0.1"),
             Self.response().replacingOccurrences(of: "\"confidence\":0.99", with: "\"confidence\":2"),
-            Self.response().replacingOccurrences(of: "\"choice\":\"a0\"", with: "\"choice\":\"a1\""),
+            Self.response().replacingOccurrences(of: "\"choice\":\"a1\"", with: "\"choice\":\"a2\""),
             "{}"
         ]
         for raw in invalid {
@@ -127,6 +129,190 @@ final class ImportClassificationTests: XCTestCase {
             ClassificationURLProtocol.handler = { _ in (status, "private provider error") }
             do { _ = try await client().classify(input, apiKey: "fixture-key"); XCTFail("Accepted HTTP \(status)") }
             catch { XCTAssertFalse(error.localizedDescription.contains("private provider error")) }
+        }
+    }
+
+    func testFundingAndCategoryAutofillIndependentlyAndKeepStatementFields() throws {
+        let original = try entry()
+        let catalog = accounts() + [account("Liabilities:Card:1234")]
+        let input = try XCTUnwrap(ImportClassificationContext.request(for: original, accounts: catalog, history: []))
+        let result = suggestion(funding: "Liabilities:Card:1234", tags: [.init(value: "coffee", probability: 0.99)])
+        let filled = ImportClassificationContext.autofilled(original, suggestion: result, input: input)
+        XCTAssertEqual(filled.categoryAccount, "Expenses:Coffee")
+        XCTAssertEqual(filled.fundingAccount, "Liabilities:Card:1234")
+        XCTAssertEqual(filled.postings.map(\.account), ["Expenses:Coffee", "Liabilities:Card:1234"])
+        XCTAssertEqual(filled.postings.map(\.amount), original.postings.map(\.amount))
+        XCTAssertEqual(filled.date, original.date)
+        XCTAssertEqual(filled.currency, original.currency)
+        XCTAssertEqual(filled.payee, original.payee)
+        XCTAssertEqual(filled.narration, original.narration)
+        XCTAssertEqual(filled.metadata, original.metadata)
+        XCTAssertEqual(filled.tags, ["coffee", "private-tag"])
+        XCTAssertTrue(result.pendingFields(for: filled).isEmpty)
+
+        let uncertainCategory = suggestion(confidence: 0.2, funding: "Liabilities:Card:1234")
+        let partial = ImportClassificationContext.autofilled(original, suggestion: uncertainCategory, input: input)
+        XCTAssertEqual(partial.fundingAccount, "Liabilities:Card:1234")
+        XCTAssertEqual(partial.categoryAccount, original.categoryAccount)
+        XCTAssertEqual(uncertainCategory.pendingFields(for: partial), ["category"])
+
+        let uncertainFunding = suggestion(funding: "Liabilities:Card:1234", fundingConfidence: 0.2)
+        let otherPartial = ImportClassificationContext.autofilled(original, suggestion: uncertainFunding, input: input)
+        XCTAssertEqual(otherPartial.categoryAccount, "Expenses:Coffee")
+        XCTAssertEqual(otherPartial.fundingAccount, original.fundingAccount)
+        XCTAssertEqual(uncertainFunding.pendingFields(for: otherPartial), ["funding"])
+    }
+
+    func testTransferRepaymentAndRefundUseCompatiblePairsWithExactPolarity() throws {
+        let outgoing = try entry()
+        let incoming = try changedEntry { json in
+            var postings = json["postings"] as! [[String: Any]]
+            postings[0]["amount"] = "-18.00"
+            postings[1]["amount"] = "18.00"
+            json["postings"] = postings
+        }
+        let transfer = suggestion(nature: "transfer", category: "Assets:Savings")
+        let repayment = suggestion(nature: "repayment", category: "Liabilities:Card:1234")
+        let refund = suggestion(nature: "refund")
+        XCTAssertTrue(transfer.canPrefill(for: outgoing))
+        XCTAssertTrue(repayment.canPrefill(for: outgoing))
+        XCTAssertFalse(repayment.canPrefill(for: incoming))
+        XCTAssertTrue(refund.canPrefill(for: incoming))
+        XCTAssertFalse(refund.canPrefill(for: outgoing))
+        let income = suggestion(nature: "income", category: "Income:Salary")
+        XCTAssertTrue(income.canPrefill(for: incoming))
+        XCTAssertFalse(income.canPrefill(for: outgoing))
+
+        let swapped = try XCTUnwrap(ImportClassificationContext.applying(category: "Assets:Bank", funding: "Assets:Savings",
+            to: outgoing, allowed: ["Assets:Bank", "Assets:Savings"]))
+        XCTAssertEqual(swapped.postings.map(\.account), ["Assets:Bank", "Assets:Savings"])
+        XCTAssertEqual(swapped.postings.map(\.amount), outgoing.postings.map(\.amount))
+        let collision = suggestion(nature: "transfer", category: "Assets:Bank", funding: "Assets:Bank")
+        XCTAssertFalse(collision.canPrefill(for: outgoing))
+        XCTAssertNil(ImportClassificationContext.applying(category: "Assets:Bank", funding: "Assets:Bank",
+            to: outgoing, allowed: ["Assets:Bank"]))
+    }
+
+    func testUniqueCardTailResolvesFundingAndDuplicateTailRemainsAmbiguous() throws {
+        let cardEntry = try changedEntry { $0["metadata"] = ["cardLast4": "1234"] }
+        let one = [account("Liabilities:BankA:1234"), account("Liabilities:BankB:5678")]
+        XCTAssertEqual(ImportClassificationContext.fundingHint(entry: cardEntry, accounts: one, history: [])?.account,
+                       "Liabilities:BankA:1234")
+        XCTAssertNil(ImportClassificationContext.fundingHint(entry: cardEntry,
+            accounts: one + [account("Liabilities:BankC:1234")], history: []))
+        let missing = try changedEntry { $0["metadata"] = ["cardLast4": "9876"] }
+        XCTAssertNil(ImportClassificationContext.fundingHint(entry: missing, accounts: one, history: []))
+        let methodTail = try changedEntry { $0["method"] = "银行卡(5678)" }
+        XCTAssertEqual(ImportClassificationContext.fundingHint(entry: methodTail, accounts: one, history: [])?.account,
+                       "Liabilities:BankB:5678")
+    }
+
+    func testOnlyConsistentSpecificPaymentHistoryCreatesHardMapping() throws {
+        let paid = try changedEntry { $0["method"] = "日常专用卡" }
+        let history = (0..<3).map { transaction(payee: "商家\($0)", line: $0, method: "日常专用卡") }
+        XCTAssertEqual(ImportClassificationContext.fundingHint(entry: paid, accounts: accounts(), history: history)?.account, "Assets:Bank")
+        XCTAssertNil(ImportClassificationContext.fundingHint(entry: paid, accounts: accounts(), history: Array(history.prefix(2))))
+        let conflict = transaction(payee: "另一个商家", method: "日常专用卡", funding: "Liabilities:Other")
+        XCTAssertNil(ImportClassificationContext.fundingHint(entry: paid, accounts: accounts() + [account("Liabilities:Other")], history: history + [conflict]))
+        let genericHistory = (0..<4).map { transaction(payee: "商家\($0)", line: $0, method: "微信支付") }
+        XCTAssertNil(ImportClassificationContext.fundingHint(entry: try entry(), accounts: accounts(), history: genericHistory))
+        XCTAssertEqual(ImportClassificationContext.relatedHistory(for: paid, history: history).count, 3)
+    }
+
+    func testCardTailNeverOverridesIssuerOrDebitCreditEvidence() throws {
+        let ccb = try changedEntry {
+            $0["method"] = "建设银行信用卡"
+            $0["source"] = "ccb-credit"
+            $0["metadata"] = ["cardLast4": "1234"]
+        }
+        for wrong in ["Assets:CMB:1234", "Liabilities:CMB:1234", "Assets:CCB:1234", "Liabilities:Card:1234"] {
+            XCTAssertNil(ImportClassificationContext.fundingHint(entry: ccb,
+                accounts: [account(wrong), account("Liabilities:CCB:Credit")], history: []), wrong)
+        }
+        XCTAssertEqual(ImportClassificationContext.fundingHint(entry: ccb,
+            accounts: [account("Liabilities:CCB:1234")], history: [])?.account, "Liabilities:CCB:1234")
+        let debit = try changedEntry {
+            $0["method"] = "储蓄卡(1234)"
+            $0["metadata"] = ["cardLast4": "1234"]
+        }
+        XCTAssertNil(ImportClassificationContext.fundingHint(entry: debit,
+            accounts: [account("Liabilities:Card:1234")], history: []))
+        let unknown = try changedEntry { $0["method"] = "某地银行信用卡(1234)" }
+        XCTAssertNil(ImportClassificationContext.fundingHint(entry: unknown,
+            accounts: [account("Liabilities:Card:1234")], history: []))
+    }
+
+    func testTagLimitOverflowRemainsPendingReview() throws {
+        let original = try changedEntry { $0["tags"] = (0..<50).map { "tag\($0)" } }
+        let input = try XCTUnwrap(ImportClassificationContext.request(for: original, accounts: accounts(), history: []))
+        let result = suggestion(tags: [.init(value: "coffee", probability: 0.99)])
+        let filled = ImportClassificationContext.autofilled(original, suggestion: result, input: input)
+        XCTAssertEqual(filled.tags, original.tags)
+        XCTAssertEqual(result.pendingFields(for: filled), ["tags"])
+    }
+
+    func testConfidentModelCannotOverrideStatementFundingIdentity() async throws {
+        let original = try changedEntry {
+            $0["method"] = "建设银行信用卡"
+            $0["source"] = "ccb-credit"
+            $0["metadata"] = ["cardLast4": "1234"]
+        }
+        for wrongAccount in ["Assets:Bank", "Liabilities:CCB:5678"] {
+            let catalog = [account(wrongAccount), account("Expenses:Coffee"), account("Income:Salary")]
+            let input = try XCTUnwrap(ImportClassificationContext.request(for: original, accounts: catalog, history: []))
+            let fundingID = "a\(try XCTUnwrap(input.accounts.firstIndex(where: { $0.account == wrongAccount })))"
+            let categoryID = "a\(try XCTUnwrap(input.accounts.firstIndex(where: { $0.account == "Expenses:Coffee" })))"
+            ClassificationURLProtocol.handler = { _ in
+                var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(Self.response().utf8)) as? [String: Any])
+                var answers = json["answers"] as! [String: [String: Any]]
+                answers["funding"]?["choice"] = fundingID
+                answers["funding"]?["probabilities"] = [fundingID: 0.98, "review": 0.02]
+                answers["category"]?["choice"] = categoryID
+                var probabilities = Dictionary(uniqueKeysWithValues: input.accounts.indices.map { ("a\($0)", 0.0) })
+                probabilities[categoryID] = 0.98
+                probabilities["review"] = 0.02
+                answers["category"]?["probabilities"] = probabilities
+                json["answers"] = answers
+                return (200, String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self))
+            }
+            let result = try await client().classify(input, apiKey: "fixture-key")
+            XCTAssertFalse(result.funding.isConfident, wrongAccount)
+            let filled = ImportClassificationContext.autofilled(original, suggestion: result, input: input)
+            XCTAssertEqual(filled.fundingAccount, original.fundingAccount)
+            XCTAssertTrue(result.pendingFields(for: filled).contains("funding"))
+        }
+    }
+
+    func testConfirmingOneFieldKeepsOtherFieldsPending() throws {
+        let draft = try entry()
+        let uncertain = suggestion(confidence: 0.2, funding: "Liabilities:Card", fundingConfidence: 0.2,
+                                   tags: [.init(value: "travel", probability: 0.7)])
+        let pending = uncertain.pendingFields(for: draft, accepted: ["funding"])
+        XCTAssertTrue(pending.contains("category"))
+        XCTAssertTrue(pending.contains("tags"))
+        XCTAssertFalse(pending.contains("funding"))
+    }
+
+    func testNoulTagJudgmentsUseKnownCandidatesAndRejectMalformedProbabilities() async throws {
+        let history = [transaction(payee: "瑞幸咖啡", tags: ["coffee"])]
+        let input = try XCTUnwrap(ImportClassificationContext.request(for: entry(), accounts: accounts(), history: history))
+        XCTAssertEqual(input.tagCandidates, ["coffee"])
+        for probability in [0.99, 2.0] {
+            ClassificationURLProtocol.handler = { request in
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.body(request)) as? [String: Any])
+                let questions = try XCTUnwrap(json["questions"] as? [String: [String: Any]])
+                XCTAssertEqual(questions["tag0"]?["type"] as? String, "noul")
+                var response = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(Self.response().utf8)) as? [String: Any])
+                var answers = response["answers"] as! [String: Any]
+                answers["tag0"] = ["type": "noul", "noul": probability]
+                response["answers"] = answers
+                return (200, String(decoding: try JSONSerialization.data(withJSONObject: response), as: UTF8.self))
+            }
+            do {
+                let result = try await client().classify(input, apiKey: "fixture-key")
+                XCTAssertEqual(probability, 0.99)
+                XCTAssertEqual(result.suggestedTags, ["coffee"])
+            } catch { XCTAssertEqual(probability, 2.0) }
         }
     }
 
@@ -201,9 +387,14 @@ final class ImportClassificationTests: XCTestCase {
         config.protocolClasses = [ClassificationURLProtocol.self]
         return ImportClassificationClient(session: URLSession(configuration: config))
     }
-    private func suggestion(nature: String = "expense", confidence: Double = 0.99, probability: Double = 0.98) -> ImportClassificationSuggestion {
-        .init(model: "jev-1.13.0", category: "Expenses:Coffee", nature: nature, confidence: confidence,
-              candidates: [.init(account: "Expenses:Coffee", probability: probability)])
+    private func field(_ value: String, confidence: Double = 0.99, probability: Double = 0.98) -> ImportClassificationSuggestion.Field {
+        .init(value: value, confidence: confidence, candidates: value == "review" ? [] : [.init(value: value, probability: probability)])
+    }
+    private func suggestion(nature: String = "expense", confidence: Double = 0.99, probability: Double = 0.98,
+                            category: String = "Expenses:Coffee", funding: String = "Assets:Bank",
+                            fundingConfidence: Double = 0.99, tags: [ImportClassificationSuggestion.Tag] = []) -> ImportClassificationSuggestion {
+        .init(model: "jev-1.13.0", category: field(category, confidence: confidence, probability: probability),
+              funding: field(funding, confidence: fundingConfidence), nature: field(nature), tags: tags)
     }
     private func accounts() -> [LedgerAccount] {
         [account("Expenses:Coffee"), account("Assets:Bank"), account("Income:Salary"),
@@ -213,11 +404,17 @@ final class ImportClassificationTests: XCTestCase {
         .init(account: name, openDate: "2020-01-01", closeDate: nil, currency: currency, alias: nil,
               label: name, group: "test", active: active)
     }
-    private func transaction(payee: String, date: String = "2026-09-01", line: Int = 1) -> LedgerTransaction {
-        .init(date: date, payee: payee, narration: "拿铁", metadata: ["secret": .string("private-metadata")],
+    private func transaction(payee: String, date: String = "2026-09-01", line: Int = 1,
+                             method: String = "", funding: String = "Assets:Bank", tags: [String] = []) -> LedgerTransaction {
+        .init(date: date, payee: payee, narration: "拿铁", metadata: ["secret": .string("private-metadata"), "method": .string(method)], tags: tags,
               postings: [.init(account: "Expenses:Coffee", amount: 1800, currency: "CNY"),
-                         .init(account: "Assets:Bank", amount: -1800, currency: "CNY")],
+                         .init(account: funding, amount: -1800, currency: "CNY")],
               source: .init(file: "private-history-path", line: line))
+    }
+    private func changedEntry(_ update: (inout [String: Any]) -> Void) throws -> LedgerImportEntry {
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(entry())) as? [String: Any])
+        update(&json)
+        return try JSONDecoder().decode(LedgerImportEntry.self, from: JSONSerialization.data(withJSONObject: json))
     }
     private func entry(amount: String = "18.00") throws -> LedgerImportEntry {
         let json = """
@@ -231,7 +428,7 @@ final class ImportClassificationTests: XCTestCase {
         return try JSONDecoder().decode(LedgerImportEntry.self, from: Data(json.utf8))
     }
     private static func response() -> String {
-        #"{"model":"jev-1.13.0","answers":{"category":{"type":"choice","choice":"a0","confidence":0.99,"probabilities":{"a0":0.98,"a1":0.01,"review":0.01}},"nature":{"type":"choice","choice":"expense","confidence":0.99,"probabilities":{"expense":0.98,"income":0,"transfer":0,"repayment":0,"refund":0,"review":0.02}}}}"#
+        #"{"model":"jev-1.13.0","answers":{"category":{"type":"choice","choice":"a1","confidence":0.99,"probabilities":{"a0":0,"a1":0.98,"a2":0.01,"review":0.01}},"funding":{"type":"choice","choice":"a0","confidence":0.99,"probabilities":{"a0":0.99,"review":0.01}},"nature":{"type":"choice","choice":"expense","confidence":0.99,"probabilities":{"expense":0.98,"income":0,"transfer":0,"repayment":0,"refund":0,"review":0.02}}}}"#
     }
     private static func body(_ request: URLRequest) throws -> Data {
         if let body = request.httpBody { return body }

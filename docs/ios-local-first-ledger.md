@@ -195,47 +195,71 @@ main app's unsynchronized, device-only Keychain with `WhenUnlocked` protection;
 it is excluded from ledger files, exports, Git, App Group and preferences.
 Removing the key disables classification for every ledger on the device.
 
-During import review, the app queries confirmed local history, ranks matches by
-normalized merchant and description bigrams, and sends up to five relevant
-examples dated on or before the incoming transaction. It sends only merchant,
-description, amount, signed funding posting amount, currency, payment method, transaction type, current account
-names and active candidate account labels. Historical examples contain merchant,
-description and account names. Source paths, IDs, tags, arbitrary metadata,
-attachments, balances and complete ledger files are excluded from the payload.
-Merchant and description fields can themselves contain personal information;
-the consent screen discloses that their text is sent to TypeSafe.
+During import review, the app prepares the category/counterpart account, funding
+account, transaction nature and existing tags. Statement dates, exact posting
+amounts, currency, merchant, description and source metadata remain unchanged.
+The workflow supports simple two-posting expenses, income, transfers, refunds and
+repayments, with account roots and signed funding amounts checked together.
+Complex splits and priced postings stay visible for manual review.
+
+Local retrieval ranks confirmed history by merchant, description and specific
+payment identity, returning up to five examples dated on or before the incoming
+transaction. The payload includes date, merchant, description, amount, signed
+funding amount, currency, payment method, card last four digits, recognized import
+provider, transaction type, current accounts, eligible account names/labels and
+relevant existing tags. History includes dates, merchant, description, payment
+method, card last four digits, account roles and tags. Source paths, order and
+merchant IDs, arbitrary metadata, attachments, balances and complete ledger files
+are excluded. The consent screen discloses the text and financial context sent to
+TypeSafe. Account eligibility respects transaction date and currency.
 
 An ephemeral, cookie-free HTTP client calls `https://api.typesafe.ai/v1/systemone`
-with `jev-1.13.0`, independent `Choice` questions for category and transaction
-nature, and a review outcome. Redirects are rejected. The full account candidate
-set is supplied up to 254 accounts plus review; larger charts and complex or
-priced postings retain manual classification. The response must contain the
-complete allowed distributions, finite probabilities summing to one (within
-rounding tolerance), and a selected maximum-probability option.
+with `jev-1.13.0`. Three independent `Choice` questions select category, funding
+account and transaction nature; one `Noul` question per candidate tag assesses its
+applicability. Each Choice includes a review outcome. Redirects are rejected.
+The complete eligible account set is supplied up to 254 accounts plus review;
+larger charts retain manual review. Distributions must contain exactly the
+allowed options, finite probabilities summing to one within rounding tolerance,
+and a selected maximum-probability option. Tag probabilities are validated too.
 
-Only simple expense/income recommendations with probability ≥ 0.95, confidence
-≥ 0.9 for both questions and a lead ≥ 0.2 are prefilled, with income/expense
-direction checked against the original funding posting. These are conservative
-initial UI thresholds, not measured accuracy guarantees. Chinese classification
-accuracy, latency and coverage still need evaluation on consented representative
-data. Transfers, refunds, repayments and uncertain cases display candidates for
-manual selection. Every transaction remains subject to the import confirmation
-and canonical local validator. Category replacement preserves the original
-decimal posting strings, funding account, amounts, tags and metadata.
+Unique card identities, specific account labels or at least three consistent
+confirmed payment mappings can establish a local funding hint. Card suffixes
+must agree with explicit issuer and credit/debit evidence; ambiguous or partially
+identified cards remain suggestions. Generic WeChat/Alipay payment channels never
+create hard bank-card mappings. Known issuer/type constraints also gate model
+funding results, including high-confidence responses.
 
-Review shows progress, a stop/resume action, candidate accounts, matching history,
-and an option to restore the original category. Results stay within the current
-preview. Manual edits win over in-flight answers. Preview changes, ledger
-changes, privacy shielding, disabling the feature, key changes and opening the save confirmation
-cancel classification; stale responses are discarded. Service/auth/quota failures
-preserve completed suggestions and the manual import path. Calls are sequential
-and retries are explicit to keep the user's paid request count predictable.
+Each account decision requires probability ≥ 0.95, confidence ≥ 0.9 and a lead
+≥ 0.2 for automatic filling. Category filling additionally requires a confident,
+compatible transaction nature. Funding and category decisions can be filled or
+confirmed independently; confirming one retains the other pending decisions.
+Existing tags with probability ≥ 0.98 are merged within the ledger tag rules;
+unapplied tags with probability ≥ 0.5 remain pending review, including tag-limit
+overflow. Historical trip/event tags require current contextual evidence.
+These are conservative initial policies whose accuracy, latency and coverage
+still need evaluation on consented representative data.
 
-Validation: run `ImportClassificationTests` and `LedgerImportModelsTests` in the
-`LedgerMobile` Xcode scheme. The API tests use synthetic transactions and a mock
-transport; live Jev quality testing requires a personal key and separately
-consented data. A model confidence value describes distribution concentration,
-not the probability that the entire accounting workflow is correct.
+Review shows progress, stop/resume controls, separate funding/category choices,
+transaction nature, tag suggestions, matching history, original-draft restoration
+and whole-draft confirmation. A pending-only filter returns to the full list when
+the final pending item is resolved. Every transaction still passes explicit
+import confirmation and canonical local validation. Account replacements update
+both posting roles atomically and preserve exact decimal strings and polarity.
+
+Results remain in the current preview. Manual edits win over in-flight answers.
+Preview changes, ledger changes, privacy shielding, disabling the feature, key
+changes and opening the save confirmation cancel classification; stale responses
+are discarded. Service/auth/quota failures preserve completed suggestions and
+the manual import path. Calls are sequential and retries explicit to keep paid
+request counts predictable.
+
+Validation: run `ImportClassificationTests`, `LedgerImportModelsTests` and the
+classification settings/import review UI tests in the `LedgerMobile` scheme.
+API tests use synthetic transactions and a mock transport; UI fixtures exercise
+independent field confirmation and recovery of the full transaction list.
+Live Jev quality testing requires a personal key and consented data. A model
+confidence value describes distribution concentration; overall accounting
+correctness is additionally checked by application rules and local validation.
 
 ## Local write transaction
 
