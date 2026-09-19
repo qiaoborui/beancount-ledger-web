@@ -3,6 +3,7 @@ import SwiftUI
 struct NativeImportFlowView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var classificationSettings = ImportClassificationSettings.shared
 
     let file: LedgerImportSelectedFile
     let providers: [LedgerImportProviderInfo]
@@ -32,6 +33,17 @@ struct NativeImportFlowView: View {
     @State private var editSaveFeedback = 0
     @State private var failureFeedback = 0
     @State private var pendingExit: ImportExitAction?
+    @State private var classificationResults: [String: ImportClassificationSuggestion] = [:]
+    @State private var classificationOriginals: [String: LedgerImportEntry] = [:]
+    @State private var manuallyReviewedIDs: Set<String> = []
+    @State private var classificationCompletedIDs: Set<String> = []
+    @State private var classificationPaused = false
+    @State private var isClassifying = false
+    @State private var classificationError: String?
+    @State private var classificationRetry = 0
+    @State private var onlyClassificationReview = false
+    @State private var classificationRunID = UUID()
+    @State private var classificationEvidence: [String: [ImportClassificationRequest.Example]] = [:]
 
     private enum ImportExitAction { case close, preparation }
 
@@ -160,6 +172,157 @@ struct NativeImportFlowView: View {
         .sensoryFeedback(.success, trigger: editSaveFeedback)
         .sensoryFeedback(.error, trigger: failureFeedback)
         .ledgerPrivacyProtectedSheet()
+        .task(id: classificationTaskID) { await classifyPreview() }
+    }
+
+    private var classificationTaskID: String {
+        [preview?.importID ?? "", session.currentLocalLedgerDescriptor?.id.uuidString ?? "",
+         String(classificationSettings.revision), String(session.privacyShielded), String(session.phase == .ready),
+         String(classificationPaused), String(confirmationPresented), String(isCommitting), String(commitResult != nil), String(classificationRetry)].joined(separator: ":")
+    }
+
+    private var classificationNeedsReview: Set<String> {
+        Set(reviewedEntries.filter { entry in
+            classificationResults[entry.id].map { !$0.canPrefill(for: entry) } == true
+        }.map(\.id))
+    }
+
+    private func classifyPreview() async {
+        guard let importID = preview?.importID, let ledgerID = session.currentLocalLedgerDescriptor?.id,
+              classificationSettings.isEnabled(for: ledgerID), !session.privacyShielded, session.phase == .ready,
+              !classificationPaused, !confirmationPresented, !isCommitting, commitResult == nil else { return }
+        let runID = UUID()
+        classificationRunID = runID
+        isClassifying = true
+        defer { if classificationRunID == runID { isClassifying = false } }
+        do {
+            let key = try classificationSettings.apiKey()
+            let settingsRevision = classificationSettings.revision
+            try await session.loadGlobalTransactions(forceRefresh: true)
+            try Task.checkCancellation()
+            guard session.currentLocalLedgerDescriptor?.id == ledgerID, !session.privacyShielded else { return }
+            let accounts = session.ledger?.accounts ?? []
+            let history = session.visibleGlobalTransactions
+            let entries = reviewedEntries
+            let client = ImportClassificationClient()
+            try await ImportClassificationBatch.run(entries, makeInput: { entry in
+                let input = ImportClassificationContext.request(for: entry, accounts: accounts, history: history)
+                if input == nil { classificationCompletedIDs.insert(entry.id) }
+                return input
+            }, classify: { input in
+                try await client.classify(input, apiKey: key)
+            }, canContinue: {
+                preview?.importID == importID && session.currentLocalLedgerDescriptor?.id == ledgerID
+                    && !session.privacyShielded && session.phase == .ready
+                    && classificationSettings.isEnabled(for: ledgerID) && classificationSettings.revision == settingsRevision
+                    && !classificationPaused && !confirmationPresented && !isCommitting && commitResult == nil
+            }, currentEntry: { id in
+                reviewedEntries.first { $0.id == id }
+            }, isEligible: { id in
+                includedEntryIDs.contains(id) && !classificationCompletedIDs.contains(id)
+                    && !manuallyReviewedIDs.contains(id) && editingEntry?.id != id
+            }, accept: { job, result in
+                let entry = job.entry
+                guard let index = reviewedEntries.firstIndex(where: { $0.id == entry.id }) else { return }
+                classificationResults[entry.id] = result
+                classificationEvidence[entry.id] = job.input.history
+                classificationCompletedIDs.insert(entry.id)
+                if result.canPrefill(for: entry),
+                   let updated = ImportClassificationContext.applying(result.category, to: entry, allowed: job.input.accounts.map(\.account)) {
+                    classificationOriginals[entry.id] = entry
+                    reviewedEntries[index] = updated
+                }
+            })
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            classificationError = (error as? ImportClassificationError)?.localizedDescription
+                ?? "智能分类暂时不可用，已完成的建议保留，你可以继续核对或重试。"
+        }
+    }
+
+    private var classificationSection: some View {
+        Section {
+            if let ledgerID = session.currentLocalLedgerDescriptor?.id {
+                NavigationLink { ImportClassificationSettingsView(ledgerID: ledgerID) } label: {
+                    Label("智能分类", systemImage: "sparkles")
+                }
+                .accessibilityIdentifier("import-classification-settings")
+                if classificationSettings.isEnabled(for: ledgerID) {
+                    if isClassifying {
+                        HStack {
+                            ProgressView()
+                            Text("已处理 \(classificationCompletedIDs.count)/\(reviewedEntries.count) 条")
+                            Spacer()
+                            Button("停止") { classificationPaused = true }
+                        }
+                    } else {
+                        Text("已建议 \(classificationResults.count) 条 · 待确认 \(classificationNeedsReview.count) 条")
+                            .foregroundStyle(.secondary)
+                        Button(classificationPaused ? "继续分类" : "重试剩余交易") {
+                            classificationError = nil
+                            classificationPaused = false
+                            classificationRetry &+= 1
+                        }
+                        .disabled(classificationCompletedIDs.count >= reviewedEntries.count)
+                    }
+                    if let classificationError {
+                        Text(classificationError).foregroundStyle(LedgerPalette.risk)
+                    }
+                    if !classificationNeedsReview.isEmpty {
+                        Toggle("只看分类待确认", isOn: $onlyClassificationReview)
+                            .accessibilityIdentifier("import-classification-review-filter")
+                    }
+                }
+            }
+        } footer: {
+            Text("建议保存在本次预览。退款、转账和还款请重点核对；复杂拆分交易保留原分类。")
+        }
+        .font(.subheadline)
+    }
+
+    @ViewBuilder
+    private func classificationRow(_ entry: LedgerImportEntry) -> some View {
+        if let result = classificationResults[entry.id] {
+            DisclosureGroup(result.canPrefill(for: entry) ? "已建议分类 · 点按核对" : "分类待确认 · 查看候选") {
+                if result.category == "review" || result.nature == "review" {
+                    Text("现有信息不足，请核对用途后选择分类。").foregroundStyle(.secondary)
+                }
+                if ["transfer", "refund", "repayment"].contains(result.nature) {
+                    Text("可能涉及转账、退款或还款，请核对资金方向与对应账户。").foregroundStyle(.secondary)
+                }
+                ForEach(result.candidates, id: \.account) { candidate in
+                    Button {
+                        if let updated = ImportClassificationContext.applying(candidate.account, to: entry,
+                            allowed: result.candidates.map(\.account)) { applyEditedEntry(updated) }
+                    } label: {
+                        Text(candidate.account).font(.caption).lineLimit(3)
+                    }
+                }
+                if let original = classificationOriginals[entry.id] {
+                    Button("恢复原分类") {
+                        if let updated = ImportClassificationContext.applying(original.categoryAccount, to: entry,
+                            allowed: [original.categoryAccount]) { applyEditedEntry(updated) }
+                    }
+                }
+                Button("保留当前分类") { applyEditedEntry(entry) }
+                if let evidence = classificationEvidence[entry.id], !evidence.isEmpty {
+                    DisclosureGroup("参考历史 · \(evidence.count) 条") {
+                        ForEach(Array(evidence.enumerated()), id: \.offset) { _, example in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(example.payee + " · " + example.narration)
+                                Text(example.accounts.joined(separator: " · ")).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(result.canPrefill(for: entry) ? LedgerPalette.secondary : LedgerPalette.risk)
+            .buttonStyle(.borderless)
+            .accessibilityIdentifier("import-classification-result-\(entry.id)")
+        }
     }
 
     private func requestExit(_ action: ImportExitAction) {
@@ -184,6 +347,7 @@ struct NativeImportFlowView: View {
             commitOutcomeNeedsReconciliation = false
             commitWasReconciled = false
             editedEntryStatus = nil
+            resetClassification()
         }
     }
 
@@ -277,6 +441,7 @@ struct NativeImportFlowView: View {
                 }
             }
             previewSummary(preview)
+            if session.currentLocalLedgerDescriptor != nil { classificationSection }
             if !preview.warnings.isEmpty { warningSection(preview.warnings) }
             bulkTagSection
             entrySection(preview)
@@ -343,7 +508,7 @@ struct NativeImportFlowView: View {
 
     private func entrySection(_ preview: LedgerImportPreview) -> some View {
         Section {
-            ForEach(reviewedEntries) { entry in
+            ForEach(reviewedEntries.filter { !onlyClassificationReview || classificationNeedsReview.contains($0.id) }) { entry in
                 ImportEntryReviewRow(
                     entry: entry,
                     included: includedEntryIDs.contains(entry.id),
@@ -353,6 +518,7 @@ struct NativeImportFlowView: View {
                     onEdit: { editingEntry = entry }
                 )
                 .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 16))
+                classificationRow(entry)
             }
         } header: {
             HStack(alignment: .firstTextBaseline) {
@@ -443,6 +609,7 @@ struct NativeImportFlowView: View {
                 if commitOutcomeNeedsReconciliation {
                     startCommitReconciliation()
                 } else {
+                    classificationPaused = true
                     confirmationPresented = true
                 }
             } label: {
@@ -613,6 +780,12 @@ struct NativeImportFlowView: View {
     private func applyEditedEntry(_ updated: LedgerImportEntry) {
         guard let index = reviewedEntries.firstIndex(where: { $0.id == updated.id }) else { return }
         reviewedEntries[index] = updated
+        manuallyReviewedIDs.insert(updated.id)
+        classificationCompletedIDs.insert(updated.id)
+        classificationResults.removeValue(forKey: updated.id)
+        classificationOriginals.removeValue(forKey: updated.id)
+        classificationEvidence.removeValue(forKey: updated.id)
+        if classificationNeedsReview.isEmpty { onlyClassificationReview = false }
         let name = updated.payee.trimmingCharacters(in: .whitespacesAndNewlines)
         editedEntryStatus = "\(name.isEmpty ? "这条交易" : "“\(name)”")的修改已保存到本次预览"
         editSaveFeedback &+= 1
@@ -753,6 +926,7 @@ struct NativeImportFlowView: View {
             commitOutcomeNeedsReconciliation = false
             commitWasReconciled = false
             editedEntryStatus = nil
+            resetClassification()
         } catch is CancellationError {
             return
         } catch {
@@ -765,10 +939,22 @@ struct NativeImportFlowView: View {
     private func startCommit() {
         guard let preview, !isCommitting else { return }
         let entries = selectedEntries
+        classificationPaused = true
         isCommitting = true
         commitErrorMessage = nil
         commitOutcomeNeedsReconciliation = false
         Task { await commit(preview: preview, entries: entries) }
+    }
+
+    private func resetClassification() {
+        classificationResults = [:]
+        classificationOriginals = [:]
+        classificationEvidence = [:]
+        manuallyReviewedIDs = []
+        classificationCompletedIDs = []
+        classificationPaused = false
+        classificationError = nil
+        onlyClassificationReview = false
     }
 
     private func commit(preview: LedgerImportPreview, entries: [LedgerImportEntry]) async {

@@ -49,6 +49,14 @@ struct SettingsView: View {
                 Text("本地账本由这台设备保护。离开 App 后按设定时间锁定，切换应用时始终隐藏账本。")
             }
             if session.isLocal {
+                if let ledgerID = session.currentLocalLedgerDescriptor?.id {
+                    Section {
+                        NavigationLink { ImportClassificationSettingsView(ledgerID: ledgerID) } label: {
+                            Label("智能分类", systemImage: "sparkles")
+                        }
+                        .accessibilityIdentifier("settings-classification")
+                    }
+                }
                 Section("本地账本") {
                     Button {
                         editingCurrentLedger = true

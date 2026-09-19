@@ -26,7 +26,9 @@ action. Foreground saves and network recovery trigger synchronization; iOS grant
 background execution opportunities. SQLite indexing and iCloud/S3 provider
 adapters remain future work. Reports reuse the Go read model against a pinned local generation.
 Files/iCloud Drive sharing currently exports a snapshot. Gmail automation and
-hosted AI are outside the local-only product.
+hosted ledger automation are outside the local-only product. Optional import
+classification calls TypeSafe directly with a user-supplied key; ledger queries,
+validation and writes continue to run entirely on the device.
 
 ## Product decision
 
@@ -183,6 +185,57 @@ import completion recheck the session identity and foreground state before
 activation. Preferences use a private `ledger-local://<UUID>` identity; that
 identity is never sent to URLSession. Widget network credentials are suspended
 when a local ledger becomes active, and only reduced local summaries are shared.
+
+## Optional Jev import classification
+
+Open **Settings → 智能分类**, save a personal TypeSafe API Key, and explicitly
+enable the feature for the active ledger. The import preview also links to these
+settings. Consent is recorded separately per ledger. The key is stored in the
+main app's unsynchronized, device-only Keychain with `WhenUnlocked` protection;
+it is excluded from ledger files, exports, Git, App Group and preferences.
+Removing the key disables classification for every ledger on the device.
+
+During import review, the app queries confirmed local history, ranks matches by
+normalized merchant and description bigrams, and sends up to five relevant
+examples dated on or before the incoming transaction. It sends only merchant,
+description, amount, signed funding posting amount, currency, payment method, transaction type, current account
+names and active candidate account labels. Historical examples contain merchant,
+description and account names. Source paths, IDs, tags, arbitrary metadata,
+attachments, balances and complete ledger files are excluded from the payload.
+Merchant and description fields can themselves contain personal information;
+the consent screen discloses that their text is sent to TypeSafe.
+
+An ephemeral, cookie-free HTTP client calls `https://api.typesafe.ai/v1/systemone`
+with `jev-1.13.0`, independent `Choice` questions for category and transaction
+nature, and a review outcome. Redirects are rejected. The full account candidate
+set is supplied up to 254 accounts plus review; larger charts and complex or
+priced postings retain manual classification. The response must contain the
+complete allowed distributions, finite probabilities summing to one (within
+rounding tolerance), and a selected maximum-probability option.
+
+Only simple expense/income recommendations with probability ≥ 0.95, confidence
+≥ 0.9 for both questions and a lead ≥ 0.2 are prefilled, with income/expense
+direction checked against the original funding posting. These are conservative
+initial UI thresholds, not measured accuracy guarantees. Chinese classification
+accuracy, latency and coverage still need evaluation on consented representative
+data. Transfers, refunds, repayments and uncertain cases display candidates for
+manual selection. Every transaction remains subject to the import confirmation
+and canonical local validator. Category replacement preserves the original
+decimal posting strings, funding account, amounts, tags and metadata.
+
+Review shows progress, a stop/resume action, candidate accounts, matching history,
+and an option to restore the original category. Results stay within the current
+preview. Manual edits win over in-flight answers. Preview changes, ledger
+changes, privacy shielding, disabling the feature, key changes and opening the save confirmation
+cancel classification; stale responses are discarded. Service/auth/quota failures
+preserve completed suggestions and the manual import path. Calls are sequential
+and retries are explicit to keep the user's paid request count predictable.
+
+Validation: run `ImportClassificationTests` and `LedgerImportModelsTests` in the
+`LedgerMobile` Xcode scheme. The API tests use synthetic transactions and a mock
+transport; live Jev quality testing requires a personal key and separately
+consented data. A model confidence value describes distribution concentration,
+not the probability that the entire accounting workflow is correct.
 
 ## Local write transaction
 
