@@ -97,7 +97,7 @@ enum LocalStorageError: LocalizedError, Equatable {
     }
 }
 
-struct LocalGitConfiguration: Codable, Equatable, Sendable {
+struct LocalGitConfiguration: Codable, Equatable, Hashable, Sendable {
     let id: UUID
     let repositoryURL: URL
     let branch: String

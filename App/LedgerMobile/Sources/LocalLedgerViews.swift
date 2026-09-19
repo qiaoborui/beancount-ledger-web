@@ -8,6 +8,9 @@ struct LedgerLibraryView: View {
     @State private var creating = false
     @State private var importing = false
     @State private var addingGit = false
+    @State private var editingLedger: LocalLedgerDescriptor?
+    @State private var deletingLedger: LocalLedgerDescriptor?
+    @State private var confirmingDelete = false
 
     var body: some View {
         NavigationStack {
@@ -71,11 +74,94 @@ struct LedgerLibraryView: View {
                 if !session.localLedgers.isEmpty {
                     Section("本地账本") {
                         ForEach(session.localLedgers) { ledger in
-                            Button { Task { await session.openLocalLedger(ledger) } } label: {
-                                LabeledContent {
-                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                            HStack(spacing: LedgerSpacing.md) {
+                                Button {
+                                    Task { await session.openLocalLedger(ledger) }
                                 } label: {
-                                    Label(ledger.name, systemImage: "book.closed")
+                                    HStack(spacing: LedgerSpacing.md) {
+                                        Image(systemName: ledger.git != nil ? "arrow.triangle.branch" : "book.closed.fill")
+                                            .font(.title3)
+                                            .foregroundStyle(LedgerPalette.cobalt)
+                                            .frame(width: 28)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(ledger.name)
+                                                .font(.body.weight(.medium))
+                                                .foregroundStyle(LedgerPalette.ink)
+                                            HStack(spacing: 4) {
+                                                Text(ledger.git != nil ? "Git 同步" : "本机存储")
+                                                Text("·")
+                                                Text(ledger.entrypoint)
+                                            }
+                                            .font(.caption2)
+                                            .foregroundStyle(LedgerPalette.secondary)
+                                        }
+                                        Spacer()
+                                    }
+                                }
+                                .buttonStyle(.plain)
+
+                                Menu {
+                                    Button {
+                                        Task { await session.openLocalLedger(ledger) }
+                                    } label: {
+                                        Label("打开账本", systemImage: "arrow.right.circle")
+                                    }
+                                    Button {
+                                        editingLedger = ledger
+                                    } label: {
+                                        Label("编辑信息", systemImage: "pencil")
+                                    }
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        deletingLedger = ledger
+                                        confirmingDelete = true
+                                    } label: {
+                                        Label("删除账本", systemImage: "trash")
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                        .font(.subheadline)
+                                        .foregroundStyle(LedgerPalette.secondary)
+                                        .frame(width: 32, height: 32)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("local-ledger-menu-\(ledger.id.uuidString)")
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    deletingLedger = ledger
+                                    confirmingDelete = true
+                                } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
+                                .accessibilityIdentifier("local-ledger-swipe-delete-\(ledger.id.uuidString)")
+
+                                Button {
+                                    editingLedger = ledger
+                                } label: {
+                                    Label("编辑", systemImage: "pencil")
+                                }
+                                .tint(LedgerPalette.cobalt)
+                                .accessibilityIdentifier("local-ledger-swipe-edit-\(ledger.id.uuidString)")
+                            }
+                            .contextMenu {
+                                Button {
+                                    Task { await session.openLocalLedger(ledger) }
+                                } label: {
+                                    Label("打开账本", systemImage: "arrow.right.circle")
+                                }
+                                Button {
+                                    editingLedger = ledger
+                                } label: {
+                                    Label("编辑信息", systemImage: "pencil")
+                                }
+                                Divider()
+                                Button(role: .destructive) {
+                                    deletingLedger = ledger
+                                    confirmingDelete = true
+                                } label: {
+                                    Label("删除账本", systemImage: "trash")
                                 }
                             }
                             .accessibilityIdentifier("local-ledger-\(ledger.id.uuidString)")
@@ -94,6 +180,24 @@ struct LedgerLibraryView: View {
             .sheet(isPresented: $creating) { LocalLedgerSetupView(importing: false) }
             .sheet(isPresented: $importing) { LocalLedgerSetupView(importing: true) }
             .sheet(isPresented: $addingGit) { GitLedgerSetupView() }
+            .sheet(item: $editingLedger) { ledger in
+                EditLedgerSheet(ledger: ledger)
+            }
+            .confirmationDialog("确定删除账本？", isPresented: $confirmingDelete, titleVisibility: .visible) {
+                Button("永久删除账本", role: .destructive) {
+                    if let ledger = deletingLedger {
+                        Task {
+                            try? await session.deleteLocalLedger(ledger)
+                            deletingLedger = nil
+                        }
+                    }
+                }
+                Button("取消", role: .cancel) {
+                    deletingLedger = nil
+                }
+            } message: {
+                Text("将永久删除账本“\(deletingLedger?.name ?? "")”及其所有本地文件与配置，此操作不可恢复。")
+            }
         }
     }
 }
@@ -281,5 +385,135 @@ private struct LocalLedgerFileEditor: View {
             await session.refresh()
             error = nil
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct EditLedgerSheet: View {
+    @EnvironmentObject private var session: LedgerSession
+    @Environment(\.dismiss) private var dismiss
+
+    let ledger: LocalLedgerDescriptor
+    var onDeleted: (() -> Void)? = nil
+
+    @State private var name: String
+    @State private var entrypoint: String
+    @State private var saving = false
+    @State private var confirmingDelete = false
+    @State private var error: String?
+
+    init(ledger: LocalLedgerDescriptor, onDeleted: (() -> Void)? = nil) {
+        self.ledger = ledger
+        self.onDeleted = onDeleted
+        _name = State(initialValue: ledger.name)
+        _entrypoint = State(initialValue: ledger.entrypoint)
+    }
+
+    private var hasChanges: Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedEntry = entrypoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (!trimmedName.isEmpty && trimmedName != ledger.name) ||
+               (!trimmedEntry.isEmpty && trimmedEntry != ledger.entrypoint)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let error {
+                    Section {
+                        StatusBanner(message: error) { self.error = nil }
+                    }
+                }
+
+                Section {
+                    TextField("账本名称", text: $name)
+                        .accessibilityIdentifier("edit-ledger-name")
+                    TextField("入口文件", text: $entrypoint)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.system(.body, design: .monospaced))
+                        .accessibilityIdentifier("edit-ledger-entrypoint")
+                } header: {
+                    Text("基本信息")
+                } footer: {
+                    Text("入口文件通常为 main.bean，需位于账本根目录下。")
+                }
+
+                Section("账本属性") {
+                    LabeledContent("存储方式", value: ledger.git == nil ? "本机独立存储" : "Git 仓库协同")
+                    LabeledContent("创建时间", value: ledger.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    LabeledContent("账本标识", value: String(ledger.id.uuidString.prefix(8))).font(.caption.monospaced())
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        confirmingDelete = true
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label("删除此账本", systemImage: "trash")
+                                .foregroundStyle(LedgerPalette.risk)
+                            Spacer()
+                        }
+                    }
+                    .accessibilityIdentifier("edit-ledger-delete")
+                } footer: {
+                    Text("删除操作将永久清空此账本在本机的所有数据文件，不可撤销。")
+                }
+            }
+            .navigationTitle("编辑账本")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                        .disabled(saving)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        Task { await save() }
+                    }
+                    .disabled(!hasChanges || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saving)
+                    .accessibilityIdentifier("edit-ledger-save")
+                }
+            }
+            .confirmationDialog("确定删除账本“\(ledger.name)”？", isPresented: $confirmingDelete, titleVisibility: .visible) {
+                Button("永久删除账本", role: .destructive) {
+                    Task { await deleteLedger() }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("此操作将永久删除该账本在本机存储的所有数据文件与配置，无法恢复。")
+            }
+            .overlay {
+                if saving {
+                    ProgressView("正在保存修改")
+                        .padding()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .interactiveDismissDisabled(saving)
+        }
+    }
+
+    private func save() async {
+        saving = true
+        defer { saving = false }
+        do {
+            try await session.updateLocalLedger(ledger, name: name, entrypoint: entrypoint)
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func deleteLedger() async {
+        saving = true
+        defer { saving = false }
+        do {
+            try await session.deleteLocalLedger(ledger)
+            onDeleted?()
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }

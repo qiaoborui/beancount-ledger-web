@@ -190,5 +190,67 @@ final class OnboardingWizardTests: XCTestCase {
         XCTAssertFalse(wechatSearch.isEmpty)
         XCTAssertTrue(wechatSearch.contains { $0.name.contains("微信") })
     }
+
+    func testCatalogUpdateLedgerNameAndEntrypoint() async throws {
+        let root = try tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let catalog = LocalLedgerCatalog(rootDirectory: root, engine: MockEngine(), validator: { _, _ in })
+        let original = try await catalog.create(name: "原始账本", currency: "CNY")
+
+        let updated = try await catalog.update(ledgerID: original.id, name: "修改后的账本")
+        XCTAssertEqual(updated.name, "修改后的账本")
+        XCTAssertEqual(updated.id, original.id)
+        XCTAssertEqual(updated.entrypoint, "main.bean")
+
+        let list = try await catalog.list()
+        XCTAssertEqual(list.count, 1)
+        XCTAssertEqual(list.first?.name, "修改后的账本")
+    }
+
+    func testCatalogDeleteLedger() async throws {
+        let root = try tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let catalog = LocalLedgerCatalog(rootDirectory: root, engine: MockEngine(), validator: { _, _ in })
+        let l1 = try await catalog.create(name: "账本 1", currency: "CNY")
+        let l2 = try await catalog.create(name: "账本 2", currency: "CNY")
+
+        var list = try await catalog.list()
+        XCTAssertEqual(list.count, 2)
+
+        try await catalog.delete(ledgerID: l1.id)
+
+        list = try await catalog.list()
+        XCTAssertEqual(list.count, 1)
+        XCTAssertEqual(list.first?.id, l2.id)
+
+        let deletedDir = root.appendingPathComponent(l1.id.uuidString)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: deletedDir.path))
+    }
+
+    func testCatalogUpdateValidation() async throws {
+        let root = try tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let catalog = LocalLedgerCatalog(rootDirectory: root, engine: MockEngine(), validator: { _, _ in })
+        let original = try await catalog.create(name: "测试账本", currency: "CNY")
+
+        // Empty name throws
+        do {
+            _ = try await catalog.update(ledgerID: original.id, name: "   ")
+            XCTFail("Should throw on empty name")
+        } catch LocalLedgerError.invalidConfiguration {
+            // expected
+        }
+
+        // Non-existent entrypoint file throws
+        do {
+            _ = try await catalog.update(ledgerID: original.id, name: "新名字", entrypoint: "missing.bean")
+            XCTFail("Should throw on missing entrypoint file")
+        } catch LocalLedgerError.invalidConfiguration {
+            // expected
+        }
+    }
 }
 
