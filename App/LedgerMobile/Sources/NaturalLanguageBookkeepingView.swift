@@ -17,10 +17,12 @@ struct NaturalLanguageBookkeepingView: View {
     @State private var runID = UUID()
     @FocusState private var inputFocused: Bool
 
-    // Account picker sheet state
+    // Account picker & modal states
     @State private var accountPickerTarget: (recordIndex: Int, postingIndex: Int, title: String, accounts: [LedgerAccountChoice])?
     @State private var showDatePicker = false
     @State private var editingDateIndex = 0
+    @State private var showEditDetailsSheet = false
+    @State private var editingRecordIndex = 0
 
     struct Record: Identifiable, Equatable {
         let id = UUID()
@@ -45,47 +47,59 @@ struct NaturalLanguageBookkeepingView: View {
 
     private struct ExamplePrompt: Identifiable {
         let id = UUID()
-        let label: String
-        let icon: String
+        let emoji: String
+        let title: String
         let text: String
+        let tint: Color
     }
 
     private let examplePrompts: [ExamplePrompt] = [
-        .init(label: "餐饮外卖", icon: "fork.knife", text: "中午在美团外卖点餐 35 元，微信零钱支付。"),
-        .init(label: "地铁出行", icon: "tram", text: "今早乘坐地铁 7 元，支付宝花呗扣款。"),
-        .init(label: "买书垫付", icon: "book.closed", text: "昨天用招行信用卡买书 128 元，其中 48 元替同事垫付。"),
-        .init(label: "聚餐分摊", icon: "person.2", text: "昨晚和朋友吃火锅微信支付 240 元，收到转账 120 元。"),
-        .init(label: "信用卡还款", icon: "creditcard", text: "从工行储蓄卡转账 3000 元还招商银行信用卡。")
+        .init(emoji: "🍱", title: "美团外卖", text: "中午在美团外卖点餐 35 元，微信零钱支付。", tint: Color(red: 0.96, green: 0.55, blue: 0.18)),
+        .init(emoji: "🚇", title: "地铁出行", text: "今早乘坐地铁 7 元，支付宝花呗扣款。", tint: Color(red: 0.16, green: 0.54, blue: 0.95)),
+        .init(emoji: "☕️", title: "咖啡饮品", text: "下午买了一杯星巴克 32 元，招行信用卡付款。", tint: Color(red: 0.72, green: 0.48, blue: 0.28)),
+        .init(emoji: "📚", title: "买书分账", text: "昨天用招行信用卡买书 128 元，其中 48 元替同事垫付。", tint: Color(red: 0.35, green: 0.45, blue: 0.88)),
+        .init(emoji: "💳", title: "信用卡还款", text: "从工行储蓄卡转账 3000 元还招商银行信用卡。", tint: Color(red: 0.12, green: 0.68, blue: 0.36))
     ]
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: LedgerSpacing.md) {
-                    if !settings.canParse {
-                        unconfiguredNoticeSection
-                    }
+            ZStack(alignment: .bottom) {
+                ScrollView {
+                    VStack(spacing: LedgerSpacing.lg) {
+                        if !settings.canParse {
+                            unconfiguredHeroBanner
+                        }
 
-                    inputSection
+                        aiInputCard
 
-                    if let error {
-                        StatusBanner(message: error) { self.error = nil }
-                    }
+                        if let error {
+                            StatusBanner(message: error) { self.error = nil }
+                        }
 
-                    if let draft, !draft.questions.isEmpty {
-                        aiQuestionsBanner(draft.questions)
-                    }
+                        if let draft, !draft.questions.isEmpty {
+                            aiNoticePill(draft.questions)
+                        }
 
-                    if !records.isEmpty {
-                        resultSection
-                        actionsSection
+                        if !records.isEmpty {
+                            resultSection
+                            // Bottom padding for floating confirm bar
+                            Color.clear.frame(height: 80)
+                        } else {
+                            inspirationSection
+                        }
                     }
+                    .padding(.horizontal, LedgerSpacing.lg)
+                    .padding(.top, LedgerSpacing.sm)
+                    .padding(.bottom, LedgerSpacing.xl)
                 }
-                .padding(.horizontal, LedgerSpacing.md)
-                .padding(.vertical, LedgerSpacing.sm)
+                .scrollDismissesKeyboard(.interactively)
+
+                // Pinned bottom confirmation bar when result is ready
+                if !records.isEmpty {
+                    floatingActionBar
+                }
             }
             .background(LedgerPalette.canvas.ignoresSafeArea())
-            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("用一句话记账")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -95,6 +109,15 @@ struct NaturalLanguageBookkeepingView: View {
                         dismiss()
                     }
                     .disabled(busy)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink {
+                        BookkeepingSettingsView()
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
                 }
             }
             .sheet(item: $preview) { prepared in
@@ -131,6 +154,9 @@ struct NaturalLanguageBookkeepingView: View {
             .sheet(isPresented: $showDatePicker) {
                 datePickerSheet
             }
+            .sheet(isPresented: $showEditDetailsSheet) {
+                editDetailsSheet
+            }
         }
         .onChange(of: input) { _, _ in
             cancel()
@@ -149,104 +175,96 @@ struct NaturalLanguageBookkeepingView: View {
         .ledgerPrivacyProtectedSheet()
     }
 
-    // MARK: - Input Section
+    // MARK: - Unconfigured Notice Banner
 
-    private var unconfiguredNoticeSection: some View {
-        HStack(spacing: LedgerSpacing.sm) {
-            Image(systemName: "sparkles")
-                .foregroundStyle(LedgerPalette.gold)
-                .font(.title3)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("尚未配置语义解析模型")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(LedgerPalette.ink)
-                Text("支持连接 DeepSeek、OpenAI、Moonshot 等兼容大模型进行本地自然语言记账。")
-                    .font(.caption)
-                    .foregroundStyle(LedgerPalette.secondary)
+    private var unconfiguredHeroBanner: some View {
+        NavigationLink {
+            BookkeepingSettingsView()
+        } label: {
+            HStack(spacing: LedgerSpacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(LedgerPalette.cobalt.opacity(0.12))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Text("连接 AI 语义解析模型")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(LedgerPalette.ink)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
+                    Text("支持一键接入 DeepSeek、OpenAI、Moonshot 或硅基流动")
+                        .font(.system(size: 12))
+                        .foregroundStyle(LedgerPalette.secondary)
+                }
+
+                Spacer()
             }
-            Spacer()
-            NavigationLink("前往配置") {
-                BookkeepingSettingsView()
-            }
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(LedgerPalette.cobalt)
+            .padding(LedgerSpacing.md)
+            .background(LedgerPalette.panel)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(LedgerPalette.cobalt.opacity(0.2), lineWidth: 1)
+            )
         }
-        .padding(LedgerSpacing.md)
-        .background(LedgerPalette.raised)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(LedgerPalette.gold.opacity(0.3), lineWidth: 1)
-        )
+        .buttonStyle(.plain)
     }
 
-    private var inputSection: some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+    // MARK: - Modern AI Prompt Input Card
+
+    private var aiInputCard: some View {
+        VStack(spacing: 0) {
+            // Text input area
             ZStack(alignment: .topLeading) {
                 if input.isEmpty {
-                    Text("例如：中午在美团外卖点餐 35 元，微信零钱支付。")
-                        .font(.subheadline)
+                    Text("输入日常口语，如：中午在美团外卖点餐 35 元，微信零钱支付。")
+                        .font(.system(size: 15, weight: .regular))
                         .foregroundStyle(Color(uiColor: .placeholderText))
-                        .padding(.top, 8)
-                        .padding(.leading, 5)
+                        .padding(.top, 10)
+                        .padding(.leading, 6)
                         .allowsHitTesting(false)
                 }
+
                 TextEditor(text: $input)
-                    .frame(minHeight: 72)
+                    .frame(minHeight: records.isEmpty ? 88 : 64)
+                    .font(.system(size: 15, weight: .regular))
+                    .scrollContentBackground(.hidden)
+                    .padding(4)
                     .focused($inputFocused)
                     .accessibilityIdentifier("bookkeeping-natural-input")
             }
-            .padding(6)
-            .background(LedgerPalette.raised)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(LedgerPalette.line, lineWidth: 1)
-            )
+            .padding(.horizontal, LedgerSpacing.md)
+            .padding(.top, LedgerSpacing.sm)
 
-            // Example prompt chips
-            if records.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: LedgerSpacing.xs) {
-                        ForEach(examplePrompts) { prompt in
-                            Button {
-                                LedgerFeedback.light()
-                                input = prompt.text
-                                inputFocused = false
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: prompt.icon)
-                                        .font(.caption2)
-                                    Text(prompt.label)
-                                        .font(.caption.weight(.medium))
-                                }
-                                .padding(.horizontal, LedgerSpacing.sm)
-                                .padding(.vertical, 5)
-                                .background(LedgerPalette.raised)
-                                .clipShape(Capsule())
-                                .overlay(
-                                    Capsule().stroke(LedgerPalette.cardBorder, lineWidth: 1)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.vertical, 1)
-                }
-            }
+            Divider()
+                .overlay(LedgerPalette.line.opacity(0.5))
+                .padding(.horizontal, LedgerSpacing.md)
+                .padding(.vertical, 4)
 
-            HStack {
+            // Bottom toolbar inside card
+            HStack(spacing: LedgerSpacing.sm) {
                 NavigationLink {
                     BookkeepingSettingsView()
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: "gearshape")
-                            .font(.caption)
-                        Text("语义解析设置")
-                            .font(.caption)
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(LedgerPalette.cobalt)
+                        Text(settings.configuration.model.isEmpty ? "语义解析设置" : settings.configuration.model)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                            .lineLimit(1)
                     }
-                    .foregroundStyle(LedgerPalette.secondary)
                 }
+                .buttonStyle(.plain)
 
                 Spacer()
 
@@ -257,319 +275,416 @@ struct NaturalLanguageBookkeepingView: View {
                         draft = nil
                         records = []
                     } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "xmark.circle.fill")
-                            Text("清空")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(LedgerPalette.secondary)
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(LedgerPalette.secondary.opacity(0.8))
                     }
                     .buttonStyle(.plain)
+                    .padding(.trailing, 4)
                 }
-            }
 
-            Button {
-                LedgerFeedback.light()
-                parse()
-            } label: {
-                HStack(spacing: 6) {
-                    if busy {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.white)
-                        Text("正在解析并推断账户…")
-                    } else {
-                        Image(systemName: "sparkles")
-                        Text(records.isEmpty ? "发送并解析" : "重新解析")
+                // Parse / Send Button
+                Button {
+                    LedgerFeedback.light()
+                    parse()
+                } label: {
+                    HStack(spacing: 5) {
+                        if busy {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.white)
+                            Text("解析中…")
+                                .font(.system(size: 13, weight: .semibold))
+                        } else {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text(records.isEmpty ? "一键解析" : "重新解析")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
                     }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        (busy || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !settings.canParse)
+                        ? LedgerPalette.secondary.opacity(0.35)
+                        : LedgerPalette.cobalt
+                    )
+                    .clipShape(Capsule())
+                    .shadow(
+                        color: (input.isEmpty || !settings.canParse) ? .clear : LedgerPalette.cobalt.opacity(0.28),
+                        radius: 4, x: 0, y: 2
+                    )
                 }
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.white)
-                .background(
-                    (busy || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !settings.canParse)
-                    ? LedgerPalette.secondary.opacity(0.4)
-                    : LedgerPalette.cobalt
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .disabled(busy || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !settings.canParse)
+                .accessibilityIdentifier("bookkeeping-parse")
             }
-            .disabled(busy || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !settings.canParse)
-            .accessibilityIdentifier("bookkeeping-parse")
+            .padding(.horizontal, LedgerSpacing.md)
+            .padding(.bottom, LedgerSpacing.sm)
         }
-        .padding(LedgerSpacing.md)
         .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(LedgerPalette.cardBorder, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(inputFocused ? LedgerPalette.cobalt.opacity(0.5) : LedgerPalette.cardBorder, lineWidth: inputFocused ? 1.5 : 1)
         )
+        .shadow(color: Color.black.opacity(0.03), radius: 6, x: 0, y: 2)
     }
 
-    // MARK: - AI Questions Non-blocking Banner
+    // MARK: - Inspiration Prompts Carousel
 
-    private func aiQuestionsBanner(_ questions: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Image(systemName: "lightbulb.fill")
-                    .foregroundStyle(LedgerPalette.gold)
-                    .font(.caption)
-                Text("AI 提示与核对建议")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(LedgerPalette.ink)
-            }
-            ForEach(Array(questions.prefix(3).enumerated()), id: \.offset) { _, q in
-                Text("• \(q)")
-                    .font(.caption2)
-                    .foregroundStyle(LedgerPalette.secondary)
+    private var inspirationSection: some View {
+        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
+            Text("快捷灵感示例")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(LedgerPalette.secondary)
+                .padding(.leading, 4)
+
+            VStack(spacing: 8) {
+                ForEach(examplePrompts) { prompt in
+                    Button {
+                        LedgerFeedback.light()
+                        input = prompt.text
+                        inputFocused = false
+                    } label: {
+                        HStack(spacing: LedgerSpacing.md) {
+                            Text(prompt.emoji)
+                                .font(.system(size: 22))
+                                .frame(width: 36, height: 36)
+                                .background(prompt.tint.opacity(0.12))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(prompt.title)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(LedgerPalette.ink)
+                                Text(prompt.text)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(LedgerPalette.secondary)
+                                    .lineLimit(1)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "arrow.up.forward.circle.fill")
+                                .font(.system(size: 18))
+                                .foregroundStyle(prompt.tint.opacity(0.7))
+                        }
+                        .padding(12)
+                        .background(LedgerPalette.panel)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(LedgerPalette.cardBorder, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(LedgerSpacing.sm)
-        .background(LedgerPalette.gold.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.top, 4)
+    }
+
+    // MARK: - Non-blocking AI Advice Pill
+
+    private func aiNoticePill(_ questions: [String]) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "lightbulb.max.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(LedgerPalette.gold)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("AI 提示")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(LedgerPalette.gold)
+
+                ForEach(Array(questions.prefix(2).enumerated()), id: \.offset) { _, q in
+                    Text(q)
+                        .font(.system(size: 12))
+                        .foregroundStyle(LedgerPalette.ink.opacity(0.85))
+                }
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(LedgerPalette.gold.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(LedgerPalette.gold.opacity(0.25), lineWidth: 1)
         )
     }
 
-    // MARK: - Result Section (Unified Result-First Card)
+    // MARK: - Result Section (Apple Wallet / Receipt Style Card)
 
     private var resultSection: some View {
         VStack(spacing: LedgerSpacing.md) {
             ForEach(Array(records.enumerated()), id: \.element.id) { recordIndex, record in
-                transactionCard(record: binding(for: recordIndex), recordIndex: recordIndex)
+                transactionReceiptCard(record: binding(for: recordIndex), recordIndex: recordIndex)
             }
         }
     }
 
-    private func transactionCard(record: Binding<Record>, recordIndex: Int) -> some View {
-        VStack(alignment: .leading, spacing: LedgerSpacing.md) {
-            // Header: Amount + Date Badge
-            HStack(alignment: .firstTextBaseline) {
-                let mainAmount = heroAmount(for: record.wrappedValue)
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(mainAmount.currencySymbol)
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(mainAmount.isNegative ? LedgerPalette.expense : LedgerPalette.income)
-                    Text(mainAmount.text)
-                        .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(mainAmount.isNegative ? LedgerPalette.expense : LedgerPalette.income)
+    private func transactionReceiptCard(record: Binding<Record>, recordIndex: Int) -> some View {
+        let currentRecord = record.wrappedValue
+        let mainAmount = heroAmount(for: currentRecord)
+        let primaryCategory = currentRecord.postings.first(where: { !$0.account.hasPrefix("Assets:") && !$0.account.hasPrefix("Liabilities:") })?.account ?? ""
+        let visual = TransactionVisualCategory.resolve(account: primaryCategory)
+
+        return VStack(spacing: 0) {
+            // Receipt Header: Category Icon + Merchant + Hero Amount
+            HStack(alignment: .center, spacing: LedgerSpacing.md) {
+                // Circular gradient category icon
+                ZStack {
+                    Circle()
+                        .fill(visual.color.opacity(0.16))
+                        .frame(width: 46, height: 46)
+                    Image(systemName: visual.iconName)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(visual.color)
+                }
+
+                // Payee & Narration
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(currentRecord.payee.isEmpty ? (visual.categoryLabel.isEmpty ? "日常支出" : visual.categoryLabel) : currentRecord.payee)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(LedgerPalette.ink)
+                        .lineLimit(1)
+
+                    HStack(spacing: 4) {
+                        Text(currentRecord.narration.isEmpty ? "口语记账" : currentRecord.narration)
+                            .font(.system(size: 13))
+                            .foregroundStyle(LedgerPalette.secondary)
+                            .lineLimit(1)
+
+                        Button {
+                            LedgerFeedback.light()
+                            editingRecordIndex = recordIndex
+                            showEditDetailsSheet = true
+                        } label: {
+                            Image(systemName: "pencil.circle.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(LedgerPalette.cobalt)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
 
                 Spacer()
 
-                Button {
-                    LedgerFeedback.light()
-                    editingDateIndex = recordIndex
-                    showDatePicker = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "calendar")
-                            .font(.caption2)
-                        Text(record.wrappedValue.date)
-                            .font(.caption.weight(.semibold).monospacedDigit())
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .bold))
+                // Hero Amount Display
+                VStack(alignment: .trailing, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 1) {
+                        Text(mainAmount.isNegative ? "-" : "+")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundStyle(mainAmount.isNegative ? LedgerPalette.expense : LedgerPalette.income)
+                        Text(mainAmount.currencySymbol)
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(mainAmount.isNegative ? LedgerPalette.expense : LedgerPalette.income)
+                        Text(mainAmount.text)
+                            .font(.system(size: 22, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(mainAmount.isNegative ? LedgerPalette.expense : LedgerPalette.income)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(LedgerPalette.raised)
-                    .clipShape(Capsule())
-                    .overlay(
-                        Capsule().stroke(LedgerPalette.cardBorder, lineWidth: 1)
-                    )
+
+                    // Date Pill Button
+                    Button {
+                        LedgerFeedback.light()
+                        editingDateIndex = recordIndex
+                        showDatePicker = true
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 9))
+                            Text(currentRecord.date)
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 7, weight: .bold))
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(LedgerPalette.raised)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(LedgerSpacing.md)
 
-            // Payee & Narration Inputs
-            HStack(spacing: LedgerSpacing.sm) {
-                HStack(spacing: 4) {
-                    Image(systemName: "person.crop.circle")
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .font(.caption)
-                    TextField("交易对方", text: record.payee)
-                        .font(.subheadline.weight(.medium))
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(LedgerPalette.raised)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+            Divider()
+                .overlay(LedgerPalette.line.opacity(0.6))
 
-                HStack(spacing: 4) {
-                    Image(systemName: "text.bubble")
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .font(.caption)
-                    TextField("说明/摘要", text: record.narration)
-                        .font(.subheadline)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(LedgerPalette.raised)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-
-            Divider().overlay(LedgerPalette.line)
-
-            // Postings / Account Mappings
-            if record.wrappedValue.postings.count == 2 {
-                // 2-posting flow: Category (Posting 0) & Funding (Posting 1)
-                standardTwoPostingView(record: record, recordIndex: recordIndex)
+            // Postings Mapping Area
+            if currentRecord.postings.count == 2 {
+                twoPostingWorkflowView(record: record, recordIndex: recordIndex)
+                    .padding(LedgerSpacing.md)
             } else {
-                // Split posting flow (3+ legs)
-                splitPostingsListView(record: record, recordIndex: recordIndex)
+                splitPostingsWorkflowView(record: record, recordIndex: recordIndex)
+                    .padding(LedgerSpacing.md)
             }
         }
-        .padding(LedgerSpacing.md)
         .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(LedgerPalette.cardBorder, lineWidth: 1)
         )
+        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 3)
     }
 
-    // MARK: - 2-Posting Layout (Result-First Category & Funding)
+    // MARK: - 2-Posting Layout (Category ← Funding)
 
-    private func standardTwoPostingView(record: Binding<Record>, recordIndex: Int) -> some View {
-        VStack(spacing: LedgerSpacing.sm) {
-            // Posting 0: Category (Expense / Income)
-            postingCardRow(
+    private func twoPostingWorkflowView(record: Binding<Record>, recordIndex: Int) -> some View {
+        VStack(spacing: LedgerSpacing.md) {
+            // Category Posting
+            accountSelectionBlock(
+                title: "支出/收入分类",
+                systemIcon: "tag.fill",
+                iconColor: LedgerPalette.cobalt,
                 record: record,
                 recordIndex: recordIndex,
                 postingIndex: 0,
-                roleTitle: "分类",
-                isFundingRole: false
+                isFunding: false
             )
 
-            // Posting 1: Funding / Payment
-            postingCardRow(
+            // Subtle flow connector arrow
+            HStack {
+                Rectangle()
+                    .fill(LedgerPalette.line.opacity(0.6))
+                    .frame(height: 1)
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 9, weight: .bold))
+                    Text("资金流向")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .foregroundStyle(LedgerPalette.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(LedgerPalette.raised)
+                .clipShape(Capsule())
+                Rectangle()
+                    .fill(LedgerPalette.line.opacity(0.6))
+                    .frame(height: 1)
+            }
+
+            // Funding Posting
+            accountSelectionBlock(
+                title: "扣款/收款账户",
+                systemIcon: "creditcard.fill",
+                iconColor: LedgerPalette.olive,
                 record: record,
                 recordIndex: recordIndex,
                 postingIndex: 1,
-                roleTitle: "账户",
-                isFundingRole: true
+                isFunding: true
             )
         }
     }
 
-    private func postingCardRow(
+    private func accountSelectionBlock(
+        title: String,
+        systemIcon: String,
+        iconColor: Color,
         record: Binding<Record>,
         recordIndex: Int,
         postingIndex: Int,
-        roleTitle: String,
-        isFundingRole: Bool
+        isFunding: Bool
     ) -> some View {
         let postingBinding = record.postings[postingIndex]
         let currentAccount = postingBinding.wrappedValue.account
         let allAccounts = session.ledger?.accounts ?? []
-        let currentVisual = TransactionVisualCategory.resolve(account: currentAccount)
         let displayLabel = accountLabel(for: currentAccount, in: allAccounts)
+        let visual = TransactionVisualCategory.resolve(account: currentAccount)
 
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: LedgerSpacing.sm) {
-                // Role badge
-                Text(roleTitle)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(isFundingRole ? LedgerPalette.olive : LedgerPalette.cobalt)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background((isFundingRole ? LedgerPalette.olive : LedgerPalette.cobalt).opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                // Account label & icon
-                HStack(spacing: 5) {
-                    Image(systemName: isFundingRole ? "creditcard.fill" : currentVisual.iconName)
-                        .font(.caption)
-                        .foregroundStyle(isFundingRole ? LedgerPalette.olive : currentVisual.color)
-
-                    Text(currentAccount.isEmpty ? "请选择账户" : displayLabel)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(currentAccount.isEmpty ? LedgerPalette.risk : LedgerPalette.ink)
-                        .lineLimit(1)
-
-                    if !currentAccount.isEmpty {
-                        Text(currentAccount)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(LedgerPalette.secondary)
-                            .lineLimit(1)
-                    }
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                HStack(spacing: 4) {
+                    Image(systemName: systemIcon)
+                        .font(.system(size: 11))
+                        .foregroundStyle(iconColor)
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.secondary)
                 }
 
                 Spacer()
 
-                // Replace / pick from full list button
+                // Current selected account badge & replacement picker
                 Button {
                     LedgerFeedback.light()
                     openAccountPicker(
                         recordIndex: recordIndex,
                         postingIndex: postingIndex,
-                        title: "选择\(roleTitle)",
-                        isFunding: isFundingRole
+                        title: "选择\(title)",
+                        isFunding: isFunding
                     )
                 } label: {
-                    HStack(spacing: 2) {
-                        Text("更换")
-                            .font(.caption.weight(.medium))
+                    HStack(spacing: 4) {
+                        Text(currentAccount.isEmpty ? "未选择" : displayLabel)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(currentAccount.isEmpty ? LedgerPalette.risk : LedgerPalette.ink)
+                            .lineLimit(1)
                         Image(systemName: "chevron.down")
                             .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(LedgerPalette.secondary)
                     }
-                    .foregroundStyle(LedgerPalette.cobalt)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(LedgerPalette.cobalt.opacity(0.08))
-                    .clipShape(Capsule())
+                    .background(LedgerPalette.raised)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
 
-            // Candidate suggestion chips
-            let candidates = candidateAccounts(for: recordIndex, postingIndex: postingIndex, isFunding: isFundingRole)
+            // Interactive Candidate Chips
+            let candidates = candidateAccounts(for: recordIndex, postingIndex: postingIndex, isFunding: isFunding)
             if !candidates.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: LedgerSpacing.xs) {
+                    HStack(spacing: 6) {
                         ForEach(candidates, id: \.account) { candidate in
                             let isSelected = candidate.account == currentAccount
-                            let visual = TransactionVisualCategory.resolve(account: candidate.account)
+                            let candVisual = TransactionVisualCategory.resolve(account: candidate.account)
+
                             Button {
                                 LedgerFeedback.selection()
                                 postingBinding.wrappedValue.account = candidate.account
                             } label: {
                                 HStack(spacing: 4) {
-                                    Image(systemName: isFundingRole ? "creditcard" : visual.iconName)
-                                        .font(.caption2)
+                                    if isFunding {
+                                        Image(systemName: "creditcard")
+                                            .font(.system(size: 10))
+                                    } else {
+                                        Image(systemName: candVisual.iconName)
+                                            .font(.system(size: 10))
+                                    }
                                     Text(candidate.displayLabel)
-                                        .font(.caption.weight(isSelected ? .semibold : .regular))
+                                        .font(.system(size: 12, weight: isSelected ? .bold : .medium))
                                     if isSelected {
                                         Image(systemName: "checkmark")
                                             .font(.system(size: 8, weight: .bold))
                                     }
                                 }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(isSelected ? LedgerPalette.cobalt.opacity(0.14) : LedgerPalette.raised)
-                                .foregroundStyle(isSelected ? LedgerPalette.cobalt : LedgerPalette.ink)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
+                                .background(isSelected ? LedgerPalette.cobalt : LedgerPalette.raised)
+                                .foregroundStyle(isSelected ? .white : LedgerPalette.ink)
                                 .clipShape(Capsule())
                                 .overlay(
                                     Capsule().stroke(isSelected ? LedgerPalette.cobalt : LedgerPalette.cardBorder, lineWidth: 1)
                                 )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressScaleButtonStyle())
                         }
                     }
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 1)
                 }
             }
         }
-        .padding(8)
-        .background(LedgerPalette.raised.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    // MARK: - Split Postings List View (3+ legs)
+    // MARK: - Split Postings Workflow View (3+ legs)
 
-    private func splitPostingsListView(record: Binding<Record>, recordIndex: Int) -> some View {
+    private func splitPostingsWorkflowView(record: Binding<Record>, recordIndex: Int) -> some View {
         VStack(spacing: LedgerSpacing.sm) {
             ForEach(Array(record.wrappedValue.postings.enumerated()), id: \.element.id) { postingIndex, posting in
                 let postingBinding = record.postings[postingIndex]
@@ -581,34 +696,16 @@ struct NaturalLanguageBookkeepingView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: LedgerSpacing.sm) {
                         Text(isNegative ? "出" : "入")
-                            .font(.caption2.weight(.bold))
+                            .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(isNegative ? LedgerPalette.expense : LedgerPalette.income)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
                             .background((isNegative ? LedgerPalette.expense : LedgerPalette.income).opacity(0.12))
                             .clipShape(RoundedRectangle(cornerRadius: 4))
 
-                        HStack(spacing: 4) {
-                            Image(systemName: visual.iconName)
-                                .font(.caption2)
-                                .foregroundStyle(visual.color)
-                            Text(posting.account.isEmpty ? "请选择账户" : displayLabel)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(posting.account.isEmpty ? LedgerPalette.risk : LedgerPalette.ink)
-                                .lineLimit(1)
-                        }
-
-                        Spacer()
-
-                        TextField("金额", text: postingBinding.amount)
-                            .keyboardType(.numbersAndPunctuation)
-                            .font(.subheadline.weight(.medium).monospacedDigit())
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 80)
-
-                        Text(posting.currency)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(LedgerPalette.secondary)
+                        Image(systemName: visual.iconName)
+                            .font(.system(size: 12))
+                            .foregroundStyle(visual.color)
 
                         Button {
                             LedgerFeedback.light()
@@ -619,11 +716,29 @@ struct NaturalLanguageBookkeepingView: View {
                                 isFunding: isNegative
                             )
                         } label: {
-                            Image(systemName: "chevron.down.circle")
-                                .font(.caption)
-                                .foregroundStyle(LedgerPalette.cobalt)
+                            HStack(spacing: 2) {
+                                Text(posting.account.isEmpty ? "选择账户" : displayLabel)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(posting.account.isEmpty ? LedgerPalette.risk : LedgerPalette.ink)
+                                    .lineLimit(1)
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 7, weight: .bold))
+                                    .foregroundStyle(LedgerPalette.secondary)
+                            }
                         }
                         .buttonStyle(.plain)
+
+                        Spacer()
+
+                        TextField("金额", text: postingBinding.amount)
+                            .keyboardType(.numbersAndPunctuation)
+                            .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+
+                        Text(posting.currency)
+                            .font(.system(size: 11, weight: .medium).monospaced())
+                            .foregroundStyle(LedgerPalette.secondary)
 
                         if record.wrappedValue.postings.count > 2 {
                             Button(role: .destructive) {
@@ -631,18 +746,18 @@ struct NaturalLanguageBookkeepingView: View {
                                 record.wrappedValue.postings.remove(at: postingIndex)
                             } label: {
                                 Image(systemName: "trash")
-                                    .font(.caption2)
-                                    .foregroundStyle(LedgerPalette.risk.opacity(0.8))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(LedgerPalette.risk.opacity(0.7))
                             }
                             .buttonStyle(.plain)
                         }
                     }
 
-                    // Candidate chips for this leg
+                    // Candidate chips for split leg
                     let candidates = candidateAccounts(for: recordIndex, postingIndex: postingIndex, isFunding: isNegative)
                     if !candidates.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: LedgerSpacing.xs) {
+                            HStack(spacing: 5) {
                                 ForEach(candidates, id: \.account) { candidate in
                                     let isSelected = candidate.account == posting.account
                                     Button {
@@ -650,24 +765,21 @@ struct NaturalLanguageBookkeepingView: View {
                                         postingBinding.wrappedValue.account = candidate.account
                                     } label: {
                                         Text(candidate.displayLabel)
-                                            .font(.caption2.weight(isSelected ? .semibold : .regular))
+                                            .font(.system(size: 11, weight: isSelected ? .bold : .regular))
                                             .padding(.horizontal, 7)
                                             .padding(.vertical, 3)
-                                            .background(isSelected ? LedgerPalette.cobalt.opacity(0.14) : LedgerPalette.raised)
-                                            .foregroundStyle(isSelected ? LedgerPalette.cobalt : LedgerPalette.ink)
+                                            .background(isSelected ? LedgerPalette.cobalt : LedgerPalette.raised)
+                                            .foregroundStyle(isSelected ? .white : LedgerPalette.ink)
                                             .clipShape(Capsule())
-                                            .overlay(
-                                                Capsule().stroke(isSelected ? LedgerPalette.cobalt : LedgerPalette.cardBorder, lineWidth: 1)
-                                            )
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(PressScaleButtonStyle())
                                 }
                             }
                         }
                     }
                 }
                 .padding(8)
-                .background(LedgerPalette.raised.opacity(0.5))
+                .background(LedgerPalette.raised.opacity(0.45))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
@@ -679,17 +791,29 @@ struct NaturalLanguageBookkeepingView: View {
                     currency: session.ledger?.valuationCurrency ?? "CNY"
                 ))
             } label: {
-                Label("添加分录", systemImage: "plus.circle")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(LedgerPalette.cobalt)
+                HStack(spacing: 4) {
+                    Image(systemName: "plus.circle")
+                    Text("添加分录")
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(LedgerPalette.cobalt)
             }
         }
     }
 
-    // MARK: - Actions Section
+    // MARK: - Floating Pinned Action Bar
 
-    private var actionsSection: some View {
-        VStack(spacing: LedgerSpacing.sm) {
+    private var floatingActionBar: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.shield.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(LedgerPalette.success)
+                Text("Beancount 复式借贷平衡已通过校验")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(LedgerPalette.secondary)
+            }
+
             Button {
                 LedgerFeedback.light()
                 prepare()
@@ -697,26 +821,35 @@ struct NaturalLanguageBookkeepingView: View {
                 HStack(spacing: 8) {
                     if busy {
                         ProgressView().controlSize(.small).tint(.white)
-                        Text("正在校验完整账本…")
+                        Text("正在校验与写入…")
                     } else {
-                        Image(systemName: "checkmark.shield.fill")
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 16, weight: .semibold))
                         Text("确认并生成预览")
                     }
                 }
-                .font(.headline.weight(.semibold))
+                .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, minHeight: 48)
+                .frame(maxWidth: .infinity, minHeight: 50)
                 .background(canPrepare ? LedgerPalette.cobalt : LedgerPalette.secondary.opacity(0.4))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(color: canPrepare ? LedgerPalette.cobalt.opacity(0.3) : .clear, radius: 6, x: 0, y: 3)
             }
             .disabled(busy || !canPrepare)
             .accessibilityIdentifier("bookkeeping-prepare")
-
-            Text("本地 Beancount 引擎将自动校验复式平衡与语法规范。")
-                .font(.caption2)
-                .foregroundStyle(LedgerPalette.secondary)
         }
-        .padding(.top, LedgerSpacing.xs)
+        .padding(.horizontal, LedgerSpacing.lg)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+        .background(
+            LedgerPalette.canvas
+                .opacity(0.96)
+                .background(.ultraThinMaterial)
+                .ignoresSafeArea()
+        )
+        .overlay(alignment: .top) {
+            Divider().overlay(LedgerPalette.line.opacity(0.6))
+        }
     }
 
     private var canPrepare: Bool {
@@ -759,6 +892,29 @@ struct NaturalLanguageBookkeepingView: View {
         .presentationDetents([.medium])
     }
 
+    // MARK: - Edit Details Sheet (Payee & Narration)
+
+    private var editDetailsSheet: some View {
+        NavigationStack {
+            Form {
+                if records.indices.contains(editingRecordIndex) {
+                    Section("商户与用途") {
+                        TextField("交易对方 / 商户", text: $records[editingRecordIndex].payee)
+                        TextField("说明 / 摘要", text: $records[editingRecordIndex].narration)
+                    }
+                }
+            }
+            .navigationTitle("修改交易信息")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { showEditDetailsSheet = false }
+                }
+            }
+        }
+        .presentationDetents([.height(220)])
+    }
+
     // MARK: - Account Helpers & Matching
 
     private func binding(for recordIndex: Int) -> Binding<Record> {
@@ -771,7 +927,6 @@ struct NaturalLanguageBookkeepingView: View {
     private func heroAmount(for record: Record) -> (currencySymbol: String, text: String, isNegative: Bool) {
         let currency = record.postings.first?.currency ?? "CNY"
         let symbol = CookieFastTransactionEditorBody.currencySymbol(for: currency)
-        // Find first positive or primary expense amount
         if let expensePosting = record.postings.first(where: { !$0.amount.hasPrefix("-") && !$0.amount.isEmpty }) {
             return (symbol, expensePosting.amount, true)
         }
@@ -876,7 +1031,7 @@ struct NaturalLanguageBookkeepingView: View {
                       session.currentLocalLedgerDescriptor?.id == ledgerID,
                       session.phase == .ready, !session.privacyShielded else { return }
 
-                // Automatically run Jev account classification if enabled!
+                // Automatically run Jev account classification if enabled
                 if classificationSettings.isEnabled(for: ledgerID) {
                     if let classifier = try? classificationSettings.classifier() {
                         try? await session.loadGlobalTransactions(forceRefresh: false)
@@ -902,7 +1057,7 @@ struct NaturalLanguageBookkeepingView: View {
                     }
                 }
 
-                // If any accounts are still empty, use heuristic keyword matching!
+                // If any accounts are still empty, use heuristic keyword matching
                 let ledgerAccounts = session.ledger?.accounts ?? []
                 for r in finalRecords.indices {
                     for p in finalRecords[r].postings.indices {
@@ -945,7 +1100,6 @@ struct NaturalLanguageBookkeepingView: View {
               session.phase == .ready, !session.privacyShielded else { return }
         next.records = records.map(\.entry)
         next.revision = UUID()
-        // Auto-clear questions since user confirmed fields
         next.questions = []
         guard next.records.allSatisfy({ $0.postings.allSatisfy { !$0.amount.isEmpty && !$0.account.isEmpty } }) else {
             error = "请补充每条分录的账户和金额。"
