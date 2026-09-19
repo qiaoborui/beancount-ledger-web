@@ -40,8 +40,13 @@ let package = Package(
                 "PendingInboxView.swift",
                 "EventTagViews.swift",
                 "ReconciliationView.swift",
+                "AddAccountView.swift",
+                "AddCategoryView.swift",
+                "CategoriesManagementView.swift",
+                "OnboardingWizardView.swift",
+                "InstitutionPickerSheet.swift",
             ],
-            sources: ["LocalLedgerAutoSyncCoordinator.swift", "LocalLedgerWidgetPublisher.swift", "LocalLedgerBackgroundProtection.swift", "LocalLedgerBackgroundSyncService.swift", "LogicalLocalStorage.swift", "DeviceLocalStorage.swift", "GitLocalStorage.swift", "LocalGitTransport.swift", "LocalGitCredentialStore.swift", "LedgerSharedAccess.swift", "LedgerExternalRoute.swift", "LedgerSharedImportInbox.swift", "LedgerSharedImportApp.swift", "GlobalSearchModels.swift", "APIClient.swift", "BQLModels.swift", "BiometricUnlockService.swift", "CurrencyModels.swift", "ImportIndexActivityAttributes.swift", "ImportIndexActivityCoordinator.swift", "LedgerImportHistory.swift", "LedgerImportModels.swift", "LedgerModels.swift", "LedgerSession.swift", "LedgerWidgetCredentialStore.swift", "LedgerWidgetRefreshClient.swift", "LedgerWidgetSnapshot.swift", "LedgerWidgetSnapshotBuilder.swift", "LocalLedgerWorkspace.swift", "LocalLedgerAuthentication.swift", "LocalLedgerCatalog.swift", "LocalLedgerEngine.swift", "LocalLedgerRepository.swift", "EmbeddedBeancountValidator.swift", "MoneyText.swift", "PasskeyAuthenticationService.swift"]
+            sources: ["AccountPresetModels.swift", "LocalLedgerAutoSyncCoordinator.swift", "LocalLedgerWidgetPublisher.swift", "LocalLedgerBackgroundProtection.swift", "LocalLedgerBackgroundSyncService.swift", "LogicalLocalStorage.swift", "DeviceLocalStorage.swift", "GitLocalStorage.swift", "LocalGitTransport.swift", "LocalGitCredentialStore.swift", "LedgerSharedAccess.swift", "LedgerExternalRoute.swift", "LedgerSharedImportInbox.swift", "LedgerSharedImportApp.swift", "GlobalSearchModels.swift", "APIClient.swift", "BQLModels.swift", "BiometricUnlockService.swift", "CurrencyModels.swift", "ImportIndexActivityAttributes.swift", "ImportIndexActivityCoordinator.swift", "LedgerImportHistory.swift", "LedgerImportModels.swift", "LedgerModels.swift", "LedgerSession.swift", "LedgerWidgetCredentialStore.swift", "LedgerWidgetRefreshClient.swift", "LedgerWidgetSnapshot.swift", "LedgerWidgetSnapshotBuilder.swift", "LocalLedgerWorkspace.swift", "LocalLedgerAuthentication.swift", "LocalLedgerCatalog.swift", "LocalLedgerEngine.swift", "LocalLedgerRepository.swift", "EmbeddedBeancountValidator.swift", "MoneyText.swift", "PasskeyAuthenticationService.swift"]
         ),
         .testTarget(
             name: "LedgerMobileTests",

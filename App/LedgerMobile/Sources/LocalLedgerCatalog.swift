@@ -1,6 +1,6 @@
 import Foundation
 
-struct LocalLedgerDescriptor: Codable, Equatable, Identifiable, Sendable {
+struct LocalLedgerDescriptor: Codable, Equatable, Hashable, Identifiable, Sendable {
     let id: UUID
     let name: String
     let entrypoint: String
@@ -13,6 +13,34 @@ struct LocalLedgerDescriptor: Codable, Equatable, Identifiable, Sendable {
         self.entrypoint = entrypoint
         self.createdAt = createdAt
         self.git = git
+    }
+}
+
+public struct OnboardingAccountSelection: Codable, Equatable, Sendable {
+    public let name: String
+    public let account: String
+    public let currency: String
+    public let initialBalance: String?
+    public let isLiability: Bool
+
+    public init(name: String, account: String, currency: String = "CNY", initialBalance: String? = nil, isLiability: Bool = false) {
+        self.name = name
+        self.account = account
+        self.currency = currency
+        self.initialBalance = initialBalance
+        self.isLiability = isLiability
+    }
+}
+
+public struct OnboardingCategorySelection: Codable, Equatable, Sendable {
+    public let name: String
+    public let account: String
+    public let currency: String
+
+    public init(name: String, account: String, currency: String = "CNY") {
+        self.name = name
+        self.account = account
+        self.currency = currency
     }
 }
 
@@ -98,6 +126,63 @@ actor LocalLedgerCatalog {
         return updated
     }
 
+    /// Delete a local ledger by ID and removes its workspace directory and associated credentials.
+    func delete(ledgerID: UUID) throws {
+        if let existing = try? list().first(where: { $0.id == ledgerID }), let git = existing.git {
+            try? gitCredentials.remove(for: git.id)
+        }
+        let directory = rootDirectory.appendingPathComponent(ledgerID.uuidString)
+        if FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.removeItem(at: directory)
+        }
+    }
+
+    /// Updates an existing ledger's name and/or entrypoint.
+    @discardableResult
+    func update(ledgerID: UUID, name: String, entrypoint: String? = nil) async throws -> LocalLedgerDescriptor {
+        guard let old = try list().first(where: { $0.id == ledgerID }) else {
+            throw LocalLedgerError.invalidConfiguration("找不到指定的本地账本")
+        }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, trimmedName.count <= 120, !trimmedName.contains("\n"), !trimmedName.contains("\r") else {
+            throw LocalLedgerError.invalidConfiguration("账本名称需要为 1–120 个字符")
+        }
+
+        let targetEntrypoint: String
+        if let entrypoint {
+            let trimmedEntry = entrypoint.trimmingCharacters(in: .whitespacesAndNewlines)
+            let parts = trimmedEntry.split(separator: "/", omittingEmptySubsequences: false)
+            guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
+                  !trimmedEntry.contains("\\"), !trimmedEntry.contains("\0"), trimmedEntry.hasSuffix(".bean") else {
+                throw LocalLedgerError.invalidConfiguration("请选择账本目录内的 .bean 入口文件")
+            }
+            let fileURL = rootDirectory.appendingPathComponent(ledgerID.uuidString).appendingPathComponent(trimmedEntry)
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                throw LocalLedgerError.invalidConfiguration("入口文件 \(trimmedEntry) 在账本目录中不存在")
+            }
+            targetEntrypoint = trimmedEntry
+        } else {
+            targetEntrypoint = old.entrypoint
+        }
+
+        let updated = LocalLedgerDescriptor(
+            id: old.id,
+            name: trimmedName,
+            entrypoint: targetEntrypoint,
+            createdAt: old.createdAt,
+            git: old.git
+        )
+
+        if targetEntrypoint != old.entrypoint {
+            let workspaceURL = rootDirectory.appendingPathComponent(ledgerID.uuidString)
+            let validate = publicationValidator(for: updated)
+            try await validate(workspaceURL, targetEntrypoint)
+        }
+
+        try persist(updated)
+        return updated
+    }
+
     /// Importing a populated branch only downloads: the local and fetched trees
     /// are identical, so the provider has no commit to push.
     func importGit(repositoryURL: String, branch: String = "main", name: String,
@@ -124,28 +209,129 @@ actor LocalLedgerCatalog {
     }
 
     func create(name: String, currency: String = "CNY") async throws -> LocalLedgerDescriptor {
+        try await createCustom(name: name, currency: currency, accounts: [], categories: [])
+    }
+
+    func createCustom(
+        name: String,
+        currency: String = "CNY",
+        accounts: [OnboardingAccountSelection] = [],
+        categories: [OnboardingCategorySelection] = []
+    ) async throws -> LocalLedgerDescriptor {
         guard currency.range(of: "^[A-Z][A-Z0-9._-]{0,23}$", options: .regularExpression) != nil else {
             throw LocalLedgerError.invalidConfiguration("请输入有效的币种代码")
         }
         let descriptor = try makeDescriptor(name: name, entrypoint: "main.bean")
         let workspace = workspace(for: descriptor)
-        let content = """
-        option "title" "\(escape(descriptor.name))"
-        option "operating_currency" "\(currency)"
 
-        1970-01-01 commodity \(currency)
-        1970-01-01 open Assets:Cash \(currency)
-        1970-01-01 open Assets:Bank \(currency)
-        1970-01-01 open Liabilities:CreditCard \(currency)
-        1970-01-01 open Equity:Opening-Balances
-        1970-01-01 open Income:Salary \(currency)
-        1970-01-01 open Expenses:Food \(currency)
-        1970-01-01 open Expenses:Transport \(currency)
-        1970-01-01 open Expenses:Other \(currency)
+        var lines: [String] = []
+        lines.append("option \"title\" \"\(escape(descriptor.name))\"")
+        lines.append("option \"operating_currency\" \"\(currency)\"")
+        lines.append("")
 
-        """
+        var allCurrencies = Set<String>()
+        allCurrencies.insert(currency)
+        for a in accounts {
+            if !a.currency.isEmpty { allCurrencies.insert(a.currency) }
+        }
+        for c in categories {
+            if !c.currency.isEmpty { allCurrencies.insert(c.currency) }
+        }
+        for cur in allCurrencies.sorted() {
+            lines.append("1970-01-01 commodity \(cur)")
+        }
+        lines.append("")
+
+        lines.append("1970-01-01 open Equity:Opening-Balances")
+        lines.append("  alias: \"期初余额\"")
+
+        let effectiveAccounts = accounts.isEmpty ? [
+            OnboardingAccountSelection(name: "现金", account: "Assets:Cash", currency: currency),
+            OnboardingAccountSelection(name: "银行存款", account: "Assets:Bank", currency: currency),
+            OnboardingAccountSelection(name: "信用卡", account: "Liabilities:CreditCard", currency: currency, isLiability: true)
+        ] : accounts
+
+        for a in effectiveAccounts {
+            lines.append("1970-01-01 open \(a.account) \(a.currency)")
+            if !a.name.isEmpty {
+                lines.append("  alias: \"\(escape(a.name))\"")
+            }
+        }
+        lines.append("")
+
+        let effectiveCategories = categories.isEmpty ? [
+            OnboardingCategorySelection(name: "工资收入", account: "Income:Salary", currency: currency),
+            OnboardingCategorySelection(name: "餐饮美食", account: "Expenses:Food", currency: currency),
+            OnboardingCategorySelection(name: "交通出行", account: "Expenses:Transport", currency: currency),
+            OnboardingCategorySelection(name: "其他支出", account: "Expenses:Other", currency: currency)
+        ] : categories
+
+        for c in effectiveCategories {
+            lines.append("1970-01-01 open \(c.account) \(c.currency)")
+            if !c.name.isEmpty {
+                lines.append("  alias: \"\(escape(c.name))\"")
+            }
+        }
+        lines.append("")
+
+        let initialBalanceAccounts = effectiveAccounts.compactMap { acct -> (OnboardingAccountSelection, Decimal)? in
+            guard let raw = acct.initialBalance?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty,
+                  let dec = Decimal(string: raw), dec > 0 else { return nil }
+            return (acct, dec)
+        }
+
+        if !initialBalanceAccounts.isEmpty {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy-MM-dd"
+            let today = formatter.string(from: Date())
+
+            for (acct, dec) in initialBalanceAccounts {
+                let formatted = String(format: "%.2f", NSDecimalNumber(decimal: dec).doubleValue)
+                if acct.isLiability {
+                    lines.append("\(today) * \"期初余额\" \"初始化账户欠款 - \(escape(acct.name))\"")
+                    lines.append("  \(acct.account)  -\(formatted) \(acct.currency)")
+                    lines.append("  Equity:Opening-Balances  \(formatted) \(acct.currency)")
+                } else {
+                    lines.append("\(today) * \"期初余额\" \"初始化账户余额 - \(escape(acct.name))\"")
+                    lines.append("  \(acct.account)  \(formatted) \(acct.currency)")
+                    lines.append("  Equity:Opening-Balances  -\(formatted) \(acct.currency)")
+                }
+                lines.append("")
+            }
+        }
+
+        let content = lines.joined(separator: "\n") + "\n"
         let validate = publicationValidator(for: descriptor)
-        try await workspace.commit(changes: [.write(Data(content.utf8), to: descriptor.entrypoint)]) { root in
+
+        let alipayWallet = effectiveAccounts.first { $0.account.contains("Alipay") }?.account
+        let wechatWallet = effectiveAccounts.first { $0.account.contains("WeChat") }?.account
+        let bankAcct = effectiveAccounts.first { $0.account.hasPrefix("Assets:Bank") }?.account
+        let creditAcct = effectiveAccounts.first { $0.account.hasPrefix("Liabilities:CreditCard") }?.account
+        let catAccounts = effectiveCategories.map(\.account)
+
+        let alipayYaml = LedgerImportTemplates.generateAlipayConfig(
+            currency: currency,
+            walletAccount: alipayWallet,
+            bankAccount: bankAcct,
+            creditAccount: creditAcct,
+            categories: catAccounts
+        )
+        let wechatYaml = LedgerImportTemplates.generateWechatConfig(
+            currency: currency,
+            walletAccount: wechatWallet,
+            bankAccount: bankAcct,
+            creditAccount: creditAcct,
+            categories: catAccounts
+        )
+
+        let changes: [LocalLedgerWorkspace.Change] = [
+            .write(Data(content.utf8), to: descriptor.entrypoint),
+            .write(Data(alipayYaml.utf8), to: "imports/alipay-config.yaml"),
+            .write(Data(wechatYaml.utf8), to: "imports/wechat-config.yaml")
+        ]
+
+        try await workspace.commit(changes: changes) { root in
             try await validate(root, descriptor.entrypoint)
         }
         try persist(descriptor)
@@ -166,7 +352,7 @@ actor LocalLedgerCatalog {
         return descriptor
     }
 
-    private func workspace(for descriptor: LocalLedgerDescriptor) -> LocalLedgerWorkspace {
+    func workspace(for descriptor: LocalLedgerDescriptor) -> LocalLedgerWorkspace {
         LocalLedgerWorkspace(rootDirectory: rootDirectory.appendingPathComponent(descriptor.id.uuidString))
     }
 

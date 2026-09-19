@@ -407,6 +407,10 @@ private actor SafePreviewLedgerAPI: LedgerAPI {
         }
     }
 
+    func addAccount(baseURL: URL, input: LedgerAccountInput) async throws {
+        try await delayTransactionWriteIfRequested()
+    }
+
     private func delayTransactionWriteIfRequested() async throws {
         guard ProcessInfo.processInfo.arguments.contains("--safe-slow-transaction-write") else { return }
         // Keep pending UI observable across the system toolbar animation in UI tests.

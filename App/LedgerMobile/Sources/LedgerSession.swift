@@ -121,6 +121,10 @@ final class LedgerSession: ObservableObject {
         if case .local = location { return true }
         return false
     }
+    var currentLocalLedgerDescriptor: LocalLedgerDescriptor? {
+        guard case let .local(id) = location else { return nil }
+        return localLedgers.first(where: { $0.id == id })
+    }
     @Published private(set) var localLedgers: [LocalLedgerDescriptor] = []
     @Published private(set) var localLedgerName = "本地账本"
     @Published private(set) var isLocalOperationBusy = false
@@ -409,6 +413,15 @@ final class LedgerSession: ObservableObject {
     }
 
     func createLocalLedger(name: String, currency: String) async {
+        await createCustomLocalLedger(name: name, currency: currency, accounts: [], categories: [])
+    }
+
+    func createCustomLocalLedger(
+        name: String,
+        currency: String,
+        accounts: [OnboardingAccountSelection],
+        categories: [OnboardingCategorySelection]
+    ) async {
         guard !isLocalOperationBusy, !isAuthenticationBusy, let localCatalog else { return }
         isLocalOperationBusy = true
         errorMessage = nil
@@ -418,7 +431,12 @@ final class LedgerSession: ObservableObject {
         do {
             try await authenticateLocalLedger(epoch: epoch, location: expectedLocation)
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
-            let descriptor = try await localCatalog.create(name: name, currency: currency)
+            let descriptor = try await localCatalog.createCustom(
+                name: name,
+                currency: currency,
+                accounts: accounts,
+                categories: categories
+            )
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
             await refreshLocalLedgers()
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
@@ -458,6 +476,47 @@ final class LedgerSession: ObservableObject {
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
             try await activateLocalLedger(descriptor)
         } catch is CancellationError { } catch { errorMessage = error.localizedDescription }
+    }
+
+    @discardableResult
+    func updateLocalLedger(_ descriptor: LocalLedgerDescriptor, name: String, entrypoint: String? = nil) async throws -> LocalLedgerDescriptor {
+        guard let localCatalog else { throw LedgerRepositoryError.capabilityUnavailable("local storage") }
+        isLocalOperationBusy = true
+        errorMessage = nil
+        defer { isLocalOperationBusy = false }
+        do {
+            let updated = try await localCatalog.update(ledgerID: descriptor.id, name: name, entrypoint: entrypoint)
+            if case let .local(id) = location, id == descriptor.id {
+                localLedgerName = updated.name
+                repositories[.local(descriptor.id)] = localCatalog.repository(for: updated)
+            }
+            await refreshLocalLedgers()
+            return updated
+        } catch {
+            errorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
+    func deleteLocalLedger(_ descriptor: LocalLedgerDescriptor) async throws {
+        guard let localCatalog else { throw LedgerRepositoryError.capabilityUnavailable("local storage") }
+        isLocalOperationBusy = true
+        errorMessage = nil
+        defer { isLocalOperationBusy = false }
+        do {
+            try await localCatalog.delete(ledgerID: descriptor.id)
+            repositories.removeValue(forKey: .local(descriptor.id))
+            if defaults.string(forKey: Self.activeLocalLedgerKey) == descriptor.id.uuidString {
+                defaults.removeObject(forKey: Self.activeLocalLedgerKey)
+            }
+            if case let .local(id) = location, id == descriptor.id {
+                chooseLedger()
+            }
+            await refreshLocalLedgers()
+        } catch {
+            errorMessage = error.localizedDescription
+            throw error
+        }
     }
 
     private func authenticateLocalLedger(epoch: Int, location expectedLocation: LedgerLocation?) async throws {
@@ -996,6 +1055,53 @@ final class LedgerSession: ObservableObject {
         let epoch = sessionEpoch
         try await localRepository.addTransaction(entry: entry)
         guard epoch == sessionEpoch else { throw CancellationError() }
+        await refresh()
+    }
+
+    func addAccount(
+        account: String,
+        alias: String,
+        currency: String,
+        date: String,
+        openingBalance: String? = nil
+    ) async throws {
+        guard phase == .ready else {
+            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+        }
+        let input = LedgerAccountInput(date: date, account: account, alias: alias, currency: currency)
+        let epoch = sessionEpoch
+        if let localRepository {
+            try await localRepository.addAccount(input: input)
+            guard epoch == sessionEpoch else { throw CancellationError() }
+
+            if let openingBalance = openingBalance?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !openingBalance.isEmpty,
+               let balanceDecimal = Decimal(string: openingBalance),
+               balanceDecimal != 0 {
+                let isLiability = account.hasPrefix("Liabilities:")
+                let isPositive = balanceDecimal > 0
+                let accountAmount = isLiability ? (isPositive ? "-\(balanceDecimal)" : "\(abs(balanceDecimal))") : "\(balanceDecimal)"
+                let equityAmount = isLiability ? "\(balanceDecimal)" : (isPositive ? "-\(balanceDecimal)" : "\(abs(balanceDecimal))")
+                let entry = LedgerTransactionEntry(
+                    date: date,
+                    flag: "*",
+                    payee: "",
+                    narration: "期初余额",
+                    tags: [],
+                    links: [],
+                    postings: [
+                        LedgerTransactionEntryPosting(account: account, amount: accountAmount, currency: currency),
+                        LedgerTransactionEntryPosting(account: "Equity:Opening-Balances", amount: equityAmount, currency: currency)
+                    ]
+                )
+                try await localRepository.addTransaction(entry: entry)
+                guard epoch == sessionEpoch else { throw CancellationError() }
+            }
+        } else {
+            _ = try await performSensitiveRequest { repository in
+                try await repository.addAccount(input: input)
+            }
+        }
         await refresh()
     }
 

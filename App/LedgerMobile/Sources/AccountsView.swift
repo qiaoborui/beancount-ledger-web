@@ -161,6 +161,7 @@ struct AccountsView: View {
     @State private var expandedSectionIDs: Set<String> = []
     @State private var selectedFilter: AccountFilterCategory = .all
     @State private var showingReconciliationView = false
+    @State private var showingAddAccount = false
     @State private var selectedAccountForReconciliation: AccountBalanceRow? = nil
     var isRoot = true
 
@@ -360,16 +361,30 @@ struct AccountsView: View {
         .ledgerNavigation("账户", isRoot: isRoot, showsTimeRange: true)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showingReconciliationView = true
-                } label: {
-                    Image(systemName: "checkmark.seal")
+                HStack(spacing: LedgerSpacing.md) {
+                    Button {
+                        showingAddAccount = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("新建账户")
+                    .accessibilityIdentifier("accounts-add-button")
+
+                    Button {
+                        showingReconciliationView = true
+                    } label: {
+                        Image(systemName: "checkmark.seal")
+                    }
+                    .accessibilityLabel("账户对账")
                 }
-                .accessibilityLabel("账户对账")
             }
         }
         .navigationDestination(item: $session.externalAccount) { account in
             AccountDetailView(account: account.account, currency: account.currency)
+        }
+        .sheet(isPresented: $showingAddAccount) {
+            AddAccountView()
+                .ledgerPrivacyProtectedSheet()
         }
         .sheet(isPresented: $showingReconciliationView) {
             NavigationStack {
