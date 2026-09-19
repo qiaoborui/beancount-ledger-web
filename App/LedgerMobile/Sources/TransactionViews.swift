@@ -2668,7 +2668,9 @@ struct CookieFastTransactionEditorBody: View {
                 datePickerSheet
             }
             .sensoryFeedback(.error, trigger: failureFeedback)
-            .sheet(isPresented: $naturalLanguagePresented) { NaturalLanguageBookkeepingView() }
+            .sheet(isPresented: $naturalLanguagePresented) {
+                NaturalLanguageBookkeepingView { dismiss() }
+            }
             .sheet(item: $preparedBookkeeping) { preview in
                 BookkeepingPreviewView(preview: preview) { _ in dismiss() }
             }
@@ -3829,7 +3831,9 @@ struct TransactionEditorView: View {
                 advancedFormView
             }
         }
-        .sheet(isPresented: $naturalLanguagePresented) { NaturalLanguageBookkeepingView() }
+        .sheet(isPresented: $naturalLanguagePresented) {
+            NaturalLanguageBookkeepingView { dismiss() }
+        }
         .sheet(item: $preparedBookkeeping) { preview in
             BookkeepingPreviewView(preview: preview) { _ in dismiss() }
         }
