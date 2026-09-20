@@ -447,13 +447,26 @@ struct NaturalLanguageBookkeepingView: View {
 
                 // Payee & Narration
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(currentRecord.payee.isEmpty ? (visual.categoryLabel.isEmpty ? "日常支出" : visual.categoryLabel) : currentRecord.payee)
+                    let hasPayee = !currentRecord.payee.isEmpty
+                    let titleText: String = {
+                        if hasPayee { return currentRecord.payee }
+                        if !currentRecord.narration.isEmpty { return currentRecord.narration }
+                        return visual.categoryLabel.isEmpty ? "日常支出" : visual.categoryLabel
+                    }()
+                    let subtitleText: String = {
+                        if hasPayee {
+                            return currentRecord.narration.isEmpty ? (visual.categoryLabel.isEmpty ? "日常交易" : visual.categoryLabel) : currentRecord.narration
+                        }
+                        return visual.categoryLabel.isEmpty ? "未分类" : visual.categoryLabel
+                    }()
+
+                    Text(titleText)
                         .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(LedgerPalette.ink)
                         .lineLimit(1)
 
                     HStack(spacing: 4) {
-                        Text(currentRecord.narration.isEmpty ? "口语记账" : currentRecord.narration)
+                        Text(subtitleText)
                             .font(.system(size: 13))
                             .foregroundStyle(LedgerPalette.secondary)
                             .lineLimit(1)
@@ -468,6 +481,7 @@ struct NaturalLanguageBookkeepingView: View {
                                 .foregroundStyle(LedgerPalette.cobalt)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("修改商户或备注")
                     }
                 }
 
@@ -899,8 +913,8 @@ struct NaturalLanguageBookkeepingView: View {
             Form {
                 if records.indices.contains(editingRecordIndex) {
                     Section("商户与用途") {
-                        TextField("交易对方 / 商户", text: $records[editingRecordIndex].payee)
-                        TextField("说明 / 摘要", text: $records[editingRecordIndex].narration)
+                        TextField("商户 / 交易对方（选填）", text: $records[editingRecordIndex].payee)
+                        TextField("说明 / 备注", text: $records[editingRecordIndex].narration)
                     }
                 }
             }

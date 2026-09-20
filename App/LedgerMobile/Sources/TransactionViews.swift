@@ -2468,7 +2468,7 @@ struct CookieFastTransactionEditorBody: View {
     let initialTags: String
     let initialPostings: [EditableTransactionPosting]
     let onSave: (LedgerTransactionEntry) async throws -> Void
-    let onSwitchToAdvanced: () -> Void
+    let onSwitchToAdvanced: (Date, String, String, [EditableTransactionPosting]) -> Void
 
     @State private var kind: CookieEntryKind = .expense
     @State private var calculator = CookieKeypadCalculator()
@@ -2562,6 +2562,32 @@ struct CookieFastTransactionEditorBody: View {
         case "HKD": return "HK$"
         case "JPY": return "¥"
         default: return code
+        }
+    }
+
+    private var activePostings: [EditableTransactionPosting] {
+        if isSplitMode {
+            return splitPostings
+        }
+        let amt = calculator.displayText.replacingOccurrences(of: "-", with: "")
+        let amtStr = (amt.isEmpty || amt == "0") ? "0.00" : amt
+        let negAmtStr = "-\(amtStr)"
+        switch kind {
+        case .expense:
+            return [
+                EditableTransactionPosting(account: resolveExpenseAccount(), amount: amtStr, currency: selectedCurrency),
+                EditableTransactionPosting(account: assetAccount, amount: negAmtStr, currency: selectedCurrency)
+            ]
+        case .income:
+            return [
+                EditableTransactionPosting(account: resolveIncomeAccount(), amount: negAmtStr, currency: selectedCurrency),
+                EditableTransactionPosting(account: assetAccount, amount: amtStr, currency: selectedCurrency)
+            ]
+        case .transfer:
+            return [
+                EditableTransactionPosting(account: transferTargetAccount, amount: amtStr, currency: selectedCurrency),
+                EditableTransactionPosting(account: transferSourceAccount, amount: negAmtStr, currency: selectedCurrency)
+            ]
         }
     }
 
@@ -2696,7 +2722,7 @@ struct CookieFastTransactionEditorBody: View {
                 ToolbarItem(placement: .primaryAction) {
                     Button("高级") {
                         LedgerFeedback.light()
-                        onSwitchToAdvanced()
+                        onSwitchToAdvanced(date, payee, narration, activePostings)
                     }
                     .font(.system(size: 15, weight: .medium))
                     .disabled(saving)
@@ -3601,8 +3627,19 @@ struct CookieFastTransactionEditorBody: View {
 
     private func setupFromInitialValues() {
         date = initialDate
-        payee = initialPayee
-        narration = initialNarration
+        if CookieCategoryItem.expenseCategories.contains(where: { $0.name == initialPayee })
+            || CookieCategoryItem.incomeCategories.contains(where: { $0.name == initialPayee })
+            || initialPayee == "记账" || initialPayee == "拆分账单" || initialPayee == "转账" {
+            payee = ""
+            if initialNarration.isEmpty {
+                narration = initialPayee
+            } else {
+                narration = initialNarration
+            }
+        } else {
+            payee = initialPayee
+            narration = initialNarration
+        }
         tagsText = initialTags
 
         if initialPostings.count > 2 {
@@ -3725,16 +3762,21 @@ struct CookieFastTransactionEditorBody: View {
         guard !saving else { return }
         calculator.evaluateToResult()
 
-        let payeeName: String = {
-            let p = payee.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !p.isEmpty { return p }
-            if isSplitMode { return "拆分账单" }
-            if kind == .transfer { return "转账" }
-            let item = currentCategories.first(where: { $0.id == selectedCategoryID })
-            return item?.name ?? "记账"
-        }()
+        let cleanPayee = payee.trimmingCharacters(in: .whitespacesAndNewlines)
+        var cleanNarration = narration.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let cleanNarration = narration.trimmingCharacters(in: .whitespacesAndNewlines)
+        // If neither payee nor narration was entered, provide a default narration based on category/type
+        if cleanPayee.isEmpty && cleanNarration.isEmpty {
+            if isSplitMode {
+                cleanNarration = "拆分账单"
+            } else if kind == .transfer {
+                cleanNarration = "转账"
+            } else {
+                let item = currentCategories.first(where: { $0.id == selectedCategoryID })
+                cleanNarration = item?.name ?? (kind == .expense ? "支出" : "收入")
+            }
+        }
+
         let parsedTags: [String] = (try? LedgerTagRules.parse(tagsText)) ?? []
 
         let postings: [LedgerTransactionEntryPosting]
@@ -3797,7 +3839,7 @@ struct CookieFastTransactionEditorBody: View {
         let entry = LedgerTransactionEntry(
             date: Self.formatDate(date),
             flag: transaction?.editableEntry?.flag,
-            payee: payeeName,
+            payee: cleanPayee,
             narration: cleanNarration,
             metadata: [:],
             tags: parsedTags,
@@ -3844,7 +3886,7 @@ private enum TransactionEditorError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .payeeRequired: "请输入交易对方"
+        case .payeeRequired: "请输入交易说明或交易对方"
         case .metadataInvalid: "元数据需要使用 JSON 对象格式"
         case let .metadataKeyInvalid(key): "元数据键 \(key) 格式无效"
         case .postingsRequired: "交易至少需要两条分录"
@@ -4008,7 +4050,13 @@ struct TransactionEditorView: View {
                     initialTags: tagsText,
                     initialPostings: postings,
                     onSave: onSave,
-                    onSwitchToAdvanced: {
+                    onSwitchToAdvanced: { newDate, newPayee, newNarration, newPostings in
+                        date = newDate
+                        payee = newPayee
+                        narration = newNarration
+                        if !newPostings.isEmpty {
+                            postings = newPostings
+                        }
                         withAnimation(.easeInOut(duration: 0.2)) {
                             mode = .advanced
                         }
@@ -4270,7 +4318,8 @@ struct TransactionEditorView: View {
 
     private func makeEntry() throws -> LedgerTransactionEntry {
         let cleanedPayee = payee.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanedPayee.isEmpty else { throw TransactionEditorError.payeeRequired }
+        let cleanedNarration = narration.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanedPayee.isEmpty || !cleanedNarration.isEmpty else { throw TransactionEditorError.payeeRequired }
         let tags = tagsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? []
             : try LedgerTagRules.parse(tagsText)
@@ -4322,7 +4371,7 @@ struct TransactionEditorView: View {
             date: Self.formatDate(date),
             flag: transaction?.editableEntry?.flag,
             payee: cleanedPayee,
-            narration: narration.trimmingCharacters(in: .whitespacesAndNewlines),
+            narration: cleanedNarration,
             metadata: metadata,
             tags: tags,
             links: transaction?.editableEntry?.links ?? [],
