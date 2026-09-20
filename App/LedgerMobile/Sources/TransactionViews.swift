@@ -1423,6 +1423,15 @@ struct TransactionMoneyFlowView: View {
     }
 
     private func direct1to1Flow(from: TransactionMoneyFlowLeg, to: TransactionMoneyFlowLeg) -> some View {
+        // ViewThatFits tries the horizontal layout first; if either account name is
+        // too long to fit, it automatically falls back to the vertical stacked layout.
+        ViewThatFits(in: .horizontal) {
+            horizontalFlow(from: from, to: to)
+            verticalFlow(from: from, to: to)
+        }
+    }
+
+    private func horizontalFlow(from: TransactionMoneyFlowLeg, to: TransactionMoneyFlowLeg) -> some View {
         HStack(spacing: 6) {
             legBox(leg: from, title: "流出 / 来源", alignment: .leading)
 
@@ -1443,6 +1452,64 @@ struct TransactionMoneyFlowView: View {
         }
     }
 
+    private func verticalFlow(from: TransactionMoneyFlowLeg, to: TransactionMoneyFlowLeg) -> some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                iconBadge(leg: from)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("流出 / 来源")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(LedgerPalette.secondary)
+                    Text(from.label)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.ink)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(shortAccount(from.account))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+
+            HStack {
+                Rectangle().fill(LedgerPalette.line.opacity(0.6)).frame(height: 0.5)
+                VStack(spacing: 2) {
+                    Image(systemName: "arrow.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                    Text(MoneyText.format(minorUnits: flow.totalAmount, currency: flow.currency))
+                        .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                .padding(.horizontal, 6)
+                Rectangle().fill(LedgerPalette.line.opacity(0.6)).frame(height: 0.5)
+            }
+
+            HStack(spacing: 8) {
+                iconBadge(leg: to)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("流入 / 去向")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(LedgerPalette.secondary)
+                    Text(to.label)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(LedgerPalette.ink)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(shortAccount(to.account))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+        }
+    }
+
     private func legBox(leg: TransactionMoneyFlowLeg, title: String, alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 3) {
             Text(title)
@@ -1459,10 +1526,12 @@ struct TransactionMoneyFlowView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(LedgerPalette.ink)
                         .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                     Text(shortAccount(leg.account))
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(LedgerPalette.secondary)
                         .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
 
                 if alignment == .trailing {
