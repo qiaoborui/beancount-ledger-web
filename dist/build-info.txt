@@ -1,0 +1,8 @@
+Xcode 27.0
+Build version 27A5252f
+iPhoneOS SDK: 27.0
+Source: 657cf2f39febb594ac49cfc9664a1392db393b58
+App: 0.1.0 (33)
+Signing: ad-hoc; install and re-sign with SideStore / iLoader / AltStore
+Distribution: private local use only; public redistribution remains gated
+7c5a900e6e7621a5fce8e8ab36a84ae36b6983db09b6ad04663e13695cec2666  LedgerMobile-0.1.0-33-SideStore.ipa
