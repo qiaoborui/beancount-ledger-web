@@ -757,6 +757,14 @@ struct LedgerAccountPicker: View {
     @State private var showingAddAccount = false
     @State private var showingAddCategory = false
 
+    private var isCategoryPicker: Bool {
+        title.contains("分类")
+    }
+
+    private var isIncomeCategory: Bool {
+        title.contains("收入")
+    }
+
     private var filteredAccounts: [LedgerAccountChoice] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return accounts }
@@ -774,6 +782,16 @@ struct LedgerAccountPicker: View {
                 dismiss()
             } label: {
                 HStack(spacing: LedgerSpacing.md) {
+                    let visual = TransactionVisualCategory.resolve(account: choice.account, label: choice.label)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(visual.color.opacity(0.14))
+                            .frame(width: 32, height: 32)
+                        Image(systemName: visual.iconName)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(visual.color)
+                    }
+
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: LedgerSpacing.sm) {
                             Text(choice.label)
@@ -807,24 +825,37 @@ struct LedgerAccountPicker: View {
         .background(LedgerPalette.canvas)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .ledgerSearch(text: $query, prompt: "搜索账户名称或路径")
+        .ledgerSearch(text: $query, prompt: isCategoryPicker ? "搜索分类名称或路径" : "搜索账户名称或路径")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button {
-                        showingAddAccount = true
-                    } label: {
-                        Label("新建账户", systemImage: "building.columns")
-                    }
-                    Button {
-                        showingAddCategory = true
-                    } label: {
-                        Label("新建分类", systemImage: "tag")
+                    if isCategoryPicker {
+                        Button {
+                            showingAddCategory = true
+                        } label: {
+                            Label(isIncomeCategory ? "新建收入分类" : "新建支出分类", systemImage: "tag")
+                        }
+                        Button {
+                            showingAddAccount = true
+                        } label: {
+                            Label("新建账户", systemImage: "building.columns")
+                        }
+                    } else {
+                        Button {
+                            showingAddAccount = true
+                        } label: {
+                            Label("新建账户", systemImage: "building.columns")
+                        }
+                        Button {
+                            showingAddCategory = true
+                        } label: {
+                            Label("新建分类", systemImage: "tag")
+                        }
                     }
                 } label: {
                     Image(systemName: "plus")
                 }
-                .accessibilityLabel("新建账户或分类")
+                .accessibilityLabel(isCategoryPicker ? "新建分类" : "新建账户或分类")
             }
         }
         .sheet(isPresented: $showingAddAccount) {
@@ -832,15 +863,15 @@ struct LedgerAccountPicker: View {
                 .ledgerPrivacyProtectedSheet()
         }
         .sheet(isPresented: $showingAddCategory) {
-            AddCategoryView()
+            AddCategoryView(initialKind: isIncomeCategory ? .income : .expense)
                 .ledgerPrivacyProtectedSheet()
         }
         .overlay {
             if filteredAccounts.isEmpty {
                 EmptyLedgerState(
                     icon: "magnifyingglass",
-                    title: "没有匹配的账户",
-                    detail: "尝试搜索账户中文名称或完整路径。"
+                    title: isCategoryPicker ? "没有匹配的分类" : "没有匹配的账户",
+                    detail: isCategoryPicker ? "尝试搜索分类中文名称或完整路径。" : "尝试搜索账户中文名称或完整路径。"
                 )
             }
         }

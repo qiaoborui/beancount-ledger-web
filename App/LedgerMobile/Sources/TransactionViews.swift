@@ -2389,6 +2389,7 @@ struct CookieKeypadView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
         .buttonStyle(PressScaleButtonStyle())
+        .accessibilityIdentifier("keypad-\(label)")
     }
 
     private func keypadOperatorButton(_ op: String, action: @escaping () -> Void) -> some View {
@@ -2404,6 +2405,7 @@ struct CookieKeypadView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
         .buttonStyle(PressScaleButtonStyle())
+        .accessibilityIdentifier("keypad-op-\(op)")
     }
 
     private func keypadDeleteButton() -> some View {
@@ -2425,6 +2427,7 @@ struct CookieKeypadView: View {
             }
         )
         .buttonStyle(PressScaleButtonStyle())
+        .accessibilityIdentifier("keypad-delete")
     }
 
     private func keypadActionButton() -> some View {
@@ -2446,6 +2449,7 @@ struct CookieKeypadView: View {
         }
         .disabled(saving)
         .buttonStyle(PressScaleButtonStyle())
+        .accessibilityIdentifier("fast-entry-save-button")
     }
 }
 
@@ -2482,6 +2486,12 @@ struct CookieFastTransactionEditorBody: View {
     @State private var tagsText: String = ""
     @State private var selectedCurrency: String = "CNY"
 
+    private enum FocusedField: Hashable {
+        case payee
+        case narration
+    }
+    @FocusState private var focusedField: FocusedField?
+
     // Multi-posting / Split mode
     @State private var isSplitMode: Bool = false
     @State private var splitPostings: [EditableTransactionPosting] = []
@@ -2492,6 +2502,27 @@ struct CookieFastTransactionEditorBody: View {
     @State private var activeAccountPickerPurpose: AccountPickerPurpose?
     @State private var showDatePickerSheet = false
     @State private var failureFeedback = 0
+
+    private var currentCategoryDisplayName: String {
+        if kind == .expense {
+            if let custom = customExpenseAccount, !custom.isEmpty {
+                return accounts.first(where: { $0.account == custom })?.displayLabel ?? custom.components(separatedBy: ":").last ?? custom
+            }
+            if let item = CookieCategoryItem.expenseCategories.first(where: { $0.id == selectedCategoryID }) {
+                return item.name
+            }
+            return "支出分类"
+        } else if kind == .income {
+            if let custom = customIncomeAccount, !custom.isEmpty {
+                return accounts.first(where: { $0.account == custom })?.displayLabel ?? custom.components(separatedBy: ":").last ?? custom
+            }
+            if let item = CookieCategoryItem.incomeCategories.first(where: { $0.id == selectedCategoryID }) {
+                return item.name
+            }
+            return "收入分类"
+        }
+        return "分类"
+    }
 
     private enum AccountPickerPurpose: Identifiable, Equatable {
         case funding
@@ -2624,27 +2655,37 @@ struct CookieFastTransactionEditorBody: View {
                     .padding(.horizontal, LedgerSpacing.lg)
                     .padding(.vertical, LedgerSpacing.xs)
 
-                Divider()
-                    .overlay(LedgerPalette.line)
+                if focusedField == nil {
+                    Divider()
+                        .overlay(LedgerPalette.line)
 
-                CookieKeypadView(
-                    calculator: $calculator,
-                    actionTitle: calculator.isCalculationPending ? "=" : (transaction == nil ? "保存" : "完成"),
-                    actionColor: kind.themeColor,
-                    saving: saving,
-                    onCommit: {
-                        if calculator.isCalculationPending {
-                            calculator.evaluateToResult()
-                            updateActivePostingAmount()
-                            LedgerFeedback.selection()
-                        } else {
-                            Task { await save() }
+                    CookieKeypadView(
+                        calculator: $calculator,
+                        actionTitle: calculator.isCalculationPending ? "=" : (transaction == nil ? "保存" : "完成"),
+                        actionColor: kind.themeColor,
+                        saving: saving,
+                        onCommit: {
+                            if calculator.isCalculationPending {
+                                calculator.evaluateToResult()
+                                updateActivePostingAmount()
+                                LedgerFeedback.selection()
+                            } else {
+                                Task { await save() }
+                            }
                         }
-                    }
-                )
-                .background(LedgerPalette.canvas)
+                    )
+                    .background(LedgerPalette.canvas)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: focusedField != nil)
             .background(LedgerPalette.canvas)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if focusedField != nil {
+                    focusedField = nil
+                }
+            }
             .navigationTitle(transaction == nil ? "记一笔" : "编辑交易")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -2659,6 +2700,27 @@ struct CookieFastTransactionEditorBody: View {
                     }
                     .font(.system(size: 15, weight: .medium))
                     .disabled(saving)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    if focusedField == .payee {
+                        Button("切换到备注") {
+                            focusedField = .narration
+                        }
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                    } else if focusedField == .narration {
+                        Button("切换到商户") {
+                            focusedField = .payee
+                        }
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(LedgerPalette.cobalt)
+                    }
+                    Spacer()
+                    Button("收起键盘") {
+                        focusedField = nil
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(LedgerPalette.cobalt)
                 }
             }
             .sheet(item: $activeAccountPickerPurpose) { purpose in
@@ -3071,6 +3133,7 @@ struct CookieFastTransactionEditorBody: View {
                     let isSelected = selectedCategoryID == cat.id && customExpenseAccount == nil && customIncomeAccount == nil
                     Button {
                         LedgerFeedback.selection()
+                        focusedField = nil
                         withAnimation(.spring(response: 0.2, dampingFraction: 0.75)) {
                             selectedCategoryID = cat.id
                             customExpenseAccount = nil
@@ -3101,24 +3164,28 @@ struct CookieFastTransactionEditorBody: View {
                     .buttonStyle(PressScaleButtonStyle())
                 }
 
+                let isCustomActive = (kind == .expense && customExpenseAccount != nil) || (kind == .income && customIncomeAccount != nil)
                 Button {
                     LedgerFeedback.light()
+                    focusedField = nil
                     activeAccountPickerPurpose = .customCategory
                 } label: {
                     VStack(spacing: 6) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(customCategoryDisplayName != nil ? kind.themeColor.opacity(0.12) : Color(uiColor: .tertiarySystemFill))
+                                .fill(isCustomActive ? kind.themeColor : Color(uiColor: .tertiarySystemFill))
                                 .frame(width: 48, height: 48)
+                                .shadow(color: isCustomActive ? kind.themeColor.opacity(0.35) : .clear, radius: 6, x: 0, y: 3)
 
-                            Image(systemName: "ellipsis")
+                            Image(systemName: isCustomActive ? "tag.fill" : "ellipsis")
                                 .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(customCategoryDisplayName != nil ? kind.themeColor : LedgerPalette.secondary)
+                                .foregroundStyle(isCustomActive ? Color.white : LedgerPalette.secondary)
                         }
+                        .scaleEffect(isCustomActive ? 1.08 : 1.0)
 
                         Text(customCategoryDisplayName ?? "更多分类")
-                            .font(.system(size: 12, weight: customCategoryDisplayName != nil ? .semibold : .regular))
-                            .foregroundStyle(customCategoryDisplayName != nil ? kind.themeColor : LedgerPalette.secondary)
+                            .font(.system(size: 12, weight: isCustomActive ? .semibold : .regular))
+                            .foregroundStyle(isCustomActive ? LedgerPalette.ink : LedgerPalette.secondary)
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity)
@@ -3129,6 +3196,7 @@ struct CookieFastTransactionEditorBody: View {
             .padding(.horizontal, LedgerSpacing.lg)
             .padding(.vertical, LedgerSpacing.sm)
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private var customCategoryDisplayName: String? {
@@ -3144,6 +3212,7 @@ struct CookieFastTransactionEditorBody: View {
     private var transferRouteCard: some View {
         VStack(spacing: 16) {
             Button {
+                focusedField = nil
                 activeAccountPickerPurpose = .transferSource
             } label: {
                 HStack(spacing: 12) {
@@ -3173,6 +3242,7 @@ struct CookieFastTransactionEditorBody: View {
                 .foregroundStyle(LedgerPalette.cobalt)
 
             Button {
+                focusedField = nil
                 activeAccountPickerPurpose = .transferTarget
             } label: {
                 HStack(spacing: 12) {
@@ -3201,95 +3271,171 @@ struct CookieFastTransactionEditorBody: View {
 
     private var controlBar: some View {
         VStack(spacing: 8) {
-            // Row 1: Action pills with breathing room
-            HStack(spacing: 8) {
+            // Row 1: Action pills with category and account clearly distinguished
+            HStack(spacing: 6) {
                 if !isSplitMode && kind != .transfer {
+                    // Category Selector Pill
                     Button {
                         LedgerFeedback.light()
-                        activeAccountPickerPurpose = .funding
+                        focusedField = nil
+                        activeAccountPickerPurpose = .customCategory
                     } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: kind == .expense ? "creditcard.fill" : "building.columns.fill")
-                                .font(.system(size: 11))
-                            Text(accountDisplayName(assetAccount))
-                                .font(.system(size: 12.5, weight: .medium))
+                        HStack(spacing: 4) {
+                            Image(systemName: kind == .expense ? "tag.fill" : "banknote.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(kind.themeColor)
+                            Text(currentCategoryDisplayName)
+                                .font(.system(size: 12, weight: .medium))
                                 .lineLimit(1)
                             Image(systemName: "chevron.down")
-                                .font(.system(size: 8, weight: .bold))
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(LedgerPalette.secondary)
                         }
                         .foregroundStyle(LedgerPalette.ink)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
                         .background(LedgerPalette.panel, in: Capsule())
                         .overlay(Capsule().stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
                     }
                     .buttonStyle(PressScaleButtonStyle())
+                    .accessibilityLabel("选择分类，当前\(currentCategoryDisplayName)")
+                    .accessibilityIdentifier("CookieFastCategoryButton")
+
+                    // Account Selector Pill
+                    Button {
+                        LedgerFeedback.light()
+                        focusedField = nil
+                        activeAccountPickerPurpose = .funding
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: kind == .expense ? "creditcard.fill" : "building.columns.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(kind == .expense ? LedgerPalette.expense : LedgerPalette.income)
+                            Text(kind == .expense ? "付: \(accountDisplayName(assetAccount))" : "收: \(accountDisplayName(assetAccount))")
+                                .font(.system(size: 12, weight: .medium))
+                                .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                        .foregroundStyle(LedgerPalette.ink)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(LedgerPalette.panel, in: Capsule())
+                        .overlay(Capsule().stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
+                    }
+                    .buttonStyle(PressScaleButtonStyle())
+                    .accessibilityLabel(kind == .expense ? "选择付款账户，当前\(accountDisplayName(assetAccount))" : "选择收款账户，当前\(accountDisplayName(assetAccount))")
+                    .accessibilityIdentifier("CookieFastAccountButton")
                 }
 
                 Button {
                     LedgerFeedback.light()
+                    focusedField = nil
                     showDatePickerSheet = true
                 } label: {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 4) {
                         Image(systemName: "calendar")
-                            .font(.system(size: 11))
+                            .font(.system(size: 10))
                         Text(dateChipLabel)
-                            .font(.system(size: 12.5, weight: .medium))
+                            .font(.system(size: 12, weight: .medium))
                     }
                     .foregroundStyle(LedgerPalette.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
                     .background(LedgerPalette.panel, in: Capsule())
                     .overlay(Capsule().stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
                 }
                 .buttonStyle(PressScaleButtonStyle())
+                .accessibilityLabel("选择日期，当前\(dateChipLabel)")
+                .accessibilityIdentifier("CookieFastDateButton")
 
                 // Split mode toggle
                 Button {
                     LedgerFeedback.selection()
+                    focusedField = nil
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                         toggleSplitMode()
                     }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: isSplitMode ? "list.bullet.rectangle.fill" : "plus.forwardslash.minus")
-                            .font(.system(size: 11))
-                        Text(isSplitMode ? "分录 (\(splitPostings.count))" : "拆分分录")
-                            .font(.system(size: 12.5, weight: .medium))
+                            .font(.system(size: 10))
+                        Text(isSplitMode ? "分录 (\(splitPostings.count))" : "拆分")
+                            .font(.system(size: 12, weight: .medium))
                     }
                     .foregroundStyle(isSplitMode ? Color.white : LedgerPalette.cobalt)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
                     .background(isSplitMode ? LedgerPalette.cobalt : LedgerPalette.cobalt.opacity(0.1), in: Capsule())
                 }
                 .buttonStyle(PressScaleButtonStyle())
+                .accessibilityLabel(isSplitMode ? "关闭分录拆分" : "开启分录拆分")
+                .accessibilityIdentifier("CookieFastSplitButton")
 
-                Spacer()
+                Spacer(minLength: 0)
             }
 
-            // Row 2: Full-width narration / payee input pill
+            // Row 2: Merchant / Payee + Narration Inputs
             HStack(spacing: 8) {
-                Image(systemName: "pencil")
-                    .font(.system(size: 12))
-                    .foregroundStyle(LedgerPalette.secondary)
-                TextField("备注 / 交易对方", text: $narration)
-                    .font(.system(size: 13.5))
-                    .textInputAutocapitalization(.never)
-                if !narration.isEmpty {
-                    Button {
-                        narration = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(LedgerPalette.secondary)
+                // Payee
+                HStack(spacing: 6) {
+                    Image(systemName: "storefront")
+                        .font(.system(size: 11))
+                        .foregroundStyle(focusedField == .payee ? LedgerPalette.cobalt : LedgerPalette.secondary)
+                    TextField(kind == .income ? "付款方/单位" : "商户/对方", text: $payee)
+                        .font(.system(size: 13))
+                        .textInputAutocapitalization(.never)
+                        .focused($focusedField, equals: .payee)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .narration }
+                        .accessibilityIdentifier("CookieFastPayeeField")
+                    if !payee.isEmpty {
+                        Button { payee = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(focusedField == .payee ? LedgerPalette.cobalt : LedgerPalette.cardBorder.opacity(0.6), lineWidth: focusedField == .payee ? 1.5 : 0.5)
+                )
+
+                // Narration
+                HStack(spacing: 6) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11))
+                        .foregroundStyle(focusedField == .narration ? LedgerPalette.cobalt : LedgerPalette.secondary)
+                    TextField("备注说明", text: $narration)
+                        .font(.system(size: 13))
+                        .textInputAutocapitalization(.never)
+                        .focused($focusedField, equals: .narration)
+                        .submitLabel(.done)
+                        .onSubmit { focusedField = nil }
+                        .accessibilityIdentifier("CookieFastNarrationField")
+                    if !narration.isEmpty {
+                        Button { narration = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(LedgerPalette.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(focusedField == .narration ? LedgerPalette.cobalt : LedgerPalette.cardBorder.opacity(0.6), lineWidth: focusedField == .narration ? 1.5 : 0.5)
+                )
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
         }
     }
 
@@ -3301,9 +3447,24 @@ struct CookieFastTransactionEditorBody: View {
                     LedgerAccountChoice(account: $0.account, label: $0.displayLabel, group: $0.group, active: $0.active)
                 }
             case .customCategory:
-                let list = kind == .expense ? expenseAccounts : incomeAccounts
-                return list.map {
-                    LedgerAccountChoice(account: $0.account, label: $0.displayLabel, group: $0.group, active: $0.active)
+                if kind == .expense {
+                    if !expenseAccounts.isEmpty {
+                        return expenseAccounts.map {
+                            LedgerAccountChoice(account: $0.account, label: $0.displayLabel, group: $0.group, active: $0.active)
+                        }
+                    }
+                    return CookieCategoryItem.expenseCategories.map {
+                        LedgerAccountChoice(account: $0.defaultAccountPrefix, label: $0.name, group: "Expenses", active: true)
+                    }
+                } else {
+                    if !incomeAccounts.isEmpty {
+                        return incomeAccounts.map {
+                            LedgerAccountChoice(account: $0.account, label: $0.displayLabel, group: $0.group, active: $0.active)
+                        }
+                    }
+                    return CookieCategoryItem.incomeCategories.map {
+                        LedgerAccountChoice(account: $0.defaultAccountPrefix, label: $0.name, group: "Income", active: true)
+                    }
                 }
             case .splitPosting:
                 return activeAccounts.map {
@@ -3330,7 +3491,7 @@ struct CookieFastTransactionEditorBody: View {
                     get: {
                         switch purpose {
                         case .funding: return assetAccount
-                        case .transferSource: return transferSourceAccount
+                        case .transferSource: transferSourceAccount = transferSourceAccount.isEmpty ? assetAccount : transferSourceAccount; return transferSourceAccount
                         case .transferTarget: return transferTargetAccount
                         case .customCategory:
                             return (kind == .expense ? customExpenseAccount : customIncomeAccount) ?? ""
@@ -3455,43 +3616,57 @@ struct CookieFastTransactionEditorBody: View {
             let p1 = initialPostings[0]
             let p2 = initialPostings[1]
 
-            selectedCurrency = p1.currency.isEmpty ? "CNY" : p1.currency
+            selectedCurrency = p1.currency.isEmpty ? (p2.currency.isEmpty ? "CNY" : p2.currency) : p1.currency
 
-            let amtStr = p1.amount.replacingOccurrences(of: "-", with: "")
+            let rawAmt = (p1.amount.isEmpty || p1.amount == "0" || p1.amount == "0.00") ? p2.amount : p1.amount
+            let amtStr = rawAmt.replacingOccurrences(of: "-", with: "")
             if !amtStr.isEmpty && amtStr != "0" && amtStr != "0.00" {
                 var calc = CookieKeypadCalculator()
                 for ch in amtStr { calc.appendDigit(String(ch)) }
                 calculator = calc
             }
 
-            if p1.account.hasPrefix("Expenses:") {
+            let isP1Expense = p1.account.hasPrefix("Expenses:")
+            let isP2Expense = p2.account.hasPrefix("Expenses:")
+            let isP1Income = p1.account.hasPrefix("Income:")
+            let isP2Income = p2.account.hasPrefix("Income:")
+
+            if isP1Expense || isP2Expense {
                 kind = .expense
-                if let matchedCat = CookieCategoryItem.expenseCategories.first(where: { p1.account.hasPrefix($0.defaultAccountPrefix) }) {
+                let expensePosting = isP1Expense ? p1 : p2
+                let fundingPosting = isP1Expense ? p2 : p1
+                let acc = expensePosting.account
+
+                if let matchedCat = CookieCategoryItem.expenseCategories.first(where: { acc.hasPrefix($0.defaultAccountPrefix) || acc == $0.defaultAccountPrefix }) {
                     selectedCategoryID = matchedCat.id
-                    if resolveExpenseAccount() == p1.account {
+                    if resolveExpenseAccount() == acc {
                         customExpenseAccount = nil
                     } else {
-                        customExpenseAccount = p1.account
+                        customExpenseAccount = acc
                     }
                 } else {
                     selectedCategoryID = ""
-                    customExpenseAccount = p1.account
+                    customExpenseAccount = acc
                 }
-                assetAccount = p2.account
-            } else if p1.account.hasPrefix("Income:") {
+                assetAccount = fundingPosting.account
+            } else if isP1Income || isP2Income {
                 kind = .income
-                if let matchedCat = CookieCategoryItem.incomeCategories.first(where: { p1.account.hasPrefix($0.defaultAccountPrefix) }) {
+                let incomePosting = isP1Income ? p1 : p2
+                let fundingPosting = isP1Income ? p2 : p1
+                let acc = incomePosting.account
+
+                if let matchedCat = CookieCategoryItem.incomeCategories.first(where: { acc.hasPrefix($0.defaultAccountPrefix) || acc == $0.defaultAccountPrefix }) {
                     selectedCategoryID = matchedCat.id
-                    if resolveIncomeAccount() == p1.account {
+                    if resolveIncomeAccount() == acc {
                         customIncomeAccount = nil
                     } else {
-                        customIncomeAccount = p1.account
+                        customIncomeAccount = acc
                     }
                 } else {
                     selectedCategoryID = ""
-                    customIncomeAccount = p1.account
+                    customIncomeAccount = acc
                 }
-                assetAccount = p2.account
+                assetAccount = fundingPosting.account
             } else {
                 kind = .transfer
                 transferTargetAccount = p1.account
@@ -3517,10 +3692,16 @@ struct CookieFastTransactionEditorBody: View {
         guard let item = CookieCategoryItem.expenseCategories.first(where: { $0.id == selectedCategoryID }) else {
             return expenseAccounts.first?.account ?? "Expenses:Food:Meals"
         }
+        if let exact = expenseAccounts.first(where: { $0.account == item.defaultAccountPrefix }) {
+            return exact.account
+        }
         if let matched = expenseAccounts.first(where: { $0.account.hasPrefix(item.defaultAccountPrefix) }) {
             return matched.account
         }
-        return item.defaultAccountPrefix
+        if let byName = expenseAccounts.first(where: { $0.displayLabel == item.name }) {
+            return byName.account
+        }
+        return expenseAccounts.first?.account ?? item.defaultAccountPrefix
     }
 
     private func resolveIncomeAccount() -> String {
@@ -3528,10 +3709,16 @@ struct CookieFastTransactionEditorBody: View {
         guard let item = CookieCategoryItem.incomeCategories.first(where: { $0.id == selectedCategoryID }) else {
             return incomeAccounts.first?.account ?? "Income:Salary"
         }
+        if let exact = incomeAccounts.first(where: { $0.account == item.defaultAccountPrefix }) {
+            return exact.account
+        }
         if let matched = incomeAccounts.first(where: { $0.account.hasPrefix(item.defaultAccountPrefix) }) {
             return matched.account
         }
-        return item.defaultAccountPrefix
+        if let byName = incomeAccounts.first(where: { $0.displayLabel == item.name }) {
+            return byName.account
+        }
+        return incomeAccounts.first?.account ?? item.defaultAccountPrefix
     }
 
     private func save() async {
