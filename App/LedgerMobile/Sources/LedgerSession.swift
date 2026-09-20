@@ -632,8 +632,12 @@ final class LedgerSession: ObservableObject {
         _ = invalidateRequests()
         setLocallyLocked(false, for: contextURL)
         clearBackgroundDate(for: contextURL)
-        amountsVisible = applicationActive
-        privacyShielded = !applicationActive
+        // Authentication just succeeded; the scene is returning to active even if
+        // `applicationActive` hasn't been updated yet by the parallel scenePhase task.
+        // Unconditionally show amounts and drop the privacy shield so the app reveals
+        // content without a flash on Face ID / Touch ID unlock.
+        amountsVisible = true
+        privacyShielded = false
         phase = .ready
         scheduleLocalResumeRefresh(prepareAutomaticSync: true)
         return true
@@ -1259,8 +1263,10 @@ final class LedgerSession: ObservableObject {
             let usesLocalMarker = credential.deviceID == "local-biometric"
             if ledger != nil {
                 setLocallyLocked(false, for: contextURL)
-                amountsVisible = applicationActive
-                privacyShielded = !applicationActive
+                // Authentication just succeeded; unconditionally reveal content even if
+                // applicationActive hasn't updated yet from the parallel scenePhase task.
+                amountsVisible = true
+                privacyShielded = false
                 phase = .ready
             }
 
@@ -2494,7 +2500,10 @@ final class LedgerSession: ObservableObject {
             finishLocalAuthenticationForegroundWaiters(cancelled: false)
         }
         if !isActive {
-            if privacyCoverArmed || isBackground {
+            // System authentication (Face ID / Touch ID / device passcode) briefly deactivates
+            // the scene while the sheet is presented. Skip shielding during that transient
+            // inactive period so the privacy cover does not flash in and back out on unlock.
+            if (privacyCoverArmed || isBackground) && !systemAuthenticationInProgress {
                 privacyShielded = true
                 privacyCoverArmed = true
                 amountsVisible = false
