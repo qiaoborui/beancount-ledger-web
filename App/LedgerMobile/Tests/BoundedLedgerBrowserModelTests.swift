@@ -50,7 +50,7 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
             gate.withLock { _builds += 1; _offMain = _offMain && !Thread.isMainThread }
             if blockBuild {
                 queryStarted.signal()
-                guard queryRelease.wait(timeout: .now() + 5) == .success else {
+                guard await browserTestWait(queryRelease) else {
                     throw BoundedReadIndexError.canceled
                 }
             }
@@ -148,7 +148,7 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         model.prepareBuild()
         await eventually { model.confirmation != nil }
         model.confirmBuild()
-        let started = await Task.detached { workspace.queryStarted.wait(timeout: .now() + 5) == .success }.value
+        let started = await browserTestWait(workspace.queryStarted)
         XCTAssertTrue(started)
         model.lock()
         await eventually { workspace.locks >= 2 }
@@ -256,7 +256,7 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         model.open()
         await eventually { model.page != nil }
         model.nextPage()
-        let started = await Task.detached { workspace.queryStarted.wait(timeout: .now() + 5) == .success }.value
+        let started = await browserTestWait(workspace.queryStarted)
         XCTAssertTrue(started)
         model.firstPage()
         model.nextPage()
@@ -284,7 +284,7 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         model.showDetail(999) // Not on the current page: rejected locally.
         XCTAssertEqual(workspace.details, 0)
         model.showDetail(1)
-        let started = await Task.detached { workspace.queryStarted.wait(timeout: .now() + 5) == .success }.value
+        let started = await browserTestWait(workspace.queryStarted)
         XCTAssertTrue(started)
         model.lock()
         XCTAssertNil(model.detail)
@@ -292,5 +292,15 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         await eventually { workspace.closes == 1 }
         XCTAssertNil(model.detail)
         XCTAssertNil(model.page)
+    }
+}
+
+// Blocking fake synchronization stays on a dispatch worker, never a Swift
+// cooperative executor. Darwin marks semaphore waits noasync (Linux does not).
+private func browserTestWait(_ semaphore: DispatchSemaphore) async -> Bool {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.global().async {
+            continuation.resume(returning: semaphore.wait(timeout: .now() + 5) == .success)
+        }
     }
 }
