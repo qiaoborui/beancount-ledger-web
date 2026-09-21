@@ -23,11 +23,12 @@ actor EmbeddedBeancountValidator {
         let errors: [Diagnostic]
         let canonical: Data?
 
-        init(data: Data) throws {
+        init(data: Data, includeCanonical: Bool) throws {
             struct Diagnostics: Decodable { let errors: [Diagnostic] }
             errors = try JSONDecoder().decode(Diagnostics.self, from: data).errors
-            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            if errors.isEmpty, let model = object?["canonical"] as? [String: Any] {
+            if includeCanonical, errors.isEmpty,
+               let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let model = object["canonical"] as? [String: Any] {
                 canonical = try JSONSerialization.data(withJSONObject: model)
             } else {
                 canonical = nil
@@ -36,20 +37,20 @@ actor EmbeddedBeancountValidator {
     }
 
     func validate(workspace: URL, entryFile: String = "main.bean") throws {
-        _ = try load(workspace: workspace, entryFile: entryFile)
+        _ = try load(workspace: workspace, entryFile: entryFile, includeCanonical: false)
     }
 
     /// The canonical loader's booked, plugin-transformed entries are the
     /// financial read model. Source files remain the editable representation.
     func canonicalModel(workspace: URL, entryFile: String = "main.bean") throws -> Data {
-        let result = try load(workspace: workspace, entryFile: entryFile)
+        let result = try load(workspace: workspace, entryFile: entryFile, includeCanonical: true)
         guard let canonical = result.canonical else {
             throw ValidationError(message: "本地 Beancount 运行时缺少完整读取模型，请重新构建运行时")
         }
         return canonical
     }
 
-    private func load(workspace: URL, entryFile: String) throws -> Result {
+    private func load(workspace: URL, entryFile: String, includeCanonical: Bool) throws -> Result {
         #if canImport(BeancountRuntime)
         if !initialized {
             let failure = Bundle.main.bundlePath.withCString { BRInitialize($0) }
@@ -60,11 +61,13 @@ actor EmbeddedBeancountValidator {
             initialized = true
         }
         let pointer = workspace.path.withCString { root in
-            entryFile.withCString { BRValidate(root, $0) }
+            entryFile.withCString { entry in
+                includeCanonical ? BRValidate(root, entry) : BRValidateOnly(root, entry)
+            }
         }
         guard let pointer else { throw ValidationError(message: "本地校验器内存不足") }
         defer { BRFree(pointer) }
-        let result = try Result(data: Data(String(cString: pointer).utf8))
+        let result = try Result(data: Data(String(cString: pointer).utf8), includeCanonical: includeCanonical)
         guard result.errors.isEmpty else {
             let message = result.errors.prefix(20).map { diagnostic in
                 let location = diagnostic.filename.map { "\($0):\(diagnostic.lineno ?? 0) " } ?? ""

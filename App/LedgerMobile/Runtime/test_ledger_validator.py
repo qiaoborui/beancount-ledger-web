@@ -2,8 +2,11 @@ import json
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
-from ledger_validator import validate_json
+import ledger_validator
+
+from ledger_validator import validate_json, validate_only_json
 
 
 class CanonicalValidationTests(unittest.TestCase):
@@ -16,7 +19,10 @@ class CanonicalValidationTests(unittest.TestCase):
 
     def validate(self, text):
         (self.root / "main.bean").write_text(text)
-        return json.loads(validate_json(str(self.root)))["errors"]
+        full = json.loads(validate_json(str(self.root)))
+        diagnostics = json.loads(validate_only_json(str(self.root)))
+        self.assertEqual(diagnostics, {"errors": full["errors"]})
+        return full["errors"]
 
     def test_balanced_and_unbalanced(self):
         ledger = '''2000-01-01 open Assets:Cash CNY
@@ -142,6 +148,34 @@ plugin "beancount.plugins.implicit_prices"
                           ("Assets:Cash", "32", "USD")])
         self.assertEqual(sell["File"], "main.bean")
         self.assertEqual(sell["Line"], 12)
+
+    def test_validation_only_never_exports_entries_but_still_books_and_checks(self):
+        (self.root / "main.bean").write_text('''plugin "beancount.plugins.auto_accounts"
+2026-01-01 * "Lunch"
+  Assets:Cash -10 CNY
+  Expenses:Food 10 CNY
+''')
+        with mock.patch.object(ledger_validator, "_canonical_entry", side_effect=AssertionError("must not export")) as export:
+            with mock.patch.object(ledger_validator.loader, "_uncached_load_file",
+                                   wraps=ledger_validator.loader._uncached_load_file) as load:
+                self.assertEqual(json.loads(validate_only_json(str(self.root))), {"errors": []})
+                self.assertEqual(load.call_count, 1)
+                self.assertIs(load.call_args.args[2], ledger_validator.validation.HARDCORE_VALIDATIONS)
+            export.assert_not_called()
+        canonical = json.loads(validate_json(str(self.root)))["canonical"]
+        self.assertEqual(len([e for e in canonical["entries"] if e["Kind"] == "open"]), 2)
+
+    def test_validation_only_reloads_mutated_source_and_preserves_diagnostics(self):
+        self.assertEqual(self.validate("2000-01-01 open Assets:Cash CNY\n"), [])
+        self.assertTrue(self.validate("2000-01-02 balance Assets:Cash 1 CNY\n"))
+        self.assertEqual(self.validate("2000-01-01 open Assets:Cash CNY\n"), [])
+
+    def test_both_entrypoints_share_preflight_and_exception_diagnostics(self):
+        with mock.patch.object(ledger_validator, "_preflight", side_effect=ValueError("Synthetic preflight failure")):
+            (self.root / "main.bean").write_text("")
+            expected = {"errors": [{"message": "Synthetic preflight failure"}]}
+            self.assertEqual(json.loads(validate_only_json(str(self.root))), expected)
+            self.assertEqual(json.loads(validate_json(str(self.root))), expected)
 
 
 if __name__ == "__main__":

@@ -154,6 +154,16 @@ def _canonical_entry(root, entry):
 
 
 def validate_json(workspace, entry_file="main.bean"):
+    """Compatibility entrypoint: validate and export the canonical read model."""
+    return _validate_json(workspace, entry_file, export_canonical=True)
+
+
+def validate_only_json(workspace, entry_file="main.bean"):
+    """Run identical canonical validation without constructing unused read JSON."""
+    return _validate_json(workspace, entry_file, export_canonical=False)
+
+
+def _validate_json(workspace, entry_file, *, export_canonical):
     try:
         root = Path(workspace).resolve(strict=True)
         if not root.is_dir() or Path(entry_file).is_absolute():
@@ -174,7 +184,7 @@ def validate_json(workspace, entry_file="main.bean"):
             result.append({"message": error.message, "filename": filename,
                            "lineno": source.get("lineno", 0)})
         payload = {"errors": result}
-        if not result:
+        if not result and export_canonical:
             # The public option map is string-valued, matching the existing
             # API. List options retain its last-declaration behavior.
             option_values = {}
