@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -55,8 +56,66 @@ class PrivateIPATests(unittest.TestCase):
         for builder in ("build-ledgercore-xcframework.sh", "build-beancount-ios.sh"):
             self.assertLess(script.index(builder), archive)
         self.assertLess(script.index('"$framework"'), script.index('sign_bundle "$app"'))
-        for required in ("Python.framework", "ledger_validator.py", "licenses/Beancount-GPL-2.0.txt"):
+        for required in ("Python.framework", "ledger_validator.py", "ledger_stream.py", "ledger_stream_bridge.py", "licenses/Beancount-GPL-2.0.txt"):
             self.assertIn(required, script)
+
+
+class PythonRuntimePackagingTests(unittest.TestCase):
+    MODULES = ("ledger_validator", "ledger_stream", "ledger_stream_bridge")
+
+    def test_builder_stages_all_application_modules(self):
+        script = (ROOT / "scripts/build-beancount-ios.sh").read_text()
+        start = script.index("for module in ")
+        block = script[start:script.index("\ndone", start) + len("\ndone")]
+        with tempfile.TemporaryDirectory() as temp:
+            build = Path(temp)
+            (build / "packages").mkdir()
+            subprocess.run(["bash", "-eu", "-c", block], check=True,
+                           env={**os.environ, "ROOT": str(ROOT), "BUILD": str(build)})
+            for module in self.MODULES:
+                self.assertEqual((build / "packages" / (module + ".py")).read_bytes(),
+                                 (ROOT / "App/LedgerMobile/Runtime" / (module + ".py")).read_bytes())
+
+    @unittest.skipUnless(shutil.which("rsync"), "requires rsync")
+    def test_incremental_resource_packaging_refreshes_all_modules(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            script = scripts / "build-beancount-ios-resources.sh"
+            shutil.copyfile(ROOT / "scripts" / script.name, script)
+            runtime = root / "App/LedgerMobile/Runtime"
+            runtime.mkdir(parents=True)
+            build = root / "server/.build/beancount-ios"
+            packages = build / "packages"
+            packages.mkdir(parents=True)
+            for module in self.MODULES:
+                shutil.copyfile(ROOT / "App/LedgerMobile/Runtime" / (module + ".py"),
+                                runtime / (module + ".py"))
+                (packages / (module + ".py")).write_text("stale staged bridge")
+            upstream = build / "upstream/Python.xcframework/build"
+            upstream.mkdir(parents=True)
+            # Replace Apple-only stdlib install/signing, not resource packaging.
+            (upstream / "utils.sh").write_text(
+                'install_python() { mkdir -p "$CODESIGNING_FOLDER_PATH/python/lib/python3.14/test"; }\n')
+            app = root / "LedgerMobile.app"
+            env = {**os.environ, "CODESIGNING_FOLDER_PATH": str(app)}
+            for iteration in range(2):
+                subprocess.run(["bash", str(script)], env=env, check=True, capture_output=True)
+                for module in self.MODULES:
+                    self.assertEqual((app / "python/app_packages" / (module + ".py")).read_bytes(),
+                                     (runtime / (module + ".py")).read_bytes())
+                self.assertFalse((app / "python/lib/python3.14/test").exists())
+                # The next pass must copy current sources, not stale build cache.
+                for module in self.MODULES:
+                    with (runtime / (module + ".py")).open("a") as output:
+                        output.write("\n# incremental update\n")
+
+    def test_ipa_checks_current_sources_for_all_modules(self):
+        script = SCRIPT.read_text()
+        self.assertIn("for module in " + " ".join(self.MODULES) + "; do", script)
+        self.assertIn('cmp "$repo_root/App/LedgerMobile/Runtime/$module.py" '
+                      '"$app/python/app_packages/$module.py"', script)
 
 
 if __name__ == "__main__":

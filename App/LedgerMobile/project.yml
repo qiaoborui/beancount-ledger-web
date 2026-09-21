@@ -21,6 +21,7 @@ targets:
       - Resources
     dependencies:
       - sdk: libresolv.tbd
+      - sdk: libsqlite3.tbd
       - framework: ../../server/.build/ledgercore/LedgerCore.xcframework
         embed: false
       - framework: ../../server/.build/beancount-ios/BeancountRuntime.xcframework

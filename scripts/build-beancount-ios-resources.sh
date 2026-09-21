@@ -22,8 +22,10 @@ mkdir -p "$CODESIGNING_FOLDER_PATH/python/app_packages"
 rsync -a --exclude __pycache__ "$BUILD/packages/" "$CODESIGNING_FOLDER_PATH/python/app_packages/"
 # The application-owned bridge changes independently of compiled extensions.
 # Always package its current source, including incremental Xcode builds.
-install -m 644 "$ROOT/App/LedgerMobile/Runtime/ledger_validator.py" \
-    "$CODESIGNING_FOLDER_PATH/python/app_packages/ledger_validator.py"
+for module in ledger_validator ledger_stream ledger_stream_bridge; do
+    install -m 644 "$ROOT/App/LedgerMobile/Runtime/$module.py" \
+        "$CODESIGNING_FOLDER_PATH/python/app_packages/$module.py"
+done
 
 # ---------------------------------------------------------------------------
 # Prune the embedded Python environment to keep only what Beancount needs.
