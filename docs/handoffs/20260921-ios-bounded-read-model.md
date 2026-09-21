@@ -43,3 +43,13 @@
 - Next: push this commit and check PR mergeability and hosted macOS `swift test --jobs 2`; Apple runtime/device validation and prior broader milestones remain separate.
 
 - Hosted validation update 2026-09-21T14:37:32.919221+00:00: fix commit `ffcb83b308bf997dff6fdfbc8e4ecb2e67fbb8be` pushed; macOS CI https://github.com/qiaoborui/beancount-ledger-web/actions/runs/35613133553 compiled successfully and all 21 `BoundedLedgerPublicationTests` passed. Full suite ran 445 tests, 15 skipped, with one out-of-scope failure at `LocalLedgerPresentationCacheTests.swift:38` (`testCachedBootstrapValidatesTheSnapshotTreeOnce`, observed 0 vs expected 1). Both requested compile errors are resolved; scoped subtask completed. PR410 open/mergeable. Next broader-task action: investigate that separate cache-test failure under separate authorization; no other test or production file changed.
+
+
+## Scoped publication CI snapshot-validation fix
+
+- Task `20260921-ios-bounded-read-model`; scoped fix active; overall architecture task remains active. Updated 2026-09-21T14:41:53.992448+00:00.
+- Branch `codex/ios-readindex-publication`; code base `1c208678e9b58b533bf627cdd38aef09cf2c626f`; PR https://github.com/qiaoborui/beancount-ledger-web/pull/410. User authorized this minimal workspace/test fix, commit/push and hosted CI verification.
+- Confirmed root cause: publication switched tree enumeration to bounded POSIX directory reads; the cache performance test's FileManager override no longer measured validation. Added a default no-op, Sendable observer at the full-tree validation entry (not recursive traversal), preserving existing copy-hook trailing-closure compatibility. Replaced obsolete FileManager instrumentation; assert exactly one validation for first cached snapshot, exactly two after a second snapshot read, and zero engine calls. The 1,000-file nested fixture and original once-per-snapshot assertion remain.
+- Changed only `App/LedgerMobile/Sources/LocalLedgerWorkspace.swift`, `App/LedgerMobile/Tests/LocalLedgerPresentationCacheTests.swift`, and this shared note. No browser/UI, publication algorithm, traversal limits, ledger data or workflow changes.
+- Host validation on patch: `git diff --check` PASS; Swift 6.0.3 Linux container compiler parse of both Swift files in default and `LEDGER_BOUNDED_READ_INDEX` modes PASS; `swift package dump-package` PASS. Source review confirms observer runs only at full-tree entry, existing validation unchanged. These are static checks, not Apple execution.
+- Next: commit/push, watch macOS `iOS core tests` full package suite, fix any related failures, record tested SHA/run and inspect PR conflict state. No device or full architecture completion claimed.

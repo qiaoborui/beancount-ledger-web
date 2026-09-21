@@ -134,6 +134,7 @@ actor LocalLedgerWorkspace {
     private let generationsDirectory: URL
     private let stagingDirectory: URL
     private let currentRevisionFile: URL
+    private let treeValidationObserver: @Sendable () -> Void
     private let copyEntryHook: @Sendable (String) throws -> Void
     private let treeLimits: TreeLimits
     private var transactionInProgress = false
@@ -146,6 +147,7 @@ actor LocalLedgerWorkspace {
         rootDirectory: URL,
         fileManager: FileManager = FileManager(),
         treeLimits: TreeLimits = TreeLimits(),
+        treeValidationObserver: @escaping @Sendable () -> Void = {},
         copyEntryHook: @escaping @Sendable (String) throws -> Void = { _ in }
     ) {
         let root = rootDirectory.standardizedFileURL
@@ -154,6 +156,7 @@ actor LocalLedgerWorkspace {
         generationsDirectory = root.appendingPathComponent("generations", isDirectory: true)
         stagingDirectory = root.appendingPathComponent("staging", isDirectory: true)
         currentRevisionFile = root.appendingPathComponent("current.json", isDirectory: false)
+        self.treeValidationObserver = treeValidationObserver
         self.copyEntryHook = copyEntryHook
         self.treeLimits = treeLimits
     }
@@ -1394,6 +1397,8 @@ actor LocalLedgerWorkspace {
 
     @discardableResult
     private func validateTree(at directory: URL) throws -> [String] {
+        // Observe full-tree validation attempts, not recursive directory enumeration.
+        treeValidationObserver()
         var aliases = Set<String>()
         var budget = TreeBudget(limits: treeLimits)
         return try validateTree(at: directory, relativePrefix: "", aliases: &aliases, budget: &budget)
