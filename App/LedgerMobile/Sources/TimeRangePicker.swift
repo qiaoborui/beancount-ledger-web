@@ -62,11 +62,11 @@ private struct LedgerTimeRangeSheet: View {
     @EnvironmentObject private var session: LedgerSession
 
     private var startBinding: Binding<Date> {
-        Binding(get: { session.draftRange.startDate }, set: session.updateDraftStart)
+        Binding(get: { session.draftRange.startDate }, set: { session.updateDraftStart($0) })
     }
 
     private var endBinding: Binding<Date> {
-        Binding(get: { session.draftRange.endDate }, set: session.updateDraftEnd)
+        Binding(get: { session.draftRange.endDate }, set: { session.updateDraftEnd($0) })
     }
 
     private var startComponents: DateComponents {
