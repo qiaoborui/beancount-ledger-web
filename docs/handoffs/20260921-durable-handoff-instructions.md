@@ -7,8 +7,8 @@
 - Scope/approval: User approved the two-layer design. Documentation only; no
   application changes or remote maintenance. User subsequently approved commit/push.
 - Branch: `codex/durable-handoff-instructions`; base code revision: `7b1efbc42701a07406b829858afe1e9856fdcdbb`.
-- Publication: This note accompanies the documentation commit on the branch above.
-  Cross-clone availability requires that commit to be pushed; verify remote state.
+- Documentation revision: `334517f`, committed and pushed to the branch above.
+- PR: https://github.com/qiaoborui/beancount-ledger-web/pull/403 (awaiting review).
 - Completed: Updated `AGENTS.md` with both locations, checkpoint triggers,
   discovery, required contents, atomic writes, live-state revalidation, publication
   requirements, privacy boundaries, and completed-task marking. Created this note.
