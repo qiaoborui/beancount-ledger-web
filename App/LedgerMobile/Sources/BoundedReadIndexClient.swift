@@ -10,10 +10,17 @@ protocol BoundedReadIndexBackend: Sendable {
     func open(_ databasePath: String, manifestJSON: String) -> String
     func transactions(_ requestJSON: String) -> String
     func detail(_ id: Int64) -> String
+    func detailRecords(_ requestJSON: String) -> String
     func unlock()
     func cancel()
     func lock()
     func close()
+}
+
+/// Existing backends/fakes remain source compatible; never fall back to the
+/// whole-detail endpoint, which can exceed its all-or-error response cap.
+extension BoundedReadIndexBackend {
+    func detailRecords(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
 }
 
 enum BoundedReadIndexError: String, Error, Sendable {
@@ -140,6 +147,57 @@ struct BoundedIndexDetail: Decodable, Sendable {
     let id: Int64
     let records: [BoundedIndexRecord]
     // The 1 MiB transport cap also bounds the number of detail records. No full ledger graph.
+}
+
+/// One source-ordered chunk of scalar projections, NOT a complete directive.
+/// Continuations omit the directive; even a terminal page remains a partial view.
+struct BoundedIndexDetailPage: Decodable, Sendable {
+    let revision: String
+    let id: Int64
+    let records: [BoundedIndexRecord]
+    let nextCursor: String?
+    private enum CodingKeys: String, CodingKey { case revision, id, records, nextCursor = "next_cursor" }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try c.decode(String.self, forKey: .revision)
+        id = try c.decode(Int64.self, forKey: .id)
+        nextCursor = try c.decodeIfPresent(String.self, forKey: .nextCursor)
+        // Unlike Transactions, Go DetailRecords always returns a non-nil array.
+        var rows = try c.nestedUnkeyedContainer(forKey: .records)
+        var result: [BoundedIndexRecord] = []
+        while !rows.isAtEnd {
+            guard result.count < 500 else { throw BoundedReadIndexError.resourceLimit }
+            result.append(try rows.decode(BoundedIndexRecord.self))
+        }
+        records = result
+    }
+
+    func validate(id expectedID: Int64, limit: Int, cursor: String?) throws {
+        guard id == expectedID, id > 0, records.count <= limit,
+              (nextCursor?.utf8.count ?? 0) <= 512 else { throw BoundedReadIndexError.corrupt }
+        let firstPage = cursor == nil || cursor == ""
+        if let nextCursor {
+            guard !nextCursor.isEmpty, nextCursor != cursor, !records.isEmpty else {
+                throw BoundedReadIndexError.corrupt
+            }
+        }
+        if firstPage {
+            guard let first = records.first, case .directive = first.value else {
+                throw BoundedReadIndexError.corrupt
+            }
+        }
+        for (offset, record) in records.enumerated() {
+            switch record.value {
+            case let .directive(recordID, _):
+                guard firstPage, offset == 0, recordID == id else { throw BoundedReadIndexError.corrupt }
+            case let .posting(entryID, ordinal, _):
+                guard entryID == id, ordinal >= 0 else { throw BoundedReadIndexError.corrupt }
+            case let .metadata(entryID, posting, _, _):
+                guard entryID == id, posting >= -1 else { throw BoundedReadIndexError.corrupt }
+            }
+        }
+    }
 }
 
 /// Byte caps apply BEFORE Data/JSONDecoder allocation, including on fake backends.
@@ -293,6 +351,20 @@ final class BoundedReadIndexClient: @unchecked Sendable {
             return page
         }
     }
+    func detailRecords(id: Int64, limit: Int = 100, cursor: String? = nil) throws -> BoundedIndexDetailPage {
+        try run {
+            guard id > 0, (1...500).contains(limit), (cursor?.utf8.count ?? 0) <= 512 else {
+                throw BoundedReadIndexError.invalidRequest
+            }
+            struct Request: Encodable { let id: Int64; let limit: Int; let cursor: String? }
+            let data = try JSONEncoder().encode(Request(id: id, limit: limit, cursor: cursor))
+            guard data.count <= 4096 else { throw BoundedReadIndexError.resourceLimit }
+            let page = try BoundedIndexWire.decode(BoundedIndexDetailPage.self,
+                json: backend.detailRecords(String(decoding: data, as: UTF8.self)), limit: BoundedIndexWire.responseLimit)
+            try page.validate(id: id, limit: limit, cursor: cursor)
+            return page
+        }
+    }
     func detail(id: Int64) throws -> BoundedIndexDetail {
         try run {
             guard id > 0 else { throw BoundedReadIndexError.invalidRequest }
@@ -324,6 +396,7 @@ private final class NativeBoundedReadIndexBackend: BoundedReadIndexBackend, @unc
     func open(_ databasePath: String, manifestJSON: String) -> String { bridge?.open(databasePath, manifestJSON: manifestJSON) ?? unavailable }
     func transactions(_ requestJSON: String) -> String { bridge?.transactions(requestJSON) ?? unavailable }
     func detail(_ id: Int64) -> String { bridge?.detail(id) ?? unavailable }
+    func detailRecords(_ requestJSON: String) -> String { bridge?.detailRecords(requestJSON) ?? unavailable }
     func unlock() { bridge?.unlock() }
     func cancel() { bridge?.cancel() }
     func lock() { bridge?.lock() }

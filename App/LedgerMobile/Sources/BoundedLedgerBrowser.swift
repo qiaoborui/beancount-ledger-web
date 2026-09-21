@@ -122,8 +122,12 @@ struct BoundedLedgerBrowser: View {
                 ForEach(detail.records.indices, id: \.self) { index in
                     scalarRecord(detail.records[index])
                 }
-                Button("关闭详情") { model.dismissDetail() }
-            } header: { Text("交易详情 · 只读标量") } footer: { Text("不是完整交易编辑器。标签、链接、元数据值、自定义字段均省略；成本仅显示已导出的标量，不表示完整成本规格、批次或估值语义。") }
+                if detail.records.isEmpty { Text("已到详情记录末尾。") }
+                Button("详情回到第一页") { model.firstDetailPage() }.disabled(model.busy)
+                Button("详情下一页（替换当前页）") { model.nextDetailPage() }
+                    .disabled(model.busy || detail.nextCursor == nil)
+                Button("关闭详情") { model.dismissDetail() }.disabled(model.busy)
+            } header: { Text("部分交易详情 · 当前页 \(detail.records.count) 条 / 最多 100 条") } footer: { Text("只显示当前页的只读标量，续页不重复交易标题；不累计记录，不保留翻页历史。即使已到末页，也不是完整交易。不是完整交易编辑器。标签、链接、元数据值、自定义字段均省略；成本仅显示已导出的标量，不表示完整成本规格、批次或估值语义。") }
         }
     }
 

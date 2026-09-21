@@ -5,7 +5,7 @@ import Combine
 /// canonical snapshot is reachable through this interface.
 struct BoundedBrowserQueries: Sendable {
     let page: @Sendable (String?) throws -> BoundedIndexPage
-    let detail: @Sendable (Int64) throws -> BoundedIndexDetail
+    let detailRecords: @Sendable (Int64, String?) throws -> BoundedIndexDetailPage
 }
 
 struct BoundedBrowserLeaseInfo: Sendable {
@@ -37,7 +37,7 @@ private struct PublishedBrowserWorkspace: BoundedBrowserWorkspace {
         try await publication.withReadLease { lease, reader in
             try await body(.init(revision: lease.manifest.index.revision, isStale: lease.isStale),
                            .init(page: { try reader.transactions(limit: 100, cursor: $0) },
-                                 detail: { try reader.detail(id: $0) }))
+                                 detailRecords: { try reader.detailRecords(id: $0, limit: 100, cursor: $1) }))
         }
     }
     func lock() { publication.lock() }
@@ -97,13 +97,13 @@ final class BoundedLedgerBrowserModel: ObservableObject {
     @Published private(set) var descriptors: [LocalLedgerDescriptor] = []
     @Published private(set) var selected: LocalLedgerDescriptor?
     @Published private(set) var page: BoundedIndexPage?
-    @Published private(set) var detail: BoundedIndexDetail?
+    @Published private(set) var detail: BoundedIndexDetailPage?
     @Published private(set) var lease: BoundedBrowserLeaseInfo?
     @Published private(set) var confirmation: UUID?
     @Published private(set) var message: String?
     let runtimeAvailable: Bool
 
-    private enum Request: Sendable { case page(String?), detail(Int64) }
+    private enum Request: Sendable { case page(String?), detail(Int64, String?) }
     private let authenticator: any LocalLedgerAuthenticating
     private let dependencies: BoundedBrowserDependencies
     private var root: URL?
@@ -267,8 +267,10 @@ final class BoundedLedgerBrowserModel: ObservableObject {
                             let page = try queries.page(cursor)
                             try Self.validate(page, revision: info.revision)
                             await self?.received(page, info: info, token: token)
-                        case .detail(let id):
-                            let detail = try queries.detail(id)
+                        case .detail(let id, let cursor):
+                            let detail = try queries.detailRecords(id, cursor)
+                            guard detail.records.count <= 100 else { throw BoundedReadIndexError.resourceLimit }
+                            try detail.validate(id: id, limit: 100, cursor: cursor)
                             guard detail.id == id, detail.revision == info.revision else {
                                 throw BoundedReadIndexError.revisionMismatch
                             }
@@ -292,7 +294,15 @@ final class BoundedLedgerBrowserModel: ObservableObject {
     func firstPage() { send(.page(nil)) }
     func showDetail(_ id: Int64) {
         guard page?.transactions.contains(where: { $0.id == id }) == true else { return }
-        send(.detail(id))
+        send(.detail(id, nil))
+    }
+    func nextDetailPage() {
+        guard let detail, let cursor = detail.nextCursor else { return }
+        send(.detail(detail.id, cursor))
+    }
+    func firstDetailPage() {
+        guard let detail else { return }
+        send(.detail(detail.id, nil))
     }
     func dismissDetail() { if !busy { detail = nil } }
 
@@ -311,9 +321,9 @@ final class BoundedLedgerBrowserModel: ObservableObject {
         lease = info
         busy = false
     }
-    private func received(_ detail: BoundedIndexDetail, token: UUID) {
+    private func received(_ detail: BoundedIndexDetailPage, token: UUID) {
         guard epoch == token, !locked else { return }
-        self.detail = detail
+        self.detail = detail // Replacement, never append or retain a previous detail page.
         busy = false
     }
     private func failed(_ error: any Error, token: UUID) {

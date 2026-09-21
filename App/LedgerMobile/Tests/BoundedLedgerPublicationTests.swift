@@ -409,8 +409,22 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         await expectError(.revisionMismatch) {
             _ = try await wrong.withReadLease { _, reader in try reader.detail(id: 1) }
         }
+        await expectError(.revisionMismatch) {
+            _ = try await wrong.withReadLease { _, reader in try reader.detailRecords(id: 1) }
+        }
+        let wrongContinuation = publication(f, behavior: .wrongDetailContinuationRevision)
+        wrongContinuation.unlock()
+        await expectError(.revisionMismatch) {
+            _ = try await wrongContinuation.withReadLease { _, reader in
+                let first = try reader.detailRecords(id: 1, limit: 1)
+                return try reader.detailRecords(id: 1, limit: 1, cursor: first.nextCursor)
+            }
+        }
         let escaped = try await p.withReadLease { _, reader in reader }
         XCTAssertThrowsError(try escaped.transactions()) {
+            XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
+        }
+        XCTAssertThrowsError(try escaped.detailRecords(id: 1)) {
             XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
         }
     }
@@ -443,6 +457,21 @@ final class BoundedLedgerPublicationTests: XCTestCase {
             XCTAssertEqual(page.revision, manifest.revision, file: file, line: line)
             XCTAssertEqual(page.transactions.count, 1, file: file, line: line)
             let row = try XCTUnwrap(page.transactions.first, file: file, line: line)
+            let detailPage = try reader.detailRecords(id: row.id, limit: 100)
+            XCTAssertEqual(detailPage.revision, manifest.revision, file: file, line: line)
+            XCTAssertEqual(detailPage.id, row.id, file: file, line: line)
+            XCTAssertEqual(detailPage.records.count, 1, file: file, line: line)
+            XCTAssertEqual(detailPage.nextCursor, "fixture-next", file: file, line: line)
+            let continuation = try reader.detailRecords(id: row.id, limit: 1, cursor: detailPage.nextCursor)
+            XCTAssertEqual(continuation.revision, manifest.revision, file: file, line: line)
+            XCTAssertEqual(continuation.records.count, 1, file: file, line: line)
+            XCTAssertNil(continuation.nextCursor, file: file, line: line)
+            guard case let .posting(entryID, ordinal, value) = continuation.records[0].value else {
+                return XCTFail("expected continuation posting", file: file, line: line)
+            }
+            XCTAssertEqual(entryID, row.id, file: file, line: line)
+            XCTAssertEqual(ordinal, 0, file: file, line: line)
+            XCTAssertEqual(value.quantity.number, "1.00000000000001", file: file, line: line)
             let detail = try reader.detail(id: row.id)
             XCTAssertEqual(detail.revision, manifest.revision, file: file, line: line)
             XCTAssertEqual(detail.id, row.id, file: file, line: line)
@@ -469,7 +498,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
 /// Scalar fake: no Beancount, Go, SQLite or native runtime needed. Cancellation
 /// deliberately does not affect results, exercising the Swift lifecycle gate.
 private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Sendable {
-    enum Behavior: Sendable, Equatable { case success, buildFailure, openFailure, wrongSource, wrongStream, wrongCount, wrongEntrypoint, sidecar, oversized, wrongPageRevision }
+    enum Behavior: Sendable, Equatable { case success, buildFailure, openFailure, wrongSource, wrongStream, wrongCount, wrongEntrypoint, sidecar, oversized, wrongPageRevision, wrongDetailContinuationRevision }
     let behavior: Behavior
     private let root: URL
     private let gate = NSLock()
@@ -559,6 +588,24 @@ private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Send
             do { return String(decoding: try JSONSerialization.data(withJSONObject: response), as: UTF8.self) }
             catch { return errorJSON(error) }
         }
+    }
+    func detailRecords(_ requestJSON: String) -> String {
+        struct Request: Decodable { let id: Int64; let limit: Int; let cursor: String? }
+        do {
+            let request = try JSONDecoder().decode(Request.self, from: Data(requestJSON.utf8))
+            guard request.id == 1 else { throw BoundedReadIndexError.notFound }
+            if request.cursor == nil || request.cursor == "" {
+                var result = try JSONSerialization.jsonObject(with: Data(detail(request.id).utf8)) as? [String: Any] ?? [:]
+                if result["error"] == nil { result["next_cursor"] = "fixture-next" }
+                return String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
+            }
+            guard request.cursor == "fixture-next" else { throw BoundedReadIndexError.invalidCursor }
+            return gate.withLock {
+                guard let manifest = opened else { return errorJSON(BoundedReadIndexError.unavailable) }
+                let revision = behavior == .wrongDetailContinuationRevision ? "wrong" : manifest.revision
+                return #"{"revision":"\#(revision)","id":1,"records":[{"type":"posting","entry_id":1,"ordinal":0,"value":{"account":"Assets:Test","Quantity":{"Number":"1.00000000000001","Currency":"USD"}}}]}"#
+            }
+        } catch { return errorJSON(error) }
     }
     func detail(_ id: Int64) -> String {
         gate.withLock {
