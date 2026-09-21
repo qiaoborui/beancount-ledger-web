@@ -32,3 +32,12 @@
 - Added fake-backed publication failure/lifecycle/lease tests. Review fixed native absolute-path alias mismatch with fixed relative artifact names, strengthened last-pair late-failure tests and per-generation fake revisions. Static diff checks and native bridge regression pass; Swift tests remain unexecuted locally (no toolchain).
 - Adds secret-free public macOS Swift package CI to exercise core and tests without private signing, deployment or ledger access. Apple framework link/protection/device gates remain separate; macOS package tests cannot satisfy them.
 - Remaining: run/review Swift CI and fix failures, publish/check publication PR; opt-in bounded UI plus background/Widget isolation; integrate confirmed writes and all capability parity; protected spill and physical-device gates. Next action publish this milestone and inspect hosted Swift tests.
+
+
+## Scoped publication CI compile fixes
+
+- Task `20260921-ios-bounded-read-model`; compile-fix subtask completed; overall bounded read-model task remains active. Updated 2026-09-21T14:34:45.312971+00:00.
+- Branch `codex/ios-readindex-publication`; code base `a259e3d30784c6297be14f25105f95383ba1df2d`; PR https://github.com/qiaoborui/beancount-ledger-web/pull/410. This note accompanies the scoped fix commit; user explicitly authorized commit/push.
+- Only test changes: keep fixture FileManager statically typed as the existing lock-protected `PublicationFailureFileManager: @unchecked Sendable`; class-qualify static query/export helpers so closures do not capture XCTestCase via dynamic Self. All XCTest assertions unchanged; no production changes.
+- Validation of this patch: `git diff --check` PASS; Swift 6.0.3 Linux container `swiftc -frontend -parse Tests/BoundedLedgerPublicationTests.swift` PASS with and without `-D LEDGER_BOUNDED_READ_INDEX`; `swift package dump-package` PASS; exact-change/assertion-preservation audit PASS. These are static checks, not macOS typechecking or execution.
+- Next: push this commit and check PR mergeability and hosted macOS `swift test --jobs 2`; Apple runtime/device validation and prior broader milestones remain separate.

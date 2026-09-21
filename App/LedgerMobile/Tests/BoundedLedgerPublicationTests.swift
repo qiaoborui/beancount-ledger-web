@@ -15,7 +15,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         var pointer: URL { root.appendingPathComponent("derived/bounded/current.json") }
     }
 
-    private func fixture(fileManager: FileManager = FileManager(), aliased: Bool = false) async throws -> Fixture {
+    private func fixture(fileManager: PublicationFailureFileManager = PublicationFailureFileManager(), aliased: Bool = false) async throws -> Fixture {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("BoundedPublication-" + UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         var workspaceRoot = root
@@ -138,7 +138,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         let p = publication(f, exporter: { source, entry, derived, name in
             let file = source.directory.appendingPathComponent(entry)
             let modified = try FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate]!
-            let summary = try await Self.export(source, entry, derived, name)
+            let summary = try await BoundedLedgerPublicationTests.export(source, entry, derived, name)
             try Data("; synthetic B\n".utf8).write(to: file)
             try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: file.path)
             return summary
@@ -199,7 +199,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
             XCTAssertEqual(lease.source.revisionID, first.sourceRevisionID)
             XCTAssertTrue(lease.isStale)
             XCTAssertEqual(try String(contentsOf: lease.source.directory.appendingPathComponent("main.bean"), encoding: .utf8), "; synthetic A\n")
-            Self.assertQueries(reader, manifest: first.index)
+            BoundedLedgerPublicationTests.assertQueries(reader, manifest: first.index)
         }
         let source = try await f.workspace.currentRevision()
         XCTAssertEqual(source?.id, current)
@@ -216,7 +216,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         try await reopened.withReadLease { lease, reader in
             XCTAssertEqual(lease.manifest, first)
             XCTAssertFalse(lease.isStale)
-            Self.assertQueries(reader, manifest: first.index)
+            BoundedLedgerPublicationTests.assertQueries(reader, manifest: first.index)
             // Prove the fake rejects the original unresolved absolute spelling,
             // rather than silently canonicalizing it and masking the regression.
             let backend = try PublicationBackend(directory: lease.derivedDirectory, behavior: .success)
@@ -290,7 +290,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
             let barrier = PublicationBarrier()
             let p = publication(f, exporter: { source, entry, derived, name in
                 await barrier.pause()
-                return try await Self.export(source, entry, derived, name)
+                return try await BoundedLedgerPublicationTests.export(source, entry, derived, name)
             })
             p.unlock()
             let task = Task { try await p.rebuild(expectedRevisionID: f.revision.id) }
@@ -308,7 +308,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         let barrier = PublicationBarrier()
         let p = publication(f, exporter: { source, entry, derived, name in
             await barrier.pause()
-            return try await Self.export(source, entry, derived, name)
+            return try await BoundedLedgerPublicationTests.export(source, entry, derived, name)
         })
         p.unlock()
         let task = Task { try await p.rebuild(expectedRevisionID: f.revision.id) }
@@ -326,7 +326,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         let barrier = PublicationBarrier()
         let p = publication(f, exporter: { source, entry, derived, name in
             await barrier.pause()
-            return try await Self.export(source, entry, derived, name)
+            return try await BoundedLedgerPublicationTests.export(source, entry, derived, name)
         })
         p.unlock()
         let task = Task { try await p.rebuild(expectedRevisionID: f.revision.id) }
@@ -355,10 +355,10 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         let barrier = PublicationBarrier()
         let reading = Task {
             try await p.withReadLease { lease, client in
-                Self.assertQueries(client, manifest: first.index)
+                BoundedLedgerPublicationTests.assertQueries(client, manifest: first.index)
                 await barrier.pause()
                 XCTAssertEqual(lease.manifest, first)
-                Self.assertQueries(client, manifest: first.index)
+                BoundedLedgerPublicationTests.assertQueries(client, manifest: first.index)
                 return try client.transactions().revision
             }
         }
@@ -371,14 +371,14 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         XCTAssertNotEqual(newer.index.revision, first.index.revision)
         try await other.withReadLease { lease, reader in
             XCTAssertEqual(lease.manifest, newer)
-            Self.assertQueries(reader, manifest: newer.index)
+            BoundedLedgerPublicationTests.assertQueries(reader, manifest: newer.index)
         }
         await barrier.resume()
         let readRevision = try await reading.value
         XCTAssertEqual(readRevision, first.index.revision)
         try await p.withReadLease { lease, reader in
             XCTAssertEqual(lease.manifest, newer)
-            Self.assertQueries(reader, manifest: newer.index)
+            BoundedLedgerPublicationTests.assertQueries(reader, manifest: newer.index)
         }
         // Lock while a consumer (not native code) is suspended must still
         // invalidate its value, even if the consumer ignores cancellation.
