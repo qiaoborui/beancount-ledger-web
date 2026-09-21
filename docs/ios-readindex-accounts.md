@@ -48,3 +48,26 @@ Swift review found Unicode identity and duplicate-ID acceptance issues; fixed.
 Real hosted Apple/package/native checks for this milestone remain required.
 Full Go vet reports a pre-existing test-goroutine Fatalf finding outside this scope.
 No private ledger, production or physical-device tests were performed.
+
+## Native account activity and summary
+
+`AccountSummary` and `AccountActivity` require exact account and currency filters
+and optionally `[start,end)`. Summary returns current (all dates), opening,
+closing and period change as exact strings. Activity groups repeated matching
+postings per transaction in ascending canonical date/ID order, retains matched
+zero-delta transactions, and reports exact changes/running balances plus the raw
+directive/detail locator. Missing pairs return zeros/empty pages, without currency
+inference. This remains `native_nominal`, not historical market valuation or
+legacy cents-compatible account reports.
+
+Cursor identities bind revision, operation, exact filters and a real transaction
+boundary. Running prefixes are recomputed rather than trusting cursor amounts;
+worst-case page latency is O(N), while retention stays bounded. Pages default100,
+max500 and1MiB. Existing schema2 indexes avoid temporary sorts. ExactDecimal can
+add validated accumulators directly, avoiding rejection when normalized wire
+spelling includes an extra leading zero at the raw-input digit limit.
+
+The experimental browser selects a currency, then displays summary and replace-only
+activity pages on the same retained reader; activity rows open bounded detail
+pages. Lock/selection clear dependent state. 62 Linux stub-harness tests and both
+configuration parse checks passed; fresh hosted Apple/native tests remain the gate.

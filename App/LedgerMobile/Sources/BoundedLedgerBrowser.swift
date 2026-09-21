@@ -100,7 +100,7 @@ struct BoundedLedgerBrowser: View {
             .pickerStyle(.segmented)
             .disabled(model.busy)
         }
-        if model.mode == .accounts { accounts }
+        if model.mode == .accounts { accounts; accountActivity }
         if let page = model.page {
             Section {
                 if page.transactions.isEmpty { Text("此版本没有交易。") }
@@ -174,11 +174,15 @@ struct BoundedLedgerBrowser: View {
                 if let page = model.balances {
                     if page.balances.isEmpty { Text("此账户没有原生单位分录。") }
                     ForEach(page.balances.indices, id: \.self) { index in
-                        VStack(alignment: .leading, spacing: LedgerSpacing.xs) {
-                            Text(page.balances[index].currency).font(.caption).foregroundStyle(.secondary)
-                            Text(page.balances[index].quantity).font(.body.monospacedDigit())
-                                .textSelection(.enabled)
+                        Button { model.selectCurrency(page.balances[index].currency) } label: {
+                            VStack(alignment: .leading, spacing: LedgerSpacing.xs) {
+                                Text(page.balances[index].currency).font(.caption).foregroundStyle(.secondary)
+                                Text(page.balances[index].quantity).font(.body.monospacedDigit())
+                                Text("查看此原生单位的汇总与流水").font(.caption)
+                            }
+                            .foregroundStyle(.primary)
                         }
+                        .disabled(model.busy || !BoundedAccountsValidation.account(page.balances[index].currency))
                     }
                     Text("当前页 \(page.balances.count) 种单位 / 最多 100 种").font(.caption)
                     Button("单位回到第一页") { model.firstBalancesPage() }.disabled(model.busy)
@@ -187,8 +191,52 @@ struct BoundedLedgerBrowser: View {
                 }
                 Button("查看开户指令与元数据类型") { model.showAccountMetadata() }.disabled(model.busy)
             } footer: {
-                Text("native_nominal：按原生币种或商品单位精确求和，不换汇、不合计不同单位。这不是市值或估值，不含期初 / 逐笔余额、成本批次或报表语义对齐。仅保留当前页，不累计单位；每次响应最多 1 MiB。")
+                Text("native_nominal：按原生币种或商品单位精确求和，不换汇、不合计不同单位。这不是市值或估值，不含成本批次，也不保证与旧版金额或报表语义一致。仅保留当前页，不累计单位；每次响应最多 1 MiB。")
             }
+        }
+    }
+
+    @ViewBuilder private var accountActivity: some View {
+        if let currency = model.selectedCurrency {
+            Section {
+                Text(currency).font(.headline).textSelection(.enabled)
+                if let summary = model.summary {
+                    nativeScalar("当前余额（全部日期）", summary.currentBalance)
+                    nativeScalar("期初余额", summary.openingBalance)
+                    nativeScalar("期末余额", summary.closingBalance)
+                    nativeScalar("期间变动", summary.periodChange)
+                }
+            } header: { Text("原生单位汇总 · 全部日期") }
+              footer: { Text("native_nominal：仅按选中单位精确求和。未选日期范围时，期初为 0，期末和期间变动等于当前余额。不是市值、估值、成本批次或旧版金额兼容承诺。") }
+            if let page = model.activity {
+                Section {
+                    if page.rows.isEmpty { Text("此账户与单位没有交易流水。") }
+                    ForEach(page.rows, id: \.id) { row in
+                        Button { model.showActivityDetail(row.id) } label: {
+                            VStack(alignment: .leading, spacing: LedgerSpacing.xs) {
+                                Text(row.date).font(.caption.monospacedDigit())
+                                if case .directive(_, let value) = row.record.value {
+                                    if let payee = value.payee { Text(payee).font(.headline).lineLimit(2) }
+                                    if let narration = value.narration { Text(narration).lineLimit(3) }
+                                }
+                                Text("变动：\(row.change)").monospacedDigit()
+                                Text("逐笔余额：\(row.balance)").monospacedDigit()
+                            }.foregroundStyle(.primary)
+                        }.disabled(model.busy)
+                    }
+                    Button("流水回到第一页") { model.firstActivityPage() }.disabled(model.busy)
+                    Button("流水下一页（替换当前页）") { model.nextActivityPage() }
+                        .disabled(model.busy || page.nextCursor == nil)
+                } header: { Text("按日期正序 · 当前页 \(page.rows.count) 条 / 最多 100 条") }
+                  footer: { Text("同一交易的同账户、同单位分录合并为一行。逐笔余额包含此前交易，不从当前页重新归零；点击查看部分标量详情。不累计页面，每次响应最多 1 MiB。") }
+            }
+        }
+    }
+
+    private func nativeScalar(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: LedgerSpacing.xs) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.body.monospacedDigit()).textSelection(.enabled)
         }
     }
 
@@ -222,8 +270,8 @@ struct BoundedLedgerBrowser: View {
 
     private var capabilities: some View {
         Section("能力与限制") {
-            Label("支持：设备验证、本地目录、显式索引构建、分页交易与账户、原生单位净额、标量详情", systemImage: "checkmark.circle")
-            Label("不支持：编辑、导入、同步、远程账本、搜索、逐笔余额、成本批次、报表、估值、小组件和后台刷新", systemImage: "minus.circle")
+            Label("支持：设备验证、本地目录、显式索引构建、分页交易与账户、原生单位净额、汇总与逐笔流水、标量详情", systemImage: "checkmark.circle")
+            Label("不支持：编辑、导入、同步、远程账本、搜索、成本批次、报表、估值、小组件和后台刷新", systemImage: "minus.circle")
             Text("只读并不代表完整语义覆盖。没有服务器或旧快照回退；无法验证时保持不可用。派生文件沿用工作区保护策略，锁定不是安全擦除或独立加密。")
                 .foregroundStyle(.secondary)
         }

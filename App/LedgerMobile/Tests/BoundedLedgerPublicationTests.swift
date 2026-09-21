@@ -443,6 +443,12 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         await expectError(.revisionMismatch) {
             _ = try await wrong.withReadLease { _, reader in try reader.accountBalances(account: "Assets:Test") }
         }
+        await expectError(.revisionMismatch) {
+            _ = try await wrong.withReadLease { _, reader in try reader.accountSummary(account: "Assets:Test", currency: "USD") }
+        }
+        await expectError(.revisionMismatch) {
+            _ = try await wrong.withReadLease { _, reader in try reader.accountActivity(account: "Assets:Test", currency: "USD") }
+        }
         let wrongContinuation = publication(f, behavior: .wrongDetailContinuationRevision)
         wrongContinuation.unlock()
         await expectError(.revisionMismatch) {
@@ -456,6 +462,12 @@ final class BoundedLedgerPublicationTests: XCTestCase {
             XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
         }
         XCTAssertThrowsError(try escaped.accountBalances(account: "Assets:Test")) {
+            XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
+        }
+        XCTAssertThrowsError(try escaped.accountSummary(account: "Assets:Test", currency: "USD")) {
+            XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
+        }
+        XCTAssertThrowsError(try escaped.accountActivity(account: "Assets:Test", currency: "USD")) {
             XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
         }
         XCTAssertThrowsError(try escaped.transactions()) {
@@ -494,6 +506,12 @@ final class BoundedLedgerPublicationTests: XCTestCase {
             let native = try reader.accountBalances(account: "Assets:Test")
             XCTAssertEqual(native.revision, manifest.revision, file: file, line: line)
             XCTAssertEqual(native.balances.first?.quantity, "12345678901234567890.00001", file: file, line: line)
+            let summary = try reader.accountSummary(account: "Assets:Test", currency: "USD")
+            XCTAssertEqual(summary.revision, manifest.revision, file: file, line: line)
+            XCTAssertEqual(summary.currentBalance, "12345678901234567890.00001", file: file, line: line)
+            let activity = try reader.accountActivity(account: "Assets:Test", currency: "USD")
+            XCTAssertEqual(activity.revision, manifest.revision, file: file, line: line)
+            XCTAssertTrue(activity.rows.isEmpty, file: file, line: line)
             let page = try reader.transactions()
             XCTAssertEqual(page.revision, manifest.revision, file: file, line: line)
             XCTAssertEqual(page.transactions.count, 1, file: file, line: line)
@@ -642,6 +660,20 @@ private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Send
             guard let manifest = opened else { return errorJSON(BoundedReadIndexError.unavailable) }
             let revision = behavior == .wrongPageRevision ? "wrong" : manifest.revision
             return #"{"revision":"\#(revision)","account":"Assets:Test","basis":"native_nominal","balances":[{"currency":"USD","quantity":"12345678901234567890.00001"}]}"#
+        }
+    }
+    func accountSummary(_ requestJSON: String) -> String {
+        gate.withLock {
+            guard let manifest = opened else { return errorJSON(BoundedReadIndexError.unavailable) }
+            let revision = behavior == .wrongPageRevision ? "wrong" : manifest.revision
+            return #"{"revision":"\#(revision)","account":"Assets:Test","currency":"USD","basis":"native_nominal","current_balance":"12345678901234567890.00001","opening_balance":"0","closing_balance":"12345678901234567890.00001","period_change":"12345678901234567890.00001"}"#
+        }
+    }
+    func accountActivity(_ requestJSON: String) -> String {
+        gate.withLock {
+            guard let manifest = opened else { return errorJSON(BoundedReadIndexError.unavailable) }
+            let revision = behavior == .wrongPageRevision ? "wrong" : manifest.revision
+            return #"{"revision":"\#(revision)","account":"Assets:Test","currency":"USD","basis":"native_nominal","rows":null}"#
         }
     }
     func detailRecords(_ requestJSON: String) -> String {

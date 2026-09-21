@@ -97,14 +97,14 @@ struct BoundedLedgerReader: Sendable {
         try check()
         let page = try client.transactions(limit: limit, cursor: cursor)
         try check()
-        guard page.revision == revision else { throw BoundedReadIndexError.revisionMismatch }
+        guard BoundedAccountsValidation.bytes(page.revision, revision) else { throw BoundedReadIndexError.revisionMismatch }
         return page
     }
     func accounts(limit: Int = 100, cursor: String? = nil) throws -> BoundedIndexAccountsPage {
         try check()
         let page = try client.accounts(limit: limit, cursor: cursor)
         try check()
-        guard page.revision == revision else { throw BoundedReadIndexError.revisionMismatch }
+        guard BoundedAccountsValidation.bytes(page.revision, revision) else { throw BoundedReadIndexError.revisionMismatch }
         return page
     }
     func accountBalances(account: String, start: String? = nil, end: String? = nil,
@@ -112,21 +112,36 @@ struct BoundedLedgerReader: Sendable {
         try check()
         let page = try client.accountBalances(account: account, start: start, end: end, limit: limit, cursor: cursor)
         try check()
-        guard page.revision == revision else { throw BoundedReadIndexError.revisionMismatch }
+        guard BoundedAccountsValidation.bytes(page.revision, revision) else { throw BoundedReadIndexError.revisionMismatch }
+        return page
+    }
+    func accountSummary(account: String, currency: String, start: String? = nil, end: String? = nil) throws -> BoundedIndexAccountSummary {
+        try check()
+        let summary = try client.accountSummary(account: account, currency: currency, start: start, end: end)
+        try check()
+        guard BoundedAccountsValidation.bytes(summary.revision, revision) else { throw BoundedReadIndexError.revisionMismatch }
+        return summary
+    }
+    func accountActivity(account: String, currency: String, start: String? = nil, end: String? = nil,
+                         limit: Int = 100, cursor: String? = nil) throws -> BoundedIndexAccountActivityPage {
+        try check()
+        let page = try client.accountActivity(account: account, currency: currency, start: start, end: end, limit: limit, cursor: cursor)
+        try check()
+        guard BoundedAccountsValidation.bytes(page.revision, revision) else { throw BoundedReadIndexError.revisionMismatch }
         return page
     }
     func detailRecords(id: Int64, limit: Int = 100, cursor: String? = nil) throws -> BoundedIndexDetailPage {
         try check()
         let page = try client.detailRecords(id: id, limit: limit, cursor: cursor)
         try check()
-        guard page.revision == revision else { throw BoundedReadIndexError.revisionMismatch }
+        guard BoundedAccountsValidation.bytes(page.revision, revision) else { throw BoundedReadIndexError.revisionMismatch }
         return page
     }
     func detail(id: Int64) throws -> BoundedIndexDetail {
         try check()
         let detail = try client.detail(id: id)
         try check()
-        guard detail.revision == revision else { throw BoundedReadIndexError.revisionMismatch }
+        guard BoundedAccountsValidation.bytes(detail.revision, revision) else { throw BoundedReadIndexError.revisionMismatch }
         return detail
     }
 }

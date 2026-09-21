@@ -9,14 +9,21 @@ struct BoundedBrowserQueries: Sendable {
     let accounts: @Sendable (String?) throws -> BoundedIndexAccountsPage
     let accountBalances: @Sendable (String, String?) throws -> BoundedIndexAccountBalancesPage
 
+    let accountSummary: @Sendable (String, String, String?, String?) throws -> BoundedIndexAccountSummary
+    let accountActivity: @Sendable (String, String, String?, String?, String?) throws -> BoundedIndexAccountActivityPage
+
     init(page: @escaping @Sendable (String?) throws -> BoundedIndexPage,
          detailRecords: @escaping @Sendable (Int64, String?) throws -> BoundedIndexDetailPage,
          accounts: @escaping @Sendable (String?) throws -> BoundedIndexAccountsPage = { _ in throw BoundedReadIndexError.unavailable },
-         accountBalances: @escaping @Sendable (String, String?) throws -> BoundedIndexAccountBalancesPage = { _, _ in throw BoundedReadIndexError.unavailable }) {
+         accountBalances: @escaping @Sendable (String, String?) throws -> BoundedIndexAccountBalancesPage = { _, _ in throw BoundedReadIndexError.unavailable },
+         accountSummary: @escaping @Sendable (String, String, String?, String?) throws -> BoundedIndexAccountSummary = { _, _, _, _ in throw BoundedReadIndexError.unavailable },
+         accountActivity: @escaping @Sendable (String, String, String?, String?, String?) throws -> BoundedIndexAccountActivityPage = { _, _, _, _, _ in throw BoundedReadIndexError.unavailable }) {
         self.page = page
         self.detailRecords = detailRecords
         self.accounts = accounts
         self.accountBalances = accountBalances
+        self.accountSummary = accountSummary
+        self.accountActivity = accountActivity
     }
 }
 
@@ -51,7 +58,9 @@ private struct PublishedBrowserWorkspace: BoundedBrowserWorkspace {
                            .init(page: { try reader.transactions(limit: 100, cursor: $0) },
                                  detailRecords: { try reader.detailRecords(id: $0, limit: 100, cursor: $1) },
                                  accounts: { try reader.accounts(limit: 100, cursor: $0) },
-                                 accountBalances: { try reader.accountBalances(account: $0, limit: 100, cursor: $1) }))
+                                 accountBalances: { try reader.accountBalances(account: $0, limit: 100, cursor: $1) },
+                                 accountSummary: { try reader.accountSummary(account: $0, currency: $1, start: $2, end: $3) },
+                                 accountActivity: { try reader.accountActivity(account: $0, currency: $1, start: $2, end: $3, limit: 100, cursor: $4) }))
         }
     }
     func lock() { publication.lock() }
@@ -115,6 +124,9 @@ final class BoundedLedgerBrowserModel: ObservableObject {
     @Published private(set) var accountsPage: BoundedIndexAccountsPage?
     @Published private(set) var selectedAccount: BoundedIndexAccountsPage.Account?
     @Published private(set) var balances: BoundedIndexAccountBalancesPage?
+    @Published private(set) var selectedCurrency: String?
+    @Published private(set) var summary: BoundedIndexAccountSummary?
+    @Published private(set) var activity: BoundedIndexAccountActivityPage?
     @Published private(set) var page: BoundedIndexPage?
     @Published private(set) var detail: BoundedIndexDetailPage?
     @Published private(set) var lease: BoundedBrowserLeaseInfo?
@@ -122,14 +134,15 @@ final class BoundedLedgerBrowserModel: ObservableObject {
     @Published private(set) var message: String?
     let runtimeAvailable: Bool
 
-    private enum Request: Sendable { case page(String?), detail(Int64, String?), accounts(String?), balances(String, String?) }
+    private enum Request: Sendable { case page(String?), detail(Int64, String?), accounts(String?), balances(Int64, String, String?), activity(Int64, String, String, String?) }
     private let authenticator: any LocalLedgerAuthenticating
     private let dependencies: BoundedBrowserDependencies
     private var root: URL?
     private var workspace: (any BoundedBrowserWorkspace)?
     private var worker: Task<Void, Never>?
     private var revisionWorker: Task<Void, Never>?
-    private var requests: AsyncStream<Request>.Continuation?
+    private var requests: AsyncStream<(UInt64, Request)>.Continuation?
+    private var serial: UInt64 = 0
     private var epoch = UUID()
     private var lifetime = BoundedBrowserLifetime()
 
@@ -269,10 +282,12 @@ final class BoundedLedgerBrowserModel: ObservableObject {
         accountsPage = nil
         selectedAccount = nil
         balances = nil
+        clearActivity()
         let token = epoch
         let lifetime = lifetime
         let initialMode = mode
-        let (stream, continuation) = AsyncStream<Request>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        let initialSerial = serial
+        let (stream, continuation) = AsyncStream<(UInt64, Request)>.makeStream(bufferingPolicy: .bufferingOldest(1))
         requests = continuation
         worker = Task.detached { [weak self] in
             defer { continuation.finish() }
@@ -286,37 +301,48 @@ final class BoundedLedgerBrowserModel: ObservableObject {
                     case .transactions:
                         let first = try queries.page(nil)
                         try Self.validate(first, revision: info.revision)
-                        await self?.received(first, info: info, token: token)
+                        await self?.received(first, info: info, token: token, serial: initialSerial)
                     case .accounts:
                         let first = try queries.accounts(nil)
                         try Self.validate(first, revision: info.revision, cursor: nil)
-                        await self?.received(first, info: info, token: token)
+                        await self?.received(first, info: info, token: token, serial: initialSerial)
                     }
-                    for await request in stream {
+                    for await (serial, request) in stream {
                         try lifetime.check()
                         switch request {
                         case .page(let cursor):
                             let page = try queries.page(cursor)
                             try Self.validate(page, revision: info.revision)
-                            await self?.received(page, info: info, token: token)
+                            await self?.received(page, info: info, token: token, serial: serial)
                         case .accounts(let cursor):
                             let page = try queries.accounts(cursor)
                             try Self.validate(page, revision: info.revision, cursor: cursor)
-                            await self?.received(page, info: info, token: token)
-                        case .balances(let account, let cursor):
+                            await self?.received(page, info: info, token: token, serial: serial)
+                        case .balances(let openID, let account, let cursor):
                             let page = try queries.accountBalances(account, cursor)
                             guard page.balances.count <= 100 else { throw BoundedReadIndexError.resourceLimit }
                             try page.validate(account: account, start: nil, end: nil, limit: 100, cursor: cursor)
-                            guard page.revision == info.revision else { throw BoundedReadIndexError.revisionMismatch }
-                            await self?.received(page, token: token)
+                            guard BoundedAccountsValidation.bytes(page.revision, info.revision) else { throw BoundedReadIndexError.revisionMismatch }
+                            await self?.received(page, openID: openID, token: token, serial: serial)
+                        case .activity(let openID, let account, let currency, let cursor):
+                            let summary = try queries.accountSummary(account, currency, nil, nil)
+                            try lifetime.check()
+                            try summary.validate(account: account, currency: currency, start: nil, end: nil)
+                            guard BoundedAccountsValidation.bytes(summary.revision, info.revision) else { throw BoundedReadIndexError.revisionMismatch }
+                            let page = try queries.accountActivity(account, currency, nil, nil, cursor)
+                            try lifetime.check()
+                            guard page.rows.count <= 100 else { throw BoundedReadIndexError.resourceLimit }
+                            try page.validate(account: account, currency: currency, start: nil, end: nil, limit: 100, cursor: cursor)
+                            guard BoundedAccountsValidation.bytes(page.revision, info.revision) else { throw BoundedReadIndexError.revisionMismatch }
+                            await self?.received(summary, activity: page, openID: openID, token: token, serial: serial)
                         case .detail(let id, let cursor):
                             let detail = try queries.detailRecords(id, cursor)
                             guard detail.records.count <= 100 else { throw BoundedReadIndexError.resourceLimit }
                             try detail.validate(id: id, limit: 100, cursor: cursor)
-                            guard detail.id == id, detail.revision == info.revision else {
+                            guard detail.id == id, BoundedAccountsValidation.bytes(detail.revision, info.revision) else {
                                 throw BoundedReadIndexError.revisionMismatch
                             }
-                            await self?.received(detail, token: token)
+                            await self?.received(detail, token: token, serial: serial)
                         }
                     }
                 }
@@ -326,13 +352,13 @@ final class BoundedLedgerBrowserModel: ObservableObject {
 
     nonisolated private static func validate(_ page: BoundedIndexPage, revision: String) throws {
         guard page.transactions.count <= 100 else { throw BoundedReadIndexError.resourceLimit }
-        guard page.revision == revision else { throw BoundedReadIndexError.revisionMismatch }
+        guard BoundedAccountsValidation.bytes(page.revision, revision) else { throw BoundedReadIndexError.revisionMismatch }
     }
 
     nonisolated private static func validate(_ page: BoundedIndexAccountsPage, revision: String, cursor: String?) throws {
         guard page.accounts.count <= 100 else { throw BoundedReadIndexError.resourceLimit }
         try page.validate(limit: 100, cursor: cursor)
-        guard page.revision == revision else { throw BoundedReadIndexError.revisionMismatch }
+        guard BoundedAccountsValidation.bytes(page.revision, revision) else { throw BoundedReadIndexError.revisionMismatch }
     }
 
     /// Mode changes keep the same scoped reader; no reopen or legacy fallback.
@@ -344,6 +370,7 @@ final class BoundedLedgerBrowserModel: ObservableObject {
         accountsPage = nil
         selectedAccount = nil
         balances = nil
+        clearActivity()
         if lease != nil { send(value == .accounts ? .accounts(nil) : .page(nil)) }
     }
     func nextAccountsPage() {
@@ -356,16 +383,42 @@ final class BoundedLedgerBrowserModel: ObservableObject {
               let row = accountsPage?.accounts.first(where: { $0.openID == openID }),
               BoundedAccountsValidation.account(row.account) else { return }
         selectedAccount = row
-        send(.balances(row.account, nil))
+        send(.balances(row.openID, row.account, nil))
     }
     func nextBalancesPage() {
-        guard let account = selectedAccount?.account, let cursor = balances?.nextCursor else { return }
-        send(.balances(account, cursor))
+        guard let account = selectedAccount, let cursor = balances?.nextCursor else { return }
+        send(.balances(account.openID, account.account, cursor))
     }
     func firstBalancesPage() {
-        guard let account = selectedAccount?.account else { return }
-        send(.balances(account, nil))
+        guard let account = selectedAccount else { return }
+        send(.balances(account.openID, account.account, nil))
     }
+    func selectCurrency(_ currency: String) {
+        guard !locked, !busy, mode == .accounts, let account = selectedAccount,
+              BoundedAccountsValidation.account(currency),
+              balances?.balances.contains(where: { BoundedAccountsValidation.bytes($0.currency, currency) }) == true else { return }
+        clearActivity()
+        selectedCurrency = currency
+        send(.activity(account.openID, account.account, currency, nil))
+    }
+    func firstActivityPage() {
+        guard let account = selectedAccount, let currency = selectedCurrency else { return }
+        send(.activity(account.openID, account.account, currency, nil))
+    }
+    func nextActivityPage() {
+        guard let account = selectedAccount, let currency = selectedCurrency, let cursor = activity?.nextCursor else { return }
+        send(.activity(account.openID, account.account, currency, cursor))
+    }
+    func showActivityDetail(_ id: Int64) {
+        guard mode == .accounts, selectedCurrency != nil, activity?.rows.contains(where: { $0.id == id }) == true else { return }
+        send(.detail(id, nil))
+    }
+    private func clearActivity() {
+        selectedCurrency = nil
+        summary = nil
+        activity = nil
+    }
+
     func showAccountMetadata() {
         guard mode == .accounts, let selectedAccount else { return }
         send(.detail(selectedAccount.openID, nil))
@@ -393,6 +446,8 @@ final class BoundedLedgerBrowserModel: ObservableObject {
     private func send(_ request: Request) {
         guard !locked, !busy, let requests, lease != nil else { return }
         busy = true
+        message = nil
+        serial &+= 1
         detail = nil
         switch request {
         case .page:
@@ -401,35 +456,50 @@ final class BoundedLedgerBrowserModel: ObservableObject {
             accountsPage = nil
             selectedAccount = nil
             balances = nil
+            clearActivity()
         case .balances:
             balances = nil
+            clearActivity()
+        case .activity:
+            summary = nil
+            activity = nil
         case .detail: break
         }
-        if case .enqueued = requests.yield(request) { return }
+        if case .enqueued = requests.yield((serial, request)) { return }
         failed(BoundedReadIndexError.busy, token: epoch)
     }
 
-    private func received(_ page: BoundedIndexPage, info: BoundedBrowserLeaseInfo, token: UUID) {
-        guard epoch == token, !locked else { return }
+    private func received(_ page: BoundedIndexPage, info: BoundedBrowserLeaseInfo, token: UUID, serial: UInt64) {
+        guard epoch == token, self.serial == serial, !locked else { return }
         self.page = page // Replacement, never append.
         lease = info
         busy = false
     }
-    private func received(_ page: BoundedIndexAccountsPage, info: BoundedBrowserLeaseInfo, token: UUID) {
-        guard epoch == token, !locked, mode == .accounts else { return }
+    private func received(_ page: BoundedIndexAccountsPage, info: BoundedBrowserLeaseInfo, token: UUID, serial: UInt64) {
+        guard epoch == token, self.serial == serial, !locked, mode == .accounts else { return }
         accountsPage = page // Replacement, never append.
         lease = info
         busy = false
     }
-    private func received(_ page: BoundedIndexAccountBalancesPage, token: UUID) {
-        guard epoch == token, !locked, mode == .accounts,
-              let account = selectedAccount?.account, account.utf8.elementsEqual(page.account.utf8) else { return }
+    private func received(_ page: BoundedIndexAccountBalancesPage, openID: Int64, token: UUID, serial: UInt64) {
+        guard epoch == token, self.serial == serial, !locked, mode == .accounts,
+              selectedAccount?.openID == openID, let account = selectedAccount?.account, account.utf8.elementsEqual(page.account.utf8) else { return }
         balances = page // Only this account's current currency page is retained.
         busy = false
     }
-    private func received(_ detail: BoundedIndexDetailPage, token: UUID) {
-        guard epoch == token, !locked else { return }
+    private func received(_ detail: BoundedIndexDetailPage, token: UUID, serial: UInt64) {
+        guard epoch == token, self.serial == serial, !locked else { return }
         self.detail = detail // Replacement, never append or retain a previous detail page.
+        busy = false
+    }
+    private func received(_ summary: BoundedIndexAccountSummary, activity: BoundedIndexAccountActivityPage,
+                          openID: Int64, token: UUID, serial: UInt64) {
+        guard epoch == token, self.serial == serial, !locked, mode == .accounts,
+              selectedAccount?.openID == openID, let account = selectedAccount?.account,
+              let currency = selectedCurrency, BoundedAccountsValidation.bytes(account, summary.account),
+              BoundedAccountsValidation.bytes(currency, summary.currency) else { return }
+        self.summary = summary
+        self.activity = activity // Replace only, including terminal empty pages.
         busy = false
     }
     private func failed(_ error: any Error, token: UUID) {
@@ -441,6 +511,7 @@ final class BoundedLedgerBrowserModel: ObservableObject {
         accountsPage = nil
         selectedAccount = nil
         balances = nil
+        clearActivity()
         lease = nil
         confirmation = nil
         busy = false
@@ -470,6 +541,7 @@ final class BoundedLedgerBrowserModel: ObservableObject {
         accountsPage = nil
         selectedAccount = nil
         balances = nil
+        clearActivity()
         lease = nil
         Task.detached {
             // Task.cancel invokes publication cancellation handlers synchronously.

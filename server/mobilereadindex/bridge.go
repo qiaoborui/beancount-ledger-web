@@ -353,3 +353,41 @@ func (b *Bridge) AccountBalances(requestJSON string) string {
 		return encode(page, readindex.MaxResponseBytes)
 	})
 }
+
+// AccountSummary returns exact native_nominal current and range balances for
+// a required account/currency pair; it never infers a currency or values lots.
+func (b *Bridge) AccountSummary(requestJSON string) string {
+	return b.run(func(ctx context.Context) (string, error) {
+		var req readindex.AccountSummaryRequest
+		if err := decodeObject(requestJSON, maxRequestBytes, &req); err != nil {
+			return "", err
+		}
+		if b.reader == nil {
+			return "", readindex.ErrUnavailable
+		}
+		result, err := b.reader.AccountSummary(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		return encode(result, readindex.MaxResponseBytes)
+	})
+}
+
+// AccountActivity returns bounded transaction pages in ascending canonical
+// order, with exact nominal deltas and recomputed (not cursor-trusted) balances.
+func (b *Bridge) AccountActivity(requestJSON string) string {
+	return b.run(func(ctx context.Context) (string, error) {
+		var req readindex.AccountActivityRequest
+		if err := decodeObject(requestJSON, maxRequestBytes, &req); err != nil {
+			return "", err
+		}
+		if b.reader == nil {
+			return "", readindex.ErrUnavailable
+		}
+		result, err := b.reader.AccountActivity(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		return encode(result, readindex.MaxResponseBytes)
+	})
+}

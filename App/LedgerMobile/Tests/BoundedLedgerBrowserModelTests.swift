@@ -31,6 +31,16 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         private var _offMain = true
         private var _accountCursors: [String?] = []
         private var _balanceAccounts: [String] = []
+        private var _activityCursors: [String?] = []
+        private var _currencies: [String] = []
+        var activityCursors: [String?] { gate.withLock { _activityCursors } }
+        var currencies: [String] { gate.withLock { _currencies } }
+        var readRevision = "fixture"
+        var activityFault: String?
+        var summaryFault: String?
+        var blockActivity = false
+        var blockSummary = false
+        var unicodeCurrencies = false
         var unicodeAccounts = false
         var blockAccountsNext = false
         var continuationFaultsOnly = false
@@ -74,7 +84,7 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         func read(_ body: @escaping @Sendable (BoundedBrowserLeaseInfo, BoundedBrowserQueries) async throws -> Void) async throws {
             gate.withLock { _opens += 1; _offMain = _offMain && !Thread.isMainThread }
             defer { gate.withLock { _closes += 1 } }
-            try await body(.init(revision: "fixture", isStale: false), .init(page: { cursor in
+            try await body(.init(revision: readRevision, isStale: false), .init(page: { cursor in
                 self.gate.withLock { self._pages.append(cursor); self._offMain = self._offMain && !Thread.isMainThread }
                 if cursor != nil, self.blockNext {
                     self.queryStarted.signal()
@@ -122,7 +132,7 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
                     let kind = fault == "record" ? "close" : "open"
                     return #"{"account":"\#(account)","open_id":\#(id),"open_date":"2026-01-01","open_record":{"type":"directive","id":\#(id),"value":{"Kind":"\#(kind)","Date":"2026-01-01","File":"main.bean","Line":1,"Account":"\#(account)"}}}"#
                 }
-                let revision = fault == "revision" ? "wrong" : "fixture"
+                let revision = fault == "revision" ? "wrong" : (fault == "unicodeRevision" ? "Cafe\u{0301}" : self.readRevision)
                 let next = fault == "cursor" ? "\"accounts-next\"" : (cursor == nil ? "\"accounts-next\"" : "null")
                 let output = fault == "oversized" ? Array(repeating: rows[0], count: 101) : rows
                 return try JSONDecoder().decode(BoundedIndexAccountsPage.self, from: Data(#"{"revision":"\#(revision)","accounts":[\#(output.joined(separator: ","))],"next_cursor":\#(next)}"#.utf8))
@@ -136,16 +146,51 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
                     guard self.queryRelease.wait(timeout: .now() + 5) == .success else { throw BoundedReadIndexError.canceled }
                 }
                 let fault = self.continuationFaultsOnly && cursor == nil ? nil : self.balancesFault
-                let revision = fault == "revision" ? "wrong" : "fixture"
+                let revision = fault == "revision" ? "wrong" : (fault == "unicodeRevision" ? "Cafe\u{0301}" : self.readRevision)
                 let otherUnicode = account.utf8.elementsEqual("Assets:Caf\u{00e9}".utf8) ? "Assets:Cafe\u{0301}" : "Assets:Caf\u{00e9}"
                 let account = fault == "account" ? "wrong" : (fault == "unicode" ? otherUnicode : account)
                 let basis = fault == "basis" ? "valuation" : "native_nominal"
                 let unit = cursor == nil ? "AAA" : "ZZZ"
                 let quantity = fault == "decimal" ? "1e9" : "12345678901234567890.000000000000001"
                 let row = #"{"currency":"\#(unit)","quantity":"\#(quantity)"}"#
+                if self.unicodeCurrencies {
+                    return try JSONDecoder().decode(BoundedIndexAccountBalancesPage.self, from: Data(#"{"revision":"fixture","account":"\#(account)","basis":"native_nominal","balances":[{"currency":"Café","quantity":"1"},{"currency":"Café","quantity":"2"}]}"#.utf8))
+                }
                 let count = fault == "oversized" ? 101 : 1
                 let next = fault == "cursor" ? "\"balances-next\"" : (cursor == nil ? "\"balances-next\"" : "null")
                 return try JSONDecoder().decode(BoundedIndexAccountBalancesPage.self, from: Data(#"{"revision":"\#(revision)","account":"\#(account)","basis":"\#(basis)","balances":[\#(Array(repeating: row, count: count).joined(separator: ","))],"next_cursor":\#(next)}"#.utf8))
+            }, accountSummary: { account, currency, start, end in
+                if self.blockSummary {
+                    self.queryStarted.signal()
+                    guard self.queryRelease.wait(timeout: .now() + 5) == .success else { throw BoundedReadIndexError.canceled }
+                }
+                let fault = self.summaryFault
+                let revision = fault == "revision" ? "wrong" : (fault == "unicodeRevision" ? "Cafe\u{0301}" : self.readRevision)
+                let account = fault == "account" ? "wrong" : account
+                let currency = fault == "currency" ? "wrong" : currency
+                let basis = fault == "basis" ? "valuation" : "native_nominal"
+                let quantity = fault == "decimal" ? "1e9" : "12345678901234567890.000000000000001"
+                let range = fault == "range" ? #", "start":"2026-01-01","end":"2026-02-01""# : ""
+                return try JSONDecoder().decode(BoundedIndexAccountSummary.self, from: Data(#"{"revision":"\#(revision)","account":"\#(account)","currency":"\#(currency)","basis":"\#(basis)","current_balance":"\#(quantity)","opening_balance":"0","closing_balance":"\#(quantity)","period_change":"\#(quantity)"\#(range)}"#.utf8))
+            }, accountActivity: { account, currency, start, end, cursor in
+                self.gate.withLock { self._activityCursors.append(cursor); self._currencies.append(currency) }
+                if self.blockActivity {
+                    self.queryStarted.signal()
+                    guard self.queryRelease.wait(timeout: .now() + 5) == .success else { throw BoundedReadIndexError.canceled }
+                }
+                let fault = self.continuationFaultsOnly && cursor == nil ? nil : self.activityFault
+                let revision = fault == "revision" ? "wrong" : (fault == "unicodeRevision" ? "Cafe\u{0301}" : self.readRevision)
+                let account = fault == "account" ? "wrong" : account
+                let currency = fault == "currency" ? "wrong" : currency
+                let basis = fault == "basis" ? "valuation" : "native_nominal"
+                let ids = fault == "oversized" ? Array(1...101) : (fault == "empty" ? [] : [cursor == nil ? 21 : 22])
+                let quantity = fault == "decimal" ? "1e9" : "12345678901234567890.000000000000001"
+                let rows = ids.map { id in
+                    #"{"id":\#(id),"date":"2026-01-01","change":"0","balance":"\#(quantity)","record":{"type":"directive","id":\#(id),"value":{"Kind":"transaction","Date":"2026-01-01","File":"main.bean","Line":1}}}"#
+                }.joined(separator: ",")
+                let range = fault == "range" ? #", "start":"2026-01-01","end":"2026-02-01""# : ""
+                let next = fault == "cursor" ? "\"activity-next\"" : (cursor == nil && fault != "empty" ? "\"activity-next\"" : "null")
+                return try JSONDecoder().decode(BoundedIndexAccountActivityPage.self, from: Data(#"{"revision":"\#(revision)","account":"\#(account)","currency":"\#(currency)","basis":"\#(basis)","rows":[\#(rows)],"next_cursor":\#(next)\#(range)}"#.utf8))
             }))
         }
     }
@@ -180,6 +225,177 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         model.unlock()
         await eventually { !model.locked && !model.busy }
         model.select(try XCTUnwrap(model.descriptors.first))
+    }
+
+    private func openBalances(_ model: BoundedLedgerBrowserModel) async throws {
+        try await select(model)
+        model.setMode(.accounts)
+        model.open()
+        await eventually { model.accountsPage != nil && !model.busy }
+        model.selectAccount(7)
+        await eventually { model.balances != nil && !model.busy }
+    }
+
+    func testActivitySelectionPagingDetailAndOneRetainedScope() async throws {
+        let (model, workspace, _) = fixture()
+        try await openBalances(model)
+        model.selectCurrency("missing")
+        XCTAssertNil(model.selectedCurrency)
+        model.selectCurrency("AAA")
+        await eventually { model.activity != nil && !model.busy }
+        XCTAssertEqual(model.selectedAccount?.openID, 7)
+        XCTAssertEqual(model.selectedCurrency, "AAA")
+        XCTAssertEqual(model.summary?.currentBalance, "12345678901234567890.000000000000001")
+        XCTAssertEqual(model.activity?.rows.map(\.id), [21])
+        model.showActivityDetail(999)
+        XCTAssertNil(model.detail)
+        model.showActivityDetail(21)
+        await eventually { model.detail != nil && !model.busy }
+        XCTAssertEqual(model.detail?.id, 21)
+        model.nextActivityPage()
+        XCTAssertNil(model.activity)
+        XCTAssertNil(model.summary)
+        XCTAssertNil(model.detail)
+        // Serial admission: a concurrent selection/page request cannot overtake.
+        model.selectCurrency("missing")
+        model.firstActivityPage()
+        await eventually { model.activity?.rows.first?.id == 22 && !model.busy }
+        XCTAssertEqual(model.activity?.rows.count, 1)
+        XCTAssertNil(model.activity?.nextCursor)
+        XCTAssertEqual(model.activity?.rows.first?.balance, model.summary?.currentBalance)
+        model.firstActivityPage()
+        await eventually { model.activity?.rows.first?.id == 21 && !model.busy }
+        XCTAssertEqual(workspace.activityCursors.count, 3)
+        XCTAssertEqual(workspace.activityCursors.compactMap { $0 }, ["activity-next"])
+        model.nextBalancesPage()
+        XCTAssertNil(model.selectedCurrency)
+        XCTAssertNil(model.summary)
+        XCTAssertNil(model.activity)
+        await eventually { model.balances != nil && !model.busy }
+        model.selectCurrency("ZZZ")
+        await eventually { model.activity != nil && !model.busy }
+        model.nextAccountsPage()
+        XCTAssertNil(model.selectedAccount)
+        XCTAssertNil(model.selectedCurrency)
+        XCTAssertNil(model.activity)
+        await eventually { model.accountsPage != nil && !model.busy }
+        model.selectAccount(8)
+        await eventually { model.balances != nil && !model.busy }
+        model.selectCurrency("AAA")
+        await eventually { model.activity != nil && !model.busy }
+        XCTAssertEqual(model.selectedAccount?.openID, 8)
+        model.setMode(.transactions)
+        XCTAssertNil(model.summary)
+        XCTAssertNil(model.activity)
+        XCTAssertNil(model.selectedCurrency)
+        await eventually { model.page != nil && !model.busy }
+        XCTAssertEqual(workspace.opens, 1)
+        XCTAssertEqual(workspace.closes, 0)
+        XCTAssertEqual(workspace.builds, 0)
+        model.lock()
+        await eventually { workspace.closes == 1 }
+    }
+
+    func testByteExactCurrencyAndAccountSelectionDoesNotAlias() async throws {
+        let workspace = Workspace(); workspace.unicodeCurrencies = true; workspace.unicodeAccounts = true
+        let (model, _, _) = fixture(workspace: workspace)
+        try await openBalances(model)
+        for openID: Int64 in [7, 8] {
+            model.selectAccount(openID)
+            XCTAssertNil(model.selectedCurrency)
+            await eventually { model.balances != nil && !model.busy }
+            for currency in ["Cafe\u{0301}", "Café"] {
+                model.selectCurrency(currency)
+                await eventually { model.activity != nil && !model.busy }
+                XCTAssertTrue(model.selectedCurrency!.utf8.elementsEqual(currency.utf8))
+                XCTAssertTrue(model.summary!.currency.utf8.elementsEqual(currency.utf8))
+                XCTAssertEqual(model.selectedAccount?.openID, openID)
+            }
+        }
+        XCTAssertEqual(workspace.currencies.map { Array($0.utf8) }, ["Cafe\u{0301}", "Café", "Cafe\u{0301}", "Café"].map { Array($0.utf8) })
+        XCTAssertEqual(workspace.opens, 1)
+        model.lock()
+    }
+
+    func testSummaryAndActivityFaultsFailClosedIncludingContinuations() async throws {
+        for summary in [true, false] {
+            let faults = summary ? ["revision", "account", "currency", "basis", "decimal", "range"] : ["revision", "account", "currency", "basis", "decimal", "range", "oversized", "cursor"]
+            for fault in faults {
+                let workspace = Workspace()
+                if summary { workspace.summaryFault = fault }
+                else { workspace.activityFault = fault; workspace.continuationFaultsOnly = true }
+                let (model, _, _) = fixture(workspace: workspace)
+                try await openBalances(model)
+                model.selectCurrency("AAA")
+                if !summary {
+                    await eventually { model.activity != nil && !model.busy }
+                    model.nextActivityPage()
+                }
+                await eventually { model.message != nil && !model.busy }
+                XCTAssertNil(model.summary)
+                XCTAssertNil(model.activity)
+                XCTAssertNil(model.selectedCurrency)
+                XCTAssertNil(model.selectedAccount)
+                XCTAssertNil(model.lease)
+                model.lock()
+            }
+        }
+    }
+
+    func testSummaryAndActivityRejectUnicodeEquivalentLeaseRevision() async throws {
+        for summary in [true, false] {
+            let workspace = Workspace(); workspace.readRevision = "Café"
+            if summary { workspace.summaryFault = "unicodeRevision" }
+            else { workspace.activityFault = "unicodeRevision" }
+            let (model, _, _) = fixture(workspace: workspace)
+            try await openBalances(model)
+            model.selectCurrency("AAA")
+            await eventually { model.message != nil && !model.busy }
+            XCTAssertNil(model.summary)
+            XCTAssertNil(model.activity)
+            XCTAssertNil(model.lease)
+            model.lock()
+        }
+    }
+
+    func testEmptyActivityKeepsZeroOrScalarSummaryWithoutContinuation() async throws {
+        let workspace = Workspace(); workspace.activityFault = "empty"
+        let (model, _, _) = fixture(workspace: workspace)
+        try await openBalances(model)
+        model.selectCurrency("AAA")
+        await eventually { model.activity != nil && !model.busy }
+        XCTAssertTrue(model.activity!.rows.isEmpty)
+        XCTAssertNotNil(model.summary)
+        XCTAssertNil(model.activity?.nextCursor)
+        model.nextActivityPage()
+        XCTAssertFalse(model.busy)
+        model.lock()
+    }
+
+    func testLockDuringSummaryOrActivitySuppressesLateResultsAcrossUnlock() async throws {
+        for summary in [true, false] {
+            let workspace = Workspace(); workspace.blockSummary = summary; workspace.blockActivity = !summary
+            let (model, _, _) = fixture(workspace: workspace)
+            try await openBalances(model)
+            model.selectCurrency("AAA")
+            let started = await browserTestWait(workspace.queryStarted)
+            XCTAssertTrue(started)
+            model.lock()
+            XCTAssertNil(model.selectedAccount)
+            XCTAssertNil(model.selectedCurrency)
+            XCTAssertNil(model.summary)
+            XCTAssertNil(model.activity)
+            model.unlock()
+            await eventually { !model.locked && !model.busy }
+            workspace.queryRelease.signal()
+            await eventually { workspace.closes == 1 }
+            XCTAssertNil(model.lease)
+            XCTAssertNil(model.activity)
+            XCTAssertNil(model.summary)
+            XCTAssertNil(model.message)
+            XCTAssertEqual(workspace.activityCursors.count, summary ? 0 : 1)
+            model.lock()
+        }
     }
 
     func testAccountsModesReplacePagesAndKeepOneScope() async throws {

@@ -313,7 +313,7 @@ func TestDetailByteCap(t *testing.T) {
 
 func TestGomobileSurface(t *testing.T) {
 	typ := reflect.TypeOf((*Bridge)(nil))
-	methods := map[string]bool{"Build": true, "Open": true, "Accounts": true, "AccountBalances": true, "Transactions": true, "Detail": true, "DetailRecords": true, "Cancel": true, "Lock": true, "Unlock": true, "Close": true}
+	methods := map[string]bool{"Build": true, "Open": true, "Accounts": true, "AccountBalances": true, "AccountSummary": true, "AccountActivity": true, "Transactions": true, "Detail": true, "DetailRecords": true, "Cancel": true, "Lock": true, "Unlock": true, "Close": true}
 	for i := 0; i < typ.NumMethod(); i++ {
 		method := typ.Method(i)
 		if !methods[method.Name] {

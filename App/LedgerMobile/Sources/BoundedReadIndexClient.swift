@@ -11,6 +11,8 @@ protocol BoundedReadIndexBackend: Sendable {
     func transactions(_ requestJSON: String) -> String
     func accounts(_ requestJSON: String) -> String
     func accountBalances(_ requestJSON: String) -> String
+    func accountSummary(_ requestJSON: String) -> String
+    func accountActivity(_ requestJSON: String) -> String
     func detail(_ id: Int64) -> String
     func detailRecords(_ requestJSON: String) -> String
     func unlock()
@@ -22,6 +24,8 @@ protocol BoundedReadIndexBackend: Sendable {
 /// Existing backends/fakes remain source compatible; never fall back to the
 /// whole-detail endpoint, which can exceed its all-or-error response cap.
 extension BoundedReadIndexBackend {
+    func accountSummary(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
+    func accountActivity(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
     func accounts(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
     func accountBalances(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
     func detailRecords(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
@@ -235,6 +239,85 @@ struct BoundedIndexAccountBalancesPage: Decodable, Sendable {
     }
 }
 
+/// Native posting units only. Exact strings, not legacy money/cents, lots or valuation.
+struct BoundedIndexAccountSummary: Decodable, Sendable {
+    let revision: String
+    let basis: String
+    let account: String
+    let currency: String
+    let start: String?
+    let end: String?
+    let currentBalance: String
+    let openingBalance: String
+    let closingBalance: String
+    let periodChange: String
+    private enum CodingKeys: String, CodingKey {
+        case revision, basis, account, currency, start, end
+        case currentBalance = "current_balance", openingBalance = "opening_balance"
+        case closingBalance = "closing_balance", periodChange = "period_change"
+    }
+    func validate(account: String, currency: String, start: String?, end: String?) throws {
+        try BoundedAccountsValidation.identity(self.account, self.currency, basis: basis,
+            start: self.start, end: self.end, account: account, currency: currency, expectedStart: start, expectedEnd: end)
+        guard [currentBalance, openingBalance, closingBalance, periodChange].allSatisfy(BoundedAccountsValidation.decimal)
+        else { throw BoundedReadIndexError.corrupt }
+    }
+}
+
+/// One ascending transaction page. Repeated postings are aggregated by the
+/// backend; Swift neither reconstructs nor rounds deltas/running balances.
+struct BoundedIndexAccountActivityPage: Decodable, Sendable {
+    struct Row: Decodable, Sendable {
+        let id: Int64
+        let date: String
+        let change: String
+        let balance: String
+        let record: BoundedIndexRecord
+    }
+    let revision: String
+    let basis: String
+    let account: String
+    let currency: String
+    let start: String?
+    let end: String?
+    let rows: [Row]
+    let nextCursor: String?
+    private enum CodingKeys: String, CodingKey {
+        case revision, basis, account, currency, start, end, rows, nextCursor = "next_cursor"
+    }
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try c.decode(String.self, forKey: .revision)
+        basis = try c.decode(String.self, forKey: .basis)
+        account = try c.decode(String.self, forKey: .account)
+        currency = try c.decode(String.self, forKey: .currency)
+        start = try c.decodeIfPresent(String.self, forKey: .start)
+        end = try c.decodeIfPresent(String.self, forKey: .end)
+        rows = try c.boundedRows(Row.self, forKey: .rows)
+        nextCursor = try c.decodeIfPresent(String.self, forKey: .nextCursor)
+    }
+    func validate(account: String, currency: String, start: String?, end: String?, limit: Int, cursor: String?) throws {
+        try BoundedAccountsValidation.identity(self.account, self.currency, basis: basis,
+            start: self.start, end: self.end, account: account, currency: currency, expectedStart: start, expectedEnd: end)
+        try BoundedAccountsValidation.page(count: rows.count, limit: limit, next: nextCursor, cursor: cursor)
+        var previous: Row?
+        var ids = Set<Int64>() // At most 500 scalar identities.
+        for row in rows {
+            guard row.id > 0, ids.insert(row.id).inserted, BoundedAccountsValidation.date(row.date),
+                  (start ?? "").isEmpty || (row.date >= (start ?? "") && row.date < (end ?? "")),
+                  BoundedAccountsValidation.decimal(row.change), BoundedAccountsValidation.decimal(row.balance),
+                  case let .directive(id, value) = row.record.value,
+                  id == row.id, value.kind == "transaction", value.date == row.date else {
+                throw BoundedReadIndexError.corrupt
+            }
+            if let previous, !(previous.date < row.date || previous.date == row.date && previous.id < row.id) {
+                throw BoundedReadIndexError.corrupt
+            }
+            previous = row
+        }
+    }
+}
+
 private extension KeyedDecodingContainer {
     func boundedRows<T: Decodable>(_ type: T.Type, forKey key: Key) throws -> [T] {
         if try decodeNil(forKey: key) { return [] } // Go nil slice
@@ -249,10 +332,19 @@ private extension KeyedDecodingContainer {
 }
 
 enum BoundedAccountsValidation {
+    static func bytes(_ lhs: String, _ rhs: String) -> Bool { lhs.utf8.elementsEqual(rhs.utf8) }
+    static func identity(_ actualAccount: String, _ actualCurrency: String, basis: String,
+                         start: String?, end: String?, account: String, currency: String,
+                         expectedStart: String?, expectedEnd: String?) throws {
+        guard Self.account(account), Self.account(currency), bytes(actualAccount, account),
+              bytes(actualCurrency, currency), bytes(basis, "native_nominal"),
+              bytes(start ?? "", expectedStart ?? ""), bytes(end ?? "", expectedEnd ?? ""),
+              interval(start, end) else { throw BoundedReadIndexError.corrupt }
+    }
     static func page(count: Int, limit: Int, next: String?, cursor: String?) throws {
         guard count <= limit, (next?.utf8.count ?? 0) <= 512 else { throw BoundedReadIndexError.corrupt }
         if let next {
-            guard !next.isEmpty, next != cursor, count > 0 else { throw BoundedReadIndexError.corrupt }
+            guard !next.isEmpty, !bytes(next, cursor ?? ""), count > 0 else { throw BoundedReadIndexError.corrupt }
         }
     }
     static func account(_ value: String) -> Bool {
@@ -488,7 +580,7 @@ final class BoundedReadIndexClient: @unchecked Sendable {
             guard data.count <= BoundedIndexWire.manifestLimit else { throw BoundedReadIndexError.resourceLimit }
             struct OpenResult: Decodable { let revision: String }
             let result = try BoundedIndexWire.decode(OpenResult.self, json: backend.open(try BoundedIndexWire.path(databasePath), manifestJSON: String(decoding: data, as: UTF8.self)), limit: BoundedIndexWire.manifestLimit)
-            guard result.revision == manifest.revision else { throw BoundedReadIndexError.revisionMismatch }
+            guard BoundedAccountsValidation.bytes(result.revision, manifest.revision) else { throw BoundedReadIndexError.revisionMismatch }
             return result.revision
         }
     }
@@ -530,6 +622,34 @@ final class BoundedReadIndexClient: @unchecked Sendable {
             let page = try BoundedIndexWire.decode(BoundedIndexAccountBalancesPage.self,
                 json: backend.accountBalances(String(decoding: data, as: UTF8.self)), limit: BoundedIndexWire.responseLimit)
             try page.validate(account: account, start: start, end: end, limit: limit, cursor: cursor)
+            return page
+        }
+    }
+    func accountSummary(account: String, currency: String, start: String? = nil, end: String? = nil) throws -> BoundedIndexAccountSummary {
+        try run {
+            guard BoundedAccountsValidation.account(account), BoundedAccountsValidation.account(currency),
+                  BoundedAccountsValidation.interval(start, end) else { throw BoundedReadIndexError.invalidRequest }
+            struct Request: Encodable { let account: String; let currency: String; let start: String?; let end: String? }
+            let data = try JSONEncoder().encode(Request(account: account, currency: currency, start: start, end: end))
+            guard data.count <= 4096 else { throw BoundedReadIndexError.resourceLimit }
+            let result = try BoundedIndexWire.decode(BoundedIndexAccountSummary.self,
+                json: backend.accountSummary(String(decoding: data, as: UTF8.self)), limit: BoundedIndexWire.responseLimit)
+            try result.validate(account: account, currency: currency, start: start, end: end)
+            return result
+        }
+    }
+    func accountActivity(account: String, currency: String, start: String? = nil, end: String? = nil,
+                         limit: Int = 100, cursor: String? = nil) throws -> BoundedIndexAccountActivityPage {
+        try run {
+            guard BoundedAccountsValidation.account(account), BoundedAccountsValidation.account(currency),
+                  BoundedAccountsValidation.interval(start, end), (1...500).contains(limit),
+                  (cursor?.utf8.count ?? 0) <= 512 else { throw BoundedReadIndexError.invalidRequest }
+            struct Request: Encodable { let account: String; let currency: String; let start: String?; let end: String?; let limit: Int; let cursor: String? }
+            let data = try JSONEncoder().encode(Request(account: account, currency: currency, start: start, end: end, limit: limit, cursor: cursor))
+            guard data.count <= 4096 else { throw BoundedReadIndexError.resourceLimit }
+            let page = try BoundedIndexWire.decode(BoundedIndexAccountActivityPage.self,
+                json: backend.accountActivity(String(decoding: data, as: UTF8.self)), limit: BoundedIndexWire.responseLimit)
+            try page.validate(account: account, currency: currency, start: start, end: end, limit: limit, cursor: cursor)
             return page
         }
     }
@@ -578,6 +698,8 @@ private final class NativeBoundedReadIndexBackend: BoundedReadIndexBackend, @unc
     func open(_ databasePath: String, manifestJSON: String) -> String { bridge?.open(databasePath, manifestJSON: manifestJSON) ?? unavailable }
     func transactions(_ requestJSON: String) -> String { bridge?.transactions(requestJSON) ?? unavailable }
     func accounts(_ requestJSON: String) -> String { bridge?.accounts(requestJSON) ?? unavailable }
+    func accountSummary(_ requestJSON: String) -> String { bridge?.accountSummary(requestJSON) ?? unavailable }
+    func accountActivity(_ requestJSON: String) -> String { bridge?.accountActivity(requestJSON) ?? unavailable }
     func accountBalances(_ requestJSON: String) -> String { bridge?.accountBalances(requestJSON) ?? unavailable }
     func detail(_ id: Int64) -> String { bridge?.detail(id) ?? unavailable }
     func detailRecords(_ requestJSON: String) -> String { bridge?.detailRecords(requestJSON) ?? unavailable }
