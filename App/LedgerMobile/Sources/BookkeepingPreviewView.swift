@@ -132,10 +132,11 @@ struct BookkeepingPreviewView: View {
         var suffix = 0
         while suffix < min(old.count, new.count) - prefix,
               old[old.count - suffix - 1] == new[new.count - suffix - 1] { suffix += 1 }
-        return old[max(0, prefix - 2)..<prefix].map { "  " + $0 }.joined(separator: "\n")
-            + "\n" + old[prefix..<(old.count - suffix)].map { "- " + $0 }.joined(separator: "\n")
-            + "\n" + new[prefix..<(new.count - suffix)].map { "+ " + $0 }.joined(separator: "\n")
-            + "\n" + new[(new.count - suffix)..<min(new.count, new.count - suffix + 2)].map { "  " + $0 }.joined(separator: "\n")
+        let leadingContext = old[max(0, prefix - 2)..<prefix].map { "  " + $0 }.joined(separator: "\n")
+        let removed = old[prefix..<(old.count - suffix)].map { "- " + $0 }.joined(separator: "\n")
+        let added = new[prefix..<(new.count - suffix)].map { "+ " + $0 }.joined(separator: "\n")
+        let trailingContext = new[(new.count - suffix)..<min(new.count, new.count - suffix + 2)].map { "  " + $0 }.joined(separator: "\n")
+        return [leadingContext, removed, added, trailingContext].joined(separator: "\n")
     }
 
     static func isIncludeOnlyDiff(_ diff: String) -> Bool {

@@ -50,6 +50,16 @@ private struct BoundedUnavailableProvider: TimelineProvider {
 
 private struct BoundedUnavailableWidget: Widget {
     let kind: String
+
+    // Widget requires a zero-argument initializer even when the bundle supplies
+    // an explicit kind for each disabled legacy widget.
+    init() {
+        self.init(kind: "LedgerExpenseOverviewWidget")
+    }
+
+    init(kind: String) {
+        self.kind = kind
+    }
     private var families: [WidgetFamily] {
         #if !targetEnvironment(macCatalyst)
         if kind == "LedgerExpenseLockScreenWidget" {

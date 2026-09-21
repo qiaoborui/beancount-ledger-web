@@ -73,3 +73,12 @@
 - Default Debug/Release unchanged; BoundedDebug/BoundedRelease flag inherited by all targets. Review corrected XcodeGen implicit default to Debug and blocked independent legacy account AppIntent entity resolution. Bounded widgets show unavailable state, timeline loader/network/background service/share import guarded. Old OS-retained Widget snapshots still require device upgrade validation.
 - Ten model tests pass in isolated Linux Swift6 harness (Apple/Combine stubs, not full SDK). Default/bounded parser checks passed; static diff checks passed. Native UI Apple typecheck/linking/rendering, model tests against real Apple package, protection and device lifecycle remain unverified for this code. No private data/signing/deployment.
 - Next: publish/check child PR and macOS CI; unsigned public Apple build validation; then capability/read-write parity and protected spilling, failure/device gates. All-target completion is NOT claimed.
+
+
+## Public native simulator compile fixes
+
+- Task20260921-ios-bounded-read-model; scoped native CI task active, overall architecture active; updated 2026-09-21T15:17:32.152880+00:00. Branch `codex/ios-bounded-browser`, code base `c791043`; PR https://github.com/qiaoborui/beancount-ledger-web/pull/411 (open, MERGEABLE). User authorizes scoped commit/push, public unsigned builds only.
+- Real native run https://github.com/qiaoborui/beancount-ledger-web/actions/runs/35616699785 failed both configurations with Xcode26.3/iOS simulator26.2: BoundedDebug widget lacked Widget-required init(); Debug timed out typechecking the bookkeeping diff concatenation. Both native framework builds and mandatory Swift imports passed.
+- Fixes: explicit default and kind widget initializers; split unchanged diff segments into independently inferred strings and join with the same three separators. No default capability, extension flag, financial-write or packaging behavior changes. Scope: two Swift files plus this note.
+- Validation: workflow contract6 and private-IPA contract7 tests PASS; diff check PASS. Existing head macOS core run35616699456 SUCCESS:455 tests,15 skipped,0 failures. General CI35616699602 now SUCCESS. Native fixes require new hosted verification; not yet claimed passing.
+- Next: push scoped fix, monitor both real native simulator jobs, fix any further concrete compile/link/package failures, then record final evidence and PR conflict status. Physical-device/runtime/parity gates remain outside this scoped task.
