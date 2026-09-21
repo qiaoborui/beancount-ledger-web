@@ -27,7 +27,11 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         private var _locks = 0
         private var _pages: [String?] = []
         private var _details = 0
+        private var _detailCursors: [String?] = []
         private var _offMain = true
+        var oversizedDetail = false
+        var wrongDetailRevision = false
+        var malformedDetail = false
         var oversized = false // configured before handing the fake to the worker
         var blockNext = false
         var blockDetail = false
@@ -42,6 +46,7 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         var locks: Int { gate.withLock { _locks } }
         var pageCount: Int { gate.withLock { _pages.count } }
         var details: Int { gate.withLock { _details } }
+        var detailCursors: [String?] { gate.withLock { _detailCursors } }
         var offMain: Bool { gate.withLock { _offMain } }
 
         func revision() async throws -> UUID { revisionID }
@@ -76,16 +81,20 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
                 return try JSONDecoder().decode(BoundedIndexPage.self, from: Data("""
                     {"revision":"fixture","transactions":[\(rows)],"next_cursor":\(cursor == nil ? "\"next\"" : "null")}
                     """.utf8))
-            }, detail: { id in
-                self.gate.withLock { self._details += 1; self._offMain = self._offMain && !Thread.isMainThread }
+            }, detailRecords: { id, cursor in
+                self.gate.withLock { self._details += 1; self._detailCursors.append(cursor); self._offMain = self._offMain && !Thread.isMainThread }
                 if self.blockDetail {
                     self.queryStarted.signal()
                     guard self.queryRelease.wait(timeout: .now() + 5) == .success else {
                         throw BoundedReadIndexError.canceled
                     }
                 }
-                return try JSONDecoder().decode(BoundedIndexDetail.self, from: Data("""
-                    {"revision":"fixture","id":\(id),"records":[]}
+                let directive = #"{"type":"directive","id":\#(id),"value":{"Kind":"transaction","Date":"2026-01-01","File":"main.bean","Line":1}}"#
+                let posting = #"{"type":"posting","entry_id":\#(id),"ordinal":0,"value":{"account":"Assets:Test","Quantity":{"Number":"1.00","Currency":"USD"}}}"#
+                let rows = self.oversizedDetail ? Array(repeating: posting, count: 101) :
+                    (self.malformedDetail ? [posting] : (cursor == nil ? [directive, posting] : [posting]))
+                return try JSONDecoder().decode(BoundedIndexDetailPage.self, from: Data("""
+                    {"revision":"\(self.wrongDetailRevision ? "wrong" : "fixture")","id":\(id),"records":[\(rows.joined(separator: ","))],"next_cursor":\(cursor == nil ? "\"detail-next\"" : "null")}
                     """.utf8))
             }))
         }
@@ -274,6 +283,64 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         model.lock()
     }
 
+    func testDetailPagesReplaceAndReuseReaderAndClearOnNavigation() async throws {
+        let (model, workspace, _) = fixture()
+        try await select(model)
+        model.open()
+        await eventually { model.page != nil }
+        model.showDetail(1)
+        await eventually { model.detail != nil }
+        XCTAssertEqual(model.detail?.records.count, 2)
+        model.nextDetailPage()
+        XCTAssertNil(model.detail)
+        await eventually { model.detail != nil }
+        XCTAssertEqual(model.detail?.records.count, 1) // NOT three accumulated records.
+        XCTAssertNil(model.detail?.nextCursor)
+        model.nextDetailPage()
+        XCTAssertEqual(workspace.details, 2)
+        model.firstDetailPage()
+        XCTAssertNil(model.detail)
+        await eventually { model.detail?.records.count == 2 }
+        XCTAssertEqual(workspace.detailCursors, [nil, "detail-next", nil])
+        XCTAssertEqual(workspace.opens, 1)
+        XCTAssertEqual(workspace.closes, 0)
+        model.dismissDetail()
+        XCTAssertNil(model.detail)
+        model.showDetail(1)
+        await eventually { model.detail != nil }
+        model.nextPage()
+        XCTAssertNil(model.detail)
+        await eventually { model.page?.transactions.first?.id == 2 }
+        model.showDetail(2)
+        await eventually { model.detail?.id == 2 }
+        model.select(try XCTUnwrap(model.selected))
+        XCTAssertNil(model.detail)
+        XCTAssertNil(model.lease)
+        await eventually { workspace.closes == 1 }
+        model.lock()
+    }
+
+    func testDetailFailuresClearRetainedState() async throws {
+        for failure in 0..<3 {
+            let workspace = Workspace()
+            workspace.oversizedDetail = failure == 0
+            workspace.wrongDetailRevision = failure == 1
+            workspace.malformedDetail = failure == 2
+            let (model, _, _) = fixture(workspace: workspace)
+            try await select(model)
+            model.open()
+            await eventually { model.page != nil }
+            model.showDetail(1)
+            await eventually { !model.busy }
+            XCTAssertNil(model.detail)
+            XCTAssertNil(model.page)
+            XCTAssertNil(model.lease)
+            XCTAssertNotNil(model.message)
+            await eventually { workspace.closes == 1 }
+            model.lock()
+        }
+    }
+
     func testLockSuppressesLateDetail() async throws {
         let workspace = Workspace()
         workspace.blockDetail = true
@@ -288,10 +355,15 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         XCTAssertTrue(started)
         model.lock()
         XCTAssertNil(model.detail)
+        model.unlock()
+        await eventually { !model.locked && !model.busy }
+        model.select(try XCTUnwrap(model.descriptors.first))
         workspace.queryRelease.signal()
         await eventually { workspace.closes == 1 }
         XCTAssertNil(model.detail)
         XCTAssertNil(model.page)
+        XCTAssertNil(model.lease)
+        model.lock()
     }
 }
 

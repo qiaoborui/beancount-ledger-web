@@ -100,6 +100,13 @@ struct BoundedLedgerReader: Sendable {
         guard page.revision == revision else { throw BoundedReadIndexError.revisionMismatch }
         return page
     }
+    func detailRecords(id: Int64, limit: Int = 100, cursor: String? = nil) throws -> BoundedIndexDetailPage {
+        try check()
+        let page = try client.detailRecords(id: id, limit: limit, cursor: cursor)
+        try check()
+        guard page.revision == revision else { throw BoundedReadIndexError.revisionMismatch }
+        return page
+    }
     func detail(id: Int64) throws -> BoundedIndexDetail {
         try check()
         let detail = try client.detail(id: id)

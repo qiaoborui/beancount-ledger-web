@@ -285,6 +285,26 @@ func (b *Bridge) Detail(id int64) string {
 	})
 }
 
+// DetailRecords returns one bounded source-ordered record page as raw JSON.
+// Requests are strict flat JSON objects of at most 4096 bytes. Lifecycle,
+// cancellation and busy behavior are identical to Transactions and Detail.
+func (b *Bridge) DetailRecords(requestJSON string) string {
+	return b.run(func(ctx context.Context) (string, error) {
+		var req readindex.DetailPageRequest
+		if err := decodeObject(requestJSON, maxRequestBytes, &req); err != nil {
+			return "", err
+		}
+		if b.reader == nil {
+			return "", readindex.ErrUnavailable
+		}
+		page, err := b.reader.DetailRecords(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		return encode(page, readindex.MaxResponseBytes)
+	})
+}
+
 func encode(v any, limit int) (string, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
