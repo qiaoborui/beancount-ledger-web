@@ -20,7 +20,7 @@ actor LocalLedgerRepository: LedgerRepository {
     private struct PreparedOperation: Sendable {
         let preview: PreparedBookkeepingChange
         let importID: String?
-        let result: Data?
+        let result: LocalLedgerResponse?
     }
     private var preparedOperations: [UUID: PreparedOperation] = [:]
 
@@ -77,10 +77,10 @@ actor LocalLedgerRepository: LedgerRepository {
             return (restored.revisionID, restored.payload)
         }
         let (revisionID, data) = try await readSnapshot("/api/ledger/bootstrap", query: query)
-        let payload = try JSONDecoder().decode(LedgerBootstrap.self, from: data)
+        let payload = try data.decode(LedgerBootstrap.self)
         presentedRevisionID = revisionID
-        if payload.sensitiveUnlocked {
-            cache.save(data, revisionID: revisionID, query: query)
+        if payload.sensitiveUnlocked, let cachedData = try? data.resultData() {
+            cache.save(cachedData, revisionID: revisionID, query: query)
         }
         return (revisionID, payload)
     }
@@ -105,7 +105,7 @@ actor LocalLedgerRepository: LedgerRepository {
             "alipayFundRounding": .bool(alipayFundRounding), "archivePassword": .string(archivePassword)])
         let (revision, data) = try await readSnapshot("/api/ledger/imports/preview", method: "POST", body: body,
             importFile: .init(name: file.name, data: file.data))
-        let result = try JSONDecoder().decode(LedgerImportPreview.self, from: data)
+        let result = try data.decode(LedgerImportPreview.self)
         presentedRevisionID = revision
         importRevisionIDs[result.importID] = revision
         importPreviewDates[result.importID] = Date()
@@ -203,10 +203,10 @@ actor LocalLedgerRepository: LedgerRepository {
         let box = ResultBox()
         let files = try await workspace.prepare(expectedRevisionID: expected, mutateStage: { root in
             for (path, body) in operations {
-                let data = try await engine.dispatch(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+                let data = try await engine.response(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                     entrypoint: entrypoint, method: "POST", path: path, body: body, staging: true))
-                if importID != nil { _ = try JSONDecoder().decode(LedgerImportCommitResult.self, from: data) }
-                else { _ = try JSONDecoder().decode(BQLCell.self, from: data) }
+                if importID != nil { _ = try data.decode(LedgerImportCommitResult.self) }
+                else { _ = try data.decode(BQLCell.self) }
                 await box.set(data)
             }
         }, validator: { root in try await validator(root, entrypoint) })
@@ -240,7 +240,7 @@ actor LocalLedgerRepository: LedgerRepository {
         await storage.didCommit(revision)
         NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
         if operation.importID != nil, let result = operation.result {
-            return try JSONDecoder().decode(LedgerImportCommitResult.self, from: result)
+            return try result.decode(LedgerImportCommitResult.self)
         }
         return nil
     }
@@ -403,12 +403,12 @@ actor LocalLedgerRepository: LedgerRepository {
     private func read<T: Decodable>(_ path: String, method: String = "GET", query: [String: String] = [:],
         body: BQLCell? = nil, importFile: LocalLedgerEngineRequest.ImportFile? = nil) async throws -> T {
         let (revision, data) = try await readSnapshot(path, method: method, query: query, body: body, importFile: importFile)
-        let result = try JSONDecoder().decode(T.self, from: data)
+        let result = try data.decode(T.self)
         presentedRevisionID = revision
         return result
     }
     private func readSnapshot(_ path: String, method: String = "GET", query: [String: String] = [:],
-        body: BQLCell? = nil, importFile: LocalLedgerEngineRequest.ImportFile? = nil) async throws -> (UUID, Data) {
+        body: BQLCell? = nil, importFile: LocalLedgerEngineRequest.ImportFile? = nil) async throws -> (UUID, LocalLedgerResponse) {
         let now = Date()
         if lastRuntimeMaintenance.map({ now.timeIntervalSince($0) >= 60 * 60 }) ?? true {
             // Opportunistic maintenance also runs for read-only app sessions.
@@ -423,8 +423,8 @@ actor LocalLedgerRepository: LedgerRepository {
         }
         let engine = engine, entrypoint = descriptor.entrypoint
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
-        let operation: @Sendable (LocalLedgerWorkspace.Revision, URL) async throws -> (UUID, Data) = { revision, root in
-            let data = try await engine.dispatch(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+        let operation: @Sendable (LocalLedgerWorkspace.Revision, URL) async throws -> (UUID, LocalLedgerResponse) = { revision, root in
+            let data = try await engine.response(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                 entrypoint: entrypoint, method: method, path: path, query: query, body: body, importFile: importFile))
             return (revision.id, data)
         }
@@ -434,8 +434,8 @@ actor LocalLedgerRepository: LedgerRepository {
         return try await workspace.withCurrentSnapshot(operation)
     }
     private actor ResultBox {
-        var data: Data?
-        func set(_ value: Data) { data = value }
+        var data: LocalLedgerResponse?
+        func set(_ value: LocalLedgerResponse) { data = value }
     }
     private func mutate<T: Decodable & Sendable>(_ path: String, method: String, body: BQLCell,
         expected: UUID? = nil, consumingImportID: String? = nil) async throws -> T {
@@ -445,17 +445,17 @@ actor LocalLedgerRepository: LedgerRepository {
         let box = ResultBox()
         let revision = try await workspace.commit(expectedRevisionID: revisionID, changes: [],
             consumingImportID: consumingImportID, mutateStage: { root in
-            let data = try await engine.dispatch(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+            let data = try await engine.response(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                 entrypoint: entrypoint, method: method, path: path, body: body, staging: true))
             // Decode before publication; malformed replies cannot produce a successful financial write.
-            _ = try JSONDecoder().decode(T.self, from: data)
+            _ = try data.decode(T.self)
             await box.set(data)
         }, validator: { root in try await validator(root, entrypoint) })
         guard let data = await box.data else { throw LocalLedgerError.operationFailed("本地修改缺少结果") }
         presentedRevisionID = revision.id
         await storage.didCommit(revision)
         NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
-        return try JSONDecoder().decode(T.self, from: data)
+        return try data.decode(T.self)
     }
 }
 
