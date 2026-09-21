@@ -6,6 +6,18 @@ import Combine
 struct BoundedBrowserQueries: Sendable {
     let page: @Sendable (String?) throws -> BoundedIndexPage
     let detailRecords: @Sendable (Int64, String?) throws -> BoundedIndexDetailPage
+    let accounts: @Sendable (String?) throws -> BoundedIndexAccountsPage
+    let accountBalances: @Sendable (String, String?) throws -> BoundedIndexAccountBalancesPage
+
+    init(page: @escaping @Sendable (String?) throws -> BoundedIndexPage,
+         detailRecords: @escaping @Sendable (Int64, String?) throws -> BoundedIndexDetailPage,
+         accounts: @escaping @Sendable (String?) throws -> BoundedIndexAccountsPage = { _ in throw BoundedReadIndexError.unavailable },
+         accountBalances: @escaping @Sendable (String, String?) throws -> BoundedIndexAccountBalancesPage = { _, _ in throw BoundedReadIndexError.unavailable }) {
+        self.page = page
+        self.detailRecords = detailRecords
+        self.accounts = accounts
+        self.accountBalances = accountBalances
+    }
 }
 
 struct BoundedBrowserLeaseInfo: Sendable {
@@ -37,7 +49,9 @@ private struct PublishedBrowserWorkspace: BoundedBrowserWorkspace {
         try await publication.withReadLease { lease, reader in
             try await body(.init(revision: lease.manifest.index.revision, isStale: lease.isStale),
                            .init(page: { try reader.transactions(limit: 100, cursor: $0) },
-                                 detailRecords: { try reader.detailRecords(id: $0, limit: 100, cursor: $1) }))
+                                 detailRecords: { try reader.detailRecords(id: $0, limit: 100, cursor: $1) },
+                                 accounts: { try reader.accounts(limit: 100, cursor: $0) },
+                                 accountBalances: { try reader.accountBalances(account: $0, limit: 100, cursor: $1) }))
         }
     }
     func lock() { publication.lock() }
@@ -96,6 +110,11 @@ final class BoundedLedgerBrowserModel: ObservableObject {
     @Published private(set) var busy = false
     @Published private(set) var descriptors: [LocalLedgerDescriptor] = []
     @Published private(set) var selected: LocalLedgerDescriptor?
+    enum Mode: String, Sendable { case transactions, accounts }
+    @Published private(set) var mode: Mode = .transactions
+    @Published private(set) var accountsPage: BoundedIndexAccountsPage?
+    @Published private(set) var selectedAccount: BoundedIndexAccountsPage.Account?
+    @Published private(set) var balances: BoundedIndexAccountBalancesPage?
     @Published private(set) var page: BoundedIndexPage?
     @Published private(set) var detail: BoundedIndexDetailPage?
     @Published private(set) var lease: BoundedBrowserLeaseInfo?
@@ -103,7 +122,7 @@ final class BoundedLedgerBrowserModel: ObservableObject {
     @Published private(set) var message: String?
     let runtimeAvailable: Bool
 
-    private enum Request: Sendable { case page(String?), detail(Int64, String?) }
+    private enum Request: Sendable { case page(String?), detail(Int64, String?), accounts(String?), balances(String, String?) }
     private let authenticator: any LocalLedgerAuthenticating
     private let dependencies: BoundedBrowserDependencies
     private var root: URL?
@@ -156,6 +175,7 @@ final class BoundedLedgerBrowserModel: ObservableObject {
     func lock() {
         retire()
         locked = true
+        mode = .transactions
         busy = false
         descriptors = []
         root = nil
@@ -167,6 +187,7 @@ final class BoundedLedgerBrowserModel: ObservableObject {
     func select(_ descriptor: LocalLedgerDescriptor) {
         guard !locked, !busy, descriptors.contains(descriptor), let root else { return }
         retire()
+        mode = .transactions
         selected = descriptor
         confirmation = nil
         message = nil
@@ -245,8 +266,12 @@ final class BoundedLedgerBrowserModel: ObservableObject {
         message = nil
         page = nil
         detail = nil
+        accountsPage = nil
+        selectedAccount = nil
+        balances = nil
         let token = epoch
         let lifetime = lifetime
+        let initialMode = mode
         let (stream, continuation) = AsyncStream<Request>.makeStream(bufferingPolicy: .bufferingOldest(1))
         requests = continuation
         worker = Task.detached { [weak self] in
@@ -257,9 +282,16 @@ final class BoundedLedgerBrowserModel: ObservableObject {
                 try lifetime.check()
                 try await workspace.read { [weak self] info, queries in
                     try lifetime.check()
-                    let first = try queries.page(nil)
-                    try Self.validate(first, revision: info.revision)
-                    await self?.received(first, info: info, token: token)
+                    switch initialMode {
+                    case .transactions:
+                        let first = try queries.page(nil)
+                        try Self.validate(first, revision: info.revision)
+                        await self?.received(first, info: info, token: token)
+                    case .accounts:
+                        let first = try queries.accounts(nil)
+                        try Self.validate(first, revision: info.revision, cursor: nil)
+                        await self?.received(first, info: info, token: token)
+                    }
                     for await request in stream {
                         try lifetime.check()
                         switch request {
@@ -267,6 +299,16 @@ final class BoundedLedgerBrowserModel: ObservableObject {
                             let page = try queries.page(cursor)
                             try Self.validate(page, revision: info.revision)
                             await self?.received(page, info: info, token: token)
+                        case .accounts(let cursor):
+                            let page = try queries.accounts(cursor)
+                            try Self.validate(page, revision: info.revision, cursor: cursor)
+                            await self?.received(page, info: info, token: token)
+                        case .balances(let account, let cursor):
+                            let page = try queries.accountBalances(account, cursor)
+                            guard page.balances.count <= 100 else { throw BoundedReadIndexError.resourceLimit }
+                            try page.validate(account: account, start: nil, end: nil, limit: 100, cursor: cursor)
+                            guard page.revision == info.revision else { throw BoundedReadIndexError.revisionMismatch }
+                            await self?.received(page, token: token)
                         case .detail(let id, let cursor):
                             let detail = try queries.detailRecords(id, cursor)
                             guard detail.records.count <= 100 else { throw BoundedReadIndexError.resourceLimit }
@@ -287,13 +329,55 @@ final class BoundedLedgerBrowserModel: ObservableObject {
         guard page.revision == revision else { throw BoundedReadIndexError.revisionMismatch }
     }
 
+    nonisolated private static func validate(_ page: BoundedIndexAccountsPage, revision: String, cursor: String?) throws {
+        guard page.accounts.count <= 100 else { throw BoundedReadIndexError.resourceLimit }
+        try page.validate(limit: 100, cursor: cursor)
+        guard page.revision == revision else { throw BoundedReadIndexError.revisionMismatch }
+    }
+
+    /// Mode changes keep the same scoped reader; no reopen or legacy fallback.
+    func setMode(_ value: Mode) {
+        guard !locked, !busy, mode != value else { return }
+        mode = value
+        page = nil
+        detail = nil
+        accountsPage = nil
+        selectedAccount = nil
+        balances = nil
+        if lease != nil { send(value == .accounts ? .accounts(nil) : .page(nil)) }
+    }
+    func nextAccountsPage() {
+        guard mode == .accounts, let cursor = accountsPage?.nextCursor else { return }
+        send(.accounts(cursor))
+    }
+    func firstAccountsPage() { if mode == .accounts { send(.accounts(nil)) } }
+    func selectAccount(_ openID: Int64) {
+        guard !locked, !busy, mode == .accounts,
+              let row = accountsPage?.accounts.first(where: { $0.openID == openID }),
+              BoundedAccountsValidation.account(row.account) else { return }
+        selectedAccount = row
+        send(.balances(row.account, nil))
+    }
+    func nextBalancesPage() {
+        guard let account = selectedAccount?.account, let cursor = balances?.nextCursor else { return }
+        send(.balances(account, cursor))
+    }
+    func firstBalancesPage() {
+        guard let account = selectedAccount?.account else { return }
+        send(.balances(account, nil))
+    }
+    func showAccountMetadata() {
+        guard mode == .accounts, let selectedAccount else { return }
+        send(.detail(selectedAccount.openID, nil))
+    }
+
     func nextPage() {
-        guard let cursor = page?.nextCursor else { return }
+        guard mode == .transactions, let cursor = page?.nextCursor else { return }
         send(.page(cursor))
     }
-    func firstPage() { send(.page(nil)) }
+    func firstPage() { if mode == .transactions { send(.page(nil)) } }
     func showDetail(_ id: Int64) {
-        guard page?.transactions.contains(where: { $0.id == id }) == true else { return }
+        guard mode == .transactions, page?.transactions.contains(where: { $0.id == id }) == true else { return }
         send(.detail(id, nil))
     }
     func nextDetailPage() {
@@ -310,7 +394,17 @@ final class BoundedLedgerBrowserModel: ObservableObject {
         guard !locked, !busy, let requests, lease != nil else { return }
         busy = true
         detail = nil
-        if case .page = request { page = nil }
+        switch request {
+        case .page:
+            page = nil
+        case .accounts:
+            accountsPage = nil
+            selectedAccount = nil
+            balances = nil
+        case .balances:
+            balances = nil
+        case .detail: break
+        }
         if case .enqueued = requests.yield(request) { return }
         failed(BoundedReadIndexError.busy, token: epoch)
     }
@@ -319,6 +413,18 @@ final class BoundedLedgerBrowserModel: ObservableObject {
         guard epoch == token, !locked else { return }
         self.page = page // Replacement, never append.
         lease = info
+        busy = false
+    }
+    private func received(_ page: BoundedIndexAccountsPage, info: BoundedBrowserLeaseInfo, token: UUID) {
+        guard epoch == token, !locked, mode == .accounts else { return }
+        accountsPage = page // Replacement, never append.
+        lease = info
+        busy = false
+    }
+    private func received(_ page: BoundedIndexAccountBalancesPage, token: UUID) {
+        guard epoch == token, !locked, mode == .accounts,
+              let account = selectedAccount?.account, account.utf8.elementsEqual(page.account.utf8) else { return }
+        balances = page // Only this account's current currency page is retained.
         busy = false
     }
     private func received(_ detail: BoundedIndexDetailPage, token: UUID) {
@@ -332,6 +438,9 @@ final class BoundedLedgerBrowserModel: ObservableObject {
         requests = nil
         page = nil
         detail = nil
+        accountsPage = nil
+        selectedAccount = nil
+        balances = nil
         lease = nil
         confirmation = nil
         busy = false
@@ -358,6 +467,9 @@ final class BoundedLedgerBrowserModel: ObservableObject {
         workspace = nil
         page = nil
         detail = nil
+        accountsPage = nil
+        selectedAccount = nil
+        balances = nil
         lease = nil
         Task.detached {
             // Task.cancel invokes publication cancellation handlers synchronously.

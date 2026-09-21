@@ -17,7 +17,7 @@ import (
 	"github.com/borui/beancount-ledger-web/server/internal/readindex/sqlite"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 var (
 	ErrUnavailable      = errors.New("read index unavailable")
@@ -113,6 +113,13 @@ var schema = []struct{ name, kind, table, sql string }{
 	{"transactions", "table", "transactions", "CREATE TABLE transactions (id INTEGER PRIMARY KEY, date TEXT NOT NULL, seq INTEGER NOT NULL) STRICT"},
 	{"transactions_date_id", "index", "transactions", "CREATE INDEX transactions_date_id ON transactions(date DESC, id DESC)"},
 	{"transactions_seq", "index", "transactions", "CREATE UNIQUE INDEX transactions_seq ON transactions(seq)"},
+	{"postings", "table", "postings", "CREATE TABLE postings (seq INTEGER PRIMARY KEY, entry_id INTEGER NOT NULL, ordinal INTEGER NOT NULL, account TEXT NOT NULL, date TEXT NOT NULL, quantity TEXT NOT NULL, currency TEXT NOT NULL, cost_number TEXT, cost_currency TEXT, cost_date TEXT, cost_label TEXT, price_number TEXT, price_currency TEXT, flag TEXT) STRICT"},
+	{"postings_account_currency_date", "index", "postings", "CREATE INDEX postings_account_currency_date ON postings(account, currency, date, seq)"},
+	{"account_events", "table", "account_events", "CREATE TABLE account_events (seq INTEGER PRIMARY KEY, entry_id INTEGER NOT NULL, kind TEXT NOT NULL, account TEXT NOT NULL, date TEXT NOT NULL) STRICT"},
+	{"account_events_catalog", "index", "account_events", "CREATE INDEX account_events_catalog ON account_events(kind, account, entry_id)"},
+	{"account_events_latest", "index", "account_events", "CREATE INDEX account_events_latest ON account_events(account, kind, date DESC, entry_id DESC)"},
+	{"prices", "table", "prices", "CREATE TABLE prices (seq INTEGER PRIMARY KEY, entry_id INTEGER NOT NULL, date TEXT NOT NULL, currency TEXT NOT NULL, quantity TEXT NOT NULL, quote_currency TEXT NOT NULL) STRICT"},
+	{"prices_currency_date", "index", "prices", "CREATE INDEX prices_currency_date ON prices(currency, quote_currency, date, seq)"},
 	{"manifest", "table", "manifest", "CREATE TABLE manifest (singleton INTEGER PRIMARY KEY CHECK(singleton=1), raw TEXT NOT NULL) STRICT"},
 }
 
@@ -269,6 +276,7 @@ func build(ctx context.Context, input io.Reader, destination string, syncDirecto
 	var m Manifest
 	var seq int64
 	var visitErr error
+	var projections projectionState
 	summary, e := boundedstream.Verify(ctx, input, func(r boundedstream.Record) error {
 		key, e := keys(r.Raw)
 		if e != nil {
@@ -286,6 +294,13 @@ func build(ctx context.Context, input io.Reader, destination string, syncDirecto
 			m.Transactions++
 			if e = ctx.Err(); e == nil {
 				e = db.Exec("INSERT INTO transactions(id, date, seq) VALUES (?, ?, ?)", key.ID, key.Value.Date, seq)
+			}
+		}
+		if e == nil {
+			var p projection
+			p, e = projections.project(r.Raw, key, seq)
+			if e == nil {
+				e = insertProjection(db, p)
 			}
 		}
 		if e != nil {

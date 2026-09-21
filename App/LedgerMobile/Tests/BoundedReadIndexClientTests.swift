@@ -8,7 +8,7 @@ final class BoundedReadIndexClientTests: XCTestCase {
         #"{"revision":"r1","transactions":[{"id":1,"date":"2026-09-21","record":\#(directive)}],"next_cursor":"cursor"}"#
     }
     private var manifestJSON: String {
-        #"{"schema_version":1,"stream_version":1,"source_digest":"source","runtime":"beancount","exporter":"bounded-v1","entrypoint":"main.bean","stream_digest":"stream","records":3,"directives":1,"postings":1,"options":0,"commodities":0,"metadata":0,"transactions":1,"bytes":1000,"max_record_bytes":500,"revision":"r1"}"#
+        #"{"schema_version":2,"stream_version":1,"source_digest":"source","runtime":"beancount","exporter":"bounded-v1","entrypoint":"main.bean","stream_digest":"stream","records":3,"directives":1,"postings":1,"options":0,"commodities":0,"metadata":0,"transactions":1,"bytes":1000,"max_record_bytes":500,"revision":"r1"}"#
     }
     func testLockedByDefaultAndExplicitCloseIsPermanent() throws {
         let backend = FakeBackend(response: page)

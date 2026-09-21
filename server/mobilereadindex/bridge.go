@@ -315,3 +315,41 @@ func encode(v any, limit int) (string, error) {
 	}
 	return string(raw), nil
 }
+
+// Accounts returns the bounded explicit-open catalog, not snapshot account
+// status/valuation parity. OpenID also locates scalar metadata detail records.
+func (b *Bridge) Accounts(requestJSON string) string {
+	return b.run(func(ctx context.Context) (string, error) {
+		var req readindex.PageRequest
+		if err := decodeObject(requestJSON, maxRequestBytes, &req); err != nil {
+			return "", err
+		}
+		if b.reader == nil {
+			return "", readindex.ErrUnavailable
+		}
+		page, err := b.reader.Accounts(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		return encode(page, readindex.MaxResponseBytes)
+	})
+}
+
+// AccountBalances requires one bounded account filter and returns exact native
+// nominal units by currency, never report valuation or running balances.
+func (b *Bridge) AccountBalances(requestJSON string) string {
+	return b.run(func(ctx context.Context) (string, error) {
+		var req readindex.AccountBalancesRequest
+		if err := decodeObject(requestJSON, maxRequestBytes, &req); err != nil {
+			return "", err
+		}
+		if b.reader == nil {
+			return "", readindex.ErrUnavailable
+		}
+		page, err := b.reader.AccountBalances(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		return encode(page, readindex.MaxResponseBytes)
+	})
+}
