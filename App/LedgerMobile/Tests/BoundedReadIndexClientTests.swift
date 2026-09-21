@@ -115,8 +115,13 @@ final class BoundedReadIndexClientTests: XCTestCase {
         client.unlock()
         let finished = expectation(description: "stale result rejected")
         DispatchQueue.global().async {
-            XCTAssertThrowsError(try client.transactions()) { XCTAssertEqual($0 as? BoundedReadIndexError, .canceled) }
-            finished.fulfill()
+            defer { finished.fulfill() }
+            do {
+                _ = try client.transactions()
+                XCTFail("Invalidated operation returned a page")
+            } catch {
+                XCTAssertEqual(error as? BoundedReadIndexError, .canceled)
+            }
         }
         XCTAssertEqual(backend.entered.wait(timeout: .now() + 2), .success)
         XCTAssertThrowsError(try client.transactions()) { XCTAssertEqual($0 as? BoundedReadIndexError, .busy) }
@@ -130,8 +135,13 @@ final class BoundedReadIndexClientTests: XCTestCase {
         client.unlock()
         let finished = expectation(description: "locked result rejected")
         DispatchQueue.global().async {
-            XCTAssertThrowsError(try client.transactions()) { XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable) }
-            finished.fulfill()
+            defer { finished.fulfill() }
+            do {
+                _ = try client.transactions()
+                XCTFail("Invalidated operation returned a page")
+            } catch {
+                XCTAssertEqual(error as? BoundedReadIndexError, .unavailable)
+            }
         }
         XCTAssertEqual(backend.entered.wait(timeout: .now() + 2), .success)
         client.lock()
@@ -146,8 +156,13 @@ final class BoundedReadIndexClientTests: XCTestCase {
         client.unlock()
         let finished = expectation(description: "closed result rejected")
         DispatchQueue.global().async {
-            XCTAssertThrowsError(try client.transactions()) { XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable) }
-            finished.fulfill()
+            defer { finished.fulfill() }
+            do {
+                _ = try client.transactions()
+                XCTFail("Invalidated operation returned a page")
+            } catch {
+                XCTAssertEqual(error as? BoundedReadIndexError, .unavailable)
+            }
         }
         XCTAssertEqual(backend.entered.wait(timeout: .now() + 2), .success)
         client.close()
