@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 #if canImport(Darwin)
 import Darwin
 #endif
@@ -416,6 +417,199 @@ actor LocalLedgerWorkspace {
         return try await operation(revision, workspace)
     }
 
+    // MARK: - Opt-in bounded publication (never changes current.json)
+
+    /// Holds both the actor transaction guard and the cross-instance lock through
+    /// export/build/publication. All financial writes still use commit/import.
+    /// Generations are never collected today, so the lease remains pinned even
+    /// after this scope. Future GC MUST account for bounded manifests/read leases.
+    func prepareBoundedPublication(
+        expectedRevisionID: UUID,
+        prepare: @Sendable (BoundedSourceLease, URL) async throws -> BoundedIndexManifest,
+        publish: @Sendable (() throws -> Void) throws -> Void
+    ) async throws -> BoundedLedgerManifest {
+        try beginTransaction()
+        defer { endTransaction() }
+        try prepareLayout()
+        try acquireTransactionLock()
+        let revision = try decodedRevision(at: currentRevisionFile, expectedID: nil)
+        let source = try workspaceLocation(for: revision)
+        let stored = try decodedRevision(at: generationDirectory(for: revision.id)
+            .appendingPathComponent(Self.revisionFileName), expectedID: revision.id)
+        guard revision == stored else { throw WorkspaceError.corruptRevision }
+        guard revision.id == expectedRevisionID else { throw WorkspaceError.staleRevision }
+        let identity = try boundedSourceIdentity(at: source)
+        let lease = BoundedSourceLease(revisionID: revision.id, identity: identity, directory: source)
+        let root = try boundedDerivedDirectory()
+        let id = UUID()
+        let derived = root.appendingPathComponent(id.uuidString, isDirectory: true)
+        try createProtectedDirectory(derived)
+        var published = false
+        defer { if !published { removeIfPresent(derived) } }
+        let index = try await prepare(lease, derived)
+        try Task.checkCancellation()
+        // Re-read bytes, not UUID/mtime: a same-size edit must fail closed.
+        guard try boundedSourceIdentity(at: source) == identity,
+              try decodedRevision(at: currentRevisionFile, expectedID: nil) == revision else {
+            throw BoundedReadIndexError.revisionMismatch
+        }
+        try verifyBoundedArtifacts(in: derived)
+        let manifest = BoundedLedgerManifest(version: 1, generationID: id,
+            sourceRevisionID: revision.id, sourceIdentity: identity, index: index)
+        let data = try manifest.encoded()
+        // These fixed artifacts are outside the financial source tree. Never
+        // traverse arbitrary builder-created trees or retain a spool in a lease.
+        let spool = derived.appendingPathComponent("stream.jsonl")
+        if try itemKindIfPresent(at: spool) != nil {
+            guard try itemKind(at: spool) == .regularFile else { throw BoundedReadIndexError.corrupt }
+            try fileManager.removeItem(at: spool)
+        }
+        try protect(derived.appendingPathComponent("index.sqlite"))
+        try synchronizeFile(derived.appendingPathComponent("index.sqlite"))
+        try synchronizeDirectory(derived)
+        try synchronizeDirectory(root)
+        // Persist newly-created derived/bounded ancestors before a first pointer.
+        try synchronizeDirectory(root.deletingLastPathComponent())
+        try synchronizeDirectory(rootDirectory)
+        try Task.checkCancellation()
+        // Permission and rename share the coordinator's privacy gate: cancel or
+        // lock cannot slip between the final epoch check and pointer publication.
+        try publish {
+            try self.writeAtomicPointer(data, to: root.appendingPathComponent("current.json"))
+        }
+        published = true
+        return manifest
+    }
+
+    /// Reopen verifies source bytes and artifact boundaries once per read lease,
+    /// not on each page. Missing/corrupt manifests never recover via legacy data
+    /// or by guessing among orphaned builds. Old generations are retained.
+    func boundedReadLease() throws -> BoundedLedgerReadLease {
+        try beginTransaction()
+        defer { endTransaction() }
+        try prepareLayout()
+        try acquireTransactionLock()
+        let root = try boundedDerivedDirectory()
+        let pointer = root.appendingPathComponent("current.json")
+        guard try itemKindIfPresent(at: pointer) == .regularFile else {
+            throw BoundedReadIndexError.unavailable
+        }
+        let data = try readRegularFile(at: pointer, displayPath: "current.json",
+                                      maximumBytes: BoundedLedgerManifest.maximumBytes)
+        let manifest = try BoundedLedgerManifest.decode(data)
+        let generation = generationDirectory(for: manifest.sourceRevisionID)
+        guard try itemKind(at: generation) == .directory else { throw BoundedReadIndexError.corrupt }
+        let revision = try decodedRevision(at: generation.appendingPathComponent(Self.revisionFileName),
+                                          expectedID: manifest.sourceRevisionID)
+        let source = try workspaceLocation(for: revision)
+        guard try boundedSourceIdentity(at: source) == manifest.sourceIdentity else {
+            throw BoundedReadIndexError.revisionMismatch
+        }
+        let derived = root.appendingPathComponent(manifest.generationID.uuidString, isDirectory: true)
+        try verifyBoundedArtifacts(in: derived)
+        // Compare pointers without legacy recovery/full-model loading. A broken
+        // source pointer is explicit unavailability, not a guessed stale state.
+        let current = try decodedRevision(at: currentRevisionFile, expectedID: nil)
+        return BoundedLedgerReadLease(manifest: manifest,
+            source: BoundedSourceLease(revisionID: revision.id, identity: manifest.sourceIdentity, directory: source),
+            derivedDirectory: derived, isStale: current.id != revision.id)
+    }
+
+    private func boundedDerivedDirectory() throws -> URL {
+        let root = rootDirectory.appendingPathComponent("derived", isDirectory: true)
+        try createProtectedDirectory(root)
+        let bounded = root.appendingPathComponent("bounded", isDirectory: true)
+        try createProtectedDirectory(bounded)
+        return bounded
+    }
+
+    private func verifyBoundedArtifacts(in directory: URL) throws {
+        guard try itemKind(at: directory) == .directory else { throw BoundedReadIndexError.corrupt }
+        let names: [String]
+        do { names = try boundedDirectoryNames(directory, maximumEntries: 2) }
+        catch { throw BoundedReadIndexError.corrupt }
+        for name in names {
+            guard name == "index.sqlite" || name == "stream.jsonl",
+                  try itemKind(at: directory.appendingPathComponent(name)) == .regularFile else {
+                throw BoundedReadIndexError.corrupt
+            }
+        }
+        guard try itemKind(at: directory.appendingPathComponent("index.sqlite")) == .regularFile else {
+            throw BoundedReadIndexError.corrupt
+        }
+    }
+
+    /// Independent full-tree identity (not the exporter's parsed-source digest).
+    /// A bounded list of paths plus a 256 KiB read buffer; no whole-file Data.
+    /// Includes plugin/support files and executable mode as well as .bean bytes.
+    private func boundedSourceIdentity(at directory: URL) throws -> String {
+        let paths = try validateTree(at: directory)
+        var digest = SHA256()
+        var budget = TreeBudget(limits: treeLimits)
+        func addLength(_ value: Int) {
+            var value = UInt64(value).bigEndian
+            withUnsafeBytes(of: &value) { digest.update(data: Data($0)) }
+        }
+        for path in paths {
+            try Task.checkCancellation()
+            let file = try secureDescendant(path, of: directory, allowMissingLeaf: false)
+            #if canImport(Darwin)
+            let descriptor = open(file.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+            guard descriptor >= 0 else { throw WorkspaceError.invalidSource }
+            var status = stat()
+            guard fstat(descriptor, &status) == 0, status.st_mode & S_IFMT == S_IFREG,
+                  status.st_size >= 0, UInt64(status.st_size) <= UInt64(Int.max) else {
+                close(descriptor)
+                throw WorkspaceError.invalidSource
+            }
+            let size = Int(status.st_size)
+            let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+            #else
+            guard try itemKind(at: file) == .regularFile else { throw WorkspaceError.invalidSource }
+            let handle = try FileHandle(forReadingFrom: file)
+            let size = (try fileManager.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? -1
+            #endif
+            defer { try? handle.close() }
+            try budget.addBytes(size)
+            addLength(path.utf8.count)
+            digest.update(data: Data(path.utf8))
+            addLength(try isExecutable(file) ? 1 : 0)
+            addLength(size)
+            var remaining = size
+            while remaining > 0 {
+                try Task.checkCancellation()
+                let data = try handle.read(upToCount: min(Self.copyBufferSize, remaining)) ?? Data()
+                guard !data.isEmpty else { throw WorkspaceError.invalidSource }
+                digest.update(data: data)
+                remaining -= data.count
+            }
+            guard (try handle.read(upToCount: 1) ?? Data()).isEmpty else { throw WorkspaceError.invalidSource }
+        }
+        return digest.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func boundedDirectoryNames(_ directory: URL, maximumEntries: Int) throws -> [String] {
+        #if canImport(Darwin)
+        let descriptor = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard descriptor >= 0 else { throw WorkspaceError.invalidSource }
+        defer { close(descriptor) }
+        return try directoryEntryNames(descriptor, maximumEntries: maximumEntries)
+        #else
+        // Non-Apple fallback is only for host fixtures; never materialize an
+        // unbounded contentsOfDirectory array before checking the entry cap.
+        guard let enumerator = fileManager.enumerator(at: directory, includingPropertiesForKeys: nil) else {
+            throw WorkspaceError.invalidSource
+        }
+        var names: [String] = []
+        for case let item as URL in enumerator {
+            enumerator.skipDescendants()
+            guard names.count < maximumEntries else { throw WorkspaceError.treeLimitExceeded }
+            names.append(item.lastPathComponent)
+        }
+        return names.sorted()
+        #endif
+    }
+
     private func requiredCurrentRevision() throws -> Revision {
         try prepareLayout()
         guard let revision = try loadCurrentRevisionIfPresent() else {
@@ -656,28 +850,31 @@ actor LocalLedgerWorkspace {
     }
 
     private func writeCurrentRevision(_ revision: Revision) throws {
-        let pending = rootDirectory.appendingPathComponent(
-            ".current-" + UUID().uuidString + ".json",
-            isDirectory: false
-        )
+        try writeAtomicPointer(try encodedRevision(revision), to: currentRevisionFile)
+    }
+
+    /// Shared publication primitive. The caller owns the workspace transaction
+    /// lock and a protected parent directory. No fallible work follows rename.
+    private func writeAtomicPointer(_ data: Data, to destination: URL) throws {
+        let parent = destination.deletingLastPathComponent()
+        let pending = parent.appendingPathComponent(".current-" + UUID().uuidString + ".json")
         defer { removeIfPresent(pending) }
-        try encodedRevision(revision).write(to: pending)
+        try data.write(to: pending, options: .withoutOverwriting)
         try protect(pending)
         try synchronizeFile(pending)
         #if canImport(Darwin)
-        guard rename(pending.path, currentRevisionFile.path) == 0 else {
+        guard rename(pending.path, destination.path) == 0 else {
             throw CocoaError(.fileWriteUnknown)
         }
         #else
-        if fileManager.fileExists(atPath: currentRevisionFile.path) {
-            _ = try fileManager.replaceItemAt(currentRevisionFile, withItemAt: pending)
+        if fileManager.fileExists(atPath: destination.path) {
+            _ = try fileManager.replaceItemAt(destination, withItemAt: pending)
         } else {
-            try fileManager.moveItem(at: pending, to: currentRevisionFile)
+            try fileManager.moveItem(at: pending, to: destination)
         }
         #endif
-        // The rename above is the commit point. A directory fsync improves
-        // crash durability; any post-rename failure leaves a valid pointer.
-        try? synchronizeDirectory(rootDirectory)
+        // The rename is the commit point. Preserve success after this point.
+        try? synchronizeDirectory(parent)
     }
 
     private func writeCommittedMarker(for revisionID: UUID, in generation: URL) throws {
@@ -1213,11 +1410,8 @@ actor LocalLedgerWorkspace {
             throw WorkspaceError.unsupportedItem(relativePrefix)
         }
         var files: [String] = []
-        for item in try fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil,
-            options: []
-        ).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+        for name in try boundedDirectoryNames(directory, maximumEntries: treeLimits.maximumEntries - budget.entries) {
+            let item = directory.appendingPathComponent(name)
             try Task.checkCancellation()
             let relativePath = relativePrefix.isEmpty
                 ? item.lastPathComponent
@@ -1394,9 +1588,14 @@ actor LocalLedgerWorkspace {
         guard try itemKind(at: url) == .regularFile else {
             throw WorkspaceError.unsupportedItem(displayPath)
         }
-        let data = try Data(contentsOf: url)
-        if let maximumBytes, data.count > maximumBytes { throw WorkspaceError.corruptRevision }
-        return data
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        if let maximumBytes {
+            let data = try handle.read(upToCount: maximumBytes + 1) ?? Data()
+            guard data.count <= maximumBytes else { throw WorkspaceError.corruptRevision }
+            return data
+        }
+        return try handle.readToEnd() ?? Data()
         #endif
     }
 
