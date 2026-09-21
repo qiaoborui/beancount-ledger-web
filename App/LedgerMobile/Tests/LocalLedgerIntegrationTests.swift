@@ -1,10 +1,57 @@
 import Foundation
 import XCTest
+#if canImport(BeancountRuntime)
+import BeancountRuntime
+#endif
 @testable import LedgerMobile
 
 /// Exercises the production Go + CPython bridges in the signed app host.
 /// Every file belongs to a unique temporary fixture; no configured ledger is read.
 final class LocalLedgerIntegrationTests: XCTestCase {
+    func testValidationOnlyBridgeKeepsCanonicalDiagnosticsAndReadModel() async throws {
+        #if os(iOS) && canImport(BeancountRuntime)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ValidationOnly-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let main = root.appendingPathComponent("main.bean")
+        let valid = """
+        plugin "beancount.plugins.auto_accounts"
+        2026-01-01 * "Synthetic precision fixture"
+          Assets:Cash -1.234567 CNY
+          Expenses:Food 1.234567 CNY
+
+        """
+        try valid.write(to: main, atomically: true, encoding: .utf8)
+        try await EmbeddedBeancountValidator.shared.validate(workspace: root)
+        let model = try await EmbeddedBeancountValidator.shared.canonicalModel(workspace: root)
+        XCTAssertTrue(String(decoding: model, as: UTF8.self).contains("1.234567"))
+        // Call the native symbol too: its success payload must contain no model.
+        let pointer = root.path.withCString { workspace in
+            "main.bean".withCString { BRValidateOnly(workspace, $0) }
+        }
+        let raw = try XCTUnwrap(pointer)
+        defer { BRFree(raw) }
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(String(cString: raw).utf8)) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), ["errors"])
+        XCTAssertEqual((object["errors"] as? [Any])?.count, 0)
+        try valid.replacingOccurrences(of: "Food 1.234567", with: "Food 1.000000")
+            .write(to: main, atomically: true, encoding: .utf8)
+        var messages: [String] = []
+        do {
+            try await EmbeddedBeancountValidator.shared.validate(workspace: root)
+            XCTFail("Validation-only accepted an unbalanced transaction")
+        } catch let error as EmbeddedBeancountValidator.ValidationError { messages.append(error.message) }
+        do {
+            _ = try await EmbeddedBeancountValidator.shared.canonicalModel(workspace: root)
+            XCTFail("Canonical load accepted an unbalanced transaction")
+        } catch let error as EmbeddedBeancountValidator.ValidationError { messages.append(error.message) }
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages.first, messages.last)
+        #else
+        throw XCTSkip("Requires the app-linked canonical Beancount runtime")
+        #endif
+    }
+
     func testCanonicalOfflineCreateReadAddEditDeleteAndReopen() async throws {
         #if os(iOS)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("LocalIntegration-" + UUID().uuidString)

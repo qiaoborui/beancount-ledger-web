@@ -50,11 +50,11 @@ char *BRInitialize(const char *bundle_path) {
     return result;
 }
 
-char *BRValidate(const char *workspace_path, const char *entry_file) {
+static char *validate(const char *workspace_path, const char *entry_file, const char *function_name) {
     if (!Py_IsInitialized()) return strdup("{\"errors\":[{\"message\":\"Python runtime is unavailable\"}]}");
     PyGILState_STATE state = PyGILState_Ensure();
     PyObject *module = PyImport_ImportModule("ledger_validator");
-    PyObject *function = module ? PyObject_GetAttrString(module, "validate_json") : NULL;
+    PyObject *function = module ? PyObject_GetAttrString(module, function_name) : NULL;
     PyObject *result = function ? PyObject_CallFunction(function, "ss", workspace_path, entry_file) : NULL;
     const char *utf8 = result ? PyUnicode_AsUTF8(result) : NULL;
     char *output = utf8 ? strdup(utf8) : NULL;
@@ -79,6 +79,14 @@ char *BRValidate(const char *workspace_path, const char *entry_file) {
     PyErr_Clear();
     PyGILState_Release(state);
     return output;
+}
+
+char *BRValidate(const char *workspace_path, const char *entry_file) {
+    return validate(workspace_path, entry_file, "validate_json");
+}
+
+char *BRValidateOnly(const char *workspace_path, const char *entry_file) {
+    return validate(workspace_path, entry_file, "validate_only_json");
 }
 
 void BRFree(char *value) { free(value); }
