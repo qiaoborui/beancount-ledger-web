@@ -89,4 +89,37 @@ char *BRValidateOnly(const char *workspace_path, const char *entry_file) {
     return validate(workspace_path, entry_file, "validate_only_json");
 }
 
+char *BRExportStream(const char *workspace_path, const char *entry_file,
+                     const char *derived_directory, const char *spool_name) {
+    // Unlike validation, this boundary never formats interpreter exceptions.
+    const char *failed = "{\"ok\":false,\"error\":{\"code\":\"export_failed\",\"message\":\"Bounded stream export failed\"}}";
+    if (!workspace_path || !entry_file || !derived_directory || !spool_name)
+        return strdup("{\"ok\":false,\"error\":{\"code\":\"invalid_arguments\",\"message\":\"Invalid stream export arguments\"}}");
+    if (!Py_IsInitialized())
+        return strdup("{\"ok\":false,\"error\":{\"code\":\"runtime_unavailable\",\"message\":\"Python runtime is unavailable\"}}");
+    PyGILState_STATE state = PyGILState_Ensure();
+    PyObject *module = PyImport_ImportModule("ledger_stream_bridge");
+    PyObject *function = module ? PyObject_GetAttrString(module, "export_stream_json") : NULL;
+    PyObject *result = function ? PyObject_CallFunction(function, "ssss", workspace_path,
+                                                       entry_file, derived_directory, spool_name) : NULL;
+    char *output = NULL;
+    // Check character count before UTF-8 conversion, then byte count before copy.
+    if (result && PyUnicode_Check(result) && PyUnicode_GetLength(result) > 0 &&
+        PyUnicode_GetLength(result) <= BR_EXPORT_STREAM_MAX_RESPONSE_BYTES) {
+        Py_ssize_t size = 0;
+        const char *utf8 = PyUnicode_AsUTF8AndSize(result, &size);
+        if (utf8 && size > 0 && size <= BR_EXPORT_STREAM_MAX_RESPONSE_BYTES &&
+            !memchr(utf8, '\0', (size_t)size)) {
+            output = malloc((size_t)size + 1);
+            if (output) memcpy(output, utf8, (size_t)size + 1);
+        }
+    }
+    Py_XDECREF(result);
+    Py_XDECREF(function);
+    Py_XDECREF(module);
+    PyErr_Clear();
+    PyGILState_Release(state);
+    return output ? output : strdup(failed);
+}
+
 void BRFree(char *value) { free(value); }

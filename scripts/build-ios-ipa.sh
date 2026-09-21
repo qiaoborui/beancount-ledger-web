@@ -127,13 +127,16 @@ for framework in frameworks:
     subprocess.run(["lipo", "-verify_arch", "arm64", str(framework / info["CFBundleExecutable"])], check=True)
     subprocess.run(["codesign", "--verify", "--strict", str(framework)], check=True)
 packages = app / "python/app_packages"
-for required in ("ledger_validator.py", "beancount/loader.py", "regex/__init__.py",
+for required in ("ledger_validator.py", "ledger_stream.py", "ledger_stream_bridge.py",
+                 "beancount/loader.py", "regex/__init__.py",
                  "licenses/Beancount-GPL-2.0.txt", "licenses/regex.txt", "licenses/CPython.txt"):
     assert (packages / required).is_file(), required
 assert (app / "python/lib/python3.14").is_dir(), "Python standard library is missing"
 print(f"Verified app, both extensions, App Groups and {len(frameworks)} embedded framework signatures.")
 PY
-cmp "$repo_root/App/LedgerMobile/Runtime/ledger_validator.py" "$app/python/app_packages/ledger_validator.py"
+for module in ledger_validator ledger_stream ledger_stream_bridge; do
+    cmp "$repo_root/App/LedgerMobile/Runtime/$module.py" "$app/python/app_packages/$module.py"
+done
 
 version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Info.plist")"
 build="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")"

@@ -30,6 +30,7 @@ source_root="${staging_dir}/source"
 mkdir -p "${source_root}/internal"
 cp -R "${server_root}/mobilecore" "${source_root}/mobilecore"
 cp -R "${server_root}/mobilegit" "${source_root}/mobilegit"
+cp -R "${server_root}/mobilereadindex" "${source_root}/mobilereadindex"
 cp -R "${server_root}/internal/." "${source_root}/internal/"
 cp "${server_root}/go.mod" "${server_root}/go.sum" "${source_root}/"
 
@@ -48,7 +49,7 @@ go get -tool "golang.org/x/mobile/cmd/gobind@${GOMOBILE_VERSION}"
   -ldflags="-s -w" \
   -trimpath \
   -o "${staging_dir}/LedgerCore.xcframework" \
-  ./mobilecore ./mobilegit
+  ./mobilecore ./mobilegit ./mobilereadindex
 
 rm -rf "${output}"
 mv "${staging_dir}/LedgerCore.xcframework" "${output}"

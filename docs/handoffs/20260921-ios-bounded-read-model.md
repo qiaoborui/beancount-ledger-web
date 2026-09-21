@@ -12,3 +12,15 @@
 - Remaining in order: (1) publish core child PR and inspect checks/conflicts; (2) native binding tests; (3) native packaging, protected spool bridge, coherent Swift source/index publication, opt-in bounded UI with explicit unsupported capabilities and Widget isolation; (4) all default reports/BQL/editor/import/Widget bounded migration and parity; (5) failure/lock/device scale gates before default switch.
 - Blockers: this host has no Swift/Xcode or connected Apple device. Apple linkage, Swift tests, protection inheritance and physical memory/lock/Widget gates must be validated elsewhere; no achievement claimed. Actual native adapter can be built/tested on Linux first.
 - Next action: publish core child PR, then native bridging and source/index publication. Full architecture is not yet completed. Device-only opt-in must not invoke background Widget legacy bootstrap; preserve normal mode until full parity.
+
+
+## Current milestone: native transport and Swift client foundation
+
+- Status: active; updated 2026-09-21T13:24:39.250694+00:00.
+- Branch: `codex/ios-readindex-bridge`, base `7143b59` (core PR https://github.com/qiaoborui/beancount-ledger-web/pull/408). This milestone accompanies this note; all prior milestones pushed. Core PR408 open/mergeable, backend/gate passed; Vercel failure persists, not a successful preview.
+- Completed: locked/cancellable gomobile bridge with private confined paths and bounded scalar responses; Python/C direct exclusive spool export (1KiB summary); runtime packaging; Swift actor export and injectable bounded client; explicit application SQLite link. See `docs/ios-readindex-bridge.md`. No workspace/session/UI default changes.
+- Review: Go bridge independently reviewed without blockers; native/Swift review found missing application SQLite linkage, fixed in `App/LedgerMobile/project.yml`. Pinned Objective-C bindings generated successfully. Swift native calls require `LEDGER_BOUNDED_READ_INDEX` and otherwise fail unavailable.
+- Validation: declared Go1.25.10 full backend tests/build PASS; targeted/race/vet PASS; Python3.14 runtime discovery 72 PASS including native C ABI and Go verifier interop; packaging seven PASS; shell syntax/diff checks PASS. Thirteen Swift tests added, NOT run (no Swift/Xcode). No Apple build or device protection/RSS evidence. Synthetic fixtures only.
+- Files: `server/mobilereadindex/`; runtime C/header, new Python bridge/tests; Swift validator/client/tests and Package.swift; project.yml; native build/package scripts and packaging tests; bridge docs. Changes to be committed/pushed together before cross-machine handoff.
+- Remaining in order: publish/check this child PR; coherent source/index publication and revision leases; opt-in bounded UI/Widget isolation; all reports/BQL/editor/import/Widget parity and protected spilling; failure/privacy/device scale gates before default switch.
+- Blockers: Apple toolchain and physical device unavailable here. Do not invoke owner-operated signing/deployment workflows without authorization; do not claim all targets complete. Next concrete action: publish milestone then implement coherent publication foundation in a child branch.

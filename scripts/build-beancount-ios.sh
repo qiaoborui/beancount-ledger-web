@@ -44,7 +44,9 @@ GENERATED="$BUILD/generated/beancount/parser"
 PARSER_HASH="$(PYTHONPATH="$BEAN/beancount/parser" python3 -c 'from hashsrc import hash_parser_source_files; print(hash_parser_source_files())')"
 rsync -a --exclude '*_test.py' --exclude tests --exclude __pycache__ "$BEAN/beancount" "$BUILD/packages/"
 rsync -a --exclude tests --exclude __pycache__ "$REGEX/regex" "$BUILD/packages/"
-cp "$ROOT/App/LedgerMobile/Runtime/ledger_validator.py" "$BUILD/packages/"
+for module in ledger_validator ledger_stream ledger_stream_bridge; do
+    cp "$ROOT/App/LedgerMobile/Runtime/$module.py" "$BUILD/packages/"
+done
 mkdir -p "$BUILD/packages/licenses"
 cp "$BEAN/COPYING" "$BUILD/packages/licenses/Beancount-GPL-2.0.txt"
 cp "$REGEX/LICENSE.txt" "$BUILD/packages/licenses/regex.txt"
