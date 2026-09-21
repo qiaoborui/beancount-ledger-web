@@ -213,7 +213,12 @@ final class BoundedAccountsTests: XCTestCase, @unchecked Sendable {
                 if accounts { _ = try client.accounts() }
                 else { _ = try client.accountBalances(account: "Assets:Stock") }
             }
-            let started = await Task.detached { backend.started.wait(timeout: .now() + 5) == .success }.value
+            // Darwin marks semaphore waits noasync; block a dispatch worker instead.
+            let started = await withCheckedContinuation { continuation in
+                DispatchQueue.global().async {
+                    continuation.resume(returning: backend.started.wait(timeout: .now() + 5) == .success)
+                }
+            }
             XCTAssertTrue(started)
             XCTAssertThrowsError(try client.accounts()) { XCTAssertEqual($0 as? BoundedReadIndexError, .busy) }
             XCTAssertThrowsError(try client.accountBalances(account: "Assets:Stock")) { XCTAssertEqual($0 as? BoundedReadIndexError, .busy) }

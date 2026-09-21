@@ -110,3 +110,10 @@
 - Reviews fixed decimal fractional-scale false resource limits, Unicode canonical-equivalence account identity confusion, and duplicate openID acceptance. All preserved exact canonical data; no default UI or financial-write change.
 - Validation: Go1.25.10 full tests/build, full serialized race, scoped vet, both100k tests PASS. Full vet has pre-existing app test goroutine Fatalf findings outside scope. Swift49 Linux stub-harness tests pass repeatedly; both-mode parse pass. Fresh Apple native/full publication CI pending; no physical-device validation.
 - Next publish/check this child PR and real Apple tests; account activity/running balances and valuation compatibility next. Remaining reports/BQL/editor/import/Widget, confirmed-write coherent publication, protected spill, device failure/scale gates are not complete.
+
+## PR413 macOS account-test CI fix
+
+- Task `20260921-ios-bounded-read-model`; scoped CI fix active, broader architecture active. Updated 2026-09-22T02:28:38.998117+08:00. Branch `codex/ios-readindex-accounts`, PR https://github.com/qiaoborui/beancount-ledger-web/pull/413; baseline `9e98188ed78c18870153ad1b21bcbcf6399fc149`.
+- Confirmed hosted core run35635854785 fails at BoundedAccountsTests.swift:216: Darwin prohibits semaphore.wait in async Task.detached. Move only the wait into DispatchQueue.global().async via withCheckedContinuation, matching browserTestWait/detail-test synchronization. Preserve five-second timeout and every busy/cancel/locked/closed assertion for both account operations. No production or backend changes.
+- Initial native run35635854630 passed Debug and BoundedDebug. General run35635854667 failed only pre-existing TestGitHubWriteValidationLargeLedgerPerformance (max concurrency7, expected2..6); do not change unrelated code. Rerun failed jobs once if it recurs, document outcome.
+- Local diff review/check only; no downloads, builds, worktree cleanup or main-worktree changes. Fresh hosted package/native/general checks pending on the fix; next commit/push authorized scoped changes and monitor all three. No physical-device evidence.
