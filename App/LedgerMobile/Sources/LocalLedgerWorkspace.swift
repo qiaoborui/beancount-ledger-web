@@ -147,8 +147,8 @@ actor LocalLedgerWorkspace {
         rootDirectory: URL,
         fileManager: FileManager = FileManager(),
         treeLimits: TreeLimits = TreeLimits(),
-        treeValidationObserver: @escaping @Sendable () -> Void = {},
-        copyEntryHook: @escaping @Sendable (String) throws -> Void = { _ in }
+        copyEntryHook: @escaping @Sendable (String) throws -> Void = { _ in },
+        treeValidationObserver: @escaping @Sendable () -> Void = {}
     ) {
         let root = rootDirectory.standardizedFileURL
         self.fileManager = fileManager
