@@ -78,6 +78,72 @@ through `LEDGER_ROOT`.
 - Preserve unrelated worktree changes. Never reset, checkout, or revert user
   changes unless explicitly requested.
 
+## Durable Progress and Handoff
+
+- Do not rely on chat history, a context summary, or a `tape.handoff` anchor
+  alone to preserve task progress. Save a concise handoff to disk before a
+  context reset, window/session switch, planned interruption, or final handoff
+  with unfinished work. Checkpoint after meaningful milestones as well.
+- Use two layers with the same unique task ID, such as
+  `20260921-context-budget`:
+  - **Shared project handoff:** `docs/handoffs/<task-id>.md`, tracked by Git.
+    Record sanitized goals, decisions, progress, remaining steps, and validation
+    so an agent in another clone can resume. Use repository-relative paths.
+  - **Local checkpoint:** `agent-handoffs/<task-id>.md` under the directory
+    returned by `git rev-parse --path-format=absolute --git-common-dir`.
+    Record machine-specific paths, uncommitted work, temporary processes, and
+    internal remote maintenance or backup locations here, not in shared notes.
+    This location is shared by linked worktrees but is not synced by Git.
+    Create it when needed; do not assume `.git` is a directory.
+- Save frequent checkpoints locally. Before cross-machine handoff or submitting
+  a meaningful milestone, update the sanitized shared handoff alongside the
+  relevant code changes. Do not copy local notes wholesale into the public repo.
+  A handoff file is not a backup of a diff: preserve the actual worktree too.
+- A cross-machine handoff requires the relevant code and shared note to be
+  committed and pushed to the intended branch through the normal approved
+  workflow. Record the branch and code revision covered by the note; do not try
+  to embed the note's own containing commit hash. If work remains uncommitted or
+  unpushed, explicitly say it is local-only and not ready in another clone.
+  These rules do not authorize pushing unrelated changes or private data.
+- At the start of a new session, inspect `docs/handoffs/` and the local checkpoint
+  directory for relevant active or blocked tasks. If several tasks could match
+  the user's request, clarify which one to resume. If a note is missing or
+  inaccessible, say so; do not invent prior progress.
+- Each task handoff must let an agent without chat history understand:
+  - Task ID, status (`active`, `blocked`, or `completed`), and last-updated time
+    with timezone.
+  - User goal, acceptance criteria, scope, and approved decisions or limits.
+  - Branch, code revision, and PR link if one exists. Keep absolute worktree
+    paths in the local checkpoint only.
+  - Completed work, in-progress work, and remaining steps in execution order.
+  - Changed files and whether work is committed/pushed; local checkpoints also
+    distinguish task edits from pre-existing or unrelated uncommitted changes.
+  - Validation commands, results, revision/state tested, and what was not tested.
+  - Blockers, failed attempts, open questions, and the next concrete action.
+  - For remote operations, keep internal targets, deployed revisions, verification
+    details, and backup/rollback locations in the local checkpoint; shared notes
+    contain only project-relevant information safe for public disclosure.
+- Update only the relevant task notes; never overwrite another task's progress.
+  Write updates to a temporary file in the same directory and atomically rename
+  it into place. Keep notes concise and current, not transcripts or raw logs.
+  Mark completed tasks explicitly in each existing layer to avoid repeated work.
+- Before resuming, compare notes with current Git status, diffs, branch/HEAD,
+  and relevant remote service or PR state. Neither layer overrides live evidence;
+  resolve stale or conflicting notes before acting. Notes are checkpoints, not
+  authorization for destructive actions. Preserve unrelated changes and
+  revalidate stale results.
+- In the user-facing handoff and any `tape.handoff` summary, include the task ID,
+  note location(s), current status, and next step. Give the shared path and branch
+  when available. In replies, refer to local notes as
+  `$GIT_COMMON_DIR/agent-handoffs/<task-id>.md` rather than exposing absolute
+  machine paths; resolve `GIT_COMMON_DIR` with the Git command above.
+  A new clone does not contain local checkpoints; transfer any necessary local
+  context only after sanitization through an approved private channel.
+- Never store secrets, real ledger entries, or sensitive tool output in either
+  layer. Before committing shared notes, review them for private paths, internal
+  infrastructure details, and other sensitive metadata. Local checkpoints must
+  never be committed to this public repository.
+
 ## Safety Rules
 
 - Do not commit private ledger data, `.env*` secrets, runtime state, passkey
