@@ -161,3 +161,120 @@ func TestExactDecimalNormalizationFailureAtomicity(t *testing.T) {
 		}
 	}
 }
+
+func TestExactDecimalAddDecimalMaxScale(t *testing.T) {
+	for _, sign := range []string{"", "-"} {
+		t.Run("sign="+sign, func(t *testing.T) {
+			var operand, sum, lexical ExactDecimal
+			if err := operand.Add(sign + "." + strings.Repeat("0", MaxExactDecimalDigits-1) + "1"); err != nil {
+				t.Fatal(err)
+			}
+			before, coefficient, scale := operand.String(), operand.coefficient.String(), operand.scale
+			if err := lexical.Add(before); !errors.Is(err, ErrDecimalLimit) {
+				t.Fatalf("normalized spelling must still exceed raw digit budget: %v", err)
+			}
+			for n := 1; n <= 2; n++ {
+				if err := sum.AddDecimal(&operand); err != nil {
+					t.Fatal(err)
+				}
+				want := sign + "0." + strings.Repeat("0", MaxExactDecimalDigits-1) + string(rune('0'+n))
+				if sum.String() != want {
+					t.Fatal("incorrect maximal-scale sum")
+				}
+				if operand.String() != before || operand.coefficient.String() != coefficient || operand.scale != scale {
+					t.Fatal("addition mutated operand")
+				}
+			}
+			// The destination and operand must not share mutable coefficient storage.
+			if err := sum.AddDecimal(&sum); err != nil {
+				t.Fatal(err)
+			}
+			if operand.String() != before || sum.coefficient.String() != sign+"4" || sum.scale != scale {
+				t.Fatal("self-addition or operand isolation failed")
+			}
+		})
+	}
+}
+
+func TestExactDecimalAddDecimalFailureAtomicity(t *testing.T) {
+	large := strings.Repeat("9", MaxExactDecimalDigits)
+	for _, sign := range []string{"", "-"} {
+		for _, tc := range []struct{ name, initial, incoming string }{
+			{"integer carry", large, "1"},
+			{"fractional carry", strings.Repeat("9", MaxExactDecimalDigits-1) + ".9", ".2"},
+			{"destination alignment", large, ".1"},
+			{"operand alignment", ".1", large},
+		} {
+			t.Run(sign+tc.name, func(t *testing.T) {
+				var d, operand ExactDecimal
+				if err := d.Add(sign + tc.initial); err != nil {
+					t.Fatal(err)
+				}
+				if err := operand.Add(sign + tc.incoming); err != nil {
+					t.Fatal(err)
+				}
+				value, coefficient, scale := d.String(), d.coefficient.String(), d.scale
+				otherValue, otherCoefficient, otherScale := operand.String(), operand.coefficient.String(), operand.scale
+				if err := d.AddDecimal(&operand); !errors.Is(err, ErrDecimalLimit) {
+					t.Fatalf("want resource limit: %v", err)
+				}
+				if d.String() != value || d.coefficient.String() != coefficient || d.scale != scale || operand.String() != otherValue || operand.coefficient.String() != otherCoefficient || operand.scale != otherScale {
+					t.Fatal("failed addition mutated destination or operand")
+				}
+				var inverse ExactDecimal
+				opposite := "-"
+				if sign == "-" {
+					opposite = ""
+				}
+				if err := inverse.Add(opposite + tc.initial); err != nil {
+					t.Fatal(err)
+				}
+				if err := d.AddDecimal(&inverse); err != nil || d.String() != "0" || d.scale != 0 {
+					t.Fatal("accumulator failed to recover", err)
+				}
+			})
+		}
+	}
+}
+
+func TestExactDecimalAddDecimalSelfAndNormalization(t *testing.T) {
+	for _, tc := range []struct{ name, raw, want string }{
+		{"zero", "0", "0"},
+		{"fraction", ".25", "0.5"},
+		{"negative", "-.25", "-0.5"},
+		{"normalize", ".5", "1"},
+		{"overflow", strings.Repeat("9", MaxExactDecimalDigits), ""},
+		{"negative overflow", "-" + strings.Repeat("9", MaxExactDecimalDigits), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var d ExactDecimal
+			if err := d.Add(tc.raw); err != nil {
+				t.Fatal(err)
+			}
+			coefficient, scale := d.coefficient.String(), d.scale
+			err := d.AddDecimal(&d)
+			if tc.want == "" {
+				if !errors.Is(err, ErrDecimalLimit) || d.coefficient.String() != coefficient || d.scale != scale {
+					t.Fatal("self-addition failure was not atomic", err)
+				}
+			} else if err != nil || d.String() != tc.want {
+				t.Fatal("incorrect self-addition", err)
+			}
+		})
+	}
+	// A fractional carry is normalized before enforcing the coefficient limit.
+	var tiny, complement ExactDecimal
+	if err := tiny.Add("." + strings.Repeat("0", MaxExactDecimalDigits-1) + "1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := complement.Add("." + strings.Repeat("9", MaxExactDecimalDigits)); err != nil {
+		t.Fatal(err)
+	}
+	before := complement.String()
+	if err := tiny.AddDecimal(&complement); err != nil || tiny.String() != "1" || tiny.scale != 0 {
+		t.Fatal("boundary carry not normalized", err)
+	}
+	if complement.String() != before {
+		t.Fatal("normalization mutated operand")
+	}
+}

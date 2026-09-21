@@ -23,7 +23,7 @@ var (
 
 // ExactDecimal is a bounded base-ten accumulator. Its zero value is zero.
 // It accepts only finite canonical decimal notation, not Rat's fractions or
-// base prefixes, and never rounds. Failed Add leaves the accumulator unchanged.
+// base prefixes, and never rounds. Failed additions leave the accumulator unchanged.
 // Not safe for concurrent use. String emits normalized plain decimal notation.
 type ExactDecimal struct {
 	coefficient big.Int
@@ -144,6 +144,17 @@ func (d *ExactDecimal) Add(raw string) error {
 	if err != nil {
 		return err
 	}
+	return d.addParts(n, scale)
+}
+
+// AddDecimal adds an already validated exact value without reparsing its display
+// spelling. It applies the same arithmetic budgets as Add and leaves both values
+// unchanged on failure. The operand is not mutated unless it is d itself.
+func (d *ExactDecimal) AddDecimal(other *ExactDecimal) error {
+	return d.addParts(&other.coefficient, other.scale)
+}
+
+func (d *ExactDecimal) addParts(n *big.Int, scale int) error {
 	target := max(scale, d.scale)
 	a, err := alignDecimal(&d.coefficient, target-d.scale)
 	if err != nil {
