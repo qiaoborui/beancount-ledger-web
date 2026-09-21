@@ -1,0 +1,146 @@
+name: iOS native checks
+
+on:
+  pull_request:
+    paths:
+      - 'App/LedgerMobile/**'
+      - 'server/mobilecore/**'
+      - 'server/mobilegit/**'
+      - 'server/mobilereadindex/**'
+      - 'server/internal/**'
+      - 'server/go.mod'
+      - 'server/go.sum'
+      - 'scripts/build-ledgercore-xcframework.sh'
+      - 'scripts/build-beancount-ios.sh'
+      - 'scripts/build-beancount-ios-resources.sh'
+      - 'scripts/test_ios_native_checks.py'
+      - '.github/workflows/ios-native-checks.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-native-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Native simulator (${{ matrix.configuration }})
+    runs-on: macos-15
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, BoundedDebug]
+    env:
+      CONFIGURATION: ${{ matrix.configuration }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Check workflow contract
+        run: python3 scripts/test_ios_native_checks.py
+
+      - name: Select latest installed stable Xcode with iOS SDKs
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import plistlib
+          import re
+          import subprocess
+
+          candidates = []
+          for app in Path('/Applications').glob('Xcode*.app'):
+              developer = app / 'Contents/Developer'
+              version_file = app / 'Contents/version.plist'
+              if not version_file.is_file() or not (developer / 'usr/bin/xcodebuild').is_file():
+                  continue
+              with version_file.open('rb') as source:
+                  info = plistlib.load(source)
+              if 'beta' in app.name.lower() or re.search(r'\d[a-z]$', info['ProductBuildVersion']):
+                  continue
+              env = {**os.environ, 'DEVELOPER_DIR': str(developer)}
+              if any(subprocess.run(
+                  ['xcrun', '--sdk', sdk, '--show-sdk-path'], env=env,
+                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+              ).returncode for sdk in ('iphoneos', 'iphonesimulator')):
+                  continue
+              version = tuple(int(part) for part in info['CFBundleShortVersionString'].split('.'))
+              candidates.append((version, str(developer)))
+          if not candidates:
+              raise SystemExit('No installed stable Xcode with device and simulator SDKs found')
+          developer = max(candidates)[1]
+          with open(os.environ['GITHUB_ENV'], 'a') as target:
+              target.write(f'DEVELOPER_DIR={developer}\n')
+          print(f'Selected {developer}')
+          PY
+
+      # The native builder stages go.mod with Go 1.26 and newer x/mobile/x/text
+      # pins; server/go.mod alone is NOT its toolchain requirement.
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache: false
+
+      - name: Install and inspect native build tools
+        run: |
+          brew install bison flex xcodegen
+          go version
+          python3 --version
+          xcodegen --version
+          "$(brew --prefix bison)/bin/bison" --version
+          "$(brew --prefix flex)/bin/flex" --version
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphonesimulator --show-sdk-version
+
+      # Build the real pinned/download-verified frameworks. No stub modules,
+      # private ledger checkout, runtime cache, IPA packaging, or artifact upload.
+      - name: Build LedgerCore including native read index
+        run: bash scripts/build-ledgercore-xcframework.sh
+
+      - name: Build canonical Beancount and Python runtime
+        run: bash scripts/build-beancount-ios.sh
+
+      - name: Require native Swift imports (no canImport fallback)
+        run: |
+          cat > "$RUNNER_TEMP/NativeImports.swift" <<'SWIFT'
+          import LedgerCore
+          import BeancountRuntime
+          let bridge: MobilereadindexBridge? = MobilereadindexNewBridge("/unused-ci-import-check")
+          SWIFT
+          xcrun --sdk iphonesimulator swiftc -typecheck \
+            -target "$(uname -m)-apple-ios17.0-simulator" \
+            -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+            -F server/.build/ledgercore/LedgerCore.xcframework/ios-arm64_x86_64-simulator \
+            -I server/.build/beancount-ios/BeancountRuntime.xcframework/ios-arm64_x86_64-simulator/Headers \
+            "$RUNNER_TEMP/NativeImports.swift"
+
+      - name: Generate the real app and extension project
+        working-directory: App/LedgerMobile
+        run: xcodegen generate
+
+      - name: Build unsigned app and both embedded extensions
+        run: |
+          # Each configuration has an isolated job: one failure cannot hide the
+          # other. Build only the host simulator arch to bound cold-build time.
+          # The existing Python resource phase may ad-hoc sign stdlib frameworks;
+          # it needs no identity/keychain. App/extension signing is disabled.
+          xcodebuild build \
+            -project App/LedgerMobile/LedgerMobile.xcodeproj \
+            -scheme LedgerMobile \
+            -configuration "$CONFIGURATION" \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/ios-native" \
+            ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM=
+          app="$RUNNER_TEMP/ios-native/Build/Products/$CONFIGURATION-iphonesimulator/LedgerMobile.app"
+          test -s "$app/LedgerMobile"
+          test -s "$app/PlugIns/LedgerWidgets.appex/LedgerWidgets"
+          test -s "$app/PlugIns/LedgerShare.appex/LedgerShare"
+          test -s "$app/Frameworks/Python.framework/Python"
+          test -s "$app/python/app_packages/ledger_stream_bridge.py"

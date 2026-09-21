@@ -236,7 +236,7 @@ struct SettingsView: View {
     private var lockIntervalBinding: Binding<LedgerLockInterval> {
         Binding(
             get: { session.lockInterval },
-            set: session.setLockInterval
+            set: { interval in session.setLockInterval(interval) }
         )
     }
 

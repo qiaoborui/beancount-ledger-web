@@ -1,5 +1,31 @@
 import SwiftUI
 
+#if LEDGER_BOUNDED_READ_INDEX
+@main
+struct LedgerMobileApp: App {
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var browser = BoundedLedgerBrowserModel(authenticator: SystemLocalLedgerAuthenticator())
+
+    var body: some Scene {
+        WindowGroup {
+            BoundedLedgerBrowser(model: browser)
+                .onChange(of: scenePhase, initial: true) { _, phase in
+                    // Authentication can temporarily make the scene inactive.
+                    // No automatic unlock, bootstrap, deep link, widget or sync path.
+                    if phase == .background { browser.lock() }
+                }
+                // Hide financial content during the app-switcher transition,
+                // without canceling device authentication on transient inactivity.
+                .overlay {
+                    if scenePhase != .active {
+                        Color(uiColor: .systemBackground).ignoresSafeArea()
+                            .overlay { Label("本地只读已遮蔽", systemImage: "lock.fill") }
+                    }
+                }
+        }
+    }
+}
+#else
 @main
 struct LedgerMobileApp: App {
     #if os(iOS)
@@ -57,3 +83,5 @@ struct LedgerMobileApp: App {
         }
     }
 }
+
+#endif
