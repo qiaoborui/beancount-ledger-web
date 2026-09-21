@@ -56,6 +56,31 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         catch { XCTAssertEqual(error as? BoundedReadIndexError, expected, file: file, line: line) }
     }
 
+    func testSchemaOneFailsUntilExplicitRebuild() async throws {
+        let f = try await fixture()
+        let p = publication(f)
+        p.unlock()
+        let manifest = try await p.rebuild(expectedRevisionID: f.revision.id)
+        let current = try Data(contentsOf: f.pointer)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: current) as? [String: Any])
+        var index = try XCTUnwrap(object["index"] as? [String: Any])
+        index["schema_version"] = 1
+        object["index"] = index
+        let old = try JSONSerialization.data(withJSONObject: object)
+        try old.write(to: f.pointer)
+        await expectError(.corrupt) { _ = try await p.withReadLease { _, _ in true } }
+        XCTAssertEqual(try Data(contentsOf: f.pointer), old)
+        let rebuilt = try await p.rebuild(expectedRevisionID: f.revision.id)
+        XCTAssertEqual(rebuilt.index.schemaVersion, 2)
+        XCTAssertNotEqual(rebuilt.generationID, manifest.generationID)
+        try await p.withReadLease { _, reader in _ = try reader.accounts() }
+        let outdatedBuilder = publication(f, behavior: .oldSchema)
+        outdatedBuilder.unlock()
+        let rebuiltBytes = try Data(contentsOf: f.pointer)
+        await expectError(.corrupt) { _ = try await outdatedBuilder.rebuild(expectedRevisionID: f.revision.id) }
+        XCTAssertEqual(try Data(contentsOf: f.pointer), rebuiltBytes)
+    }
+
     func testLockedByDefaultAndMissingManifestNeverFallsBack() async throws {
         let f = try await fixture()
         let p = publication(f)
@@ -412,6 +437,12 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         await expectError(.revisionMismatch) {
             _ = try await wrong.withReadLease { _, reader in try reader.detailRecords(id: 1) }
         }
+        await expectError(.revisionMismatch) {
+            _ = try await wrong.withReadLease { _, reader in try reader.accounts() }
+        }
+        await expectError(.revisionMismatch) {
+            _ = try await wrong.withReadLease { _, reader in try reader.accountBalances(account: "Assets:Test") }
+        }
         let wrongContinuation = publication(f, behavior: .wrongDetailContinuationRevision)
         wrongContinuation.unlock()
         await expectError(.revisionMismatch) {
@@ -421,6 +452,12 @@ final class BoundedLedgerPublicationTests: XCTestCase {
             }
         }
         let escaped = try await p.withReadLease { _, reader in reader }
+        XCTAssertThrowsError(try escaped.accounts()) {
+            XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
+        }
+        XCTAssertThrowsError(try escaped.accountBalances(account: "Assets:Test")) {
+            XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
+        }
         XCTAssertThrowsError(try escaped.transactions()) {
             XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
         }
@@ -453,6 +490,10 @@ final class BoundedLedgerPublicationTests: XCTestCase {
     private static func assertQueries(_ reader: BoundedLedgerReader, manifest: BoundedIndexManifest,
                                       file: StaticString = #filePath, line: UInt = #line) {
         do {
+            XCTAssertEqual(try reader.accounts().revision, manifest.revision, file: file, line: line)
+            let native = try reader.accountBalances(account: "Assets:Test")
+            XCTAssertEqual(native.revision, manifest.revision, file: file, line: line)
+            XCTAssertEqual(native.balances.first?.quantity, "12345678901234567890.00001", file: file, line: line)
             let page = try reader.transactions()
             XCTAssertEqual(page.revision, manifest.revision, file: file, line: line)
             XCTAssertEqual(page.transactions.count, 1, file: file, line: line)
@@ -498,7 +539,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
 /// Scalar fake: no Beancount, Go, SQLite or native runtime needed. Cancellation
 /// deliberately does not affect results, exercising the Swift lifecycle gate.
 private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Sendable {
-    enum Behavior: Sendable, Equatable { case success, buildFailure, openFailure, wrongSource, wrongStream, wrongCount, wrongEntrypoint, sidecar, oversized, wrongPageRevision, wrongDetailContinuationRevision }
+    enum Behavior: Sendable, Equatable { case success, oldSchema, buildFailure, openFailure, wrongSource, wrongStream, wrongCount, wrongEntrypoint, sidecar, oversized, wrongPageRevision, wrongDetailContinuationRevision }
     let behavior: Behavior
     private let root: URL
     private let gate = NSLock()
@@ -511,7 +552,7 @@ private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Send
     }
 
     static func manifest(behavior: Behavior, identity: String = String(repeating: "a", count: 64)) throws -> BoundedIndexManifest {
-        BoundedIndexManifest(schemaVersion: 1, streamVersion: 1,
+        BoundedIndexManifest(schemaVersion: behavior == .oldSchema ? 1 : 2, streamVersion: 1,
             sourceDigest: behavior == .wrongSource ? String(repeating: "c", count: 64) : identity,
             runtime: behavior == .oversized ? String(repeating: "x", count: BoundedIndexWire.manifestLimit + 1) : "fixture",
             exporter: "bounded-v1", entrypoint: behavior == .wrongEntrypoint ? "other.bean" : "main.bean",
@@ -587,6 +628,20 @@ private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Send
             ]
             do { return String(decoding: try JSONSerialization.data(withJSONObject: response), as: UTF8.self) }
             catch { return errorJSON(error) }
+        }
+    }
+    func accounts(_ requestJSON: String) -> String {
+        gate.withLock {
+            guard let manifest = opened else { return errorJSON(BoundedReadIndexError.unavailable) }
+            let revision = behavior == .wrongPageRevision ? "wrong" : manifest.revision
+            return #"{"revision":"\#(revision)","accounts":[{"account":"Assets:Test","open_id":1,"open_date":"2026-09-21","open_record":{"type":"directive","id":1,"value":{"Kind":"open","Date":"2026-09-21","File":"main.bean","Line":1,"Account":"Assets:Test"}}}]}"#
+        }
+    }
+    func accountBalances(_ requestJSON: String) -> String {
+        gate.withLock {
+            guard let manifest = opened else { return errorJSON(BoundedReadIndexError.unavailable) }
+            let revision = behavior == .wrongPageRevision ? "wrong" : manifest.revision
+            return #"{"revision":"\#(revision)","account":"Assets:Test","basis":"native_nominal","balances":[{"currency":"USD","quantity":"12345678901234567890.00001"}]}"#
         }
     }
     func detailRecords(_ requestJSON: String) -> String {

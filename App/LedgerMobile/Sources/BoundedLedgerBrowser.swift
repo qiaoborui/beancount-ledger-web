@@ -92,6 +92,15 @@ struct BoundedLedgerBrowser: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+        Section {
+            Picker("读取内容", selection: Binding(get: { model.mode }, set: { model.setMode($0) })) {
+                Text("交易").tag(BoundedLedgerBrowserModel.Mode.transactions)
+                Text("账户").tag(BoundedLedgerBrowserModel.Mode.accounts)
+            }
+            .pickerStyle(.segmented)
+            .disabled(model.busy)
+        }
+        if model.mode == .accounts { accounts }
         if let page = model.page {
             Section {
                 if page.transactions.isEmpty { Text("此版本没有交易。") }
@@ -127,7 +136,59 @@ struct BoundedLedgerBrowser: View {
                 Button("详情下一页（替换当前页）") { model.nextDetailPage() }
                     .disabled(model.busy || detail.nextCursor == nil)
                 Button("关闭详情") { model.dismissDetail() }.disabled(model.busy)
-            } header: { Text("部分交易详情 · 当前页 \(detail.records.count) 条 / 最多 100 条") } footer: { Text("只显示当前页的只读标量，续页不重复交易标题；不累计记录，不保留翻页历史。即使已到末页，也不是完整交易。不是完整交易编辑器。标签、链接、元数据值、自定义字段均省略；成本仅显示已导出的标量，不表示完整成本规格、批次或估值语义。") }
+            } header: { Text("部分指令详情 · 当前页 \(detail.records.count) 条 / 最多 100 条") } footer: { Text("只显示当前页的只读标量，续页不重复指令标题；不累计记录，不保留翻页历史。即使已到末页，也不是完整指令。不是完整交易编辑器。标签、链接、元数据值、自定义字段均省略；成本仅显示已导出的标量，不表示完整成本规格、批次或估值语义。") }
+        }
+    }
+
+    @ViewBuilder private var accounts: some View {
+        if let page = model.accountsPage {
+            Section {
+                if page.accounts.isEmpty { Text("此版本没有显式开户记录。") }
+                ForEach(page.accounts, id: \.openID) { row in
+                    Button { model.selectAccount(row.openID) } label: {
+                        VStack(alignment: .leading, spacing: LedgerSpacing.xs) {
+                            Text(row.account).font(.headline)
+                            Text("开户：\(row.openDate)").font(.caption)
+                            if let close = row.closeDate { Text("最后显式关闭：\(close)").font(.caption) }
+                            if case .directive(_, let value) = row.openRecord.value {
+                                if let currencies = value.currencies, !currencies.isEmpty {
+                                    Text("声明单位：\(currencies.joined(separator: ", "))").font(.caption)
+                                }
+                                if let booking = value.booking { Text("记账方式：\(booking)").font(.caption) }
+                            }
+                        }
+                        .foregroundStyle(.primary)
+                    }
+                    .disabled(model.busy || !BoundedAccountsValidation.account(row.account))
+                }
+                Button("账户回到第一页") { model.firstAccountsPage() }.disabled(model.busy)
+                Button("账户下一页（替换当前页）") { model.nextAccountsPage() }
+                    .disabled(model.busy || page.nextCursor == nil)
+            } header: { Text("显式开户 · 当前页 \(page.accounts.count) 条 / 最多 100 条") }
+              footer: { Text("仅列出显式 open 指令，包含已关闭账户；不从分录推断账户，也不表示某日的有效账户。翻页会清除已选账户与余额。") }
+        }
+        if let selected = model.selectedAccount {
+            Section {
+                Text(selected.account).font(.headline).textSelection(.enabled)
+                Text("原生单位净额 · 全部日期").font(.subheadline)
+                if let page = model.balances {
+                    if page.balances.isEmpty { Text("此账户没有原生单位分录。") }
+                    ForEach(page.balances.indices, id: \.self) { index in
+                        VStack(alignment: .leading, spacing: LedgerSpacing.xs) {
+                            Text(page.balances[index].currency).font(.caption).foregroundStyle(.secondary)
+                            Text(page.balances[index].quantity).font(.body.monospacedDigit())
+                                .textSelection(.enabled)
+                        }
+                    }
+                    Text("当前页 \(page.balances.count) 种单位 / 最多 100 种").font(.caption)
+                    Button("单位回到第一页") { model.firstBalancesPage() }.disabled(model.busy)
+                    Button("单位下一页（替换当前页）") { model.nextBalancesPage() }
+                        .disabled(model.busy || page.nextCursor == nil)
+                }
+                Button("查看开户指令与元数据类型") { model.showAccountMetadata() }.disabled(model.busy)
+            } footer: {
+                Text("native_nominal：按原生币种或商品单位精确求和，不换汇、不合计不同单位。这不是市值或估值，不含期初 / 逐笔余额、成本批次或报表语义对齐。仅保留当前页，不累计单位；每次响应最多 1 MiB。")
+            }
         }
     }
 
@@ -136,6 +197,7 @@ struct BoundedLedgerBrowser: View {
         case .directive(_, let value):
             VStack(alignment: .leading, spacing: LedgerSpacing.xs) {
                 Text("\(value.date) · \(value.kind)").font(.caption)
+                if let account = value.account { Text(account).font(.headline) }
                 if let payee = value.payee { Text(payee).font(.headline) }
                 if let narration = value.narration { Text(narration) }
                 if let flag = value.flag { Text("标记：\(flag)").font(.caption) }
@@ -160,8 +222,8 @@ struct BoundedLedgerBrowser: View {
 
     private var capabilities: some View {
         Section("能力与限制") {
-            Label("支持：设备验证、本地目录、显式索引构建、分页交易、标量详情", systemImage: "checkmark.circle")
-            Label("不支持：编辑、导入、同步、远程账本、搜索、余额、报表、估值、小组件和后台刷新", systemImage: "minus.circle")
+            Label("支持：设备验证、本地目录、显式索引构建、分页交易与账户、原生单位净额、标量详情", systemImage: "checkmark.circle")
+            Label("不支持：编辑、导入、同步、远程账本、搜索、逐笔余额、成本批次、报表、估值、小组件和后台刷新", systemImage: "minus.circle")
             Text("只读并不代表完整语义覆盖。没有服务器或旧快照回退；无法验证时保持不可用。派生文件沿用工作区保护策略，锁定不是安全擦除或独立加密。")
                 .foregroundStyle(.secondary)
         }

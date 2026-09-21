@@ -173,12 +173,14 @@ func verifySchema(ctx context.Context, db *sqlite.DB) error {
 // recordReader exposes a single indexed record at a time to the existing
 // verifier. It checks the materialized keys while the native row is current.
 type recordReader struct {
-	ctx      context.Context
-	rows     *sqlite.Rows
-	pending  string
-	seq      int64
-	manifest Manifest
-	err      error
+	ctx              context.Context
+	rows             *sqlite.Rows
+	pending          string
+	seq              int64
+	manifest         Manifest
+	projections      projectionState
+	projectionCounts [3]int64
+	err              error
 }
 
 func (r *recordReader) Read(p []byte) (int, error) {
@@ -223,6 +225,14 @@ func (r *recordReader) Read(p []byte) (int, error) {
 			r.err = ErrCorrupt
 			return 0, r.err
 		}
+		projection, projectErr := r.projections.project([]byte(raw), key, r.seq)
+		if projectErr != nil || !verifyProjectionRow(r.rows, projection) {
+			r.err = ErrCorrupt
+			return 0, r.err
+		}
+		if projection.table >= 0 {
+			r.projectionCounts[projection.table]++
+		}
 		if err = r.rows.Err(); err != nil {
 			r.err = dbError(r.ctx, err, ErrCorrupt)
 			return 0, r.err
@@ -238,7 +248,7 @@ func verifyRecords(ctx context.Context, db *sqlite.DB, want Manifest) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	rows, err := db.Query("SELECT r.seq, r.entry_id, r.raw, t.id, t.date, t.seq FROM records AS r LEFT JOIN transactions AS t INDEXED BY transactions_seq ON t.seq=r.seq ORDER BY r.seq")
+	rows, err := db.Query(projectionReplayQuery())
 	if err != nil {
 		return dbError(ctx, err, ErrCorrupt)
 	}
@@ -259,6 +269,20 @@ func verifyRecords(ctx context.Context, db *sqlite.DB, want Manifest) error {
 	}
 	if finishManifest(reader.manifest, summary) != want {
 		return ErrCorrupt
+	}
+	for table, t := range projectionTables {
+		counts, e := db.Query("SELECT count(*) FROM " + t.name)
+		if e != nil {
+			return dbError(ctx, e, ErrCorrupt)
+		}
+		valid := counts.Next() && counts.Int64(0) == reader.projectionCounts[table]
+		e = counts.Close()
+		if e != nil {
+			return dbError(ctx, e, ErrCorrupt)
+		}
+		if !valid {
+			return ErrCorrupt
+		}
 	}
 	// The LEFT JOIN also needs the inverse check for orphan transaction rows.
 	rows, err = db.Query("SELECT count(*) FROM transactions")

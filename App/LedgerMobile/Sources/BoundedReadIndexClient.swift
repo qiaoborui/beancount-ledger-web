@@ -9,6 +9,8 @@ protocol BoundedReadIndexBackend: Sendable {
     func build(_ streamPath: String, destination: String) -> String
     func open(_ databasePath: String, manifestJSON: String) -> String
     func transactions(_ requestJSON: String) -> String
+    func accounts(_ requestJSON: String) -> String
+    func accountBalances(_ requestJSON: String) -> String
     func detail(_ id: Int64) -> String
     func detailRecords(_ requestJSON: String) -> String
     func unlock()
@@ -20,6 +22,8 @@ protocol BoundedReadIndexBackend: Sendable {
 /// Existing backends/fakes remain source compatible; never fall back to the
 /// whole-detail endpoint, which can exceed its all-or-error response cap.
 extension BoundedReadIndexBackend {
+    func accounts(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
+    func accountBalances(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
     func detailRecords(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
 }
 
@@ -75,9 +79,13 @@ struct BoundedIndexRecord: Decodable, Sendable {
         let flag: String?
         let payee: String?
         let narration: String?
+        let account: String?
+        let currencies: [String]?
+        let booking: String?
         enum CodingKeys: String, CodingKey {
             case kind = "Kind", date = "Date", file = "File", line = "Line"
             case flag = "Flag", payee = "Payee", narration = "Narration"
+            case account = "Account", currencies = "Currencies", booking = "Booking"
         }
     }
     struct Posting: Decodable, Sendable {
@@ -139,6 +147,151 @@ struct BoundedIndexPage: Decodable, Sendable {
             result.append(try rows.decode(Transaction.self))
         }
         transactions = result
+    }
+}
+
+/// Explicit opens only; not inferred from postings, and not an active-as-of catalog.
+/// Account keys use backend UTF-8 byte identity, not Swift Unicode equivalence.
+struct BoundedIndexAccountsPage: Decodable, Sendable {
+    struct Account: Decodable, Sendable {
+        let account: String
+        let openID: Int64
+        let openDate: String
+        let closeDate: String?
+        let openRecord: BoundedIndexRecord
+        enum CodingKeys: String, CodingKey {
+            case account, openID = "open_id", openDate = "open_date"
+            case closeDate = "close_date", openRecord = "open_record"
+        }
+    }
+    let revision: String
+    let accounts: [Account]
+    let nextCursor: String?
+    private enum CodingKeys: String, CodingKey { case revision, accounts, nextCursor = "next_cursor" }
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try c.decode(String.self, forKey: .revision)
+        nextCursor = try c.decodeIfPresent(String.self, forKey: .nextCursor)
+        accounts = try c.boundedRows(Account.self, forKey: .accounts)
+    }
+    func validate(limit: Int, cursor: String?) throws {
+        try BoundedAccountsValidation.page(count: accounts.count, limit: limit, next: nextCursor, cursor: cursor)
+        var previous: String?
+        var openIDs = Set<Int64>() // Bounded by the decoded page cap (500).
+        for row in accounts {
+            guard row.openID > 0, openIDs.insert(row.openID).inserted,
+                  BoundedAccountsValidation.date(row.openDate),
+                  row.closeDate.map(BoundedAccountsValidation.date) ?? true,
+                  case let .directive(id, value) = row.openRecord.value,
+                  id == row.openID, value.kind == "open",
+                  let account = value.account, account.utf8.elementsEqual(row.account.utf8),
+                  value.date == row.openDate else { throw BoundedReadIndexError.corrupt }
+            if let previous, !previous.utf8.lexicographicallyPrecedes(row.account.utf8) {
+                throw BoundedReadIndexError.corrupt
+            }
+            previous = row.account
+        }
+    }
+}
+
+/// Exact native posting-unit sums. No valuation, lots, opening or running balance.
+/// Deliberately never parsed as Double, Decimal, cents, or a money formatter input.
+struct BoundedIndexAccountBalancesPage: Decodable, Sendable {
+    struct Balance: Decodable, Sendable {
+        let currency: String
+        let quantity: String
+    }
+    let revision: String
+    let basis: String
+    let account: String
+    let start: String?
+    let end: String?
+    let balances: [Balance]
+    let nextCursor: String?
+    private enum CodingKeys: String, CodingKey { case revision, basis, account, start, end, balances, nextCursor = "next_cursor" }
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try c.decode(String.self, forKey: .revision)
+        basis = try c.decode(String.self, forKey: .basis)
+        account = try c.decode(String.self, forKey: .account)
+        start = try c.decodeIfPresent(String.self, forKey: .start)
+        end = try c.decodeIfPresent(String.self, forKey: .end)
+        nextCursor = try c.decodeIfPresent(String.self, forKey: .nextCursor)
+        balances = try c.boundedRows(Balance.self, forKey: .balances)
+    }
+    func validate(account expected: String, start: String?, end: String?, limit: Int, cursor: String?) throws {
+        guard account.utf8.elementsEqual(expected.utf8), basis == "native_nominal",
+              (self.start ?? "") == (start ?? ""), (self.end ?? "") == (end ?? ""),
+              BoundedAccountsValidation.interval(self.start, self.end) else { throw BoundedReadIndexError.corrupt }
+        try BoundedAccountsValidation.page(count: balances.count, limit: limit, next: nextCursor, cursor: cursor)
+        var previous: String?
+        for row in balances {
+            guard BoundedAccountsValidation.decimal(row.quantity) else { throw BoundedReadIndexError.corrupt }
+            if let previous, !previous.utf8.lexicographicallyPrecedes(row.currency.utf8) {
+                throw BoundedReadIndexError.corrupt
+            }
+            previous = row.currency
+        }
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func boundedRows<T: Decodable>(_ type: T.Type, forKey key: Key) throws -> [T] {
+        if try decodeNil(forKey: key) { return [] } // Go nil slice
+        var rows = try nestedUnkeyedContainer(forKey: key)
+        var result: [T] = []
+        while !rows.isAtEnd {
+            guard result.count < 500 else { throw BoundedReadIndexError.resourceLimit }
+            result.append(try rows.decode(type))
+        }
+        return result
+    }
+}
+
+enum BoundedAccountsValidation {
+    static func page(count: Int, limit: Int, next: String?, cursor: String?) throws {
+        guard count <= limit, (next?.utf8.count ?? 0) <= 512 else { throw BoundedReadIndexError.corrupt }
+        if let next {
+            guard !next.isEmpty, next != cursor, count > 0 else { throw BoundedReadIndexError.corrupt }
+        }
+    }
+    static func account(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 1024 &&
+        value.trimmingCharacters(in: .whitespacesAndNewlines) == value &&
+        !value.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+    }
+    static func interval(_ start: String?, _ end: String?) -> Bool {
+        let start = start ?? "", end = end ?? ""
+        return start.isEmpty && end.isEmpty || date(start) && date(end) && start < end
+    }
+    static func date(_ value: String) -> Bool {
+        guard value.utf8.count == 10 else { return false }
+        let b = Array(value.utf8)
+        guard b[4] == 45, b[7] == 45,
+              b.enumerated().allSatisfy({ $0.offset == 4 || $0.offset == 7 || (48...57).contains($0.element) }) else { return false }
+        let year = Int(value.prefix(4))!, month = Int(value.dropFirst(5).prefix(2))!, day = Int(value.suffix(2))!
+        guard year > 0, (1...12).contains(month) else { return false }
+        let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+        let days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        return (1...days[month - 1]).contains(day)
+    }
+    /// Go emits normalized plain ASCII decimals; reject alternate spellings,
+    /// exponents, negative zero and non-finite values without numeric conversion.
+    static func decimal(_ value: String) -> Bool {
+        var b = value.utf8[...]
+        let negative = b.first == 45
+        if negative { b = b.dropFirst() }
+        guard !b.isEmpty else { return false }
+        let parts = b.split(separator: 46, omittingEmptySubsequences: false)
+        guard parts.count <= 2, let integer = parts.first, !integer.isEmpty,
+              integer.allSatisfy({ (48...57).contains($0) }),
+              integer.count == 1 || integer.first != 48 else { return false }
+        if parts.count == 2 {
+            let fraction = parts[1]
+            guard !fraction.isEmpty, fraction.last != 48,
+                  fraction.allSatisfy({ (48...57).contains($0) }) else { return false }
+        }
+        return !(negative && b.elementsEqual([48]))
     }
 }
 
@@ -312,12 +465,15 @@ final class BoundedReadIndexClient: @unchecked Sendable {
     func build(streamPath: String, destination: String) throws -> BoundedIndexManifest {
         try run {
             let json = backend.build(try BoundedIndexWire.path(streamPath), destination: try BoundedIndexWire.path(destination))
-            return try BoundedIndexWire.decode(BoundedIndexManifest.self, json: json, limit: BoundedIndexWire.manifestLimit)
+            let manifest = try BoundedIndexWire.decode(BoundedIndexManifest.self, json: json, limit: BoundedIndexWire.manifestLimit)
+            guard manifest.schemaVersion == 2, manifest.streamVersion == 1 else { throw BoundedReadIndexError.corrupt }
+            return manifest
         }
     }
     @discardableResult
     func open(databasePath: String, manifest: BoundedIndexManifest) throws -> String {
         try run {
+            guard manifest.schemaVersion == 2, manifest.streamVersion == 1 else { throw BoundedReadIndexError.corrupt }
             // A manifest may be constructed by a caller rather than returned by
             // Build. Bound scalar inputs before allocating its encoded request.
             let strings = [manifest.sourceDigest, manifest.runtime, manifest.exporter,
@@ -348,6 +504,32 @@ final class BoundedReadIndexClient: @unchecked Sendable {
                 guard row.id > 0, case let .directive(id, directive) = row.record.value,
                       row.id == id, row.date == directive.date, directive.kind == "transaction" else { throw BoundedReadIndexError.corrupt }
             }
+            return page
+        }
+    }
+    func accounts(limit: Int = 100, cursor: String? = nil) throws -> BoundedIndexAccountsPage {
+        try run {
+            guard (1...500).contains(limit), (cursor?.utf8.count ?? 0) <= 512 else { throw BoundedReadIndexError.invalidRequest }
+            struct Request: Encodable { let limit: Int; let cursor: String? }
+            let data = try JSONEncoder().encode(Request(limit: limit, cursor: cursor))
+            guard data.count <= 4096 else { throw BoundedReadIndexError.resourceLimit }
+            let page = try BoundedIndexWire.decode(BoundedIndexAccountsPage.self,
+                json: backend.accounts(String(decoding: data, as: UTF8.self)), limit: BoundedIndexWire.responseLimit)
+            try page.validate(limit: limit, cursor: cursor)
+            return page
+        }
+    }
+    func accountBalances(account: String, start: String? = nil, end: String? = nil,
+                         limit: Int = 100, cursor: String? = nil) throws -> BoundedIndexAccountBalancesPage {
+        try run {
+            guard BoundedAccountsValidation.account(account), BoundedAccountsValidation.interval(start, end),
+                  (1...500).contains(limit), (cursor?.utf8.count ?? 0) <= 512 else { throw BoundedReadIndexError.invalidRequest }
+            struct Request: Encodable { let account: String; let start: String?; let end: String?; let limit: Int; let cursor: String? }
+            let data = try JSONEncoder().encode(Request(account: account, start: start, end: end, limit: limit, cursor: cursor))
+            guard data.count <= 4096 else { throw BoundedReadIndexError.resourceLimit }
+            let page = try BoundedIndexWire.decode(BoundedIndexAccountBalancesPage.self,
+                json: backend.accountBalances(String(decoding: data, as: UTF8.self)), limit: BoundedIndexWire.responseLimit)
+            try page.validate(account: account, start: start, end: end, limit: limit, cursor: cursor)
             return page
         }
     }
@@ -395,6 +577,8 @@ private final class NativeBoundedReadIndexBackend: BoundedReadIndexBackend, @unc
     func build(_ streamPath: String, destination: String) -> String { bridge?.build(streamPath, destination: destination) ?? unavailable }
     func open(_ databasePath: String, manifestJSON: String) -> String { bridge?.open(databasePath, manifestJSON: manifestJSON) ?? unavailable }
     func transactions(_ requestJSON: String) -> String { bridge?.transactions(requestJSON) ?? unavailable }
+    func accounts(_ requestJSON: String) -> String { bridge?.accounts(requestJSON) ?? unavailable }
+    func accountBalances(_ requestJSON: String) -> String { bridge?.accountBalances(requestJSON) ?? unavailable }
     func detail(_ id: Int64) -> String { bridge?.detail(id) ?? unavailable }
     func detailRecords(_ requestJSON: String) -> String { bridge?.detailRecords(requestJSON) ?? unavailable }
     func unlock() { bridge?.unlock() }

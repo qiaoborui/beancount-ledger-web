@@ -29,6 +29,14 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         private var _details = 0
         private var _detailCursors: [String?] = []
         private var _offMain = true
+        private var _accountCursors: [String?] = []
+        private var _balanceAccounts: [String] = []
+        var unicodeAccounts = false
+        var blockAccountsNext = false
+        var continuationFaultsOnly = false
+        var accountsFault: String?
+        var blockBalances = false
+        var balancesFault: String?
         var oversizedDetail = false
         var wrongDetailRevision = false
         var malformedDetail = false
@@ -40,6 +48,8 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         let queryRelease = DispatchSemaphore(value: 0)
         let revisionID = UUID()
 
+        var accountCursors: [String?] { gate.withLock { _accountCursors } }
+        var balanceAccounts: [String] { gate.withLock { _balanceAccounts } }
         var opens: Int { gate.withLock { _opens } }
         var closes: Int { gate.withLock { _closes } }
         var builds: Int { gate.withLock { _builds } }
@@ -96,6 +106,46 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
                 return try JSONDecoder().decode(BoundedIndexDetailPage.self, from: Data("""
                     {"revision":"\(self.wrongDetailRevision ? "wrong" : "fixture")","id":\(id),"records":[\(rows.joined(separator: ","))],"next_cursor":\(cursor == nil ? "\"detail-next\"" : "null")}
                     """.utf8))
+            }, accounts: { cursor in
+                let call = self.gate.withLock {
+                    self._accountCursors.append(cursor)
+                    return self._accountCursors.count
+                }
+                if self.blockAccountsNext, cursor != nil, call == 2 {
+                    self.queryStarted.signal()
+                    guard self.queryRelease.wait(timeout: .now() + 5) == .success else { throw BoundedReadIndexError.canceled }
+                }
+                let fault = self.continuationFaultsOnly && cursor == nil ? nil : self.accountsFault
+                let names = self.unicodeAccounts ? ["Assets:Cafe\u{0301}", "Assets:Caf\u{00e9}"] : [cursor == nil ? "Assets:A" : "Assets:B"]
+                let rows = names.enumerated().map { offset, account in
+                    let id = (cursor == nil ? 7 : 8) + offset
+                    let kind = fault == "record" ? "close" : "open"
+                    return #"{"account":"\#(account)","open_id":\#(id),"open_date":"2026-01-01","open_record":{"type":"directive","id":\#(id),"value":{"Kind":"\#(kind)","Date":"2026-01-01","File":"main.bean","Line":1,"Account":"\#(account)"}}}"#
+                }
+                let revision = fault == "revision" ? "wrong" : "fixture"
+                let next = fault == "cursor" ? "\"accounts-next\"" : (cursor == nil ? "\"accounts-next\"" : "null")
+                let output = fault == "oversized" ? Array(repeating: rows[0], count: 101) : rows
+                return try JSONDecoder().decode(BoundedIndexAccountsPage.self, from: Data(#"{"revision":"\#(revision)","accounts":[\#(output.joined(separator: ","))],"next_cursor":\#(next)}"#.utf8))
+            }, accountBalances: { account, cursor in
+                let call = self.gate.withLock {
+                    self._balanceAccounts.append(account)
+                    return self._balanceAccounts.count
+                }
+                if self.blockBalances, call == 1 {
+                    self.queryStarted.signal()
+                    guard self.queryRelease.wait(timeout: .now() + 5) == .success else { throw BoundedReadIndexError.canceled }
+                }
+                let fault = self.continuationFaultsOnly && cursor == nil ? nil : self.balancesFault
+                let revision = fault == "revision" ? "wrong" : "fixture"
+                let otherUnicode = account.utf8.elementsEqual("Assets:Caf\u{00e9}".utf8) ? "Assets:Cafe\u{0301}" : "Assets:Caf\u{00e9}"
+                let account = fault == "account" ? "wrong" : (fault == "unicode" ? otherUnicode : account)
+                let basis = fault == "basis" ? "valuation" : "native_nominal"
+                let unit = cursor == nil ? "AAA" : "ZZZ"
+                let quantity = fault == "decimal" ? "1e9" : "12345678901234567890.000000000000001"
+                let row = #"{"currency":"\#(unit)","quantity":"\#(quantity)"}"#
+                let count = fault == "oversized" ? 101 : 1
+                let next = fault == "cursor" ? "\"balances-next\"" : (cursor == nil ? "\"balances-next\"" : "null")
+                return try JSONDecoder().decode(BoundedIndexAccountBalancesPage.self, from: Data(#"{"revision":"\#(revision)","account":"\#(account)","basis":"\#(basis)","balances":[\#(Array(repeating: row, count: count).joined(separator: ","))],"next_cursor":\#(next)}"#.utf8))
             }))
         }
     }
@@ -130,6 +180,243 @@ final class BoundedLedgerBrowserModelTests: XCTestCase, @unchecked Sendable {
         model.unlock()
         await eventually { !model.locked && !model.busy }
         model.select(try XCTUnwrap(model.descriptors.first))
+    }
+
+    func testAccountsModesReplacePagesAndKeepOneScope() async throws {
+        let (model, workspace, _) = fixture()
+        try await select(model)
+        model.open()
+        await eventually { model.page != nil && !model.busy }
+        model.setMode(.accounts)
+        XCTAssertNil(model.page)
+        await eventually { model.accountsPage != nil && !model.busy }
+        XCTAssertEqual(model.accountsPage?.accounts.map(\.account), ["Assets:A"])
+        model.selectAccount(7)
+        await eventually { model.balances != nil && !model.busy }
+        XCTAssertEqual(model.balances?.balances.first?.quantity, "12345678901234567890.000000000000001")
+        model.nextBalancesPage()
+        XCTAssertNil(model.balances)
+        await eventually { model.balances?.balances.first?.currency == "ZZZ" && !model.busy }
+        XCTAssertEqual(model.balances?.balances.count, 1)
+        model.showAccountMetadata()
+        await eventually { model.detail != nil && !model.busy }
+        XCTAssertEqual(model.detail?.id, 7)
+        model.nextAccountsPage()
+        XCTAssertNil(model.detail)
+        XCTAssertNil(model.balances)
+        XCTAssertNil(model.selectedAccount)
+        await eventually { model.accountsPage?.accounts.first?.account == "Assets:B" && !model.busy }
+        XCTAssertEqual(model.accountsPage?.accounts.count, 1)
+        model.selectAccount(8)
+        await eventually { model.balances?.account == "Assets:B" && !model.busy }
+        model.setMode(.transactions)
+        XCTAssertNil(model.accountsPage)
+        XCTAssertNil(model.balances)
+        XCTAssertNil(model.selectedAccount)
+        await eventually { model.page != nil && !model.busy }
+        XCTAssertEqual(workspace.opens, 1)
+        XCTAssertEqual(workspace.closes, 0)
+        model.lock()
+        await eventually { workspace.closes == 1 }
+        XCTAssertNil(model.page)
+        XCTAssertNil(model.lease)
+    }
+
+    func testUnicodeEquivalentAccountsSelectByOpenIDAndPreserveRequestBytes() async throws {
+        let workspace = Workspace(); workspace.unicodeAccounts = true
+        let (model, _, _) = fixture(workspace: workspace)
+        try await select(model)
+        model.setMode(.accounts); model.open()
+        await eventually { model.accountsPage != nil && !model.busy }
+        model.selectAccount(999) // An ID outside the displayed page has no capability.
+        XCTAssertNil(model.selectedAccount)
+        XCTAssertTrue(workspace.balanceAccounts.isEmpty)
+        for (id, name) in [(Int64(8), "Assets:Caf\u{00e9}"), (7, "Assets:Cafe\u{0301}")] {
+            model.selectAccount(id)
+            await eventually { model.balances != nil && !model.busy }
+            XCTAssertEqual(model.selectedAccount?.openID, id)
+            XCTAssertTrue(try XCTUnwrap(model.selectedAccount?.account).utf8.elementsEqual(name.utf8))
+            XCTAssertTrue(try XCTUnwrap(model.balances?.account).utf8.elementsEqual(name.utf8))
+            XCTAssertTrue(try XCTUnwrap(workspace.balanceAccounts.last).utf8.elementsEqual(name.utf8))
+        }
+        model.lock()
+        await eventually { workspace.closes == 1 }
+    }
+
+    func testUnicodeEquivalentWrongAccountResponseFailsClosed() async throws {
+        for id in [Int64(7), 8] {
+            let workspace = Workspace(); workspace.unicodeAccounts = true; workspace.balancesFault = "unicode"
+            let (model, _, _) = fixture(workspace: workspace)
+            try await select(model)
+            model.setMode(.accounts); model.open()
+            await eventually { model.accountsPage != nil && !model.busy }
+            model.selectAccount(id)
+            await eventually { model.message != nil && !model.busy }
+            XCTAssertNil(model.balances)
+            XCTAssertNil(model.selectedAccount)
+            XCTAssertNil(model.lease)
+            await eventually { workspace.closes == 1 }
+            model.lock()
+        }
+    }
+
+    func testAccountsAndBalancesContinuationMismatchesFailClosed() async throws {
+        for accounts in [true, false] {
+            let faults = accounts ? ["revision", "record", "cursor"] : ["revision", "account", "basis", "decimal", "cursor", "unicode"]
+            for fault in faults {
+                let workspace = Workspace(); workspace.continuationFaultsOnly = true
+                workspace.unicodeAccounts = fault == "unicode"
+                if accounts { workspace.accountsFault = fault } else { workspace.balancesFault = fault }
+                let (model, _, _) = fixture(workspace: workspace)
+                try await select(model)
+                model.setMode(.accounts); model.open()
+                await eventually { model.accountsPage != nil && !model.busy }
+                if accounts { model.nextAccountsPage() }
+                else {
+                    model.selectAccount(7)
+                    await eventually { model.balances != nil && !model.busy }
+                    model.nextBalancesPage()
+                }
+                await eventually { model.message != nil && !model.busy }
+                XCTAssertNil(model.accountsPage)
+                XCTAssertNil(model.selectedAccount)
+                XCTAssertNil(model.balances)
+                XCTAssertNil(model.lease)
+                await eventually { workspace.closes == 1 }
+                model.lock()
+            }
+        }
+    }
+
+    func testDelayedAccountsAndBalancesStaySerialAndCannotReplaceNewSelection() async throws {
+        for accounts in [true, false] {
+            for lockAndUnlock in [true, false] {
+                let workspace = Workspace()
+                workspace.blockAccountsNext = accounts; workspace.blockBalances = !accounts
+                let (model, _, _) = fixture(workspace: workspace)
+                try await select(model)
+                model.setMode(.accounts); model.open()
+                await eventually { model.accountsPage != nil && !model.busy }
+                if accounts { model.nextAccountsPage() } else { model.selectAccount(7) }
+                let started = await browserTestWait(workspace.queryStarted)
+                XCTAssertTrue(started)
+                // Neither endpoint, selection nor a mode change may bypass the busy gate.
+                model.firstAccountsPage(); model.nextAccountsPage()
+                model.selectAccount(8); model.firstBalancesPage(); model.nextBalancesPage()
+                model.setMode(.transactions)
+                let descriptor = try XCTUnwrap(model.selected)
+                model.select(try XCTUnwrap(model.descriptors.first))
+                XCTAssertEqual(model.selected, descriptor)
+                XCTAssertTrue(model.busy)
+                XCTAssertEqual(model.mode, .accounts)
+                XCTAssertEqual(workspace.accountCursors.count, accounts ? 2 : 1)
+                XCTAssertEqual(workspace.balanceAccounts.count, accounts ? 0 : 1)
+                if lockAndUnlock {
+                    model.lock()
+                    XCTAssertNil(model.accountsPage); XCTAssertNil(model.balances); XCTAssertNil(model.selectedAccount)
+                    model.unlock()
+                    await eventually { !model.locked && !model.busy }
+                } else {
+                    // Selection is intentionally disabled while busy. Finish that
+                    // request before selecting again; lock is the interrupt path.
+                    workspace.queryRelease.signal()
+                    await eventually { !model.busy }
+                }
+                model.select(try XCTUnwrap(model.descriptors.first))
+                XCTAssertNil(model.accountsPage); XCTAssertNil(model.balances); XCTAssertNil(model.selectedAccount)
+                model.setMode(.accounts); model.open()
+                await eventually { model.accountsPage != nil && !model.busy }
+                if !accounts {
+                    model.nextAccountsPage()
+                    await eventually { model.accountsPage?.accounts.first?.openID == 8 && !model.busy }
+                }
+                let selectedID: Int64 = accounts ? 7 : 8
+                let selectedName = accounts ? "Assets:A" : "Assets:B"
+                model.selectAccount(selectedID)
+                await eventually { model.balances != nil && !model.busy }
+                // After lock/unlock, release the old epoch only AFTER the new
+                // selection has published; it must not clear or replace new state.
+                if lockAndUnlock { workspace.queryRelease.signal() }
+                await eventually { workspace.closes == 1 }
+                XCTAssertEqual(model.selectedAccount?.openID, selectedID)
+                XCTAssertEqual(model.accountsPage?.accounts.first?.openID, selectedID)
+                XCTAssertTrue(try XCTUnwrap(model.balances?.account).utf8.elementsEqual(selectedName.utf8))
+                XCTAssertNotNil(model.lease)
+                XCTAssertNil(model.message)
+                XCTAssertFalse(model.busy)
+                model.lock()
+                await eventually { workspace.closes == 2 }
+            }
+        }
+    }
+
+    func testAccountsCanBeInitialModeAndSelectionClearsAllState() async throws {
+        let (model, workspace, _) = fixture()
+        try await select(model)
+        model.setMode(.accounts)
+        model.open()
+        await eventually { model.accountsPage != nil && !model.busy }
+        XCTAssertEqual(workspace.pageCount, 0)
+        model.selectAccount(7)
+        await eventually { model.balances != nil && !model.busy }
+        model.select(try XCTUnwrap(model.descriptors.first))
+        XCTAssertNil(model.accountsPage)
+        XCTAssertNil(model.balances)
+        XCTAssertNil(model.selectedAccount)
+        XCTAssertNil(model.lease)
+        XCTAssertEqual(model.mode, .transactions)
+        model.lock()
+    }
+
+    func testLockDuringBalancesSuppressesLateResultAndClearsCatalog() async throws {
+        let workspace = Workspace(); workspace.blockBalances = true
+        let (model, _, _) = fixture(workspace: workspace)
+        try await select(model)
+        model.setMode(.accounts); model.open()
+        await eventually { model.accountsPage != nil && !model.busy }
+        model.selectAccount(7)
+        let started = await browserTestWait(workspace.queryStarted)
+        XCTAssertTrue(started)
+        model.lock()
+        XCTAssertNil(model.accountsPage)
+        XCTAssertNil(model.balances)
+        XCTAssertNil(model.selectedAccount)
+        XCTAssertNil(model.detail)
+        XCTAssertTrue(model.descriptors.isEmpty)
+        workspace.queryRelease.signal()
+        await eventually { workspace.closes == 1 }
+        XCTAssertNil(model.balances)
+        XCTAssertNil(model.lease)
+    }
+
+    func testAccountsAndBalancesFailClosedOnOversizeAndMismatches() async throws {
+        for fault in ["oversized", "revision"] {
+            let workspace = Workspace(); workspace.accountsFault = fault
+            let (model, _, _) = fixture(workspace: workspace)
+            try await select(model)
+            model.setMode(.accounts); model.open()
+            await eventually { model.message != nil && !model.busy }
+            XCTAssertNil(model.accountsPage)
+            XCTAssertNil(model.lease)
+            XCTAssertEqual(workspace.pageCount, 0)
+            model.lock()
+        }
+        for fault in ["oversized", "revision", "account", "basis", "decimal"] {
+            let workspace = Workspace(); workspace.balancesFault = fault
+            let (model, _, _) = fixture(workspace: workspace)
+            try await select(model)
+            model.setMode(.accounts); model.open()
+            await eventually { model.accountsPage != nil && !model.busy }
+            model.selectAccount(7)
+            await eventually { model.message != nil && !model.busy }
+            XCTAssertNil(model.accountsPage)
+            XCTAssertNil(model.selectedAccount)
+            XCTAssertNil(model.balances)
+            XCTAssertNil(model.lease)
+            XCTAssertEqual(workspace.opens, 1)
+            XCTAssertEqual(workspace.pageCount, 0)
+            model.lock()
+        }
     }
 
     func testLockWhileAuthenticatingSuppressesLateCatalogAccess() async {
