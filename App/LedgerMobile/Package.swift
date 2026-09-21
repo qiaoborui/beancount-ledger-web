@@ -56,7 +56,9 @@ let package = Package(
         .testTarget(
             name: "LedgerMobileTests",
             dependencies: ["LedgerMobile"],
-            path: "Tests"
+            path: "Tests",
+            // UI-dependent tests remain covered by the Xcode app-host target.
+            exclude: ["CookieFastTransactionEditorTests.swift"]
         ),
     ]
 )
