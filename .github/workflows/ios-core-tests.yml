@@ -1,0 +1,31 @@
+name: iOS core tests
+
+on:
+  pull_request:
+    paths:
+      - 'App/LedgerMobile/Package.swift'
+      - 'App/LedgerMobile/Sources/**'
+      - 'App/LedgerMobile/Tests/**'
+      - '.github/workflows/ios-core-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-core-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  swift:
+    name: Swift package tests
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: swift --version
+      - name: Test app-independent core
+        working-directory: App/LedgerMobile
+        run: swift test --jobs 2

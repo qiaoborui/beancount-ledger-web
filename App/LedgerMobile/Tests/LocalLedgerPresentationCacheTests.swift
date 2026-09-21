@@ -10,16 +10,6 @@ final class LocalLedgerPresentationCacheTests: XCTestCase {
         func increment() { lock.withLock { scans += 1 } }
     }
 
-    private final class CountingFileManager: FileManager, @unchecked Sendable {
-        let counter: ScanCounter
-        init(counter: ScanCounter) { self.counter = counter; super.init() }
-        override func contentsOfDirectory(at url: URL, includingPropertiesForKeys keys: [URLResourceKey]?,
-                                          options mask: FileManager.DirectoryEnumerationOptions = []) throws -> [URL] {
-            if url.lastPathComponent == "workspace" { counter.increment() }
-            return try super.contentsOfDirectory(at: url, includingPropertiesForKeys: keys, options: mask)
-        }
-    }
-
     func testCachedBootstrapValidatesTheSnapshotTreeOnce() async throws {
         let (descriptor, original, engine) = try await fixture()
         let changes = (0..<1_000).map { LocalLedgerWorkspace.Change.write(Data("; safe performance fixture".utf8), to: "entries/\($0).bean") }
@@ -29,13 +19,15 @@ final class LocalLedgerPresentationCacheTests: XCTestCase {
         _ = try await load(seed)
         let scans = ScanCounter()
         let workspace = LocalLedgerWorkspace(rootDirectory: original.rootDirectory,
-            fileManager: CountingFileManager(counter: scans))
+            treeValidationObserver: { scans.increment() })
         let coldEngine = Engine()
         let reopened = LocalLedgerRepository(descriptor: descriptor, workspace: workspace, engine: coldEngine, validator: { _, _ in })
         let started = ContinuousClock.now
         _ = try await load(reopened)
         print("Cached bootstrap: \(started.duration(to: .now)), snapshot scans: \(scans.value)")
         XCTAssertEqual(scans.value, 1, "Validate the immutable tree once per snapshot read")
+        _ = try await load(reopened)
+        XCTAssertEqual(scans.value, 2, "A new snapshot read must validate once again")
         let calls = await coldEngine.calls
         XCTAssertEqual(calls, 0)
     }
