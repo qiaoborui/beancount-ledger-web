@@ -49,7 +49,13 @@ final class ShareViewController: UIViewController {
         super.viewDidAppear(animated)
         guard !started else { return }
         started = true
+        #if LEDGER_BOUNDED_READ_INDEX
+        // The experimental app cannot consume imports. Do not load attachments
+        // or write its shared inbox, and do not modify any saved credentials.
+        showResult(saved: 0, failure: "有界只读实验构建不支持导入。")
+        #else
         Task { await saveAttachments() }
+        #endif
     }
 
     private func saveAttachments() async {

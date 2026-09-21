@@ -64,10 +64,19 @@ final class LocalLedgerBackgroundSyncService {
     }
 
     func configure(operation: @escaping @MainActor @Sendable () async -> Bool) {
+        #if LEDGER_BOUNDED_READ_INDEX
+        // Compile-time isolation: no scheduling, monitoring or financial callback.
+        return
+        #else
         self.operation = operation
+        #endif
     }
 
     func startMonitoring(networkChanged: @escaping @MainActor @Sendable (Bool) -> Void) {
+        #if LEDGER_BOUNDED_READ_INDEX
+        // Compile-time isolation: no scheduling, monitoring or financial callback.
+        return
+        #else
         #if os(iOS)
         guard monitor == nil else { return }
         let monitor = NWPathMonitor()
@@ -78,9 +87,14 @@ final class LocalLedgerBackgroundSyncService {
         monitor.start(queue: DispatchQueue(label: "ledger.local-sync.network"))
         self.monitor = monitor
         #endif
+        #endif
     }
 
     func register() {
+        #if LEDGER_BOUNDED_READ_INDEX
+        // Compile-time isolation: no scheduling, monitoring or financial callback.
+        return
+        #else
         #if os(iOS) && !targetEnvironment(macCatalyst)
         guard !registered else { return }
         let registeredRefresh = BGTaskScheduler.shared.register(
@@ -97,9 +111,14 @@ final class LocalLedgerBackgroundSyncService {
         }
         registered = registeredRefresh || registeredProcessing
         #endif
+        #endif
     }
 
     func setEnabled(_ enabled: Bool) {
+        #if LEDGER_BOUNDED_READ_INDEX
+        // Compile-time isolation: no scheduling, monitoring or financial callback.
+        return
+        #else
         if schedulingEnabled != enabled { schedulingGeneration = UUID() }
         schedulingEnabled = enabled
         #if os(iOS) && !targetEnvironment(macCatalyst)
@@ -110,9 +129,14 @@ final class LocalLedgerBackgroundSyncService {
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.processingTaskIdentifier)
         }
         #endif
+        #endif
     }
 
     func schedule() {
+        #if LEDGER_BOUNDED_READ_INDEX
+        // Compile-time isolation: no scheduling, monitoring or financial callback.
+        return
+        #else
         #if os(iOS) && !targetEnvironment(macCatalyst)
         guard schedulingEnabled, registered else { return }
         let generation = schedulingGeneration
@@ -154,10 +178,15 @@ final class LocalLedgerBackgroundSyncService {
             }
         }
         #endif
+        #endif
     }
 
     #if os(iOS) && !targetEnvironment(macCatalyst)
     private func execute(_ task: BGTask, kind: BackgroundTaskKind) {
+        #if LEDGER_BOUNDED_READ_INDEX
+        // Compile-time isolation: no scheduling, monitoring or financial callback.
+        task.setTaskCompleted(success: false)
+        #else
         // On a cold background launch, authorization is checked from persisted
         // configuration by operation, independently of the foreground UI phase.
         guard let operation else { task.setTaskCompleted(success: false); return }
@@ -171,6 +200,7 @@ final class LocalLedgerBackgroundSyncService {
             self.recordExecution(kind: kind, success: finalSuccess)
             schedule()
         }
+        #endif
     }
     #endif
 }
@@ -178,7 +208,9 @@ final class LocalLedgerBackgroundSyncService {
 #if os(iOS)
 final class LedgerBackgroundAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        #if !LEDGER_BOUNDED_READ_INDEX
         LocalLedgerBackgroundSyncService.shared.register()
+        #endif
         return true
     }
 }

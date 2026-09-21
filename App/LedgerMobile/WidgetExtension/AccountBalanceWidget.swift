@@ -37,7 +37,13 @@ struct LedgerAccountEntityQuery: EntityQuery {
     }
 
     private var accounts: [LedgerAccountEntity] {
-        (LedgerWidgetSnapshotStore.shared.load()?.accounts ?? []).map(LedgerAccountEntity.init)
+        #if LEDGER_BOUNDED_READ_INDEX
+        // Intent/entity resolution runs independently of timeline providers.
+        // Never expose a cached legacy account during an experimental build.
+        return []
+        #else
+        return (LedgerWidgetSnapshotStore.shared.load()?.accounts ?? []).map(LedgerAccountEntity.init)
+        #endif
     }
 }
 

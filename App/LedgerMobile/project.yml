@@ -1,11 +1,25 @@
 name: LedgerMobile
 
 options:
+  defaultConfig: Debug
   createIntermediateGroups: true
   deploymentTarget:
     iOS: "17.0"
 
+# Explicit opt-in, inherited by EVERY target, including all extensions/tests.
+# Existing Debug/Release remain unchanged. Never set the flag on the app alone.
+configs:
+  Debug: debug
+  Release: release
+  BoundedDebug: debug
+  BoundedRelease: release
+
 settings:
+  configs:
+    BoundedDebug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) DEBUG LEDGER_BOUNDED_READ_INDEX
+    BoundedRelease:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) LEDGER_BOUNDED_READ_INDEX
   base:
     SWIFT_VERSION: "6.0"
     CURRENT_PROJECT_VERSION: "35"
@@ -97,6 +111,10 @@ targets:
         Debug:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) PERSONAL_TEAM_BUILD
         Release:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) PERSONAL_TEAM_BUILD
+        BoundedDebug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) PERSONAL_TEAM_BUILD
+        BoundedRelease:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) PERSONAL_TEAM_BUILD
     scheme:
       testTargets:

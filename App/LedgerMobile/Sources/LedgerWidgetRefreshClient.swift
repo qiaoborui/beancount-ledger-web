@@ -126,6 +126,9 @@ struct LedgerWidgetRefreshClient: LedgerWidgetRefreshing, @unchecked Sendable {
         now: Date = Date(),
         calendar: Calendar = .current
     ) async throws -> LedgerWidgetSnapshot {
+        #if LEDGER_BOUNDED_READ_INDEX
+        throw LedgerWidgetRefreshError.invalidResponse
+        #else
         guard credential.enabled,
               var components = URLComponents(string: credential.serverOrigin),
               components.scheme?.lowercased() == "https",
@@ -164,6 +167,7 @@ struct LedgerWidgetRefreshClient: LedgerWidgetRefreshing, @unchecked Sendable {
             throw LedgerWidgetRefreshError.invalidResponse
         }
         return try remote.snapshot(previous: previous)
+        #endif
     }
 
     private static func dateString(_ date: Date, calendar: Calendar) -> String {
@@ -198,10 +202,17 @@ actor LedgerWidgetTimelineLoader {
         self.credentialStore = credentialStore
         self.snapshotStore = snapshotStore
         self.statusStore = statusStore
+        #if LEDGER_BOUNDED_READ_INDEX
+        self.client = nil
+        #else
         self.client = localOnly ? nil : (client ?? clientFactory())
+        #endif
     }
 
     func load(now: Date = Date(), forceRefresh: Bool = false) async -> LedgerWidgetTimelineLoadResult {
+        #if LEDGER_BOUNDED_READ_INDEX
+        return LedgerWidgetTimelineLoadResult(snapshot: nil, refreshInterval: Self.successRefreshInterval)
+        #else
         let cachedState = snapshotStore.loadState()
         let cached = cachedState.snapshot
         // An upgraded widget can run before the app suspends its old credentials.
@@ -304,6 +315,7 @@ actor LedgerWidgetTimelineLoader {
         let result = await task.value
         inFlight = nil
         return finish(result, cached: cached, now: now)
+        #endif
     }
 
     private func finish(
