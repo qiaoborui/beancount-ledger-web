@@ -84,6 +84,84 @@ final class ImportClassificationTests: XCTestCase {
         XCTAssertFalse(suggestion().canPrefill(for: incoming))
     }
 
+    func testLeadingModerateCategoryPreselectsUnknownAndStillNeedsConfirmation() throws {
+        let original = try entry()
+        let catalog = accounts() + [account("Liabilities:Card")]
+        let input = try XCTUnwrap(ImportClassificationContext.request(for: original, accounts: catalog, history: []))
+        let result = suggestion(confidence: 0.5, probability: 0.6,
+                                funding: "Liabilities:Card", fundingConfidence: 0.5)
+        let filled = ImportClassificationContext.autofilled(original, suggestion: result, input: input)
+        XCTAssertEqual(filled.categoryAccount, "Expenses:Coffee")
+        XCTAssertEqual(filled.fundingAccount, original.fundingAccount)
+        XCTAssertEqual(filled, ImportClassificationContext.applying(category: "Expenses:Coffee",
+            funding: original.fundingAccount, to: original, allowed: input.accounts.map(\.account)))
+        XCTAssertFalse(result.category.isConfident)
+        XCTAssertFalse(result.canPrefill(for: filled))
+        XCTAssertEqual(result.pendingFields(for: filled), ["category", "funding"])
+        XCTAssertEqual(result.pendingFields(for: filled, accepted: ["category"]), ["funding"])
+    }
+
+    func testCategoryPreselectionKeepsWeakAmbiguousAndReviewResultsUnresolved() throws {
+        let original = try entry()
+        let input = try XCTUnwrap(ImportClassificationContext.request(for: original, accounts: accounts(), history: []))
+        let fields: [ImportClassificationSuggestion.Field] = [
+            field("Expenses:Coffee", confidence: 0.5, probability: 0.59),
+            field("Expenses:Coffee", confidence: 0.49, probability: 0.6),
+            .init(value: "Expenses:Coffee", confidence: 0.5, candidates: [
+                .init(value: "Expenses:Coffee", probability: 0.6),
+                .init(value: "Income:Salary", probability: 0.401)]),
+            .init(value: "review", confidence: 0.8, candidates: [.init(value: "Expenses:Coffee", probability: 0.2)]),
+            field("Expenses:Unknown", confidence: 0.5, probability: 0.6),
+            field("Expenses:Missing", confidence: 0.5, probability: 0.6),
+            field("Assets:Savings", confidence: 0.5, probability: 0.6),
+        ]
+        for category in fields {
+            let result = ImportClassificationSuggestion(model: "fixture", category: category,
+                funding: field(original.fundingAccount), nature: field("expense"), tags: [])
+            XCTAssertEqual(ImportClassificationContext.autofilled(original, suggestion: result, input: input), original)
+        }
+    }
+
+    func testCategoryPreselectionPreservesExistingSpecificCategory() throws {
+        let original = try XCTUnwrap(ImportClassificationContext.applying(category: "Expenses:Dining",
+            funding: "Assets:Bank", to: entry(), allowed: ["Expenses:Dining", "Assets:Bank"]))
+        let input = try XCTUnwrap(ImportClassificationContext.request(for: original,
+            accounts: accounts() + [account("Expenses:Dining")], history: []))
+        let result = suggestion(confidence: 0.5, probability: 0.6)
+        XCTAssertEqual(ImportClassificationContext.autofilled(original, suggestion: result, input: input), original)
+    }
+
+    func testCategoryPreselectionHonorsIncomeRefundAndPostingPolarity() throws {
+        let incoming = try changedEntry { json in
+            var postings = json["postings"] as! [[String: Any]]
+            postings[0]["amount"] = "-18.00"
+            postings[1]["amount"] = "18.00"
+            json["postings"] = postings
+        }
+        let input = try XCTUnwrap(ImportClassificationContext.request(for: incoming, accounts: accounts(), history: []))
+        for (nature, category) in [("income", "Income:Salary"), ("refund", "Expenses:Coffee")] {
+            let result = suggestion(nature: nature, confidence: 0.5, probability: 0.6, category: category)
+            let filled = ImportClassificationContext.autofilled(incoming, suggestion: result, input: input)
+            XCTAssertEqual(filled.categoryAccount, category)
+            XCTAssertEqual(filled.postings.map(\.amount), incoming.postings.map(\.amount))
+            XCTAssertTrue(result.pendingFields(for: filled).contains("category"))
+        }
+        let incompatible = suggestion(confidence: 0.5, probability: 0.6)
+        XCTAssertEqual(ImportClassificationContext.autofilled(incoming, suggestion: incompatible, input: input), incoming)
+    }
+
+    func testCategoryPreselectionAcceptsExactTwentyPointLeadAndIncomeUnknown() throws {
+        let original = try XCTUnwrap(ImportClassificationContext.applying(category: "Income:Unknown",
+            funding: "Assets:Bank", to: entry(), allowed: ["Income:Unknown", "Assets:Bank"]))
+        let input = try XCTUnwrap(ImportClassificationContext.request(for: original, accounts: accounts(), history: []))
+        let result = ImportClassificationSuggestion(model: "fixture",
+            category: .init(value: "Expenses:Coffee", confidence: 0.5, candidates: [
+                .init(value: "Expenses:Coffee", probability: 0.6), .init(value: "Income:Salary", probability: 0.4)]),
+            funding: field(original.fundingAccount), nature: field("expense"), tags: [])
+        XCTAssertEqual(ImportClassificationContext.autofilled(original, suggestion: result, input: input).categoryAccount,
+                       "Expenses:Coffee")
+    }
+
     func testDirectAPIUsesTypedChoicesAndValidatesResponse() async throws {
         let input = try XCTUnwrap(ImportClassificationContext.request(for: entry(), accounts: accounts(), history: []))
         ClassificationURLProtocol.handler = { request in

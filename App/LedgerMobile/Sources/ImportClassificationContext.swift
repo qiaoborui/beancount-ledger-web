@@ -159,12 +159,25 @@ enum ImportClassificationContext {
                            input: ImportClassificationRequest) -> LedgerImportEntry {
         let funding = suggestion.funding.isConfident && fundingCompatible(suggestion.funding.value, input: input)
             ? suggestion.funding.value : entry.fundingAccount
-        let category = suggestion.category.isConfident && suggestion.nature.isConfident
+        let category = (suggestion.category.isConfident || canPreselectCategory(suggestion.category, for: entry))
+            && suggestion.nature.isConfident
             && suggestion.compatible(category: suggestion.category.value, funding: funding, entry: entry)
             ? suggestion.category.value : entry.categoryAccount
         let tags = (try? LedgerTagRules.validating((entry.tags ?? []) + suggestion.suggestedTags)) ?? entry.tags ?? []
         return applying(category: category, funding: funding, tags: tags, to: entry,
                         allowed: input.accounts.map(\.account)) ?? entry
+    }
+
+    private static func canPreselectCategory(_ field: ImportClassificationSuggestion.Field,
+                                            for entry: LedgerImportEntry) -> Bool {
+        guard ["Expenses:Unknown", "Income:Unknown"].contains(entry.categoryAccount),
+              field.value.hasPrefix("Expenses:") || field.value.hasPrefix("Income:"),
+              !["Expenses:Unknown", "Income:Unknown"].contains(field.value),
+              field.confidence >= 0.5, let first = field.candidates.first,
+              first.value == field.value, first.probability >= 0.6 else { return false }
+        // This only fills a reviewable draft; pendingFields keeps its stricter
+        // confirmation policy. Tolerance includes an exact 60% / 40% boundary.
+        return first.probability - (field.candidates.dropFirst().first?.probability ?? 0) >= 0.2 - 1e-12
     }
 
     static func applying(category: String, funding: String, tags: [String]? = nil,

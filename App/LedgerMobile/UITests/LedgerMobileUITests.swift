@@ -782,6 +782,9 @@ final class LedgerMobileUITests: XCTestCase {
             return element
         }
         reveal("result").tap()
+        XCTAssertTrue(result.label.contains("待确认"))
+        XCTAssertTrue(reveal("category").label.contains("Expenses:Education:Books"))
+        capture("classification-category-preselected-awaiting-confirmation")
         reveal("funding").tap()
         reveal("import-suggestion-funding-Liabilities:CreditCard").tap()
         XCTAssertTrue(result.label.contains("待确认"))

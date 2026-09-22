@@ -1058,8 +1058,12 @@ struct NativeImportFlowView: View {
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--safe-preview"),
                ProcessInfo.processInfo.arguments.contains("--safe-classification-review"),
-               let entry = reviewedEntries.first {
-                classificationResults[entry.id] = .init(model: "fixture",
+               let entry = reviewedEntries.first,
+               let original = ImportClassificationContext.applying(category: "Expenses:Unknown",
+                   funding: entry.fundingAccount, to: entry, allowed: ["Expenses:Unknown", entry.fundingAccount]),
+               let input = ImportClassificationContext.request(for: original,
+                   accounts: session.ledger?.accounts ?? [], history: []) {
+                let result = ImportClassificationSuggestion(model: "fixture",
                     category: .init(value: entry.categoryAccount, confidence: 0.5,
                                     candidates: [.init(value: entry.categoryAccount, probability: 0.6)]),
                     funding: .init(value: "Liabilities:CreditCard", confidence: 0.5,
@@ -1067,7 +1071,9 @@ struct NativeImportFlowView: View {
                     nature: .init(value: "expense", confidence: 0.99,
                                   candidates: [.init(value: "expense", probability: 0.99)]),
                     tags: [.init(value: "travel", probability: 0.7)])
-                classificationOriginals[entry.id] = entry
+                classificationResults[entry.id] = result
+                classificationOriginals[entry.id] = original
+                reviewedEntries[0] = ImportClassificationContext.autofilled(original, suggestion: result, input: input)
                 onlyClassificationReview = true
             }
 #endif
