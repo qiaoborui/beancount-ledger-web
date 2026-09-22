@@ -1,16 +1,17 @@
 # Native Import Category Preselection
 
 - Task ID: `20260922-ios-import-category-preselection`.
-- Status: completed (implementation and simulator verification; draft PR delivery).
-- Updated: 2026-09-22T18:07:00+08:00.
+- Status: completed (implementation, simulator verification and private IPA delivery).
+- Updated: 2026-09-22T22:50:00+08:00.
 - Goal: replace an unclassified import draft with a clearly leading suggested
   category while preserving visible review and explicit write confirmation.
 - Branch: `codex/ios-import-category-preselection`.
 - Code revision: `089e1e6b07a6354031cf531e236acb692587a6d8`, based on main
   `0867241e14d0a7b98d9deb1300fdaec1ade436d4`.
-- Draft PR: https://github.com/qiaoborui/beancount-ledger-web/pull/417.
+- PR: https://github.com/qiaoborui/beancount-ledger-web/pull/417.
+- User authorized private IPA update followed by PR merge, in that order.
 - Scope: main's native import classification path. Existing SQLite experiments,
-  capacity work, hosted artifacts and private ledgers remain unchanged.
+  capacity work and private ledgers remain unchanged.
 
 ## Policy And Changes
 
@@ -47,11 +48,22 @@
 - An unsigned simulator attempt failed two existing Keychain cases; local signing
   resolved both. The standalone Swift package test entrance has a pre-existing
   missing Cookie editor symbol failure; tests ran through the native app target.
-- Synthetic data only. Physical iPhone, live Jev accuracy, IPA packaging and
-  deployment were outside this verification. No merge or hosted IPA replacement.
+- Synthetic data only. Physical iPhone and live Jev accuracy remain untested.
+- Delivery follow-up: rebuilt private Release IPA from `b806d61` with Xcode 27.0
+  / SDK 27.0, app 0.1.0 (35). Verified arm64, both extensions, App Groups, runtime
+  resources, 48 embedded framework signatures, ZIP and checksum. Updated the
+  authorized LAN copy, preserving the prior package. A complete HTTP download
+  returned 200 and matched the built file byte-for-byte; its deep signature passed.
+- Re-ran the 39 native tests and one UI test successfully before merge. Private
+  packaging guard suite: four tests passed. No product changes since verification.
+- GitHub required Gate passes. Independent Vercel preview failed after successful
+  builds because the container registry reached its image-count limit; no registry
+  cleanup or branch-protection bypass is part of this native delivery.
 
 ## Next Step
 
-Review draft PR #417 and authorize merge before including the change in a main IPA.
+Proceed with the authorized normal merge of PR #417 after the latest required Gate;
+verify the merged product tree matches the delivered IPA source. The user can
+re-sign the updated private IPA through SideStore/iLoader.
 Machine-specific evidence and runtime locations are recorded only in
 `$GIT_COMMON_DIR/agent-handoffs/20260922-ios-import-category-preselection.md`.
