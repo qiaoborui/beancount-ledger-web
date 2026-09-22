@@ -15,7 +15,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         var pointer: URL { root.appendingPathComponent("derived/bounded/current.json") }
     }
 
-    private func fixture(fileManager: PublicationFailureFileManager = PublicationFailureFileManager(), aliased: Bool = false) async throws -> Fixture {
+    private func fixture(faults: PublicationFileFaults = PublicationFileFaults(), aliased: Bool = false) async throws -> Fixture {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("BoundedPublication-" + UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         var workspaceRoot = root
@@ -27,7 +27,8 @@ final class BoundedLedgerPublicationTests: XCTestCase {
             // Alias an ancestor, not the workspace itself: child symlinks stay forbidden.
             workspaceRoot = alias.appendingPathComponent("workspace")
         }
-        let workspace = LocalLedgerWorkspace(rootDirectory: workspaceRoot, fileManager: fileManager)
+        let workspace = LocalLedgerWorkspace(rootDirectory: workspaceRoot,
+                                             fileManager: PublicationFailureFileManager(faults: faults))
         let revision = try await workspace.commit(changes: [.write(Data("; synthetic A\n".utf8), to: "main.bean")], validator: { _ in })
         return Fixture(workspace: workspace, revision: revision, root: workspaceRoot)
     }
@@ -287,7 +288,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
     }
 
     func testLateProtectionFailuresRetainLastMatchedGeneration() async throws {
-        for failure in [PublicationFailureFileManager.Failure.databaseProtection, .pointerProtection] {
+        for failure in [PublicationFileFaults.Failure.databaseProtection, .pointerProtection] {
             try await checkFilesystemFailure(failure)
         }
     }
@@ -298,9 +299,9 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         try await checkFilesystemFailure(.pointerRename)
     }
 
-    private func checkFilesystemFailure(_ failure: PublicationFailureFileManager.Failure) async throws {
-        let files = PublicationFailureFileManager()
-        let f = try await fixture(fileManager: files)
+    private func checkFilesystemFailure(_ failure: PublicationFileFaults.Failure) async throws {
+        let files = PublicationFileFaults()
+        let f = try await fixture(faults: files)
         let p = publication(f)
         p.unlock()
         let first = try await p.rebuild(expectedRevisionID: f.revision.id)
@@ -756,7 +757,7 @@ private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Send
 
 /// Inject faults only after a successful A publication and a source B commit.
 /// No production fault hooks or changes to the workspace implementation needed.
-private final class PublicationFailureFileManager: FileManager, @unchecked Sendable {
+private final class PublicationFileFaults: @unchecked Sendable {
     enum Failure: Sendable { case databaseProtection, pointerProtection, pointerRename }
     private let gate = NSLock()
     private var failure: Failure?
@@ -766,7 +767,7 @@ private final class PublicationFailureFileManager: FileManager, @unchecked Senda
 
     func arm(_ failure: Failure) { gate.withLock { self.failure = failure; injected = false } }
 
-    override func setAttributes(_ attributes: [FileAttributeKey: Any], ofItemAtPath path: String) throws {
+    func setAttributes(_ attributes: [FileAttributeKey: Any], ofItemAtPath path: String) throws {
         try gate.withLock {
             let url = URL(fileURLWithPath: path)
             let isPointer = url.lastPathComponent.hasPrefix(".current-") &&
@@ -781,16 +782,16 @@ private final class PublicationFailureFileManager: FileManager, @unchecked Senda
                 injected = true
                 throw CocoaError(.fileWriteNoPermission)
             case .pointerRename where isPointer:
-                try super.setAttributes(attributes, ofItemAtPath: path)
+                try FileManager.default.setAttributes(attributes, ofItemAtPath: path)
                 // Pending bytes and protection succeed; only the final rename
                 // is denied. Keep the existing pointer untouched and readable.
                 let parent = url.deletingLastPathComponent().path
-                try super.setAttributes([.posixPermissions: 0o500], ofItemAtPath: parent)
+                try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: parent)
                 restrictedParent = parent
                 failure = nil
                 injected = true
             default:
-                try super.setAttributes(attributes, ofItemAtPath: path)
+                try FileManager.default.setAttributes(attributes, ofItemAtPath: path)
             }
         }
     }
@@ -799,17 +800,32 @@ private final class PublicationFailureFileManager: FileManager, @unchecked Senda
         gate.withLock {
             guard let parent = restrictedParent else { return }
             do {
-                try super.setAttributes([.posixPermissions: 0o700], ofItemAtPath: parent)
+                try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: parent)
                 restrictedParent = nil
             } catch { XCTFail("could not restore fixture directory permissions") }
         }
+    }
+}
+
+// The workspace exclusively owns this manager; only locked fault state is shared
+// with the test, including on SDKs where FileManager is non-Sendable.
+private final class PublicationFailureFileManager: FileManager, @unchecked Sendable {
+    private let faults: PublicationFileFaults
+
+    init(faults: PublicationFileFaults) {
+        self.faults = faults
+        super.init()
+    }
+
+    override func setAttributes(_ attributes: [FileAttributeKey: Any], ofItemAtPath path: String) throws {
+        try faults.setAttributes(attributes, ofItemAtPath: path)
     }
 
     override func removeItem(at url: URL) throws {
         // writeAtomicPointer's deferred pending-file cleanup runs only after
         // the failed rename. Restore permissions then, allowing normal cleanup
         // of both the pending pointer and the rejected generation.
-        restorePermissions()
+        faults.restorePermissions()
         try super.removeItem(at: url)
     }
 }

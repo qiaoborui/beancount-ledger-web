@@ -1,9 +1,9 @@
 # 20260922-ios-readindex-valuation
 
-- Status: active; updated 2026-09-22T15:18:00+08:00. App-container milestone `3dcb6a4` and verified BoundedRelease IPA complete. Physical-device connectivity blocks installation/testing; broader device acceptance remains open.
+- Status: active; updated 2026-09-22T15:41:00+08:00. App-container milestone `3dcb6a4` and verified BoundedRelease IPA complete. Hosted test compilation follow-up locally verified; publication and refreshed hosted checks follow. Physical-device connectivity blocks installation/testing; broader device acceptance remains open.
 - Parent: `20260921-ios-bounded-read-model`. Current goal: finish Apple verification of bounded valuation and resolve reproducible failures. Keep the default application mode unchanged; no merge, release, production mutation, or reporting/BQL expansion authorized.
 - Branch: `codex/ios-readindex-valuation`; Graphite parent `codex/ios-validation-concurrency-fixture` (PR #415). Base `7629d60e6c466aef2d565bd851a0ca2ff5072747`.
-- Draft PR: [#416](https://github.com/qiaoborui/beancount-ledger-web/pull/416). Remote last verified open, draft, and mergeable at `7f79fd7812c2521c54b80287bfb64b17363a1ce7`. This note accompanies the subsequent app-container and packaging code milestone; refreshed hosted checks follow publication.
+- Draft PR: [#416](https://github.com/qiaoborui/beancount-ledger-web/pull/416). Remote last verified open, draft, and mergeable at `1c1082a2834e5646caa77b5d2a6d609f090eb6e2`. This note accompanies the subsequent test-only ownership correction; refreshed hosted checks follow publication.
 
 ## Completed Implementation
 
@@ -54,3 +54,12 @@ Earlier sandbox failures (Keychain access, TCP test listeners, simulator service
 - Committed code revision: `3dcb6a452c1bc4bd0194916fb7c59affbecb5e39`. Built clean BoundedRelease IPA from this revision with Xcode27.0/SDK27.0. App/Widget/Share bounded flags, arm64, App Groups, deep app signature,48 embedded-framework signatures, runtime resources, ZIP and SHA-256 passed. Artifact is `com.qiaoborui.ledger.mobile.ipa`,27,722,596 bytes; SHA-256 `f4eaa86ac78d71fd3fa46209c72b658c89fa93e4f05f4df1e7c7b8a455458393`.
 - Python LAN hosting retains the ordinary Release file and serves BoundedRelease separately. Full bounded download returned HTTP200 and matched SHA-256/ZIP checks. Simulator launch screenshot confirms the experimental locked shell. Temporary QA simulator was shut down and deleted; existing simulators and phone app were preserved. Independent architecture review found no concrete introduced regressions.
 - This documentation-only follow-up records the code revision above. Next: inspect refreshed PR checks, retry device tests after trusted connectivity is restored. Physical lock transitions, file protection, memory/latency and larger-scale acceptance remain open. Full reports/BQL/write/import/Widget parity and the default-mode switch remain parent-task work.
+
+## Hosted Test Compilation Follow-Up
+
+- Hosted native run `35699181993` passed Debug. BoundedDebug built the app and extensions, then failed compiling the test target under Xcode 26.3: the fixture passed a caller-retained `PublicationFailureFileManager` into `LocalLedgerWorkspace`, producing a non-Sendable actor-transfer error before assertions ran. The same tests compiled locally under Xcode 27.
+- `BoundedLedgerPublicationTests.swift` now constructs the manager directly for exclusive workspace ownership. Only a separate lock-protected fault controller is shared with the test. All fault injection, permissions restoration, retained-generation assertions and concurrency checks remain. Application/runtime sources, compiler strictness and test selection are unchanged.
+- Local verification of this follow-up: macOS Swift suite 504 tests, 15 existing skips, zero failures; actual iOS 27 app-host tests 24 passed, zero skipped/failed (22 publication cases plus the 205/10,000-transaction native cases); native workflow contract 8 passed; `git diff --check` passed. The existing hosted app-test step is the compiler regression gate for the prior failure.
+- General CI and Swift package checks passed at `1c1082a`. Vercel's current preview log confirms image construction succeeded and registry publication was denied by the image-count limit. No registry cleanup was performed.
+- Bounded IPA remains the verified `3dcb6a4` application build: this follow-up changes tests only. A fresh full LAN download returned HTTP 200 with 27,722,596 bytes; SHA-256 and ZIP integrity matched the recorded artifact. Physical device still reports unavailable; installation/protection/performance acceptance remains open.
+- Next: publish this test-only correction, confirm the hosted native check, then resume physical-device acceptance after trusted connectivity is restored. Keep the PR draft and default mode unchanged.
