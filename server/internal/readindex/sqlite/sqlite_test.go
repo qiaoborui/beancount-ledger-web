@@ -75,6 +75,29 @@ func count(t *testing.T, db *DB) int64 {
 	return r.Int64(0)
 }
 
+func TestNativeConnectionHardening(t *testing.T) {
+	// Apple's SQLite omits loadable extensions. Exercise native configuration
+	// with a canonical path so SQLITE_OPEN_NOFOLLOW cannot mask its result.
+	path, err := filepath.EvalSymlinks(newPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := openTest(t, path, true)
+	exec(t, db, "CREATE TABLE entries (value TEXT) STRICT")
+	exec(t, db, "INSERT INTO entries VALUES (?)", "synthetic")
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db = openTest(t, path, false)
+	r := query(t, db, "SELECT value FROM entries")
+	if !r.Next() || r.Text(0) != "synthetic" || r.Next() {
+		t.Fatal("native writable/read-only connection did not preserve its row")
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBindExactTextAndTypes(t *testing.T) {
 	db := openTest(t, newPath(t), true)
 	exec(t, db, "CREATE TABLE entries (id INTEGER PRIMARY KEY, text TEXT, amount TEXT, n INTEGER, flag INTEGER, nullable TEXT)")
@@ -702,10 +725,16 @@ func TestIntegrityCheckExpressionSpillFailsClosed(t *testing.T) {
 	}
 	patchSchema(t, path, "%0000001d", "%0100000d")
 	db = openTest(t, path, true)
-	// An 80 x 100000-byte ephemeral IN btree must hit av_open's denial,
-	// not the default VFS's global temporary file. Merely listing temp files
-	// would miss SQLite's immediately unlinked files.
-	code(t, db.IntegrityCheck(context.Background()), 14)
+	// SQLite may detect the rewritten index before spilling its ephemeral IN
+	// btree. Both outcomes reject the index; TestProtectedTempSortFailsClosed
+	// independently requires the VFS to deny scratch-file creation.
+	err := db.IntegrityCheck(context.Background())
+	var sqliteErr *Error
+	if errors.As(err, &sqliteErr) && sqliteErr.Code&255 == 11 {
+		code(t, err, 11)
+	} else {
+		code(t, err, 14)
+	}
 	assertPragmasDenied(t, db)
 	exec(t, db, "SELECT value FROM entries NOT INDEXED")
 }

@@ -94,7 +94,10 @@ static int bind_text(sqlite3_stmt *s, int i, const char *p, int n) {
 static int harden(sqlite3 *db) {
     int rc = sqlite3_db_config(db,SQLITE_DBCONFIG_DEFENSIVE,1,NULL);
     if (rc == SQLITE_OK) rc = sqlite3_db_config(db,SQLITE_DBCONFIG_TRUSTED_SCHEMA,0,NULL);
-    if (rc == SQLITE_OK) rc = sqlite3_db_config(db,SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION,0,NULL);
+    // Apple builds omit extension loading and reject its db_config operation.
+    // Require runtime proof of omission; otherwise disabling must succeed.
+    if (rc == SQLITE_OK && !sqlite3_compileoption_used("OMIT_LOAD_EXTENSION"))
+        rc = sqlite3_db_config(db,SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION,0,NULL);
     return rc;
 }
 static int authorize(void *integrity, int op, const char *a, const char *b, const char *c, const char *d) {

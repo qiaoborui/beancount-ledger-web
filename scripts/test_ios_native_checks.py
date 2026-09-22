@@ -96,9 +96,21 @@ class NativeWorkflowTests(unittest.TestCase):
         self.assertNotIn("continue-on-error", self.workflow)
         self.assertNotIn("|| true", self.workflow)
 
+    def test_apple_sqlite_runtime_gate_precedes_native_build(self):
+        gate = self.workflow.index("- name: Test read index against Apple system SQLite")
+        builder = self.workflow.index("run: bash scripts/build-ledgercore-xcframework.sh")
+        self.assertLess(gate, builder)
+        step = self.workflow[gate:builder].split("\n      # Build", 1)[0]
+        self.assertIn("working-directory: server", step)
+        self.assertIn('export TMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"', step)
+        self.assertIn(
+            "go test -race -p 2 -timeout 120s ./internal/ledger ./internal/readindex/... ./mobilereadindex",
+            step,
+        )
+
     def test_embedded_shell_and_python_syntax(self):
         blocks = run_blocks(self.workflow)
-        self.assertEqual(len(blocks), 4)
+        self.assertEqual(len(blocks), 5)
         for block in blocks:
             shell = "\n".join(line[10:] for line in block.splitlines()) + "\n"
             result = subprocess.run(["bash", "-n"], input=shell, text=True, capture_output=True)
