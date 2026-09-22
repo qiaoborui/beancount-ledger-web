@@ -135,5 +135,5 @@
 
 ## Latest valuation checkpoint
 
-- Updated 2026-09-22T13:17:34.364329+08:00; broader task remains active. Current branch `codex/ios-readindex-valuation`, based on `7629d60` / PR #415. Go schema-3 valuation and Swift transport implementation are ready for a draft checkpoint; Apple SDK/full publication/native validation remains pending.
+- Updated 2026-09-22T13:17:34.364329+08:00; broader task remains active. Current branch `codex/ios-readindex-valuation`, based on `7629d60` / PR #415. Go schema-3 valuation and Swift transport implementation were committed/pushed as `078442b` in draft PR [#416](https://github.com/qiaoborui/beancount-ledger-web/pull/416), currently mergeable; Apple SDK/full publication/native validation remains pending.
 - Current resumable scope, validation limits and next steps: [20260922-ios-readindex-valuation](20260922-ios-readindex-valuation.md). Earlier milestone statuses above are historical.

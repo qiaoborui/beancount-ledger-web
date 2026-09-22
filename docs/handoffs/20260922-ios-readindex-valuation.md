@@ -1,8 +1,8 @@
 # 20260922-ios-readindex-valuation
 
-- Status: active; updated 2026-09-22T13:17:34.364329+08:00. Implementation checkpoint ready for publication; Apple validation remains pending.
+- Status: active; updated 2026-09-22T13:17:34.364329+08:00. Implementation checkpoint committed and pushed; Apple validation remains pending.
 - Parent task: `20260921-ios-bounded-read-model`. User requested committing/pushing the current work and saving progress; no merge, release, default-mode switch, or further feature expansion requested.
-- Branch: `codex/ios-readindex-valuation`; Graphite parent `codex/ios-validation-concurrency-fixture` (PR [#415](https://github.com/qiaoborui/beancount-ledger-web/pull/415)). Base revision `7629d60e6c466aef2d565bd851a0ca2ff5072747`; the implementation accompanies this checkpoint. Child PR pending creation.
+- Branch: `codex/ios-readindex-valuation`; Graphite parent `codex/ios-validation-concurrency-fixture` (PR [#415](https://github.com/qiaoborui/beancount-ledger-web/pull/415)). Base revision `7629d60e6c466aef2d565bd851a0ca2ff5072747`; code revision `078442b9d720d7b179456cc178496460f95b81f9` is committed and pushed. Draft child PR [#416](https://github.com/qiaoborui/beancount-ledger-web/pull/416) is open and mergeable, with no reported conflicts.
 
 ## Scope and completed work
 
@@ -14,7 +14,7 @@
 
 ## Validation and review
 
-Against the current implementation based on `7629d60`, freshly checked in this publication session:
+Against the implementation committed as `078442b`, freshly checked in this publication session:
 
 - Go 1.25.10, cgo enabled: `go test -p 1 ./...` PASS (cached package results); `go build -p 1 -o /dev/null ./cmd/ledger-web` PASS.
 - Swift 6.0.3 Linux harness: 73 tests PASS, including all nine new valuation tests and extracted revision/lifetime reader checks. Harness uses the real client and selected source/tests, with platform stubs; excludes two existing Apple-validator-only tests and does not run the full publication suite.
@@ -25,9 +25,8 @@ Against the current implementation based on `7629d60`, freshly checked in this p
 
 ## Remaining steps
 
-1. Push this checkpoint and create a draft child PR; verify its base, head and mergeability.
-2. Run hosted macOS Swift package tests and freshly rebuilt native simulator checks. Resolve failures before marking the PR ready; local harness/syntax checks do not replace these gates.
-3. Verify old-index rebuild and new valuation calls through the native Apple bridge. Physical-device protection, cancellation, memory/latency and large-price-graph behavior remain broader-task gates.
-4. Resume reporting/BQL/default-mode migration only under the broader plan, separately from this publication request.
+1. Follow the checks on draft PR #416 (queued/running at publication). Run hosted macOS Swift package tests and freshly rebuilt native simulator checks. Resolve failures before marking the PR ready; local harness/syntax checks do not replace these gates.
+2. Verify old-index rebuild and new valuation calls through the native Apple bridge. Physical-device protection, cancellation, memory/latency and large-price-graph behavior remain broader-task gates.
+3. Resume reporting/BQL/default-mode migration only under the broader plan, separately from this publication request.
 
 The implementation is not claimed release-ready. No concrete source-level blocker was found; full Apple validation is the outstanding acceptance step.
