@@ -197,13 +197,34 @@ final class BoundedReadIndexClientTests: XCTestCase {
         try FileManager.default.createDirectory(at: derived, withIntermediateDirectories: true)
         try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: temp)
         let paths = try EmbeddedBeancountValidator.streamPaths(workspace: alias.appendingPathComponent("source"), entryFile: "main.bean", derivedDirectory: alias.appendingPathComponent("derived"), spoolName: "fresh-1.jsonl")
-        XCTAssertEqual(paths.workspace, source.resolvingSymlinksInPath().path)
-        XCTAssertEqual(paths.derived, derived.resolvingSymlinksInPath().path)
+        let sourcePath = try XCTUnwrap(realpath(source.path, nil))
+        let derivedPath = try XCTUnwrap(realpath(derived.path, nil))
+        defer { free(sourcePath); free(derivedPath) }
+        XCTAssertEqual(paths.workspace, String(cString: sourcePath))
+        XCTAssertEqual(paths.derived, String(cString: derivedPath))
         for name in ["../escape", ".hidden", "a/b", "中文", String(repeating: "a", count: 129)] {
             XCTAssertThrowsError(try EmbeddedBeancountValidator.streamPaths(workspace: source, entryFile: "main.bean", derivedDirectory: derived, spoolName: name))
         }
         XCTAssertThrowsError(try EmbeddedBeancountValidator.streamPaths(workspace: source, entryFile: "../main.bean", derivedDirectory: derived, spoolName: "fresh"))
         XCTAssertThrowsError(try EmbeddedBeancountValidator.streamPaths(workspace: source, entryFile: "main.bean", derivedDirectory: source.appendingPathComponent("inside"), spoolName: "fresh"))
+    }
+    func testResolvedDirectoryPreservesPOSIXPathAndRejectsMissingRoots() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let target = root.appendingPathComponent("target")
+        let alias = root.appendingPathComponent("alias")
+        try fm.createDirectory(at: target, withIntermediateDirectories: false)
+        try fm.createSymbolicLink(at: alias, withDestinationURL: target)
+        let canonical = try XCTUnwrap(realpath(target.path, nil))
+        defer { free(canonical) }
+        for supplied in [target, alias] {
+            XCTAssertEqual(try BoundedIndexWire.resolvedDirectory(supplied), String(cString: canonical))
+        }
+        XCTAssertThrowsError(try BoundedIndexWire.resolvedDirectory(root.appendingPathComponent("missing"))) {
+            XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
+        }
     }
     func testMissingExportRuntimeFailsExplicitly() async throws {
         #if !canImport(BeancountRuntime)

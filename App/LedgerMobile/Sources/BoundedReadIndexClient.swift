@@ -590,9 +590,12 @@ enum BoundedIndexWire {
     static func resolvedDirectory(_ url: URL) throws -> String {
         guard url.isFileURL else { throw BoundedReadIndexError.invalidRequest }
         _ = try path(url.path)
-        // iOS /var and host /tmp can be system aliases. Resolve the supplied root,
-        // not untrusted child paths (the native bridge rejects child symlinks).
-        return try path(url.resolvingSymlinksInPath().standardizedFileURL.path)
+        // Foundation can shorten /private/var or /private/tmp back to symlink
+        // aliases. Keep the POSIX spelling required by the native path guard.
+        // Only resolve the supplied root; native code still checks child paths.
+        guard let resolved = realpath(url.path, nil) else { throw BoundedReadIndexError.unavailable }
+        defer { free(resolved) }
+        return try path(String(cString: resolved))
     }
 }
 
