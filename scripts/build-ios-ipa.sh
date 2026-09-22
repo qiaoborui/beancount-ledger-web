@@ -3,10 +3,18 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [[ $# != 2 || "${1:-}" != --private-local ]]; then
-  echo 'Usage: bash scripts/build-ios-ipa.sh --private-local NEW_OUTPUT_DIRECTORY' >&2
+if [[ ( $# != 2 && $# != 4 ) || "${1:-}" != --private-local ]]; then
+  echo 'Usage: bash scripts/build-ios-ipa.sh --private-local NEW_OUTPUT_DIRECTORY [--configuration Release|BoundedRelease]' >&2
   echo 'Private local use only. Public redistribution remains gated; see App/LedgerMobile/Runtime/THIRD_PARTY.md.' >&2
   exit 1
+fi
+configuration=Release
+if [[ $# == 4 ]]; then
+  if [[ "$3" != --configuration || ( "$4" != Release && "$4" != BoundedRelease ) ]]; then
+    echo 'Configuration must be Release or BoundedRelease.' >&2
+    exit 1
+  fi
+  configuration="$4"
 fi
 umask 077
 output_dir="$2"
@@ -35,10 +43,27 @@ build_settings=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEA
 if [[ -n "${GITHUB_RUN_NUMBER:-}" ]]; then
   build_settings+=("CURRENT_PROJECT_VERSION=$((GITHUB_RUN_NUMBER + 3))")
 fi
+# Verify the opt-in flag across the app and both extensions before archiving.
+xcodebuild -project LedgerMobile.xcodeproj -alltargets \
+  -configuration "$configuration" -sdk iphoneos -showBuildSettings -json \
+  "${build_settings[@]}" > "$build_dir/settings.json"
+python3 - "$build_dir/settings.json" "$configuration" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as source:
+    targets = {item["target"]: item["buildSettings"] for item in json.load(source)}
+for name in ("LedgerMobile", "LedgerWidgets", "LedgerShare"):
+    settings = targets[name]
+    flags = settings.get("SWIFT_ACTIVE_COMPILATION_CONDITIONS", "").split()
+    assert settings["CONFIGURATION"] == sys.argv[2], name
+    assert ("LEDGER_BOUNDED_READ_INDEX" in flags) == (sys.argv[2] == "BoundedRelease"), name
+print("Verified configuration for app, Widget and Share: " + sys.argv[2])
+PY
 xcodebuild archive \
   -project LedgerMobile.xcodeproj \
   -scheme LedgerMobile \
-  -configuration Release \
+  -configuration "$configuration" \
   -quiet \
   -destination 'generic/platform=iOS' \
   -derivedDataPath "$build_dir/DerivedData" \
@@ -140,7 +165,7 @@ done
 
 version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Info.plist")"
 build="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")"
-ipa_name="LedgerMobile-${version}-${build}-SideStore.ipa"
+ipa_name="com.qiaoborui.ledger.mobile.ipa"
 ditto -c -k --norsrc --keepParent "$build_dir/Payload" "$output_dir/$ipa_name"
 unzip -tq "$output_dir/$ipa_name"
 cd "$output_dir"
@@ -149,6 +174,7 @@ shasum -a 256 "$ipa_name" > "$ipa_name.sha256"
   xcodebuild -version
   echo "iPhoneOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
   echo "Source: $(git -C "$repo_root" rev-parse HEAD)"
+  echo "Configuration: $configuration"
   echo "App: $version ($build)"
   echo 'Signing: ad-hoc; install and re-sign with SideStore / iLoader / AltStore'
   echo 'Distribution: private local use only; public redistribution remains gated'

@@ -151,3 +151,28 @@ jobs:
           test -s "$app/PlugIns/LedgerShare.appex/LedgerShare"
           test -s "$app/Frameworks/Python.framework/Python"
           test -s "$app/python/app_packages/ledger_stream_bridge.py"
+
+      - name: Exercise bounded publication inside the simulator app container
+        if: matrix.configuration == 'BoundedDebug'
+        run: |
+          destination="$(python3 - <<'PY'
+          import json
+          import subprocess
+
+          devices = json.loads(subprocess.check_output([
+              'xcrun', 'simctl', 'list', 'devices', 'available', '--json',
+          ]))['devices']
+          phone = next(device['udid'] for runtime in devices.values() for device in runtime
+                       if device['name'].startswith('iPhone') and device['isAvailable'])
+          print('platform=iOS Simulator,id=' + phone)
+          PY
+          )"
+          xcodebuild test \
+            -project App/LedgerMobile/LedgerMobile.xcodeproj \
+            -scheme LedgerMobile -configuration "$CONFIGURATION" \
+            -destination "$destination" \
+            -derivedDataPath "$RUNNER_TEMP/ios-native" \
+            -only-testing:LedgerMobileTests/BoundedNativeIntegrationTests \
+            -parallel-testing-enabled NO -jobs 2 \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM=
