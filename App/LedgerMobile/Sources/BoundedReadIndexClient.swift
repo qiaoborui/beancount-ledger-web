@@ -11,6 +11,8 @@ protocol BoundedReadIndexBackend: Sendable {
     func transactions(_ requestJSON: String) -> String
     func accounts(_ requestJSON: String) -> String
     func accountBalances(_ requestJSON: String) -> String
+    func priceLookup(_ requestJSON: String) -> String
+    func valueLegacyCents(_ requestJSON: String) -> String
     func accountSummary(_ requestJSON: String) -> String
     func accountActivity(_ requestJSON: String) -> String
     func detail(_ id: Int64) -> String
@@ -24,6 +26,8 @@ protocol BoundedReadIndexBackend: Sendable {
 /// Existing backends/fakes remain source compatible; never fall back to the
 /// whole-detail endpoint, which can exceed its all-or-error response cap.
 extension BoundedReadIndexBackend {
+    func priceLookup(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
+    func valueLegacyCents(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
     func accountSummary(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
     func accountActivity(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
     func accounts(_ requestJSON: String) -> String { #"{"error":{"code":"unavailable"}}"# }
@@ -387,6 +391,117 @@ enum BoundedAccountsValidation {
     }
 }
 
+/// One raw canonical quote, not a nominal conversion or a price catalog.
+/// Quantity preserves signs, zeros and exponent spelling without numeric parsing.
+struct BoundedIndexPriceQuote: Decodable, Sendable, Equatable {
+    let sequence: Int64
+    let entryID: Int64
+    let date: String
+    let currency: String
+    let quantity: String
+    let quoteCurrency: String
+    private enum CodingKeys: String, CodingKey {
+        case sequence, entryID = "entry_id", date, currency, quantity, quoteCurrency = "quote_currency"
+    }
+}
+
+struct BoundedIndexPriceLookupResult: Decodable, Sendable {
+    let revision: String
+    let tiePolicy: String
+    let found: Bool
+    let price: BoundedIndexPriceQuote?
+    private enum CodingKeys: String, CodingKey { case revision, tiePolicy = "tie_policy", found, price, error }
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard !c.contains(.error) else { throw BoundedReadIndexError.corrupt }
+        revision = try c.decode(String.self, forKey: .revision)
+        tiePolicy = try c.decode(String.self, forKey: .tiePolicy)
+        found = try c.decode(Bool.self, forKey: .found)
+        price = try c.decodeIfPresent(BoundedIndexPriceQuote.self, forKey: .price)
+    }
+    func validate(date: String?) throws {
+        guard !revision.isEmpty, tiePolicy == BoundedValuationValidation.tiePolicy,
+              found == (price != nil) else { throw BoundedReadIndexError.corrupt }
+        if let price {
+            guard price.sequence > 0, price.entryID > 0,
+                  BoundedAccountsValidation.date(price.date),
+                  (date ?? "").isEmpty || price.date <= date!,
+                  BoundedValuationValidation.currency(price.currency),
+                  BoundedValuationValidation.currency(price.quoteCurrency) else { throw BoundedReadIndexError.corrupt }
+            guard price.quantity.utf8.count <= BoundedValuationValidation.quantityLimit else { throw BoundedReadIndexError.resourceLimit }
+            guard BoundedValuationValidation.quantity(price.quantity) else { throw BoundedReadIndexError.corrupt }
+        }
+        // Go normalizes pair keys with Unicode simple uppercase + TrimSpace.
+        // Returned currencies are raw source spelling. Do not compare them to
+        // the request or emulate Go with Swift's different full uppercase rules.
+    }
+}
+
+/// Explicit compatibility basis: input/output are signed int64 cents. Each Go
+/// conversion edge truncates independently. Never feed nominal reporting UI.
+struct BoundedIndexLegacyCentsResult: Decodable, Sendable {
+    let revision: String
+    let basis: String
+    let tiePolicy: String
+    let amount: Int64
+    let found: Bool
+    private enum CodingKeys: String, CodingKey { case revision, basis, tiePolicy = "tie_policy", amount, found, error }
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard !c.contains(.error) else { throw BoundedReadIndexError.corrupt }
+        revision = try c.decode(String.self, forKey: .revision)
+        basis = try c.decode(String.self, forKey: .basis)
+        tiePolicy = try c.decode(String.self, forKey: .tiePolicy)
+        amount = try c.decode(Int64.self, forKey: .amount)
+        found = try c.decode(Bool.self, forKey: .found)
+    }
+    func validate() throws {
+        guard !revision.isEmpty, basis == "legacy_cents",
+              tiePolicy == BoundedValuationValidation.tiePolicy,
+              found || amount == 0 else { throw BoundedReadIndexError.corrupt }
+    }
+}
+
+private enum BoundedValuationValidation {
+    static let tiePolicy = "source_sequence_last" // readindex.PriceTiePolicy
+    static let quantityLimit = BoundedIndexWire.responseLimit / 6 - 4096
+    // Go unicode.IsSpace, rather than Foundation's broader whitespace set.
+    static let space = CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{0085}\u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}")
+    static func currency(_ value: String) -> Bool {
+        guard value.utf8.count <= 1024 else { return false }
+        // Go checks controls after trimming, and defaults empty to CNY.
+        // The native endpoint also bounds the Go-normalized UTF-8 byte length.
+        return !value.trimmingCharacters(in: space).unicodeScalars.contains {
+            $0.value < 32 || (127...159).contains($0.value)
+        }
+    }
+    static func request(base: String, quote: String, date: String?) throws {
+        guard currency(base), currency(quote), (date ?? "").isEmpty || BoundedAccountsValidation.date(date!) else {
+            throw BoundedReadIndexError.invalidRequest
+        }
+    }
+    /// boundedstream's finite decimal grammar; unlike native balance sums this
+    /// permits exponents, leading/trailing zeros, +, .1 and 1. No exponent expansion.
+    static func quantity(_ value: String) -> Bool {
+        var bytes = value.utf8[...]
+        if bytes.first == 43 || bytes.first == 45 { bytes = bytes.dropFirst() }
+        var digits = 0
+        while let b = bytes.first, (48...57).contains(b) { digits += 1; bytes = bytes.dropFirst() }
+        if bytes.first == 46 {
+            bytes = bytes.dropFirst()
+            while let b = bytes.first, (48...57).contains(b) { digits += 1; bytes = bytes.dropFirst() }
+        }
+        guard digits > 0 else { return false }
+        if bytes.first == 69 || bytes.first == 101 {
+            bytes = bytes.dropFirst()
+            if bytes.first == 43 || bytes.first == 45 { bytes = bytes.dropFirst() }
+            guard !bytes.isEmpty else { return false }
+            while let b = bytes.first, (48...57).contains(b) { bytes = bytes.dropFirst() }
+        }
+        return bytes.isEmpty
+    }
+}
+
 struct BoundedIndexDetail: Decodable, Sendable {
     let revision: String
     let id: Int64
@@ -558,14 +673,14 @@ final class BoundedReadIndexClient: @unchecked Sendable {
         try run {
             let json = backend.build(try BoundedIndexWire.path(streamPath), destination: try BoundedIndexWire.path(destination))
             let manifest = try BoundedIndexWire.decode(BoundedIndexManifest.self, json: json, limit: BoundedIndexWire.manifestLimit)
-            guard manifest.schemaVersion == 2, manifest.streamVersion == 1 else { throw BoundedReadIndexError.corrupt }
+            guard manifest.schemaVersion == 3, manifest.streamVersion == 1 else { throw BoundedReadIndexError.corrupt }
             return manifest
         }
     }
     @discardableResult
     func open(databasePath: String, manifest: BoundedIndexManifest) throws -> String {
         try run {
-            guard manifest.schemaVersion == 2, manifest.streamVersion == 1 else { throw BoundedReadIndexError.corrupt }
+            guard manifest.schemaVersion == 3, manifest.streamVersion == 1 else { throw BoundedReadIndexError.corrupt }
             // A manifest may be constructed by a caller rather than returned by
             // Build. Bound scalar inputs before allocating its encoded request.
             let strings = [manifest.sourceDigest, manifest.runtime, manifest.exporter,
@@ -653,6 +768,30 @@ final class BoundedReadIndexClient: @unchecked Sendable {
             return page
         }
     }
+    func priceLookup(base: String, quote: String, date: String? = nil) throws -> BoundedIndexPriceLookupResult {
+        try run {
+            try BoundedValuationValidation.request(base: base, quote: quote, date: date)
+            struct Request: Encodable { let base: String; let quote: String; let date: String? }
+            let data = try JSONEncoder().encode(Request(base: base, quote: quote, date: date))
+            guard data.count <= 4096 else { throw BoundedReadIndexError.resourceLimit }
+            let result = try BoundedIndexWire.decode(BoundedIndexPriceLookupResult.self,
+                json: backend.priceLookup(String(decoding: data, as: UTF8.self)), limit: BoundedIndexWire.responseLimit)
+            try result.validate(date: date)
+            return result
+        }
+    }
+    func valueLegacyCents(amount: Int64, base: String, quote: String, date: String? = nil) throws -> BoundedIndexLegacyCentsResult {
+        try run {
+            try BoundedValuationValidation.request(base: base, quote: quote, date: date)
+            struct Request: Encodable { let basis = "legacy_cents"; let amount: Int64; let base: String; let quote: String; let date: String? }
+            let data = try JSONEncoder().encode(Request(amount: amount, base: base, quote: quote, date: date))
+            guard data.count <= 4096 else { throw BoundedReadIndexError.resourceLimit }
+            let result = try BoundedIndexWire.decode(BoundedIndexLegacyCentsResult.self,
+                json: backend.valueLegacyCents(String(decoding: data, as: UTF8.self)), limit: BoundedIndexWire.responseLimit)
+            try result.validate()
+            return result
+        }
+    }
     func detailRecords(id: Int64, limit: Int = 100, cursor: String? = nil) throws -> BoundedIndexDetailPage {
         try run {
             guard id > 0, (1...500).contains(limit), (cursor?.utf8.count ?? 0) <= 512 else {
@@ -697,6 +836,8 @@ private final class NativeBoundedReadIndexBackend: BoundedReadIndexBackend, @unc
     func build(_ streamPath: String, destination: String) -> String { bridge?.build(streamPath, destination: destination) ?? unavailable }
     func open(_ databasePath: String, manifestJSON: String) -> String { bridge?.open(databasePath, manifestJSON: manifestJSON) ?? unavailable }
     func transactions(_ requestJSON: String) -> String { bridge?.transactions(requestJSON) ?? unavailable }
+    func priceLookup(_ requestJSON: String) -> String { bridge?.priceLookup(requestJSON) ?? unavailable }
+    func valueLegacyCents(_ requestJSON: String) -> String { bridge?.valueLegacyCents(requestJSON) ?? unavailable }
     func accounts(_ requestJSON: String) -> String { bridge?.accounts(requestJSON) ?? unavailable }
     func accountSummary(_ requestJSON: String) -> String { bridge?.accountSummary(requestJSON) ?? unavailable }
     func accountActivity(_ requestJSON: String) -> String { bridge?.accountActivity(requestJSON) ?? unavailable }

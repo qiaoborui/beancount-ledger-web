@@ -8,7 +8,7 @@ final class BoundedReadIndexClientTests: XCTestCase {
         #"{"revision":"r1","transactions":[{"id":1,"date":"2026-09-21","record":\#(directive)}],"next_cursor":"cursor"}"#
     }
     private var manifestJSON: String {
-        #"{"schema_version":2,"stream_version":1,"source_digest":"source","runtime":"beancount","exporter":"bounded-v1","entrypoint":"main.bean","stream_digest":"stream","records":3,"directives":1,"postings":1,"options":0,"commodities":0,"metadata":0,"transactions":1,"bytes":1000,"max_record_bytes":500,"revision":"r1"}"#
+        #"{"schema_version":3,"stream_version":1,"source_digest":"source","runtime":"beancount","exporter":"bounded-v1","entrypoint":"main.bean","stream_digest":"stream","records":3,"directives":1,"postings":1,"options":0,"commodities":0,"metadata":0,"transactions":1,"bytes":1000,"max_record_bytes":500,"revision":"r1"}"#
     }
     func testLockedByDefaultAndExplicitCloseIsPermanent() throws {
         let backend = FakeBackend(response: page)
@@ -60,6 +60,16 @@ final class BoundedReadIndexClientTests: XCTestCase {
         guard case let .metadata(_, _, key, type) = detail.records[2].value else { return XCTFail("metadata identity required") }
         XCTAssertEqual(key, "nested")
         XCTAssertEqual(type, "list")
+    }
+    func testBuildRejectsSchemaOneAndTwo() {
+        for schema in [1, 2, 4] {
+            let backend = FakeBackend(response: manifestJSON.replacingOccurrences(of: "\"schema_version\":3", with: "\"schema_version\":\(schema)"))
+            let client = BoundedReadIndexClient(backend: backend)
+            client.unlock()
+            XCTAssertThrowsError(try client.build(streamPath: "stream.jsonl", destination: "index.sqlite")) {
+                XCTAssertEqual($0 as? BoundedReadIndexError, .corrupt)
+            }
+        }
     }
     func testBuildAndOpenUseOnlyCappedManifest() throws {
         let backend = FakeBackend(response: manifestJSON)

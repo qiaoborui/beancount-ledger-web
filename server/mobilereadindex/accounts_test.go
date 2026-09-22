@@ -23,8 +23,8 @@ func accountsBridgeFixture(t *testing.T) *Bridge {
 		`{"type":"posting","entry_id":3,"ordinal":0,"value":{"account":"Assets:Cash","Quantity":{"Number":"12345678901234567890.000000000000000000001","Currency":"USD"},"Cost":{"Number":"1E-99999999","Currency":"EUR"}}}`,
 		`{"type":"posting","entry_id":3,"ordinal":1,"value":{"account":"Assets:Cash","Quantity":{"Number":"-1.25","Currency":"EUR"}}}`,
 		`{"type":"posting","entry_id":3,"ordinal":2,"value":{"account":"Assets:Huge","Quantity":{"Number":"1E999999999","Currency":"USD"}}}`))
-	if m.SchemaVersion != 2 {
-		t.Fatal("schema2 required")
+	if m.SchemaVersion != 3 {
+		t.Fatal("schema3 required")
 	}
 	openFixture(t, b, "accounts", manifest, m)
 	return b

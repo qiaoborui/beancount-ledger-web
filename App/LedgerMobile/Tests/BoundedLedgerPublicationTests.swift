@@ -56,29 +56,39 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         catch { XCTAssertEqual(error as? BoundedReadIndexError, expected, file: file, line: line) }
     }
 
-    func testSchemaOneFailsUntilExplicitRebuild() async throws {
-        let f = try await fixture()
-        let p = publication(f)
-        p.unlock()
-        let manifest = try await p.rebuild(expectedRevisionID: f.revision.id)
-        let current = try Data(contentsOf: f.pointer)
-        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: current) as? [String: Any])
-        var index = try XCTUnwrap(object["index"] as? [String: Any])
-        index["schema_version"] = 1
-        object["index"] = index
-        let old = try JSONSerialization.data(withJSONObject: object)
-        try old.write(to: f.pointer)
-        await expectError(.corrupt) { _ = try await p.withReadLease { _, _ in true } }
-        XCTAssertEqual(try Data(contentsOf: f.pointer), old)
-        let rebuilt = try await p.rebuild(expectedRevisionID: f.revision.id)
-        XCTAssertEqual(rebuilt.index.schemaVersion, 2)
-        XCTAssertNotEqual(rebuilt.generationID, manifest.generationID)
-        try await p.withReadLease { _, reader in _ = try reader.accounts() }
-        let outdatedBuilder = publication(f, behavior: .oldSchema)
-        outdatedBuilder.unlock()
-        let rebuiltBytes = try Data(contentsOf: f.pointer)
-        await expectError(.corrupt) { _ = try await outdatedBuilder.rebuild(expectedRevisionID: f.revision.id) }
-        XCTAssertEqual(try Data(contentsOf: f.pointer), rebuiltBytes)
+    func testSchemasOneAndTwoFailUntilExplicitRebuild() async throws {
+        for schema in [1, 2] {
+            let f = try await fixture()
+            let p = publication(f)
+            p.unlock()
+            let manifest = try await p.rebuild(expectedRevisionID: f.revision.id)
+            let current = try Data(contentsOf: f.pointer)
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: current) as? [String: Any])
+            var index = try XCTUnwrap(object["index"] as? [String: Any])
+            index["schema_version"] = schema
+            object["index"] = index
+            let old = try JSONSerialization.data(withJSONObject: object)
+            try old.write(to: f.pointer)
+            await expectError(.corrupt) { _ = try await p.withReadLease { _, _ in true } }
+            XCTAssertEqual(try Data(contentsOf: f.pointer), old)
+            for behavior: PublicationBackend.Behavior in [.buildFailure, .openFailure, .oldSchema, .schemaTwo] {
+                let failing = publication(f, behavior: behavior)
+                failing.unlock()
+                await expectError(behavior == .buildFailure ? .unavailable : .corrupt) {
+                    _ = try await failing.rebuild(expectedRevisionID: f.revision.id)
+                }
+                XCTAssertEqual(try Data(contentsOf: f.pointer), old)
+            }
+            let rebuilt = try await p.rebuild(expectedRevisionID: f.revision.id)
+            XCTAssertEqual(rebuilt.index.schemaVersion, 3)
+            XCTAssertNotEqual(rebuilt.generationID, manifest.generationID)
+            try await p.withReadLease { _, reader in _ = try reader.accounts() }
+            let outdatedBuilder = publication(f, behavior: schema == 1 ? .oldSchema : .schemaTwo)
+            outdatedBuilder.unlock()
+            let rebuiltBytes = try Data(contentsOf: f.pointer)
+            await expectError(.corrupt) { _ = try await outdatedBuilder.rebuild(expectedRevisionID: f.revision.id) }
+            XCTAssertEqual(try Data(contentsOf: f.pointer), rebuiltBytes)
+        }
     }
 
     func testLockedByDefaultAndMissingManifestNeverFallsBack() async throws {
@@ -449,6 +459,12 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         await expectError(.revisionMismatch) {
             _ = try await wrong.withReadLease { _, reader in try reader.accountActivity(account: "Assets:Test", currency: "USD") }
         }
+        await expectError(.revisionMismatch) {
+            _ = try await wrong.withReadLease { _, reader in try reader.priceLookup(base: "EUR", quote: "USD") }
+        }
+        await expectError(.revisionMismatch) {
+            _ = try await wrong.withReadLease { _, reader in try reader.valueLegacyCents(amount: 1, base: "EUR", quote: "USD") }
+        }
         let wrongContinuation = publication(f, behavior: .wrongDetailContinuationRevision)
         wrongContinuation.unlock()
         await expectError(.revisionMismatch) {
@@ -458,6 +474,12 @@ final class BoundedLedgerPublicationTests: XCTestCase {
             }
         }
         let escaped = try await p.withReadLease { _, reader in reader }
+        XCTAssertThrowsError(try escaped.priceLookup(base: "EUR", quote: "USD")) {
+            XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
+        }
+        XCTAssertThrowsError(try escaped.valueLegacyCents(amount: 1, base: "EUR", quote: "USD")) {
+            XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
+        }
         XCTAssertThrowsError(try escaped.accounts()) {
             XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
         }
@@ -506,6 +528,12 @@ final class BoundedLedgerPublicationTests: XCTestCase {
             let native = try reader.accountBalances(account: "Assets:Test")
             XCTAssertEqual(native.revision, manifest.revision, file: file, line: line)
             XCTAssertEqual(native.balances.first?.quantity, "12345678901234567890.00001", file: file, line: line)
+            let price = try reader.priceLookup(base: "EUR", quote: "USD")
+            XCTAssertEqual(price.revision, manifest.revision, file: file, line: line)
+            XCTAssertFalse(price.found, file: file, line: line)
+            let cents = try reader.valueLegacyCents(amount: Int64.max, base: "USD", quote: "USD")
+            XCTAssertEqual(cents.revision, manifest.revision, file: file, line: line)
+            XCTAssertEqual(cents.amount, Int64.max, file: file, line: line)
             let summary = try reader.accountSummary(account: "Assets:Test", currency: "USD")
             XCTAssertEqual(summary.revision, manifest.revision, file: file, line: line)
             XCTAssertEqual(summary.currentBalance, "12345678901234567890.00001", file: file, line: line)
@@ -557,7 +585,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
 /// Scalar fake: no Beancount, Go, SQLite or native runtime needed. Cancellation
 /// deliberately does not affect results, exercising the Swift lifecycle gate.
 private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Sendable {
-    enum Behavior: Sendable, Equatable { case success, oldSchema, buildFailure, openFailure, wrongSource, wrongStream, wrongCount, wrongEntrypoint, sidecar, oversized, wrongPageRevision, wrongDetailContinuationRevision }
+    enum Behavior: Sendable, Equatable { case success, oldSchema, schemaTwo, buildFailure, openFailure, wrongSource, wrongStream, wrongCount, wrongEntrypoint, sidecar, oversized, wrongPageRevision, wrongDetailContinuationRevision }
     let behavior: Behavior
     private let root: URL
     private let gate = NSLock()
@@ -570,7 +598,7 @@ private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Send
     }
 
     static func manifest(behavior: Behavior, identity: String = String(repeating: "a", count: 64)) throws -> BoundedIndexManifest {
-        BoundedIndexManifest(schemaVersion: behavior == .oldSchema ? 1 : 2, streamVersion: 1,
+        BoundedIndexManifest(schemaVersion: behavior == .oldSchema ? 1 : behavior == .schemaTwo ? 2 : 3, streamVersion: 1,
             sourceDigest: behavior == .wrongSource ? String(repeating: "c", count: 64) : identity,
             runtime: behavior == .oversized ? String(repeating: "x", count: BoundedIndexWire.manifestLimit + 1) : "fixture",
             exporter: "bounded-v1", entrypoint: behavior == .wrongEntrypoint ? "other.bean" : "main.bean",
@@ -646,6 +674,20 @@ private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Send
             ]
             do { return String(decoding: try JSONSerialization.data(withJSONObject: response), as: UTF8.self) }
             catch { return errorJSON(error) }
+        }
+    }
+    func priceLookup(_ requestJSON: String) -> String {
+        gate.withLock {
+            guard let manifest = opened else { return errorJSON(BoundedReadIndexError.unavailable) }
+            let revision = behavior == .wrongPageRevision ? "wrong" : manifest.revision
+            return #"{"revision":"\#(revision)","tie_policy":"source_sequence_last","found":false}"#
+        }
+    }
+    func valueLegacyCents(_ requestJSON: String) -> String {
+        gate.withLock {
+            guard let manifest = opened else { return errorJSON(BoundedReadIndexError.unavailable) }
+            let revision = behavior == .wrongPageRevision ? "wrong" : manifest.revision
+            return #"{"revision":"\#(revision)","basis":"legacy_cents","tie_policy":"source_sequence_last","amount":9223372036854775807,"found":true}"#
         }
     }
     func accounts(_ requestJSON: String) -> String {

@@ -391,3 +391,50 @@ func (b *Bridge) AccountActivity(requestJSON string) string {
 		return encode(result, readindex.MaxResponseBytes)
 	})
 }
+
+// PriceLookup returns one exact quote; no price catalog crosses the bridge.
+func (b *Bridge) PriceLookup(requestJSON string) string {
+	return b.run(func(ctx context.Context) (string, error) {
+		var req readindex.PriceLookupRequest
+		if err := decodeObject(requestJSON, maxRequestBytes, &req); err != nil {
+			return "", err
+		}
+		if b.reader == nil {
+			return "", readindex.ErrUnavailable
+		}
+		result, err := b.reader.PriceLookup(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		return encode(result, readindex.MaxResponseBytes)
+	})
+}
+
+// ValueLegacyCents performs bounded valuation natively, with int64 cents input
+// and output. Missing is found:false; overflow/search limits are resource_limit.
+func (b *Bridge) ValueLegacyCents(requestJSON string) string {
+	return b.run(func(ctx context.Context) (string, error) {
+		// Pointer distinguishes an omitted amount from an explicitly supplied zero.
+		var wire struct {
+			Basis  string `json:"basis"`
+			Amount *int64 `json:"amount"`
+			Base   string `json:"base"`
+			Quote  string `json:"quote"`
+			Date   string `json:"date,omitempty"`
+		}
+		if err := decodeObject(requestJSON, maxRequestBytes, &wire); err != nil {
+			return "", err
+		}
+		if wire.Amount == nil {
+			return "", readindex.ErrInvalidRequest
+		}
+		if b.reader == nil {
+			return "", readindex.ErrUnavailable
+		}
+		result, err := b.reader.ValueLegacyCents(ctx, readindex.LegacyCentsRequest{Basis: wire.Basis, Amount: *wire.Amount, Base: wire.Base, Quote: wire.Quote, Date: wire.Date})
+		if err != nil {
+			return "", err
+		}
+		return encode(result, readindex.MaxResponseBytes)
+	})
+}

@@ -17,7 +17,7 @@ import (
 	"github.com/borui/beancount-ledger-web/server/internal/readindex/sqlite"
 )
 
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 var (
 	ErrUnavailable      = errors.New("read index unavailable")
@@ -118,8 +118,8 @@ var schema = []struct{ name, kind, table, sql string }{
 	{"account_events", "table", "account_events", "CREATE TABLE account_events (seq INTEGER PRIMARY KEY, entry_id INTEGER NOT NULL, kind TEXT NOT NULL, account TEXT NOT NULL, date TEXT NOT NULL) STRICT"},
 	{"account_events_catalog", "index", "account_events", "CREATE INDEX account_events_catalog ON account_events(kind, account, entry_id)"},
 	{"account_events_latest", "index", "account_events", "CREATE INDEX account_events_latest ON account_events(account, kind, date DESC, entry_id DESC)"},
-	{"prices", "table", "prices", "CREATE TABLE prices (seq INTEGER PRIMARY KEY, entry_id INTEGER NOT NULL, date TEXT NOT NULL, currency TEXT NOT NULL, quantity TEXT NOT NULL, quote_currency TEXT NOT NULL) STRICT"},
-	{"prices_currency_date", "index", "prices", "CREATE INDEX prices_currency_date ON prices(currency, quote_currency, date, seq)"},
+	{"prices", "table", "prices", "CREATE TABLE prices (seq INTEGER PRIMARY KEY, entry_id INTEGER NOT NULL, date TEXT NOT NULL, currency TEXT NOT NULL, quantity TEXT NOT NULL, quote_currency TEXT NOT NULL, pair_key TEXT NOT NULL) STRICT"},
+	{"prices_pair_date", "index", "prices", "CREATE INDEX prices_pair_date ON prices(pair_key, date DESC, seq DESC)"},
 	{"manifest", "table", "manifest", "CREATE TABLE manifest (singleton INTEGER PRIMARY KEY CHECK(singleton=1), raw TEXT NOT NULL) STRICT"},
 }
 

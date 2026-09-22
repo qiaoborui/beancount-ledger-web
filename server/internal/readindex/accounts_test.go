@@ -491,7 +491,7 @@ func TestSchemaOneAndWrongRecordProjectionRejected(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	e = db.Exec("INSERT INTO prices SELECT 1,entry_id,date,currency,quantity,quote_currency FROM prices")
+	e = db.Exec("INSERT INTO prices SELECT 1,entry_id,date,currency,quantity,quote_currency,pair_key FROM prices")
 	db.Close()
 	if e != nil {
 		t.Fatal(e)
