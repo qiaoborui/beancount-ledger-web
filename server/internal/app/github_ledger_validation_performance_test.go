@@ -8,56 +8,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
 
 const validationPerformanceIncludeCount = 120
-
-type validationDownloadMetrics struct {
-	mu        sync.Mutex
-	requests  int
-	active    int
-	maxActive int
-}
-
-func (metrics *validationDownloadMetrics) wrap(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/repos/owner/ledger/contents/") {
-			next.ServeHTTP(w, r)
-			return
-		}
-		metrics.mu.Lock()
-		metrics.requests++
-		metrics.active++
-		if metrics.active > metrics.maxActive {
-			metrics.maxActive = metrics.active
-		}
-		metrics.mu.Unlock()
-		defer func() {
-			metrics.mu.Lock()
-			metrics.active--
-			metrics.mu.Unlock()
-		}()
-		// Model latency on content downloads only. Keep the delay outside the
-		// fake's state mutex so the measurement observes actual HTTP overlap.
-		time.Sleep(20 * time.Millisecond)
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (metrics *validationDownloadMetrics) take(t testing.TB) (requests, maxActive int) {
-	t.Helper()
-	metrics.mu.Lock()
-	defer metrics.mu.Unlock()
-	if metrics.active != 0 {
-		t.Fatalf("write returned with %d content downloads still active", metrics.active)
-	}
-	requests, maxActive = metrics.requests, metrics.maxActive
-	metrics.requests, metrics.maxActive = 0, 0
-	return
-}
 
 func validationPerformanceLedger() map[string]string {
 	files := make(map[string]string, validationPerformanceIncludeCount+1)
@@ -83,10 +38,18 @@ func TestGitHubWriteValidationLargeLedgerPerformance(t *testing.T) {
 	t.Setenv("BEAN_CHECK_BIN", binary)
 	files := validationPerformanceLedger()
 	metrics := &validationDownloadMetrics{}
+	metrics.installDefaultTransport(t)
 	fake := &fakeGitHubLedgerAPI{
 		t: t, files: files, blobs: map[string]string{}, treeBlobs: map[string]string{}, contentReads: map[string]int{},
 	}
-	fake.server = httptest.NewServer(metrics.wrap(http.HandlerFunc(fake.handle)))
+	fake.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Model content latency outside the fake's state mutex. Handler cleanup
+		// can outlive a client download, so measure at the transport instead.
+		if isValidationContentDownload(r) {
+			time.Sleep(20 * time.Millisecond)
+		}
+		fake.handle(w, r)
+	}))
 	t.Cleanup(fake.server.Close)
 	cfg := githubAPITestConfig(t, fake)
 	writer := NewLedgerWriter(cfg, nil)
@@ -102,7 +65,7 @@ func TestGitHubWriteValidationLargeLedgerPerformance(t *testing.T) {
 			t.Fatalf("write %d failed: %v", write+1, err)
 		}
 		requests, maxActive := metrics.take(t)
-		t.Logf("write=%d includes=%d transactions=12000 elapsed=%s content_GETs=%d max_content_concurrency=%d", write+1, validationPerformanceIncludeCount, elapsed.Round(time.Millisecond), requests, maxActive)
+		t.Logf("write=%d includes=%d transactions=12000 elapsed=%s content_GETs=%d max_client_content_concurrency=%d", write+1, validationPerformanceIncludeCount, elapsed.Round(time.Millisecond), requests, maxActive)
 		if write == 0 {
 			if elapsed > 5*time.Second {
 				t.Errorf("cold validated write took %s, budget is 5s", elapsed)
