@@ -15,7 +15,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         var pointer: URL { root.appendingPathComponent("derived/bounded/current.json") }
     }
 
-    private func fixture(fileManager: PublicationFailureFileManager = PublicationFailureFileManager(), aliased: Bool = false) async throws -> Fixture {
+    private func fixture(faults: PublicationFileFaults = PublicationFileFaults(), aliased: Bool = false) async throws -> Fixture {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("BoundedPublication-" + UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         var workspaceRoot = root
@@ -27,7 +27,8 @@ final class BoundedLedgerPublicationTests: XCTestCase {
             // Alias an ancestor, not the workspace itself: child symlinks stay forbidden.
             workspaceRoot = alias.appendingPathComponent("workspace")
         }
-        let workspace = LocalLedgerWorkspace(rootDirectory: workspaceRoot, fileManager: fileManager)
+        let workspace = LocalLedgerWorkspace(rootDirectory: workspaceRoot,
+                                             fileManager: PublicationFailureFileManager(faults: faults))
         let revision = try await workspace.commit(changes: [.write(Data("; synthetic A\n".utf8), to: "main.bean")], validator: { _ in })
         return Fixture(workspace: workspace, revision: revision, root: workspaceRoot)
     }
@@ -56,29 +57,39 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         catch { XCTAssertEqual(error as? BoundedReadIndexError, expected, file: file, line: line) }
     }
 
-    func testSchemaOneFailsUntilExplicitRebuild() async throws {
-        let f = try await fixture()
-        let p = publication(f)
-        p.unlock()
-        let manifest = try await p.rebuild(expectedRevisionID: f.revision.id)
-        let current = try Data(contentsOf: f.pointer)
-        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: current) as? [String: Any])
-        var index = try XCTUnwrap(object["index"] as? [String: Any])
-        index["schema_version"] = 1
-        object["index"] = index
-        let old = try JSONSerialization.data(withJSONObject: object)
-        try old.write(to: f.pointer)
-        await expectError(.corrupt) { _ = try await p.withReadLease { _, _ in true } }
-        XCTAssertEqual(try Data(contentsOf: f.pointer), old)
-        let rebuilt = try await p.rebuild(expectedRevisionID: f.revision.id)
-        XCTAssertEqual(rebuilt.index.schemaVersion, 2)
-        XCTAssertNotEqual(rebuilt.generationID, manifest.generationID)
-        try await p.withReadLease { _, reader in _ = try reader.accounts() }
-        let outdatedBuilder = publication(f, behavior: .oldSchema)
-        outdatedBuilder.unlock()
-        let rebuiltBytes = try Data(contentsOf: f.pointer)
-        await expectError(.corrupt) { _ = try await outdatedBuilder.rebuild(expectedRevisionID: f.revision.id) }
-        XCTAssertEqual(try Data(contentsOf: f.pointer), rebuiltBytes)
+    func testSchemasOneAndTwoFailUntilExplicitRebuild() async throws {
+        for schema in [1, 2] {
+            let f = try await fixture()
+            let p = publication(f)
+            p.unlock()
+            let manifest = try await p.rebuild(expectedRevisionID: f.revision.id)
+            let current = try Data(contentsOf: f.pointer)
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: current) as? [String: Any])
+            var index = try XCTUnwrap(object["index"] as? [String: Any])
+            index["schema_version"] = schema
+            object["index"] = index
+            let old = try JSONSerialization.data(withJSONObject: object)
+            try old.write(to: f.pointer)
+            await expectError(.corrupt) { _ = try await p.withReadLease { _, _ in true } }
+            XCTAssertEqual(try Data(contentsOf: f.pointer), old)
+            for behavior: PublicationBackend.Behavior in [.buildFailure, .openFailure, .oldSchema, .schemaTwo] {
+                let failing = publication(f, behavior: behavior)
+                failing.unlock()
+                await expectError(behavior == .buildFailure ? .unavailable : .corrupt) {
+                    _ = try await failing.rebuild(expectedRevisionID: f.revision.id)
+                }
+                XCTAssertEqual(try Data(contentsOf: f.pointer), old)
+            }
+            let rebuilt = try await p.rebuild(expectedRevisionID: f.revision.id)
+            XCTAssertEqual(rebuilt.index.schemaVersion, 3)
+            XCTAssertNotEqual(rebuilt.generationID, manifest.generationID)
+            try await p.withReadLease { _, reader in _ = try reader.accounts() }
+            let outdatedBuilder = publication(f, behavior: schema == 1 ? .oldSchema : .schemaTwo)
+            outdatedBuilder.unlock()
+            let rebuiltBytes = try Data(contentsOf: f.pointer)
+            await expectError(.corrupt) { _ = try await outdatedBuilder.rebuild(expectedRevisionID: f.revision.id) }
+            XCTAssertEqual(try Data(contentsOf: f.pointer), rebuiltBytes)
+        }
     }
 
     func testLockedByDefaultAndMissingManifestNeverFallsBack() async throws {
@@ -277,7 +288,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
     }
 
     func testLateProtectionFailuresRetainLastMatchedGeneration() async throws {
-        for failure in [PublicationFailureFileManager.Failure.databaseProtection, .pointerProtection] {
+        for failure in [PublicationFileFaults.Failure.databaseProtection, .pointerProtection] {
             try await checkFilesystemFailure(failure)
         }
     }
@@ -288,9 +299,9 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         try await checkFilesystemFailure(.pointerRename)
     }
 
-    private func checkFilesystemFailure(_ failure: PublicationFailureFileManager.Failure) async throws {
-        let files = PublicationFailureFileManager()
-        let f = try await fixture(fileManager: files)
+    private func checkFilesystemFailure(_ failure: PublicationFileFaults.Failure) async throws {
+        let files = PublicationFileFaults()
+        let f = try await fixture(faults: files)
         let p = publication(f)
         p.unlock()
         let first = try await p.rebuild(expectedRevisionID: f.revision.id)
@@ -449,6 +460,12 @@ final class BoundedLedgerPublicationTests: XCTestCase {
         await expectError(.revisionMismatch) {
             _ = try await wrong.withReadLease { _, reader in try reader.accountActivity(account: "Assets:Test", currency: "USD") }
         }
+        await expectError(.revisionMismatch) {
+            _ = try await wrong.withReadLease { _, reader in try reader.priceLookup(base: "EUR", quote: "USD") }
+        }
+        await expectError(.revisionMismatch) {
+            _ = try await wrong.withReadLease { _, reader in try reader.valueLegacyCents(amount: 1, base: "EUR", quote: "USD") }
+        }
         let wrongContinuation = publication(f, behavior: .wrongDetailContinuationRevision)
         wrongContinuation.unlock()
         await expectError(.revisionMismatch) {
@@ -458,6 +475,12 @@ final class BoundedLedgerPublicationTests: XCTestCase {
             }
         }
         let escaped = try await p.withReadLease { _, reader in reader }
+        XCTAssertThrowsError(try escaped.priceLookup(base: "EUR", quote: "USD")) {
+            XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
+        }
+        XCTAssertThrowsError(try escaped.valueLegacyCents(amount: 1, base: "EUR", quote: "USD")) {
+            XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
+        }
         XCTAssertThrowsError(try escaped.accounts()) {
             XCTAssertEqual($0 as? BoundedReadIndexError, .unavailable)
         }
@@ -506,6 +529,12 @@ final class BoundedLedgerPublicationTests: XCTestCase {
             let native = try reader.accountBalances(account: "Assets:Test")
             XCTAssertEqual(native.revision, manifest.revision, file: file, line: line)
             XCTAssertEqual(native.balances.first?.quantity, "12345678901234567890.00001", file: file, line: line)
+            let price = try reader.priceLookup(base: "EUR", quote: "USD")
+            XCTAssertEqual(price.revision, manifest.revision, file: file, line: line)
+            XCTAssertFalse(price.found, file: file, line: line)
+            let cents = try reader.valueLegacyCents(amount: Int64.max, base: "USD", quote: "USD")
+            XCTAssertEqual(cents.revision, manifest.revision, file: file, line: line)
+            XCTAssertEqual(cents.amount, Int64.max, file: file, line: line)
             let summary = try reader.accountSummary(account: "Assets:Test", currency: "USD")
             XCTAssertEqual(summary.revision, manifest.revision, file: file, line: line)
             XCTAssertEqual(summary.currentBalance, "12345678901234567890.00001", file: file, line: line)
@@ -557,7 +586,7 @@ final class BoundedLedgerPublicationTests: XCTestCase {
 /// Scalar fake: no Beancount, Go, SQLite or native runtime needed. Cancellation
 /// deliberately does not affect results, exercising the Swift lifecycle gate.
 private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Sendable {
-    enum Behavior: Sendable, Equatable { case success, oldSchema, buildFailure, openFailure, wrongSource, wrongStream, wrongCount, wrongEntrypoint, sidecar, oversized, wrongPageRevision, wrongDetailContinuationRevision }
+    enum Behavior: Sendable, Equatable { case success, oldSchema, schemaTwo, buildFailure, openFailure, wrongSource, wrongStream, wrongCount, wrongEntrypoint, sidecar, oversized, wrongPageRevision, wrongDetailContinuationRevision }
     let behavior: Behavior
     private let root: URL
     private let gate = NSLock()
@@ -570,7 +599,7 @@ private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Send
     }
 
     static func manifest(behavior: Behavior, identity: String = String(repeating: "a", count: 64)) throws -> BoundedIndexManifest {
-        BoundedIndexManifest(schemaVersion: behavior == .oldSchema ? 1 : 2, streamVersion: 1,
+        BoundedIndexManifest(schemaVersion: behavior == .oldSchema ? 1 : behavior == .schemaTwo ? 2 : 3, streamVersion: 1,
             sourceDigest: behavior == .wrongSource ? String(repeating: "c", count: 64) : identity,
             runtime: behavior == .oversized ? String(repeating: "x", count: BoundedIndexWire.manifestLimit + 1) : "fixture",
             exporter: "bounded-v1", entrypoint: behavior == .wrongEntrypoint ? "other.bean" : "main.bean",
@@ -648,6 +677,20 @@ private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Send
             catch { return errorJSON(error) }
         }
     }
+    func priceLookup(_ requestJSON: String) -> String {
+        gate.withLock {
+            guard let manifest = opened else { return errorJSON(BoundedReadIndexError.unavailable) }
+            let revision = behavior == .wrongPageRevision ? "wrong" : manifest.revision
+            return #"{"revision":"\#(revision)","tie_policy":"source_sequence_last","found":false}"#
+        }
+    }
+    func valueLegacyCents(_ requestJSON: String) -> String {
+        gate.withLock {
+            guard let manifest = opened else { return errorJSON(BoundedReadIndexError.unavailable) }
+            let revision = behavior == .wrongPageRevision ? "wrong" : manifest.revision
+            return #"{"revision":"\#(revision)","basis":"legacy_cents","tie_policy":"source_sequence_last","amount":9223372036854775807,"found":true}"#
+        }
+    }
     func accounts(_ requestJSON: String) -> String {
         gate.withLock {
             guard let manifest = opened else { return errorJSON(BoundedReadIndexError.unavailable) }
@@ -714,7 +757,7 @@ private final class PublicationBackend: BoundedReadIndexBackend, @unchecked Send
 
 /// Inject faults only after a successful A publication and a source B commit.
 /// No production fault hooks or changes to the workspace implementation needed.
-private final class PublicationFailureFileManager: FileManager, @unchecked Sendable {
+private final class PublicationFileFaults: @unchecked Sendable {
     enum Failure: Sendable { case databaseProtection, pointerProtection, pointerRename }
     private let gate = NSLock()
     private var failure: Failure?
@@ -724,7 +767,7 @@ private final class PublicationFailureFileManager: FileManager, @unchecked Senda
 
     func arm(_ failure: Failure) { gate.withLock { self.failure = failure; injected = false } }
 
-    override func setAttributes(_ attributes: [FileAttributeKey: Any], ofItemAtPath path: String) throws {
+    func setAttributes(_ attributes: [FileAttributeKey: Any], ofItemAtPath path: String) throws {
         try gate.withLock {
             let url = URL(fileURLWithPath: path)
             let isPointer = url.lastPathComponent.hasPrefix(".current-") &&
@@ -739,16 +782,16 @@ private final class PublicationFailureFileManager: FileManager, @unchecked Senda
                 injected = true
                 throw CocoaError(.fileWriteNoPermission)
             case .pointerRename where isPointer:
-                try super.setAttributes(attributes, ofItemAtPath: path)
+                try FileManager.default.setAttributes(attributes, ofItemAtPath: path)
                 // Pending bytes and protection succeed; only the final rename
                 // is denied. Keep the existing pointer untouched and readable.
                 let parent = url.deletingLastPathComponent().path
-                try super.setAttributes([.posixPermissions: 0o500], ofItemAtPath: parent)
+                try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: parent)
                 restrictedParent = parent
                 failure = nil
                 injected = true
             default:
-                try super.setAttributes(attributes, ofItemAtPath: path)
+                try FileManager.default.setAttributes(attributes, ofItemAtPath: path)
             }
         }
     }
@@ -757,17 +800,32 @@ private final class PublicationFailureFileManager: FileManager, @unchecked Senda
         gate.withLock {
             guard let parent = restrictedParent else { return }
             do {
-                try super.setAttributes([.posixPermissions: 0o700], ofItemAtPath: parent)
+                try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: parent)
                 restrictedParent = nil
             } catch { XCTFail("could not restore fixture directory permissions") }
         }
+    }
+}
+
+// The workspace exclusively owns this manager; only locked fault state is shared
+// with the test, including on SDKs where FileManager is non-Sendable.
+private final class PublicationFailureFileManager: FileManager, @unchecked Sendable {
+    private let faults: PublicationFileFaults
+
+    init(faults: PublicationFileFaults) {
+        self.faults = faults
+        super.init()
+    }
+
+    override func setAttributes(_ attributes: [FileAttributeKey: Any], ofItemAtPath path: String) throws {
+        try faults.setAttributes(attributes, ofItemAtPath: path)
     }
 
     override func removeItem(at url: URL) throws {
         // writeAtomicPointer's deferred pending-file cleanup runs only after
         // the failed rename. Restore permissions then, allowing normal cleanup
         // of both the pending pointer and the rejected generation.
-        restorePermissions()
+        faults.restorePermissions()
         try super.removeItem(at: url)
     }
 }

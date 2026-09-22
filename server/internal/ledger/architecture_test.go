@@ -12,6 +12,9 @@ import (
 
 func TestLedgerPackagesUseOnlyApprovedDependencies(t *testing.T) {
 	allowed := map[string]bool{
+		// Bounded scalar valuation providers support cancellation and typed failures.
+		"context":  true,
+		"errors":   true,
 		"math":     true,
 		"math/big": true,
 		"strconv":  true,

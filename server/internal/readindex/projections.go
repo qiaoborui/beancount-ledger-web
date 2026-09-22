@@ -14,7 +14,7 @@ import (
 var projectionTables = []struct{ name, columns string }{
 	{"postings", "seq, entry_id, ordinal, account, date, quantity, currency, cost_number, cost_currency, cost_date, cost_label, price_number, price_currency, flag"},
 	{"account_events", "seq, entry_id, kind, account, date"},
-	{"prices", "seq, entry_id, date, currency, quantity, quote_currency"},
+	{"prices", "seq, entry_id, date, currency, quantity, quote_currency, pair_key"},
 }
 
 type projectionState struct{ date string }
@@ -72,7 +72,7 @@ func (s *projectionState) project(raw []byte, key envelope, seq int64) (projecti
 	case "open", "close":
 		return projection{1, []any{seq, key.ID, key.Value.Kind, v.Account, s.date}}, nil
 	case "price":
-		return projection{2, []any{seq, key.ID, s.date, v.Currency, v.AmountValue.Number, v.AmountValue.Currency}}, nil
+		return projection{2, []any{seq, key.ID, s.date, v.Currency, v.AmountValue.Number, v.AmountValue.Currency, ledger.PricePairKey(v.Currency, v.AmountValue.Currency)}}, nil
 	}
 	return p, nil
 }

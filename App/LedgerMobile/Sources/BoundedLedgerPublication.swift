@@ -51,7 +51,7 @@ struct BoundedLedgerManifest: Codable, Equatable, Sendable {
             }
             bytes += value.utf8.count
         }
-        guard version == 1, index.schemaVersion == 2, index.streamVersion == 1,
+        guard version == 1, index.schemaVersion == 3, index.streamVersion == 1,
               digest(sourceIdentity), digest(index.sourceDigest), digest(index.streamDigest),
               !index.revision.isEmpty, !index.runtime.isEmpty, !index.exporter.isEmpty,
               index.records >= 0, index.directives >= 0, index.postings >= 0,
@@ -92,6 +92,20 @@ struct BoundedLedgerReader: Sendable {
         self.client = client
         self.revision = revision
         self.check = check
+    }
+    func priceLookup(base: String, quote: String, date: String? = nil) throws -> BoundedIndexPriceLookupResult {
+        try check()
+        let result = try client.priceLookup(base: base, quote: quote, date: date)
+        try check()
+        guard BoundedAccountsValidation.bytes(result.revision, revision) else { throw BoundedReadIndexError.revisionMismatch }
+        return result
+    }
+    func valueLegacyCents(amount: Int64, base: String, quote: String, date: String? = nil) throws -> BoundedIndexLegacyCentsResult {
+        try check()
+        let result = try client.valueLegacyCents(amount: amount, base: base, quote: quote, date: date)
+        try check()
+        guard BoundedAccountsValidation.bytes(result.revision, revision) else { throw BoundedReadIndexError.revisionMismatch }
+        return result
     }
     func transactions(limit: Int = 100, cursor: String? = nil) throws -> BoundedIndexPage {
         try check()

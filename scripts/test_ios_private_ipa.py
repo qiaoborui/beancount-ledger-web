@@ -1,4 +1,5 @@
 """Host-independent guards for private-only IPA packaging (stdlib only)."""
+import json
 import os
 from pathlib import Path
 import re
@@ -12,6 +13,55 @@ SCRIPT = ROOT / "scripts/build-ios-ipa.sh"
 
 
 class PrivateIPATests(unittest.TestCase):
+    def test_configuration_defaults_to_release_and_accepts_explicit_modes(self):
+        preamble = SCRIPT.read_text().split("umask 077", 1)[0]
+        for arguments, expected in [([], "Release"), (["--configuration", "Release"], "Release"),
+                                    (["--configuration", "BoundedRelease"], "BoundedRelease")]:
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(["bash", "-c", preamble + '\nprintf "%s" "$configuration"',
+                                         str(SCRIPT), "--private-local", "unused", *arguments],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
+
+    def test_invalid_configuration_fails_before_creating_output(self):
+        for arguments in (["--configuration", "Debug"], ["--configuration", "BoundedDebug"],
+                          ["--configuration", "Release;false"], ["--configuration"],
+                          ["--other", "BoundedRelease"]):
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory() as temp:
+                output = Path(temp) / "output"
+                result = subprocess.run(["bash", str(SCRIPT), "--private-local", str(output), *arguments],
+                                        capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(output.exists())
+
+    def test_configuration_guard_requires_matching_app_and_extension_flags(self):
+        script = SCRIPT.read_text()
+        block = script.split('python3 - "$build_dir/settings.json" "$configuration"', 1)[1]
+        program = block.split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
+        names = ("LedgerMobile", "LedgerWidgets", "LedgerShare")
+        for configuration in ("Release", "BoundedRelease"):
+            for mismatch in (None, *names, "missing"):
+                with self.subTest(configuration=configuration, mismatch=mismatch), tempfile.TemporaryDirectory() as temp:
+                    settings = []
+                    for name in names:
+                        enabled = (configuration == "BoundedRelease") != (name == mismatch)
+                        settings.append({"target": name, "buildSettings": {
+                            "CONFIGURATION": configuration,
+                            "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "PERSONAL_TEAM_BUILD" +
+                                (" LEDGER_BOUNDED_READ_INDEX" if enabled else ""),
+                        }})
+                    if mismatch == "missing":
+                        settings.pop()
+                    path = Path(temp) / "settings.json"
+                    path.write_text(json.dumps(settings))
+                    result = subprocess.run([os.sys.executable, "-c", program, str(path), configuration],
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode == 0, mismatch is None, result.stderr)
+        self.assertIn('-configuration "$configuration"', script)
+        self.assertIn('echo "Configuration: $configuration"', script)
+        self.assertIn('ipa_name="com.qiaoborui.ledger.mobile.ipa"', script)
+
     def test_packaging_requires_explicit_private_mode(self):
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "output"

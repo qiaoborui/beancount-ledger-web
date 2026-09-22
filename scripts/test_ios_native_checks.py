@@ -96,9 +96,21 @@ class NativeWorkflowTests(unittest.TestCase):
         self.assertNotIn("continue-on-error", self.workflow)
         self.assertNotIn("|| true", self.workflow)
 
+    def test_apple_sqlite_runtime_gate_precedes_native_build(self):
+        gate = self.workflow.index("- name: Test read index against Apple system SQLite")
+        builder = self.workflow.index("run: bash scripts/build-ledgercore-xcframework.sh")
+        self.assertLess(gate, builder)
+        step = self.workflow[gate:builder].split("\n      # Build", 1)[0]
+        self.assertIn("working-directory: server", step)
+        self.assertIn('export TMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"', step)
+        self.assertIn(
+            "go test -race -p 2 -timeout 120s ./internal/ledger ./internal/readindex/... ./mobilereadindex",
+            step,
+        )
+
     def test_embedded_shell_and_python_syntax(self):
         blocks = run_blocks(self.workflow)
-        self.assertEqual(len(blocks), 4)
+        self.assertEqual(len(blocks), 6)
         for block in blocks:
             shell = "\n".join(line[10:] for line in block.splitlines()) + "\n"
             result = subprocess.run(["bash", "-n"], input=shell, text=True, capture_output=True)
@@ -106,6 +118,19 @@ class NativeWorkflowTests(unittest.TestCase):
             if "python3 - <<'PY'\n" in shell:
                 python = shell.split("python3 - <<'PY'\n", 1)[1].split("\nPY", 1)[0]
                 compile(python, str(WORKFLOW), "exec")
+
+    def test_bounded_runtime_executes_in_app_container(self):
+        step = self.workflow.split("- name: Exercise bounded publication inside the simulator app container", 1)[1]
+        for required in ("if: matrix.configuration == 'BoundedDebug'", "xcodebuild test",
+                         "-only-testing:LedgerMobileTests/BoundedNativeIntegrationTests",
+                         "-parallel-testing-enabled NO", "CODE_SIGNING_ALLOWED=NO"):
+            self.assertIn(required, step)
+        tests = (ROOT / "App/LedgerMobile/Tests/BoundedNativeIntegrationTests.swift").read_text()
+        self.assertIn(".applicationSupportDirectory", tests)
+        self.assertIn("BoundedLedgerPublication(workspace: workspace)", tests)
+        self.assertIn("transactionCount: 10_000", tests)
+        self.assertNotIn("makeClient:", tests)
+        self.assertNotIn("exporter:", tests)
 
 
 if __name__ == "__main__":

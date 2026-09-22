@@ -31,9 +31,18 @@ func owned(info os.FileInfo, mode os.FileMode) bool {
 	return ok && st.Uid == uint32(os.Geteuid()) && info.Mode().Perm() == mode && info.Mode()&(os.ModeSymlink|os.ModeSetuid|os.ModeSetgid|os.ModeSticky) == 0
 }
 
-// Above the private root we require non-symlink, non-writable trusted ancestors
-// (root-owned sticky system temporary directories are safe for owned children).
+// iOS supplies an OS-managed application container boundary. Other paths retain
+// the host policy through the filesystem root, including root-owned sticky tmp.
 func ancestors(path string) bool {
+	return ancestorsWithin(path, applicationContainer())
+}
+
+func ancestorsWithin(path, container string) bool {
+	stop := string(filepath.Separator)
+	if container != stop && filepath.IsAbs(container) && filepath.Clean(container) == container &&
+		strings.HasPrefix(path, container+string(filepath.Separator)) {
+		stop = container
+	}
 	for p := filepath.Dir(path); ; p = filepath.Dir(p) {
 		info, err := os.Lstat(p)
 		if err != nil || !info.IsDir() {
@@ -46,7 +55,7 @@ func ancestors(path string) bool {
 		if info.Mode().Perm()&0022 != 0 && !(st.Uid == 0 && info.Mode()&os.ModeSticky != 0) {
 			return false
 		}
-		if p == filepath.Dir(p) {
+		if p == stop || p == filepath.Dir(p) {
 			return true
 		}
 	}

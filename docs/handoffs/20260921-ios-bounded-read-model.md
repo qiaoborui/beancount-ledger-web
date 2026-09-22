@@ -132,3 +132,8 @@
 - Deterministically reproduced a fixture lifetime mismatch: six client requests can finish while seven server handlers overlap during cleanup. Test now counts client RoundTrip through underlying Body.Close; production six-worker limit unchanged. Retains every original timing/request/cache/concurrency/commit assertion. Added EOF/close/error/once/filter and deterministic handler7/client6 regressions.
 - Go1.25.10 repeated targeted/race/full backend/build checks PASS; independent review repeated focused race with real bean-check PASS, no blockers. Negative control changing production cap to7 via temporary overlay correctly fails original bound; actual production file unchanged. Hosted CI pending publication.
 - Next publish/check repair PR, then continue valuation/reports/BQL and remaining parity. Physical-device and protected-spill gates remain unfulfilled; do not treat CI repair as full plan completion.
+
+## Latest valuation checkpoint
+
+- Updated 2026-09-22T13:17:34.364329+08:00; broader task remains active. Current branch `codex/ios-readindex-valuation`, based on `7629d60` / PR #415. Go schema-3 valuation and Swift transport implementation were committed/pushed as `078442b` in draft PR [#416](https://github.com/qiaoborui/beancount-ledger-web/pull/416), currently mergeable; Apple SDK/full publication/native validation remains pending.
+- Current resumable scope, validation limits and next steps: [20260922-ios-readindex-valuation](20260922-ios-readindex-valuation.md). Earlier milestone statuses above are historical.

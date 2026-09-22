@@ -179,16 +179,16 @@ final class BoundedAccountsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testPublicationManifestSchemaTwoOnly() throws {
+    func testPublicationManifestSchemaThreeOnly() throws {
         let digest = String(repeating: "a", count: 64)
-        for schema in [1, 2, 3] {
+        for schema in [1, 2, 3, 4] {
             let index = BoundedIndexManifest(schemaVersion: schema, streamVersion: 1,
                 sourceDigest: digest, runtime: "fixture", exporter: "bounded-v1", entrypoint: "main.bean",
                 streamDigest: digest, records: 1, directives: 1, postings: 0, options: 0,
                 commodities: 0, metadata: 0, transactions: 0, bytes: 100, maxRecordBytes: 100, revision: digest)
             let manifest = BoundedLedgerManifest(version: 1, generationID: UUID(), sourceRevisionID: UUID(), sourceIdentity: digest, index: index)
             let encoded = try JSONEncoder().encode(manifest)
-            if schema == 2 {
+            if schema == 3 {
                 XCTAssertEqual(try BoundedLedgerManifest.decode(encoded), manifest)
                 XCTAssertNoThrow(try manifest.encoded())
             } else {

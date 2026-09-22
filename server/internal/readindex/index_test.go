@@ -101,7 +101,7 @@ func TestExactRecordsManifestAndReopen(t *testing.T) {
 	}
 	input := makeStream(records...)
 	path, m := buildText(t, input)
-	if m.SchemaVersion != 2 || m.StreamVersion != 1 || m.SourceDigest != strings.Repeat("a", 64) || m.Runtime != "beancount/3.2.3 python/3.13.2" || m.Exporter != "bounded-v1" || m.Entrypoint != "main.bean" || len(m.Revision) != 64 || m.Records != 7 || m.Directives != 1 || m.Postings != 1 || m.Metadata != 2 || m.Options != 1 || m.Commodities != 1 || m.Transactions != 1 || m.Bytes != int64(len(input)) {
+	if m.SchemaVersion != 3 || m.StreamVersion != 1 || m.SourceDigest != strings.Repeat("a", 64) || m.Runtime != "beancount/3.2.3 python/3.13.2" || m.Exporter != "bounded-v1" || m.Entrypoint != "main.bean" || len(m.Revision) != 64 || m.Records != 7 || m.Directives != 1 || m.Postings != 1 || m.Metadata != 2 || m.Options != 1 || m.Commodities != 1 || m.Transactions != 1 || m.Bytes != int64(len(input)) {
 		t.Fatalf("incorrect manifest: %+v", m)
 	}
 	before, err := os.ReadFile(path)

@@ -164,6 +164,56 @@ func TestRootPinningAndOwnership(t *testing.T) {
 	}
 }
 
+func TestApplicationContainerAncestorBoundary(t *testing.T) {
+	for _, kind := range []string{"valid", "host", "sibling", "relative", "dirty", "writable-container", "writable-child", "symlink-child", "symlink-container"} {
+		t.Run(kind, func(t *testing.T) {
+			base := t.TempDir()
+			if err := os.Chmod(base, 0775); err != nil {
+				t.Fatal(err)
+			}
+			container := filepath.Join(base, "container")
+			parent := filepath.Join(container, "Library")
+			root := filepath.Join(parent, "derived")
+			if err := os.MkdirAll(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			anchor := container
+			switch kind {
+			case "host":
+				anchor = ""
+			case "sibling":
+				anchor = container + "-other"
+			case "relative":
+				anchor = "container"
+			case "dirty":
+				anchor += "/."
+			case "writable-container", "writable-child":
+				path := container
+				if kind == "writable-child" {
+					path = parent
+				}
+				if err := os.Chmod(path, 0775); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink-child", "symlink-container":
+				path := parent
+				if kind == "symlink-container" {
+					path = container
+				}
+				if err := os.Rename(path, path+"-real"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(path+"-real", path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := ancestorsWithin(root, anchor); got != (kind == "valid") {
+				t.Fatalf("ancestor policy accepted=%v", got)
+			}
+		})
+	}
+}
+
 type foreignInfo struct {
 	os.FileInfo
 	stat *syscall.Stat_t

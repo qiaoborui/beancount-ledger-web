@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/borui/beancount-ledger-web/server/internal/ledger"
 )
 
 type Transaction struct {
@@ -968,7 +970,7 @@ func (index PriceIndex) latestPrice(currency, quoteCurrency string, date string)
 }
 
 func pricePairKey(currency, quoteCurrency string) string {
-	return normalizeValuationCurrency(currency) + "\x00" + normalizeValuationCurrency(quoteCurrency)
+	return ledger.PricePairKey(currency, quoteCurrency)
 }
 
 func splitPricePairKey(key string) (string, string) {
@@ -997,11 +999,7 @@ func ValuationInCurrencyAt(amount int, currency, targetCurrency string, prices [
 }
 
 func normalizeValuationCurrency(currency string) string {
-	currency = strings.ToUpper(strings.TrimSpace(currency))
-	if currency == "" {
-		return "CNY"
-	}
-	return currency
+	return ledger.NormalizeValuationCurrency(currency)
 }
 
 func ValidValuationCurrency(raw string, commodities []string) string {

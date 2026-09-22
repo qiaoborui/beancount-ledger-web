@@ -280,6 +280,20 @@ bash scripts/build-ios-ipa.sh --private-local /absolute/path/to/new-output-direc
 The parent directory must exist and the output directory must be new. The
 explicit private-use flag preserves the public distribution gate.
 
+The default configuration is `Release`. For the experimental bounded reader:
+
+```sh
+bash scripts/build-ios-ipa.sh --private-local /absolute/path/to/new-bounded-output \
+    --configuration BoundedRelease
+```
+
+Both modes produce `com.qiaoborui.ledger.mobile.ipa` in their separate output
+directories. `build-info.txt` records the selected configuration. Packaging
+checks the bounded compilation flag on the app, Widget, and Share targets before
+archiving. The bounded mode uses existing local workspaces and retains its
+explicit unsupported-capability limits; installing it with the same signing
+identity replaces the normal app. Keep the normal IPA for returning to that mode.
+
 The workflow uses a dedicated Apple Silicon Mac runner with labels
 `self-hosted`, `macOS`, `ARM64`, and `ledger-ios`. It selects the newest Xcode in
 `/Applications`, including beta releases, through the job's `DEVELOPER_DIR`.
