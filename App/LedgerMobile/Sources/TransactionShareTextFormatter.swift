@@ -89,7 +89,7 @@ struct TransactionShareTextFormatter {
 /// caller owns a private temporary sink and must discard ALL output if append or
 /// finish throws. Sink chunks are bounded; partial output is not a valid export.
 struct TransactionShareTextStream {
-    enum StreamError: Error, Equatable { case invalidSummary, invalidOrder, countMismatch, finished, failed }
+    enum StreamError: Error, Equatable { case invalidSummary, invalidOrder, countMismatch, arithmeticOverflow, finished, failed }
     struct Summary: Equatable, Sendable {
         let count: Int
         let firstDate: String?
@@ -122,7 +122,13 @@ struct TransactionShareTextStream {
             guard transaction.date <= (lastDate ?? summary.firstDate!),
                   transaction.date >= summary.lastDate!,
                   count != 0 || transaction.date == summary.firstDate else { throw StreamError.invalidOrder }
+            // The single receipt formats every posting, unlike presentation's
+            // early-return expense/income branch. Reject abs(Int.min) explicitly.
+            _ = try LocalTransactionScan.checkedExpense(transaction)
             if summary.count == 1 {
+                guard transaction.postings.allSatisfy({ $0.amount != Int.min }) else {
+                    throw StreamError.arithmeticOverflow
+                }
                 try emit(TransactionShareTextFormatter.format(transactions: [transaction], currency: currency,
                     accountLabels: accountLabels), write: write)
             } else {
