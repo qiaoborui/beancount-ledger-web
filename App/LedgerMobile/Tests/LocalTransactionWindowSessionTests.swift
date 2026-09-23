@@ -577,6 +577,58 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         }
     }
 
+    func testWidgetDayWindowsAndSummaryDoNotChangeMainRangeOrLegacyArrays() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(205)
+        let range = session.selectedRange
+        let ledger = session.ledger?.transactions
+        let presented = await repository.presentedRevisionID
+        let first = try await session.localWidgetDayWindow("2026-09-23")
+        XCTAssertEqual(first.transactions.count, 100)
+        XCTAssertEqual(first.transactions.first?.source.line, 1)
+        XCTAssertFalse(first.isComplete)
+        let summary = try await session.localWidgetDaySummary("2026-09-23")
+        XCTAssertEqual(summary.matchedCount, 205)
+        XCTAssertTrue(summary.visibleTransactions.isEmpty)
+        let last = try await session.localWidgetDayWindow("2026-09-23", index: 2)
+        XCTAssertEqual(last.transactions.map(\.source.line), [201, 202, 203, 204, 205])
+        XCTAssertTrue(last.isComplete)
+        XCTAssertEqual(session.selectedRange, range)
+        XCTAssertEqual(session.ledger?.transactions, ledger)
+        let authority = await repository.presentedRevisionID
+        XCTAssertEqual(authority, presented)
+        let requests = await engine.pageRequests
+        XCTAssertTrue(requests.allSatisfy { $0.query["start"] == "2026-09-23" && $0.query["end"] == "2026-09-24" })
+        do { _ = try await session.localWidgetDayWindow("2026-02-30"); XCTFail("invalid day accepted") } catch {}
+        do { _ = try await session.localWidgetDayWindow("2026-09-23", index: 3); XCTFail("missing page became empty success") } catch {}
+    }
+
+    func testWidgetDayPageAndSummaryRejectLateResetPrivacyRevisionCancellation() async throws {
+        for summary in [false, true] {
+            for operation in 0..<4 {
+                let (session, engine, repository) = try await fixture()
+                defer { session.chooseLedger() }
+                let entered = expectation(description: "widget awaiting")
+                let gate = Gate(entered)
+                await engine.pause(gate: gate)
+                let old = Task {
+                    if summary { _ = try await session.localWidgetDaySummary("2026-09-23") }
+                    else { _ = try await session.localWidgetDayWindow("2026-09-23") }
+                }
+                await fulfillment(of: [entered], timeout: 3)
+                switch operation {
+                case 0: session.resetLocalTransactionWindow()
+                case 1: await session.updateActivity(isActive: false, isBackground: true)
+                case 2: try await advance(repository)
+                default: old.cancel()
+                }
+                await gate.release()
+                do { try await old.value; XCTFail("late widget result returned") } catch {}
+            }
+        }
+    }
+
     func testAccountPagesAndCompleteTrendAreIndependentAndDoNotSeedLegacyArrays() async throws {
         let (session, _, repository) = try await fixture()
         defer { session.chooseLedger() }
