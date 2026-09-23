@@ -70,10 +70,16 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	if err := ensureLedgerReady(c.cfg); err != nil {
 		return nil, err
 	}
-	version, err := c.currentVersion(false)
+	version, err := c.currentVersion(c.cfg.localCanonicalOwned)
 	if err != nil {
 		return nil, err
 	}
+	// An owned canonical model is immutable for one exact source generation.
+	// Never rebuild changed source using already-booked postings from its past.
+	if c.cfg.localCanonicalOwned && version.Version != c.cfg.localCanonicalVersion {
+		return nil, ErrLocalModelUnavailable
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.snapshot != nil && c.snapshot.Version == version.Version {

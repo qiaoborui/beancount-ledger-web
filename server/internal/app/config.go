@@ -25,6 +25,8 @@ type Config struct {
 	localTransport              bool
 	localEntrypoint             string
 	localCanonical              *LocalCanonicalModel
+	localCanonicalOwned         bool
+	localCanonicalVersion       string
 	localRegisteredCache        *LedgerCache
 	SelfHosted                  bool
 	MaintenanceMode             bool
