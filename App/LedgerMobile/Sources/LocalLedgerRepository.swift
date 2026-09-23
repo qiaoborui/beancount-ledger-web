@@ -202,6 +202,35 @@ actor LocalLedgerRepository: LedgerRepository {
         }
     }
 
+    /// Complete full-history scan, retaining only a bounded globally sorted window.
+    /// Continuations must be bound by the session to the same query/account context.
+    func globalSearchWindow(query: String, accounts: [LedgerAccount], scope: LedgerGlobalSearchScope,
+                            filters: LedgerGlobalSearchFilters, after: LocalGlobalSearchScan.Anchor? = nil,
+                            nativeRevision: String? = nil, expectedRevisionID: UUID,
+                            limits: LocalGlobalSearchScan.Limits = .init()) async throws -> LocalGlobalSearchScan.Result {
+        var scan: LocalGlobalSearchScan?
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await searchCandidatePage(cursor: cursor, expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil {
+                if let nativeRevision, nativeRevision != page.revision {
+                    throw LocalGlobalSearchScan.ScanError.revisionMismatch
+                }
+                scan = try LocalGlobalSearchScan(revision: page.revision, query: query, accounts: accounts,
+                    scope: scope, filters: filters, after: after, limits: limits)
+            }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return result
+            }
+            cursor = page.nextCursor
+        }
+    }
+
     /// The native model revision is opaque; the workspace UUID is the bootstrap
     /// pairing boundary. Check it inside the pinned snapshot, not in a prior read.
     func overviewCategories(start: String, end: String,

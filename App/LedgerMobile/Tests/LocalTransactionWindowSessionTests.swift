@@ -557,6 +557,64 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         }
     }
 
+    func testGlobalSearchWindowsPreserveFullCountsAndRejectChangedQueryAndOldSequence() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let original = session.ledger?.transactions
+        let global = session.globalTransactions
+        let presented = await repository.presentedRevisionID
+        let first = try await session.localGlobalSearchWindow(query: "", scope: .transactions, filters: .init(), limits: .init(rows: 1))
+        XCTAssertEqual(first.result.matchedCount, 3)
+        XCTAssertEqual(first.result.transactions.map(\.source.line), [1])
+        let next = try XCTUnwrap(first.continuation)
+        do {
+            _ = try await session.localGlobalSearchWindow(query: "Needle", scope: .transactions, filters: .init(), continuation: next)
+            XCTFail("continuation accepted changed query")
+        } catch {}
+        let second = try await session.localGlobalSearchWindow(query: "", scope: .transactions, filters: .init(), continuation: next, limits: .init(rows: 1))
+        XCTAssertEqual(second.result.matchedCount, 3)
+        XCTAssertEqual(second.result.transactions.map(\.source.line), [2])
+        let last = try await session.localGlobalSearchWindow(query: "", scope: .transactions, filters: .init(), continuation: second.continuation, limits: .init(rows: 1))
+        XCTAssertEqual(last.result.transactions.map(\.source.line), [3]); XCTAssertNil(last.continuation)
+        let fresh = try await session.localGlobalSearchWindow(query: "Needle", scope: .transactions, filters: .init())
+        XCTAssertEqual(fresh.result.transactions.map(\.source.line), [2])
+        do {
+            _ = try await session.localGlobalSearchWindow(query: "", scope: .transactions, filters: .init(), continuation: next)
+            XCTFail("old sequence accepted")
+        } catch {}
+        XCTAssertEqual(session.ledger?.transactions, original)
+        XCTAssertEqual(session.globalTransactions, global)
+        let authority = await repository.presentedRevisionID
+        XCTAssertEqual(presented, authority)
+        let requests = await engine.pageRequests
+        XCTAssertTrue(requests.allSatisfy { $0.query["dialect"] == "native-search-candidates-v1" })
+        XCTAssertTrue(requests.allSatisfy { $0.query["start"] == "0001-01-01" && $0.query["end"] == "9999-12-31" })
+    }
+
+    func testGlobalSearchSupersessionResetPrivacyRangeRevisionAndCancellationRejectLateResults() async throws {
+        for operation in 0..<6 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "global search awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let old = Task { try await session.localGlobalSearchWindow(query: "", scope: .transactions, filters: .init()) }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0:
+                let new = try await session.localGlobalSearchWindow(query: "Needle", scope: .transactions, filters: .init())
+                XCTAssertEqual(new.result.matchedCount, 1)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            case 3: await session.applyRange(.month(year: 2026, month: 8))
+            case 4: try await advance(repository)
+            default: old.cancel()
+            }
+            await gate.release()
+            do { _ = try await old.value; XCTFail("Late search returned") } catch {}
+        }
+    }
+
     func testSelectionFactsScanFullRangeWithoutSeedingLegacyArraysOrWriteAuthority() async throws {
         let (session, _, repository) = try await fixture()
         defer { session.chooseLedger() }
