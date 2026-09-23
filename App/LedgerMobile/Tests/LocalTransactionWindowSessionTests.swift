@@ -34,6 +34,8 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
 
     private actor Engine: LocalLedgerEngine {
         private var gate: Gate?
+        private var rowCount = 3
+        func setRowCount(_ count: Int) { rowCount = count }
         private var successfulEdits = false
         private var successfulOtherWrites = false
         func enableSuccessfulOtherWrites() { successfulOtherWrites = true }
@@ -59,7 +61,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
                 if fail { throw LocalLedgerError.operationFailed("Synthetic late failure") }
             }
             let saved = URL(fileURLWithPath: request.workspaceRoot).appendingPathComponent("window-edit.json")
-            var rows = (1...3).map { Self.row($0) }
+            var rows = (1...rowCount).map { Self.row($0) }
             if successfulEdits, let data = try? Data(contentsOf: saved) {
                 rows[0] = try JSONDecoder().decode(LedgerTransaction.self, from: data)
             }
@@ -411,6 +413,74 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         await session.loadNextLocalTransactionWindow()
         XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, 2)
         XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+    }
+
+    func testPreviousNextReloadExactWindowsAndPreserveCompleteSummary() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadPreviousLocalTransactionWindow()
+        assertCleared(session)
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        await session.loadLocalTransactionSummary()
+        for expected in [2, 3] {
+            await session.loadNextLocalTransactionWindow()
+            XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, expected)
+            XCTAssertEqual(session.localTransactionWindowIndex, expected - 1)
+        }
+        for expected in [2, 1] {
+            await session.loadPreviousLocalTransactionWindow()
+            XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, expected)
+            XCTAssertEqual(session.localTransactionWindowIndex, expected - 1)
+            XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+        }
+        await session.loadPreviousLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindowIndex, 0)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, 2)
+        XCTAssertEqual(session.localTransactionWindowIndex, 1)
+        session.resetLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindowIndex, 0)
+    }
+
+    func testPreviousNavigationReplaysEvictedAnchorsWithoutAccumulatingRows() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(40)
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        for _ in 1..<40 { await session.loadNextLocalTransactionWindow() }
+        XCTAssertEqual(session.localTransactionWindowIndex, 39)
+        XCTAssertEqual(session.localTransactionSummary?.matchedCount, 40)
+        for expected in stride(from: 39, through: 1, by: -1) {
+            await session.loadPreviousLocalTransactionWindow()
+            XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [expected])
+            XCTAssertEqual(session.localTransactionWindowIndex, expected - 1)
+            XCTAssertEqual(session.localTransactionSummary?.matchedCount, 40)
+            XCTAssertNil(session.localTransactionWindowError)
+        }
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [2])
+    }
+
+    func testPreviousReplayCannotPublishAfterResetOrNewRevision() async throws {
+        for changedRevision in [false, true] {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+            await session.loadNextLocalTransactionWindow()
+            let entered = expectation(description: "previous awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let loading = Task { await session.loadPreviousLocalTransactionWindow() }
+            await fulfillment(of: [entered], timeout: 3)
+            await session.loadPreviousLocalTransactionWindow() // No duplicate request.
+            if changedRevision { try await advance(repository) }
+            else { session.resetLocalTransactionWindow() }
+            await gate.release()
+            await loading.value
+            XCTAssertNil(session.localTransactionWindow)
+            XCTAssertEqual(session.localTransactionWindowIndex, 0)
+            XCTAssertFalse(session.isLocalTransactionWindowLoading)
+        }
     }
 
     func testOptInFirstNextSingleWindowEOFAndExplicitResetLeaveLegacyArraysUntouched() async throws {

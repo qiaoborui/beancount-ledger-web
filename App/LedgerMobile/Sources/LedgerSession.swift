@@ -211,6 +211,9 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var localTransactionSummaryError: String?
     private var transactionSummaryTask: Task<Void, Never>?
     private var transactionWindowFilter = LedgerTransactionFilter()
+    private var transactionWindowLimits = LocalTransactionWindow.Limits()
+    private var transactionWindowAnchors = LocalTransactionWindow.Anchors()
+    @Published private(set) var localTransactionWindowIndex = 0
     private var transactionWindowReader: LocalTransactionWindow?
     private var transactionWindowContext: LocalReadContext?
     private var transactionWindowGeneration = 0
@@ -3357,6 +3360,8 @@ final class LedgerSession: ObservableObject {
         localTransactionSummary = nil
         isLocalTransactionSummaryLoading = false
         localTransactionSummaryError = nil
+        transactionWindowAnchors.removeAll()
+        localTransactionWindowIndex = 0
         transactionWindowTask?.cancel()
         transactionWindowTask = nil
         transactionDetailTask?.cancel()
@@ -3405,6 +3410,7 @@ final class LedgerSession: ObservableObject {
         guard !Task.isCancelled else { return }
         resetLocalTransactionWindow()
         transactionWindowFilter = filter
+        transactionWindowLimits = limits
         guard let context = try? localReadContext(), let repository = localRepository else { return }
         await runLocalTransactionWindow(context: context, repository: repository, filter: filter, limits: limits)
     }
@@ -3416,7 +3422,20 @@ final class LedgerSession: ObservableObject {
               localTransactionWindow?.continuation != nil,
               let context = transactionWindowContext, let repository = localRepository,
               (try? validateLocalRead(context)) != nil else { return }
-        await runLocalTransactionWindow(context: context, repository: repository)
+        await runLocalTransactionWindow(context: context, repository: repository,
+            targetIndex: localTransactionWindowIndex + 1)
+    }
+
+    /// Reload evicted windows from bounded cursor anchors, or replay from the
+    /// beginning if the anchor was evicted. Never retain previously visible rows.
+    func loadPreviousLocalTransactionWindow() async {
+        guard !Task.isCancelled, !isLocalTransactionWindowLoading,
+              localTransactionWindowIndex > 0,
+              let context = transactionWindowContext, let repository = localRepository,
+              (try? validateLocalRead(context)) != nil else { return }
+        await runLocalTransactionWindow(context: context, repository: repository,
+            filter: transactionWindowFilter, limits: transactionWindowLimits,
+            targetIndex: localTransactionWindowIndex - 1, replay: true)
     }
 
     /// Complete counts/facets/day totals independently of scroll position.
@@ -3461,7 +3480,8 @@ final class LedgerSession: ObservableObject {
     }
 
     private func runLocalTransactionWindow(context: LocalReadContext, repository: LocalLedgerRepository,
-        filter: LedgerTransactionFilter = .init(), limits: LocalTransactionWindow.Limits = .init()) async {
+        filter: LedgerTransactionFilter = .init(), limits: LocalTransactionWindow.Limits = .init(),
+        targetIndex: Int = 0, replay: Bool = false) async {
         isLocalTransactionWindowLoading = true
         localTransactionWindowError = nil
         let task = Task { @MainActor [self] in
@@ -3474,12 +3494,19 @@ final class LedgerSession: ObservableObject {
             do {
                 try validateLocalRead(context)
                 let reader: LocalTransactionWindow
+                let checkpoint = replay && targetIndex > 0 ? transactionWindowAnchors.checkpoint(for: targetIndex) : nil
+                var replayIndex = checkpoint == nil ? 0 : targetIndex
+                if replay, let old = transactionWindowReader {
+                    transactionWindowReader = nil
+                    await old.invalidate()
+                    try validateLocalRead(context)
+                }
                 if let existing = transactionWindowReader {
                     reader = existing
                 } else {
                     reader = try await repository.makeTransactionWindow(start: context.range.start,
                         end: context.range.queryEndExclusive, filter: filter,
-                        expectedRevisionID: context.revisionID, limits: limits)
+                        expectedRevisionID: context.revisionID, limits: limits, checkpoint: checkpoint)
                     do { try validateLocalRead(context) }
                     catch {
                         Task { await reader.invalidate() }
@@ -3489,8 +3516,19 @@ final class LedgerSession: ObservableObject {
                     transactionWindowContext = context
                 }
                 try validateLocalRead(context)
-                let window = try await reader.nextWindow()
+                var window = try await reader.nextWindow()
                 try validateLocalRead(context)
+                if replay {
+                    while replayIndex < targetIndex {
+                        guard let continuation = window.continuation else {
+                            throw LocalTransactionWindow.WindowError.invalidCheckpoint
+                        }
+                        transactionWindowAnchors.insert(continuation, for: replayIndex + 1)
+                        window = try await reader.nextWindow()
+                        try validateLocalRead(context)
+                        replayIndex += 1
+                    }
+                }
                 // A cached candidate page bypasses the repository provider. Always
                 // check the workspace again, even at EOF, before publishing it.
                 let revision = try await repository.workspace.currentRevision()
@@ -3498,6 +3536,10 @@ final class LedgerSession: ObservableObject {
                 guard revision?.id == context.revisionID else {
                     throw LocalLedgerWorkspace.WorkspaceError.staleRevision
                 }
+                if let continuation = window.continuation {
+                    transactionWindowAnchors.insert(continuation, for: targetIndex + 1)
+                }
+                localTransactionWindowIndex = targetIndex
                 localTransactionWindow = window // complete summary exists only at EOF
                 if let summary = window.summary {
                     localTransactionSummary = summary
