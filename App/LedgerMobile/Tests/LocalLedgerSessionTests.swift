@@ -118,6 +118,69 @@ final class LocalLedgerSessionTests: XCTestCase {
         return (root, defaults, suite)
     }
 
+    private actor HistoryEngine: LocalLedgerEngine {
+        var gate: Gate?
+        var changesRevision = false
+        private(set) var historyCalls = 0
+        func configure(gate: Gate? = nil, changesRevision: Bool = false) {
+            self.gate = gate
+            self.changesRevision = changesRevision
+        }
+        func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
+            if request.path == "/api/ledger/bootstrap" { return Data(LedgerModelsTests.bootstrapJSON.utf8) }
+            if request.path == "/api/ledger/version" { return Data("{}".utf8) }
+            guard request.path == "/api/ledger/transactions/history-page" else {
+                throw LocalLedgerError.operationFailed("Unexpected history fallback")
+            }
+            historyCalls += 1
+            if let gate { self.gate = nil; await gate.suspend() }
+            let second = request.query["cursor"] != nil
+            let revision = second && changesRevision ? "changed" : "one"
+            let rows = (0..<500).map { index in
+                LedgerTransaction(date: "2026-09-01", payee: "Synthetic", narration: "Row",
+                    postings: [], source: .init(file: "main.bean", line: index + (second ? 500 : 0)))
+            }
+            let encoded = try JSONEncoder().encode(rows)
+            return Data(("{\"revision\":\"" + revision + "\",\"transactions\":" + String(decoding: encoded, as: UTF8.self)
+                + (second ? "" : ",\"nextCursor\":\"second\"") + ",\"sensitiveUnlocked\":true}").utf8)
+        }
+    }
+
+    func testBoundedHistoryRejectsMixedRevisionsAndLockDuringPage() async throws {
+        for mode in ["complete", "stale", "lock"] {
+            let fixture = try fixture()
+            let engine = HistoryEngine()
+            let catalog = LocalLedgerCatalog(rootDirectory: fixture.root.appendingPathComponent("managed"),
+                engine: engine, validator: { _, _ in })
+            let descriptor = try await catalog.create(name: "History evidence")
+            let session = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+                defaults: fixture.defaults,
+                widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+                widgetCredentialStore: InertWidgetStore())
+            await session.openLocalLedger(descriptor)
+            XCTAssertEqual(session.phase, .ready)
+            let waiting = expectation(description: "history page")
+            let gate = Gate(waiting)
+            await engine.configure(gate: mode == "lock" ? gate : nil, changesRevision: mode == "stale")
+            if mode != "lock" { waiting.fulfill() }
+            let entry = LedgerTransactionEntry(date: "2026-09-23", payee: "Synthetic", narration: "Probe", postings: [])
+            let operation = Task { try await session.bookkeepingHistory(for: entry) }
+            await fulfillment(of: [waiting], timeout: 3)
+            if mode == "lock" { await session.lock(); await gate.release() }
+            do {
+                let rows = try await operation.value
+                XCTAssertEqual(mode, "complete")
+                XCTAssertEqual(rows.count, 5)
+                XCTAssertTrue(session.visibleGlobalTransactions.isEmpty)
+            } catch {
+                XCTAssertNotEqual(mode, "complete", "Unexpected error: \(error)")
+            }
+            let calls = await engine.historyCalls
+            XCTAssertEqual(calls, mode == "lock" ? 1 : 2)
+            session.chooseLedger()
+        }
+    }
+
     func testColdRelaunchRestoresValidatedPresentationAfterAuthenticationWithoutRebuilding() async throws {
         let fixture = try fixture()
         let firstEngine = ResumeEngine()

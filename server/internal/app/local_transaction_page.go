@@ -76,6 +76,12 @@ func decodeLocalCursor(raw string) (localTransactionCursor, error) {
 // Native-only additive route. Existing HTTP transaction contracts stay intact.
 // Select rows before serialization; never build an all-history response to slice.
 func localTransactionPageResponse(cfg Config, snapshot *LedgerSnapshot, query map[string]string) (int, json.RawMessage, error) {
+	return localTransactionPageProjection(cfg, snapshot, query, false)
+}
+
+// History evidence streams only the metadata required by the existing native
+// classifier. It shares row/byte limits and cursor freshness with normal pages.
+func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query map[string]string, evidence bool) (int, json.RawMessage, error) {
 	start, end := query["start"], query["end"]
 	if start == "" {
 		start = "0001-01-01"
@@ -110,7 +116,7 @@ func localTransactionPageResponse(cfg Config, snapshot *LedgerSnapshot, query ma
 	}
 	effectiveStart, effectiveEnd := transactionQueryEffectiveRange(start, end, filter)
 	modelRevision := fmt.Sprintf("%s:%d", snapshot.Version, snapshot.localReadModelID)
-	scopeBytes, _ := json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, modelRevision, effectiveStart, effectiveEnd, query["q"], query["account"], query["tag"], query["kind"]})
+	scopeBytes, _ := json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, modelRevision, effectiveStart, effectiveEnd, query["q"], query["account"], query["tag"], query["kind"], strconv.FormatBool(evidence)})
 	scope := fmt.Sprintf("%x", sha256.Sum256(scopeBytes))
 	offset := 0
 	if raw := query["cursor"]; raw != "" {
@@ -151,7 +157,17 @@ func localTransactionPageResponse(cfg Config, snapshot *LedgerSnapshot, query ma
 		// Listing projection deliberately omits rich editor drafts and metadata.
 		// These remain in the model for filtering and legacy/detail requests.
 		txn.Entry = nil
-		txn.Metadata = nil
+		if evidence {
+			metadata := make(map[string]MetadataValue, 3)
+			for _, key := range []string{"method", "cardLast4", "source"} {
+				if value, ok := txn.Metadata[key]; ok {
+					metadata[key] = value
+				}
+			}
+			txn.Metadata = metadata
+		} else {
+			txn.Metadata = nil
+		}
 		if txn.Postings == nil {
 			txn.Postings = []Posting{}
 		}

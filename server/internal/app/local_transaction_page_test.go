@@ -187,3 +187,96 @@ func TestLocalPageStructuredFiltersBindCursor(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalHistoryEvidenceProjectionIsBoundedAndCursorScoped(t *testing.T) {
+	cfg, snapshot := pageFixture(8)
+	for i := range snapshot.Transactions {
+		var metadata map[string]MetadataValue
+		if err := json.Unmarshal([]byte(`{"method":"Synthetic payment","cardLast4":"1234","source":"wechat","private":"must-not-be-returned"}`), &metadata); err != nil {
+			t.Fatal(err)
+		}
+		snapshot.Transactions[i].Metadata = metadata
+	}
+	// Fixture sorted views were created before metadata assignment.
+	snapshot.transactionsAsc, snapshot.transactionsDesc = sortedTransactionViews(snapshot.Transactions)
+	q := map[string]string{"limit": "2"}
+	status, data, err := localTransactionPageProjection(cfg, snapshot, q, true)
+	if status != 200 || err != nil || len(data) > localTransactionPageBytes {
+		t.Fatalf("status=%d err=%v", status, err)
+	}
+	var page localTransactionPage
+	if err := json.Unmarshal(data, &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Transactions) != 2 || page.NextCursor == "" {
+		t.Fatal("missing continuation")
+	}
+	for _, txn := range page.Transactions {
+		if len(txn.Metadata) != 3 || txn.Entry != nil || filepath.IsAbs(txn.Source.File) {
+			t.Fatal("wrong evidence projection")
+		}
+	}
+	if strings.Contains(string(data), "must-not-be-returned") {
+		t.Fatal("unneeded metadata leaked")
+	}
+	q["cursor"] = page.NextCursor
+	if status, _, _ := localTransactionPageResponse(cfg, snapshot, q); status != 409 {
+		t.Fatal("history cursor accepted by ordinary page")
+	}
+	if status, _, err := localTransactionPageProjection(cfg, snapshot, q, true); status != 200 || err != nil {
+		t.Fatal("history cursor failed", status, err)
+	}
+	snapshot.Version = "changed"
+	if status, _, _ := localTransactionPageProjection(cfg, snapshot, q, true); status != 409 {
+		t.Fatal("stale history cursor accepted")
+	}
+}
+
+func TestLocalHistoryMetadataEnforcesByteBudgetWithoutTruncation(t *testing.T) {
+	cfg, snapshot := pageFixture(6)
+	var value MetadataValue
+	raw, _ := json.Marshal(strings.Repeat("m", 300000))
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal(err)
+	}
+	for i := range snapshot.Transactions {
+		snapshot.Transactions[i].Metadata = map[string]MetadataValue{"method": value}
+	}
+	snapshot.transactionsAsc, snapshot.transactionsDesc = sortedTransactionViews(snapshot.Transactions)
+	seen := map[int]bool{}
+	q := map[string]string{"limit": "500"}
+	for {
+		status, data, err := localTransactionPageProjection(cfg, snapshot, q, true)
+		if status != 200 || err != nil || len(data) > localTransactionPageBytes {
+			t.Fatal(status, len(data), err)
+		}
+		var page localTransactionPage
+		if err := json.Unmarshal(data, &page); err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Transactions) > 3 {
+			t.Fatal("byte budget not applied")
+		}
+		for _, txn := range page.Transactions {
+			if seen[txn.Source.Line] {
+				t.Fatal("duplicate")
+			}
+			seen[txn.Source.Line] = true
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		q["cursor"] = page.NextCursor
+	}
+	if len(seen) != 6 {
+		t.Fatal("omission")
+	}
+	raw, _ = json.Marshal(strings.Repeat("m", localTransactionPageBytes))
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal(err)
+	}
+	snapshot.transactionsDesc[0].Metadata = map[string]MetadataValue{"method": value}
+	if status, _, _ := localTransactionPageProjection(cfg, snapshot, nil, true); status != 413 {
+		t.Fatal("oversize evidence not rejected")
+	}
+}

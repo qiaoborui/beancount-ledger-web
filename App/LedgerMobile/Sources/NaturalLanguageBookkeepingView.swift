@@ -1023,6 +1023,7 @@ struct NaturalLanguageBookkeepingView: View {
         busy = true
         error = nil
         let text = input, settingsRevision = settings.revision
+        let classificationRevision = classificationSettings.revision
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -1048,17 +1049,36 @@ struct NaturalLanguageBookkeepingView: View {
                 // Automatically run Jev account classification if enabled
                 if classificationSettings.isEnabled(for: ledgerID) {
                     if let classifier = try? classificationSettings.classifier() {
-                        try? await session.loadGlobalTransactions(forceRefresh: false)
-                        if let enriched = try? await BookkeepingPipeline.enrich(
-                            result,
-                            accounts: session.ledger?.accounts ?? [],
-                            history: session.visibleGlobalTransactions,
-                            provider: classifier
-                        ) {
-                            result = enriched
+                        do {
+                            result = try await BookkeepingPipeline.enrich(
+                                result,
+                                accounts: session.ledger?.accounts ?? [],
+                                relatedHistory: { record in
+                                    let rows = try await session.bookkeepingHistory(for: record)
+                                    guard await MainActor.run(body: {
+                                        runID == id && input == text && settings.revision == settingsRevision
+                                            && classificationSettings.revision == classificationRevision
+                                            && classificationSettings.isEnabled(for: ledgerID)
+                                            && session.currentLocalLedgerDescriptor?.id == ledgerID
+                                            && session.phase == .ready && !session.privacyShielded
+                                    }) else { throw CancellationError() }
+                                    return rows
+                                },
+                                provider: classifier
+                            )
+                        } catch is CancellationError {
+                            throw CancellationError()
+                        } catch {
+                            // Optional enrichment failure leaves the parsed draft for manual review.
                         }
                     }
                 }
+
+                try Task.checkCancellation()
+                guard runID == id, input == text, settings.revision == settingsRevision,
+                      classificationSettings.revision == classificationRevision,
+                      session.currentLocalLedgerDescriptor?.id == ledgerID,
+                      session.phase == .ready, !session.privacyShielded else { return }
 
                 // Auto-fill proposals directly into records
                 var finalRecords = result.records.map(Record.init)

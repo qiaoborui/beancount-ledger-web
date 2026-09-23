@@ -16,7 +16,39 @@ enum ImportClassificationContext {
         entry.postings.first { $0.account == entry.fundingAccount }.flatMap { decimal($0.amount) }
     }
 
+    /// Full-history evidence reduced incrementally; related examples and payment
+    /// consistency are independent so an older conflicting mapping is not lost.
+    struct Evidence: Sendable {
+        var related: [LedgerTransaction] = []
+        var mappings: [LedgerTransaction] = []
+    }
+
+    struct Accumulator: Sendable {
+        let entry: LedgerImportEntry
+        private(set) var evidence = Evidence()
+
+        mutating func consume(_ page: [LedgerTransaction]) {
+            evidence.related = relatedHistory(for: entry, history: evidence.related + page)
+            for transaction in page where transaction.date <= entry.date && samePayment(entry, transaction) {
+                guard let funding = historyRoles(transaction)?.funding else { continue }
+                if let first = evidence.mappings.first.flatMap({ historyRoles($0)?.funding }), first != funding {
+                    // One conflicting account is sufficient to prevent a hard mapping.
+                    if evidence.mappings.allSatisfy({ historyRoles($0)?.funding == first }) {
+                        evidence.mappings.append(transaction)
+                    }
+                } else if evidence.mappings.count < 3 {
+                    evidence.mappings.append(transaction)
+                }
+            }
+        }
+    }
+
     static func request(for entry: LedgerImportEntry, accounts: [LedgerAccount], history: [LedgerTransaction]) -> ImportClassificationRequest? {
+        request(for: entry, accounts: accounts,
+                evidence: Evidence(related: relatedHistory(for: entry, history: history), mappings: history))
+    }
+
+    static func request(for entry: LedgerImportEntry, accounts: [LedgerAccount], evidence: Evidence) -> ImportClassificationRequest? {
         guard supports(entry), LedgerDateRange.parse(entry.date) != nil else { return nil }
         let options = accounts.filter {
             ($0.active || $0.closeDate != nil)
@@ -25,7 +57,7 @@ enum ImportClassificationContext {
                 && ($0.currency.isEmpty || $0.currency == entry.currency)
         }.sorted { $0.account < $1.account }
         guard !options.isEmpty, options.count <= 254, options.contains(where: { ImportClassificationRequest.isFunding($0.account) }) else { return nil }
-        let related = relatedHistory(for: entry, history: history)
+        let related = evidence.related
         let examples = related.map { transaction in
             let roles = historyRoles(transaction)
             return ImportClassificationRequest.Example(
@@ -45,7 +77,7 @@ enum ImportClassificationContext {
             fundingAmount: entry.postings.first(where: { $0.account == entry.fundingAccount })!.amount,
             currentCategory: entry.categoryAccount,
             accounts: options.map { .init(account: $0.account, label: clipped($0.alias ?? $0.label)) },
-            fundingHint: fundingHint(entry: entry, accounts: funds, history: history),
+            fundingHint: fundingHint(entry: entry, accounts: funds, history: evidence.mappings),
             tagCandidates: [], history: examples
         )
     }

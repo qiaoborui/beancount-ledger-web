@@ -108,6 +108,10 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         let next = try await repository.transactionPage(cursor: cursor, limit: 1)
         XCTAssertEqual(next.revision, pages.first?.revision)
         XCTAssertNotEqual(next.transactions.first?.id, pages.first?.transactions.first?.id)
+        let evidence = try await repository.classificationHistoryPage(cursor: nil)
+        XCTAssertEqual(evidence.revision, next.revision)
+        XCTAssertEqual(evidence.transactions.count, 3)
+        XCTAssertTrue(evidence.transactions.allSatisfy { $0.editableEntry == nil })
         #else
         throw XCTSkip("Requires embedded native model registry")
         #endif
