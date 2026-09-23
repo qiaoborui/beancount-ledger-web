@@ -1073,7 +1073,17 @@ struct LedgerAccount: Decodable, Equatable, Sendable {
     let active: Bool
 }
 
-struct LedgerAccountDetail: Decodable, Equatable {
+/// A partial ascending history window plus complete account balances/count.
+/// Never use detail.rows alone to build a whole-period balance chart.
+struct LedgerAccountPage: Decodable, Sendable {
+    let revision: String
+    let sensitiveUnlocked: Bool
+    let detail: LedgerAccountDetail
+    let rowCount: Int
+    let nextCursor: String?
+}
+
+struct LedgerAccountDetail: Decodable, Equatable, Sendable {
     let account: String
     let label: String
     let alias: String?
@@ -1089,7 +1099,7 @@ struct LedgerAccountDetail: Decodable, Equatable {
     var periodChange: Int? = nil
 }
 
-struct LedgerAccountDetailRow: Decodable, Equatable, Identifiable {
+struct LedgerAccountDetailRow: Decodable, Equatable, Identifiable, Sendable {
     let date: String
     let payee: String
     let narration: String

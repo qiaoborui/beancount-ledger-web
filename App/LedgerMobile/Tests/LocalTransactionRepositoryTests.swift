@@ -56,6 +56,86 @@ final class LocalTransactionRepositoryTests: XCTestCase {
         return try JSONSerialization.data(withJSONObject: object)
     }
 
+    private func accountPageData(_ mutate: (inout [String: Any]) -> Void = { _ in }) throws -> Data {
+        var object: [String: Any] = ["revision": "native-account", "sensitiveUnlocked": true, "rowCount": 2,
+            "detail": ["account": "Assets:Cash", "label": "Cash", "group": "Assets", "active": true,
+                "currency": "CNY", "currentBalance": 200, "openingBalance": 0, "closingBalance": 200, "periodChange": 200,
+                "start": start, "end": end,
+                "rows": (1...2).map { index in
+                    ["date": "2026-09-23", "payee": "Synthetic", "narration": "Account", "change": 100, "balance": index * 100,
+                     "txn": ["date": "2026-09-23", "payee": "Synthetic", "narration": "Account",
+                         "postings": [["account": "Assets:Cash", "amount": 100, "currency": "CNY"]],
+                         "source": ["file": "main.bean", "line": index, "hash": "h"]]] as [String: Any]
+                }] as [String: Any]]
+        mutate(&object)
+        return try JSONSerialization.data(withJSONObject: object)
+    }
+
+    func testAccountPagePinnedTypedQueryAndNoWriteAuthorityAdvance() async throws {
+        let (workspace, revision) = try await workspace()
+        let engine = Engine([try accountPageData()])
+        let repository = repository(workspace, engine)
+        let result = try await repository.accountPage(account: "Assets:Cash", currency: "CNY", start: start, end: end, expectedRevisionID: revision)
+        XCTAssertEqual(result.detail.rows.map(\.balance), [100, 200]); XCTAssertEqual(result.rowCount, 2)
+        let requests = await engine.requests
+        XCTAssertEqual(requests[0].path, "/api/ledger/accounts/detail/page")
+        XCTAssertEqual(requests[0].query, ["account": "Assets:Cash", "currency": "CNY", "start": start, "end": end, "limit": "100"])
+        let presented = await repository.presentedRevisionID
+        XCTAssertNil(presented)
+    }
+
+    func testAccountPageRejectsMalformedFactsBoundsAndLockedPayload() async throws {
+        for mutation in 0..<12 {
+            let (workspace, revision) = try await workspace()
+            let data = try accountPageData { object in
+                var detail = object["detail"] as! [String: Any]
+                switch mutation {
+                case 0: object["sensitiveUnlocked"] = false
+                case 1: object["revision"] = ""
+                case 2: object["rowCount"] = 1
+                case 3: detail["currency"] = "USD"
+                case 4: detail["periodChange"] = 1
+                case 5: object["nextCursor"] = ""
+                case 6: detail["start"] = "2026-08-01"
+                case 7:
+                    var rows = detail["rows"] as! [[String: Any]]
+                    rows[1]["balance"] = 999
+                    detail["rows"] = rows
+                case 8: object["nextCursor"] = "more" // complete count cannot claim continuation
+                case 9:
+                    var rows = detail["rows"] as! [[String: Any]]
+                    rows[0]["balance"] = 1100; rows[1]["balance"] = 1200
+                    detail["rows"] = rows
+                case 10: detail["rows"] = Array((detail["rows"] as! [[String: Any]]).prefix(1))
+                default: detail["rows"] = [] as [[String: Any]]
+                }
+                object["detail"] = detail
+            }
+            let repository = repository(workspace, Engine([data]))
+            do {
+                _ = try await repository.accountPage(account: "Assets:Cash", currency: "CNY", start: start, end: end, expectedRevisionID: revision)
+                XCTFail("malformed account page accepted \(mutation)")
+            } catch {}
+        }
+        let oversized = Data(repeating: 32, count: (1 << 20) + 1)
+        XCTAssertThrowsError(try LocalLedgerResponse(result: oversized).decodeAccountPage())
+        XCTAssertThrowsError(try LocalLedgerResponse(envelope: Data(#"{"ok":false,"status":409,"diagnostics":[],"result":{"error":"stale"}}"#.utf8)).decodeAccountPage()) {
+            XCTAssertEqual($0 as? LocalLedgerError, .staleTransactionCursor)
+        }
+    }
+
+    func testAccountPageRejectsSupersededRevisionOnReturn() async throws {
+        let (workspace, revision) = try await workspace()
+        let engine = Engine([try accountPageData()]) { _ in
+            _ = try await workspace.commit(expectedRevisionID: revision, changes: [.write(Data("; changed".utf8), to: "main.bean")]) { _ in }
+        }
+        let repository = repository(workspace, engine)
+        do {
+            _ = try await repository.accountPage(account: "Assets:Cash", currency: "CNY", start: start, end: end, expectedRevisionID: revision)
+            XCTFail("superseded account page returned")
+        } catch { XCTAssertEqual(error as? LocalLedgerWorkspace.WorkspaceError, .staleRevision) }
+    }
+
     func testCandidateDialectHasOnlyDatesCursorAndLimitAndNeverPresentsRevision() async throws {
         let (workspace, revision) = try await workspace()
         let engine = Engine([try page(cursor: "raw-next")])

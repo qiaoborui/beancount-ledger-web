@@ -202,6 +202,73 @@ actor LocalLedgerRepository: LedgerRepository {
         }
     }
 
+    /// Pinned additive account page. Complete balances/counts do not make the
+    /// rows complete; callers must keep chart aggregation independent of windows.
+    func accountPage(account: String, currency: String, start: String, end: String,
+                     cursor: String? = nil, limit: Int = 100, expectedRevisionID: UUID) async throws -> LedgerAccountPage {
+        guard !account.isEmpty, !currency.isEmpty, (1...500).contains(limit),
+              cursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 }) ?? true else {
+            throw LocalLedgerError.invalidConfiguration("账户分页参数无效")
+        }
+        var query = ["account": account, "currency": currency, "start": start, "end": end, "limit": String(limit)]
+        query["cursor"] = cursor
+        try Task.checkCancellation()
+        let (_, response) = try await readSnapshot("/api/ledger/accounts/detail/page", query: query,
+            expectedRevisionID: expectedRevisionID)
+        try Task.checkCancellation()
+        let page = try response.decodeAccountPage()
+        guard page.sensitiveUnlocked else { throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定") }
+        let detail = page.detail
+        guard !page.revision.isEmpty, detail.account == account, detail.currency == currency,
+              detail.start ?? "" == start, detail.end ?? "" == end,
+              detail.rows.count <= limit, page.rowCount >= detail.rows.count,
+              let opening = detail.openingBalance, let closing = detail.closingBalance, let change = detail.periodChange,
+              page.nextCursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 && $0 != cursor }) ?? true,
+              page.nextCursor == nil || (!detail.rows.isEmpty && page.rowCount > detail.rows.count) else {
+            throw LocalLedgerError.operationFailed("账户分页响应无效")
+        }
+        if cursor == nil {
+            guard (page.nextCursor != nil) == (page.rowCount > detail.rows.count),
+                  page.rowCount == 0 || !detail.rows.isEmpty else {
+                throw LocalLedgerError.operationFailed("账户首页流水不完整")
+            }
+            if let first = detail.rows.first {
+                let (balance, overflow) = opening.addingReportingOverflow(first.change)
+                guard !overflow, balance == first.balance else { throw LocalLedgerError.operationFailed("账户期初流水余额不一致") }
+            }
+        }
+        if page.nextCursor == nil, let last = detail.rows.last {
+            guard last.balance == closing else { throw LocalLedgerError.operationFailed("账户期末流水余额不一致") }
+        }
+        if page.rowCount == 0 {
+            guard opening == closing, detail.rows.isEmpty, page.nextCursor == nil else {
+                throw LocalLedgerError.operationFailed("空账户期间余额不一致")
+            }
+        }
+        let (calculated, overflow) = closing.subtractingReportingOverflow(opening)
+        guard !overflow, calculated == change else { throw LocalLedgerError.operationFailed("账户期间余额不一致") }
+        var previous: LedgerAccountDetailRow?
+        var ids: Set<String> = []
+        for row in detail.rows {
+            guard row.date == row.transaction.date, row.payee == row.transaction.payee,
+                  row.narration == row.transaction.narration, ids.insert(row.id).inserted,
+                  start.isEmpty || (row.date >= start && row.date < end),
+                  previous.map({ $0.date <= row.date }) ?? true else {
+                throw LocalLedgerError.operationFailed("账户分页流水不一致")
+            }
+            if let previous {
+                let (balance, overflow) = previous.balance.addingReportingOverflow(row.change)
+                guard !overflow, balance == row.balance else { throw LocalLedgerError.operationFailed("账户流水余额不一致") }
+            }
+            previous = row
+        }
+        try Task.checkCancellation()
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return page
+    }
+
     /// Complete full-history scan, retaining only a bounded globally sorted window.
     /// Continuations must be bound by the session to the same query/account context.
     func globalSearchWindow(query: String, accounts: [LedgerAccount], scope: LedgerGlobalSearchScope,

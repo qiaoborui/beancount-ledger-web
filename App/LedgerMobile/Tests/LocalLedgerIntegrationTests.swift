@@ -127,6 +127,26 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         }
         XCTAssertNil(searchLast.nextCursor)
 
+        // Account windows retain complete balances while their rows stay bounded.
+        let legacyAccount = try await repository.accountDetail(account: "Assets:Cash", currency: "CNY", start: start, end: end)
+        var accountRows: [LedgerAccountDetailRow] = []
+        var accountCursor: String?
+        repeat {
+            let page = try await repository.accountPage(account: "Assets:Cash", currency: "CNY", start: start, end: end,
+                cursor: accountCursor, limit: 137, expectedRevisionID: bootstrap.revisionID)
+            XCTAssertEqual(page.rowCount, legacyAccount.rows.count)
+            XCTAssertEqual(page.detail.currentBalance, legacyAccount.currentBalance)
+            XCTAssertEqual(page.detail.openingBalance, legacyAccount.openingBalance)
+            XCTAssertEqual(page.detail.closingBalance, legacyAccount.closingBalance)
+            XCTAssertEqual(page.detail.periodChange, legacyAccount.periodChange)
+            XCTAssertLessThanOrEqual(page.detail.rows.count, 137)
+            accountRows += page.detail.rows
+            accountCursor = page.nextCursor
+        } while accountCursor != nil
+        XCTAssertEqual(accountRows.map(\.balance), legacyAccount.rows.map(\.balance))
+        XCTAssertEqual(accountRows.map(\.change), legacyAccount.rows.map(\.change))
+        XCTAssertEqual(accountRows.map { $0.transaction.id }, legacyAccount.rows.map { $0.transaction.id })
+
         // Real paged navigation must resume within a candidate page, without
         // re-counting the summary or interpreting window absence as deletion.
         let windowLimits = LocalTransactionWindow.Limits(maxRows: 137)
