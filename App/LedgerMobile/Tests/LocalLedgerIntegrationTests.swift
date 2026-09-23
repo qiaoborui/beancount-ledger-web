@@ -8,6 +8,177 @@ import BeancountRuntime
 /// Exercises the production Go + CPython bridges in the signed app host.
 /// Every file belongs to a unique temporary fixture; no configured ledger is read.
 final class LocalLedgerIntegrationTests: XCTestCase {
+    func testCandidateScanMatchesLegacyUnicodeFiltersAndFullSummariesWithoutWrites() async throws {
+        #if os(iOS) && canImport(BeancountRuntime) && canImport(LedgerCore)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CandidateIntegration-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspace = LocalLedgerWorkspace(rootDirectory: root)
+        let composed = "Caf\u{00e9}"
+        let decomposed = "Cafe\u{0301}"
+        // One long grapheme, not hundreds of transactions or parser invocations.
+        let combining = "a" + String(repeating: "\u{0301}", count: 600)
+        let unicode = "✁ 👩\u{200d}💻 " + combining
+        var text = """
+        2000-01-01 open Assets:Cash CNY
+        2000-01-01 open Assets:Bank CNY
+        2000-01-01 open Expenses:Food CNY
+        2000-01-01 open Income:Other CNY
+        2000-01-01 open Expenses:Outside CNY
+
+        """
+        // The entire first page is deliberately irrelevant to Unicode/refund filters.
+        for index in 0..<500 {
+            text += """
+            2026-09-23 * "Ordinary" "Synthetic row \(index)" #ordinary
+              Expenses:Food 1 CNY
+              Assets:Cash -1 CNY
+
+            """
+        }
+        for payee in [composed, decomposed] {
+            text += """
+            2026-09-22 * "\(payee)" "\(unicode)" #unicode
+              Expenses:Food 2 CNY
+              Assets:Cash -2 CNY
+
+            """
+        }
+        text += """
+        2026-09-21 * "Synthetic credit" "Metadata-only evidence" #refund
+          type: "退款"
+          fixture: "not candidate evidence"
+          Income:Other -3 CNY
+          Assets:Cash 3 CNY
+
+        2026-09-21 * "Synthetic reversal" "Signed expense" #reversal
+          Expenses:Food -4 CNY
+          Assets:Cash 4 CNY
+
+        2026-09-20 * "Synthetic move" "Tail-only account and tag" #tail
+          Assets:Bank 5 CNY
+          Assets:Cash -5 CNY
+
+        2026-08-31 * "Outside" "Before range" #outside
+          Expenses:Outside 7 CNY
+          Assets:Cash -7 CNY
+
+        2026-10-01 * "Outside" "Exclusive end" #outside
+          Expenses:Outside 7 CNY
+          Assets:Cash -7 CNY
+
+        """
+        let original = Data(text.utf8)
+        // One real canonical validation/commit; never use the configured catalog.
+        let initial = try await workspace.commit(changes: [.write(original, to: "main.bean")]) { root in
+            try await EmbeddedBeancountValidator.shared.validate(workspace: root, entryFile: "main.bean")
+        }
+        let repository = LocalLedgerRepository(
+            descriptor: .init(id: UUID(), name: "Synthetic candidates", entrypoint: "main.bean", createdAt: Date()),
+            workspace: workspace)
+        let start = "2026-09-01", end = "2026-10-01"
+        let bootstrap = try await repository.bootstrapSnapshot(start: start, end: end, today: "2026-09-23", valuationCurrency: "CNY")
+        XCTAssertEqual(bootstrap.revisionID, initial.id)
+        XCTAssertTrue(bootstrap.payload.sensitiveUnlocked)
+        let legacy = try await repository.globalTransactions()
+        XCTAssertEqual(legacy.transactions.count, 507)
+        let rows = legacy.transactions.filter { $0.date >= start && $0.date < end }
+        XCTAssertEqual(rows.count, 505)
+
+        let first = try await repository.candidatePage(start: start, end: end, expectedRevisionID: bootstrap.revisionID)
+        XCTAssertEqual(first.transactions.count, 500)
+        let cursor = try XCTUnwrap(first.nextCursor)
+        let last = try await repository.candidatePage(start: start, end: end, cursor: cursor, expectedRevisionID: bootstrap.revisionID)
+        XCTAssertEqual(last.transactions.count, 5)
+        XCTAssertNil(last.nextCursor)
+        XCTAssertEqual(last.revision, first.revision)
+        let candidates = first.transactions + last.transactions
+        // Compare the actual wire projection, not only IDs/counts. Candidate rows
+        // omit editor drafts and arbitrary metadata but retain string type evidence.
+        func projection(_ row: LedgerTransaction) -> LedgerTransaction {
+            let metadata = row.metadata?["type"]?.stringValue.map { ["type": LedgerMetadataValue.string($0)] }
+            return LedgerTransaction(date: row.date, payee: row.payee, narration: row.narration,
+                                     metadata: metadata, tags: row.tags, postings: row.postings, source: row.source)
+        }
+        XCTAssertEqual(candidates, rows.map(projection))
+        XCTAssertTrue(candidates.allSatisfy { $0.editableEntry == nil })
+        let refund = try XCTUnwrap(candidates.first { $0.narration == "Metadata-only evidence" })
+        XCTAssertEqual(refund.metadata, ["type": .string("退款")])
+        XCTAssertTrue(TransactionPresentation(transaction: refund).isRefund)
+        XCTAssertEqual(TransactionPresentation(transaction: refund).kind, .income)
+        let legacyRefund = try XCTUnwrap(rows.first { $0.id == refund.id })
+        XCTAssertEqual(legacyRefund.metadata?["fixture"], .string("not candidate evidence"))
+
+        let accounts = Array(Set(rows.flatMap { $0.postings.map(\.account) }))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        let tags = Array(Set(rows.flatMap { $0.tags ?? [] }.filter { !$0.isEmpty }))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        var limits = LocalTransactionScan.Limits()
+        limits.maxVisibleCount = 2
+        let filters = [
+            LedgerTransactionFilter(),
+            LedgerTransactionFilter(query: composed),
+            LedgerTransactionFilter(query: decomposed),
+            LedgerTransactionFilter(query: "✁"),
+            LedgerTransactionFilter(query: "👩\u{200d}💻"),
+            LedgerTransactionFilter(query: "👩"),
+            LedgerTransactionFilter(query: combining),
+            LedgerTransactionFilter(query: "\(decomposed) ✁", kind: .expense, account: "Expenses", tags: ["unicode"]),
+            LedgerTransactionFilter(kind: .income, tags: ["refund", "reversal"]),
+            LedgerTransactionFilter(kind: .transfer),
+            LedgerTransactionFilter(query: "no synthetic match")
+        ]
+        XCTAssertEqual(rows.filter(LedgerTransactionFilter(query: decomposed).matches).count, 2)
+        XCTAssertEqual(rows.filter(LedgerTransactionFilter(query: combining).matches).count, 2)
+        for filter in filters {
+            let result = try await repository.scanTransactions(start: start, end: end, filter: filter,
+                                                               expectedRevisionID: bootstrap.revisionID, limits: limits)
+            let matched = rows.filter(filter.matches)
+            XCTAssertEqual(result.revision, first.revision)
+            XCTAssertEqual(result.fullRangeCount, 505)
+            XCTAssertEqual(result.matchedCount, matched.count, "Filter: \(filter)")
+            XCTAssertEqual(result.visibleTransactions, matched.prefix(2).map(projection))
+            XCTAssertEqual(result.hasMoreMatches, matched.count > 2)
+            XCTAssertEqual(result.availableAccounts, accounts)
+            XCTAssertEqual(result.availableTags, tags)
+            XCTAssertTrue(result.availableAccounts.contains("Assets:Bank"))
+            XCTAssertTrue(result.availableTags.contains("tail"))
+            XCTAssertFalse(result.availableTags.contains("outside"))
+            let grouped = Dictionary(grouping: matched, by: \.date)
+            XCTAssertEqual(result.days.map(\.date), grouped.keys.sorted(by: >))
+            for day in result.days {
+                let group = try XCTUnwrap(grouped[day.date])
+                let signed = group.flatMap(\.postings).filter { $0.account.hasPrefix("Expenses:") }
+                    .reduce(0) { $0 + $1.amount }
+                XCTAssertEqual(day.matchedCount, group.count)
+                XCTAssertEqual(day.signedExpense, signed)
+                XCTAssertEqual(day.expense, max(0, signed))
+            }
+        }
+        // A workspace UUID, not the native page revision, pairs reads to bootstrap.
+        let wrongRevision = UUID()
+        do {
+            _ = try await repository.candidatePage(start: start, end: end, expectedRevisionID: wrongRevision)
+            XCTFail("Candidate page accepted a non-bootstrap UUID")
+        } catch {
+            XCTAssertEqual(error as? LocalLedgerWorkspace.WorkspaceError, .staleRevision)
+        }
+        do {
+            _ = try await repository.scanTransactions(start: start, end: end, filter: .init(), expectedRevisionID: wrongRevision)
+            XCTFail("Candidate scan accepted a non-bootstrap UUID")
+        } catch {
+            XCTAssertEqual(error as? LocalLedgerWorkspace.WorkspaceError, .staleRevision)
+        }
+        let after = try await workspace.currentRevision()
+        let saved = try await workspace.readFile(at: "main.bean")
+        let presented = await repository.presentedRevisionID
+        XCTAssertEqual(after, initial, "Read-only candidate operations must not publish a ledger revision")
+        XCTAssertEqual(saved, original, "Candidate operations must preserve exact ledger bytes")
+        XCTAssertEqual(presented, bootstrap.revisionID, "Candidate reads must not change the presented bootstrap UUID")
+        #else
+        throw XCTSkip("Requires the iOS app-host Python and Go bridges")
+        #endif
+    }
+
     func testValidationOnlyBridgeKeepsCanonicalDiagnosticsAndReadModel() async throws {
         #if os(iOS) && canImport(BeancountRuntime)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ValidationOnly-" + UUID().uuidString)
