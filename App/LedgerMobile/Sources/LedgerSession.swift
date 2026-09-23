@@ -244,6 +244,7 @@ final class LedgerSession: ObservableObject {
         let context: LocalReadContext
         let account: String
         let currency: String
+        let order: LedgerAccountPageOrder
     }
     struct LocalAccountContinuation: Sendable {
         fileprivate let sequenceID: UUID
@@ -253,6 +254,7 @@ final class LedgerSession: ObservableObject {
         fileprivate let count: Int
         fileprivate let consumed: Int
         fileprivate let lastBalance: Int
+        fileprivate let lastChange: Int
         fileprivate let lastDate: String
     }
     struct LocalAccountWindow: Sendable {
@@ -3666,17 +3668,17 @@ final class LedgerSession: ObservableObject {
     /// may publish into legacy arrays or infer missing/deleted history from a page.
     func localAccountWindow(account: String, currency: String,
                             continuation: LocalAccountContinuation? = nil,
-                            limit: Int = 100) async throws -> LocalAccountWindow {
+                            limit: Int = 100, order: LedgerAccountPageOrder = .asc) async throws -> LocalAccountWindow {
         let context = try localReadContext()
         guard let repository = localRepository else { throw CancellationError() }
         let sequence: AccountReadSequence
         if let continuation {
             guard let existing = accountReadSequence, existing.id == continuation.sequenceID,
-                  existing.account == account, existing.currency == currency else { throw CancellationError() }
+                  existing.account == account, existing.currency == currency, existing.order == order else { throw CancellationError() }
             try validateLocalRead(existing.context)
             sequence = existing
         } else {
-            sequence = AccountReadSequence(id: UUID(), context: context, account: account, currency: currency)
+            sequence = AccountReadSequence(id: UUID(), context: context, account: account, currency: currency, order: order)
             accountReadSequence = sequence
         }
         accountPageTask?.cancel()
@@ -3685,7 +3687,7 @@ final class LedgerSession: ObservableObject {
             try validateLocalRead(sequence.context)
             return try await repository.accountPage(account: account, currency: currency,
                 start: context.range.start, end: context.range.queryEndExclusive,
-                cursor: continuation?.cursor, limit: limit, expectedRevisionID: context.revisionID)
+                cursor: continuation?.cursor, limit: limit, order: order, expectedRevisionID: context.revisionID)
         }
         accountPageTask = task
         defer { if accountPageRequestID == id { accountPageTask = nil; accountPageRequestID = nil } }
@@ -3705,8 +3707,10 @@ final class LedgerSession: ObservableObject {
         if let continuation {
             guard page.revision == continuation.revision, page.rowCount == continuation.count,
                   header == continuation.header, let first = page.detail.rows.first,
-                  continuation.lastDate <= first.date else { throw LocalLedgerError.operationFailed("账户分页上下文已变化") }
-            let (balance, overflow) = continuation.lastBalance.addingReportingOverflow(first.change)
+                  (order == .asc ? continuation.lastDate <= first.date : continuation.lastDate >= first.date) else { throw LocalLedgerError.operationFailed("账户分页上下文已变化") }
+            let (balance, overflow) = order == .asc
+                ? continuation.lastBalance.addingReportingOverflow(first.change)
+                : continuation.lastBalance.subtractingReportingOverflow(continuation.lastChange)
             guard !overflow, balance == first.balance else { throw LocalLedgerError.operationFailed("账户分页余额不连续") }
         }
         let current = try await repository.workspace.currentRevision()
@@ -3716,7 +3720,7 @@ final class LedgerSession: ObservableObject {
         let next: LocalAccountContinuation?
         if let cursor = page.nextCursor, let last = page.detail.rows.last {
             next = LocalAccountContinuation(sequenceID: sequence.id, revision: page.revision, cursor: cursor,
-                header: header, count: page.rowCount, consumed: consumed, lastBalance: last.balance, lastDate: last.date)
+                header: header, count: page.rowCount, consumed: consumed, lastBalance: last.balance, lastChange: last.change, lastDate: last.date)
         } else { next = nil }
         return LocalAccountWindow(page: page, continuation: next)
     }

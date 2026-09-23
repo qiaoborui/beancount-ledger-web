@@ -205,13 +205,15 @@ actor LocalLedgerRepository: LedgerRepository {
     /// Pinned additive account page. Complete balances/counts do not make the
     /// rows complete; callers must keep chart aggregation independent of windows.
     func accountPage(account: String, currency: String, start: String, end: String,
-                     cursor: String? = nil, limit: Int = 100, expectedRevisionID: UUID) async throws -> LedgerAccountPage {
+                     cursor: String? = nil, limit: Int = 100, order: LedgerAccountPageOrder = .asc,
+                     expectedRevisionID: UUID) async throws -> LedgerAccountPage {
         guard !account.isEmpty, !currency.isEmpty, (1...500).contains(limit),
               cursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 }) ?? true else {
             throw LocalLedgerError.invalidConfiguration("账户分页参数无效")
         }
         var query = ["account": account, "currency": currency, "start": start, "end": end, "limit": String(limit)]
         query["cursor"] = cursor
+        if order == .desc { query["order"] = order.rawValue }
         try Task.checkCancellation()
         let (_, response) = try await readSnapshot("/api/ledger/accounts/detail/page", query: query,
             expectedRevisionID: expectedRevisionID)
@@ -233,12 +235,19 @@ actor LocalLedgerRepository: LedgerRepository {
                 throw LocalLedgerError.operationFailed("账户首页流水不完整")
             }
             if let first = detail.rows.first {
-                let (balance, overflow) = opening.addingReportingOverflow(first.change)
-                guard !overflow, balance == first.balance else { throw LocalLedgerError.operationFailed("账户期初流水余额不一致") }
+                if order == .asc {
+                    let (balance, overflow) = opening.addingReportingOverflow(first.change)
+                    guard !overflow, balance == first.balance else { throw LocalLedgerError.operationFailed("账户期初流水余额不一致") }
+                } else if first.balance != closing { throw LocalLedgerError.operationFailed("账户期末流水余额不一致") }
             }
         }
         if page.nextCursor == nil, let last = detail.rows.last {
-            guard last.balance == closing else { throw LocalLedgerError.operationFailed("账户期末流水余额不一致") }
+            if order == .asc {
+                guard last.balance == closing else { throw LocalLedgerError.operationFailed("账户期末流水余额不一致") }
+            } else {
+                let (balance, overflow) = last.balance.subtractingReportingOverflow(last.change)
+                guard !overflow, balance == opening else { throw LocalLedgerError.operationFailed("账户期初流水余额不一致") }
+            }
         }
         if page.rowCount == 0 {
             guard opening == closing, detail.rows.isEmpty, page.nextCursor == nil else {
@@ -253,11 +262,13 @@ actor LocalLedgerRepository: LedgerRepository {
             guard row.date == row.transaction.date, row.payee == row.transaction.payee,
                   row.narration == row.transaction.narration, ids.insert(row.id).inserted,
                   start.isEmpty || (row.date >= start && row.date < end),
-                  previous.map({ $0.date <= row.date }) ?? true else {
+                  previous.map({ order == .asc ? $0.date <= row.date : $0.date >= row.date }) ?? true else {
                 throw LocalLedgerError.operationFailed("账户分页流水不一致")
             }
             if let previous {
-                let (balance, overflow) = previous.balance.addingReportingOverflow(row.change)
+                let (balance, overflow) = order == .asc
+                    ? previous.balance.addingReportingOverflow(row.change)
+                    : previous.balance.subtractingReportingOverflow(previous.change)
                 guard !overflow, balance == row.balance else { throw LocalLedgerError.operationFailed("账户流水余额不一致") }
             }
             previous = row
