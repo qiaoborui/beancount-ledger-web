@@ -206,6 +206,11 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var localTransactionWindow: LocalTransactionWindow.Window?
     @Published private(set) var isLocalTransactionWindowLoading = false
     @Published private(set) var localTransactionWindowError: String?
+    @Published private(set) var localTransactionSummary: LocalTransactionScan.Result?
+    @Published private(set) var isLocalTransactionSummaryLoading = false
+    @Published private(set) var localTransactionSummaryError: String?
+    private var transactionSummaryTask: Task<Void, Never>?
+    private var transactionWindowFilter = LedgerTransactionFilter()
     private var transactionWindowReader: LocalTransactionWindow?
     private var transactionWindowContext: LocalReadContext?
     private var transactionWindowGeneration = 0
@@ -3347,6 +3352,11 @@ final class LedgerSession: ObservableObject {
     func resetLocalTransactionWindow() {
         localTransactionActionID = nil
         transactionWindowGeneration &+= 1
+        transactionSummaryTask?.cancel()
+        transactionSummaryTask = nil
+        localTransactionSummary = nil
+        isLocalTransactionSummaryLoading = false
+        localTransactionSummaryError = nil
         transactionWindowTask?.cancel()
         transactionWindowTask = nil
         transactionDetailTask?.cancel()
@@ -3394,6 +3404,7 @@ final class LedgerSession: ObservableObject {
                                     limits: LocalTransactionWindow.Limits = .init()) async {
         guard !Task.isCancelled else { return }
         resetLocalTransactionWindow()
+        transactionWindowFilter = filter
         guard let context = try? localReadContext(), let repository = localRepository else { return }
         await runLocalTransactionWindow(context: context, repository: repository, filter: filter, limits: limits)
     }
@@ -3406,6 +3417,47 @@ final class LedgerSession: ObservableObject {
               let context = transactionWindowContext, let repository = localRepository,
               (try? validateLocalRead(context)) != nil else { return }
         await runLocalTransactionWindow(context: context, repository: repository)
+    }
+
+    /// Complete counts/facets/day totals independently of scroll position.
+    /// No visible rows are retained by this scan and nothing is published before
+    /// EOF. Errors stay separate from the currently usable bounded list window.
+    func loadLocalTransactionSummary() async {
+        guard !Task.isCancelled, !isLocalTransactionSummaryLoading,
+              localTransactionSummary == nil,
+              let context = transactionWindowContext, let repository = localRepository,
+              (try? validateLocalRead(context)) != nil else { return }
+        let filter = transactionWindowFilter
+        isLocalTransactionSummaryLoading = true
+        localTransactionSummaryError = nil
+        let task = Task { @MainActor [self] in
+            defer {
+                if context.generation == transactionWindowGeneration {
+                    isLocalTransactionSummaryLoading = false
+                    transactionSummaryTask = nil
+                }
+            }
+            do {
+                try validateLocalRead(context)
+                let result = try await repository.scanTransactions(start: context.range.start,
+                    end: context.range.queryEndExclusive, filter: filter,
+                    expectedRevisionID: context.revisionID, limits: .init(maxVisibleCount: 0))
+                try validateLocalRead(context)
+                let revision = try await repository.workspace.currentRevision()
+                try validateLocalRead(context)
+                guard revision?.id == context.revisionID else {
+                    throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+                }
+                localTransactionSummary = result
+            } catch {
+                guard context.generation == transactionWindowGeneration else { return }
+                if localTransactionSummary == nil, !(error is CancellationError) && !Task.isCancelled {
+                    localTransactionSummaryError = error.localizedDescription
+                }
+            }
+        }
+        transactionSummaryTask = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
     }
 
     private func runLocalTransactionWindow(context: LocalReadContext, repository: LocalLedgerRepository,
@@ -3447,6 +3499,13 @@ final class LedgerSession: ObservableObject {
                     throw LocalLedgerWorkspace.WorkspaceError.staleRevision
                 }
                 localTransactionWindow = window // complete summary exists only at EOF
+                if let summary = window.summary {
+                    localTransactionSummary = summary
+                    localTransactionSummaryError = nil
+                    transactionSummaryTask?.cancel()
+                    transactionSummaryTask = nil
+                    isLocalTransactionSummaryLoading = false
+                }
             } catch {
                 guard context.generation == transactionWindowGeneration else { return }
                 let cancelled = error is CancellationError || Task.isCancelled
