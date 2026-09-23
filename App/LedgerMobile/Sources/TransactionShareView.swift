@@ -820,3 +820,39 @@ struct TransactionShareSheet: View {
         }
     }
 }
+
+/// Explicit file export leaves existing image/text/clipboard sharing unchanged.
+/// Only the complete prepared file is shared; never read it back into one String.
+struct TransactionTextExportSheet: View {
+    @EnvironmentObject private var session: LedgerSession
+    @Environment(\.dismiss) private var dismiss
+    let export: LocalTransactionShareExport
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Label("完整文字文件已准备", systemImage: "doc.text")
+                    Text("共 \(export.count) 笔，包含当前筛选范围内的全部已选交易，不限于本页。")
+                        .foregroundStyle(.secondary)
+                }
+                Section {
+                    ShareLink(item: export.url) {
+                        Label("分享文字文件", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(session.phase != .ready || session.privacyShielded)
+                    .accessibilityIdentifier("transaction-text-export-share")
+                } footer: {
+                    Text("这是完整的 UTF-8 文字文件。关闭此窗口或锁定账本后，会清除本机临时文件；已交给其他应用的副本不受此清理影响。")
+                }
+            }
+            .navigationTitle("导出流水文字")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
+            }
+        }
+        // The presenting sheet owns cleanup via onDismiss. A system share
+        // controller may hide this view without ending the export presentation.
+    }
+}

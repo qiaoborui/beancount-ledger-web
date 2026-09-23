@@ -3,7 +3,8 @@ import Foundation
 /// Caller-owned export, not a session cache. The lifecycle owner must discard
 /// this value on lock/revision change/dismissal, including after publication.
 @MainActor
-final class LocalTransactionShareExport {
+final class LocalTransactionShareExport: Identifiable {
+    let id = UUID()
     let url: URL
     let count: Int
     let revisionID: UUID

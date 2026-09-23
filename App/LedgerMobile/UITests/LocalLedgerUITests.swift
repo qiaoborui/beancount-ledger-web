@@ -81,6 +81,14 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["transaction-tag-selection"].tap()
         let selected = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'transaction-select-row-'")).firstMatch
         XCTAssertTrue(selected.waitForExistence(timeout: 5)); selected.tap()
+        app.buttons["transaction-batch-share"].press(forDuration: 1)
+        let exportMenu = app.buttons["导出完整文字文件"].firstMatch
+        XCTAssertTrue(exportMenu.waitForExistence(timeout: 5)); exportMenu.tap()
+        let exportShare = app.buttons["transaction-text-export-share"]
+        XCTAssertTrue(exportShare.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '共 1 笔'")).firstMatch.exists)
+        app.navigationBars["导出流水文字"].buttons["完成"].tap()
+        XCTAssertTrue(exportShare.waitForNonExistence(timeout: 5))
         app.buttons["添加标签"].tap()
         let tagInput = app.textFields["transaction-bulk-tag-input"]
         XCTAssertTrue(tagInput.waitForExistence(timeout: 15))
