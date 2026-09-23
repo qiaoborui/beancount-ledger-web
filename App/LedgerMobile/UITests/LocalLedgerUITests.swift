@@ -112,6 +112,21 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["#synthetic-reviewed"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Synthetic action edited"].firstMatch.waitForExistence(timeout: 15))
         app.navigationBars["#synthetic-reviewed"].buttons.element(boundBy: 0).tap()
+        app.open(URL(string: "ledger://accounts?account=Assets%3ABank&currency=CNY")!)
+        let historyPage = app.staticTexts["account-history-page"]
+        XCTAssertTrue(historyPage.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertEqual(historyPage.label, "第 1 页")
+        XCTAssertFalse(app.buttons["account-history-previous"].isEnabled)
+        XCTAssertFalse(app.buttons["account-history-next"].isEnabled)
+        let trend = app.descendants(matching: .any)["account-balance-trend-chart"]
+        XCTAssertTrue(trend.waitForExistence(timeout: 20), app.debugDescription)
+        let accountRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'account-history-row-'")).firstMatch
+        XCTAssertTrue(accountRow.waitForExistence(timeout: 10), app.debugDescription)
+        if !accountRow.isHittable { app.swipeUp() }
+        accountRow.tap()
+        XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 10))
+        app.navigationBars["交易详情"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(historyPage.waitForExistence(timeout: 15))
         app.tabBars.buttons["交易"].tap()
         XCTAssertTrue(editedRow.waitForExistence(timeout: 15))
         editedRow.press(forDuration: 1)
