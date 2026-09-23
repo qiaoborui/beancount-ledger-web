@@ -49,6 +49,14 @@ final class LocalLedger100kIntegrationTests: XCTestCase {
         let home = try await repository.bootstrap(start: "2026-09-01", end: "2026-10-01", today: "2026-09-23", valuationCurrency: "CNY")
         XCTAssertGreaterThan(home.summary.expense, 0)
         print("SYNTHETIC100K bootstrap_ms=\(Self.ms(bootstrapStart.duration(to: .now)))")
+        let categoryStart = ContinuousClock.now
+        let currentRevision = try await repository.workspace.currentRevision()
+        let revision = try XCTUnwrap(currentRevision)
+        let categories = try await repository.overviewCategories(start: "0001-01-01", end: "9999-12-31", expectedRevisionID: revision.id)
+        XCTAssertEqual(categories.positiveTotalMinorUnits, 10000000)
+        XCTAssertEqual(categories.categories.count, 1)
+        XCTAssertEqual(categories.categories.first?.positiveTransactionCount, 100000)
+        print("SYNTHETIC100K overview_categories_ms=\(Self.ms(categoryStart.duration(to: .now)))")
         let entry = LedgerTransactionEntry(date: "2026-09-23", payee: "Synthetic", narration: "Confirmed capacity probe", postings: [
             .init(account: "Expenses:Food", amount: "1", currency: "CNY"), .init(account: "Assets:Cash", amount: "-1", currency: "CNY")])
         let previewStart = ContinuousClock.now

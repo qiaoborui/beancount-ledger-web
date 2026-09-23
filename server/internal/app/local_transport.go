@@ -53,6 +53,9 @@ type LocalImportFile struct {
 // mutation is a staged proposal; canonical validation and publication belong
 // to the caller's workspace transaction.
 func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
+	if input.Path == "/api/ledger/overview/categories" && (input.Staging || input.ImportFile != nil) {
+		return http.StatusBadRequest, nil, errors.New("overview categories require a committed generation without an import file")
+	}
 	cfg, err := localConfig(input)
 	if err != nil {
 		return http.StatusBadRequest, nil, err
@@ -95,6 +98,13 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 			return http.StatusBadRequest, nil, err
 		}
 		return localTransactionPageProjection(cfg, snapshot, input.Query, input.Path == "/api/ledger/transactions/history-page")
+	}
+	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && input.Path == "/api/ledger/overview/categories" {
+		snapshot, err := cache.Snapshot()
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		return localOverviewCategoriesResponse(cfg, snapshot, input.Query)
 	}
 	if strings.EqualFold(input.Method, http.MethodPost) && input.Path == "/api/ledger/bql" {
 		if input.ImportFile != nil {

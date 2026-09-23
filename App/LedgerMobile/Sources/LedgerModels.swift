@@ -2523,3 +2523,21 @@ enum EventTagCalculator {
         }
     }
 }
+
+/// Native-only bounded overview projection. Totals include every positive net
+/// category, while only the top four carry representative transactions for icons.
+struct LedgerOverviewCategories: Codable, Sendable {
+    let revision: String
+    let start: String
+    let end: String
+    let sensitiveUnlocked: Bool
+    let positiveTotalMinorUnits: Int
+    let categories: [Category]
+
+    struct Category: Codable, Sendable {
+        let label: String
+        let totalMinorUnits: Int
+        let positiveTransactionCount: Int
+        let representative: LedgerTransaction
+    }
+}
