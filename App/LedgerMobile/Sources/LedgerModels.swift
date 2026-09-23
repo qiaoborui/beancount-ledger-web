@@ -1119,7 +1119,7 @@ struct LedgerAccountDetailRow: Decodable, Equatable, Identifiable, Sendable {
     }
 }
 
-struct LedgerAccountBalanceTrendPoint: Equatable, Identifiable {
+struct LedgerAccountBalanceTrendPoint: Equatable, Identifiable, Sendable {
     let date: String
     let balance: Int
 
@@ -1174,7 +1174,7 @@ extension LedgerAccountDetail {
     }
 
     func balanceTrend(maxPoints: Int) -> [LedgerAccountBalanceTrendPoint] {
-        downsampledBalanceTrend(balanceTrend, maxPoints: maxPoints)
+        Self.downsampledBalanceTrend(balanceTrend, maxPoints: maxPoints)
     }
 
     func balanceTrend(in range: LedgerDateRange, maxPoints: Int) -> [LedgerAccountBalanceTrendPoint] {
@@ -1186,10 +1186,10 @@ extension LedgerAccountDetail {
         if points.last != closingPoint {
             points.append(closingPoint)
         }
-        return downsampledBalanceTrend(points, maxPoints: maxPoints)
+        return Self.downsampledBalanceTrend(points, maxPoints: maxPoints)
     }
 
-    private func downsampledBalanceTrend(
+    static func downsampledBalanceTrend(
         _ points: [LedgerAccountBalanceTrendPoint],
         maxPoints: Int
     ) -> [LedgerAccountBalanceTrendPoint] {
