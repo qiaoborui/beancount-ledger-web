@@ -241,3 +241,90 @@ func TestLocalAccountPagePreEncodingBudgets(t *testing.T) {
 		t.Fatal("oversized header accepted")
 	}
 }
+
+func TestLocalAccountDescendingExactLegacyReverseWithStableBalances(t *testing.T) {
+	cfg, snapshot := accountPageFixture(1205)
+	for i := range snapshot.Transactions {
+		if i < 3 {
+			snapshot.Transactions[i].Date = "2026-08-31"
+		}
+		if i > 1201 {
+			snapshot.Transactions[i].Date = "2026-10-01"
+		}
+	}
+	snapshot.transactionsAsc, snapshot.transactionsDesc = sortedTransactionIndices(snapshot.Transactions)
+	service := NewAccountServiceWithSnapshot(nil, nil, func() (*LedgerSnapshot, error) { return snapshot, nil })
+	for _, currency := range []string{"CNY", "USD"} {
+		legacy, err := service.Detail("Assets:Cash", currency, "2026-09-01", "2026-10-01")
+		if err != nil {
+			t.Fatal(err)
+		}
+		q := map[string]string{"account": "Assets:Cash", "currency": currency, "start": "2026-09-01", "end": "2026-10-01", "order": "desc", "limit": "137"}
+		count := 0
+		for attempts := 0; attempts < 10; attempts++ {
+			page := readAccountPage(t, cfg, snapshot, q)
+			if page.RowCount != len(legacy.Rows) || page.Detail.CurrentBalance != legacy.CurrentBalance || page.Detail.OpeningBalance != legacy.OpeningBalance || page.Detail.ClosingBalance != legacy.ClosingBalance {
+				t.Fatal("descending totals changed")
+			}
+			for _, row := range page.Detail.Rows {
+				expected := legacy.Rows[len(legacy.Rows)-1-count]
+				if row.Txn.Source.Line != expected.Txn.Source.Line || row.Balance != expected.Balance || row.Change != expected.Change {
+					t.Fatal("not exact legacy reversal")
+				}
+				count++
+			}
+			if page.NextCursor == "" {
+				break
+			}
+			if count == 137 {
+				asc := map[string]string{}
+				for k, v := range q {
+					asc[k] = v
+				}
+				asc["order"] = "asc"
+				asc["cursor"] = page.NextCursor
+				if status, _, err := localAccountPageResponse(cfg, snapshot, asc); status != 409 || err == nil {
+					t.Fatal("order cursor mismatch accepted")
+				}
+			}
+			q["cursor"] = page.NextCursor
+		}
+		if count != len(legacy.Rows) {
+			t.Fatal("descending incomplete")
+		}
+	}
+	if status, _, err := localAccountPageResponse(cfg, snapshot, map[string]string{"account": "Assets:Cash", "order": "other"}); status != 400 || err == nil {
+		t.Fatal("invalid order accepted")
+	}
+}
+func TestLocalAccountDescendingByteContinuationAndMinInt(t *testing.T) {
+	cfg, snapshot := accountPageFixture(7)
+	for i := range snapshot.Transactions {
+		snapshot.Transactions[i].Narration = strings.Repeat("<", 30000)
+	}
+	q := map[string]string{"account": "Assets:Cash", "order": "desc", "limit": "500"}
+	count := 0
+	for attempts := 0; attempts < 4; attempts++ {
+		page := readAccountPage(t, cfg, snapshot, q)
+		for _, row := range page.Detail.Rows {
+			if row.Txn.Source.Line != 7-count || row.Balance != (7-count)*10 {
+				t.Fatal("byte continuation balance/order")
+			}
+			count++
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		q["cursor"] = page.NextCursor
+	}
+	if count != 7 {
+		t.Fatal("incomplete")
+	}
+	cfg, snapshot = accountPageFixture(1)
+	minInt := -int(^uint(0)>>1) - 1
+	snapshot.Transactions[0].Postings = []Posting{{Account: "Assets:Cash", Currency: "CNY", Amount: minInt}}
+	page := readAccountPage(t, cfg, snapshot, map[string]string{"account": "Assets:Cash", "order": "desc"})
+	if page.Detail.Rows[0].Balance != minInt || page.Detail.PeriodChange != minInt {
+		t.Fatal("MinInt subtraction changed")
+	}
+}
