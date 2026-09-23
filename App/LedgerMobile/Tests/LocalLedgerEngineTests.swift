@@ -3,6 +3,20 @@ import XCTest
 @testable import LedgerMobile
 
 final class LocalLedgerEngineTests: XCTestCase {
+    func testPageWireBoundPrecedesDecodeForResultsAndEnvelopes() throws {
+        let result = Data(#"{"revision":"r","transactions":[],"sensitiveUnlocked":true}"#.utf8)
+        let envelope = Data(#"{"ok":true,"status":200,"result":\#(String(decoding: result, as: UTF8.self))}"#.utf8)
+        for (data, wrapped) in [(result, false), (envelope, true)] {
+            let response = wrapped ? LocalLedgerResponse(envelope: data) : LocalLedgerResponse(result: data)
+            XCTAssertEqual(try response.decodeTransactionPage(maximumBytes: data.count).revision, "r")
+            XCTAssertThrowsError(try response.decodeTransactionPage(maximumBytes: data.count - 1))
+        }
+        let malformed = LocalLedgerResponse(result: Data(repeating: 0xff, count: 10))
+        XCTAssertThrowsError(try malformed.decodeTransactionPage(maximumBytes: 9)) {
+            XCTAssertEqual($0 as? LocalLedgerError, .operationFailed("交易分页响应超过容量限制"))
+        }
+    }
+
     func testBridgePreservesLargeIntegersAndNestedValues() throws {
         let raw = Data(#"{"ok":true,"status":200,"result":{"exact":9007199254740993,"decimal":1.25,"null":null,"array":[true,"中文",{"amount":"0.0001"}]}}"#.utf8)
         let result = try LocalLedgerJSON.resultData(raw)

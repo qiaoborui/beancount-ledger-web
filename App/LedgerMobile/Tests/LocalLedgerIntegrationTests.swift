@@ -108,6 +108,34 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         let legacyRefund = try XCTUnwrap(rows.first { $0.id == refund.id })
         XCTAssertEqual(legacyRefund.metadata?["fixture"], .string("not candidate evidence"))
 
+        // Real paged navigation must resume within a candidate page, without
+        // re-counting the summary or interpreting window absence as deletion.
+        let windowLimits = LocalTransactionWindow.Limits(maxRows: 137)
+        let windowReader = try await repository.makeTransactionWindow(start: start, end: end,
+            expectedRevisionID: bootstrap.revisionID, limits: windowLimits)
+        var navigated: [LedgerTransaction] = []
+        var checkpoint: LocalTransactionWindow.Checkpoint?
+        while true {
+            let window = try await windowReader.nextWindow()
+            XCTAssertLessThanOrEqual(window.transactions.count, 137)
+            if checkpoint == nil { checkpoint = window.continuation }
+            navigated += window.transactions
+            if window.isComplete {
+                XCTAssertEqual(window.summary?.fullRangeCount, 505)
+                XCTAssertEqual(window.summary?.matchedCount, 505)
+                break
+            }
+            XCTAssertNil(window.summary)
+        }
+        XCTAssertEqual(navigated, candidates)
+        let resumed = try await repository.makeTransactionWindow(start: start, end: end,
+            expectedRevisionID: bootstrap.revisionID, limits: windowLimits, checkpoint: XCTUnwrap(checkpoint))
+        let replay = try await resumed.nextWindow()
+        XCTAssertEqual(replay.transactions, Array(candidates[137..<274]))
+        XCTAssertNil(replay.summary)
+        let detail = try await repository.transactionDetail(source: refund.source, expectedRevisionID: bootstrap.revisionID)
+        XCTAssertEqual(detail, legacyRefund)
+
         let accounts = Array(Set(rows.flatMap { $0.postings.map(\.account) }))
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         let tags = Array(Set(rows.flatMap { $0.tags ?? [] }.filter { !$0.isEmpty }))

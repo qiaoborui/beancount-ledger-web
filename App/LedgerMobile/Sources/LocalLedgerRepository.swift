@@ -118,7 +118,7 @@ actor LocalLedgerRepository: LedgerRepository {
         let (_, response) = try await readSnapshot("/api/ledger/transactions/page", query: query,
                                                   expectedRevisionID: expectedRevisionID)
         try Task.checkCancellation()
-        let page = try response.decodeTransactionPage()
+        let page = try response.decodeTransactionPage(maximumBytes: 1 << 20)
         guard page.sensitiveUnlocked else {
             throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定")
         }
@@ -186,6 +186,61 @@ actor LocalLedgerRepository: LedgerRepository {
 
     func transactionDetail(source: TransactionSource) async throws -> LedgerTransaction {
         try await read("/api/ledger/transactions/detail", query: ["file": source.file, "line": String(source.line), "hash": source.hash ?? ""])
+    }
+
+    /// Bare detail transport has no sensitiveUnlocked flag: authentication belongs
+    /// to the owning session, which must discard results on lock/workspace changes.
+    /// Unlike presentation reads, this pinned read never authorizes later writes.
+    func transactionDetail(source: TransactionSource, expectedRevisionID: UUID) async throws -> LedgerTransaction {
+        try Task.checkCancellation()
+        guard !source.file.isEmpty, !source.file.hasPrefix("/"),
+              !source.file.contains("\\"), !source.file.contains("\0"),
+              source.line >= 0, let hash = source.hash, !hash.isEmpty else {
+            throw LocalLedgerError.invalidConfiguration("交易来源无效")
+        }
+        var depth = 0
+        for component in source.file.split(separator: "/") where component != "." {
+            depth += component == ".." ? -1 : 1
+            guard depth >= 0 else { throw LocalLedgerError.invalidConfiguration("交易来源无效") }
+        }
+        let (_, response) = try await readSnapshot("/api/ledger/transactions/detail",
+            query: ["file": source.file, "line": String(source.line), "hash": hash],
+            expectedRevisionID: expectedRevisionID)
+        try Task.checkCancellation()
+        let detail = try response.decode(LedgerTransaction.self)
+        guard detail.source == source else { throw LocalLedgerError.staleTransactionCursor }
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return detail
+    }
+
+    /// Additive reader only, not production UI wiring. The provider checks freshness
+    /// after each new page read; it is NOT called when serving cached rows. The owner
+    /// must explicitly invalidate the window on revision, workspace or lock changes
+    /// and discard already returned windows. Authentication belongs to that session.
+    func makeTransactionWindow(start: String, end: String, filter: LedgerTransactionFilter = .init(),
+                               expectedRevisionID: UUID, limits: LocalTransactionWindow.Limits = .init(),
+                               checkpoint: LocalTransactionWindow.Checkpoint? = nil) async throws -> LocalTransactionWindow {
+        try Task.checkCancellation()
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        let workspaceID = descriptor.id
+        let scope = [workspaceID.uuidString, expectedRevisionID.uuidString, start, end].joined(separator: "|")
+        return try LocalTransactionWindow(workspaceID: workspaceID, scope: scope, filter: filter, limits: limits,
+                                          checkpoint: checkpoint) { request in
+            guard request.workspaceID == workspaceID else {
+                throw LocalTransactionWindow.WindowError.invalidConfiguration
+            }
+            let page = try await self.candidatePage(start: start, end: end, cursor: request.cursor,
+                                                  limit: request.limit, expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if let expected = request.expectedRevision, page.revision != expected {
+                throw LocalTransactionWindow.WindowError.revisionMismatch
+            }
+            return page
+        }
     }
 
     func classificationHistoryPage(cursor: String?) async throws -> LedgerTransactionPage {

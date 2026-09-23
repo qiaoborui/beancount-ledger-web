@@ -212,13 +212,13 @@ struct LocalTransactionScan: Sendable {
         state.bytes = total
     }
 
-    private static func add(_ lhs: Int, _ rhs: Int) throws -> Int {
+    static func add(_ lhs: Int, _ rhs: Int) throws -> Int {
         let (value, overflow) = lhs.addingReportingOverflow(rhs)
         guard !overflow else { throw ScanError.arithmeticOverflow }
         return value
     }
 
-    private static func checkedExpense(_ transaction: LedgerTransaction) throws -> Int {
+    static func checkedExpense(_ transaction: LedgerTransaction) throws -> Int {
         // Mirror TransactionPresentation's early returns: only validate arithmetic
         // that its selected branch reaches, including intermediate sum overflows.
         var expense = 0
@@ -250,11 +250,11 @@ struct LocalTransactionScan: Sendable {
     // fixed container/element allowances plus every retained UTF-8 payload, including
     // optional metadata and editable entries. No JSON copies or cached page bodies.
     // The independent row, group, page and byte caps bound each growing dimension.
-    private static func stringBytes(_ value: String) throws -> Int {
+    static func stringBytes(_ value: String) throws -> Int {
         try add(128, value.utf8.count)
     }
 
-    private static func transactionBytes(_ transaction: LedgerTransaction) throws -> Int {
+    static func transactionBytes(_ transaction: LedgerTransaction) throws -> Int {
         var bytes = 512
         func string(_ value: String?) throws {
             if let value { bytes = try add(bytes, stringBytes(value)) }
