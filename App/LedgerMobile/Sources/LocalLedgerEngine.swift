@@ -75,7 +75,12 @@ struct LocalLedgerResponse: Sendable {
         return (try? JSONDecoder().decode(Envelope.self, from: data).diagnostics.contains { $0.code == "model.unavailable" }) ?? false
     }
 
-    func decodeTransactionPage() throws -> LedgerTransactionPage {
+    /// Bound the complete wire response (including a native envelope) before any
+    /// JSON decoding. The native page encoder reserves envelope headroom.
+    func decodeTransactionPage(maximumBytes: Int? = nil) throws -> LedgerTransactionPage {
+        if let maximumBytes, maximumBytes < 0 || data.count > maximumBytes {
+            throw LocalLedgerError.operationFailed("交易分页响应超过容量限制")
+        }
         do { return try decode(LedgerTransactionPage.self) }
         catch let error as LocalLedgerError {
             // Interpret conflict only at this endpoint; other mutation conflicts
