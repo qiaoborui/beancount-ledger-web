@@ -191,7 +191,7 @@ final class LedgerSession: ObservableObject {
     private var systemAuthenticationInProgress = false
     private var requestGeneration = 0
     private var sessionEpoch = 0
-    private struct LocalPresentation: Equatable {
+    fileprivate struct LocalPresentation: Equatable, Sendable {
         let ledgerID: UUID
         let revisionID: UUID?
         let today: String
@@ -210,8 +210,27 @@ final class LedgerSession: ObservableObject {
     private var transactionWindowGeneration = 0
     private var transactionWindowTask: Task<Void, Never>?
     private var transactionDetailTask: Task<LedgerTransaction, Error>?
+    private var localTransactionActionID: UUID?
 
-    private struct LocalReadContext {
+    enum LocalTransactionActionKind: Sendable { case edit, delete, addTags }
+
+    /// Caller-owned exact originals, never an all-history session detail cache.
+    /// The opaque nonce is single-use and revocable independently of this value.
+    struct LocalTransactionAction: Sendable {
+        let kind: LocalTransactionActionKind
+        let originals: [LedgerTransaction]
+        fileprivate let id: UUID
+        fileprivate let context: LocalReadContext
+        fileprivate init(kind: LocalTransactionActionKind, originals: [LedgerTransaction],
+                         id: UUID, context: LocalReadContext) {
+            self.kind = kind
+            self.originals = originals
+            self.id = id
+            self.context = context
+        }
+    }
+
+    fileprivate struct LocalReadContext: Sendable {
         let generation: Int
         let request: Int
         let epoch: Int
@@ -3325,6 +3344,7 @@ final class LedgerSession: ObservableObject {
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
     func resetLocalTransactionWindow() {
+        localTransactionActionID = nil
         transactionWindowGeneration &+= 1
         transactionWindowTask?.cancel()
         transactionWindowTask = nil
@@ -3464,6 +3484,113 @@ final class LedgerSession: ObservableObject {
             throw LocalLedgerWorkspace.WorkspaceError.staleRevision
         }
         return detail
+    }
+
+    /// An explicit user action hydrates exact sources from a pinned revision.
+    /// A newer completed preparation supersedes prior authority. While hydration
+    /// is busy, reject a second preparation without revoking the in-flight one.
+    /// No partial batch is authorized.
+    func prepareLocalTransactionAction(sources: [TransactionSource],
+                                       kind: LocalTransactionActionKind) async throws -> LocalTransactionAction {
+        let context = try localReadContext()
+        guard !sources.isEmpty, kind == .addTags || sources.count == 1,
+              Set(sources.map(Self.transactionMutationKey)).count == sources.count,
+              sources.allSatisfy({ $0.hash?.isEmpty == false }) else {
+            throw LedgerTransactionMutationError.sourceUnavailable
+        }
+        guard transactionDetailTask == nil else { throw LocalTransactionWindow.WindowError.busy }
+        let id = UUID()
+        localTransactionActionID = id
+        do {
+            var originals: [LedgerTransaction] = []
+            for source in sources {
+                try validateLocalRead(context)
+                guard localTransactionActionID == id else { throw CancellationError() }
+                guard transactionMutations[Self.transactionMutationKey(source)]?.phase.blocksFurtherWrites != true else {
+                    throw LedgerTransactionMutationError.alreadyInProgress
+                }
+                let original = try await localTransactionDetail(source: source)
+                try validateLocalRead(context)
+                guard localTransactionActionID == id else { throw CancellationError() }
+                originals.append(original)
+            }
+            return LocalTransactionAction(kind: kind, originals: originals, id: id, context: context)
+        } catch {
+            if localTransactionActionID == id { localTransactionActionID = nil }
+            throw error
+        }
+    }
+
+    func cancelLocalTransactionAction(_ action: LocalTransactionAction) {
+        if localTransactionActionID == action.id { localTransactionActionID = nil }
+    }
+
+    func updateLocalTransaction(action: LocalTransactionAction, entry: LedgerTransactionEntry) async throws {
+        try await performLocalTransactionAction(action, kind: .edit, mutation: .edit(entry))
+    }
+
+    func deleteLocalTransaction(action: LocalTransactionAction, reason: String) async throws {
+        try await performLocalTransactionAction(action, kind: .delete, mutation: .delete, reason: reason)
+    }
+
+    func addLocalTransactionTags(action: LocalTransactionAction, tags: [String]) async throws {
+        try await performLocalTransactionAction(action, kind: .addTags, mutation: .addTags(tags))
+    }
+
+    private func performLocalTransactionAction(_ action: LocalTransactionAction,
+        kind: LocalTransactionActionKind, mutation: LedgerTransactionMutation.Kind, reason: String = "") async throws {
+        func validate() throws {
+            try validateLocalRead(action.context)
+            guard localTransactionActionID == action.id, action.kind == kind else { throw CancellationError() }
+        }
+        try validate()
+        guard let repository = localRepository else { throw CancellationError() }
+        let revision = try await repository.workspace.currentRevision()
+        try validate()
+        guard revision?.id == action.context.revisionID else {
+            localTransactionActionID = nil
+            throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+        }
+        let sources = action.originals.map(\.source)
+        let keys = sources.map(Self.transactionMutationKey)
+        // Validate the entire batch before changing any optimistic overlay.
+        guard !keys.contains(where: { transactionMutations[$0]?.phase.blocksFurtherWrites == true }) else {
+            throw LedgerTransactionMutationError.alreadyInProgress
+        }
+        localTransactionActionID = nil // Consume BEFORE begin resets the window generation.
+        let operationID = UUID()
+        for original in action.originals {
+            let projected: LedgerTransaction
+            switch mutation {
+            case .edit(let entry): projected = original.projecting(entry: entry)
+            case .delete: projected = original
+            case .addTags(let tags): projected = original.projecting(addingTags: tags)
+            }
+            try beginTransactionMutation(key: Self.transactionMutationKey(original.source),
+                mutation: LedgerTransactionMutation(operationID: operationID, original: original,
+                    projected: projected, kind: mutation, phase: .pending))
+        }
+        do {
+            try await performSensitiveRequest(validatesRequestGeneration: false) { _ in
+                // Never use mutable presentedRevisionID as the authority for this action.
+                switch mutation {
+                case .edit(let entry):
+                    try await repository.updateTransaction(source: sources[0], entry: entry,
+                        expectedRevisionID: action.context.revisionID)
+                case .delete:
+                    try await repository.deleteTransaction(source: sources[0], reason: reason,
+                        expectedRevisionID: action.context.revisionID)
+                case .addTags(let tags):
+                    try await repository.addTransactionTags(sources: sources, tags: tags,
+                        expectedRevisionID: action.context.revisionID)
+                }
+            }
+            confirmTransactionMutations(keys: keys, operationID: operationID)
+            scheduleTransactionReconciliation()
+        } catch {
+            failTransactionMutations(keys: keys, operationID: operationID, error: error)
+            throw error
+        }
     }
 
     private func invalidateOverviewCategories() {
