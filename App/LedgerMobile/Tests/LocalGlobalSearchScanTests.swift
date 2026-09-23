@@ -79,6 +79,25 @@ final class LocalGlobalSearchScanTests: XCTestCase {
         XCTAssertNotNil(try completed.consume(page([]), requestedCursor: nil))
         XCTAssertThrowsError(try completed.consume(page([]), requestedCursor: nil))
     }
+    func testAvailableTagsComeFromAllHistoryIncludingBlankAndFilteredEmptyResults() throws {
+        for (query, scope, filters) in [
+            ("", LedgerGlobalSearchScope.all, LedgerGlobalSearchFilters()),
+            ("absent", .transactions, .init(account: "Expenses:Missing")),
+            ("trip", .accounts, .init()),
+            ("", .documents, .init(startDate: "2027-01-01"))
+        ] {
+            var scan = try LocalGlobalSearchScan(revision: "r", query: query, accounts: [], scope: scope, filters: filters, limits: .init(rows: 1))
+            XCTAssertNil(try scan.consume(page([row(1)], next: "n"), requestedCursor: nil))
+            let result = try XCTUnwrap(scan.consume(page([row(2)]), requestedCursor: "n"))
+            XCTAssertEqual(result.availableTags, ["office", "trip"])
+            XCTAssertTrue(result.transactions.isEmpty)
+        }
+        var bounded = try LocalGlobalSearchScan(revision: "r", query: "", accounts: [], limits: .init(tags: 1))
+        XCTAssertNil(try bounded.consume(page([row(1)], next: "n"), requestedCursor: nil))
+        XCTAssertThrowsError(try bounded.consume(page([row(2)]), requestedCursor: "n"))
+        XCTAssertThrowsError(try bounded.consume(page([]), requestedCursor: "n"))
+    }
+
     func testIndependentGoldenMatchingAndLexicalSourceIDOrder() throws {
         let rows = [row(2), row(10), row(3), row(1)]
         for query in ["cafe", "ＣＡＦＥ", "Cafe\u{301}", "receipt true", "empty-key", "12.50 餐饮", "fixture.bean", "number 12.5"] {
