@@ -226,6 +226,8 @@ final class LedgerSession: ObservableObject {
     private var transactionShareTask: Task<LocalTransactionShareExport, Error>?
     private var transactionShareID: UUID?
     private var transactionShareExport: LocalTransactionShareExport?
+    private var transactionSelectionTask: Task<LocalTransactionSelectionScan.Result, Error>?
+    private var transactionSelectionID: UUID?
 
     enum LocalTransactionActionKind: Sendable { case edit, delete, addTags }
 
@@ -3362,6 +3364,9 @@ final class LedgerSession: ObservableObject {
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
     func resetLocalTransactionWindow() {
+        transactionSelectionID = nil
+        transactionSelectionTask?.cancel()
+        transactionSelectionTask = nil
         discardLocalTransactionShare()
         localTransactionActionID = nil
         transactionWindowGeneration &+= 1
@@ -3596,6 +3601,39 @@ final class LedgerSession: ObservableObject {
             throw LocalLedgerWorkspace.WorkspaceError.staleRevision
         }
         return detail
+    }
+
+    /// Caller-owned complete facts. Every new selection request supersedes the
+    /// previous one; the UI must also compare its captured selection before use.
+    func localTransactionSelectionFacts(filter: LedgerTransactionFilter,
+                                        selectedIDs: Set<String>) async throws -> LocalTransactionSelectionScan.Result {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        transactionSelectionTask?.cancel()
+        let id = UUID()
+        transactionSelectionID = id
+        let blocked = Set(transactionMutations.values.filter { $0.phase.blocksFurtherWrites }.map { $0.original.id })
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            let result = try await repository.selectionFacts(start: context.range.start,
+                end: context.range.queryEndExclusive, filter: filter, selectedIDs: selectedIDs,
+                blockedIDs: blocked, expectedRevisionID: context.revisionID)
+            try validateLocalRead(context)
+            guard transactionSelectionID == id else { throw CancellationError() }
+            return result
+        }
+        transactionSelectionTask = task
+        defer {
+            if transactionSelectionID == id { transactionSelectionTask = nil; transactionSelectionID = nil }
+        }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(context)
+        guard transactionSelectionID == id else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard transactionSelectionID == id else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
     }
 
     /// Retain at most one export, revoking its file synchronously whenever the

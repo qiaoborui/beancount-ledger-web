@@ -7,7 +7,7 @@ import Foundation
 /// not remembered selection membership or the existing full-range tag scope.
 struct LocalTransactionSelectionScan {
     enum SelectionError: Error, Equatable { case sourceBytes, invalidBudget }
-    struct Result {
+    struct Result: Sendable {
         let rangeCount: Int
         let matchingCount: Int
         let selectedCount: Int

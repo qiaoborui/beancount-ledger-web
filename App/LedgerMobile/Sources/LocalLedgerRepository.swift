@@ -161,6 +161,32 @@ actor LocalLedgerRepository: LedgerRepository {
         }
     }
 
+    /// Complete selection facts from unfiltered candidates, not the UI window.
+    /// Does not advance mutable write-presentation authority or retain rows.
+    func selectionFacts(start: String, end: String, filter: LedgerTransactionFilter,
+                        selectedIDs: Set<String>, blockedIDs: Set<String>, expectedRevisionID: UUID) async throws
+        -> LocalTransactionSelectionScan.Result {
+        var scan: LocalTransactionSelectionScan?
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await candidatePage(start: start, end: end, cursor: cursor,
+                expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil {
+                scan = try LocalTransactionSelectionScan(revision: page.revision, filter: filter,
+                    selectedIDs: selectedIDs, blockedIDs: blockedIDs)
+            }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return result
+            }
+            cursor = page.nextCursor
+        }
+    }
+
     /// The native model revision is opaque; the workspace UUID is the bootstrap
     /// pairing boundary. Check it inside the pinned snapshot, not in a prior read.
     func overviewCategories(start: String, end: String,
