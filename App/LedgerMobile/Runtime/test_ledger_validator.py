@@ -1,4 +1,5 @@
 import json
+import hashlib
 import pathlib
 import tempfile
 import unittest
@@ -176,6 +177,94 @@ plugin "beancount.plugins.implicit_prices"
             expected = {"errors": [{"message": "Synthetic preflight failure"}]}
             self.assertEqual(json.loads(validate_only_json(str(self.root))), expected)
             self.assertEqual(json.loads(validate_json(str(self.root))), expected)
+
+    def test_stream_export_matches_canonical_without_whole_model_response(self):
+        text = '''plugin "beancount.plugins.auto_accounts"
+plugin "beancount.plugins.implicit_prices"
+2026-01-01 * "Buy"
+  Assets:Stock 2 HOOL {10 USD}
+  Assets:Cash -20 USD
+'''
+        self.assertEqual(self.validate(text), [])
+        expected = json.loads(validate_json(str(self.root)))["canonical"]
+        with tempfile.TemporaryDirectory() as output_dir:
+            output = pathlib.Path(output_dir).resolve() / "model.records"
+            reply = json.loads(ledger_validator.export_canonical_json(str(self.root), "main.bean", str(output)))
+            self.assertEqual(reply["errors"], [])
+            self.assertNotIn("canonical", reply)
+            lines = output.read_bytes().splitlines(keepends=True)
+            footer = json.loads(lines[-1])
+            self.assertEqual(footer["sha256"], hashlib.sha256(b"".join(lines[:-1])).hexdigest())
+            actual = {"version": 1, "entries": [], "options": {}, "commodities": []}
+            current = None
+            for line in lines:
+                record = json.loads(line)
+                if record["type"] == "option": actual["options"][record["key"]] = record["value"]
+                elif record["type"] == "commodity": actual["commodities"].append(record["value"])
+                elif record["type"] == "entry": current = record["entry"]
+                elif record["type"] == "posting": current.setdefault("Postings", []).append(record["posting"])
+                elif record["type"] == "end_entry": actual["entries"].append(current)
+            self.assertEqual(actual, expected)
+            self.assertEqual(reply["stream"]["entries"], len(expected["entries"]))
+            self.assertLess(len(json.dumps(reply)), 256)
+            original = output.read_bytes()
+            second = json.loads(ledger_validator.export_canonical_json(str(self.root), "main.bean", str(output)))
+            self.assertTrue(second["errors"])
+            self.assertEqual(output.read_bytes(), original)
+
+    def test_stream_failure_never_leaves_partial_or_source_output(self):
+        self.assertEqual(self.validate("2000-01-01 open Assets:Cash CNY\n"), [])
+        inside = self.root / "stream"
+        self.assertTrue(json.loads(ledger_validator.export_canonical_json(str(self.root), "main.bean", str(inside)))["errors"])
+        self.assertFalse(inside.exists())
+        with tempfile.TemporaryDirectory() as output_dir:
+            output = pathlib.Path(output_dir).resolve() / "model.records"
+            with mock.patch.object(ledger_validator, "STREAM_RECORD_LIMIT", 40):
+                self.assertTrue(json.loads(ledger_validator.export_canonical_json(str(self.root), "main.bean", str(output)))["errors"])
+            self.assertFalse(output.exists())
+            (self.root / "main.bean").write_text("invalid ledger\n")
+            self.assertTrue(json.loads(ledger_validator.export_canonical_json(str(self.root), "main.bean", str(output)))["errors"])
+            self.assertFalse(output.exists())
+
+    def test_stream_rejects_huge_projection_before_canonical_entry_allocation(self):
+        from beancount.core import data as bean_data
+        from datetime import date
+        root = self.root.resolve()
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory).resolve() / "stream"
+            for meta, narration in [({}, "x" * ledger_validator.STREAM_RECORD_LIMIT),
+                                    ({str(i): "x" * 1000 for i in range(2000)}, "small")]:
+                entry = bean_data.Transaction(meta, date(2026, 1, 1), "*", "Synthetic", narration, frozenset(), frozenset(), [])
+                with mock.patch.object(ledger_validator, "_canonical_entry", side_effect=AssertionError("projection should not run")) as project:
+                    with self.assertRaisesRegex(ValueError, "byte budget"):
+                        ledger_validator._write_canonical_stream(root, [entry], {}, output)
+                    project.assert_not_called()
+                self.assertFalse(output.exists())
+
+    def test_stream_supports_booking_modes_and_custom_typed_values(self):
+        self.assertEqual(self.validate('''2000-01-01 open Assets:Stock HOOL "FIFO"
+2026-01-01 custom "budget" Assets:Stock "monthly" 100 USD
+'''), [])
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory).resolve() / "stream"
+            reply = json.loads(ledger_validator.export_canonical_json(str(self.root), "main.bean", str(output)))
+            self.assertEqual(reply["errors"], [])
+            self.assertEqual(reply["stream"]["entries"], 2)
+
+    def test_stream_fdopen_failure_closes_descriptor_and_removes_owned_file(self):
+        import os
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory).resolve() / "stream"
+            descriptors = []
+            def fail_open(fd, mode):
+                descriptors.append(fd)
+                raise OSError("synthetic fdopen failure")
+            with mock.patch.object(ledger_validator.os, "fdopen", side_effect=fail_open):
+                with self.assertRaises(OSError):
+                    ledger_validator._write_canonical_stream(self.root.resolve(), [], {}, output)
+            self.assertFalse(output.exists())
+            self.assertEqual(len(descriptors), 1)
+            with self.assertRaises(OSError): os.fstat(descriptors[0])
 
 
 if __name__ == "__main__":

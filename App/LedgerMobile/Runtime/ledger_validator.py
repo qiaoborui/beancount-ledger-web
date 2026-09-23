@@ -4,6 +4,7 @@ The shipped parser and plugins are trusted application code. Imported ledgers
 are data: preflight every parsed include before invoking loader transformations.
 """
 import glob
+import hashlib
 import json
 import os
 from datetime import date
@@ -97,7 +98,7 @@ def _metadata_value(value):
     return str(value)
 
 
-def _canonical_entry(root, entry):
+def _canonical_entry(root, entry, *, include_postings=True):
     """Export loader results directly; booking and plugin output stay intact.
 
     Decimal quantities remain strings across the language bridge. File/Line
@@ -134,23 +135,160 @@ def _canonical_entry(root, entry):
     if isinstance(entry, data.Custom):
         result["CustomType"] = entry.type
         result["CustomValues"] = [_metadata_value(value.value) for value in entry.values]
-    if isinstance(entry, data.Transaction):
-        postings = []
-        for posting in entry.postings:
-            row = {"account": posting.account, "Quantity": _amount(posting.units)}
-            if posting.flag:
-                row["flag"] = posting.flag
-            if posting.cost is not None:
-                row["Cost"] = _amount(posting.cost)
-                if posting.cost.date is not None:
-                    row["CostDate"] = posting.cost.date.isoformat()
-                if posting.cost.label is not None:
-                    row["CostLabel"] = posting.cost.label
-            if posting.price is not None:
-                row["Price"] = _amount(posting.price)
-            postings.append(row)
-        result["Postings"] = postings
+    if include_postings and isinstance(entry, data.Transaction):
+        result["Postings"] = [_canonical_posting(posting) for posting in entry.postings]
     return result
+
+
+def _canonical_posting(posting):
+    row = {"account": posting.account, "Quantity": _amount(posting.units)}
+    if posting.flag:
+        row["flag"] = posting.flag
+    if posting.cost is not None:
+        row["Cost"] = _amount(posting.cost)
+        if posting.cost.date is not None:
+            row["CostDate"] = posting.cost.date.isoformat()
+        if posting.cost.label is not None:
+            row["CostLabel"] = posting.cost.label
+    if posting.price is not None:
+        row["Price"] = _amount(posting.price)
+    return row
+
+
+STREAM_RECORD_LIMIT = 1 << 20
+STREAM_TOTAL_LIMIT = 256 << 20
+
+
+def _check_export_value(value, budget):
+    """Conservative pre-allocation bound, including worst-case JSON escaping.
+
+    This deliberately rejects pathological single records rather than building
+    huge projected dicts/strings to discover that they exceed the wire limit.
+    """
+    if budget < 0:
+        raise ValueError("Canonical export record exceeds byte budget")
+    if isinstance(value, str):
+        cost = 6 * len(value) + 2
+    elif isinstance(value, dict):
+        budget -= 2
+        for key, child in value.items():
+            budget = _check_export_value(key, budget - 2)
+            budget = _check_export_value(child, budget)
+        return budget
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        budget -= 2
+        for child in value:
+            budget = _check_export_value(child, budget - 1)
+        return budget
+    elif isinstance(value, Decimal):
+        # Decimal wire spelling includes digits, exponent and sign.
+        cost = len(value.as_tuple().digits) + 128
+    elif isinstance(value, Amount):
+        budget = _check_export_value(value.currency, budget)
+        return _check_export_value(value.number, budget)
+    elif value is None or isinstance(value, (bool, int, float, date)):
+        cost = 128 if not isinstance(value, int) else max(128, value.bit_length() // 3 + 4)
+    else:
+        raise ValueError("Unsupported canonical stream metadata value")
+    if cost > budget:
+        raise ValueError("Canonical export record exceeds byte budget")
+    return budget - cost
+
+
+def _check_export_entry(entry):
+    budget = STREAM_RECORD_LIMIT - 4096
+    # Check only projected fields. Open.booking and Custom ValueType.dtype are
+    # canonical internal objects, not exported metadata values.
+    for key in ("account", "source_account", "currency", "flag", "payee", "narration",
+                "comment", "name", "query_string", "description", "filename",
+                "currencies", "tags", "links", "type", "amount", "tolerance"):
+        if hasattr(entry, key):
+            budget = _check_export_value(getattr(entry, key), budget)
+    for key, value in (entry.meta or {}).items():
+        if key not in {"filename", "lineno"} and not key.startswith("__"):
+            budget = _check_export_value(key, budget)
+            budget = _check_export_value(value, budget)
+    # File is projected separately from source metadata.
+    budget = _check_export_value((entry.meta or {}).get("filename", ""), budget)
+    if isinstance(entry, data.Custom):
+        for value in entry.values:
+            budget = _check_export_value(value.value, budget)
+
+
+def _write_canonical_stream(root, entries, options, output):
+    """One bounded record at a time; never serialize an all-entry array.
+
+    Called only after the canonical loader has validated successfully. This
+    bounds additional serialization, not the canonical loader's booked AST.
+    The caller owns an isolated output directory; never overwrite an artifact.
+    """
+    path = Path(os.path.abspath(output))
+    parent = path.parent.resolve(strict=True)
+    if parent == root or parent.is_relative_to(root):
+        raise ValueError("Canonical export must be outside source workspace")
+    if path.parent != parent:
+        raise ValueError("Canonical export parent must be resolved and non-symlinked")
+    digest = hashlib.sha256()
+    total = 0
+    count = 0
+    encoder = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        stream_file = os.fdopen(fd, "wb")
+        fd = None  # ownership transferred
+        with stream_file as stream:
+            def emit(record, *, hashed=True):
+                nonlocal total
+                _check_export_value(record, STREAM_RECORD_LIMIT)
+                encoded = bytearray()
+                for chunk in encoder.iterencode(record):
+                    raw = chunk.encode("utf-8")
+                    if len(encoded) + len(raw) + 1 > STREAM_RECORD_LIMIT:
+                        raise ValueError("Canonical export record exceeds byte budget")
+                    encoded.extend(raw)
+                encoded.append(10)
+                if total + len(encoded) > STREAM_TOTAL_LIMIT:
+                    raise ValueError("Canonical export exceeds total byte budget")
+                stream.write(encoded)
+                total += len(encoded)
+                if hashed:
+                    digest.update(encoded)
+
+            emit({"type": "header", "version": 1})
+            # Catalog records are separate so even many options do not require
+            # a second aggregate dictionary or a huge header.
+            for key, value in options.items():
+                if isinstance(value, str):
+                    emit({"type": "option", "key": key, "value": value})
+                elif isinstance(value, list) and value and all(isinstance(item, str) for item in value):
+                    emit({"type": "option", "key": key, "value": value[-1]})
+            for currency in sorted(set(options.get("commodities", ())) | set(options.get("operating_currency", ()))):
+                emit({"type": "commodity", "value": currency})
+            for entry in entries:
+                _check_export_entry(entry)
+                emit({"type": "entry", "entry": _canonical_entry(root, entry, include_postings=False)})
+                if isinstance(entry, data.Transaction):
+                    for posting in entry.postings:
+                        _check_export_value(posting, STREAM_RECORD_LIMIT - 4096)
+                        emit({"type": "posting", "posting": _canonical_posting(posting)})
+                emit({"type": "end_entry"})
+                count += 1
+            checksum = digest.hexdigest()
+            emit({"type": "footer", "entries": count, "sha256": checksum}, hashed=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        return {"version": 1, "entries": count, "bytes": total, "sha256": checksum}
+    except BaseException:
+        if fd is not None:
+            os.close(fd)
+        # Our O_EXCL-created file only. Partial exports must never register.
+        path.unlink(missing_ok=True)
+        raise
+
+
+def export_canonical_json(workspace, entry_file, output):
+    """Validate and write a bounded stream; return only diagnostics/descriptor."""
+    return _validate_json(workspace, entry_file, export_canonical=False, stream_output=output)
 
 
 def validate_json(workspace, entry_file="main.bean"):
@@ -163,7 +301,7 @@ def validate_only_json(workspace, entry_file="main.bean"):
     return _validate_json(workspace, entry_file, export_canonical=False)
 
 
-def _validate_json(workspace, entry_file, *, export_canonical):
+def _validate_json(workspace, entry_file, *, export_canonical, stream_output=None):
     try:
         root = Path(workspace).resolve(strict=True)
         if not root.is_dir() or Path(entry_file).is_absolute():
@@ -184,6 +322,8 @@ def _validate_json(workspace, entry_file, *, export_canonical):
             result.append({"message": error.message, "filename": filename,
                            "lineno": source.get("lineno", 0)})
         payload = {"errors": result}
+        if not result and stream_output is not None:
+            payload["stream"] = _write_canonical_stream(root, entries, options, stream_output)
         if not result and export_canonical:
             # The public option map is string-valued, matching the existing
             # API. List options retain its last-declaration behavior.

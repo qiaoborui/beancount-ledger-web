@@ -52,6 +52,33 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         #endif
     }
 
+    func testCanonicalStreamExportIsSmallExclusiveAndKeepsSourceUntouched() async throws {
+        #if os(iOS) && canImport(BeancountRuntime)
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("StreamIntegration-" + UUID().uuidString)
+        let source = base.appendingPathComponent("workspace")
+        let output = base.appendingPathComponent("canonical.records")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let text = "2000-01-01 open Assets:Cash CNY\n"
+        try text.write(to: source.appendingPathComponent("main.bean"), atomically: true, encoding: .utf8)
+        let result = try await EmbeddedBeancountValidator.shared.exportCanonical(workspace: source, to: output)
+        XCTAssertEqual(result.entries, 1)
+        XCTAssertGreaterThan(result.bytes, 0)
+        XCTAssertEqual(result.sha256.count, 64)
+        let exported = try Data(contentsOf: output)
+        XCTAssertEqual(result.bytes, exported.count)
+        XCTAssertTrue(String(decoding: exported, as: UTF8.self).contains("end_entry"))
+        do {
+            _ = try await EmbeddedBeancountValidator.shared.exportCanonical(workspace: source, to: output)
+            XCTFail("Existing export overwritten")
+        } catch is EmbeddedBeancountValidator.ValidationError { }
+        XCTAssertEqual(try Data(contentsOf: output), exported)
+        XCTAssertEqual(try String(contentsOf: source.appendingPathComponent("main.bean"), encoding: .utf8), text)
+        #else
+        throw XCTSkip("Requires embedded canonical runtime")
+        #endif
+    }
+
     func testCanonicalOfflineCreateReadAddEditDeleteAndReopen() async throws {
         #if os(iOS)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("LocalIntegration-" + UUID().uuidString)
