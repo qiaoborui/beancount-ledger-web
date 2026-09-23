@@ -2,6 +2,77 @@ import XCTest
 
 @MainActor
 final class LocalLedgerUITests: XCTestCase {
+    func testLocalContextActionsHydrateCancelReopenAndCommit() throws {
+        continueAfterFailure = false
+        #if targetEnvironment(simulator)
+        let app = XCUIApplication()
+        app.launchArguments = ["--local-ui-testing"]
+        app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
+        app.launch()
+        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        app.buttons["local-ledger-create"].tap()
+        app.buttons["local-ledger-confirm-create"].tap()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 30))
+        app.tabBars.buttons["交易"].tap()
+        app.buttons["transaction-create-local"].tap()
+        XCTAssertTrue(app.buttons["高级"].waitForExistence(timeout: 5))
+        app.buttons["高级"].tap()
+        let payee = app.textFields["transaction-edit-payee"]
+        XCTAssertTrue(payee.waitForExistence(timeout: 5))
+        payee.tap(); payee.typeText("Synthetic context action")
+        let amount = app.textFields["transaction-edit-posting-amount-0"]
+        replaceActionText(amount, with: "12.34", in: app)
+        replaceActionText(app.textFields["transaction-edit-posting-amount-1"], with: "-12.34", in: app)
+        app.buttons["transaction-edit-save"].tap()
+        XCTAssertTrue(app.buttons["bookkeeping-confirm-save"].waitForExistence(timeout: 30))
+        app.buttons["bookkeeping-confirm-save"].tap()
+        XCTAssertTrue(app.navigationBars["流水"].waitForExistence(timeout: 30))
+        let row = app.staticTexts["Synthetic context action"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        for action in ["edit", "tags", "delete"] {
+            row.press(forDuration: 1)
+            let menu = app.buttons["transaction-context-" + action].firstMatch
+            XCTAssertTrue(menu.waitForExistence(timeout: 5)); menu.tap()
+            if action == "edit" {
+                let cancel = app.buttons["取消"].firstMatch
+                XCTAssertTrue(cancel.waitForExistence(timeout: 15)); cancel.tap()
+                XCTAssertTrue(cancel.waitForNonExistence(timeout: 5))
+            } else {
+                let control = action == "tags" ? app.textFields["transaction-bulk-tag-input"] : app.buttons["transaction-delete-confirm"]
+                XCTAssertTrue(control.waitForExistence(timeout: 15))
+                app.buttons["取消"].firstMatch.tap()
+                XCTAssertTrue(control.waitForNonExistence(timeout: 5))
+            }
+        }
+        row.press(forDuration: 1)
+        app.buttons["transaction-context-delete"].firstMatch.tap()
+        let confirm = app.buttons["transaction-delete-confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 15))
+        confirm.tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(row.waitForNonExistence(timeout: 15), app.debugDescription)
+        #else
+        throw XCTSkip("Isolated synthetic simulator ledger only")
+        #endif
+    }
+
+    private func replaceActionText(_ field: XCUIElement, with text: String, in app: XCUIApplication) {
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.press(forDuration: 1)
+        let predicate = NSPredicate(format: "label IN %@", ["Select All", "全选"])
+        let options = app.menuItems.matching(predicate).allElementsBoundByIndex
+            + app.buttons.matching(predicate).allElementsBoundByIndex
+        if let all = options.first(where: { $0.isHittable }) { all.tap() }
+        else {
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5)).tap()
+            let old = field.value as? String ?? ""
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count))
+        }
+        field.typeText(text)
+        XCTAssertEqual(field.value as? String, text)
+    }
+
     func testNaturalLanguageSplitReachesValidatedDiffAndLocalSave() throws {
         #if targetEnvironment(simulator)
         let app = XCUIApplication()

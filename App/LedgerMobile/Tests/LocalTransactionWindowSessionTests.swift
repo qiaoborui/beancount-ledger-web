@@ -678,7 +678,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         let detail = try await session.localTransactionDetail(source: source)
         XCTAssertEqual(detail.source, source)
         XCTAssertEqual(detail.narration, "window only")
-        XCTAssertEqual(session.transactionResolution(for: source), .unavailable)
+        XCTAssertEqual(session.transactionResolution(for: source), .unloaded)
         XCTAssertNil(session.visibleTransaction(matching: source))
         XCTAssertEqual(session.ledger?.transactions, transactions)
         XCTAssertEqual(session.globalTransactions, global)
@@ -708,7 +708,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
             await gate.release()
             do { _ = try await reading.value; XCTFail("Stale detail returned for action \(action)") }
             catch { }
-            XCTAssertEqual(session.transactionResolution(for: source), .unavailable)
+            XCTAssertEqual(session.transactionResolution(for: source), .unloaded)
             assertCleared(session)
             session.chooseLedger()
         }

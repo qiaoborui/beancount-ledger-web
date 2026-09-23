@@ -56,6 +56,7 @@ enum LedgerTransactionMutationError: LocalizedError, Equatable {
 
 enum LedgerTransactionResolution: Equatable {
     case visible(LedgerTransaction)
+    case unloaded // Local absence from a UI window is not evidence of deletion.
     case unavailable
 }
 
@@ -2008,12 +2009,12 @@ final class LedgerSession: ObservableObject {
             return .visible(projectedTransaction(transaction))
         }
         let key = Self.transactionMutationKey(source)
-        guard let mutation = transactionMutations[key] else { return .unavailable }
+        guard let mutation = transactionMutations[key] else { return isLocal ? .unloaded : .unavailable }
         switch mutation.phase {
         case .pending, .confirmed:
             return .visible(mutation.projected)
         case .failed:
-            return .unavailable
+            return isLocal ? .unloaded : .unavailable
         }
     }
 
