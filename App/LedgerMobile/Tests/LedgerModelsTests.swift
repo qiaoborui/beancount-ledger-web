@@ -483,6 +483,19 @@ final class LedgerModelsTests: XCTestCase {
         )
     }
 
+    func testPreparedTagBatchRequiresUnchangedSelectionAndActiveSelectionMode() {
+        XCTAssertTrue(TransactionTagSelectionRules.canPresentPreparedBatch(
+            captured: ["a", "b"], current: ["b", "a"], isSelecting: true))
+        XCTAssertFalse(TransactionTagSelectionRules.canPresentPreparedBatch(
+            captured: ["a", "b"], current: ["a", "c"], isSelecting: true))
+        XCTAssertFalse(TransactionTagSelectionRules.canPresentPreparedBatch(
+            captured: ["a", "b"], current: ["a"], isSelecting: true))
+        XCTAssertFalse(TransactionTagSelectionRules.canPresentPreparedBatch(
+            captured: ["a", "b"], current: ["a", "b"], isSelecting: false))
+        XCTAssertFalse(TransactionTagSelectionRules.canPresentPreparedBatch(
+            captured: [], current: [], isSelecting: true))
+    }
+
     func testBulkTagSelectionKeepsExistingSelectionsWithinTwoHundredLimit() {
         let current = Set((0..<150).map { "existing-\($0)" })
         let candidates = (0..<200).map { "candidate-\($0)" }

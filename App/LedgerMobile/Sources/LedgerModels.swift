@@ -1031,6 +1031,11 @@ enum LedgerTagRules {
 enum TransactionTagSelectionRules {
     static let maximumCount = 200
 
+    /// Equal counts do not imply equal user intent after asynchronous hydration.
+    static func canPresentPreparedBatch(captured: Set<String>, current: Set<String>, isSelecting: Bool) -> Bool {
+        isSelecting && !captured.isEmpty && captured == current
+    }
+
     static func adding(_ candidateIDs: [String], to current: Set<String>) -> Set<String> {
         var updated = current
         for id in candidateIDs where updated.count < maximumCount {

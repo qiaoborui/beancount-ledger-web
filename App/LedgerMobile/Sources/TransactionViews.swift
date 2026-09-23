@@ -386,6 +386,10 @@ struct TransactionsView: View {
     @State private var actionMessageStyle: LedgerStatusStyle = .failure
     @State private var confirmationFeedback = 0
     @State private var selectionFeedback = 0
+    @State private var localAction: LedgerSession.LocalTransactionAction?
+    @State private var actionTask: Task<Void, Never>?
+    @State private var actionRequestID: UUID?
+    @State private var preparingTags = false
 
     private var transactions: [LedgerTransaction] {
         session.visibleTransactions
@@ -613,13 +617,19 @@ struct TransactionsView: View {
                 )
                 .ledgerPrivacyProtectedSheet()
             }
-            .sheet(item: $editingTarget) { transaction in
+            .sheet(item: $editingTarget, onDismiss: revokeListAction) { transaction in
                 TransactionEditorView(
                     transaction: transaction,
                     accounts: session.ledger?.accounts ?? [],
                     commodities: session.ledger?.commodities ?? [],
                     onSave: { entry in
-                        try await session.updateTransaction(source: transaction.source, entry: entry)
+                        if session.isLocal {
+                            guard let localAction else { throw CancellationError() }
+                            do { try await session.updateLocalTransaction(action: localAction, entry: entry) }
+                            catch { failListAction(error); throw error }
+                        } else {
+                            try await session.updateTransaction(source: transaction.source, entry: entry)
+                        }
                         actionMessage = "交易修改已保存"
                         actionMessageStyle = .confirmed
                         confirmationFeedback &+= 1
@@ -627,8 +637,9 @@ struct TransactionsView: View {
                 )
                 .ledgerPrivacyProtectedSheet()
             }
-            .sheet(item: $deletionTarget) { transaction in
-                TransactionDeleteSheet(transaction: transaction) {
+            .sheet(item: $deletionTarget, onDismiss: revokeListAction) { transaction in
+                TransactionDeleteSheet(transaction: transaction, localAction: localAction,
+                    onFailed: { error in if localAction != nil { failListAction(error) } }) {
                     actionMessage = "交易已从账本删除"
                     actionMessageStyle = .confirmed
                     confirmationFeedback &+= 1
@@ -651,9 +662,9 @@ struct TransactionsView: View {
                 EventTagListView()
                     .ledgerPrivacyProtectedSheet()
             }
-            .sheet(isPresented: $tagEditorPresented) {
+            .sheet(isPresented: $tagEditorPresented, onDismiss: revokeListAction) {
                 TransactionTagEditorSheet(
-                    selectedCount: selectedTransactionIDs.count,
+                    selectedCount: localAction?.originals.count ?? selectedTransactionIDs.count,
                     onApply: { tags in
                         try await applyTags(tags)
                     }
@@ -707,6 +718,24 @@ struct TransactionsView: View {
                     session.pendingTransactionFilter = nil
                 }
             }
+        .onChange(of: selectedTransactionIDs) { _, _ in
+            if preparingTags { revokeListAction() }
+        }
+        .onChange(of: isSelecting) { _, selected in
+            if !selected && preparingTags { revokeListAction() }
+        }
+        .onDisappear {
+            if editingTarget == nil && deletionTarget == nil && !tagEditorPresented { revokeListAction() }
+        }
+        .onChange(of: session.privacyShielded) { _, hidden in
+            if hidden { clearListActionPresentation() }
+        }
+        .onChange(of: session.phase) { _, phase in
+            if phase != .ready { clearListActionPresentation() }
+        }
+        .overlay(alignment: .top) {
+            if actionRequestID != nil { ProgressView("正在读取交易").padding().background(.regularMaterial) }
+        }
         .sensoryFeedback(.success, trigger: confirmationFeedback)
         .sensoryFeedback(.selection, trigger: selectionFeedback)
     }
@@ -761,17 +790,18 @@ struct TransactionsView: View {
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(role: .destructive) {
-                    deletionTarget = transaction
+                    if session.isLocal { prepareListAction([transaction], kind: .delete) }
+                    else { deletionTarget = transaction }
                 } label: {
                     Label("删除", systemImage: "trash")
                 }
                 .disabled(transaction.source.hash?.isEmpty != false
                     || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
 
-                if session.isLocal && transaction.editableEntry != nil {
+                if session.isLocal {
                     Button {
                         LedgerFeedback.light()
-                        editingTarget = transaction
+                        prepareListAction([transaction], kind: .edit)
                     } label: {
                         Label("编辑", systemImage: "pencil")
                     }
@@ -788,6 +818,64 @@ struct TransactionsView: View {
                 }
                 .tint(LedgerPalette.cobalt)
             }
+        }
+    }
+
+    private func revokeListAction() {
+        preparingTags = false
+        actionRequestID = nil
+        actionTask?.cancel()
+        actionTask = nil
+        if let localAction { session.cancelLocalTransactionAction(localAction) }
+        localAction = nil
+    }
+
+    private func clearListActionPresentation() {
+        editingTarget = nil
+        deletionTarget = nil
+        tagEditorPresented = false
+        revokeListAction()
+    }
+
+    private func failListAction(_ error: Error) {
+        clearListActionPresentation()
+        actionMessageStyle = .failure
+        actionMessage = error.localizedDescription + " 请重新打开交易操作，核对最新内容后再试。"
+    }
+
+    private func prepareListAction(_ rows: [LedgerTransaction], kind: LedgerSession.LocalTransactionActionKind) {
+        guard actionRequestID == nil, !rows.isEmpty else { return }
+        revokeListAction()
+        let id = UUID()
+        let selection = selectedTransactionIDs
+        preparingTags = kind == .addTags
+        actionRequestID = id
+        actionTask = Task { @MainActor in
+            do {
+                let prepared = try await session.prepareLocalTransactionAction(sources: rows.map(\.source), kind: kind)
+                guard !Task.isCancelled, actionRequestID == id,
+                      kind != .addTags || TransactionTagSelectionRules.canPresentPreparedBatch(
+                        captured: selection, current: selectedTransactionIDs, isSelecting: isSelecting) else {
+                    session.cancelLocalTransactionAction(prepared)
+                    return
+                }
+                if kind == .edit, prepared.originals[0].editableEntry == nil {
+                    session.cancelLocalTransactionAction(prepared)
+                    throw LedgerTransactionMutationError.sourceUnavailable
+                }
+                localAction = prepared
+                switch kind {
+                case .edit: editingTarget = prepared.originals[0]
+                case .delete: deletionTarget = prepared.originals[0]
+                case .addTags: tagEditorPresented = true
+                }
+            } catch {
+                if !Task.isCancelled, actionRequestID == id {
+                    actionMessageStyle = .failure
+                    actionMessage = error.localizedDescription
+                }
+            }
+            if actionRequestID == id { preparingTags = false; actionRequestID = nil; actionTask = nil }
         }
     }
 
@@ -808,7 +896,12 @@ struct TransactionsView: View {
             actionMessage = "一次最多为 \(TransactionTagSelectionRules.maximumCount) 笔交易添加标签。"
             return
         }
-        tagEditorPresented = true
+        if session.isLocal {
+            // Preserve existing full-range application scope, including selected
+            // rows hidden by the current filter. Never use the loaded page as U.
+            let selected = transactions.filter { selectedTransactionIDs.contains($0.id) && isTagEligible($0) }
+            prepareListAction(selected, kind: .addTags)
+        } else { tagEditorPresented = true }
     }
 
     private func handleShare() {
@@ -819,13 +912,22 @@ struct TransactionsView: View {
 
     private func applyTags(_ tags: [String]) async throws {
         let selected = transactions.filter { selectedTransactionIDs.contains($0.id) && isTagEligible($0) }
-        guard !selected.isEmpty else { throw LedgerTagValidationError.empty }
-        try await session.addTransactionTags(sources: selected.map(\.source), tags: tags)
+        let appliedCount: Int
+        if session.isLocal {
+            guard let localAction else { throw CancellationError() }
+            appliedCount = localAction.originals.count
+            do { try await session.addLocalTransactionTags(action: localAction, tags: tags) }
+            catch { failListAction(error); throw error }
+        } else {
+            guard !selected.isEmpty else { throw LedgerTagValidationError.empty }
+            appliedCount = selected.count
+            try await session.addTransactionTags(sources: selected.map(\.source), tags: tags)
+        }
         selectedTransactionIDs.removeAll()
         isSelecting = false
         confirmationFeedback &+= 1
         actionMessageStyle = .confirmed
-        actionMessage = "已验证，并为 \(selected.count) 条交易添加标签。"
+        actionMessage = "已验证，并为 \(appliedCount) 条交易添加标签。"
     }
 }
 

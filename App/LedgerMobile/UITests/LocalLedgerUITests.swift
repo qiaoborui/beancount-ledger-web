@@ -70,6 +70,24 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["交易详情"].waitForNonExistence(timeout: 30))
         let editedRow = app.staticTexts["Synthetic action edited"].firstMatch
         XCTAssertTrue(editedRow.waitForExistence(timeout: 15), app.debugDescription)
+        // Swipe actions use the same exact-source authority, not a summary draft.
+        editedRow.swipeLeft()
+        let swipeEdit = app.buttons["编辑"].firstMatch
+        XCTAssertTrue(swipeEdit.waitForExistence(timeout: 5)); swipeEdit.tap()
+        XCTAssertTrue(app.buttons["取消"].firstMatch.waitForExistence(timeout: 15))
+        app.buttons["取消"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["取消"].firstMatch.waitForNonExistence(timeout: 5))
+        app.buttons["transaction-actions"].tap()
+        app.buttons["transaction-tag-selection"].tap()
+        let selected = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'transaction-select-row-'")).firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout: 5)); selected.tap()
+        app.buttons["添加标签"].tap()
+        let tagInput = app.textFields["transaction-bulk-tag-input"]
+        XCTAssertTrue(tagInput.waitForExistence(timeout: 15))
+        tagInput.tap(); tagInput.typeText("synthetic-reviewed")
+        app.buttons["transaction-bulk-tag-apply"].tap()
+        XCTAssertTrue(tagInput.waitForNonExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["已验证，并为 1 条交易添加标签。"].waitForExistence(timeout: 10))
         editedRow.press(forDuration: 1)
         app.buttons["transaction-context-delete"].firstMatch.tap()
         let confirm = app.buttons["transaction-delete-confirm"]
