@@ -320,6 +320,99 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         }
     }
 
+    func testCompleteSummaryDoesNotRequireScrollingOrRetainVisibleRows() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadLocalTransactionWindow(filter: .init(query: "Needle"), limits: .init(maxRows: 1))
+        // One matched row can reach EOF immediately; explicit summary is idempotent.
+        await session.loadLocalTransactionSummary()
+        XCTAssertEqual(session.localTransactionSummary?.matchedCount, 1)
+        XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        XCTAssertNil(session.localTransactionSummary)
+        let visible = session.localTransactionWindow?.transactions
+        await session.loadLocalTransactionSummary()
+        XCTAssertEqual(session.localTransactionSummary?.matchedCount, 3)
+        XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+        XCTAssertEqual(session.localTransactionSummary?.visibleTransactions.count, 0)
+        XCTAssertEqual(session.localTransactionSummary?.days.first?.expense, 375)
+        XCTAssertEqual(session.localTransactionWindow?.transactions, visible)
+        XCTAssertNotNil(session.localTransactionWindow?.continuation)
+        XCTAssertFalse(session.isLocalTransactionSummaryLoading)
+        XCTAssertNil(session.localTransactionSummaryError)
+        session.resetLocalTransactionWindow()
+        XCTAssertNil(session.localTransactionSummary)
+    }
+
+    func testLateSummaryCannotPublishAfterResetPrivacyRangeOrRevisionChange() async throws {
+        for operation in 0..<4 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+            let entered = expectation(description: "summary awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let loading = Task { await session.loadLocalTransactionSummary() }
+            await fulfillment(of: [entered], timeout: 3)
+            XCTAssertTrue(session.isLocalTransactionSummaryLoading)
+            switch operation {
+            case 0: session.resetLocalTransactionWindow()
+            case 1: await session.updateActivity(isActive: false, isBackground: true)
+            case 2: await session.applyRange(.month(year: 2026, month: 8))
+            default: try await advance(repository)
+            }
+            await gate.release()
+            await loading.value
+            XCTAssertNil(session.localTransactionSummary)
+            XCTAssertFalse(session.isLocalTransactionSummaryLoading)
+            if operation == 3 { XCTAssertNotNil(session.localTransactionSummaryError) }
+        }
+    }
+
+    func testWindowEOFSummarySupersedesLateIndependentScanFailure() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        let entered = expectation(description: "independent scan awaiting")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate, fail: true)
+        let loading = Task { await session.loadLocalTransactionSummary() }
+        await fulfillment(of: [entered], timeout: 3)
+        await session.loadNextLocalTransactionWindow()
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+        XCTAssertFalse(session.isLocalTransactionSummaryLoading)
+        await gate.release()
+        await loading.value
+        XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+        XCTAssertNil(session.localTransactionSummaryError)
+        XCTAssertFalse(session.isLocalTransactionSummaryLoading)
+    }
+
+    func testSummaryFailureLeavesWindowUsableAndCanRetry() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        let visible = session.localTransactionWindow?.transactions
+        let entered = expectation(description: "failed summary")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate, fail: true)
+        let loading = Task { await session.loadLocalTransactionSummary() }
+        await fulfillment(of: [entered], timeout: 3)
+        await session.loadLocalTransactionSummary() // Concurrent duplicate is a no-op.
+        await gate.release()
+        await loading.value
+        XCTAssertNil(session.localTransactionSummary)
+        XCTAssertNotNil(session.localTransactionSummaryError)
+        XCTAssertEqual(session.localTransactionWindow?.transactions, visible)
+        await session.loadLocalTransactionSummary()
+        XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+        XCTAssertNil(session.localTransactionSummaryError)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, 2)
+        XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+    }
+
     func testOptInFirstNextSingleWindowEOFAndExplicitResetLeaveLegacyArraysUntouched() async throws {
         let (session, engine, repository) = try await fixture()
         defer { session.chooseLedger() }
