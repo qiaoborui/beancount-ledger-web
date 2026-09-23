@@ -406,6 +406,12 @@ func readConfiguredLedgerLines(cfg Config) ([]BeanLine, error) {
 }
 
 func localLedgerSource(cfg Config) ([]BeanLine, []fileStat, error) {
+	return walkLocalLedgerSource(cfg, true)
+}
+
+// Version checks use the same include traversal and content hashes as source
+// loading, but must not retain every line of the ledger just to discard it.
+func walkLocalLedgerSource(cfg Config, collectLines bool) ([]BeanLine, []fileStat, error) {
 	seen := map[string]bool{}
 	var lines []BeanLine
 	var stats []fileStat
@@ -439,9 +445,13 @@ func localLedgerSource(cfg Config) ([]BeanLine, []fileStat, error) {
 			return errors.New("local ledger exceeds 64 MiB")
 		}
 		stats = append(stats, fileStat{relative: filepath.ToSlash(relative), contentHash: sha256.Sum256(raw), mtimeMs: info.ModTime().UnixMilli()})
-		for index, line := range strings.Split(string(raw), "\n") {
+		index := 0
+		for line := range strings.SplitSeq(string(raw), "\n") {
+			index++
 			line = strings.TrimSuffix(line, "\r")
-			lines = append(lines, BeanLine{File: full, Line: index + 1, Text: line})
+			if collectLines {
+				lines = append(lines, BeanLine{File: full, Line: index, Text: line})
+			}
 			match := includeRe.FindStringSubmatch(strings.TrimSpace(line))
 			if match == nil {
 				continue
