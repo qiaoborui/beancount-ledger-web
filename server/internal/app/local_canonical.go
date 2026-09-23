@@ -183,6 +183,49 @@ func localCanonicalTransactions(entries, source []BeanEntry) []Transaction {
 	return txns
 }
 
+// compactLocalCanonicalSource runs only after raw hashes and editor drafts have
+// been built. Canonical entries already retain their exact RawLines; the only
+// remaining source consumers are the entries endpoint's controls and reversal
+// recovery for transactions whose lossless editor draft was rejected.
+func compactLocalCanonicalSource(source []BeanEntry, txns []Transaction) []BeanEntry {
+	fallback := make(map[string]struct{})
+	for _, txn := range txns {
+		if txn.Entry == nil && txn.Source.Line > 0 {
+			key := canonicalSourceKey(BeanEntry{Kind: "transaction", File: txn.Source.File, Line: txn.Source.Line})
+			fallback[key] = struct{}{}
+		}
+	}
+	keep := func(entry BeanEntry) bool {
+		switch entry.Kind {
+		case "plugin", "include", "pushtag", "poptag", "pushmeta", "popmeta":
+			return true
+		case "transaction":
+			_, needed := fallback[canonicalSourceKey(entry)]
+			return needed
+		default:
+			return false
+		}
+	}
+	count := 0
+	for _, entry := range source {
+		if keep(entry) {
+			count++
+		}
+	}
+	// Do not filter in place: even an empty subslice pins the full parser array.
+	// Keep empty results nonnil so snapshotSourceBeanEntries cannot fall back to
+	// canonical (possibly transformed/generated) entries during reversal.
+	retained := make([]BeanEntry, count)
+	next := 0
+	for _, entry := range source {
+		if keep(entry) {
+			retained[next] = entry
+			next++
+		}
+	}
+	return retained
+}
+
 func snapshotSourceBeanEntries(snapshot *LedgerSnapshot) []BeanEntry {
 	if snapshot.SourceBeanEntries != nil {
 		return snapshot.SourceBeanEntries
