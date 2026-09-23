@@ -69,6 +69,48 @@ final class LocalLedger100kIntegrationTests: XCTestCase {
         XCTAssertEqual(monthly.transactionCount, monthlyCount)
         XCTAssertEqual(monthly.highestExpense, .init(title: "Synthetic", minorUnits: 100))
         XCTAssertEqual(monthly.positiveTotalMinorUnits, home.summary.expense)
+        // Traverse the real bridge without retaining all rows or IDs. Ordering
+        // plus adjacent-source uniqueness detects boundary duplication; exact
+        // full counts and posting totals independently verify the traversal.
+        let windowStart = ContinuousClock.now
+        let reader = try await repository.makeTransactionWindow(start: "0001-01-01", end: "9999-12-31",
+            expectedRevisionID: revision.id)
+        var seen = 0
+        var windows = 0
+        var expense = 0
+        var previous: LedgerTransaction?
+        while true {
+            let window = try await reader.nextWindow()
+            windows += 1
+            XCTAssertLessThanOrEqual(window.transactions.count, 1_000)
+            XCTAssertLessThanOrEqual(window.accountedBytes, 4 * 1_024 * 1_024)
+            for row in window.transactions {
+                if let previous {
+                    XCTAssertGreaterThanOrEqual(previous.date, row.date)
+                    XCTAssertNotEqual(previous.source, row.source)
+                }
+                previous = row
+                seen += 1
+                expense += row.postings.filter { $0.account.hasPrefix("Expenses:") }.reduce(0) { $0 + $1.amount }
+            }
+            if windows == 1 {
+                print("SYNTHETIC100K first_window_ms=\(Self.ms(windowStart.duration(to: .now)))")
+            }
+            if window.isComplete {
+                let summary = try XCTUnwrap(window.summary)
+                XCTAssertEqual(summary.fullRangeCount, 100_000)
+                XCTAssertEqual(summary.matchedCount, 100_000)
+                XCTAssertEqual(summary.days.reduce(0) { $0 + $1.signedExpense }, 10_000_000)
+                XCTAssertEqual(Set(summary.availableAccounts), ["Assets:Cash", "Expenses:Food"])
+                XCTAssertTrue(summary.visibleTransactions.isEmpty)
+                break
+            }
+            XCTAssertNil(window.summary)
+        }
+        XCTAssertEqual(seen, 100_000)
+        XCTAssertEqual(expense, 10_000_000)
+        print("SYNTHETIC100K windows=\(windows) traversal_ms=\(Self.ms(windowStart.duration(to: .now)))")
+        await reader.invalidate()
         let entry = LedgerTransactionEntry(date: "2026-09-23", payee: "Synthetic", narration: "Confirmed capacity probe", postings: [
             .init(account: "Expenses:Food", amount: "1", currency: "CNY"), .init(account: "Assets:Cash", amount: "-1", currency: "CNY")])
         let previewStart = ContinuousClock.now
