@@ -35,6 +35,8 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
     private actor Engine: LocalLedgerEngine {
         private var gate: Gate?
         private var successfulEdits = false
+        private var successfulOtherWrites = false
+        func enableSuccessfulOtherWrites() { successfulOtherWrites = true }
         func enableSuccessfulEdits() { successfulEdits = true }
         private var gatedPath = ""
         private var failAfterGate = false
@@ -68,6 +70,11 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
                     postings: rows[0].postings, editableEntry: entry,
                     source: TransactionSource(file: "synthetic.bean", line: 1, hash: "committed-row-1"))
                 try JSONEncoder().encode(updated).write(to: saved)
+                return Data(#"{"ok":true}"#.utf8)
+            }
+            if successfulOtherWrites, request.method == "DELETE" || request.path == "/api/ledger/transactions/tags" {
+                try Data("; successful synthetic write".utf8).write(to:
+                    URL(fileURLWithPath: request.workspaceRoot).appendingPathComponent("action-write.bean"))
                 return Data(#"{"ok":true}"#.utf8)
             }
             if request.path == "/api/ledger/bootstrap" {
@@ -129,6 +136,188 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertNil(session.localTransactionWindow, file: file, line: line)
         XCTAssertNil(session.localTransactionWindowError, file: file, line: line)
         XCTAssertFalse(session.isLocalTransactionWindowLoading, file: file, line: line)
+    }
+
+    private func actionSource(_ line: Int = 1) -> TransactionSource {
+        .init(file: "synthetic.bean", line: line, hash: "row-\(line)")
+    }
+
+    func testPreparedActionDoesNotPopulateLegacyArraysAndEditsUnknownExactOriginal() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.enableSuccessfulEdits()
+        let source = actionSource()
+        XCTAssertNil(session.visibleTransaction(matching: source))
+        let rows = session.ledger?.transactions
+        let global = session.globalTransactions
+        let action = try await session.prepareLocalTransactionAction(sources: [source], kind: .edit)
+        XCTAssertEqual(action.originals.map(\.source), [source])
+        XCTAssertEqual(session.ledger?.transactions, rows)
+        XCTAssertEqual(session.globalTransactions, global)
+        XCTAssertNil(session.visibleTransaction(matching: source))
+        let before = try await repository.workspace.currentRevision()
+        let entry = LedgerTransactionEntry(date: "2026-09-24", payee: "Action edited", narration: "Synthetic",
+            postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")])
+        try await session.updateLocalTransaction(action: action, entry: entry)
+        let after = try await repository.workspace.currentRevision()
+        XCTAssertNotEqual(before?.id, after?.id)
+        do {
+            try await session.updateLocalTransaction(action: action, entry: entry)
+            XCTFail("Consumed action replayed")
+        } catch is CancellationError { }
+    }
+
+    func testPreparedDeleteAndTagsUsePinnedWorkspaceCommit() async throws {
+        for kind in [LedgerSession.LocalTransactionActionKind.delete, .addTags] {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            await engine.enableSuccessfulOtherWrites()
+            let sources = kind == .delete ? [actionSource()] : [actionSource(), actionSource(2)]
+            let action = try await session.prepareLocalTransactionAction(sources: sources, kind: kind)
+            let before = try await repository.workspace.currentRevision()
+            if kind == .delete { try await session.deleteLocalTransaction(action: action, reason: "Synthetic") }
+            else { try await session.addLocalTransactionTags(action: action, tags: ["synthetic"]) }
+            let after = try await repository.workspace.currentRevision()
+            XCTAssertNotEqual(before?.id, after?.id)
+            for original in action.originals {
+                XCTAssertNotEqual(session.transactionMutationPhase(for: original), .pending)
+            }
+            do {
+                if kind == .delete { try await session.deleteLocalTransaction(action: action, reason: "Replay") }
+                else { try await session.addLocalTransactionTags(action: action, tags: ["replay"]) }
+                XCTFail("Action replay accepted")
+            } catch is CancellationError { }
+        }
+    }
+
+    func testPreparedActionRevokedByResetPrivacyRangeAndCancellation() async throws {
+        for revocation in ["reset", "privacy", "range", "cancel", "choose"] {
+            let (session, _, repository) = try await fixture()
+            let action = try await session.prepareLocalTransactionAction(sources: [actionSource()], kind: .delete)
+            let before = try await repository.workspace.currentRevision()
+            switch revocation {
+            case "reset": session.resetLocalTransactionWindow()
+            case "privacy": await session.updateActivity(isActive: false, isBackground: true)
+            case "range": await session.applyRange(.month(year: 2026, month: 8))
+            case "cancel": session.cancelLocalTransactionAction(action)
+            default: session.chooseLedger()
+            }
+            do {
+                try await session.deleteLocalTransaction(action: action, reason: "Synthetic")
+                XCTFail("Revoked action accepted: \(revocation)")
+            } catch is CancellationError { }
+            let after = try await repository.workspace.currentRevision()
+            XCTAssertEqual(before?.id, after?.id)
+            session.chooseLedger()
+        }
+    }
+
+    func testPreparedActionCannotBorrowNewerOrdinaryReadAuthority() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let action = try await session.prepareLocalTransactionAction(sources: [actionSource()], kind: .delete)
+        try await advance(repository)
+        _ = try await repository.bootstrap(start: "2026-09-01", end: "2026-10-01", today: "2026-09-23", valuationCurrency: "CNY")
+        let before = try await repository.workspace.currentRevision()
+        do {
+            try await session.deleteLocalTransaction(action: action, reason: "Stale action")
+            XCTFail("Stale action borrowed presentedRevisionID")
+        } catch LocalLedgerWorkspace.WorkspaceError.staleRevision { }
+        let after = try await repository.workspace.currentRevision()
+        XCTAssertEqual(before?.id, after?.id)
+        XCTAssertNil(session.transactionMutationPhase(for: action.originals[0]))
+    }
+
+    func testPreparedActionRejectsWrongKindAndSupersededNonceWithoutOverlay() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let first = try await session.prepareLocalTransactionAction(sources: [actionSource()], kind: .delete)
+        let second = try await session.prepareLocalTransactionAction(sources: [actionSource(2)], kind: .addTags)
+        session.cancelLocalTransactionAction(first) // Must not revoke the newer action.
+        for action in [first, second] {
+            do {
+                try await session.deleteLocalTransaction(action: action, reason: "Wrong authority")
+                XCTFail("Wrong or superseded authority accepted")
+            } catch is CancellationError { }
+            XCTAssertNil(session.transactionMutationPhase(for: action.originals[0]))
+        }
+        // Valid new action reaches the deliberately failing mock write, not cancellation.
+        do {
+            try await session.addLocalTransactionTags(action: second, tags: ["synthetic"])
+            XCTFail("Mock should fail")
+        } catch is CancellationError { XCTFail("Old cancellation revoked newer action") }
+          catch { }
+        if case .failed = session.transactionMutationPhase(for: second.originals[0]) { }
+        else { XCTFail("Expected failed overlay after mock rollback") }
+    }
+
+    func testActionPreparationRejectsInvalidBatchesAndLateHydration() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        for sources in [[], [actionSource(), actionSource()]] as [[TransactionSource]] {
+            do {
+                _ = try await session.prepareLocalTransactionAction(sources: sources, kind: .addTags)
+                XCTFail("Invalid batch accepted")
+            } catch LedgerTransactionMutationError.sourceUnavailable { }
+        }
+        do {
+            _ = try await session.prepareLocalTransactionAction(sources: [actionSource(), actionSource(2)], kind: .edit)
+            XCTFail("Multiple edit originals accepted")
+        } catch LedgerTransactionMutationError.sourceUnavailable { }
+        let entered = expectation(description: "action hydration paused")
+        let gate = Gate(entered)
+        await engine.pause("/api/ledger/transactions/detail", gate: gate)
+        let loading = Task { try await session.prepareLocalTransactionAction(sources: [actionSource()], kind: .delete) }
+        await fulfillment(of: [entered], timeout: 3)
+        session.resetLocalTransactionWindow()
+        await gate.release()
+        do {
+            _ = try await loading.value
+            XCTFail("Late hydration granted authority")
+        } catch is CancellationError { }
+        XCTAssertNil(session.visibleTransaction(matching: actionSource()))
+    }
+
+    func testOverlappingPreparationReportsBusyWithoutRevokingInFlightAuthority() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let entered = expectation(description: "first preparation paused")
+        let gate = Gate(entered)
+        await engine.pause("/api/ledger/transactions/detail", gate: gate)
+        let first = Task { try await session.prepareLocalTransactionAction(sources: [actionSource()], kind: .delete) }
+        await fulfillment(of: [entered], timeout: 3)
+        do {
+            _ = try await session.prepareLocalTransactionAction(sources: [actionSource(2)], kind: .delete)
+            XCTFail("Concurrent hydration accepted")
+        } catch LocalTransactionWindow.WindowError.busy { }
+        await gate.release()
+        let action = try await first.value
+        XCTAssertEqual(action.originals.map(\.source), [actionSource()])
+        do {
+            try await session.deleteLocalTransaction(action: action, reason: "Synthetic")
+            XCTFail("Mock should fail")
+        } catch is CancellationError { XCTFail("Busy preparation revoked original authority") }
+          catch { }
+    }
+
+    func testPreparedBatchHydratesAllOriginalsBeforeAnyOverlayAndRollsBackFailure() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let sources = [actionSource(), actionSource(2), actionSource(3)]
+        let action = try await session.prepareLocalTransactionAction(sources: sources, kind: .addTags)
+        XCTAssertEqual(action.originals.map(\.source), sources)
+        let before = try await repository.workspace.currentRevision()
+        for original in action.originals { XCTAssertNil(session.transactionMutationPhase(for: original)) }
+        do {
+            try await session.addLocalTransactionTags(action: action, tags: ["synthetic"])
+            XCTFail("Mock should fail")
+        } catch { }
+        let after = try await repository.workspace.currentRevision()
+        XCTAssertEqual(before?.id, after?.id)
+        for original in action.originals {
+            if case .failed = session.transactionMutationPhase(for: original) { }
+            else { XCTFail("Expected rolled back batch") }
+        }
     }
 
     func testOptInFirstNextSingleWindowEOFAndExplicitResetLeaveLegacyArraysUntouched() async throws {
