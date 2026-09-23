@@ -269,6 +269,29 @@ actor LocalLedgerRepository: LedgerRepository {
         return page
     }
 
+    func accountTrend(account: String, currency: String, range: LedgerDateRange,
+                      expectedRevisionID: UUID) async throws -> LocalAccountTrendScan.Result {
+        var scan: LocalAccountTrendScan?
+        var cursor: String?
+        let end = range.queryEndExclusive
+        while true {
+            try Task.checkCancellation()
+            let page = try await accountPage(account: account, currency: currency, start: range.start, end: end,
+                cursor: cursor, limit: 500, expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil {
+                scan = try LocalAccountTrendScan(range: range, account: account, currency: currency, revision: page.revision)
+            }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return result
+            }
+            cursor = page.nextCursor
+        }
+    }
+
     /// Complete full-history scan, retaining only a bounded globally sorted window.
     /// Continuations must be bound by the session to the same query/account context.
     func globalSearchWindow(query: String, accounts: [LedgerAccount], scope: LedgerGlobalSearchScope,

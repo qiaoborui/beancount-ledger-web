@@ -147,6 +147,12 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         XCTAssertEqual(accountRows.map(\.change), legacyAccount.rows.map(\.change))
         XCTAssertEqual(accountRows.map { $0.transaction.id }, legacyAccount.rows.map { $0.transaction.id })
 
+        let completeAccountTrend = try await repository.accountTrend(account: "Assets:Cash", currency: "CNY",
+            range: .init(start: start, end: "2026-09-30", preset: .custom), expectedRevisionID: bootstrap.revisionID)
+        XCTAssertEqual(completeAccountTrend.rowCount, legacyAccount.rows.count)
+        XCTAssertEqual(completeAccountTrend.points, legacyAccount.balanceTrend(in:
+            .init(start: start, end: "2026-09-30", preset: .custom), maxPoints: 180))
+
         // Real paged navigation must resume within a candidate page, without
         // re-counting the summary or interpreting window absence as deletion.
         let windowLimits = LocalTransactionWindow.Limits(maxRows: 137)
