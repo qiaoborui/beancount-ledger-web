@@ -505,6 +505,58 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertNotNil(session.localTransactionWindow)
     }
 
+    func testShareExportExactSelectionAndPublishedFileRevokedByPrivacyResetAndDismissal() async throws {
+        for operation in 0..<4 {
+            let (session, _, _) = try await fixture()
+            defer { session.chooseLedger() }
+            let row = try await session.localTransactionDetail(source: actionSource(2))
+            let export = try await session.prepareLocalTransactionShare(filter: .init(), selectedIDs: [row.id])
+            XCTAssertEqual(export.count, 1)
+            XCTAssertTrue(try String(contentsOf: export.url, encoding: .utf8).contains("Needle"))
+            switch operation {
+            case 0: session.discardLocalTransactionShare(export)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            default: session.chooseLedger()
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: export.url.path))
+        }
+    }
+
+    func testNewShareRevokesOldFileAndOldDismissalDoesNotRevokeNewOne() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let old = try await session.prepareLocalTransactionShare(filter: .init(), selectedIDs: nil)
+        let new = try await session.prepareLocalTransactionShare(filter: .init(query: "Needle"), selectedIDs: nil)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.url.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: new.url.path))
+        session.discardLocalTransactionShare(old)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: new.url.path))
+        session.discardLocalTransactionShare(new)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: new.url.path))
+    }
+
+    func testLateShareCannotPublishAfterPrivacyRangeResetRevisionOrCancellation() async throws {
+        for operation in 0..<5 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "share awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let loading = Task { try await session.prepareLocalTransactionShare(filter: .init(), selectedIDs: nil) }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0: await session.updateActivity(isActive: false, isBackground: true)
+            case 1: await session.applyRange(.month(year: 2026, month: 8))
+            case 2: session.resetLocalTransactionWindow()
+            case 3: try await advance(repository)
+            default: loading.cancel()
+            }
+            await gate.release()
+            do { _ = try await loading.value; XCTFail("Revoked share published") } catch { }
+        }
+    }
+
     func testOptInFirstNextSingleWindowEOFAndExplicitResetLeaveLegacyArraysUntouched() async throws {
         let (session, engine, repository) = try await fixture()
         defer { session.chooseLedger() }

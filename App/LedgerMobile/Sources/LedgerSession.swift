@@ -223,6 +223,9 @@ final class LedgerSession: ObservableObject {
     private var transactionWindowTask: Task<Void, Never>?
     private var transactionDetailTask: Task<LedgerTransaction, Error>?
     private var localTransactionActionID: UUID?
+    private var transactionShareTask: Task<LocalTransactionShareExport, Error>?
+    private var transactionShareID: UUID?
+    private var transactionShareExport: LocalTransactionShareExport?
 
     enum LocalTransactionActionKind: Sendable { case edit, delete, addTags }
 
@@ -3359,6 +3362,7 @@ final class LedgerSession: ObservableObject {
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
     func resetLocalTransactionWindow() {
+        discardLocalTransactionShare()
         localTransactionActionID = nil
         transactionWindowGeneration &+= 1
         transactionSummaryTask?.cancel()
@@ -3592,6 +3596,62 @@ final class LedgerSession: ObservableObject {
             throw LocalLedgerWorkspace.WorkspaceError.staleRevision
         }
         return detail
+    }
+
+    /// Retain at most one export, revoking its file synchronously whenever the
+    /// session's read context is invalidated. The caller must also discard on
+    /// share-sheet dismissal; retaining an old URL never keeps its file alive.
+    func discardLocalTransactionShare(_ export: LocalTransactionShareExport? = nil) {
+        if let export, transactionShareExport !== export {
+            export.discard()
+            return
+        }
+        transactionShareID = nil
+        transactionShareTask?.cancel()
+        transactionShareTask = nil
+        transactionShareExport?.discard()
+        transactionShareExport = nil
+    }
+
+    func prepareLocalTransactionShare(filter: LedgerTransactionFilter,
+                                      selectedIDs: Set<String>?) async throws -> LocalTransactionShareExport {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        // Serial ownership: a new explicit share revokes the previous file/task.
+        discardLocalTransactionShare()
+        let id = UUID()
+        transactionShareID = id
+        let currency = ledger?.valuationCurrency ?? "CNY"
+        let labels = TransactionCategoryPresentation.accountLabels(ledger?.accounts ?? [])
+        let task = Task { @MainActor [self] in
+            try await LocalTransactionShareExport.prepare(repository: repository,
+                start: context.range.start, end: context.range.queryEndExclusive,
+                filter: filter, selectedIDs: selectedIDs, expectedRevisionID: context.revisionID,
+                currency: currency, accountLabels: labels,
+                parentDirectory: FileManager.default.temporaryDirectory.resolvingSymlinksInPath(),
+                adopt: { export in self.transactionShareExport = export }) {
+                    try self.validateLocalRead(context)
+                    guard self.transactionShareID == id else { throw CancellationError() }
+                }
+        }
+        transactionShareTask = task
+        do {
+            let export = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            do {
+                try validateLocalRead(context)
+                guard transactionShareID == id else { throw CancellationError() }
+                let revision = try await repository.workspace.currentRevision()
+                try validateLocalRead(context)
+                guard transactionShareID == id else { throw CancellationError() }
+                guard revision?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+            } catch { export.discard(); throw error }
+            transactionShareExport = export
+            transactionShareTask = nil
+            return export
+        } catch {
+            if transactionShareID == id { discardLocalTransactionShare() }
+            throw error
+        }
     }
 
     /// An explicit user action hydrates exact sources from a pinned revision.

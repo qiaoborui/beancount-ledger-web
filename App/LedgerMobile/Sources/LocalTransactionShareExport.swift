@@ -25,7 +25,8 @@ final class LocalTransactionShareExport {
     static func prepare(repository: LocalLedgerRepository, start: String, end: String,
                         filter: LedgerTransactionFilter, selectedIDs: Set<String>?,
                         expectedRevisionID: UUID, currency: String, accountLabels: [String: String],
-                        parentDirectory: URL, validate: @MainActor () throws -> Void) async throws -> LocalTransactionShareExport {
+                        parentDirectory: URL, adopt: @MainActor (LocalTransactionShareExport) -> Void = { _ in },
+                        validate: @MainActor () throws -> Void) async throws -> LocalTransactionShareExport {
         try validate()
         try Task.checkCancellation()
         let first = try await repository.makeTransactionWindow(start: start, end: end,
@@ -83,7 +84,11 @@ final class LocalTransactionShareExport {
             guard revision?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
             // No await between final owner checks and publishing the complete file.
             let url = try sink.finish()
-            return LocalTransactionShareExport(url: url, count: count, revisionID: expectedRevisionID, file: sink)
+            let export = LocalTransactionShareExport(url: url, count: count, revisionID: expectedRevisionID, file: sink)
+            // Transfer revocation ownership synchronously before an async caller
+            // can suspend receiving this completed result.
+            adopt(export)
+            return export
         } catch {
             file?.discard()
             await first.invalidate()
