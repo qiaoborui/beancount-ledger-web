@@ -96,6 +96,31 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 		}
 		return localTransactionPageProjection(cfg, snapshot, input.Query, input.Path == "/api/ledger/transactions/history-page")
 	}
+	if strings.EqualFold(input.Method, http.MethodPost) && input.Path == "/api/ledger/bql" {
+		if input.ImportFile != nil {
+			return http.StatusBadRequest, nil, errors.New("importFile is valid only for import preview")
+		}
+		if len(input.Body) > bqlMaxRequestBodyLength {
+			return http.StatusRequestEntityTooLarge, nil, errors.New("BQL request exceeds byte budget")
+		}
+		var request BQLRequest
+		if err := json.Unmarshal(input.Body, &request); err != nil {
+			return http.StatusBadRequest, nil, errors.New("invalid BQL request")
+		}
+		snapshot, err := cache.Snapshot()
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		result, err := executeLocalBQL(snapshot, request.Query, request.ValuationCurrency)
+		if errors.Is(err, errLocalBQLCapacity) {
+			return http.StatusRequestEntityTooLarge, nil, err
+		}
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		raw, err := json.Marshal(result)
+		return http.StatusOK, raw, err
+	}
 	runtime := newFilesystemRuntimeStore(cfg.RuntimeDir)
 	writer := NewLedgerWriterWithRuntimeStore(cfg, cache, runtime)
 	if input.Staging {

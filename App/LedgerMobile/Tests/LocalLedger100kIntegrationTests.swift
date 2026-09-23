@@ -38,6 +38,13 @@ final class LocalLedger100kIntegrationTests: XCTestCase {
         let next = try await repository.transactionPage(cursor: first.nextCursor, limit: 100)
         XCTAssertEqual(next.revision, first.revision)
         XCTAssertTrue(Set(first.transactions.map(\.id)).isDisjoint(with: Set(next.transactions.map(\.id))))
+        let bqlStart = ContinuousClock.now
+        let aggregate = try await repository.runBQL(
+            query: "SELECT count(*), sum(amount) FROM postings WHERE account = 'Expenses:Food'",
+            valuationCurrency: "CNY")
+        XCTAssertEqual(aggregate.rowCount, 1)
+        XCTAssertEqual(aggregate.rows, [[.number(100000), .number(10000000)]])
+        print("SYNTHETIC100K aggregate_bql_ms=\(Self.ms(bqlStart.duration(to: .now)))")
         let bootstrapStart = ContinuousClock.now
         let home = try await repository.bootstrap(start: "2026-09-01", end: "2026-10-01", today: "2026-09-23", valuationCurrency: "CNY")
         XCTAssertGreaterThan(home.summary.expense, 0)
