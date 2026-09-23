@@ -130,14 +130,14 @@ func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query 
 		offset = cursor.Offset
 	}
 	txns := snapshotTransactionsDesc(snapshot)
-	if offset > len(txns) {
+	if offset > txns.Len() {
 		return 400, nil, errors.New("invalid transaction cursor position")
 	}
 	page := localTransactionPage{Revision: modelRevision, Transactions: make([]Transaction, 0, limit), SensitiveUnlocked: true}
 	// Reserve enough for revision/cursor/envelope fields; exact final size checked.
 	used := 4096
-	for index := offset; index < len(txns); index++ {
-		txn := txns[index]
+	for index := offset; index < txns.Len(); index++ {
+		txn := txns.At(index)
 		if txn.Date < effectiveStart || txn.Date >= effectiveEnd || (filter != nil && !filter.Matches(txn)) {
 			continue
 		}

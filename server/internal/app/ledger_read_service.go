@@ -440,9 +440,9 @@ func FilterLedgerTransactions(txns []Transaction, start, end string, unlocked bo
 	return filterLedgerTransactionsDesc(desc, start, end, unlocked, nil)
 }
 
-func filterLedgerTransactionsDesc(txns []Transaction, start, end string, unlocked bool, query *transactionQuery) []Transaction {
-	filtered := make([]Transaction, 0, min(len(txns), 256))
-	for _, txn := range txns {
+func filterLedgerTransactionsDesc(txns transactionOrder, start, end string, unlocked bool, query *transactionQuery) []Transaction {
+	filtered := make([]Transaction, 0, min(txns.Len(), 256))
+	for txn := range txns.All() {
 		if txn.Date < start || txn.Date >= end {
 			continue
 		}
@@ -567,7 +567,7 @@ func scopedNetWorthSummary(snapshot *LedgerSnapshot, start, end string, unlocked
 	if !unlocked {
 		return netWorthRows, monthEndRows, windows, creditCards, nil
 	}
-	allRows := netWorthHistoryInCurrencyAsc(snapshotTransactionsAsc(snapshot), snapshot.Prices, valuationCurrency)
+	allRows := netWorthHistoryInCurrencySequence(snapshotTransactionsAsc(snapshot).All(), snapshot.Prices, valuationCurrency)
 	for _, row := range allRows {
 		if row.Date >= start && row.Date < end {
 			netWorthRows = append(netWorthRows, row)

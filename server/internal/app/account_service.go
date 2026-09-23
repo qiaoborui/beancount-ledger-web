@@ -88,7 +88,7 @@ func (s *AccountService) Detail(account, currency, start, end string) (AccountDe
 	}
 	currentBalance := accountBalances[currency]
 	rows, openingBalance, closingBalance := accountDetailRowsForRange(
-		AccountDetailFromSortedInCurrency(account, currency, snapshotTransactionsAsc(snapshot)),
+		accountDetailFromSequenceInCurrency(account, currency, snapshotTransactionsAsc(snapshot).All()),
 		start,
 		end,
 		currentBalance,

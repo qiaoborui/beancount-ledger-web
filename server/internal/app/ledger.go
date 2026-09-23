@@ -4,10 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"iter"
 	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1220,12 +1222,16 @@ func NetWorthHistoryInCurrency(txns []Transaction, prices []Price, valuationCurr
 }
 
 func netWorthHistoryInCurrencyAsc(sorted []Transaction, prices []Price, valuationCurrency string) []NetWorthPoint {
+	return netWorthHistoryInCurrencySequence(slices.Values(sorted), prices, valuationCurrency)
+}
+
+func netWorthHistoryInCurrencySequence(sorted iter.Seq[Transaction], prices []Price, valuationCurrency string) []NetWorthPoint {
 	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
 	priceIndex := NewPriceIndex(prices)
 	balances := map[string]map[string]int{}
 	var rows []NetWorthPoint
 	lastDate := ""
-	for _, txn := range sorted {
+	for txn := range sorted {
 		for _, posting := range txn.Postings {
 			currency := posting.Currency
 			if currency == "" {
@@ -1281,12 +1287,13 @@ func AccountDetailFromSorted(account string, sortedTxns []Transaction) []Account
 }
 
 func AccountDetailFromSortedInCurrency(account, currency string, sortedTxns []Transaction) []AccountDetailRow {
-	type relevant struct {
-		txn    Transaction
-		change int
-	}
-	var rows []relevant
-	for _, txn := range sortedTxns {
+	return accountDetailFromSequenceInCurrency(account, currency, slices.Values(sortedTxns))
+}
+
+func accountDetailFromSequenceInCurrency(account, currency string, sortedTxns iter.Seq[Transaction]) []AccountDetailRow {
+	var balance int
+	out := make([]AccountDetailRow, 0)
+	for txn := range sortedTxns {
 		var change int
 		matched := false
 		for _, posting := range txn.Postings {
@@ -1300,15 +1307,11 @@ func AccountDetailFromSortedInCurrency(account, currency string, sortedTxns []Tr
 			}
 		}
 		if matched {
-			rows = append(rows, relevant{txn: txn, change: change})
+			balance += change
+			out = append(out, AccountDetailRow{Date: txn.Date, Payee: txn.Payee, Narration: txn.Narration, Change: change, Balance: balance, Txn: txn})
 		}
 	}
-	var balance int
-	out := make([]AccountDetailRow, 0, len(rows))
-	for _, row := range rows {
-		balance += row.change
-		out = append(out, AccountDetailRow{Date: row.txn.Date, Payee: row.txn.Payee, Narration: row.txn.Narration, Change: row.change, Balance: balance, Txn: row.txn})
-	}
+
 	return out
 }
 
