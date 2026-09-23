@@ -398,17 +398,17 @@ func TestLedgerSnapshotCachesDerivedViews(t *testing.T) {
 	if snapshot.transactionsAsc == nil || snapshot.transactionsDesc == nil {
 		t.Fatal("transaction sort views should be prepared with the snapshot")
 	}
-	if len(snapshotTransactionsAsc(snapshot)) != 2 || snapshotTransactionsAsc(snapshot)[0].Payee != "Cafe" || snapshotTransactionsAsc(snapshot)[1].Payee != "Employer" {
+	if snapshotTransactionsAsc(snapshot).Len() != 2 || snapshotTransactionsAsc(snapshot).At(0).Payee != "Cafe" || snapshotTransactionsAsc(snapshot).At(1).Payee != "Employer" {
 		t.Fatalf("ascending transaction cache changed order: %#v", snapshotTransactionsAsc(snapshot))
 	}
-	if len(snapshotTransactionsDesc(snapshot)) != 2 || snapshotTransactionsDesc(snapshot)[0].Payee != "Employer" || snapshotTransactionsDesc(snapshot)[1].Payee != "Cafe" {
+	if snapshotTransactionsDesc(snapshot).Len() != 2 || snapshotTransactionsDesc(snapshot).At(0).Payee != "Employer" || snapshotTransactionsDesc(snapshot).At(1).Payee != "Cafe" {
 		t.Fatalf("descending transaction cache changed order: %#v", snapshotTransactionsDesc(snapshot))
 	}
 	_, sameDayDesc := sortedTransactionViews([]Transaction{
 		{Date: "2026-05-02", Payee: "Second line", Source: TransactionSource{Line: 20}},
 		{Date: "2026-05-02", Payee: "First line", Source: TransactionSource{Line: 10}},
 	})
-	if sameDayDesc[0].Payee != "First line" || sameDayDesc[1].Payee != "Second line" {
+	if sameDayDesc.At(0).Payee != "First line" || sameDayDesc.At(1).Payee != "Second line" {
 		t.Fatalf("descending cache should keep same-day ledger order: %#v", sameDayDesc)
 	}
 
@@ -560,7 +560,10 @@ func BenchmarkBuildLedgerTransactionsCached(b *testing.B) {
 
 func BenchmarkBuildLedgerTransactionsFromIndexedRange(b *testing.B) {
 	snapshot := benchmarkLedgerSnapshot(2000)
-	txns := snapshotTransactionsDesc(snapshot)
+	txns := make([]Transaction, 0, len(snapshot.Transactions))
+	for txn := range snapshotTransactionsDesc(snapshot).All() {
+		txns = append(txns, txn)
+	}
 
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {

@@ -198,7 +198,7 @@ func TestLocalHistoryEvidenceProjectionIsBoundedAndCursorScoped(t *testing.T) {
 		snapshot.Transactions[i].Metadata = metadata
 	}
 	// Fixture sorted views were created before metadata assignment.
-	snapshot.transactionsAsc, snapshot.transactionsDesc = sortedTransactionViews(snapshot.Transactions)
+	snapshot.transactionsAsc, snapshot.transactionsDesc = sortedTransactionIndices(snapshot.Transactions)
 	q := map[string]string{"limit": "2"}
 	status, data, err := localTransactionPageProjection(cfg, snapshot, q, true)
 	if status != 200 || err != nil || len(data) > localTransactionPageBytes {
@@ -242,7 +242,7 @@ func TestLocalHistoryMetadataEnforcesByteBudgetWithoutTruncation(t *testing.T) {
 	for i := range snapshot.Transactions {
 		snapshot.Transactions[i].Metadata = map[string]MetadataValue{"method": value}
 	}
-	snapshot.transactionsAsc, snapshot.transactionsDesc = sortedTransactionViews(snapshot.Transactions)
+	snapshot.transactionsAsc, snapshot.transactionsDesc = sortedTransactionIndices(snapshot.Transactions)
 	seen := map[int]bool{}
 	q := map[string]string{"limit": "500"}
 	for {
@@ -275,7 +275,7 @@ func TestLocalHistoryMetadataEnforcesByteBudgetWithoutTruncation(t *testing.T) {
 	if err := json.Unmarshal(raw, &value); err != nil {
 		t.Fatal(err)
 	}
-	snapshot.transactionsDesc[0].Metadata = map[string]MetadataValue{"method": value}
+	snapshot.Transactions[snapshot.transactionsDesc[0]].Metadata = map[string]MetadataValue{"method": value}
 	if status, _, _ := localTransactionPageProjection(cfg, snapshot, nil, true); status != 413 {
 		t.Fatal("oversize evidence not rejected")
 	}

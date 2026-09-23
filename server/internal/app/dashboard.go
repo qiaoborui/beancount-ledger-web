@@ -412,18 +412,12 @@ func balanceTotals(balances []AccountBalance) (int, int) {
 	return assets, liabilities
 }
 
-func dashboardSortedTransactions(snapshot *LedgerSnapshot, txns []Transaction, filters DashboardFilters) []Transaction {
+func dashboardSortedTransactions(snapshot *LedgerSnapshot, txns []Transaction, filters DashboardFilters) transactionOrder {
 	if filters.Empty() {
 		return snapshotTransactionsAsc(snapshot)
 	}
-	sorted := append([]Transaction(nil), txns...)
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Date == sorted[j].Date {
-			return sorted[i].Source.Line < sorted[j].Source.Line
-		}
-		return sorted[i].Date < sorted[j].Date
-	})
-	return sorted
+	asc, _ := sortedTransactionViews(txns)
+	return asc
 }
 
 type dashboardBucketSummary struct {
@@ -476,14 +470,14 @@ func dashboardBucketIndex(buckets []dashboardBucket, date string) int {
 	return index
 }
 
-func dashboardNetWorthSeries(sorted []Transaction, priceIndex PriceIndex, start, end, valuationCurrency string, includeYearLabels bool) []NetWorthPoint {
+func dashboardNetWorthSeries(sorted transactionOrder, priceIndex PriceIndex, start, end, valuationCurrency string, includeYearLabels bool) []NetWorthPoint {
 	buckets := dashboardBuckets(start, end, includeYearLabels)
 	balances := map[string]map[string]int{}
 	out := make([]NetWorthPoint, 0, len(buckets))
 	index := 0
 	for _, bucket := range buckets {
-		for index < len(sorted) && sorted[index].Date < bucket.End {
-			for _, posting := range sorted[index].Postings {
+		for index < sorted.Len() && sorted.At(index).Date < bucket.End {
+			for _, posting := range sorted.At(index).Postings {
 				currency := posting.Currency
 				if currency == "" {
 					currency = "CNY"
