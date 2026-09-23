@@ -483,6 +483,28 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         }
     }
 
+    func testSameRevisionRefreshAndFailedAdditionSignalWindowReload() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadLocalTransactionWindow()
+        let revision = try await repository.workspace.currentRevision()
+        let before = session.localTransactionReloadID
+        await session.refresh()
+        let refreshed = try await repository.workspace.currentRevision()
+        XCTAssertEqual(revision?.id, refreshed?.id)
+        XCTAssertGreaterThan(session.localTransactionReloadID, before)
+        XCTAssertNil(session.localTransactionWindow)
+        await session.loadLocalTransactionWindow()
+        XCTAssertNotNil(session.localTransactionWindow)
+        let beforeFailure = session.localTransactionReloadID
+        let entry = LedgerTransactionEntry(date: "2026-09-23", payee: "Synthetic", narration: "Fails",
+            postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")])
+        do { try await session.addLocalTransaction(entry); XCTFail("Mock should fail") } catch { }
+        XCTAssertGreaterThan(session.localTransactionReloadID, beforeFailure)
+        await session.loadLocalTransactionWindow()
+        XCTAssertNotNil(session.localTransactionWindow)
+    }
+
     func testOptInFirstNextSingleWindowEOFAndExplicitResetLeaveLegacyArraysUntouched() async throws {
         let (session, engine, repository) = try await fixture()
         defer { session.chooseLedger() }

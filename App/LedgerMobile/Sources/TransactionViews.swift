@@ -326,7 +326,7 @@ private struct LedgerTransactionActions: ViewModifier {
 }
 
 struct CookieTransactionFilterBar: View {
-    let filteredCount: Int
+    let filteredCount: Int?
     @Binding var kindFilter: TransactionKindFilter
 
     var body: some View {
@@ -358,7 +358,7 @@ struct CookieTransactionFilterBar: View {
 
             Spacer()
 
-            Text("\(filteredCount) 笔")
+            Text(filteredCount.map { "\($0) 笔" } ?? "统计中…")
                 .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
                 .foregroundStyle(LedgerPalette.secondary)
         }
@@ -391,6 +391,31 @@ struct TransactionsView: View {
     @State private var actionRequestID: UUID?
     @State private var preparingTags = false
 
+    private struct WindowRequestKey: Equatable {
+        let revision: UUID?
+        let reload: Int
+        let range: LedgerDateRange
+        let filter: LedgerTransactionFilter
+        let readable: Bool
+    }
+
+    private var windowRequestKey: WindowRequestKey {
+        .init(revision: session.localTransactionPresentationRevision, reload: session.localTransactionReloadID, range: session.selectedRange,
+              filter: filters, readable: session.isLocal && session.phase == .ready && !session.privacyShielded
+                && !session.isRangeLoading && !session.isValuationCurrencyLoading
+                && !session.transactionMutationStates.values.contains(.pending))
+    }
+
+    // Only rendering is migrated here. Existing full-range selection/share still
+    // uses the complete legacy universe until its independent migration lands.
+    private var displayedTransactions: [LedgerTransaction] {
+        session.isLocal ? (session.localTransactionWindow?.transactions ?? []) : filteredTransactions
+    }
+
+    private var displayedCount: Int? {
+        session.isLocal ? session.localTransactionSummary?.matchedCount : filteredTransactions.count
+    }
+
     private var transactions: [LedgerTransaction] {
         session.visibleTransactions
     }
@@ -400,12 +425,14 @@ struct TransactionsView: View {
     }
 
     private var availableAccounts: [String] {
-        Array(Set(transactions.flatMap { $0.postings.map(\.account) }))
+        if session.isLocal { return session.localTransactionSummary?.availableAccounts ?? [] }
+        return Array(Set(transactions.flatMap { $0.postings.map(\.account) }))
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     private var availableTags: [String] {
-        Array(Set(transactions.flatMap { $0.tags ?? [] }.filter { !$0.isEmpty }))
+        if session.isLocal { return session.localTransactionSummary?.availableTags ?? [] }
+        return Array(Set(transactions.flatMap { $0.tags ?? [] }.filter { !$0.isEmpty }))
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
@@ -418,7 +445,7 @@ struct TransactionsView: View {
     var isRoot = true
 
     private var groupedTransactions: [(date: String, transactions: [LedgerTransaction])] {
-        Dictionary(grouping: filteredTransactions, by: \.date)
+        Dictionary(grouping: displayedTransactions, by: \.date)
             .map { (date: $0.key, transactions: $0.value) }
             .sorted { $0.date > $1.date }
     }
@@ -464,11 +491,11 @@ struct TransactionsView: View {
         return max(0, total)
     }
 
-    var body: some View {
+    private var transactionList: some View {
         List {
             Section {
                 CookieTransactionFilterBar(
-                    filteredCount: filteredTransactions.count,
+                    filteredCount: displayedCount,
                     kindFilter: $filters.kind
                 )
             }
@@ -489,7 +516,24 @@ struct TransactionsView: View {
                     StatusBanner(message: actionMessage, style: actionMessageStyle) { self.actionMessage = nil }
                 }
             }
-            if filteredTransactions.isEmpty {
+            if session.isLocal {
+                if let error = session.localTransactionWindowError {
+                    Section {
+                        StatusBanner(message: error, onDismiss: {})
+                        Button("重新读取流水") { Task { await loadWindow() } }
+                    }
+                }
+                if let error = session.localTransactionSummaryError {
+                    Section {
+                        StatusBanner(message: error, onDismiss: {})
+                        Button("重新统计完整范围") { Task { await session.loadLocalTransactionSummary() } }
+                    }
+                }
+                if session.isLocalTransactionWindowLoading && displayedTransactions.isEmpty {
+                    Section { ProgressView("正在读取流水") }
+                }
+            }
+            if displayedTransactions.isEmpty && (!session.isLocal || session.localTransactionWindow?.isComplete == true) {
                 ContentUnavailableView(
                     filters.query.isEmpty && activeStructuredFilterCount == 0 ? "所选范围暂无流水" : "没有匹配的交易",
                     systemImage: "list.bullet.rectangle",
@@ -507,7 +551,9 @@ struct TransactionsView: View {
                             .font(.system(.footnote, design: .rounded, weight: .semibold))
                             .foregroundStyle(LedgerPalette.ink)
                         Spacer()
-                        let dayExpense = groupExpense(for: group.transactions)
+                        let dayExpense = session.isLocal
+                            ? (session.localTransactionSummary?.days.first(where: { $0.date == group.date })?.expense ?? 0)
+                            : groupExpense(for: group.transactions)
                         if dayExpense > 0 {
                             HStack(spacing: 3) {
                                 Text("支出")
@@ -526,7 +572,28 @@ struct TransactionsView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
-            if !filteredTransactions.isEmpty {
+            if session.isLocal, session.localTransactionWindow != nil {
+                Section {
+                    HStack {
+                        Button("上一页") { Task { await session.loadPreviousLocalTransactionWindow() } }
+                            .disabled(session.localTransactionWindowIndex == 0 || session.isLocalTransactionWindowLoading)
+                            .accessibilityIdentifier("transaction-window-previous")
+                        Spacer()
+                        Text("第 \(session.localTransactionWindowIndex + 1) 页").font(.footnote.monospacedDigit())
+                        Spacer()
+                        Button("下一页") { Task { await session.loadNextLocalTransactionWindow() } }
+                            .disabled(session.localTransactionWindow?.continuation == nil || session.isLocalTransactionWindowLoading)
+                            .accessibilityIdentifier("transaction-window-next")
+                    }
+                    if let summary = session.localTransactionSummary {
+                        Text("\(summary.matchedCount) / \(summary.fullRangeCount) 笔 · 本页 \(displayedTransactions.count) 笔")
+                            .font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
+                    } else {
+                        Text(session.localTransactionSummaryError == nil ? "正在统计完整范围…" : "完整统计暂不可用")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+            } else if !session.isLocal && !filteredTransactions.isEmpty {
                 Section {
                     Text("\(filteredTransactions.count) / \(transactions.count) 笔")
                         .font(.footnote.monospacedDigit())
@@ -535,10 +602,17 @@ struct TransactionsView: View {
                 .listRowBackground(Color.clear)
             }
         }
+    }
+
+    private var navigationContent: some View {
+        transactionList
         .ledgerReadingList()
         .ledgerNavigation("流水", isRoot: isRoot, showsTimeRange: true)
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
+        .task(id: windowRequestKey) {
+            if windowRequestKey.readable { await loadWindow() }
+        }
         .toolbar {
             if session.isLocal {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -589,6 +663,10 @@ struct TransactionsView: View {
                 }
             }
         }
+    }
+
+    private var presentedContent: some View {
+        navigationContent
             .sheet(isPresented: $creatingTransaction) {
                 TransactionEditorView(accounts: session.ledger?.accounts ?? [], commodities: session.ledger?.commodities ?? []) { entry in
                     try await session.addLocalTransaction(entry)
@@ -654,7 +732,10 @@ struct TransactionsView: View {
                     accounts: availableAccounts,
                     availableTags: availableTags,
                     onDone: { filterPresented = false },
-                    onOpenEventReports: { eventTagListPresented = true }
+                    onOpenEventReports: { eventTagListPresented = true },
+                    facetsReady: !session.isLocal || session.localTransactionSummary != nil,
+                    facetsError: session.isLocal ? session.localTransactionSummaryError : nil,
+                    onRetryFacets: { Task { await session.loadLocalTransactionSummary() } }
                 )
                 .ledgerPrivacyProtectedSheet()
             }
@@ -691,6 +772,10 @@ struct TransactionsView: View {
                 .environmentObject(session)
                 .ledgerPrivacyProtectedSheet()
             }
+    }
+
+    var body: some View {
+        presentedContent
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isSelecting {
                     TransactionBatchActionBar(
@@ -819,6 +904,13 @@ struct TransactionsView: View {
                 .tint(LedgerPalette.cobalt)
             }
         }
+    }
+
+    private func loadWindow() async {
+        guard session.isLocal, session.phase == .ready, !session.privacyShielded else { return }
+        await session.loadLocalTransactionWindow(filter: filters)
+        guard !Task.isCancelled else { return }
+        await session.loadLocalTransactionSummary()
     }
 
     private func revokeListAction() {
@@ -1069,6 +1161,13 @@ private struct TransactionFilterSheet: View {
     let availableTags: [String]
     let onDone: () -> Void
     var onOpenEventReports: (() -> Void)? = nil
+    var facetsReady = true
+    var facetsError: String? = nil
+    var onRetryFacets: (() -> Void)? = nil
+
+    private var pickerAccounts: [String] {
+        Array(Set(accounts).union(account.map { [$0] } ?? [])).sorted()
+    }
 
     @State private var tagQuery = ""
 
@@ -1085,6 +1184,14 @@ private struct TransactionFilterSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !facetsReady {
+                    Section {
+                        if let facetsError {
+                            StatusBanner(message: facetsError, onDismiss: {})
+                            Button("重新读取筛选项") { onRetryFacets?() }
+                        } else { ProgressView("正在读取完整范围筛选项") }
+                    }
+                }
                 Section("交易类型") {
                     Picker("交易类型", selection: $kind) {
                         ForEach(TransactionKindFilter.allCases) { filter in
@@ -1098,7 +1205,7 @@ private struct TransactionFilterSheet: View {
                 Section("账户") {
                     Picker("账户", selection: $account) {
                         Text("全部账户").tag(Optional<String>.none)
-                        ForEach(accounts, id: \.self) { value in
+                        ForEach(pickerAccounts, id: \.self) { value in
                             Text(value).tag(Optional(value))
                         }
                     }
@@ -1113,7 +1220,9 @@ private struct TransactionFilterSheet: View {
                             .autocorrectionDisabled()
                     }
 
-                    if availableTags.isEmpty, tags.isEmpty {
+                    if !facetsReady && availableTags.isEmpty && tags.isEmpty {
+                        Text("完整标签列表尚未读取").foregroundStyle(LedgerPalette.secondary)
+                    } else if availableTags.isEmpty, tags.isEmpty {
                         Text("当前范围没有标签")
                             .foregroundStyle(LedgerPalette.secondary)
                     } else if displayedTags.isEmpty {
