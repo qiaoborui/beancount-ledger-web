@@ -24,9 +24,9 @@ func localCanonicalEntries(cfg Config, source []BeanEntry) ([]BeanEntry, error) 
 	if model.Version != 1 {
 		return nil, errors.New("unsupported canonical ledger model version")
 	}
-	bySource := make(map[string]BeanEntry, len(source))
-	for _, entry := range source {
-		bySource[canonicalSourceKey(entry)] = entry
+	bySource := make(map[string]int, len(source))
+	for i := range source {
+		bySource[canonicalSourceKey(source[i])] = i
 	}
 	entries := make([]BeanEntry, 0, len(model.Entries))
 	for _, original := range model.Entries {
@@ -57,8 +57,8 @@ func localCanonicalEntries(cfg Config, source []BeanEntry) ([]BeanEntry, error) 
 		// The loader owns the semantic fields. Only the raw locator material is
 		// copied from source, so canonical generated/modified postings survive.
 		entry.RawLines = nil
-		if raw, ok := bySource[canonicalSourceKey(entry)]; ok {
-			entry.RawLines = raw.RawLines
+		if index, ok := bySource[canonicalSourceKey(entry)]; ok {
+			entry.RawLines = source[index].RawLines
 		}
 		entries = append(entries, entry)
 	}
@@ -106,32 +106,37 @@ func localCanonicalCommodities(entries []BeanEntry, model *LocalCanonicalModel) 
 }
 
 func localCanonicalTransactions(entries, source []BeanEntry) []Transaction {
-	// Canonical Beancount has already expanded pads. Passing pad directives
-	// through the Go raw-source expansion would duplicate or invent postings.
-	transactions := make([]BeanEntry, 0, len(entries))
+	// Canonical Beancount has already expanded pads. Do not run raw-source
+	// expansion, accumulate its unused balances, or create canonical editor
+	// drafts only to replace them with exact source drafts below.
+	bySource := make(map[string]int, len(source))
+	for i := range source {
+		if source[i].Kind == "transaction" {
+			bySource[canonicalSourceKey(source[i])] = i
+		}
+	}
+	txns := make([]Transaction, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Kind == "transaction" {
-			transactions = append(transactions, entry)
+		if entry.Kind != "transaction" {
+			continue
 		}
-	}
-	txns := TransactionsFromBeanEntries(transactions)
-	bySource := make(map[string]BeanEntry, len(source))
-	for _, entry := range source {
-		if entry.Kind == "transaction" {
-			bySource[canonicalSourceKey(entry)] = entry
+		txn := Transaction{
+			Date: entry.Date, Payee: entry.Payee, Narration: entry.Narration,
+			Metadata: entry.Metadata, Tags: entry.Tags, Links: entry.Links,
+			Postings: finalizeParsedPostings(entry.Postings),
+			Source:   TransactionSource{File: entry.File, Line: entry.Line},
 		}
-	}
-	for i, entry := range transactions {
-		txns[i].Entry = nil
-		if raw, ok := bySource[canonicalSourceKey(entry)]; ok {
-			txns[i].Source.Hash = transactionHash(raw.RawLines)
-			txns[i].Entry = EditableLedgerEntryFromBeanTransaction(raw)
+		if index, ok := bySource[canonicalSourceKey(entry)]; ok {
+			raw := source[index]
+			txn.Source.Hash = transactionHash(raw.RawLines)
+			txn.Entry = EditableLedgerEntryFromBeanTransaction(raw)
 		} else {
 			// A generated transaction has no editable transaction block. Give it
 			// a stable identity that cannot resolve to its originating pad line.
-			txns[i].Source.Line = 0
-			txns[i].Source.Hash = "generated:" + transactionHash([]string{canonicalSourceKey(entry), fmt.Sprint(i)})
+			txn.Source.Line = 0
+			txn.Source.Hash = "generated:" + transactionHash([]string{canonicalSourceKey(entry), fmt.Sprint(len(txns))})
 		}
+		txns = append(txns, txn)
 	}
 	return txns
 }

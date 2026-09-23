@@ -106,11 +106,14 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	}
 	c.metrics.observeOperation(operationBeanCompile, parseResult, parseStarted)
 	entries := compiled.Entries
-	txns := TransactionsFromBeanEntries(entries)
-	options := OptionsMapFromBeanEntries(entries)
+	var txns []Transaction
+	var options map[string]string
 	if c.cfg.localTransport && c.cfg.localCanonical != nil {
 		txns = localCanonicalTransactions(entries, sourceEntries)
 		options = copyStringMap(c.cfg.localCanonical.Options)
+	} else {
+		txns = TransactionsFromBeanEntries(entries)
+		options = OptionsMapFromBeanEntries(entries)
 	}
 	accounts := AccountsFromBeanEntries(entries)
 	prices := PricesFromBeanEntries(entries)
@@ -285,7 +288,7 @@ func ledgerVersion(cfg Config) (LedgerVersion, error) {
 	var stats []fileStat
 	var err error
 	if cfg.localTransport {
-		_, stats, err = localLedgerSource(cfg)
+		_, stats, err = walkLocalLedgerSource(cfg, false)
 	} else {
 		stats, err = ledgerVersionFiles(mainBeanPath(cfg), cfg.LedgerRoot, map[string]bool{})
 	}
