@@ -25,6 +25,24 @@ final class LocalTransactionSelectionScanTests: XCTestCase {
         XCTAssertEqual(result.selectedMatchingEligibleCount, 1)
         XCTAssertEqual(result.tagSources, Array(rows.prefix(2)).map(\.source))
         XCTAssertTrue(result.allMatchingSelected)
+        XCTAssertEqual(try result.sourcesForTagPreparation(), Array(rows.prefix(2)).map(\.source))
+    }
+
+    func testTagPreparationRejectsHiddenOverflowAndFilteredEmptyWithoutPartialBatch() throws {
+        let rows = (1...201).map { row($0, payee: $0 == 1 ? "Needle" : "Hidden") }
+        for query in ["Needle", "absent"] {
+            var scan = try LocalTransactionSelectionScan(revision: "r", filter: .init(query: query),
+                selectedIDs: Set(rows.map(\.id)))
+            let result = try XCTUnwrap(scan.consume(page(rows), requestedCursor: nil))
+            XCTAssertThrowsError(try result.sourcesForTagPreparation()) {
+                XCTAssertEqual($0 as? LocalTransactionSelectionScan.TagPreparationError,
+                    query == "Needle" ? .tooMany : .noEligibleSelection)
+            }
+        }
+        var scan = try LocalTransactionSelectionScan(revision: "r", filter: .init(query: "Needle"),
+            selectedIDs: Set(rows.prefix(200).map(\.id)))
+        let result = try XCTUnwrap(scan.consume(page(rows), requestedCursor: nil))
+        XCTAssertEqual(try result.sourcesForTagPreparation(), rows.prefix(200).map(\.source))
     }
 
     func testEmptyAndMissingIDsDoNotBecomeImplicitAllSelection() throws {
