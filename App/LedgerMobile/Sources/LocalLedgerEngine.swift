@@ -23,7 +23,7 @@ enum LocalLedgerError: LocalizedError, Equatable {
 struct LocalLedgerEngineRequest: Encodable, Sendable {
     struct ImportFile: Encodable, Sendable { let name: String; let data: Data }
     let version = 1
-    let operation = "request"
+    var operation = "request"
     let workspaceRoot: String
     let runtimeRoot: String
     let entrypoint: String
@@ -34,6 +34,9 @@ struct LocalLedgerEngineRequest: Encodable, Sendable {
     var importFile: ImportFile? = nil
     var staging = false
     var canonical: BQLCell? = nil
+    var modelHandle: String? = nil
+    var streamFile: String? = nil
+    var sourceVersion: String? = nil
 }
 
 /// A process-local JSON boundary. Implementations never open an HTTP listener.
@@ -63,6 +66,15 @@ struct LocalLedgerResponse: Sendable {
         return try JSONDecoder().decode(type, from: data)
     }
 
+    var modelUnavailable: Bool {
+        guard isEnvelope else { return false }
+        struct Envelope: Decodable {
+            struct Diagnostic: Decodable { let code: String }
+            let diagnostics: [Diagnostic]
+        }
+        return (try? JSONDecoder().decode(Envelope.self, from: data).diagnostics.contains { $0.code == "model.unavailable" }) ?? false
+    }
+
     func decodeTransactionPage() throws -> LedgerTransactionPage {
         do { return try decode(LedgerTransactionPage.self) }
         catch let error as LocalLedgerError {
@@ -83,37 +95,136 @@ struct LocalLedgerResponse: Sendable {
     }
 }
 
+/// Process-wide FIFO gate prevents actor reentrancy from duplicating canonical
+/// registration or replacing handles while another native request is preparing.
+private actor LocalModelRequestGate {
+    static let shared = LocalModelRequestGate()
+    private var occupied = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func acquire() async {
+        if !occupied { occupied = true; return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+    func release() {
+        if waiters.isEmpty { occupied = false }
+        else { waiters.removeFirst().resume() }
+    }
+}
+
 actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     static let shared = EmbeddedLocalLedgerEngine()
     // Committed generation directories are immutable. Keep only the most recent
     // model; mutable stages always load their current contents independently.
-    private var canonicalCache: (workspace: String, entrypoint: String, model: Data)?
+    private var canonicalCache: (workspace: String, entrypoint: String, handle: String)?
 
     func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
         try await response(request).resultData()
     }
 
     func response(_ request: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse {
+        await LocalModelRequestGate.shared.acquire()
+        do {
+            try Task.checkCancellation()
+            let result = try await serializedResponse(request)
+            await LocalModelRequestGate.shared.release()
+            return result
+        } catch {
+            await LocalModelRequestGate.shared.release()
+            throw error
+        }
+    }
+
+    private func serializedResponse(_ original: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse {
         #if canImport(LedgerCore)
-        let canonical: Data
+        var request = original
+        // Publication validation performs a GET against a mutable stage too.
+        // Scope by actual workspace, not merely the POST mutation flag.
+        let container = URL(fileURLWithPath: request.workspaceRoot).deletingLastPathComponent().deletingLastPathComponent().lastPathComponent
+        request.staging = request.staging || container == "staging"
+        let handle: String
         if !request.staging, let cached = canonicalCache,
            cached.workspace == request.workspaceRoot, cached.entrypoint == request.entrypoint {
-            canonical = cached.model
+            handle = cached.handle
         } else {
-            let model = try await EmbeddedBeancountValidator.shared.canonicalModel(
-                workspace: URL(fileURLWithPath: request.workspaceRoot), entryFile: request.entrypoint)
-            canonical = model
-            if !request.staging {
-                canonicalCache = (request.workspaceRoot, request.entrypoint, model)
+            if !request.staging, let old = canonicalCache {
+                release(old.handle, request: request)
+                canonicalCache = nil
             }
+            handle = try await register(request)
+            if !request.staging { canonicalCache = (request.workspaceRoot, request.entrypoint, handle) }
         }
-        let encoded = try LocalLedgerJSON.requestData(request, canonical: canonical)
-        let response = MobilecoreDispatchJSON(String(decoding: encoded, as: UTF8.self))
-        return LocalLedgerResponse(envelope: Data(response.utf8))
+        defer { if request.staging { release(handle, request: request) } }
+        var small = request
+        small.canonical = nil
+        small.modelHandle = handle
+        let result = try nativeResponse(small)
+        // Fail stale reads safely; do not retry financial writes automatically.
+        if result.modelUnavailable {
+            if canonicalCache?.handle == handle { canonicalCache = nil }
+            release(handle, request: request)
+        }
+        return result
         #else
         throw LocalLedgerError.runtimeUnavailable
         #endif
     }
+
+    #if canImport(LedgerCore)
+    private func nativeResponse(_ request: LocalLedgerEngineRequest) throws -> LocalLedgerResponse {
+        let encoded = try JSONEncoder().encode(request)
+        return LocalLedgerResponse(envelope: Data(MobilecoreDispatchJSON(String(decoding: encoded, as: UTF8.self)).utf8))
+    }
+
+    private func release(_ handle: String, request: LocalLedgerEngineRequest) {
+        var command = request
+        command.operation = "model-release"
+        command.modelHandle = handle
+        command.body = nil; command.importFile = nil; command.canonical = nil
+        _ = try? nativeResponse(command)
+    }
+
+    private func register(_ request: LocalLedgerEngineRequest) async throws -> String {
+        var command = request
+        command.operation = "model-source"
+        command.body = nil; command.importFile = nil; command.canonical = nil; command.modelHandle = nil
+        struct Version: Decodable { let sourceVersion: String }
+        let version = try nativeResponse(command).decode(Version.self)
+        let runtime = URL(fileURLWithPath: request.runtimeRoot)
+        let directory = runtime.appendingPathComponent("canonical-stream")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard directory.standardizedFileURL.path == directory.resolvingSymlinksInPath().standardizedFileURL.path else {
+            throw LocalLedgerError.invalidConfiguration("模型导出目录不允许符号链接")
+        }
+        // All exporter/ingestion work is serialized by the process-wide gate.
+        // Only exact owned scratch names are removed; imports/receipts untouched.
+        for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey]) {
+            let name = file.lastPathComponent
+            let token = String(name.prefix(32))
+            guard name.count == 40, name.hasSuffix(".records"),
+                  token.allSatisfy({ "0123456789abcdef".contains($0) }) else { continue }
+            let attributes = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard attributes.isRegularFile == true, attributes.isSymbolicLink != true else {
+                throw LocalLedgerError.invalidConfiguration("模型临时文件无效")
+            }
+            try FileManager.default.removeItem(at: file)
+        }
+        #if os(iOS)
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: directory.path)
+        #endif
+        let filename = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + ".records"
+        let output = directory.appendingPathComponent(filename)
+        defer { try? FileManager.default.removeItem(at: output) }
+        _ = try await EmbeddedBeancountValidator.shared.exportCanonical(
+            workspace: URL(fileURLWithPath: request.workspaceRoot), entryFile: request.entrypoint, to: output)
+        try Task.checkCancellation()
+        command.operation = "model-register"
+        command.sourceVersion = version.sourceVersion
+        command.streamFile = filename
+        struct Registration: Decodable { let handle: String }
+        return try nativeResponse(command).decode(Registration.self).handle
+    }
+    #endif
+
 }
 
 /// Keep large bridge payloads in JSON form. BQLCell remains the typed value for

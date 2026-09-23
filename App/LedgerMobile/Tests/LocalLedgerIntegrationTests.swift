@@ -79,6 +79,40 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         #endif
     }
 
+    func testConcurrentModelReadsAndDiscardedPreviewKeepCursorValid() async throws {
+        #if os(iOS)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("HandleIntegration-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let catalog = LocalLedgerCatalog(rootDirectory: root)
+        let descriptor = try await catalog.create(name: "Handles")
+        let repository = catalog.repository(for: descriptor)
+        func entry(_ n: Int) -> LedgerTransactionEntry {
+            LedgerTransactionEntry(date: "2026-09-01", payee: "Synthetic", narration: "Row \(n)", postings: [
+                .init(account: "Expenses:Food", amount: "1", currency: "CNY"),
+                .init(account: "Assets:Cash", amount: "-1", currency: "CNY")])
+        }
+        _ = try await repository.bootstrap(start: "2026-09-01", end: "2026-10-01", today: "2026-09-01", valuationCurrency: "CNY")
+        for i in 0..<3 { try await repository.addTransaction(entry: entry(i)) }
+        let pages = try await withThrowingTaskGroup(of: LedgerTransactionPage.self) { group in
+            for _ in 0..<4 { group.addTask { try await repository.transactionPage(limit: 1) } }
+            var results: [LedgerTransactionPage] = []
+            for try await page in group { results.append(page) }
+            return results
+        }
+        XCTAssertEqual(Set(pages.map(\.revision)).count, 1)
+        let cursor = try XCTUnwrap(pages.first?.nextCursor)
+        let preview = try await repository.prepareBookkeeping(.manual(entry(4)))
+        await repository.discardPrepared(preview)
+        let probe = try await repository.transactionPage(limit: 1)
+        XCTAssertEqual(probe.revision, pages.first?.revision, "Preview must preserve exact committed model identity")
+        let next = try await repository.transactionPage(cursor: cursor, limit: 1)
+        XCTAssertEqual(next.revision, pages.first?.revision)
+        XCTAssertNotEqual(next.transactions.first?.id, pages.first?.transactions.first?.id)
+        #else
+        throw XCTSkip("Requires embedded native model registry")
+        #endif
+    }
+
     func testCanonicalOfflineCreateReadAddEditDeleteAndReopen() async throws {
         #if os(iOS)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("LocalIntegration-" + UUID().uuidString)
