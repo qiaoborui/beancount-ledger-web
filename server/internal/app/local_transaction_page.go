@@ -22,6 +22,10 @@ const localTransactionPageMax = 500
 // Swift owns candidate filtering and Unicode/presentation semantics.
 const localNativeCandidatesDialect = "native-candidates-v1"
 
+// Global search consumes every metadata key/value using Swift formatting. It
+// must not reuse the list dialect, whose type-only projection loses matches.
+const localNativeSearchCandidatesDialect = "native-search-candidates-v1"
+
 // Process-scoped MAC makes cursors opaque: restarting the app requires a fresh
 // first page, and clients cannot substitute a source revision or filter set.
 var localCursorKey = func() []byte {
@@ -86,12 +90,13 @@ func localTransactionPageResponse(cfg Config, snapshot *LedgerSnapshot, query ma
 // classifier. It shares row/byte limits and cursor freshness with normal pages.
 func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query map[string]string, evidence bool) (int, json.RawMessage, error) {
 	candidates := false
+	searchCandidates := false
 	if dialect, exists := query["dialect"]; exists {
 		if evidence {
 			return 400, nil, errors.New("dialect is not valid on history-page")
 		}
 		switch dialect {
-		case localNativeCandidatesDialect:
+		case localNativeCandidatesDialect, localNativeSearchCandidatesDialect:
 			// Presence, including an empty value, is an error: silently accepting
 			// a filter could make a caller mistake raw candidates for matches.
 			for _, key := range []string{"q", "account", "tag", "tags", "kind"} {
@@ -100,6 +105,7 @@ func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query 
 				}
 			}
 			candidates = true
+			searchCandidates = dialect == localNativeSearchCandidatesDialect
 		default:
 			return 400, nil, errors.New("unsupported transaction page dialect")
 		}
@@ -140,7 +146,7 @@ func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query 
 	modelRevision := fmt.Sprintf("%s:%d", snapshot.Version, snapshot.localReadModelID)
 	scopeBytes, _ := json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, modelRevision, effectiveStart, effectiveEnd, query["q"], query["account"], query["tag"], query["kind"], strconv.FormatBool(evidence)})
 	if candidates {
-		scopeBytes, _ = json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, modelRevision, localNativeCandidatesDialect, start, end})
+		scopeBytes, _ = json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, modelRevision, query["dialect"], start, end})
 	}
 	scope := fmt.Sprintf("%x", sha256.Sum256(scopeBytes))
 	offset := 0
@@ -192,6 +198,9 @@ func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query 
 				}
 			}
 			txn.Metadata = metadata
+		} else if searchCandidates {
+			// Preserve exact metadata and scalar types, without mutating the shared
+			// model. The encoded row/page budget below includes all metadata.
 		} else if candidates {
 			// Only Swift TransactionPresentation's stringValue evidence. Never retain
 			// arbitrary metadata or stringify numeric/object values. The row byte cap

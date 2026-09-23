@@ -73,6 +73,30 @@ final class LocalTransactionRepositoryTests: XCTestCase {
         XCTAssertNil(presented)
     }
 
+    func testSearchCandidateDialectPreservesMetadataAndDoesNotPresentRevision() async throws {
+        let (workspace, revision) = try await workspace()
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: page(rows: 1)) as? [String: Any])
+        var rows = try XCTUnwrap(object["transactions"] as? [[String: Any]])
+        rows[0]["metadata"] = ["receipt": "ＣＡＦÉ", "number": 12.5, "bool": true, "null-key": NSNull()]
+        object["transactions"] = rows
+        let engine = Engine([try JSONSerialization.data(withJSONObject: object)])
+        let repository = repository(workspace, engine)
+        let result = try await repository.searchCandidatePage(limit: 27, expectedRevisionID: revision)
+        XCTAssertEqual(result.transactions[0].metadata,
+            ["receipt": .string("ＣＡＦÉ"), "number": .number(12.5), "bool": .bool(true), "null-key": .null])
+        let requests = await engine.requests
+        XCTAssertEqual(requests[0].query, ["dialect": "native-search-candidates-v1",
+            "start": "0001-01-01", "end": "9999-12-31", "limit": "27"])
+        let presented = await repository.presentedRevisionID
+        XCTAssertNil(presented)
+        do {
+            _ = try await repository.searchCandidatePage(expectedRevisionID: UUID())
+            XCTFail("stale search revision accepted")
+        } catch {}
+        let finalRequests = await engine.requests
+        XCTAssertEqual(finalRequests.count, 1)
+    }
+
     func testScanFollowsEmptyIntermediatePagesAndFiltersOnlyInSwift() async throws {
         let (workspace, revision) = try await workspace()
         let engine = Engine([try page(cursor: "one", rows: 1, payee: "Other"),

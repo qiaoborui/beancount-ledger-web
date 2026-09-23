@@ -648,3 +648,113 @@ func TestLocalCandidatePageTransportAndHistoryRejection(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalSearchCandidatesPreserveAllMetadataWithoutChangingListDialect(t *testing.T) {
+	cfg, snapshot := pageFixture(3)
+	for i := range snapshot.Transactions {
+		snapshot.Transactions[i].Metadata = map[string]MetadataValue{
+			"type": "商品退款", "receipt": "ＣＡＦÉ Cafe\u0301 ✁\u200d✁", "number": 12.5,
+			"bool": true, "null-key": nil, "method": "exact", "account": "Expenses:Food",
+		}
+	}
+	before, _ := json.Marshal(snapshot.Transactions)
+	page := readCandidatePage(t, cfg, snapshot, map[string]string{"dialect": localNativeSearchCandidatesDialect})
+	for i, row := range page.Transactions {
+		want := snapshot.Transactions[i]
+		want.Entry = nil
+		want.Postings = []Posting{}
+		want.Source.File = "main.bean"
+		gotJSON, _ := json.Marshal(row)
+		wantJSON, _ := json.Marshal(want)
+		if string(gotJSON) != string(wantJSON) {
+			t.Fatalf("search candidate changed: %s != %s", gotJSON, wantJSON)
+		}
+	}
+	after, _ := json.Marshal(snapshot.Transactions)
+	if string(before) != string(after) {
+		t.Fatal("projection mutated model")
+	}
+	list := readCandidatePage(t, cfg, snapshot, nil)
+	if len(list.Transactions[0].Metadata) != 1 {
+		t.Fatal("list dialect widened")
+	}
+}
+
+func TestLocalSearchCandidatesRejectFiltersAndForeignCursors(t *testing.T) {
+	cfg, snapshot := pageFixture(3)
+	for _, key := range []string{"q", "account", "tag", "tags", "kind"} {
+		for _, value := range []string{"", "Coffee"} {
+			q := map[string]string{"dialect": localNativeSearchCandidatesDialect, key: value}
+			if status, raw, err := localTransactionPageResponse(cfg, snapshot, q); status != 400 || raw != nil || err == nil {
+				t.Fatal("filter accepted", key, value, status, err)
+			}
+		}
+	}
+	search := readCandidatePage(t, cfg, snapshot, map[string]string{"dialect": localNativeSearchCandidatesDialect, "limit": "1"})
+	for _, dialect := range []string{"", localNativeCandidatesDialect} {
+		q := map[string]string{"limit": "1"}
+		if dialect != "" {
+			q["dialect"] = dialect
+		}
+		status, raw, err := localTransactionPageResponse(cfg, snapshot, q)
+		if status != 200 || err != nil {
+			t.Fatal(status, err)
+		}
+		var other localTransactionPage
+		if err := json.Unmarshal(raw, &other); err != nil {
+			t.Fatal(err)
+		}
+		if status, _, err := localTransactionPageResponse(cfg, snapshot, map[string]string{"dialect": localNativeSearchCandidatesDialect, "cursor": other.NextCursor}); status != 409 || err == nil {
+			t.Fatal("foreign cursor accepted", status, err)
+		}
+		q["cursor"] = search.NextCursor
+		if status, _, err := localTransactionPageResponse(cfg, snapshot, q); status != 409 || err == nil {
+			t.Fatal("search cursor escaped dialect", status, err)
+		}
+	}
+	for _, mutate := range []func(){func() { snapshot.Version += "new" }, func() { snapshot.localReadModelID++ }, func() { cfg.LedgerRoot += "other" }, func() { cfg.localEntrypoint = "other.bean" }} {
+		oldCfg, oldVersion, oldID := cfg, snapshot.Version, snapshot.localReadModelID
+		mutate()
+		if status, _, err := localTransactionPageResponse(cfg, snapshot, map[string]string{"dialect": localNativeSearchCandidatesDialect, "cursor": search.NextCursor}); status != 409 || err == nil {
+			t.Fatal("stale search cursor accepted", status, err)
+		}
+		cfg, snapshot.Version, snapshot.localReadModelID = oldCfg, oldVersion, oldID
+	}
+	if status, _, err := localTransactionPageProjection(cfg, snapshot, map[string]string{"dialect": localNativeSearchCandidatesDialect}, true); status != 400 || err == nil {
+		t.Fatal("history accepted search dialect")
+	}
+}
+
+func TestLocalSearchCandidateMetadataByteBudgetAndContinuation(t *testing.T) {
+	cfg, snapshot := pageFixture(7)
+	text := strings.Repeat("<", 60000)
+	for i := range snapshot.Transactions {
+		snapshot.Transactions[i].Metadata["receipt"] = text
+	}
+	query := map[string]string{"dialect": localNativeSearchCandidatesDialect, "limit": "500"}
+	count := 0
+	for index := 0; index < 4; index++ {
+		page := readCandidatePage(t, cfg, snapshot, query)
+		want := 2
+		if index == 3 {
+			want = 1
+		}
+		if len(page.Transactions) != want {
+			t.Fatal("wrong byte-limited count", len(page.Transactions))
+		}
+		for _, row := range page.Transactions {
+			count++
+			if row.Source.Line != count || row.Metadata["receipt"] != text {
+				t.Fatal("missing, repeated or truncated candidate")
+			}
+		}
+		if (page.NextCursor == "") != (index == 3) {
+			t.Fatal("wrong continuation")
+		}
+		query["cursor"] = page.NextCursor
+	}
+	snapshot.Transactions[0].Metadata["receipt"] = strings.Repeat("<", localTransactionPageBytes/6+1)
+	if status, raw, err := localTransactionPageResponse(cfg, snapshot, map[string]string{"dialect": localNativeSearchCandidatesDialect}); status != 413 || raw != nil || err == nil {
+		t.Fatal("oversized search metadata accepted", status, err)
+	}
+}
