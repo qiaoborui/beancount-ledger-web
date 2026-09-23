@@ -117,6 +117,7 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	var options map[string]string
 	if c.cfg.localTransport && c.cfg.localCanonical != nil {
 		txns = localCanonicalTransactions(entries, sourceEntries)
+		sourceEntries = compactLocalCanonicalSource(sourceEntries, txns)
 		options = copyStringMap(c.cfg.localCanonical.Options)
 	} else {
 		txns = TransactionsFromBeanEntries(entries)
