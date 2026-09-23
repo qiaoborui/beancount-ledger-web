@@ -96,6 +96,11 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["transaction-bulk-tag-apply"].tap()
         XCTAssertTrue(tagInput.waitForNonExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(app.staticTexts["已验证，并为 1 条交易添加标签。"].waitForExistence(timeout: 10))
+        app.buttons["transaction-actions"].tap()
+        app.buttons["事件与项目核算"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["事件与项目核算"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["event-tag-summary-synthetic-reviewed"].waitForExistence(timeout: 20), app.debugDescription)
+        app.buttons["关闭"].firstMatch.tap()
         // Native global search uses complete metadata candidates, not the
         // legacy all-history transaction array. Drill-down must survive refresh.
         let searchTab = app.buttons.matching(NSPredicate(format: "label == 'Search' OR label == '搜索'")).firstMatch

@@ -967,6 +967,15 @@ private struct IncomeExpenseAnalysisContent: View {
     private var dashboard: LedgerDashboard { data.dashboard }
     private var statement: LedgerIncomeStatement { data.statement }
 
+    private var eventSummaries: [EventTagSummary] {
+        if session.isLocal { return session.localEventTagSummaries ?? [] }
+        return EventTagCalculator.summarizeAllTags(from: session.visibleTransactions,
+            accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? []))
+    }
+    private var eventReadKey: String {
+        "\(session.localGlobalSearchInvalidation)/\(session.phase)/\(session.privacyShielded)/\(session.isRangeLoading)/\(session.isValuationCurrencyLoading)/\(session.transactionMutationStates.values.contains(.pending))"
+    }
+
     var body: some View {
         VStack(spacing: LedgerSpacing.lg) {
             AnalysisMetricGrid(
@@ -1010,10 +1019,15 @@ private struct IncomeExpenseAnalysisContent: View {
             )
 
             // Event & Tag Project Accounting Card
-            let allSummaries = EventTagCalculator.summarizeAllTags(
-                from: session.visibleTransactions,
-                accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
-            )
+            let allSummaries = eventSummaries
+            if session.isLocal, let error = session.localEventTagSummaryError {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("事件汇总读取失败：" + error).foregroundStyle(.secondary)
+                    Button("重试事件汇总") { Task { await session.loadLocalEventTagSummaries(force: true) } }
+                }
+            } else if session.isLocal && session.localEventTagSummaries == nil {
+                ProgressView("正在统计事件与项目…")
+            }
             if !allSummaries.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
@@ -1105,6 +1119,7 @@ private struct IncomeExpenseAnalysisContent: View {
                 }
             }
         }
+        .task(id: eventReadKey) { if session.isLocal { await session.loadLocalEventTagSummaries() } }
         .sheet(isPresented: $eventTagListPresented) {
             EventTagListView()
                 .ledgerPrivacyProtectedSheet()
