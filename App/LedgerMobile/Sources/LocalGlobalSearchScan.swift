@@ -31,6 +31,8 @@ struct LocalGlobalSearchScan {
         let remainingCount: Int
         let transactions: [LedgerTransaction]
         let tags: [String]
+        /// Full-history filter choices, independent of query/scope/filters.
+        let availableTags: [String]
         let continuation: Anchor?
         let rowBytes: Int
         let stateBytes: Int
@@ -48,6 +50,7 @@ struct LocalGlobalSearchScan {
     private let enabled: Bool
     private var rows: [(row: LedgerTransaction, bytes: Int)] = []
     private var tags: Set<String> = []
+    private var availableTags: Set<String> = []
     private var cursors: Set<String> = []
     private var cursor: String?
     private var pageCount = 0
@@ -102,7 +105,15 @@ struct LocalGlobalSearchScan {
                 try charge(LocalTransactionScan.stringBytes(next))
                 cursors.insert(next)
             }
-            for row in page.transactions where enabled && filters.includes(row) {
+            for row in page.transactions {
+                // Match the legacy picker universe, even for a blank all-scope
+                // query or filters with zero results. Never infer facets from top-K.
+                for tag in row.tags ?? [] where !availableTags.contains(tag) {
+                    guard availableTags.count < limits.tags else { throw ScanError.capacity }
+                    try charge(LocalTransactionScan.stringBytes(tag))
+                    availableTags.insert(tag)
+                }
+                guard enabled && filters.includes(row) else { continue }
                 // Tag search is independent of the transaction query match.
                 if scope == .all {
                     for tag in row.tags ?? [] where (filters.tag == nil || filters.tag == tag)
@@ -137,11 +148,11 @@ struct LocalGlobalSearchScan {
             guard cursor == nil else { return nil }
             completed = true
             return Result(revision: revision, matchedCount: matchedCount, remainingCount: remainingCount,
-                transactions: rows.map(\.row), tags: tags.sorted(),
+                transactions: rows.map(\.row), tags: tags.sorted(), availableTags: availableTags.sorted(),
                 continuation: remainingCount > rows.count ? rows.last.map { Anchor($0.row) } : nil,
                 rowBytes: rowBytes, stateBytes: stateBytes)
         } catch {
-            failed = true; rows.removeAll(); tags.removeAll(); cursors.removeAll(); rowBytes = 0
+            failed = true; rows.removeAll(); tags.removeAll(); availableTags.removeAll(); cursors.removeAll(); rowBytes = 0
             throw error
         }
     }
