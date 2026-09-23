@@ -133,18 +133,26 @@ private struct LedgerTransactionActions: ViewModifier {
     let transaction: LedgerTransaction
     @State private var action: Action?
     @State private var confirmationFeedback = 0
+    @State private var preparation: Task<Void, Never>?
+    @State private var preparationID: UUID?
+    @State private var preparationError: String?
+    @State private var localAuthority: LedgerSession.LocalTransactionAction?
 
     private enum Kind { case edit, tags, delete, share }
     private struct Action: Identifiable {
         let id = UUID()
         let kind: Kind
         let transaction: LedgerTransaction
+        var authority: LedgerSession.LocalTransactionAction? = nil
     }
 
     private var resolved: LedgerTransaction? {
-        guard session.phase == .ready, !session.privacyShielded,
-              case let .visible(current) = session.transactionResolution(for: transaction.source) else { return nil }
-        return current
+        guard session.phase == .ready, !session.privacyShielded else { return nil }
+        switch session.transactionResolution(for: transaction.source) {
+        case .visible(let current): return current
+        case .unloaded: return session.isLocal ? transaction : nil
+        case .unavailable: return nil
+        }
     }
 
     private func canWrite(_ transaction: LedgerTransaction) -> Bool {
@@ -159,7 +167,7 @@ private struct LedgerTransactionActions: ViewModifier {
                     .disabled(resolved == nil)
                     .accessibilityIdentifier("transaction-context-share")
                 Button("编辑", systemImage: "pencil") { present(.edit) }
-                    .disabled(resolved.map { !canWrite($0) || $0.editableEntry == nil } ?? true)
+                    .disabled(resolved.map { !canWrite($0) || (!session.isLocal && $0.editableEntry == nil) } ?? true)
                     .accessibilityIdentifier("transaction-context-edit")
                 Button("复制摘要", systemImage: "doc.on.doc", action: copySummary)
                     .disabled(resolved == nil)
@@ -172,8 +180,26 @@ private struct LedgerTransactionActions: ViewModifier {
                     .disabled(resolved.map { !canWrite($0) } ?? true)
                     .accessibilityIdentifier("transaction-context-delete")
             }
-            .sheet(item: $action) { action in
+            .overlay(alignment: .trailing) {
+                if preparationID != nil { ProgressView().accessibilityLabel("正在读取交易") }
+            }
+            .alert("无法读取交易", isPresented: Binding(
+                get: { preparationError != nil }, set: { if !$0 { preparationError = nil } }
+            )) { Button("好", role: .cancel) { preparationError = nil } }
+            message: { Text(preparationError ?? "") }
+            .sheet(item: $action, onDismiss: cancelPreparation) { action in
                 actionSheet(action).ledgerPrivacyProtectedSheet()
+            }
+            .onDisappear {
+                // A presenter can disappear during full-screen sheet adaptation.
+                // Presented authority belongs to the sheet, not presenter visibility.
+                if action == nil { cancelPreparation() }
+            }
+            .onChange(of: session.privacyShielded) { _, hidden in
+                if hidden { action = nil; cancelPreparation() }
+            }
+            .onChange(of: session.phase) { _, phase in
+                if phase != .ready { action = nil; cancelPreparation() }
             }
             .sensoryFeedback(.success, trigger: confirmationFeedback)
     }
@@ -194,26 +220,96 @@ private struct LedgerTransactionActions: ViewModifier {
                 accounts: session.ledger?.accounts ?? [],
                 commodities: session.ledger?.commodities ?? []
             ) { entry in
-                try await session.updateTransaction(source: action.transaction.source, entry: entry)
+                if let authority = action.authority {
+                    do { try await session.updateLocalTransaction(action: authority, entry: entry) }
+                    catch { endFailedAction(error); throw error }
+                } else {
+                    try await session.updateTransaction(source: action.transaction.source, entry: entry)
+                }
                 confirmationFeedback &+= 1
             }
         case .tags:
             TransactionTagEditorSheet(selectedCount: 1) { tags in
-                try await session.addTransactionTags(sources: [action.transaction.source], tags: tags)
+                if let authority = action.authority {
+                    do { try await session.addLocalTransactionTags(action: authority, tags: tags) }
+                    catch { endFailedAction(error); throw error }
+                } else {
+                    try await session.addTransactionTags(sources: [action.transaction.source], tags: tags)
+                }
                 confirmationFeedback &+= 1
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         case .delete:
-            TransactionDeleteSheet(transaction: action.transaction) { confirmationFeedback &+= 1 }
+            TransactionDeleteSheet(transaction: action.transaction, localAction: action.authority,
+                onFailed: { error in
+                    if action.authority != nil { endFailedAction(error) }
+                }, onDeleted: { confirmationFeedback &+= 1 })
         }
     }
 
+    private func endFailedAction(_ error: Error) {
+        // A submitted nonce is consumed even after rollback. Never offer a retry
+        // that silently borrows authority for a potentially newer original.
+        action = nil
+        cancelPreparation()
+        preparationError = error.localizedDescription + " 请重新打开交易操作，核对最新内容后再试。"
+    }
+
+    private func cancelPreparation() {
+        preparationID = nil
+        preparation?.cancel()
+        preparation = nil
+        if let localAuthority { session.cancelLocalTransactionAction(localAuthority) }
+        localAuthority = nil
+    }
+
     private func present(_ kind: Kind) {
-        guard let current = resolved else { return }
+        guard preparationID == nil, let current = resolved else { return }
         if kind != .share && !canWrite(current) { return }
-        if case .edit = kind, current.editableEntry == nil { return }
-        action = Action(kind: kind, transaction: current)
+        guard session.isLocal else {
+            if case .edit = kind, current.editableEntry == nil { return }
+            action = Action(kind: kind, transaction: current)
+            return
+        }
+        cancelPreparation()
+        let id = UUID()
+        preparationID = id
+        preparation = Task { @MainActor in
+            do {
+                let detail: LedgerTransaction
+                let authority: LedgerSession.LocalTransactionAction?
+                if kind == .share {
+                    detail = try await session.localTransactionDetail(source: current.source)
+                    authority = nil
+                } else {
+                    let actionKind: LedgerSession.LocalTransactionActionKind
+                    switch kind {
+                    case .edit: actionKind = .edit
+                    case .tags: actionKind = .addTags
+                    case .delete: actionKind = .delete
+                    case .share: return
+                    }
+                    let prepared = try await session.prepareLocalTransactionAction(
+                        sources: [current.source], kind: actionKind)
+                    authority = prepared
+                    detail = prepared.originals[0]
+                }
+                guard !Task.isCancelled, preparationID == id else {
+                    if let authority { session.cancelLocalTransactionAction(authority) }
+                    return
+                }
+                if kind == .edit, detail.editableEntry == nil {
+                    if let authority { session.cancelLocalTransactionAction(authority) }
+                    throw LedgerTransactionMutationError.sourceUnavailable
+                }
+                localAuthority = authority
+                action = Action(kind: kind, transaction: detail, authority: authority)
+            } catch {
+                if !Task.isCancelled, preparationID == id { preparationError = error.localizedDescription }
+            }
+            if preparationID == id { preparationID = nil; preparation = nil }
+        }
     }
 
     private func copySummary() {
@@ -2104,6 +2200,9 @@ struct TransactionDetailView: View {
                 return
             }
         }
+        // An evicted/not-yet-loaded local row needs explicit detail hydration,
+        // not a false deletion conclusion from the session's current arrays.
+        if case .unloaded = session.transactionResolution(for: transaction.source) { return }
         sourceUnavailable = true
     }
 }
@@ -2112,6 +2211,8 @@ private struct TransactionDeleteSheet: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dismiss) private var dismiss
     let transaction: LedgerTransaction
+    var localAction: LedgerSession.LocalTransactionAction? = nil
+    var onFailed: ((Error) -> Void)? = nil
     let onDeleted: () -> Void
     @State private var reason = ""
     @State private var isDeleting = false
@@ -2141,15 +2242,18 @@ private struct TransactionDeleteSheet: View {
                         errorMessage = nil
                         Task {
                             do {
-                                try await session.deleteTransaction(
-                                    source: transaction.source,
-                                    reason: reason.trimmingCharacters(in: .whitespacesAndNewlines)
-                                )
+                                let trimmedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if let localAction {
+                                    try await session.deleteLocalTransaction(action: localAction, reason: trimmedReason)
+                                } else {
+                                    try await session.deleteTransaction(source: transaction.source, reason: trimmedReason)
+                                }
                                 dismiss()
                                 onDeleted()
                             } catch {
                                 errorMessage = error.localizedDescription
                                 failureFeedback &+= 1
+                                onFailed?(error)
                             }
                             isDeleting = false
                         }
