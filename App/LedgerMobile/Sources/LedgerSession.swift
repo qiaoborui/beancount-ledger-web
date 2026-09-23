@@ -228,6 +228,7 @@ final class LedgerSession: ObservableObject {
     private var transactionShareExport: LocalTransactionShareExport?
     private var transactionSelectionTask: Task<LocalTransactionSelectionScan.Result, Error>?
     private var transactionSelectionID: UUID?
+    @Published private(set) var localGlobalSearchInvalidation = 0
     private var globalSearchTask: Task<LocalGlobalSearchScan.Result, Error>?
     private var globalSearchRequestID: UUID?
     private var localSearchSequence: LocalSearchSequence?
@@ -3385,6 +3386,7 @@ final class LedgerSession: ObservableObject {
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
     func resetLocalTransactionWindow() {
+        localGlobalSearchInvalidation &+= 1
         globalSearchTask?.cancel()
         globalSearchTask = nil
         globalSearchRequestID = nil
