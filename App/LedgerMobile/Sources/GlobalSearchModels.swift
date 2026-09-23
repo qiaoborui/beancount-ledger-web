@@ -73,6 +73,31 @@ enum LedgerGlobalSearch {
         }
     }
 
+    static func transactionPrecedes(_ lhs: LedgerTransaction, _ rhs: LedgerTransaction) -> Bool {
+        lhs.date == rhs.date ? lhs.id < rhs.id : lhs.date > rhs.date
+    }
+
+    static func transactionMatches(_ transaction: LedgerTransaction, query: String,
+                                   labels: [String: String]) -> Bool {
+        var text = [transaction.date, transaction.payee, transaction.narration, transaction.source.file]
+        text += (transaction.tags ?? []).map { "#" + $0 }
+        text += transaction.postings.map { posting in
+            let value = Decimal(posting.amount) / 100
+            let amount = NSDecimalNumber(decimal: value).stringValue + " " + String(format: "%.2f", NSDecimalNumber(decimal: value).doubleValue)
+            return [posting.account, labels[posting.account] ?? "", amount, posting.currency ?? ""].joined(separator: " ")
+        }
+        for (key, value) in transaction.metadata ?? [:] {
+            text.append(key)
+            switch value {
+            case .null: break
+            case let .string(value): text.append(value)
+            case let .number(value): text.append(String(value))
+            case let .bool(value): text.append(String(value))
+            }
+        }
+        return query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || matches(text.joined(separator: " "), query: query)
+    }
+
     static func search(
         _ query: String,
         transactions: [LedgerTransaction],
@@ -90,24 +115,8 @@ enum LedgerGlobalSearch {
         var result = LedgerSearchResults()
         if scope == .all || scope == .transactions {
             result.transactions = filteredTransactions.filter { transaction in
-                var text = [transaction.date, transaction.payee, transaction.narration, transaction.source.file]
-                text += (transaction.tags ?? []).map { "#" + $0 }
-                text += transaction.postings.map { posting in
-                    let value = Decimal(posting.amount) / 100
-                    let amount = NSDecimalNumber(decimal: value).stringValue + " " + String(format: "%.2f", NSDecimalNumber(decimal: value).doubleValue)
-                    return [posting.account, labels[posting.account] ?? "", amount, posting.currency ?? ""].joined(separator: " ")
-                }
-                for (key, value) in transaction.metadata ?? [:] {
-                    text.append(key)
-                    switch value {
-                    case .null: break
-                    case let .string(value): text.append(value)
-                    case let .number(value): text.append(String(value))
-                    case let .bool(value): text.append(String(value))
-                    }
-                }
-                return matchesQuery(text.joined(separator: " "))
-            }.sorted { $0.date == $1.date ? $0.id < $1.id : $0.date > $1.date }
+                transactionMatches(transaction, query: query, labels: labels)
+            }.sorted(by: transactionPrecedes)
         }
         if (scope == .all || scope == .accounts), filters.tag == nil, !filters.hasDateRange {
             result.accounts = accounts.filter {
