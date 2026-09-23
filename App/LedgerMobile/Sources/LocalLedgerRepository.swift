@@ -90,14 +90,22 @@ actor LocalLedgerRepository: LedgerRepository {
     /// Additive native page API. Callers must keep cursor and query together and
     /// restart after a revision conflict; it is not an all-history response.
     func transactionPage(start: String = "0001-01-01", end: String = "9999-12-31",
-                         query: String = "", cursor: String? = nil, limit: Int = 100) async throws -> LedgerTransactionPage {
+                         query: String = "", cursor: String? = nil, limit: Int = 100,
+                         account: String? = nil, tag: String? = nil, kind: String? = nil) async throws -> LedgerTransactionPage {
         guard (1...500).contains(limit) else { throw LocalLedgerError.invalidConfiguration("分页数量必须为 1 到 500") }
         var parameters = ["start": start, "end": end, "q": query, "limit": String(limit)]
         parameters["cursor"] = cursor
+        parameters["account"] = account
+        parameters["tag"] = tag
+        parameters["kind"] = kind
         let (revision, response) = try await readSnapshot("/api/ledger/transactions/page", query: parameters)
         let page = try response.decodeTransactionPage()
         presentedRevisionID = revision
         return page
+    }
+
+    func transactionDetail(source: TransactionSource) async throws -> LedgerTransaction {
+        try await read("/api/ledger/transactions/detail", query: ["file": source.file, "line": String(source.line), "hash": source.hash ?? ""])
     }
 
     func globalTransactions() async throws -> LedgerGlobalTransactions {

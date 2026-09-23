@@ -79,6 +79,13 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 	if err != nil {
 		return http.StatusBadRequest, nil, err
 	}
+	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && input.Path == "/api/ledger/transactions/detail" {
+		snapshot, err := cache.Snapshot()
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		return localTransactionDetailResponse(cfg, snapshot, input.Query)
+	}
 	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && input.Path == "/api/ledger/transactions/page" {
 		if input.Staging {
 			return http.StatusBadRequest, nil, errors.New("transaction pages require a committed generation")

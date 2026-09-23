@@ -143,3 +143,47 @@ func TestLocalPageRejectsReplacedCanonicalModelWithSameSourceVersion(t *testing.
 		t.Fatal("cursor accepted across transformed model replacement")
 	}
 }
+
+func TestLocalTransactionDetailRequiresExactSourceAndKeepsMetadata(t *testing.T) {
+	cfg, snapshot := pageFixture(2)
+	txn := snapshot.Transactions[0]
+	query := map[string]string{"file": "main.bean", "line": fmt.Sprint(txn.Source.Line), "hash": txn.Source.Hash}
+	status, raw, err := localTransactionDetailResponse(cfg, snapshot, query)
+	if status != 200 || err != nil {
+		t.Fatal(status, err)
+	}
+	var detail Transaction
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Source.File != "main.bean" || detail.Entry == nil || detail.Postings == nil {
+		t.Fatal("invalid detail projection")
+	}
+	query["hash"] = "stale"
+	if status, _, _ := localTransactionDetailResponse(cfg, snapshot, query); status != 409 {
+		t.Fatal("stale detail accepted")
+	}
+	query["file"] = "../main.bean"
+	if status, _, _ := localTransactionDetailResponse(cfg, snapshot, query); status != 400 {
+		t.Fatal("path escape accepted")
+	}
+}
+
+func TestLocalPageStructuredFiltersBindCursor(t *testing.T) {
+	cfg, snapshot := pageFixture(3)
+	_, raw, err := localTransactionPageResponse(cfg, snapshot, map[string]string{"limit": "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page localTransactionPage
+	_ = json.Unmarshal(raw, &page)
+	for _, key := range []string{"account", "tag", "kind"} {
+		value := "changed"
+		if key == "kind" {
+			value = "expense"
+		}
+		if status, _, _ := localTransactionPageResponse(cfg, snapshot, map[string]string{"cursor": page.NextCursor, key: value}); status != 409 {
+			t.Fatalf("filter %s did not invalidate cursor", key)
+		}
+	}
+}
