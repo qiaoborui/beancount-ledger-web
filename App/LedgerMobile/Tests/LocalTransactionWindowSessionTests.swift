@@ -94,9 +94,10 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
                 let offset = Int(request.query["cursor"] ?? "0") ?? 0
                 let limit = Int(request.query["limit"] ?? "100") ?? 100
                 let end = min(rows.count, offset + limit)
-                let accountRows = try rows[offset..<end].enumerated().map { index, row -> [String: Any] in
+                let ordered = request.query["order"] == "desc" ? Array(rows.reversed()) : rows
+                let accountRows = try ordered[offset..<end].enumerated().map { index, row -> [String: Any] in
                     ["date": row.date, "payee": row.payee, "narration": row.narration, "change": 125,
-                     "balance": (offset + index + 1) * 125,
+                     "balance": (request.query["order"] == "desc" ? rows.count - offset - index : offset + index + 1) * 125,
                      "txn": try JSONSerialization.jsonObject(with: JSONEncoder().encode(row))]
                 }
                 let detail: [String: Any] = ["account": request.query["account"]!, "label": "Synthetic", "group": "Expenses", "active": true,
@@ -604,6 +605,22 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertEqual(session.ledger?.transactions, original)
         let authority = await repository.presentedRevisionID
         XCTAssertEqual(authority, presented)
+    }
+
+    func testDescendingAccountWindowsReverseHistoryAndRejectOrderChangedContinuation() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let first = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", limit: 1, order: .desc)
+        XCTAssertEqual(first.page.detail.rows.map(\.balance), [375])
+        let cursor = try XCTUnwrap(first.continuation)
+        do {
+            _ = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: cursor, limit: 1)
+            XCTFail("changed order accepted")
+        } catch {}
+        let second = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: cursor, limit: 1, order: .desc)
+        XCTAssertEqual(second.page.detail.rows.map(\.balance), [250])
+        let third = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: second.continuation, limit: 1, order: .desc)
+        XCTAssertEqual(third.page.detail.rows.map(\.balance), [125]); XCTAssertNil(third.continuation)
     }
 
     func testAccountPageAndTrendRejectLateReadsOnResetPrivacyRevisionAndCancellation() async throws {

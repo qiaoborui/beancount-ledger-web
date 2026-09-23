@@ -147,6 +147,17 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         XCTAssertEqual(accountRows.map(\.change), legacyAccount.rows.map(\.change))
         XCTAssertEqual(accountRows.map { $0.transaction.id }, legacyAccount.rows.map { $0.transaction.id })
 
+        var descendingRows: [LedgerAccountDetailRow] = []
+        accountCursor = nil
+        repeat {
+            let page = try await repository.accountPage(account: "Assets:Cash", currency: "CNY", start: start, end: end,
+                cursor: accountCursor, limit: 137, order: .desc, expectedRevisionID: bootstrap.revisionID)
+            descendingRows += page.detail.rows
+            accountCursor = page.nextCursor
+        } while accountCursor != nil
+        XCTAssertEqual(descendingRows.map(\.balance), legacyAccount.rows.reversed().map(\.balance))
+        XCTAssertEqual(descendingRows.map(\.id), legacyAccount.rows.reversed().map(\.id))
+
         let completeAccountTrend = try await repository.accountTrend(account: "Assets:Cash", currency: "CNY",
             range: .init(start: start, end: "2026-09-30", preset: .custom), expectedRevisionID: bootstrap.revisionID)
         XCTAssertEqual(completeAccountTrend.rowCount, legacyAccount.rows.count)

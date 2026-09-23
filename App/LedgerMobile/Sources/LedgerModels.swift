@@ -1075,6 +1075,8 @@ struct LedgerAccount: Decodable, Equatable, Sendable {
 
 /// A partial ascending history window plus complete account balances/count.
 /// Never use detail.rows alone to build a whole-period balance chart.
+enum LedgerAccountPageOrder: String, Sendable { case asc, desc }
+
 struct LedgerAccountPage: Decodable, Sendable {
     let revision: String
     let sensitiveUnlocked: Bool
