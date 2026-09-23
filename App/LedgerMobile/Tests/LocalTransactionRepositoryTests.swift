@@ -97,6 +97,30 @@ final class LocalTransactionRepositoryTests: XCTestCase {
         XCTAssertEqual(finalRequests.count, 1)
     }
 
+    func testGlobalSearchWindowScansAllCandidatesAndRejectsChangedNativeRevision() async throws {
+        let (workspace, revision) = try await workspace()
+        let engine = Engine([try page(cursor: "n", rows: 1, payee: "Other"), try page(rows: 1, payee: "Needle")])
+        let repository = repository(workspace, engine)
+        let result = try await repository.globalSearchWindow(query: "Needle", accounts: [], scope: .transactions,
+            filters: .init(), expectedRevisionID: revision, limits: .init(rows: 1))
+        XCTAssertEqual(result.matchedCount, 1)
+        XCTAssertEqual(result.transactions.map(\.payee), ["Needle"])
+        let requests = await engine.requests
+        XCTAssertEqual(requests.map { $0.query["cursor"] }, [nil, "n"])
+        XCTAssertTrue(requests.allSatisfy { $0.query["dialect"] == "native-search-candidates-v1" && $0.query["q"] == nil })
+        let presented = await repository.presentedRevisionID
+        XCTAssertNil(presented)
+        let changed = self.repository(workspace, Engine([try page(revision: "replacement", rows: 1)]))
+        do {
+            _ = try await changed.globalSearchWindow(query: "Needle", accounts: [], scope: .transactions,
+                filters: .init(), after: result.transactions.first.map(LocalGlobalSearchScan.Anchor.init),
+                nativeRevision: result.revision, expectedRevisionID: revision)
+            XCTFail("changed native model accepted anchor")
+        } catch {
+            XCTAssertEqual(error as? LocalGlobalSearchScan.ScanError, .revisionMismatch)
+        }
+    }
+
     func testScanFollowsEmptyIntermediatePagesAndFiltersOnlyInSwift() async throws {
         let (workspace, revision) = try await workspace()
         let engine = Engine([try page(cursor: "one", rows: 1, payee: "Other"),

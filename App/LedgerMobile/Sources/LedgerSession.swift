@@ -228,6 +228,27 @@ final class LedgerSession: ObservableObject {
     private var transactionShareExport: LocalTransactionShareExport?
     private var transactionSelectionTask: Task<LocalTransactionSelectionScan.Result, Error>?
     private var transactionSelectionID: UUID?
+    private var globalSearchTask: Task<LocalGlobalSearchScan.Result, Error>?
+    private var globalSearchRequestID: UUID?
+    private var localSearchSequence: LocalSearchSequence?
+
+    private struct LocalSearchSequence {
+        let id: UUID
+        let context: LocalReadContext
+        let query: String
+        let scope: LedgerGlobalSearchScope
+        let filters: LedgerGlobalSearchFilters
+        let accounts: [LedgerAccount]
+    }
+    struct LocalSearchContinuation: Sendable {
+        fileprivate let sequenceID: UUID
+        fileprivate let nativeRevision: String
+        fileprivate let anchor: LocalGlobalSearchScan.Anchor
+    }
+    struct LocalSearchWindow: Sendable {
+        let result: LocalGlobalSearchScan.Result
+        let continuation: LocalSearchContinuation?
+    }
 
     enum LocalTransactionActionKind: Sendable { case edit, delete, addTags }
 
@@ -3364,6 +3385,10 @@ final class LedgerSession: ObservableObject {
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
     func resetLocalTransactionWindow() {
+        globalSearchTask?.cancel()
+        globalSearchTask = nil
+        globalSearchRequestID = nil
+        localSearchSequence = nil
         transactionSelectionID = nil
         transactionSelectionTask?.cancel()
         transactionSelectionTask = nil
@@ -3601,6 +3626,55 @@ final class LedgerSession: ObservableObject {
             throw LocalLedgerWorkspace.WorkspaceError.staleRevision
         }
         return detail
+    }
+
+    /// Caller owns one bounded result; this never seeds legacy global arrays or
+    /// reconciles deletion from a partial window. Continuations are opaque and
+    /// bind account labels, filters, scope, query, native model and read context.
+    func localGlobalSearchWindow(query: String, scope: LedgerGlobalSearchScope,
+                                 filters: LedgerGlobalSearchFilters,
+                                 continuation: LocalSearchContinuation? = nil,
+                                 limits: LocalGlobalSearchScan.Limits = .init()) async throws -> LocalSearchWindow {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let accounts = ledger?.accounts ?? []
+        let sequence: LocalSearchSequence
+        if let continuation {
+            guard let existing = localSearchSequence, existing.id == continuation.sequenceID,
+                  existing.query == query, existing.scope == scope, existing.filters == filters,
+                  existing.accounts == accounts else { throw CancellationError() }
+            try validateLocalRead(existing.context)
+            sequence = existing
+        } else {
+            sequence = LocalSearchSequence(id: UUID(), context: context, query: query,
+                scope: scope, filters: filters, accounts: accounts)
+            localSearchSequence = sequence
+        }
+        globalSearchTask?.cancel()
+        let id = UUID()
+        globalSearchRequestID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(sequence.context)
+            return try await repository.globalSearchWindow(query: query, accounts: accounts,
+                scope: scope, filters: filters, after: continuation?.anchor,
+                nativeRevision: continuation?.nativeRevision, expectedRevisionID: context.revisionID, limits: limits)
+        }
+        globalSearchTask = task
+        defer {
+            if globalSearchRequestID == id { globalSearchTask = nil; globalSearchRequestID = nil }
+        }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(sequence.context)
+        guard globalSearchRequestID == id, localSearchSequence?.id == sequence.id,
+              ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(sequence.context)
+        guard globalSearchRequestID == id, localSearchSequence?.id == sequence.id,
+              ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return LocalSearchWindow(result: result, continuation: result.continuation.map {
+            LocalSearchContinuation(sequenceID: sequence.id, nativeRevision: result.revision, anchor: $0)
+        })
     }
 
     /// Caller-owned complete facts. Every new selection request supersedes the
