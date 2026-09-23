@@ -1,5 +1,12 @@
 import Foundation
 
+struct LedgerTransactionPage: Decodable, Sendable {
+    let revision: String
+    let transactions: [LedgerTransaction]
+    let nextCursor: String?
+    let sensitiveUnlocked: Bool
+}
+
 struct LedgerGlobalTransactions: Decodable, Sendable {
     let transactions: [LedgerTransaction]
     let sensitiveUnlocked: Bool

@@ -66,6 +66,32 @@ final class LocalLedgerRepositoryTests: XCTestCase {
         }
     }
 
+    func testNativePagePreservesCursorFiltersAndRequiredArrays() async throws {
+        actor PageEngine: LocalLedgerEngine {
+            var last: LocalLedgerEngineRequest?
+            func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
+                last = request
+                return Data(#"{"revision":"one","transactions":[],"nextCursor":"opaque-next","sensitiveUnlocked":true}"#.utf8)
+            }
+        }
+        let engine = PageEngine()
+        let workspace = LocalLedgerWorkspace(rootDirectory: try root())
+        _ = try await workspace.commit(changes: [.write(Data(";fixture".utf8), to: "main.bean")]) { _ in }
+        let descriptor = LocalLedgerDescriptor(id: UUID(), name: "Page", entrypoint: "main.bean", createdAt: Date())
+        let repository = LocalLedgerRepository(descriptor: descriptor, workspace: workspace, engine: engine, validator: { _, _ in })
+        let page = try await repository.transactionPage(query: "payee:shop", cursor: "opaque-before", limit: 25)
+        XCTAssertEqual(page.revision, "one")
+        XCTAssertEqual(page.nextCursor, "opaque-next")
+        XCTAssertEqual(page.transactions, [])
+        let request = await engine.last
+        XCTAssertEqual(request?.path, "/api/ledger/transactions/page")
+        XCTAssertEqual(request?.query["q"], "payee:shop")
+        XCTAssertEqual(request?.query["cursor"], "opaque-before")
+        XCTAssertEqual(request?.query["limit"], "25")
+        do { _ = try await repository.transactionPage(limit: 501); XCTFail("oversized page accepted") }
+        catch is LocalLedgerError { }
+    }
+
     private actor Engine: LocalLedgerEngine {
         var requests: [LocalLedgerEngineRequest] = []
         var mutationText = "; accepted\n"
