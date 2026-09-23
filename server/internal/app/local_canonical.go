@@ -13,10 +13,12 @@ import (
 // of the embedded Beancount loader. Decimal quantities cross JSON as strings.
 // Source text is loaded independently for lossless editing and source hashes.
 type LocalCanonicalModel struct {
-	Version     int               `json:"version"`
-	Entries     []BeanEntry       `json:"entries"`
-	Options     map[string]string `json:"options"`
-	Commodities []string          `json:"commodities,omitempty"`
+	// Set only for an exclusively owned streamed model, under its cache mutex.
+	normalizedRoot string
+	Version        int               `json:"version"`
+	Entries        []BeanEntry       `json:"entries"`
+	Options        map[string]string `json:"options"`
+	Commodities    []string          `json:"commodities,omitempty"`
 }
 
 func localCanonicalEntries(cfg Config, source []BeanEntry) ([]BeanEntry, error) {
@@ -24,25 +26,48 @@ func localCanonicalEntries(cfg Config, source []BeanEntry) ([]BeanEntry, error) 
 	if model.Version != 1 {
 		return nil, errors.New("unsupported canonical ledger model version")
 	}
+	if cfg.localCanonicalOwned && model.normalizedRoot != "" {
+		if model.normalizedRoot != cfg.LedgerRoot {
+			return nil, errors.New("canonical model belongs to another workspace")
+		}
+		return model.Entries, nil
+	}
+	// Validate before mutating an owned array, so a rejected model cannot leave
+	// partially normalized absolute paths/postings behind for a subsequent call.
+	if cfg.localCanonicalOwned {
+		for _, entry := range model.Entries {
+			if _, err := canonicalAbsoluteSource(cfg.LedgerRoot, entry.File); err != nil {
+				return nil, err
+			}
+			for _, posting := range entry.Postings {
+				if posting.Quantity.Number == "" || posting.Quantity.Currency == "" {
+					return nil, errors.New("canonical ledger contains an unbooked posting")
+				}
+			}
+		}
+	}
 	bySource := make(map[string]int, len(source))
 	for i := range source {
 		bySource[canonicalSourceKey(source[i])] = i
 	}
-	entries := make([]BeanEntry, 0, len(model.Entries))
-	for _, original := range model.Entries {
+	var entries []BeanEntry
+	if cfg.localCanonicalOwned {
+		entries = model.Entries
+	} else {
+		entries = make([]BeanEntry, len(model.Entries))
+	}
+	for index, original := range model.Entries {
 		entry := original
-		if entry.File != "" {
-			if filepath.IsAbs(entry.File) {
-				return nil, errors.New("canonical ledger source must be relative")
-			}
-			clean := filepath.Clean(filepath.FromSlash(entry.File))
-			if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-				return nil, errors.New("canonical ledger source escapes workspace")
-			}
-			entry.File = filepath.Join(cfg.LedgerRoot, clean)
+		var err error
+		entry.File, err = canonicalAbsoluteSource(cfg.LedgerRoot, entry.File)
+		if err != nil {
+			return nil, err
 		}
+
 		entry.Amount = entry.AmountValue.Cents()
-		entry.Postings = append([]parsedPosting(nil), original.Postings...)
+		if !cfg.localCanonicalOwned {
+			entry.Postings = append([]parsedPosting(nil), original.Postings...)
+		}
 		for i := range entry.Postings {
 			posting := &entry.Postings[i]
 			if posting.Quantity.Number == "" || posting.Quantity.Currency == "" {
@@ -60,9 +85,26 @@ func localCanonicalEntries(cfg Config, source []BeanEntry) ([]BeanEntry, error) 
 		if index, ok := bySource[canonicalSourceKey(entry)]; ok {
 			entry.RawLines = source[index].RawLines
 		}
-		entries = append(entries, entry)
+		entries[index] = entry
+	}
+	if cfg.localCanonicalOwned {
+		model.normalizedRoot = cfg.LedgerRoot
 	}
 	return entries, nil
+}
+
+func canonicalAbsoluteSource(root, file string) (string, error) {
+	if file == "" {
+		return "", nil
+	}
+	if filepath.IsAbs(file) {
+		return "", errors.New("canonical ledger source must be relative")
+	}
+	clean := filepath.Clean(filepath.FromSlash(file))
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", errors.New("canonical ledger source escapes workspace")
+	}
+	return filepath.Join(root, clean), nil
 }
 
 func canonicalSourceKey(entry BeanEntry) string {

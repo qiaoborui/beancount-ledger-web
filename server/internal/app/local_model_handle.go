@@ -100,6 +100,11 @@ func RegisterLocalModel(input LocalRequest, streamName, expectedVersion string) 
 	}
 	handle := hex.EncodeToString(token)
 	cfg.localCanonical = model
+	// ReadLocalCanonicalStream created this model exclusively for this cache.
+	// Unlike caller-supplied legacy JSON, its arrays may become the primary
+	// normalized semantic entries without retaining another rich copy.
+	cfg.localCanonicalOwned = true
+	cfg.localCanonicalVersion = expectedVersion
 	registered := &localRegisteredModel{handle: handle, root: cfg.LedgerRoot, entrypoint: cfg.localEntrypoint, version: expectedVersion, model: model, cache: NewLedgerCache(cfg), staging: input.Staging}
 	localModels.Lock()
 	defer localModels.Unlock()
