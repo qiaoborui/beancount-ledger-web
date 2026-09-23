@@ -201,7 +201,10 @@ final class LedgerSession: ObservableObject {
         didSet { if localPresentation != oldValue { resetLocalTransactionWindow() } }
     }
 
-    // Opt-in bounded reads. These do not replace bootstrap/global arrays or grant
+    var localTransactionPresentationRevision: UUID? { localPresentation?.revisionID }
+    @Published private(set) var localTransactionReloadID = 0
+
+    // Bounded reads. These do not replace bootstrap/global arrays or grant
     // mutation authority. Only the caller of localTransactionDetail holds detail.
     @Published private(set) var localTransactionWindow: LocalTransactionWindow.Window?
     @Published private(set) var isLocalTransactionWindowLoading = false
@@ -1144,6 +1147,7 @@ final class LedgerSession: ObservableObject {
         }
         let epoch = sessionEpoch
         resetLocalTransactionWindow()
+        defer { if epoch == sessionEpoch { localTransactionReloadID &+= 1 } }
         try await localRepository.addTransaction(entry: entry)
         guard epoch == sessionEpoch else { throw CancellationError() }
         await refresh()
@@ -1527,6 +1531,7 @@ final class LedgerSession: ObservableObject {
     private func refreshWithResult() async -> Bool {
         guard phase == .ready, let contextURL, !isRangeLoading, !isValuationCurrencyLoading else { return false }
         let generation = invalidateRequests()
+        defer { if generation == requestGeneration { localTransactionReloadID &+= 1 } }
         do {
             try await loadLedger(from: contextURL, generation: generation)
             guard generation == requestGeneration else { return false }
@@ -1543,6 +1548,7 @@ final class LedgerSession: ObservableObject {
     private func refreshAfterBiometricUnlock() async -> Bool {
         guard phase == .ready, let contextURL, !isRangeLoading, !isValuationCurrencyLoading else { return false }
         let generation = invalidateRequests()
+        defer { if generation == requestGeneration { localTransactionReloadID &+= 1 } }
         do {
             try await loadLedger(
                 from: contextURL,
