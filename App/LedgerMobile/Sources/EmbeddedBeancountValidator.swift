@@ -50,7 +50,51 @@ actor EmbeddedBeancountValidator {
         return canonical
     }
 
-    private func load(workspace: URL, entryFile: String, includeCanonical: Bool) throws -> Result {
+    /// Output directory must be caller-owned, protected and outside the source.
+    /// The caller removes the exclusive file when ingestion completes/fails.
+    struct StreamDescriptor: Decodable, Sendable {
+        let version: Int
+        let entries: Int
+        let bytes: Int
+        let sha256: String
+    }
+
+    func exportCanonical(workspace: URL, entryFile: String = "main.bean", to output: URL) throws -> StreamDescriptor {
+        #if canImport(BeancountRuntime)
+        try initializeIfNeeded()
+        let root = workspace.resolvingSymlinksInPath().standardizedFileURL
+        let parent = output.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+        let target = parent.appendingPathComponent(output.lastPathComponent)
+        guard parent != root, !parent.path.hasPrefix(root.path + "/"),
+              !FileManager.default.fileExists(atPath: target.path) else {
+            throw ValidationError(message: "模型导出必须使用账本外的独立临时文件")
+        }
+        let pointer = root.path.withCString { root in
+            entryFile.withCString { entry in
+                target.path.withCString { BRExportCanonical(root, entry, $0) }
+            }
+        }
+        guard let pointer else { throw ValidationError(message: "本地导出内存不足") }
+        defer { BRFree(pointer) }
+        struct Reply: Decodable {
+            struct Diagnostic: Decodable { let message: String }
+            let errors: [Diagnostic]
+            let stream: StreamDescriptor?
+        }
+        let reply = try JSONDecoder().decode(Reply.self, from: Data(String(cString: pointer).utf8))
+        guard reply.errors.isEmpty else { throw ValidationError(message: reply.errors.prefix(20).map(\.message).joined(separator: "\n")) }
+        guard let descriptor = reply.stream, descriptor.version == 1,
+              descriptor.bytes > 0, descriptor.bytes <= 256 * 1024 * 1024,
+              descriptor.entries >= 0, descriptor.sha256.count == 64 else {
+            throw ValidationError(message: "本地模型导出描述无效")
+        }
+        return descriptor
+        #else
+        throw ValidationError(message: "此构建缺少本地 Beancount 校验运行时")
+        #endif
+    }
+
+    private func initializeIfNeeded() throws {
         #if canImport(BeancountRuntime)
         if !initialized {
             let failure = Bundle.main.bundlePath.withCString { BRInitialize($0) }
@@ -60,6 +104,14 @@ actor EmbeddedBeancountValidator {
             }
             initialized = true
         }
+        #else
+        throw ValidationError(message: "此构建缺少本地 Beancount 校验运行时")
+        #endif
+    }
+
+    private func load(workspace: URL, entryFile: String, includeCanonical: Bool) throws -> Result {
+        #if canImport(BeancountRuntime)
+        try initializeIfNeeded()
         let pointer = workspace.path.withCString { root in
             entryFile.withCString { entry in
                 includeCanonical ? BRValidate(root, entry) : BRValidateOnly(root, entry)

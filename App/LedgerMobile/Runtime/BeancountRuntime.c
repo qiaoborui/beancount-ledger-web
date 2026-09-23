@@ -50,12 +50,16 @@ char *BRInitialize(const char *bundle_path) {
     return result;
 }
 
-static char *validate(const char *workspace_path, const char *entry_file, const char *function_name) {
+static char *validate(const char *workspace_path, const char *entry_file, const char *function_name, const char *stream_path) {
     if (!Py_IsInitialized()) return strdup("{\"errors\":[{\"message\":\"Python runtime is unavailable\"}]}");
     PyGILState_STATE state = PyGILState_Ensure();
     PyObject *module = PyImport_ImportModule("ledger_validator");
     PyObject *function = module ? PyObject_GetAttrString(module, function_name) : NULL;
-    PyObject *result = function ? PyObject_CallFunction(function, "ss", workspace_path, entry_file) : NULL;
+    PyObject *result = NULL;
+    if (function) {
+        result = stream_path ? PyObject_CallFunction(function, "sss", workspace_path, entry_file, stream_path)
+                             : PyObject_CallFunction(function, "ss", workspace_path, entry_file);
+    }
     const char *utf8 = result ? PyUnicode_AsUTF8(result) : NULL;
     char *output = utf8 ? strdup(utf8) : NULL;
     if (!output) {
@@ -82,11 +86,15 @@ static char *validate(const char *workspace_path, const char *entry_file, const 
 }
 
 char *BRValidate(const char *workspace_path, const char *entry_file) {
-    return validate(workspace_path, entry_file, "validate_json");
+    return validate(workspace_path, entry_file, "validate_json", NULL);
 }
 
 char *BRValidateOnly(const char *workspace_path, const char *entry_file) {
-    return validate(workspace_path, entry_file, "validate_only_json");
+    return validate(workspace_path, entry_file, "validate_only_json", NULL);
+}
+
+char *BRExportCanonical(const char *workspace_path, const char *entry_file, const char *stream_path) {
+    return validate(workspace_path, entry_file, "export_canonical_json", stream_path);
 }
 
 void BRFree(char *value) { free(value); }
