@@ -156,6 +156,22 @@ final class BookkeepingPipelineTests: XCTestCase {
         XCTAssertEqual(result.proposals.first?.provider, "offline-fixture-v1")
     }
 
+    func testCancellationDuringLastHistoryPageNeverCallsClassifier() async throws {
+        var draft = try parsed().draft(for: input)
+        draft.records = [.init(date: "2026-09-18", narration: "Synthetic", postings: [
+            .init(account: "", amount: "80", currency: "CNY")])]
+        let provider = OfflineClassifier()
+        do {
+            _ = try await BookkeepingPipeline.enrich(draft, accounts: accounts, relatedHistory: { _ in
+                withUnsafeCurrentTask { $0?.cancel() }
+                return []
+            }, provider: provider)
+            XCTFail("Cancelled history was accepted")
+        } catch is CancellationError { }
+        let calls = await provider.requests
+        XCTAssertTrue(calls.isEmpty)
+    }
+
     private func repository() async throws -> LocalLedgerRepository {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("BookkeepingTests-" + UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }

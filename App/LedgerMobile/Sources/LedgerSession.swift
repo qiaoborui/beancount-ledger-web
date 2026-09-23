@@ -1829,6 +1829,61 @@ final class LedgerSession: ObservableObject {
     private var globalTransactionsLoadedAt: Date?
     var hasCachedGlobalTransactions: Bool { globalTransactionsLoadedAt != nil }
 
+    /// Consume bounded pages without publishing or retaining an all-history list.
+    /// performSensitiveRequest rejects late results on lock/ledger/write changes;
+    /// the native cursor rejects any revision change between pages.
+    func classificationEvidence(for entry: LedgerImportEntry) async throws -> ImportClassificationContext.Evidence {
+        let epoch = sessionEpoch, generation = requestGeneration
+        return try await performSensitiveRequest { repository in
+            var accumulator = ImportClassificationContext.Accumulator(entry: entry)
+            var cursor: String?
+            var revision: String?
+            repeat {
+                try Task.checkCancellation()
+                try await self.validateHistoryRead(epoch: epoch, generation: generation)
+                let page = try await repository.classificationHistoryPage(cursor: cursor)
+                guard page.sensitiveUnlocked, revision == nil || revision == page.revision else {
+                    throw LedgerAPIError.server(status: 409, message: "历史记录已变化，请重试")
+                }
+                try await self.validateHistoryRead(epoch: epoch, generation: generation)
+                revision = page.revision
+                accumulator.consume(page.transactions)
+                cursor = page.nextCursor
+            } while cursor != nil
+            return accumulator.evidence
+        }
+    }
+
+    func bookkeepingHistory(for entry: LedgerTransactionEntry) async throws -> [LedgerTransaction] {
+        guard !entry.payee.isEmpty else { return [] }
+        let epoch = sessionEpoch, generation = requestGeneration
+        return try await performSensitiveRequest { repository in
+            var related: [LedgerTransaction] = []
+            var cursor: String?
+            var revision: String?
+            repeat {
+                try Task.checkCancellation()
+                try await self.validateHistoryRead(epoch: epoch, generation: generation)
+                let page = try await repository.classificationHistoryPage(cursor: cursor)
+                guard page.sensitiveUnlocked, revision == nil || revision == page.revision else {
+                    throw LedgerAPIError.server(status: 409, message: "历史记录已变化，请重试")
+                }
+                try await self.validateHistoryRead(epoch: epoch, generation: generation)
+                revision = page.revision
+                related = Array((related + page.transactions.filter { $0.date <= entry.date && $0.payee == entry.payee })
+                    .sorted { $0.date > $1.date }.prefix(5))
+                cursor = page.nextCursor
+            } while cursor != nil
+            return related
+        }
+    }
+
+    private func validateHistoryRead(epoch: Int, generation: Int) throws {
+        guard sessionEpoch == epoch, requestGeneration == generation, phase == .ready, !privacyShielded else {
+            throw CancellationError()
+        }
+    }
+
     func loadGlobalTransactions(forceRefresh: Bool = false) async throws {
         if !forceRefresh, phase == .ready,
            let loadedAt = globalTransactionsLoadedAt,

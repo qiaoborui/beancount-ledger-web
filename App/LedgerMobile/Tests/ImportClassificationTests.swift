@@ -24,6 +24,69 @@ final class ImportClassificationTests: XCTestCase {
         XCTAssertTrue(encoded.contains("瑞幸咖啡"))
     }
 
+    func testPagedEvidenceEqualsFullHistoryIncludingOldConflict() throws {
+        let paid = try changedEntry { $0["method"] = "日常专用卡" }
+        var history = (0..<1200).map { transaction(payee: $0.isMultiple(of: 3) ? "瑞幸咖啡" : "商家\($0)",
+            date: "2026-09-01", line: $0, method: "日常专用卡") }
+        let allAccounts = accounts() + [account("Liabilities:Other")]
+        for conflict in [false, true] {
+            if conflict { history.append(transaction(payee: "旧记录", date: "2025-01-01", line: 2000,
+                method: "日常专用卡", funding: "Liabilities:Other")) }
+            var accumulator = ImportClassificationContext.Accumulator(entry: paid)
+            for offset in stride(from: 0, to: history.count, by: 37) {
+                accumulator.consume(Array(history[offset..<min(offset + 37, history.count)]))
+                XCTAssertLessThanOrEqual(accumulator.evidence.related.count, 5)
+                XCTAssertLessThanOrEqual(accumulator.evidence.mappings.count, 4)
+            }
+            XCTAssertEqual(accumulator.evidence.related.map(\.id),
+                ImportClassificationContext.relatedHistory(for: paid, history: history).map(\.id))
+            let full = try XCTUnwrap(ImportClassificationContext.request(for: paid, accounts: allAccounts, history: history))
+            let bounded = try XCTUnwrap(ImportClassificationContext.request(for: paid, accounts: allAccounts, evidence: accumulator.evidence))
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            XCTAssertEqual(try encoder.encode(full), try encoder.encode(bounded))
+            XCTAssertEqual(bounded.fundingHint == nil, conflict)
+        }
+    }
+
+    func testMappingWitnessReductionAcrossConflictPermutations() throws {
+        let paid = try changedEntry { $0["method"] = "日常专用卡" }
+        let allAccounts = accounts() + [account("Liabilities:Other"), account("Assets:Other")]
+        let patterns = [[], [0], [0, 0], [0, 0, 0], [0, 1, 0, 0, 0], [1, 0, 1, 0, 1],
+                        [0, 0, 0, 1, 2, 0], [0, 1, 2, 2, 2, 2]]
+        for pattern in patterns {
+            let history = pattern.enumerated().map { index, value in
+                transaction(payee: "Synthetic", line: index, method: "日常专用卡",
+                            funding: ["Assets:Bank", "Liabilities:Other", "Assets:Other"][value])
+            }
+            for chunk in [1, 2, 3, 5] {
+                var accumulator = ImportClassificationContext.Accumulator(entry: paid)
+                for offset in stride(from: 0, to: history.count, by: chunk) {
+                    accumulator.consume(Array(history[offset..<min(offset + chunk, history.count)]))
+                }
+                let full = try XCTUnwrap(ImportClassificationContext.request(for: paid, accounts: allAccounts, history: history))
+                let bounded = try XCTUnwrap(ImportClassificationContext.request(for: paid, accounts: allAccounts, evidence: accumulator.evidence))
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+                XCTAssertEqual(try encoder.encode(full), try encoder.encode(bounded), "\(pattern)/\(chunk)")
+                XCTAssertLessThanOrEqual(accumulator.evidence.mappings.count, 4)
+            }
+        }
+    }
+
+    @MainActor
+    func testConsentChangedWhileLoadingEvidenceDoesNotMakePaidRequest() async throws {
+        let original = try entry()
+        let input = try XCTUnwrap(ImportClassificationContext.request(for: original, accounts: accounts(), history: []))
+        var consent = true
+        var called = false
+        try await ImportClassificationBatch.run([original], makeInput: { _ in
+            await Task.yield()
+            consent = false
+            return input
+        }, classify: { _ in called = true; return self.suggestion() }, canContinue: { consent },
+        currentEntry: { _ in original }, isEligible: { _ in true }, accept: { _, _ in XCTFail("accepted stale evidence") })
+        XCTAssertFalse(called)
+    }
+
     func testAccountReplacementPreservesExactDecimalsAndRefundDirection() throws {
         let original = try entry(amount: "-18.123456789")
         let changed = try XCTUnwrap(ImportClassificationContext.applying(category: "Expenses:Coffee", funding: original.fundingAccount, to: original, allowed: ["Expenses:Coffee"]))

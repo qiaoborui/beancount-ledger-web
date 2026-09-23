@@ -143,13 +143,19 @@ enum BookkeepingPipeline {
         }
     }
     @MainActor
-    static func classifyImports(_ entries: [LedgerImportEntry], accounts: [LedgerAccount], history: [LedgerTransaction],
+    static func classifyImports(_ entries: [LedgerImportEntry], accounts: [LedgerAccount], history: [LedgerTransaction] = [],
+        evidence: ((LedgerImportEntry) async throws -> ImportClassificationContext.Evidence)? = nil,
         provider: any BookkeepingClassifier, canContinue: () -> Bool,
         currentEntry: (String) -> LedgerImportEntry?, isEligible: (String) -> Bool,
         unsupported: (LedgerImportEntry) -> Void,
         accept: (ImportClassificationBatch.Job, ImportClassificationSuggestion, LedgerImportEntry) -> Void) async throws {
         try await ImportClassificationBatch.run(entries, makeInput: { entry in
-            let input = ImportClassificationContext.request(for: entry, accounts: accounts, history: history)
+            let input: ImportClassificationRequest?
+            if let evidence {
+                input = ImportClassificationContext.request(for: entry, accounts: accounts, evidence: try await evidence(entry))
+            } else {
+                input = ImportClassificationContext.request(for: entry, accounts: accounts, history: history)
+            }
             if input == nil { unsupported(entry) }
             return input
         }, classify: { input in
@@ -160,7 +166,8 @@ enum BookkeepingPipeline {
     }
     /// Enrich unresolved fields only. The caller checks its draft/consent
     /// revision again before presenting this immutable result.
-    static func enrich(_ draft: BookkeepingDraft, accounts: [LedgerAccount], history: [LedgerTransaction],
+    static func enrich(_ draft: BookkeepingDraft, accounts: [LedgerAccount], history: [LedgerTransaction] = [],
+                       relatedHistory: (@Sendable (LedgerTransactionEntry) async throws -> [LedgerTransaction])? = nil,
                        provider: any BookkeepingClassifier) async throws -> BookkeepingDraft {
         var result = draft
         for (recordIndex, record) in draft.records.enumerated() {
@@ -183,7 +190,9 @@ enum BookkeepingPipeline {
                         && (account.currency.isEmpty || account.currency == posting.currency)
                 }.sorted { $0.account < $1.account }
                 guard !candidates.isEmpty, candidates.count <= 254 else { continue }
-                let related = history.filter { $0.date <= record.date && !record.payee.isEmpty && $0.payee == record.payee }
+                let evidenceHistory = try await relatedHistory?(record) ?? history
+                try Task.checkCancellation()
+                let related = evidenceHistory.filter { $0.date <= record.date && !record.payee.isEmpty && $0.payee == record.payee }
                     .sorted { $0.date > $1.date }.prefix(5).map { transaction in
                         ImportClassificationRequest.Example(date: transaction.date, payee: transaction.payee,
                             narration: transaction.narration, method: "", cardLast4: "",
@@ -195,6 +204,7 @@ enum BookkeepingPipeline {
                     currency: posting.currency, role: role, evidence: draft.evidence.map(\.original).joined(separator: "\n"),
                     candidates: candidates.map { .init(account: $0.account, label: $0.displayLabel) }, history: related)
                 let proposal = try await provider.decideAccount(input)
+                try Task.checkCancellation()
                 try proposal.decision.validate(allowed: Set(candidates.map(\.account)))
                 guard proposal.recordIndex == recordIndex, proposal.postingIndex == postingIndex else {
                     throw BookkeepingError.invalidModelResponse

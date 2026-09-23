@@ -86,7 +86,7 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 		}
 		return localTransactionDetailResponse(cfg, snapshot, input.Query)
 	}
-	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && input.Path == "/api/ledger/transactions/page" {
+	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && (input.Path == "/api/ledger/transactions/page" || input.Path == "/api/ledger/transactions/history-page") {
 		if input.Staging {
 			return http.StatusBadRequest, nil, errors.New("transaction pages require a committed generation")
 		}
@@ -94,7 +94,7 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 		if err != nil {
 			return http.StatusBadRequest, nil, err
 		}
-		return localTransactionPageResponse(cfg, snapshot, input.Query)
+		return localTransactionPageProjection(cfg, snapshot, input.Query, input.Path == "/api/ledger/transactions/history-page")
 	}
 	runtime := newFilesystemRuntimeStore(cfg.RuntimeDir)
 	writer := NewLedgerWriterWithRuntimeStore(cfg, cache, runtime)

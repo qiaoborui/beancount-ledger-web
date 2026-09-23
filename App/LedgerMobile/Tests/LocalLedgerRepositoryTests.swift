@@ -88,6 +88,11 @@ final class LocalLedgerRepositoryTests: XCTestCase {
         XCTAssertEqual(request?.query["q"], "payee:shop")
         XCTAssertEqual(request?.query["cursor"], "opaque-before")
         XCTAssertEqual(request?.query["limit"], "25")
+        _ = try await repository.classificationHistoryPage(cursor: "history-cursor")
+        let evidenceRequest = await engine.last
+        XCTAssertEqual(evidenceRequest?.path, "/api/ledger/transactions/history-page")
+        XCTAssertEqual(evidenceRequest?.query["cursor"], "history-cursor")
+        XCTAssertEqual(evidenceRequest?.query["limit"], "500")
         do { _ = try await repository.transactionPage(limit: 501); XCTFail("oversized page accepted") }
         catch is LocalLedgerError { }
     }

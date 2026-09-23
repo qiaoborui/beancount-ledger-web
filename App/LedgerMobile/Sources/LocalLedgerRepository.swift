@@ -108,6 +108,13 @@ actor LocalLedgerRepository: LedgerRepository {
         try await read("/api/ledger/transactions/detail", query: ["file": source.file, "line": String(source.line), "hash": source.hash ?? ""])
     }
 
+    func classificationHistoryPage(cursor: String?) async throws -> LedgerTransactionPage {
+        var query = ["limit": "500"]
+        query["cursor"] = cursor
+        let (_, response) = try await readSnapshot("/api/ledger/transactions/history-page", query: query)
+        return try response.decodeTransactionPage()
+    }
+
     func globalTransactions() async throws -> LedgerGlobalTransactions {
         try await read("/api/ledger/transactions", query: ["start": "0001-01-01", "end": "9999-12-31"])
     }
