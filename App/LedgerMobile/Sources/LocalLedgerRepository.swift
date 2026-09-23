@@ -306,6 +306,18 @@ actor LocalLedgerRepository: LedgerRepository {
         let _: BQLCell = try await mutate("/api/ledger/transactions/tags", method: "POST",
             body: json(LedgerTransactionTagsRequest(sources: sources, tags: tags)))
     }
+    func updateTransaction(source: TransactionSource, entry: LedgerTransactionEntry, expectedRevisionID: UUID) async throws {
+        let _: BQLCell = try await mutate("/api/ledger/transactions", method: "PUT",
+            body: json(LedgerTransactionUpdateRequest(source: source, entry: entry)), expected: expectedRevisionID)
+    }
+    func deleteTransaction(source: TransactionSource, reason: String, expectedRevisionID: UUID) async throws {
+        let _: BQLCell = try await mutate("/api/ledger/transactions", method: "DELETE",
+            body: json(LedgerTransactionDeleteRequest(source: source, reason: reason)), expected: expectedRevisionID)
+    }
+    func addTransactionTags(sources: [TransactionSource], tags: [String], expectedRevisionID: UUID) async throws {
+        let _: BQLCell = try await mutate("/api/ledger/transactions/tags", method: "POST",
+            body: json(LedgerTransactionTagsRequest(sources: sources, tags: tags)), expected: expectedRevisionID)
+    }
     func addTransaction(entry: LedgerTransactionEntry) async throws {
         let _: BQLCell = try await mutate("/api/ledger/append", method: "POST", body: json(entry))
     }
