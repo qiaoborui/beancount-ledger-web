@@ -99,13 +99,18 @@ func localTransactionPageResponse(cfg Config, snapshot *LedgerSnapshot, query ma
 			return 400, nil, errors.New("transaction page limit must be 1..500")
 		}
 	}
+	switch query["kind"] {
+	case "", "all", "expense", "income", "transfer":
+	default:
+		return 400, nil, errors.New("invalid transaction kind")
+	}
 	filter, err := ParseTransactionQuery(query["q"])
 	if err != nil {
 		return 400, nil, err
 	}
 	effectiveStart, effectiveEnd := transactionQueryEffectiveRange(start, end, filter)
 	modelRevision := fmt.Sprintf("%s:%d", snapshot.Version, snapshot.localReadModelID)
-	scopeBytes, _ := json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, modelRevision, effectiveStart, effectiveEnd, query["q"]})
+	scopeBytes, _ := json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, modelRevision, effectiveStart, effectiveEnd, query["q"], query["account"], query["tag"], query["kind"]})
 	scope := fmt.Sprintf("%x", sha256.Sum256(scopeBytes))
 	offset := 0
 	if raw := query["cursor"]; raw != "" {
@@ -128,6 +133,15 @@ func localTransactionPageResponse(cfg Config, snapshot *LedgerSnapshot, query ma
 	for index := offset; index < len(txns); index++ {
 		txn := txns[index]
 		if txn.Date < effectiveStart || txn.Date >= effectiveEnd || (filter != nil && !filter.Matches(txn)) {
+			continue
+		}
+		if account := query["account"]; account != "" && !transactionHasAccountPrefix(txn, account) {
+			continue
+		}
+		if tag := query["tag"]; tag != "" && !queryStringSliceContains(txn.Tags, tag) {
+			continue
+		}
+		if kind := query["kind"]; kind != "" && kind != "all" && dashboardTransactionType(txn) != kind {
 			continue
 		}
 		if len(page.Transactions) == limit {
@@ -167,4 +181,38 @@ func localTransactionPageResponse(cfg Config, snapshot *LedgerSnapshot, query ma
 		return 500, nil, errors.New("transaction page exceeds byte budget")
 	}
 	return http.StatusOK, encoded, nil
+}
+
+// Details carry rich metadata and editor draft only when requested by an exact
+// source locator. A changed hash must never resolve to the new row accidentally.
+func localTransactionDetailResponse(cfg Config, snapshot *LedgerSnapshot, query map[string]string) (int, json.RawMessage, error) {
+	line, err := strconv.Atoi(query["line"])
+	file := query["file"]
+	hash := query["hash"]
+	if err != nil || line < 0 || hash == "" || file == "" || filepath.IsAbs(file) || strings.Contains(file, "\\") {
+		return 400, nil, errors.New("invalid transaction locator")
+	}
+	clean := filepath.Clean(filepath.FromSlash(file))
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return 400, nil, errors.New("invalid transaction locator")
+	}
+	full := filepath.Join(cfg.LedgerRoot, clean)
+	for _, txn := range snapshot.Transactions {
+		if txn.Source.File != full || txn.Source.Line != line || txn.Source.Hash != hash {
+			continue
+		}
+		txn.Source.File = filepath.ToSlash(clean)
+		if txn.Postings == nil {
+			txn.Postings = []Posting{}
+		}
+		raw, err := json.Marshal(txn)
+		if err != nil {
+			return 500, nil, errors.New("cannot encode transaction detail")
+		}
+		if len(raw) > localTransactionPageBytes {
+			return 413, nil, errors.New("transaction detail exceeds byte budget")
+		}
+		return 200, raw, nil
+	}
+	return 409, nil, errors.New("transaction source changed; reopen from the current page")
 }

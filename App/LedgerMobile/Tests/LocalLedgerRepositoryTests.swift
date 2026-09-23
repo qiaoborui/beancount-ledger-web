@@ -92,6 +92,29 @@ final class LocalLedgerRepositoryTests: XCTestCase {
         catch is LocalLedgerError { }
     }
 
+    func testNativeDetailUsesExactLocatorAndRichPayload() async throws {
+        actor DetailEngine: LocalLedgerEngine {
+            var last: LocalLedgerEngineRequest?
+            func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
+                last = request
+                return Data(#"{"date":"2026-09-01","payee":"Synthetic","narration":"detail","metadata":{"method":"Cash"},"postings":[],"source":{"file":"main.bean","line":1,"hash":"exact"}}"#.utf8)
+            }
+        }
+        let engine = DetailEngine()
+        let workspace = LocalLedgerWorkspace(rootDirectory: try root())
+        _ = try await workspace.commit(changes: [.write(Data("; fixture".utf8), to: "main.bean")]) { _ in }
+        let descriptor = LocalLedgerDescriptor(id: UUID(), name: "Detail", entrypoint: "main.bean", createdAt: Date())
+        let repository = LocalLedgerRepository(descriptor: descriptor, workspace: workspace, engine: engine, validator: { _, _ in })
+        let source = TransactionSource(file: "main.bean", line: 1, hash: "exact")
+        let detail = try await repository.transactionDetail(source: source)
+        XCTAssertEqual(detail.source, source)
+        XCTAssertEqual(detail.metadata?["method"], .string("Cash"))
+        let request = await engine.last
+        XCTAssertEqual(request?.path, "/api/ledger/transactions/detail")
+        XCTAssertEqual(request?.query["hash"], "exact")
+        XCTAssertEqual(request?.query["line"], "1")
+    }
+
     private actor Engine: LocalLedgerEngine {
         var requests: [LocalLedgerEngineRequest] = []
         var mutationText = "; accepted\n"
