@@ -280,6 +280,7 @@ struct AccountsView: View {
                             } label: {
                                 AccountRowView(row: row)
                             }
+                            .accessibilityIdentifier("account-link-" + row.account + "-" + row.nativeCurrency)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button {
                                     selectedAccountForReconciliation = row
@@ -474,6 +475,30 @@ struct AccountDetailView: View {
     @State private var errorMessage: String?
     @State private var reloadToken = 0
     @State private var showingReconcileSheet = false
+    @State private var localWindow: LedgerSession.LocalAccountWindow?
+    @State private var completeTrend: LocalAccountTrendScan.Result?
+    @State private var trendError: String?
+    @State private var pageIndex = 0
+    @State private var pageLoading = false
+    @State private var trendLoading = false
+    @State private var active = false
+    @State private var completedRequest: AccountDetailRequestKey?
+    @State private var completedTrendRequest: AccountDetailRequestKey?
+    private var displayedPage: Int { completedRequest?.page ?? 0 }
+    private var displayedRange: LedgerDateRange {
+        guard session.isLocal, let completedRequest else { return session.selectedRange }
+        return .init(start: completedRequest.start, end: completedRequest.end, preset: .custom)
+    }
+
+    private var readable: Bool {
+        session.phase == .ready && !session.privacyShielded && !session.isRangeLoading
+            && !session.isValuationCurrencyLoading && !session.transactionMutationStates.values.contains(.pending)
+    }
+    private var trendKey: AccountDetailRequestKey {
+        var key = requestKey
+        key.page = 0
+        return key
+    }
 
     private var requestKey: AccountDetailRequestKey {
         AccountDetailRequestKey(
@@ -481,7 +506,12 @@ struct AccountDetailView: View {
             currency: currency,
             start: session.selectedRange.start,
             end: session.selectedRange.end,
-            reloadToken: reloadToken
+            reloadToken: reloadToken,
+            revision: session.isLocal ? session.localTransactionPresentationRevision : nil,
+            invalidation: session.isLocal ? session.localGlobalSearchInvalidation : 0,
+            readable: session.isLocal ? readable : true,
+            active: session.isLocal ? active : true,
+            page: session.isLocal ? pageIndex : 0
         )
     }
 
@@ -544,8 +574,20 @@ struct AccountDetailView: View {
             )
         }
         .task(id: requestKey) {
-            await load(replacingContent: detail == nil)
+            if session.isLocal { await loadLocalPage() }
+            else { await load(replacingContent: detail == nil) }
         }
+        .task(id: trendKey) { if session.isLocal { await loadLocalTrend() } }
+        .onAppear { active = true }
+        .onDisappear { active = false }
+        .onChange(of: readable) { _, allowed in
+            if session.isLocal && !allowed {
+                detail = nil; localWindow = nil; completeTrend = nil; completedRequest = nil; completedTrendRequest = nil
+                errorMessage = nil; trendError = nil
+            }
+        }
+        .onChange(of: session.selectedRange) { _, _ in pageIndex = 0 }
+        .onChange(of: session.localTransactionPresentationRevision) { _, _ in pageIndex = 0 }
     }
 
     private func detailContent(_ detail: LedgerAccountDetail) -> some View {
@@ -554,7 +596,7 @@ struct AccountDetailView: View {
             LazyVStack(spacing: LedgerSpacing.md) {
                 AccountDetailHero(
                     detail: detail,
-                    range: session.selectedRange,
+                    range: displayedRange,
                     onReconcile: { showingReconcileSheet = true }
                 )
 
@@ -562,16 +604,36 @@ struct AccountDetailView: View {
                     StatusBanner(message: errorMessage) {
                         self.errorMessage = nil
                     }
+                    if session.isLocal {
+                        Button("重试账户流水") { reloadToken += 1 }
+                            .accessibilityIdentifier("account-history-retry")
+                    }
                 }
 
-                AccountBalanceTrendPanel(detail: detail, range: session.selectedRange)
+                if session.isLocal {
+                    if let completeTrend, completedTrendRequest == trendKey {
+                        AccountBalanceTrendPanel(detail: completeTrend.detail, range: session.selectedRange,
+                            completePoints: completeTrend.points)
+                    } else if let trendError {
+                        Text("余额趋势读取失败：" + trendError).foregroundStyle(.secondary)
+                        Button("重试余额趋势") { reloadToken += 1 }
+                    } else if trendLoading {
+                        ProgressView("正在读取完整余额趋势…")
+                    } else {
+                        Text("余额趋势需要重新读取。").foregroundStyle(.secondary)
+                        Button("重新读取余额趋势") { reloadToken += 1 }
+                    }
+                    if pageLoading { ProgressView("正在读取账户流水…") }
+                } else {
+                    AccountBalanceTrendPanel(detail: detail, range: session.selectedRange)
+                }
 
                 HStack(alignment: .firstTextBaseline) {
                     Text("账户流水")
                         .font(.system(.body, design: .default, weight: .semibold))
                         .foregroundStyle(LedgerPalette.ink)
                     Spacer()
-                    Text("\(detail.rows.count) 笔")
+                    Text("\(localWindow?.page.rowCount ?? detail.rows.count) 笔")
                         .font(.system(.caption2, design: .default, weight: .medium).monospacedDigit())
                         .foregroundStyle(LedgerPalette.secondary)
                 }
@@ -586,7 +648,7 @@ struct AccountDetailView: View {
                 } else {
                     LedgerPanel {
                         LazyVStack(spacing: 0) {
-                            ForEach(Array(detail.rows.reversed().enumerated()), id: \.element.id) { index, row in
+                            ForEach(Array((session.isLocal ? detail.rows : Array(detail.rows.reversed())).enumerated()), id: \.element.id) { index, row in
                                 NavigationLink {
                                     TransactionDetailView(transaction: row.transaction)
                                 } label: {
@@ -594,6 +656,8 @@ struct AccountDetailView: View {
                                 }
                                 .buttonStyle(PressScaleButtonStyle())
                                 .ledgerTransactionActions(row.transaction)
+                                .disabled(session.isLocal && pageLoading)
+                                .accessibilityIdentifier("account-history-row-" + row.transaction.id)
 
                                 if index < detail.rows.count - 1 {
                                     Divider()
@@ -604,12 +668,88 @@ struct AccountDetailView: View {
                         }
                     }
                 }
+                if session.isLocal, let localWindow {
+                    HStack {
+                        Button("上一页") {
+                            let target = max(0, displayedPage - 1)
+                            if pageIndex == target { reloadToken += 1 } else { pageIndex = target }
+                        }
+                            .disabled(displayedPage == 0 || pageLoading)
+                            .accessibilityIdentifier("account-history-previous")
+                        Spacer()
+                        Text("第 \(displayedPage + 1) 页").font(.caption).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("account-history-page")
+                        Spacer()
+                        Button("下一页") {
+                            let target = displayedPage + 1
+                            if pageIndex == target { reloadToken += 1 } else { pageIndex = target }
+                        }
+                            .disabled(localWindow.continuation == nil || pageLoading)
+                            .accessibilityIdentifier("account-history-next")
+                    }
+                }
             }
             .padding(LedgerSpacing.lg)
             .padding(.bottom, LedgerSpacing.xxl)
             .ledgerAdaptivePageWidth()
         }
-        .refreshable { await load(replacingContent: false) }
+        .refreshable {
+            if session.isLocal { pageIndex = 0; reloadToken += 1 }
+            else { await load(replacingContent: false) }
+        }
+    }
+
+    private func loadLocalPage() async {
+        guard active, readable else { return }
+        let key = requestKey
+        pageLoading = true
+        errorMessage = nil
+        defer { if key == requestKey { pageLoading = false } }
+        do {
+            var previous = completedRequest
+            previous?.page = key.page
+            let forward = previous == key && completedRequest?.page == key.page - 1
+                && localWindow?.continuation != nil
+            var window = try await session.localAccountWindow(account: account, currency: currency,
+                continuation: forward ? localWindow?.continuation : nil, order: .desc)
+            if key.page > 0 && !forward {
+                for index in 0..<key.page {
+                    guard let continuation = window.continuation else {
+                        if !Task.isCancelled, key == requestKey { pageIndex = index }
+                        return
+                    }
+                    window = try await session.localAccountWindow(account: account, currency: currency,
+                        continuation: continuation, order: .desc)
+                }
+            }
+            guard !Task.isCancelled, key == requestKey, readable else { return }
+            localWindow = window
+            detail = window.page.detail
+            completedRequest = key
+        } catch {
+            if !Task.isCancelled, key == requestKey {
+                errorMessage = error is CancellationError ? "账户读取已中断，请重新加载。" : error.localizedDescription
+            }
+        }
+    }
+
+    private func loadLocalTrend() async {
+        guard active, readable else { return }
+        let key = trendKey
+        trendLoading = true
+        trendError = nil
+        defer { if key == trendKey { trendLoading = false } }
+        do {
+            let result = try await session.localAccountTrend(account: account, currency: currency)
+            guard !Task.isCancelled, key == trendKey, readable else { return }
+            completeTrend = result
+            completedTrendRequest = key
+        } catch {
+            if !Task.isCancelled, key == trendKey {
+                completeTrend = nil
+                trendError = error is CancellationError ? "读取已中断，请重试。" : error.localizedDescription
+            }
+        }
     }
 
     private func load(replacingContent: Bool = true) async {
@@ -635,6 +775,11 @@ private struct AccountDetailRequestKey: Hashable {
     let start: String
     let end: String
     let reloadToken: Int
+    let revision: UUID?
+    let invalidation: Int
+    let readable: Bool
+    let active: Bool
+    var page: Int
 }
 
 private struct AccountDetailHero: View {
@@ -777,11 +922,12 @@ private struct AccountBalanceTrendPanel: View {
     @EnvironmentObject private var session: LedgerSession
     let detail: LedgerAccountDetail
     let range: LedgerDateRange
+    var completePoints: [LedgerAccountBalanceTrendPoint]? = nil
 
     @State private var selectedIndex: Int?
 
     private var points: [LedgerAccountBalanceTrendPoint] {
-        detail.balanceTrend(in: range, maxPoints: 180)
+        completePoints ?? detail.balanceTrend(in: range, maxPoints: 180)
     }
 
     private var axis: LedgerChartAxis {
