@@ -104,6 +104,29 @@ actor LocalLedgerRepository: LedgerRepository {
         return page
     }
 
+    /// The native model revision is opaque; the workspace UUID is the bootstrap
+    /// pairing boundary. Check it inside the pinned snapshot, not in a prior read.
+    func overviewCategories(start: String, end: String,
+                            expectedRevisionID: UUID) async throws -> LedgerOverviewCategories {
+        let (_, response) = try await readSnapshot("/api/ledger/overview/categories",
+            query: ["start": start, "end": end], expectedRevisionID: expectedRevisionID)
+        let result = try response.decode(LedgerOverviewCategories.self)
+        guard result.sensitiveUnlocked else {
+            throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定")
+        }
+        guard result.start == start, result.end == end, !result.revision.isEmpty,
+              result.categories.count <= 4, result.positiveTotalMinorUnits >= 0,
+              result.categories.isEmpty == (result.positiveTotalMinorUnits == 0),
+              Set(result.categories.map(\.label)).count == result.categories.count,
+              result.categories.allSatisfy({ $0.totalMinorUnits > 0
+                  && $0.totalMinorUnits <= result.positiveTotalMinorUnits
+                  && $0.positiveTransactionCount > 0 }) else {
+            throw LocalLedgerError.operationFailed("支出分类汇总响应无效")
+        }
+        // This read must not change the revision used to authorize financial writes.
+        return result
+    }
+
     func transactionDetail(source: TransactionSource) async throws -> LedgerTransaction {
         try await read("/api/ledger/transactions/detail", query: ["file": source.file, "line": String(source.line), "hash": source.hash ?? ""])
     }
@@ -436,7 +459,8 @@ actor LocalLedgerRepository: LedgerRepository {
         return result
     }
     private func readSnapshot(_ path: String, method: String = "GET", query: [String: String] = [:],
-        body: BQLCell? = nil, importFile: LocalLedgerEngineRequest.ImportFile? = nil) async throws -> (UUID, LocalLedgerResponse) {
+        body: BQLCell? = nil, importFile: LocalLedgerEngineRequest.ImportFile? = nil,
+        expectedRevisionID: UUID? = nil) async throws -> (UUID, LocalLedgerResponse) {
         let now = Date()
         if lastRuntimeMaintenance.map({ now.timeIntervalSince($0) >= 60 * 60 }) ?? true {
             // Opportunistic maintenance also runs for read-only app sessions.
@@ -452,6 +476,9 @@ actor LocalLedgerRepository: LedgerRepository {
         let engine = engine, entrypoint = descriptor.entrypoint
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
         let operation: @Sendable (LocalLedgerWorkspace.Revision, URL) async throws -> (UUID, LocalLedgerResponse) = { revision, root in
+            if let expectedRevisionID, revision.id != expectedRevisionID {
+                throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+            }
             let data = try await engine.response(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                 entrypoint: entrypoint, method: method, path: path, query: query, body: body, importFile: importFile))
             return (revision.id, data)

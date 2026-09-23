@@ -93,6 +93,11 @@ final class LedgerSession: ObservableObject {
 
     @Published private(set) var phase: Phase
     @Published private(set) var ledger: LedgerBootstrap?
+    @Published private(set) var localOverviewCategories: LedgerOverviewCategories?
+    @Published private(set) var isLocalOverviewCategoriesLoading = false
+    @Published private(set) var localOverviewCategoriesError: String?
+    private var overviewCategoriesGeneration = 0
+    private var overviewSaveObserver: AnyCancellable?
     @Published private(set) var location: LedgerLocation?
     @Published private(set) var localSyncStatus: LocalStorageSyncStatus?
     @Published private(set) var localAutomaticSyncEnabled = true
@@ -300,6 +305,22 @@ final class LedgerSession: ObservableObject {
                 phase = .locked(authenticated: true)
             }
         }
+        // Aggregate invalidation is independent of optional automatic Git sync.
+        overviewSaveObserver = NotificationCenter.default.publisher(for: LocalLedgerRepository.didSaveNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let id = notification.object as? UUID else { return }
+                Task { @MainActor [weak self] in
+                    guard let self, self.location == .local(id), let repository = self.localRepository else { return }
+                    let epoch = self.sessionEpoch
+                    let revision = try? await repository.workspace.currentRevision()
+                    guard self.sessionEpoch == epoch, self.location == .local(id),
+                          self.phase == .ready,
+                          revision?.id != self.localPresentation?.revisionID else { return }
+                    self.invalidateOverviewCategories()
+                    self.localOverviewCategoriesError = "账本已更新，请刷新支出分类"
+                }
+            }
         widgetRefreshStatusObserver = LedgerWidgetRefreshStatusObserver(
             store: resolvedWidgetRefreshStatusStore
         ) { [weak self] in
@@ -661,6 +682,8 @@ final class LedgerSession: ObservableObject {
                 if presentation.revisionID == nil || presentation.revisionID != revision?.id
                     || presentation.today != LedgerDateRange.today(now: self.ledgerNow()) {
                     await self.refresh()
+                } else {
+                    await self.refreshLocalOverviewCategories()
                 }
                 guard !Task.isCancelled, self.sessionEpoch == epoch, self.location == expectedLocation,
                       self.applicationActive, self.phase == .ready else { return }
@@ -1946,6 +1969,7 @@ final class LedgerSession: ObservableObject {
         if transactionMutations[key]?.phase.blocksFurtherWrites == true {
             throw LedgerTransactionMutationError.alreadyInProgress
         }
+        if isLocal { invalidateOverviewCategories() }
         transactionMutations[key] = mutation
         transactionMutationStates[key] = .pending
     }
@@ -2881,6 +2905,8 @@ final class LedgerSession: ObservableObject {
         }
         phase = .ready
         Task { await restoreImportIndexTrackingIfNeeded() }
+        if local != nil { await refreshLocalOverviewCategories() }
+        guard generation == requestGeneration else { return }
         await publishWidgetSnapshot(
             ledger: payload,
             contextURL: contextURL,
@@ -3256,8 +3282,47 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    private func invalidateOverviewCategories() {
+        overviewCategoriesGeneration &+= 1
+        localOverviewCategories = nil
+        localOverviewCategoriesError = nil
+        isLocalOverviewCategoriesLoading = false
+    }
+
+    /// Never substitute bootstrap/global transaction arrays for a failed local
+    /// aggregate: those arrays will eventually be independently bounded.
+    func refreshLocalOverviewCategories() async {
+        guard phase == .ready, let repository = localRepository,
+              let presentation = localPresentation,
+              presentation.ledgerID == repository.descriptor.id,
+              let revisionID = presentation.revisionID else { return }
+        invalidateOverviewCategories()
+        let token = overviewCategoriesGeneration, generation = requestGeneration
+        let epoch = sessionEpoch, expectedLocation = location, range = selectedRange
+        isLocalOverviewCategoriesLoading = true
+        func isCurrent() -> Bool {
+            token == overviewCategoriesGeneration && generation == requestGeneration
+                && epoch == sessionEpoch && location == expectedLocation && phase == .ready
+                && selectedRange == range && localPresentation?.revisionID == revisionID
+        }
+        defer { if isCurrent() { isLocalOverviewCategoriesLoading = false } }
+        do {
+            let result = try await repository.overviewCategories(start: range.start,
+                end: range.queryEndExclusive, expectedRevisionID: revisionID)
+            // A writer may have published while the pinned engine read was suspended.
+            let current = try await repository.workspace.currentRevision()
+            guard isCurrent(), !Task.isCancelled else { return }
+            guard current?.id == revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+            localOverviewCategories = result
+        } catch {
+            guard isCurrent(), !Task.isCancelled else { return }
+            localOverviewCategoriesError = error.localizedDescription
+        }
+    }
+
     @discardableResult
     private func invalidateRequests() -> Int {
+        invalidateOverviewCategories()
         requestGeneration &+= 1
         return requestGeneration
     }

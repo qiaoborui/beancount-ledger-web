@@ -47,7 +47,23 @@ struct OverviewView: View {
 
 
                 // 3. Top Spending Categories
-                let topCategories = spendingCategories(from: ledger.transactions, accountLabels: accountLabels)
+                let topCategories = session.isLocal
+                    ? localSpendingCategories(accountLabels: accountLabels)
+                    : spendingCategories(from: ledger.transactions, accountLabels: accountLabels)
+                if session.isLocal && topCategories.isEmpty {
+                    if session.isLocalOverviewCategoriesLoading {
+                        Section("当月支出排行") { ProgressView("正在加载支出分类…") }
+                    } else if let error = session.localOverviewCategoriesError {
+                        Section("当月支出排行") {
+                            Text(error).foregroundStyle(LedgerPalette.secondary)
+                            Button("重试") { Task { await session.refresh() } }
+                        }
+                    } else if session.localOverviewCategories == nil {
+                        Section("当月支出排行") {
+                            Button("加载支出分类") { Task { await session.refresh() } }
+                        }
+                    }
+                }
                 if !topCategories.isEmpty {
                     Section {
                         OverviewTopCategoriesCard(
@@ -139,6 +155,24 @@ struct OverviewView: View {
         }
     }
 
+    private func localSpendingCategories(accountLabels: [String: String]) -> [OverviewCategorySpending] {
+        guard let response = session.localOverviewCategories,
+              response.positiveTotalMinorUnits > 0 else { return [] }
+        return response.categories.sorted {
+            $0.totalMinorUnits == $1.totalMinorUnits
+                ? $0.label < $1.label : $0.totalMinorUnits > $1.totalMinorUnits
+        }.prefix(4).map { item in
+            let visual = TransactionVisualCategory.resolve(
+                transaction: item.representative,
+                presentation: TransactionPresentation(transaction: item.representative),
+                accountLabels: accountLabels)
+            return OverviewCategorySpending(id: item.label, label: item.label,
+                iconName: visual.iconName, color: visual.color,
+                totalMinorUnits: item.totalMinorUnits, count: max(1, item.positiveTransactionCount),
+                percentage: Double(item.totalMinorUnits) / Double(response.positiveTotalMinorUnits))
+        }
+    }
+
     private func spendingCategories(
         from transactions: [LedgerTransaction],
         accountLabels: [String: String]
@@ -178,7 +212,7 @@ struct OverviewView: View {
         guard overallExpense > 0 else { return [] }
 
         return positiveCategories
-            .sorted { $0.amount > $1.amount }
+            .sorted { $0.amount == $1.amount ? $0.label < $1.label : $0.amount > $1.amount }
             .prefix(4)
             .map { item in
                 OverviewCategorySpending(
