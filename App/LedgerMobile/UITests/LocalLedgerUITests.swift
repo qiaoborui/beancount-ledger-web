@@ -44,13 +44,39 @@ final class LocalLedgerUITests: XCTestCase {
                 XCTAssertTrue(control.waitForNonExistence(timeout: 5))
             }
         }
-        row.press(forDuration: 1)
+        // The detail screen also hydrates and prepares fresh authority; merely
+        // opening/cancelling either editor must not revoke a future action.
+        row.tap()
+        XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 10))
+        let edit = app.buttons["transaction-edit"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        let enabled = NSPredicate(format: "enabled == true")
+        expectation(for: enabled, evaluatedWith: edit)
+        waitForExpectations(timeout: 15)
+        edit.tap()
+        let cancel = app.buttons["取消"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 15)); cancel.tap()
+        XCTAssertTrue(cancel.waitForNonExistence(timeout: 5))
+        app.buttons["transaction-delete"].tap()
+        let detailConfirm = app.buttons["transaction-delete-confirm"]
+        XCTAssertTrue(detailConfirm.waitForExistence(timeout: 15))
+        app.buttons["取消"].firstMatch.tap()
+        XCTAssertTrue(detailConfirm.waitForNonExistence(timeout: 5))
+        app.buttons["transaction-edit"].tap()
+        XCTAssertTrue(app.buttons["高级"].waitForExistence(timeout: 15))
+        app.buttons["高级"].tap()
+        replaceActionText(app.textFields["transaction-edit-payee"], with: "Synthetic action edited", in: app)
+        app.buttons["transaction-edit-save"].tap()
+        XCTAssertTrue(app.navigationBars["交易详情"].waitForNonExistence(timeout: 30))
+        let editedRow = app.staticTexts["Synthetic action edited"].firstMatch
+        XCTAssertTrue(editedRow.waitForExistence(timeout: 15), app.debugDescription)
+        editedRow.press(forDuration: 1)
         app.buttons["transaction-context-delete"].firstMatch.tap()
         let confirm = app.buttons["transaction-delete-confirm"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 15))
         confirm.tap()
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(row.waitForNonExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(editedRow.waitForNonExistence(timeout: 15), app.debugDescription)
         #else
         throw XCTSkip("Isolated synthetic simulator ledger only")
         #endif

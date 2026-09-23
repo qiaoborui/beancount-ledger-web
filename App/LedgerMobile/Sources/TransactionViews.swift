@@ -1724,6 +1724,11 @@ struct TransactionDetailView: View {
     @State private var sourceUnavailable = false
     @State private var sharePresented = false
     @State private var selectedEventTag: String?
+    @State private var detailTask: Task<Void, Never>?
+    @State private var detailRequestID: UUID?
+    @State private var localAction: LedgerSession.LocalTransactionAction?
+    @State private var detailError: String?
+    @State private var localEditCompleted = false
     private let snapshotOnly: Bool
 
     init(transaction: LedgerTransaction, snapshotOnly: Bool = false) {
@@ -2000,7 +2005,7 @@ struct TransactionDetailView: View {
                         // Edit
                         Button {
                             LedgerFeedback.light()
-                            editorPresented = true
+                            prepareAction(.edit)
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "pencil")
@@ -2014,8 +2019,8 @@ struct TransactionDetailView: View {
                         .buttonStyle(PressScaleButtonStyle())
                         .disabled(
                             transaction.source.hash?.isEmpty != false
-                                || transaction.editableEntry == nil
-                                || sourceUnavailable
+                                || (!session.isLocal && transaction.editableEntry == nil)
+                                || sourceUnavailable || detailRequestID != nil
                                 || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true
                         )
                     }
@@ -2058,20 +2063,20 @@ struct TransactionDetailView: View {
             }
             if !snapshotOnly {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(role: .destructive) { deletionPresented = true } label: {
+                    Button(role: .destructive) { prepareAction(.delete) } label: {
                         Label("删除交易", systemImage: "trash")
                     }
-                    .disabled(transaction.source.hash?.isEmpty != false || sourceUnavailable
+                    .disabled(transaction.source.hash?.isEmpty != false || sourceUnavailable || detailRequestID != nil
                         || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
                     .accessibilityIdentifier("transaction-delete")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("编辑") { editorPresented = true }
+                    Button("编辑") { prepareAction(.edit) }
                         .fontWeight(.semibold)
                         .disabled(
                             transaction.source.hash?.isEmpty != false
-                                || transaction.editableEntry == nil
-                                || sourceUnavailable
+                                || (!session.isLocal && transaction.editableEntry == nil)
+                                || sourceUnavailable || detailRequestID != nil
                                 || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true
                         )
                         .accessibilityIdentifier("transaction-edit")
@@ -2087,8 +2092,10 @@ struct TransactionDetailView: View {
             .environmentObject(session)
             .ledgerPrivacyProtectedSheet()
         }
-        .sheet(isPresented: $deletionPresented) {
-            TransactionDeleteSheet(transaction: transaction) { dismiss() }
+        .sheet(isPresented: $deletionPresented, onDismiss: revokeAction) {
+            TransactionDeleteSheet(transaction: transaction, localAction: localAction,
+                onFailed: { error in if localAction != nil { finishFailedAction(error) } },
+                onDeleted: { dismiss() })
                 .ledgerPrivacyProtectedSheet()
         }
         .sheet(isPresented: $duplicatePresented) {
@@ -2110,14 +2117,27 @@ struct TransactionDetailView: View {
             )
             .ledgerPrivacyProtectedSheet()
         }
-        .sheet(isPresented: $editorPresented) {
+        .sheet(isPresented: $editorPresented, onDismiss: revokeAction) {
             TransactionEditorView(
                 transaction: transaction,
                 accounts: session.ledger?.accounts ?? [],
                 commodities: session.ledger?.commodities ?? [],
                 onSave: { entry in
                     let sourceFile = transaction.source.file
-                    try await session.updateTransaction(source: transaction.source, entry: entry)
+                    if session.isLocal {
+                        guard let localAction else { throw CancellationError() }
+                        do { try await session.updateLocalTransaction(action: localAction, entry: entry) }
+                        catch { finishFailedAction(error); throw error }
+                        // The original source is consumed. Never hydrate or offer
+                        // another action against its optimistic projection while
+                        // range-independent replacement resolution is unavailable.
+                        localEditCompleted = true
+                        editorPresented = false
+                        dismiss()
+                        return
+                    } else {
+                        try await session.updateTransaction(source: transaction.source, entry: entry)
+                    }
                     confirmedEntry = entry
                     confirmedSourceFile = sourceFile
                     transaction = transaction.projecting(entry: entry)
@@ -2151,7 +2171,91 @@ struct TransactionDetailView: View {
         .onChange(of: session.transactionMutationStates) { _, _ in
             synchronizeTransaction(with: session.ledger)
         }
+        .task { await hydrateDetail() }
+        .onDisappear {
+            if !editorPresented && !deletionPresented { cancelDetail(); revokeAction() }
+        }
+        .onChange(of: session.privacyShielded) { _, hidden in
+            if hidden { editorPresented = false; deletionPresented = false; cancelDetail(); revokeAction() }
+        }
+        .onChange(of: session.phase) { _, phase in
+            if phase != .ready { editorPresented = false; deletionPresented = false; cancelDetail(); revokeAction() }
+        }
+        .overlay(alignment: .top) {
+            if detailRequestID != nil { ProgressView("正在读取交易").padding().background(.regularMaterial) }
+        }
+        .alert("交易操作未完成", isPresented: Binding(
+            get: { detailError != nil }, set: { if !$0 { detailError = nil } }
+        )) { Button("好", role: .cancel) { detailError = nil } }
+        message: { Text(detailError ?? "") }
         .sensoryFeedback(.success, trigger: confirmationFeedback)
+    }
+
+    private func revokeAction() {
+        if let localAction { session.cancelLocalTransactionAction(localAction) }
+        localAction = nil
+    }
+
+    private func cancelDetail() {
+        detailRequestID = nil
+        detailTask?.cancel()
+        detailTask = nil
+    }
+
+    private func finishFailedAction(_ error: Error) {
+        editorPresented = false
+        deletionPresented = false
+        revokeAction()
+        detailError = error.localizedDescription + " 请重新打开交易操作，核对最新内容后再试。"
+    }
+
+    private func hydrateDetail() async {
+        guard session.isLocal, !snapshotOnly, !localEditCompleted, detailRequestID == nil,
+              session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites != true else { return }
+        let id = UUID()
+        detailRequestID = id
+        defer { if detailRequestID == id { detailRequestID = nil } }
+        do {
+            let detail = try await session.localTransactionDetail(source: transaction.source)
+            guard !Task.isCancelled, detailRequestID == id else { return }
+            transaction = detail
+            sourceUnavailable = false
+        } catch {
+            if !Task.isCancelled, detailRequestID == id {
+                detailError = error.localizedDescription
+            }
+        }
+    }
+
+    private func prepareAction(_ kind: LedgerSession.LocalTransactionActionKind) {
+        guard !snapshotOnly, detailRequestID == nil else { return }
+        guard session.isLocal else {
+            if kind == .edit { editorPresented = true } else { deletionPresented = true }
+            return
+        }
+        revokeAction()
+        let id = UUID()
+        detailRequestID = id
+        detailTask = Task { @MainActor in
+            do {
+                let prepared = try await session.prepareLocalTransactionAction(sources: [transaction.source], kind: kind)
+                guard !Task.isCancelled, detailRequestID == id else {
+                    session.cancelLocalTransactionAction(prepared)
+                    return
+                }
+                let detail = prepared.originals[0]
+                if kind == .edit, detail.editableEntry == nil {
+                    session.cancelLocalTransactionAction(prepared)
+                    throw LedgerTransactionMutationError.sourceUnavailable
+                }
+                transaction = detail
+                localAction = prepared
+                if kind == .edit { editorPresented = true } else { deletionPresented = true }
+            } catch {
+                if !Task.isCancelled, detailRequestID == id { detailError = error.localizedDescription }
+            }
+            if detailRequestID == id { detailRequestID = nil; detailTask = nil }
+        }
     }
 
     private func receiptInfoRow(title: String, value: String) -> some View {
