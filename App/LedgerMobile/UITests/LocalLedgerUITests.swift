@@ -96,6 +96,24 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["transaction-bulk-tag-apply"].tap()
         XCTAssertTrue(tagInput.waitForNonExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(app.staticTexts["已验证，并为 1 条交易添加标签。"].waitForExistence(timeout: 10))
+        // Native global search uses complete metadata candidates, not the
+        // legacy all-history transaction array. Drill-down must survive refresh.
+        let searchTab = app.buttons.matching(NSPredicate(format: "label == 'Search' OR label == '搜索'")).firstMatch
+        XCTAssertTrue(searchTab.waitForExistence(timeout: 5)); searchTab.tap()
+        let search = app.searchFields["搜索整个账本"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5)); search.tap(); search.typeText("synthetic")
+        let searchRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'transaction-row-'")).firstMatch
+        XCTAssertTrue(searchRow.waitForExistence(timeout: 20), app.debugDescription)
+        searchRow.tap()
+        XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 10))
+        app.navigationBars["交易详情"].buttons.element(boundBy: 0).tap()
+        let tagLink = app.buttons["global-search-tag-synthetic-reviewed"]
+        XCTAssertTrue(tagLink.waitForExistence(timeout: 15), app.debugDescription); tagLink.tap()
+        XCTAssertTrue(app.navigationBars["#synthetic-reviewed"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Synthetic action edited"].firstMatch.waitForExistence(timeout: 15))
+        app.navigationBars["#synthetic-reviewed"].buttons.element(boundBy: 0).tap()
+        app.tabBars.buttons["交易"].tap()
+        XCTAssertTrue(editedRow.waitForExistence(timeout: 15))
         editedRow.press(forDuration: 1)
         app.buttons["transaction-context-delete"].firstMatch.tap()
         let confirm = app.buttons["transaction-delete-confirm"]
