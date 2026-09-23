@@ -28,7 +28,11 @@ struct EventTagListView: View {
     }
 
     private var tagSummaries: [EventTagSummary] {
-        EventTagCalculator.summarizeAllTags(from: allTransactions, accountLabels: accountLabels)
+        if session.isLocal { return session.localEventTagSummaries ?? [] }
+        return EventTagCalculator.summarizeAllTags(from: allTransactions, accountLabels: accountLabels)
+    }
+    private var readKey: String {
+        "\(session.localGlobalSearchInvalidation)/\(session.phase)/\(session.privacyShielded)/\(session.isRangeLoading)/\(session.isValuationCurrencyLoading)/\(session.transactionMutationStates.values.contains(.pending))"
     }
 
     private var filteredSummaries: [EventTagSummary] {
@@ -51,13 +55,19 @@ struct EventTagListView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if tagSummaries.isEmpty {
+                if session.isLocal, let error = session.localEventTagSummaryError {
+                    ContentUnavailableView("标签汇总读取失败", systemImage: "exclamationmark.triangle", description: Text(error))
+                    Button("重试") { Task { await session.loadLocalEventTagSummaries(force: true) } }
+                } else if session.isLocal && session.localEventTagSummaries == nil {
+                    ProgressView("正在统计全部标签…")
+                } else if tagSummaries.isEmpty {
                     emptyState
                 } else {
                     content
                 }
             }
             .background(LedgerPalette.canvas)
+            .task(id: readKey) { if session.isLocal { await session.loadLocalEventTagSummaries() } }
             .navigationTitle("事件与项目核算")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -115,6 +125,7 @@ struct EventTagListView: View {
                     } label: {
                         EventTagSummaryCard(summary: summary)
                     }
+                    .accessibilityIdentifier("event-tag-summary-" + summary.tag)
                     .buttonStyle(PressScaleButtonStyle(pressedScale: 0.98))
                     .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     .listRowBackground(Color.clear)
