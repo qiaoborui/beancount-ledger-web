@@ -557,6 +557,51 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         }
     }
 
+    func testSelectionFactsScanFullRangeWithoutSeedingLegacyArraysOrWriteAuthority() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let first = try await session.localTransactionDetail(source: actionSource(1))
+        let second = try await session.localTransactionDetail(source: actionSource(2))
+        let originalRows = session.ledger?.transactions
+        let presented = await repository.presentedRevisionID
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        let facts = try await session.localTransactionSelectionFacts(filter: .init(query: "Needle"),
+            selectedIDs: [first.id, second.id])
+        XCTAssertEqual(facts.rangeCount, 3)
+        XCTAssertEqual(facts.matchingCount, 1)
+        XCTAssertEqual(facts.selectedCount, 2)
+        XCTAssertEqual(facts.selectedMatchingCount, 1)
+        XCTAssertEqual(facts.tagSources, [first.source, second.source])
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [1])
+        XCTAssertEqual(session.ledger?.transactions, originalRows)
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(presented, after)
+    }
+
+    func testSelectionFactsSupersessionResetPrivacyRangeRevisionAndCancellationRejectLateResults() async throws {
+        for operation in 0..<6 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "selection awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let old = Task { try await session.localTransactionSelectionFacts(filter: .init(), selectedIDs: []) }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0:
+                let new = try await session.localTransactionSelectionFacts(filter: .init(query: "Needle"), selectedIDs: [])
+                XCTAssertEqual(new.matchingCount, 1)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            case 3: await session.applyRange(.month(year: 2026, month: 8))
+            case 4: try await advance(repository)
+            default: old.cancel()
+            }
+            await gate.release()
+            do { _ = try await old.value; XCTFail("Late selection facts returned") } catch { }
+        }
+    }
+
     func testOptInFirstNextSingleWindowEOFAndExplicitResetLeaveLegacyArraysUntouched() async throws {
         let (session, engine, repository) = try await fixture()
         defer { session.chooseLedger() }
