@@ -108,11 +108,26 @@ actor LocalLedgerRepository: LedgerRepository {
     /// This read never advances the presentation revision that authorizes writes.
     func candidatePage(start: String, end: String, cursor: String? = nil, limit: Int = 500,
                        expectedRevisionID: UUID) async throws -> LedgerTransactionPage {
+        try await nativeCandidatePage(dialect: "native-candidates-v1", start: start, end: end,
+            cursor: cursor, limit: limit, expectedRevisionID: expectedRevisionID)
+    }
+
+    /// Global-search evidence includes every metadata key/value. Matching and
+    /// date+ID result ordering still belong to LedgerGlobalSearch, not this page.
+    func searchCandidatePage(start: String = "0001-01-01", end: String = "9999-12-31",
+                             cursor: String? = nil, limit: Int = 500,
+                             expectedRevisionID: UUID) async throws -> LedgerTransactionPage {
+        try await nativeCandidatePage(dialect: "native-search-candidates-v1", start: start, end: end,
+            cursor: cursor, limit: limit, expectedRevisionID: expectedRevisionID)
+    }
+
+    private func nativeCandidatePage(dialect: String, start: String, end: String, cursor: String?, limit: Int,
+                                     expectedRevisionID: UUID) async throws -> LedgerTransactionPage {
         guard (1...500).contains(limit),
               cursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 }) ?? true else {
             throw LocalLedgerError.invalidConfiguration("候选分页参数无效")
         }
-        var query = ["dialect": "native-candidates-v1", "start": start, "end": end, "limit": String(limit)]
+        var query = ["dialect": dialect, "start": start, "end": end, "limit": String(limit)]
         query["cursor"] = cursor
         try Task.checkCancellation()
         let (_, response) = try await readSnapshot("/api/ledger/transactions/page", query: query,

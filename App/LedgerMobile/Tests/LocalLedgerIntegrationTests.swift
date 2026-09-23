@@ -108,6 +108,25 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         let legacyRefund = try XCTUnwrap(rows.first { $0.id == refund.id })
         XCTAssertEqual(legacyRefund.metadata?["fixture"], .string("not candidate evidence"))
 
+        // Global search needs arbitrary metadata, not just list presentation's
+        // type. Exercise the real native dialect with exact Swift matching.
+        let searchFirst = try await repository.searchCandidatePage(start: start, end: end,
+            expectedRevisionID: bootstrap.revisionID)
+        let searchLast = try await repository.searchCandidatePage(start: start, end: end,
+            cursor: XCTUnwrap(searchFirst.nextCursor), expectedRevisionID: bootstrap.revisionID)
+        let searchRows = searchFirst.transactions + searchLast.transactions
+        XCTAssertEqual(searchRows.count, rows.count)
+        XCTAssertTrue(searchRows.allSatisfy { $0.editableEntry == nil })
+        XCTAssertEqual(searchRows.map(\.metadata), rows.map(\.metadata))
+        for query in ["fixture", "not candidate evidence", "CAFÉ", "Ｃａｆｅ", "2.00", "✁", "👩", "payee:literal"] {
+            let actual = LedgerGlobalSearch.search(query, transactions: searchRows,
+                accounts: bootstrap.payload.accounts, documents: []).transactions.map(\.id)
+            let expected = LedgerGlobalSearch.search(query, transactions: rows,
+                accounts: bootstrap.payload.accounts, documents: []).transactions.map(\.id)
+            XCTAssertEqual(actual, expected, query)
+        }
+        XCTAssertNil(searchLast.nextCursor)
+
         // Real paged navigation must resume within a candidate page, without
         // re-counting the summary or interpreting window absence as deletion.
         let windowLimits = LocalTransactionWindow.Limits(maxRows: 137)
