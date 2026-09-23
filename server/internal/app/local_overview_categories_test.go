@@ -35,6 +35,13 @@ func readOverview(t *testing.T, cfg Config, snapshot *LedgerSnapshot, query map[
 	if status != http.StatusOK || err != nil || len(raw) > localTransactionPageBytes {
 		t.Fatalf("status=%d bytes=%d error=%v", status, len(raw), err)
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if fields["transactionCount"] == nil || fields["highestExpense"] == nil {
+		t.Fatal("missing required stats keys")
+	}
 	var result localOverviewCategories
 	if err := json.Unmarshal(raw, &result); err != nil {
 		t.Fatal(err)
@@ -384,7 +391,7 @@ func TestLocalOverviewCategoriesWorkingAndResponseLimits(t *testing.T) {
 	t.Run("combined summaries exceed response budget", func(t *testing.T) {
 		var txns []Transaction
 		for i := 0; i < 4; i++ {
-			txns = append(txns, Transaction{Narration: strings.Repeat("x", 280000), Postings: []Posting{overviewPosting(fmt.Sprintf("Expenses:G%d", i), 1)}})
+			txns = append(txns, Transaction{Payee: "small title", Narration: strings.Repeat("x", 280000), Postings: []Posting{overviewPosting(fmt.Sprintf("Expenses:G%d", i), 1)}})
 		}
 		cfg, snapshot := overviewFixture(txns...)
 		assertOverviewCapacity(t, cfg, snapshot)
@@ -431,6 +438,8 @@ func TestLocalOverviewCategories100kExactFullScan(t *testing.T) {
 		}
 		txns[i] = Transaction{Date: "2026-09-01", Payee: fmt.Sprint(i), Postings: []Posting{overviewPosting("Expenses:Food", amount), overviewPosting("Assets:Cash", -amount)}}
 	}
+	txns[rows-1].Postings[0].Amount = 999
+	txns[rows-1].Postings[1].Amount = -999
 	cfg, snapshot := overviewFixture(txns...)
 	// Thousands of definitions must be indexed once, not scanned for every
 	// one of the 100k rows (including snapshots without a prepared AccountMap).
@@ -440,7 +449,10 @@ func TestLocalOverviewCategories100kExactFullScan(t *testing.T) {
 	}
 	snapshot.AccountMap = nil
 	got := readOverview(t, cfg, snapshot, nil)
-	const total = 90000*123 - 10000*23
+	const total = 90000*123 - 10000*23 + 999 - 123
+	if got.TransactionCount != rows || got.HighestExpense == nil || got.HighestExpense.Title != "99999" || got.HighestExpense.MinorUnits != 999 {
+		t.Fatalf("100k partial stats: %+v", got)
+	}
 	if got.PositiveTotalMinorUnits != total || len(got.Categories) != 1 || got.Categories[0].TotalMinorUnits != total || got.Categories[0].PositiveTransactionCount != 90000 {
 		t.Fatalf("100k partial totals: %+v", got)
 	}
@@ -521,7 +533,7 @@ func TestLocalOverviewCategoriesWorkingBudgetBoundary(t *testing.T) {
 func TestLocalOverviewCategoriesSerializedResponseExactBoundary(t *testing.T) {
 	txns := make([]Transaction, 4)
 	for i := range txns {
-		txns[i] = Transaction{Postings: []Posting{overviewPosting(fmt.Sprintf("Expenses:G%d", i), 1)}}
+		txns[i] = Transaction{Payee: "small title", Postings: []Posting{overviewPosting(fmt.Sprintf("Expenses:G%d", i), 1)}}
 	}
 	cfg, snapshot := overviewFixture(txns...)
 	status, raw, err := localOverviewCategoriesResponse(cfg, snapshot, nil)
@@ -563,5 +575,219 @@ func TestLocalOverviewCategoriesNativeRoute(t *testing.T) {
 	input.ImportFile = &LocalImportFile{Name: "invalid"}
 	if status, raw, err := DispatchLocalRequest(input); status != 400 || raw != nil || err == nil {
 		t.Fatal("import aggregate accepted", status, err)
+	}
+}
+
+func TestLocalOverviewCategoriesStatsPresentationSemantics(t *testing.T) {
+	p := overviewPosting
+	for _, tc := range []struct {
+		name     string
+		postings []Posting
+		want     int // zero means no qualifying highest expense
+	}{
+		{"positive expense precedes larger income", []Posting{p("Income:Salary", 900), p("Expenses:A", 30), p("Expenses:A", -10)}, 20},
+		{"negative expense excludes positive income", []Posting{p("Expenses:A", -30), p("Expenses:A", 10), p("Income:Salary", 900)}, 0},
+		{"net zero expense falls through", []Posting{p("Expenses:A", 30), p("Expenses:A", -30), p("Income:Salary", 90), p("Income:Salary", -10)}, 80},
+		{"zero posting falls through", []Posting{p("Expenses:A", 0), p("Income:Salary", 90)}, 90},
+		{"no expense positive net income", []Posting{p("Income:A", 100), p("Income:B", -20)}, 80},
+		{"negative income", []Posting{p("Income:A", -100), p("Income:B", 20)}, 0},
+		{"zero income", []Posting{p("Income:A", -100), p("Income:B", 100)}, 0},
+		{"net zero expense only", []Posting{p("Expenses:A", -100), p("Expenses:A", 100)}, 0},
+		{"transfer", []Posting{p("Assets:Cash", 900), p("Liabilities:Card", -900)}, 0},
+		{"empty", nil, 0},
+		{"exact prefixes", []Posting{p("Expenses", 900), p("expenses:A", 900), p("Income", 900), p("income:A", 900)}, 0},
+		{"raw expense currencies", []Posting{{Account: "Expenses:A", Amount: 12, Currency: "CNY"}, {Account: "Expenses:A", Amount: 23, Currency: "USD"}}, 35},
+		{"raw income currencies", []Posting{{Account: "Income:A", Amount: 12, Currency: "CNY"}, {Account: "Income:B", Amount: 23, Currency: "USD"}}, 35},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, snapshot := overviewFixture(Transaction{
+				Payee: "退款", Narration: "退款", Metadata: map[string]MetadataValue{"type": "退款"}, Postings: tc.postings,
+			})
+			got := readOverview(t, cfg, snapshot, nil)
+			if got.TransactionCount != 1 {
+				t.Fatal("count depends on category eligibility", got.TransactionCount)
+			}
+			if tc.want == 0 {
+				if got.HighestExpense != nil {
+					t.Fatalf("unexpected expense: %+v", got.HighestExpense)
+				}
+			} else if got.HighestExpense == nil || got.HighestExpense.MinorUnits != tc.want || got.HighestExpense.Title != "退款" {
+				t.Fatalf("presentation mismatch: %+v", got.HighestExpense)
+			}
+		})
+	}
+}
+
+func TestLocalOverviewCategoriesStatsTitles(t *testing.T) {
+	for _, tc := range []struct{ payee, narration, want string }{
+		{"Payee", "Narration", "Payee"},
+		{"", "Narration", "Narration"},
+		{"", "", "未命名交易"},
+		{" \t\n", "Narration", " \t\n"},
+		{"", " \t\n", " \t\n"},
+		{"e\u0301", "é", "e\u0301"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			cfg, snapshot := overviewFixture(Transaction{Payee: tc.payee, Narration: tc.narration, Postings: []Posting{overviewPosting("Income:Returned", 1)}})
+			got := readOverview(t, cfg, snapshot, nil)
+			if got.HighestExpense == nil || got.HighestExpense.Title != tc.want {
+				t.Fatalf("title changed: %+v", got.HighestExpense)
+			}
+		})
+	}
+}
+
+func TestLocalOverviewCategoriesStatsCountRangeAndTies(t *testing.T) {
+	p := overviewPosting
+	cfg, snapshot := overviewFixture(
+		Transaction{Date: "2026-08-31", Payee: "before", Postings: []Posting{p("Income:A", math.MaxInt), p("Income:A", 1)}},
+		Transaction{Date: "2026-09-01", Payee: "older tie", Postings: []Posting{p("Income:A", 100)}},
+		Transaction{Date: "2026-09-30", Payee: "first descending tie", Postings: []Posting{p("Income:A", 100)}},
+		Transaction{Date: "2026-09-30", Payee: "later same day tie", Postings: []Posting{p("Expenses:A", 100)}},
+		Transaction{Date: "2026-09-30", Postings: []Posting{p("Expenses:A", -100)}},
+		Transaction{Date: "2026-09-30", Postings: []Posting{p("Income:A", -100)}},
+		Transaction{Date: "2026-09-30", Postings: []Posting{p("Assets:A", 100)}},
+		Transaction{Date: "2026-09-30", Postings: []Posting{p("Expenses:A", 0)}},
+		Transaction{Date: "2026-09-30"},
+		Transaction{Date: "2026-10-01", Payee: "end excluded", Postings: []Posting{p("Expenses:A", math.MaxInt), p("Expenses:A", 1)}},
+	)
+	query := map[string]string{"start": "2026-09-01", "end": "2026-10-01"}
+	for _, prepared := range []bool{true, false} {
+		if !prepared {
+			snapshot.transactionsAsc, snapshot.transactionsDesc = nil, nil
+		}
+		got := readOverview(t, cfg, snapshot, query)
+		if got.TransactionCount != 8 || got.HighestExpense == nil || got.HighestExpense.Title != "first descending tie" || got.HighestExpense.MinorUnits != 100 {
+			t.Fatalf("count/order/range mismatch (prepared=%t): %+v", prepared, got)
+		}
+	}
+	got := readOverview(t, cfg, snapshot, map[string]string{"start": "2026-10-02", "end": "2026-10-03"})
+	if got.TransactionCount != 0 || got.HighestExpense != nil {
+		t.Fatalf("empty range stats: %+v", got)
+	}
+	cfg, snapshot = overviewFixture()
+	status, raw, err := localOverviewCategoriesResponse(cfg, snapshot, nil)
+	if status != 200 || err != nil || !strings.Contains(string(raw), `"highestExpense":null`) || !strings.Contains(string(raw), `"transactionCount":0`) {
+		t.Fatalf("empty snapshot required keys: %s, %v", raw, err)
+	}
+}
+
+func TestLocalOverviewCategoriesStatsWinnerIndependentOfTopCategories(t *testing.T) {
+	p := overviewPosting
+	for _, refund := range []int{99, 100, 101} {
+		t.Run(fmt.Sprint(refund), func(t *testing.T) {
+			txns := []Transaction{
+				{Payee: "winner", Postings: []Posting{p("Expenses:Winner", 100)}},
+				{Postings: []Posting{p("Expenses:Winner", -refund)}},
+			}
+			for i := 0; i < 4; i++ {
+				txns = append(txns, Transaction{Postings: []Posting{p(fmt.Sprintf("Expenses:Top%d", i), 20)}})
+			}
+			cfg, snapshot := overviewFixture(txns...)
+			got := readOverview(t, cfg, snapshot, nil)
+			if got.TransactionCount != 6 || got.HighestExpense == nil || got.HighestExpense.Title != "winner" || got.HighestExpense.MinorUnits != 100 || len(got.Categories) != 4 {
+				t.Fatalf("winner limited to categories: %+v", got)
+			}
+			for _, category := range got.Categories {
+				if category.Label == "Winner" {
+					t.Fatal("test winner unexpectedly in top four")
+				}
+			}
+		})
+	}
+}
+
+func TestLocalOverviewCategoriesStatsCheckedRelevantSums(t *testing.T) {
+	p := overviewPosting
+	for _, amounts := range [][]int{{math.MaxInt, 1}, {math.MinInt, -1}, {math.MaxInt, 1, -1}} {
+		for _, expense := range []int{-1, 0, 1} {
+			t.Run(fmt.Sprint(amounts, expense), func(t *testing.T) {
+				// Income comes first to catch eager summation before expense precedence.
+				txn := Transaction{Postings: []Posting{p("Income:A", amounts[0]), p("Income:A", amounts[1])}}
+				if len(amounts) == 3 {
+					txn.Postings = append(txn.Postings, p("Income:A", amounts[2]))
+				}
+				txn.Postings = append(txn.Postings, p("Expenses:A", expense))
+				cfg, snapshot := overviewFixture(txn)
+				if expense == 0 {
+					assertOverviewCapacity(t, cfg, snapshot)
+				} else {
+					got := readOverview(t, cfg, snapshot, nil)
+					if (got.HighestExpense != nil) != (expense > 0) || (expense > 0 && got.HighestExpense.MinorUnits != expense) {
+						t.Fatalf("irrelevant income affected winner: %+v", got)
+					}
+				}
+			})
+		}
+	}
+	for _, account := range []string{"Income:A", "Expenses:A", "Assets:A"} {
+		for _, amount := range []int{math.MinInt, math.MaxInt} {
+			cfg, snapshot := overviewFixture(Transaction{Postings: []Posting{p(account, amount)}})
+			got := readOverview(t, cfg, snapshot, nil)
+			want := amount > 0 && account != "Assets:A"
+			if (got.HighestExpense != nil) != want || (want && got.HighestExpense.MinorUnits != amount) {
+				t.Fatalf("integer boundary %s %d: %+v", account, amount, got)
+			}
+		}
+	}
+}
+
+func TestLocalOverviewCategoriesStatsFinalWinnerTitleBudget(t *testing.T) {
+	p := overviewPosting
+	large := strings.Repeat("x", localOverviewCategoryWorkingBytes+1)
+	cfg, snapshot := overviewFixture(
+		Transaction{Payee: large, Postings: []Posting{p("Income:A", 1)}},
+		Transaction{Payee: "final winner", Narration: large, Metadata: map[string]MetadataValue{"type": large}, Postings: []Posting{p("Income:A", 2)}},
+		Transaction{Payee: large, Postings: []Posting{p("Income:A", 2)}}, // later equal title is irrelevant
+	)
+	got := readOverview(t, cfg, snapshot, nil)
+	if got.TransactionCount != 3 || got.HighestExpense == nil || got.HighestExpense.Title != "final winner" {
+		t.Fatalf("nonwinning/unselected payload affected stats: %+v", got)
+	}
+	for _, title := range []string{large, strings.Repeat("x", localTransactionPageBytes), strings.Repeat("\x01", 200000)} {
+		snapshot.Transactions[1].Payee = title
+		assertOverviewCapacity(t, cfg, snapshot)
+	}
+	// Stats-only exact serialized boundary, including escaped title bytes.
+	for _, escaped := range []bool{false, true} {
+		cfg, snapshot := overviewFixture(Transaction{Payee: "x", Postings: []Posting{p("Income:A", 1)}})
+		_, raw, err := localOverviewCategoriesResponse(cfg, snapshot, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		budget := localTransactionPageBytes - len(raw) + 1
+		title := strings.Repeat("x", budget)
+		if escaped {
+			title = strings.Repeat("\x01", budget/6) + strings.Repeat("x", budget%6)
+		}
+		snapshot.Transactions[0].Payee = title
+		status, raw, err := localOverviewCategoriesResponse(cfg, snapshot, nil)
+		if status != 200 || err != nil || len(raw) != localTransactionPageBytes {
+			t.Fatal("exact stats response boundary rejected", status, len(raw), err)
+		}
+		snapshot.Transactions[0].Payee += "x"
+		assertOverviewCapacity(t, cfg, snapshot)
+	}
+}
+
+func TestLocalOverviewCategoriesStats100kIncomeOnlyAllocation(t *testing.T) {
+	const rows = 100000
+	txns := make([]Transaction, rows)
+	for i := range txns {
+		txns[i] = Transaction{Payee: fmt.Sprint(i), Postings: []Posting{overviewPosting("Income:A", i+1)}}
+	}
+	cfg, snapshot := overviewFixture(txns...)
+	got := readOverview(t, cfg, snapshot, nil)
+	if got.TransactionCount != rows || got.HighestExpense == nil || got.HighestExpense.Title != "99999" || got.HighestExpense.MinorUnits != rows || len(got.Categories) != 0 {
+		t.Fatalf("100k income-only stats truncated: %+v", got)
+	}
+	// Every row replaces the candidate: allocation must still be constant.
+	allocs := testing.AllocsPerRun(1, func() {
+		if status, _, err := localOverviewCategoriesResponse(cfg, snapshot, nil); status != 200 || err != nil {
+			panic(err)
+		}
+	})
+	if allocs > 100 {
+		t.Fatalf("per-candidate allocation regression: %.0f allocations", allocs)
 	}
 }

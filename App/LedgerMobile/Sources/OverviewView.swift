@@ -52,7 +52,7 @@ struct OverviewView: View {
                     : spendingCategories(from: ledger.transactions, accountLabels: accountLabels)
                 if session.isLocal && topCategories.isEmpty {
                     if session.isLocalOverviewCategoriesLoading {
-                        Section("当月支出排行") { ProgressView("正在加载支出分类…") }
+                        Section("当月支出排行") { ProgressView("正在加载概览汇总…") }
                     } else if let error = session.localOverviewCategoriesError {
                         Section("当月支出排行") {
                             Text(error).foregroundStyle(LedgerPalette.secondary)
@@ -60,7 +60,7 @@ struct OverviewView: View {
                         }
                     } else if session.localOverviewCategories == nil {
                         Section("当月支出排行") {
-                            Button("加载支出分类") { Task { await session.refresh() } }
+                            Button("加载概览汇总") { Task { await session.refresh() } }
                         }
                     }
                 }
@@ -429,16 +429,8 @@ private struct OverviewSpendingRhythmCard: View {
         return ledger.summary.expense / daysElapsed
     }
 
-    private var highestExpense: (title: String, amount: Int)? {
-        let expenseTx = ledger.transactions.compactMap { tx -> (String, Int)? in
-            let presentation = TransactionPresentation(transaction: tx)
-            guard presentation.kind == .expense, !presentation.isRefund, presentation.minorUnits > 0 else { return nil }
-            return (presentation.title, presentation.minorUnits)
-        }
-        return expenseTx.max { $0.1 < $1.1 }
-    }
-
     var body: some View {
+        let stats = session.overviewTransactionStats
         HStack(spacing: 0) {
             // Daily average
             VStack(alignment: .leading, spacing: 3) {
@@ -478,9 +470,9 @@ private struct OverviewSpendingRhythmCard: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(LedgerPalette.secondary)
                 }
-                if let highest = highestExpense {
+                if let highest = stats?.highestExpense {
                     AmountLabel(
-                        minorUnits: highest.amount,
+                        minorUnits: highest.minorUnits,
                         currency: ledger.summary.currency,
                         font: .system(size: 16, weight: .semibold, design: .rounded),
                         color: LedgerPalette.ink
@@ -491,7 +483,8 @@ private struct OverviewSpendingRhythmCard: View {
                         .foregroundStyle(LedgerPalette.secondary)
                         .lineLimit(1)
                 } else {
-                    Text("暂无支出")
+                    Text(stats != nil ? "暂无支出"
+                         : session.isLocalOverviewCategoriesLoading ? "加载中…" : "暂不可用")
                         .font(.system(size: 15, weight: .medium, design: .rounded))
                         .foregroundStyle(LedgerPalette.secondary)
                     Text("—")
@@ -548,7 +541,8 @@ private struct MonthlyConclusion: View {
                         .foregroundStyle(LedgerPalette.secondary)
                 }
                 Spacer()
-                Text("\(ledger.transactions.count) 笔流水")
+                Text(session.overviewTransactionStats.map { "\($0.transactionCount) 笔流水" }
+                     ?? (session.isLocalOverviewCategoriesLoading ? "流水统计加载中…" : "流水统计暂不可用"))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(LedgerPalette.secondary)
                     .padding(.horizontal, 7)

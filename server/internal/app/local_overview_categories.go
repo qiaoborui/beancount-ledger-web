@@ -20,12 +20,19 @@ const localOverviewCategoryWorkingBytes = 8 << 20
 var errLocalOverviewCategoryCapacity = errors.New("overview categories exceed group, working-state or response capacity; narrow the date range")
 
 type localOverviewCategories struct {
-	Revision                string                  `json:"revision"`
-	Start                   string                  `json:"start"`
-	End                     string                  `json:"end"`
-	SensitiveUnlocked       bool                    `json:"sensitiveUnlocked"`
-	PositiveTotalMinorUnits int                     `json:"positiveTotalMinorUnits"`
-	Categories              []localOverviewCategory `json:"categories"`
+	Revision                string                       `json:"revision"`
+	Start                   string                       `json:"start"`
+	End                     string                       `json:"end"`
+	SensitiveUnlocked       bool                         `json:"sensitiveUnlocked"`
+	PositiveTotalMinorUnits int                          `json:"positiveTotalMinorUnits"`
+	TransactionCount        int                          `json:"transactionCount"`
+	HighestExpense          *localOverviewHighestExpense `json:"highestExpense"`
+	Categories              []localOverviewCategory      `json:"categories"`
+}
+
+type localOverviewHighestExpense struct {
+	Title      string `json:"title"`
+	MinorUnits int    `json:"minorUnits"`
 }
 
 type localOverviewCategory struct {
@@ -77,11 +84,13 @@ func localOverviewCategoriesResponse(cfg Config, snapshot *LedgerSnapshot, query
 	used := 0
 	var accounts map[string]int
 	txns := snapshotTransactionsDesc(snapshot)
+	transactionCount, highestIndex, highestAmount := 0, -1, 0
 	for index := 0; index < txns.Len(); index++ {
 		txn := txns.At(index)
 		if txn.Date < start || txn.Date >= end {
 			continue
 		}
+		transactionCount++
 		eligible, total := false, 0
 		for _, posting := range txn.Postings {
 			if posting.Amount == 0 || !strings.HasPrefix(posting.Account, "Expenses:") {
@@ -93,6 +102,27 @@ func localOverviewCategoriesResponse(cfg Config, snapshot *LedgerSnapshot, query
 			if !ok {
 				return capacity()
 			}
+		}
+		// TransactionPresentation gives nonzero net expense precedence over
+		// income. A negative expense is a refund, even with positive income;
+		// only zero/no expense falls through to income (positive means expense).
+		// Do not sum irrelevant income: even overflow there cannot affect the
+		// presentation. Keep only an index and amount, not per-row projections.
+		amount := total
+		if total == 0 {
+			for _, posting := range txn.Postings {
+				if !strings.HasPrefix(posting.Account, "Income:") {
+					continue
+				}
+				var ok bool
+				amount, ok = localOverviewAdd(amount, posting.Amount)
+				if !ok {
+					return capacity()
+				}
+			}
+		}
+		if amount > highestAmount {
+			highestIndex, highestAmount = index, amount
 		}
 		if !eligible {
 			continue
@@ -158,7 +188,23 @@ func localOverviewCategoriesResponse(cfg Config, snapshot *LedgerSnapshot, query
 	result := localOverviewCategories{
 		Revision: fmt.Sprintf("%s:%d", snapshot.Version, snapshot.localReadModelID),
 		Start:    start, End: end, SensitiveUnlocked: true,
-		Categories: make([]localOverviewCategory, 0, 4),
+		Categories: make([]localOverviewCategory, 0, 4), TransactionCount: transactionCount,
+	}
+	if highestIndex >= 0 {
+		txn := txns.At(highestIndex)
+		title := txn.Payee
+		if title == "" {
+			title = txn.Narration
+		}
+		if title == "" {
+			title = "未命名交易"
+		}
+		// Only the final winner's title is serialized. Bound it before marshal;
+		// the final response check also accounts for JSON escaping and categories.
+		if len(title) > localTransactionPageBytes {
+			return capacity()
+		}
+		result.HighestExpense = &localOverviewHighestExpense{Title: title, MinorUnits: highestAmount}
 	}
 	positive := make([]*localOverviewCategoryGroup, 0, len(groups))
 	for _, group := range groups {
