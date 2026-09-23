@@ -129,6 +129,24 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(historyPage.waitForExistence(timeout: 15))
         app.tabBars.buttons["交易"].tap()
         XCTAssertTrue(editedRow.waitForExistence(timeout: 15))
+        let date = DateFormatter()
+        date.locale = Locale(identifier: "en_US_POSIX")
+        date.dateFormat = "yyyy-MM-dd"
+        let day = date.string(from: Date())
+        app.open(URL(string: "ledger://transactions?date=" + day)!)
+        XCTAssertTrue(app.navigationBars[day + " 支出"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["widget-day-page"].waitForExistence(timeout: 20), app.debugDescription)
+        let widgetRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'transaction-row-'")).firstMatch
+        XCTAssertTrue(widgetRow.waitForExistence(timeout: 15)); widgetRow.tap()
+        XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["transaction-edit"].exists)
+        app.navigationBars["交易详情"].buttons.element(boundBy: 0).tap()
+        app.buttons["完成"].firstMatch.tap()
+        // open(URL:) relaunches the isolated app into its overview root. Return
+        // explicitly to the transaction list before testing mutable row actions.
+        app.tabBars.buttons["交易"].tap()
+        XCTAssertTrue(app.navigationBars["流水"].waitForExistence(timeout: 10))
+        XCTAssertTrue(editedRow.waitForExistence(timeout: 15))
         editedRow.press(forDuration: 1)
         app.buttons["transaction-context-delete"].firstMatch.tap()
         let confirm = app.buttons["transaction-delete-confirm"]

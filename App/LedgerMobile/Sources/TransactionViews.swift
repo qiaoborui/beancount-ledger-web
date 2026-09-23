@@ -1116,9 +1116,43 @@ struct WidgetDayTransactionsView: View {
     @State private var payload: LedgerBootstrap?
     @State private var loading = true
     @State private var errorMessage: String?
+    @State private var window: LocalTransactionWindow.Window?
+    @State private var summary: LocalTransactionScan.Result?
+    @State private var summaryError: String?
+    @State private var page = 0
+    @State private var displayedPage = 0
+    @State private var reload = 0
+    @State private var active = false
+    @State private var summaryLoading = false
+    private struct Request: Equatable {
+        let day: String
+        let revision: UUID?
+        let invalidation: Int
+        let readable: Bool
+        let active: Bool
+        let reload: Int
+        var page: Int
+    }
+    private var readable: Bool {
+        session.phase == .ready && !session.privacyShielded && !session.isRangeLoading
+            && !session.isValuationCurrencyLoading && !session.transactionMutationStates.values.contains(.pending)
+    }
+    private var request: Request {
+        .init(day: day, revision: session.localTransactionPresentationRevision,
+            invalidation: session.localGlobalSearchInvalidation, readable: readable, active: active, reload: reload, page: page)
+    }
+    private var summaryRequest: Request { var key = request; key.page = 0; return key }
+    @State private var completedSummary: Request?
+    @State private var completedWindow: Request?
+    private var windowMatchesScope: Bool {
+        guard let completedWindow else { return false }
+        return completedWindow.day == request.day && completedWindow.revision == request.revision
+            && completedWindow.invalidation == request.invalidation && readable
+    }
 
     private var transactions: [LedgerTransaction] {
-        (payload?.transactions ?? []).filter {
+        if session.isLocal { return windowMatchesScope ? (window?.transactions ?? []) : [] }
+        return (payload?.transactions ?? []).filter {
             $0.date == day && LedgerTransactionFilter(kind: .expense).matches($0)
         }
     }
@@ -1128,12 +1162,18 @@ struct WidgetDayTransactionsView: View {
             if let errorMessage {
                 Section {
                     Text(errorMessage).foregroundStyle(.secondary)
-                    Button("重试") { Task { await load() } }
+                    Button("重试") {
+                        if session.isLocal { reload += 1 } else { Task { await load() } }
+                    }
                 }
             }
-            if loading && payload == nil {
+            if session.isLocal, let summaryError {
+                Text("支出汇总读取失败：" + summaryError).foregroundStyle(.secondary)
+                Button("重试汇总") { reload += 1 }
+            }
+            if loading && transactions.isEmpty {
                 ProgressView("正在读取当天支出")
-            } else if transactions.isEmpty && errorMessage == nil {
+            } else if transactions.isEmpty && errorMessage == nil && (!session.isLocal || (window != nil && windowMatchesScope)) {
                 ContentUnavailableView("当天暂无支出", systemImage: "calendar", description: Text(day))
             }
             Section {
@@ -1143,13 +1183,32 @@ struct WidgetDayTransactionsView: View {
                     } label: {
                         TransactionCard(
                             transaction: transaction,
-                            accountLabels: TransactionCategoryPresentation.accountLabels(payload?.accounts ?? [])
+                            accountLabels: TransactionCategoryPresentation.accountLabels(session.isLocal ? (session.ledger?.accounts ?? []) : (payload?.accounts ?? []))
                         )
                     }
                     .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
+                    .disabled(session.isLocal && loading)
                 }
             } header: {
-                if !transactions.isEmpty { Text("全部支出 · \(transactions.count) 笔") }
+                if session.isLocal {
+                    if completedSummary == summaryRequest, let summary { Text("全部支出 · \(summary.matchedCount) 笔") }
+                    else if summaryLoading { Text("正在统计全部支出…") }
+                } else if !transactions.isEmpty { Text("全部支出 · \(transactions.count) 笔") }
+            }
+            if session.isLocal, windowMatchesScope, let window {
+                HStack {
+                    Button("上一页") {
+                        let target = max(0, displayedPage - 1)
+                        if page == target { reload += 1 } else { page = target }
+                    }.disabled(displayedPage == 0 || loading)
+                    Spacer()
+                    Text("第 \(displayedPage + 1) 页").font(.caption).accessibilityIdentifier("widget-day-page")
+                    Spacer()
+                    Button("下一页") {
+                        let target = displayedPage + 1
+                        if page == target { reload += 1 } else { page = target }
+                    }.disabled(window.isComplete || loading)
+                }
             }
         }
         .ledgerReadingList()
@@ -1161,8 +1220,51 @@ struct WidgetDayTransactionsView: View {
             }
             ToolbarItem(placement: .topBarLeading) { PrivacyToolbarButton() }
         }
-        .task { await load() }
-        .refreshable { await load() }
+        .task(id: request) {
+            if session.isLocal { await loadLocalWindow() }
+            else { await load() }
+        }
+        .task(id: summaryRequest) { if session.isLocal { await loadLocalSummary() } }
+        .onAppear { active = true }
+        .onDisappear { active = false }
+        .onChange(of: readable) { _, allowed in
+            if session.isLocal && !allowed { window = nil; completedWindow = nil; summary = nil; completedSummary = nil }
+        }
+        .onChange(of: session.localTransactionPresentationRevision) { _, _ in page = 0; displayedPage = 0 }
+        .onChange(of: day) { _, _ in page = 0; displayedPage = 0 }
+        .refreshable {
+            if session.isLocal { page = 0; reload += 1 } else { await load() }
+        }
+    }
+
+    private func loadLocalWindow() async {
+        guard active, readable else { return }
+        let key = request
+        loading = true; errorMessage = nil
+        defer { if key == request { loading = false } }
+        do {
+            let result = try await session.localWidgetDayWindow(day, index: key.page)
+            guard !Task.isCancelled, key == request, readable else { return }
+            window = result; completedWindow = key; displayedPage = key.page
+        } catch {
+            if !Task.isCancelled, key == request { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func loadLocalSummary() async {
+        guard active, readable else { return }
+        let key = summaryRequest
+        summaryLoading = true; summaryError = nil
+        defer { if key == summaryRequest { summaryLoading = false } }
+        do {
+            let result = try await session.localWidgetDaySummary(day)
+            guard !Task.isCancelled, key == summaryRequest, readable else { return }
+            summary = result; completedSummary = key
+        } catch {
+            if !Task.isCancelled, key == summaryRequest {
+                summary = nil; completedSummary = nil; summaryError = error.localizedDescription
+            }
+        }
     }
 
     @MainActor
@@ -2511,7 +2613,7 @@ struct TransactionDetailView: View {
     }
 
     private func hydrateDetail() async {
-        guard session.isLocal, !snapshotOnly, !localEditCompleted, detailRequestID == nil,
+        guard session.isLocal, !localEditCompleted, detailRequestID == nil,
               session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites != true else { return }
         let id = UUID()
         detailRequestID = id
