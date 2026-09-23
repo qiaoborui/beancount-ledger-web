@@ -104,6 +104,63 @@ actor LocalLedgerRepository: LedgerRepository {
         return page
     }
 
+    /// Raw date-range candidates; filtering belongs exclusively to the Swift reducer.
+    /// This read never advances the presentation revision that authorizes writes.
+    func candidatePage(start: String, end: String, cursor: String? = nil, limit: Int = 500,
+                       expectedRevisionID: UUID) async throws -> LedgerTransactionPage {
+        guard (1...500).contains(limit),
+              cursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 }) ?? true else {
+            throw LocalLedgerError.invalidConfiguration("候选分页参数无效")
+        }
+        var query = ["dialect": "native-candidates-v1", "start": start, "end": end, "limit": String(limit)]
+        query["cursor"] = cursor
+        try Task.checkCancellation()
+        let (_, response) = try await readSnapshot("/api/ledger/transactions/page", query: query,
+                                                  expectedRevisionID: expectedRevisionID)
+        try Task.checkCancellation()
+        let page = try response.decodeTransactionPage()
+        guard page.sensitiveUnlocked else {
+            throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定")
+        }
+        guard !page.revision.isEmpty, page.transactions.count <= limit,
+              page.nextCursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 && $0 != cursor }) ?? true else {
+            throw LocalLedgerError.operationFailed("候选分页响应无效")
+        }
+        // Pinning keeps the generation readable, not current: a writer can commit
+        // while the engine is suspended, including on the very last page.
+        try Task.checkCancellation()
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return page
+    }
+
+    func scanTransactions(start: String, end: String, filter: LedgerTransactionFilter,
+                          expectedRevisionID: UUID, limits: LocalTransactionScan.Limits = .init()) async throws
+        -> LocalTransactionScan.Result {
+        var scan: LocalTransactionScan?
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await candidatePage(start: start, end: end, cursor: cursor,
+                                               expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil {
+                scan = try LocalTransactionScan(expectedRevision: page.revision, filter: filter, limits: limits)
+            }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                try Task.checkCancellation()
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                // Session/request guards still own publication after this async return.
+                return result
+            }
+            // Empty/nonmatching pages are not EOF; follow the raw continuation.
+            cursor = scan?.nextCursor
+        }
+    }
+
     /// The native model revision is opaque; the workspace UUID is the bootstrap
     /// pairing boundary. Check it inside the pinned snapshot, not in a prior read.
     func overviewCategories(start: String, end: String,

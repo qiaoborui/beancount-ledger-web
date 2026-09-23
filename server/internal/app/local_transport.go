@@ -56,6 +56,11 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 	if input.Path == "/api/ledger/overview/categories" && (input.Staging || input.ImportFile != nil) {
 		return http.StatusBadRequest, nil, errors.New("overview categories require a committed generation without an import file")
 	}
+	if input.Path == "/api/ledger/transactions/history-page" {
+		if _, exists := input.Query["dialect"]; exists {
+			return http.StatusBadRequest, nil, errors.New("dialect is not valid on history-page")
+		}
+	}
 	cfg, err := localConfig(input)
 	if err != nil {
 		return http.StatusBadRequest, nil, err

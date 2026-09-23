@@ -19,6 +19,9 @@ const localTransactionPageBytes = 1 << 20
 const localTransactionPageDefault = 100
 const localTransactionPageMax = 500
 
+// Swift owns candidate filtering and Unicode/presentation semantics.
+const localNativeCandidatesDialect = "native-candidates-v1"
+
 // Process-scoped MAC makes cursors opaque: restarting the app requires a fresh
 // first page, and clients cannot substitute a source revision or filter set.
 var localCursorKey = func() []byte {
@@ -82,6 +85,25 @@ func localTransactionPageResponse(cfg Config, snapshot *LedgerSnapshot, query ma
 // History evidence streams only the metadata required by the existing native
 // classifier. It shares row/byte limits and cursor freshness with normal pages.
 func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query map[string]string, evidence bool) (int, json.RawMessage, error) {
+	candidates := false
+	if dialect, exists := query["dialect"]; exists {
+		if evidence {
+			return 400, nil, errors.New("dialect is not valid on history-page")
+		}
+		switch dialect {
+		case localNativeCandidatesDialect:
+			// Presence, including an empty value, is an error: silently accepting
+			// a filter could make a caller mistake raw candidates for matches.
+			for _, key := range []string{"q", "account", "tag", "tags", "kind"} {
+				if _, exists := query[key]; exists {
+					return 400, nil, fmt.Errorf("%s is not valid on native candidate pages", key)
+				}
+			}
+			candidates = true
+		default:
+			return 400, nil, errors.New("unsupported transaction page dialect")
+		}
+	}
 	start, end := query["start"], query["end"]
 	if start == "" {
 		start = "0001-01-01"
@@ -117,6 +139,9 @@ func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query 
 	effectiveStart, effectiveEnd := transactionQueryEffectiveRange(start, end, filter)
 	modelRevision := fmt.Sprintf("%s:%d", snapshot.Version, snapshot.localReadModelID)
 	scopeBytes, _ := json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, modelRevision, effectiveStart, effectiveEnd, query["q"], query["account"], query["tag"], query["kind"], strconv.FormatBool(evidence)})
+	if candidates {
+		scopeBytes, _ = json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, modelRevision, localNativeCandidatesDialect, start, end})
+	}
 	scope := fmt.Sprintf("%x", sha256.Sum256(scopeBytes))
 	offset := 0
 	if raw := query["cursor"]; raw != "" {
@@ -141,14 +166,16 @@ func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query 
 		if txn.Date < effectiveStart || txn.Date >= effectiveEnd || (filter != nil && !filter.Matches(txn)) {
 			continue
 		}
-		if account := query["account"]; account != "" && !transactionHasAccountPrefix(txn, account) {
-			continue
-		}
-		if tag := query["tag"]; tag != "" && !queryStringSliceContains(txn.Tags, tag) {
-			continue
-		}
-		if kind := query["kind"]; kind != "" && kind != "all" && dashboardTransactionType(txn) != kind {
-			continue
+		if !candidates {
+			if account := query["account"]; account != "" && !transactionHasAccountPrefix(txn, account) {
+				continue
+			}
+			if tag := query["tag"]; tag != "" && !queryStringSliceContains(txn.Tags, tag) {
+				continue
+			}
+			if kind := query["kind"]; kind != "" && kind != "all" && dashboardTransactionType(txn) != kind {
+				continue
+			}
 		}
 		if len(page.Transactions) == limit {
 			page.NextCursor = signLocalCursor(localTransactionCursor{scope, index})
@@ -165,6 +192,18 @@ func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query 
 				}
 			}
 			txn.Metadata = metadata
+		} else if candidates {
+			// Only Swift TransactionPresentation's stringValue evidence. Never retain
+			// arbitrary metadata or stringify numeric/object values. The row byte cap
+			// includes this field; oversize evidence fails rather than truncating it.
+			if value, ok := txn.Metadata["type"].(string); ok {
+				if len(value) > localTransactionPageBytes {
+					return 413, nil, errors.New("native presentation evidence exceeds page byte budget")
+				}
+				txn.Metadata = map[string]MetadataValue{"type": value}
+			} else {
+				txn.Metadata = nil
+			}
 		} else {
 			txn.Metadata = nil
 		}
