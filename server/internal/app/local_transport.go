@@ -221,12 +221,14 @@ type localPageCacheKey struct {
 }
 
 func localRequestCache(cfg Config, staging bool) (*LedgerCache, error) {
+	if cfg.localRegisteredCache != nil {
+		// resolveLocalModel checks source freshness before handing out this cache;
+		// LedgerCache.Snapshot must still recheck it to catch changes after resolve.
+		return cfg.localRegisteredCache, nil
+	}
 	version, err := ledgerVersion(cfg)
 	if err != nil {
 		return nil, err
-	}
-	if cfg.localRegisteredCache != nil {
-		return cfg.localRegisteredCache, nil
 	}
 	if staging || filepath.Base(filepath.Dir(filepath.Dir(cfg.LedgerRoot))) != "generations" {
 		return NewLedgerCache(cfg), nil
