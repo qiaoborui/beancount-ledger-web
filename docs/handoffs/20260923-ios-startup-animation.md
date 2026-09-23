@@ -1,6 +1,7 @@
 # 20260923-ios-startup-animation
 
-- Status: active. Updated 2026-09-24 00:16 +08:00.
+- Status: active (animation committed and PR open; load-cost findings awaiting a
+decision). Updated 2026-09-24 00:31 +08:00.
 - Goal: replace the iOS app's static privacy startup cover with a lively opening
   animation, and separately determine whether the local startup path's
   perceived jank is animation or load cost.
@@ -10,6 +11,8 @@
 - Base revision: `4ef1b8040a4a` (`origin/main`, "docs: mark small purse yield
   handoff complete (#422)"). Branch: `codex/ios-startup-animation`, cut fresh
   from `origin/main` per the approved decision.
+- Code revision: `37a460db` on `codex/ios-startup-animation`, pushed to `origin`.
+  PR #459: https://github.com/qiaoborui/beancount-ledger-web/pull/459
 - Approved decisions: base branch = fresh from `origin/main`; motion style =
   "subtle & alive" (brand mark breathes 1.0↔1.04, title rises at 0.10 s,
   subtitle at 0.18 s, three staggered dots, exit = fade + swell 1.0→1.06);
@@ -88,10 +91,9 @@
 
 ## Remaining steps
 
-1. Report the findings above to the user (done in this session's reply) and get
-   a decision on the load-cost plan before touching it.
+1. Get a decision on the load-cost plan for finding 2 before touching it.
 2. Decide the cover-timing question (finding 3).
-3. Commit and open the PR through the normal protected-branch workflow.
+3. Merge PR #459 once its required `Gate` check passes.
 
 ## Not tested
 
