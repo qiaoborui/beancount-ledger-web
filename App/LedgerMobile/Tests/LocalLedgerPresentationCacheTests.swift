@@ -80,6 +80,21 @@ final class LocalLedgerPresentationCacheTests: XCTestCase {
         XCTAssertEqual(refreshed.payload.summary.expense, 777)
     }
 
+    func testOptionalCacheCannotFailUsableTypedBootstrap() async throws {
+        struct EnvelopeEngine: LocalLedgerEngine {
+            func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data { Data("{}".utf8) }
+            func response(_ request: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse {
+                LocalLedgerResponse(envelope: Data(#"{"ok":true,"status":200,"result":{"start":"2026-09-01","end":"2026-10-01","summary":{"currency":"CNY","income":0,"expense":100,"net":-100},"accountBalances":[],"transactions":[],"accounts":[],"valuationCurrency":"CNY","sensitiveUnlocked":true,"ignored":1e1000}}"#.utf8))
+            }
+        }
+        let (descriptor, workspace, _) = try await fixture()
+        let repository = LocalLedgerRepository(descriptor: descriptor, workspace: workspace,
+            engine: EnvelopeEngine(), validator: { _, _ in })
+        let payload = try await load(repository)
+        XCTAssertEqual(payload.summary.expense, 100)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.rootDirectory.appendingPathComponent(".bootstrap-presentation.json").path))
+    }
+
     private actor Engine: LocalLedgerEngine {
         private(set) var calls = 0
         var unlocked = true

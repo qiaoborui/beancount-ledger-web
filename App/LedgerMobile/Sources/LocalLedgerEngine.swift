@@ -37,6 +37,34 @@ struct LocalLedgerEngineRequest: Encodable, Sendable {
 /// A process-local JSON boundary. Implementations never open an HTTP listener.
 protocol LocalLedgerEngine: Sendable {
     func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data
+    func response(_ request: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse
+}
+
+extension LocalLedgerEngine {
+    // Existing engines/mocks keep returning result-only JSON.
+    func response(_ request: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse {
+        LocalLedgerResponse(result: try await dispatch(request))
+    }
+}
+
+/// Retain the native envelope until the caller knows its result type. Only the
+/// persisted bootstrap presentation/legacy callers need materialized result JSON.
+struct LocalLedgerResponse: Sendable {
+    private let data: Data
+    private let isEnvelope: Bool
+
+    init(result: Data) { data = result; isEnvelope = false }
+    init(envelope: Data) { data = envelope; isEnvelope = true }
+
+    func decode<T: Decodable>(_ type: T.Type) throws -> T {
+        if isEnvelope { return try LocalLedgerJSON.decodeResult(type, from: data) }
+        return try JSONDecoder().decode(type, from: data)
+    }
+
+    func resultData() throws -> Data {
+        if isEnvelope { return try LocalLedgerJSON.resultData(data) }
+        return data
+    }
 }
 
 actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
@@ -46,6 +74,10 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     private var canonicalCache: (workspace: String, entrypoint: String, model: Data)?
 
     func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
+        try await response(request).resultData()
+    }
+
+    func response(_ request: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse {
         #if canImport(LedgerCore)
         let canonical: Data
         if !request.staging, let cached = canonicalCache,
@@ -61,7 +93,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         }
         let encoded = try LocalLedgerJSON.requestData(request, canonical: canonical)
         let response = MobilecoreDispatchJSON(String(decoding: encoded, as: UTF8.self))
-        return try LocalLedgerJSON.resultData(Data(response.utf8))
+        return LocalLedgerResponse(envelope: Data(response.utf8))
         #else
         throw LocalLedgerError.runtimeUnavailable
         #endif
@@ -82,6 +114,35 @@ enum LocalLedgerJSON {
         encoded.append(canonical)
         encoded.append(UInt8(ascii: "}"))
         return encoded
+    }
+
+    private struct TypedEnvelope<T: Decodable>: Decodable {
+        let result: T
+        private enum Keys: String, CodingKey { case ok, status, diagnostics, result }
+        private struct Diagnostic: Decodable { let message: String }
+        private struct Failure: Decodable { let error: String? }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: Keys.self)
+            let ok = try container.decode(Bool.self, forKey: .ok)
+            let status = try container.decode(Int.self, forKey: .status)
+            // Preserve strict diagnostic types and result.error precedence.
+            let diagnostics = try container.decodeIfPresent([Diagnostic].self, forKey: .diagnostics)
+            guard ok, (200..<300).contains(status) else {
+                let failure = try? container.decode(Failure.self, forKey: .result)
+                throw LocalLedgerError.operationFailed(failure?.error
+                    ?? diagnostics?.map(\.message).joined(separator: "\n")
+                    ?? "本地账本操作失败")
+            }
+            // superDecoder supplies null for an absent result, matching the
+            // legacy resultData path; Optional<T> can decode it, concrete T fails.
+            let value = try container.superDecoder(forKey: .result).singleValueContainer()
+            result = try value.decode(T.self)
+        }
+    }
+
+    static func decodeResult<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        try JSONDecoder().decode(TypedEnvelope<T>.self, from: data).result
     }
 
     static func resultData(_ data: Data) throws -> Data {

@@ -27,6 +27,45 @@ final class LocalLedgerRepositoryTests: XCTestCase {
         XCTAssertTrue(saved.text.hasSuffix("; prepared archive\n"))
     }
 
+    func testEnvelopeFailuresAfterStageWriteNeverPublish() async throws {
+        actor EnvelopeEngine: LocalLedgerEngine {
+            let legacy = Engine()
+            var failure = Data(#"{"ok":false,"status":400,"result":{"error":"synthetic rejection"}}"#.utf8)
+            func configure(_ raw: String) { failure = Data(raw.utf8) }
+            func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
+                try await legacy.dispatch(request)
+            }
+            func response(_ request: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse {
+                let result = try await legacy.dispatch(request)
+                return request.staging ? LocalLedgerResponse(envelope: failure) : LocalLedgerResponse(result: result)
+            }
+        }
+        let engine = EnvelopeEngine()
+        let catalog = LocalLedgerCatalog(rootDirectory: try root(), engine: engine, validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Envelope rollback")
+        let repository = catalog.repository(for: descriptor)
+        _ = try await repository.runBQL(query: "SELECT 1", valuationCurrency: "CNY")
+        let before = try await repository.readFile(path: "main.bean")
+        let entry = LedgerTransactionEntry(date: "2026-09-15", payee: "", narration: "Synthetic", postings: [.init(account: "Expenses:Food", amount: "1", currency: "CNY"), .init(account: "Assets:Cash", amount: "-1", currency: "CNY")])
+        for raw in [#"{"ok":false,"status":400,"result":{"error":"synthetic rejection"}}"#,
+                    #"{"ok":"true","status":200,"result":{}}"#, "invalid JSON"] {
+            await engine.configure(raw)
+            do {
+                try await repository.addTransaction(entry: entry)
+                XCTFail("Failed envelope published a financial write")
+            } catch { }
+            let after = try await repository.readFile(path: "main.bean")
+            XCTAssertEqual(after.revisionID, before.revisionID)
+            XCTAssertEqual(after.text, before.text)
+            do {
+                _ = try await repository.prepareBookkeeping(.manual(entry))
+                XCTFail("Failed envelope produced a preview")
+            } catch { }
+            let afterPreview = try await repository.readFile(path: "main.bean")
+            XCTAssertEqual(afterPreview.revisionID, before.revisionID)
+        }
+    }
+
     private actor Engine: LocalLedgerEngine {
         var requests: [LocalLedgerEngineRequest] = []
         var mutationText = "; accepted\n"
