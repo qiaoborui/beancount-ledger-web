@@ -47,16 +47,28 @@ final class LocalLedger100kIntegrationTests: XCTestCase {
         print("SYNTHETIC100K aggregate_bql_ms=\(Self.ms(bqlStart.duration(to: .now)))")
         let bootstrapStart = ContinuousClock.now
         let home = try await repository.bootstrap(start: "2026-09-01", end: "2026-10-01", today: "2026-09-23", valuationCurrency: "CNY")
-        XCTAssertGreaterThan(home.summary.expense, 0)
         print("SYNTHETIC100K bootstrap_ms=\(Self.ms(bootstrapStart.duration(to: .now)))")
+        // Oracle reads the full month, independently of bootstrap row limits.
+        let monthlyCount = (0..<100_000).filter { $0 % 12 + 1 == 9 }.count
+        XCTAssertEqual(home.summary.expense, monthlyCount * 100)
+        let monthlyOracle = try await repository.runBQL(
+            query: "SELECT count(*), sum(amount), max(amount) FROM postings WHERE account = 'Expenses:Food' AND date >= '2026-09-01' AND date < '2026-10-01'",
+            valuationCurrency: "CNY")
+        XCTAssertEqual(monthlyOracle.rows, [[.number(Double(monthlyCount)), .number(Double(monthlyCount * 100)), .number(100)]])
         let categoryStart = ContinuousClock.now
         let currentRevision = try await repository.workspace.currentRevision()
         let revision = try XCTUnwrap(currentRevision)
         let categories = try await repository.overviewCategories(start: "0001-01-01", end: "9999-12-31", expectedRevisionID: revision.id)
+        XCTAssertEqual(categories.transactionCount, 100_000)
+        XCTAssertEqual(categories.highestExpense, .init(title: "Synthetic", minorUnits: 100))
         XCTAssertEqual(categories.positiveTotalMinorUnits, 10000000)
         XCTAssertEqual(categories.categories.count, 1)
         XCTAssertEqual(categories.categories.first?.positiveTransactionCount, 100000)
         print("SYNTHETIC100K overview_categories_ms=\(Self.ms(categoryStart.duration(to: .now)))")
+        let monthly = try await repository.overviewCategories(start: "2026-09-01", end: "2026-10-01", expectedRevisionID: revision.id)
+        XCTAssertEqual(monthly.transactionCount, monthlyCount)
+        XCTAssertEqual(monthly.highestExpense, .init(title: "Synthetic", minorUnits: 100))
+        XCTAssertEqual(monthly.positiveTotalMinorUnits, home.summary.expense)
         let entry = LedgerTransactionEntry(date: "2026-09-23", payee: "Synthetic", narration: "Confirmed capacity probe", postings: [
             .init(account: "Expenses:Food", amount: "1", currency: "CNY"), .init(account: "Assets:Cash", amount: "-1", currency: "CNY")])
         let previewStart = ContinuousClock.now

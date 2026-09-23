@@ -2526,18 +2526,103 @@ enum EventTagCalculator {
 
 /// Native-only bounded overview projection. Totals include every positive net
 /// category, while only the top four carry representative transactions for icons.
+/// Count and highest expense cover all rows in the range, not just categories.
 struct LedgerOverviewCategories: Codable, Sendable {
     let revision: String
     let start: String
     let end: String
     let sensitiveUnlocked: Bool
     let positiveTotalMinorUnits: Int
+    let transactionCount: Int
+    let highestExpense: HighestExpense?
     let categories: [Category]
+
+    struct HighestExpense: Codable, Equatable, Sendable {
+        let title: String
+        let minorUnits: Int
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case revision, start, end, sensitiveUnlocked, positiveTotalMinorUnits
+        case transactionCount, highestExpense, categories
+    }
+
+    init(revision: String, start: String, end: String, sensitiveUnlocked: Bool,
+         positiveTotalMinorUnits: Int, transactionCount: Int, highestExpense: HighestExpense?,
+         categories: [Category]) {
+        self.revision = revision
+        self.start = start
+        self.end = end
+        self.sensitiveUnlocked = sensitiveUnlocked
+        self.positiveTotalMinorUnits = positiveTotalMinorUnits
+        self.transactionCount = transactionCount
+        self.highestExpense = highestExpense
+        self.categories = categories
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try values.decode(String.self, forKey: .revision)
+        start = try values.decode(String.self, forKey: .start)
+        end = try values.decode(String.self, forKey: .end)
+        sensitiveUnlocked = try values.decode(Bool.self, forKey: .sensitiveUnlocked)
+        positiveTotalMinorUnits = try values.decode(Int.self, forKey: .positiveTotalMinorUnits)
+        transactionCount = try values.decode(Int.self, forKey: .transactionCount)
+        // decodeIfPresent would incorrectly accept an old/missing contract field
+        // as a successful range with no expenses. Optional.decode requires the key.
+        highestExpense = try values.decode(HighestExpense?.self, forKey: .highestExpense)
+        categories = try values.decode([Category].self, forKey: .categories)
+        guard transactionCount >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .transactionCount, in: values,
+                debugDescription: "Overview transaction count must be nonnegative")
+        }
+        if let highestExpense, highestExpense.minorUnits <= 0 || transactionCount == 0 {
+            throw DecodingError.dataCorruptedError(forKey: .highestExpense, in: values,
+                debugDescription: "Overview highest expense requires a positive amount and nonzero count")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(revision, forKey: .revision)
+        try values.encode(start, forKey: .start)
+        try values.encode(end, forKey: .end)
+        try values.encode(sensitiveUnlocked, forKey: .sensitiveUnlocked)
+        try values.encode(positiveTotalMinorUnits, forKey: .positiveTotalMinorUnits)
+        try values.encode(transactionCount, forKey: .transactionCount)
+        // Successful absence is an explicit JSON null, never an omitted key.
+        try values.encode(highestExpense, forKey: .highestExpense)
+        try values.encode(categories, forKey: .categories)
+    }
 
     struct Category: Codable, Sendable {
         let label: String
         let totalMinorUnits: Int
         let positiveTransactionCount: Int
         let representative: LedgerTransaction
+    }
+}
+
+/// Portable adapter for the existing overview count and spending-rhythm views.
+/// nil means unavailable, whereas a successful nil highestExpense means no expense.
+struct OverviewTransactionStats: Equatable, Sendable {
+    let transactionCount: Int
+    let highestExpense: LedgerOverviewCategories.HighestExpense?
+
+    init?(isLocal: Bool, aggregate: LedgerOverviewCategories?, transactions: [LedgerTransaction]) {
+        if isLocal {
+            guard let aggregate else { return nil }
+            transactionCount = aggregate.transactionCount
+            highestExpense = aggregate.highestExpense
+        } else {
+            transactionCount = transactions.count
+            highestExpense = transactions.compactMap { transaction in
+                let presentation = TransactionPresentation(transaction: transaction)
+                guard presentation.kind == .expense, !presentation.isRefund,
+                      presentation.minorUnits > 0 else { return nil }
+                return LedgerOverviewCategories.HighestExpense(title: presentation.title,
+                    minorUnits: presentation.minorUnits)
+            }.max { $0.minorUnits < $1.minorUnits }
+        }
     }
 }

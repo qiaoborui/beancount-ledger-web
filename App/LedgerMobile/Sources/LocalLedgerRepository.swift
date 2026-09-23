@@ -121,7 +121,7 @@ actor LocalLedgerRepository: LedgerRepository {
               result.categories.allSatisfy({ $0.totalMinorUnits > 0
                   && $0.totalMinorUnits <= result.positiveTotalMinorUnits
                   && $0.positiveTransactionCount > 0 }) else {
-            throw LocalLedgerError.operationFailed("支出分类汇总响应无效")
+            throw LocalLedgerError.operationFailed("概览汇总响应无效")
         }
         // This read must not change the revision used to authorize financial writes.
         return result

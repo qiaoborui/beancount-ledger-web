@@ -96,6 +96,12 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var localOverviewCategories: LedgerOverviewCategories?
     @Published private(set) var isLocalOverviewCategoriesLoading = false
     @Published private(set) var localOverviewCategoriesError: String?
+    var overviewTransactionStats: OverviewTransactionStats? {
+        guard let ledger else { return nil }
+        return OverviewTransactionStats(isLocal: isLocal, aggregate: localOverviewCategories,
+            transactions: ledger.transactions)
+    }
+
     private var overviewCategoriesGeneration = 0
     private var overviewSaveObserver: AnyCancellable?
     @Published private(set) var location: LedgerLocation?
@@ -318,7 +324,7 @@ final class LedgerSession: ObservableObject {
                           self.phase == .ready,
                           revision?.id != self.localPresentation?.revisionID else { return }
                     self.invalidateOverviewCategories()
-                    self.localOverviewCategoriesError = "账本已更新，请刷新支出分类"
+                    self.localOverviewCategoriesError = "账本已更新，请刷新概览汇总"
                 }
             }
         widgetRefreshStatusObserver = LedgerWidgetRefreshStatusObserver(

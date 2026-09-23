@@ -292,17 +292,24 @@ final class LocalLedgerSessionTests: XCTestCase {
         XCTAssertEqual(globalTransactions, transactions)
         XCTAssertEqual(session.localOverviewCategories?.categories.count, 4)
         XCTAssertEqual(session.localOverviewCategories?.positiveTotalMinorUnits, 2_000)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertEqual(session.overviewTransactionStats?.highestExpense, .init(title: "Outside bootstrap", minorUnits: 900_000))
+        XCTAssertNotEqual(session.overviewTransactionStats?.transactionCount, transactions.count)
         await fixture.engine.configureOverview(failure: true)
         await session.refresh()
         XCTAssertEqual(session.phase, .ready)
         XCTAssertEqual(session.ledger?.transactions, transactions)
         XCTAssertEqual(session.globalTransactions, globalTransactions)
         XCTAssertNil(session.localOverviewCategories)
+        XCTAssertNil(session.overviewTransactionStats)
         XCTAssertTrue(session.localOverviewCategoriesError?.contains("capacity") == true)
         XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
         await fixture.engine.configureOverview(empty: true)
         await session.refresh()
         XCTAssertEqual(session.localOverviewCategories?.categories.count, 0)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 0)
+        XCTAssertNotNil(session.overviewTransactionStats)
+        XCTAssertNil(session.overviewTransactionStats?.highestExpense)
         XCTAssertNil(session.localOverviewCategoriesError)
         XCTAssertEqual(session.ledger?.transactions, transactions)
     }
@@ -318,11 +325,13 @@ final class LocalLedgerSessionTests: XCTestCase {
             await fulfillment(of: [entered], timeout: 3)
             XCTAssertTrue(session.isLocalOverviewCategoriesLoading)
             XCTAssertNil(session.localOverviewCategories)
+            XCTAssertNil(session.overviewTransactionStats)
             if shouldLock { await session.lock() } else { session.chooseLedger() }
             XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
             await gate.release()
             await loading.value
             XCTAssertNil(session.localOverviewCategories)
+            XCTAssertNil(session.overviewTransactionStats)
             XCTAssertNil(session.localOverviewCategoriesError)
             session.chooseLedger()
         }
@@ -340,9 +349,13 @@ final class LocalLedgerSessionTests: XCTestCase {
         await fixture.engine.configureOverview()
         await session.refresh()
         XCTAssertNotNil(session.localOverviewCategories)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertEqual(session.overviewTransactionStats?.highestExpense, .init(title: "Outside bootstrap", minorUnits: 900_000))
         await gate.release()
         await old.value
         XCTAssertNotNil(session.localOverviewCategories)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertEqual(session.overviewTransactionStats?.highestExpense, .init(title: "Outside bootstrap", minorUnits: 900_000))
         XCTAssertNil(session.localOverviewCategoriesError)
         XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
     }
@@ -356,13 +369,20 @@ final class LocalLedgerSessionTests: XCTestCase {
         await fixture.engine.configureOverview(gate: gate)
         let old = Task { await session.refreshLocalOverviewCategories() }
         await fulfillment(of: [entered], timeout: 3)
+        await fixture.engine.configureOverview(empty: true)
         let target = session.selectedRange.shifted(by: -1)
         await session.applyRange(target)
         XCTAssertEqual(session.localOverviewCategories?.start, target.start)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 0)
+        XCTAssertNotNil(session.overviewTransactionStats)
+        XCTAssertNil(session.overviewTransactionStats?.highestExpense)
         XCTAssertEqual(session.localOverviewCategories?.end, target.queryEndExclusive)
         await gate.release()
         await old.value
         XCTAssertEqual(session.localOverviewCategories?.start, target.start)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 0)
+        XCTAssertNotNil(session.overviewTransactionStats)
+        XCTAssertNil(session.overviewTransactionStats?.highestExpense)
         XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
     }
 
@@ -385,9 +405,12 @@ final class LocalLedgerSessionTests: XCTestCase {
         await gate.release()
         await old.value
         XCTAssertNil(session.localOverviewCategories)
+        XCTAssertNil(session.overviewTransactionStats)
         XCTAssertNotNil(session.localOverviewCategoriesError)
         await session.refresh()
         XCTAssertNotNil(session.localOverviewCategories)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertEqual(session.overviewTransactionStats?.highestExpense, .init(title: "Outside bootstrap", minorUnits: 900_000))
         XCTAssertNil(session.localOverviewCategoriesError)
     }
 
@@ -403,9 +426,12 @@ final class LocalLedgerSessionTests: XCTestCase {
         try await repository.saveFile(draft, text: draft.text + "; updated\n")
         await fulfillment(of: [invalidated], timeout: 3)
         XCTAssertNil(session.localOverviewCategories)
+        XCTAssertNil(session.overviewTransactionStats)
         XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
         await session.refresh()
         XCTAssertNotNil(session.localOverviewCategories)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertEqual(session.overviewTransactionStats?.highestExpense, .init(title: "Outside bootstrap", minorUnits: 900_000))
     }
 
     func testOverviewWarmUnlockReloadsAggregateWithoutBootstrap() async throws {
@@ -414,6 +440,7 @@ final class LocalLedgerSessionTests: XCTestCase {
         defer { session.chooseLedger() }
         await session.lock()
         XCTAssertNil(session.localOverviewCategories)
+        XCTAssertNil(session.overviewTransactionStats)
         let loaded = expectation(description: "warm aggregate reloaded")
         let observation = session.$localOverviewCategories.compactMap { $0 }.prefix(1).sink { _ in loaded.fulfill() }
         defer { observation.cancel() }
@@ -423,6 +450,8 @@ final class LocalLedgerSessionTests: XCTestCase {
         let after = await fixture.engine.bootstrapCalls
         XCTAssertEqual(after, calls)
         XCTAssertNotNil(session.localOverviewCategories)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertEqual(session.overviewTransactionStats?.highestExpense, .init(title: "Outside bootstrap", minorUnits: 900_000))
     }
 
     func testWarmLocalUnlockKeepsReadyShellAndSkipsUnchangedBootstrap() async throws {
