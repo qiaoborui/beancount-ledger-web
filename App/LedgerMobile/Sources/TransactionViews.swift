@@ -814,7 +814,10 @@ struct TransactionsView: View {
                     session.pendingTransactionFilter = nil
                 }
             }
-        .onChange(of: windowRequestKey) { _, _ in cancelFileExport() }
+        .onChange(of: windowRequestKey) { _, _ in
+            cancelFileExport()
+            if preparingTags { revokeListAction() }
+        }
         .onChange(of: selectedTransactionIDs) { _, _ in
             cancelFileExport()
             if preparingTags { revokeListAction() }
@@ -991,7 +994,44 @@ struct TransactionsView: View {
             && session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites != true
     }
 
+    private func prepareLocalSelectedTags() {
+        guard actionRequestID == nil, isSelecting, !selectedTransactionIDs.isEmpty else { return }
+        revokeListAction()
+        let id = UUID(), key = windowRequestKey
+        let selection = selectedTransactionIDs
+        preparingTags = true
+        actionRequestID = id
+        actionTask = Task { @MainActor in
+            defer {
+                if actionRequestID == id { preparingTags = false; actionRequestID = nil; actionTask = nil }
+            }
+            func stillCurrent() -> Bool {
+                !Task.isCancelled && actionRequestID == id && windowRequestKey == key
+                    && TransactionTagSelectionRules.canPresentPreparedBatch(
+                        captured: selection, current: selectedTransactionIDs, isSelecting: isSelecting)
+            }
+            do {
+                let facts = try await session.localTransactionSelectionFacts(filter: key.filter, selectedIDs: selection)
+                guard stillCurrent() else { return }
+                let sources = try facts.sourcesForTagPreparation()
+                let prepared = try await session.prepareLocalTransactionAction(sources: sources, kind: .addTags)
+                guard stillCurrent() else {
+                    session.cancelLocalTransactionAction(prepared)
+                    return
+                }
+                localAction = prepared
+                tagEditorPresented = true
+            } catch {
+                if stillCurrent() {
+                    actionMessageStyle = .failure
+                    actionMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
     private func handleAddTags() {
+        if session.isLocal { prepareLocalSelectedTags(); return }
         let eligible = selectedTransactions.filter(isTagEligible)
         if eligible.isEmpty {
             actionMessageStyle = .failure
@@ -1003,12 +1043,7 @@ struct TransactionsView: View {
             actionMessage = "一次最多为 \(TransactionTagSelectionRules.maximumCount) 笔交易添加标签。"
             return
         }
-        if session.isLocal {
-            // Preserve existing full-range application scope, including selected
-            // rows hidden by the current filter. Never use the loaded page as U.
-            let selected = transactions.filter { selectedTransactionIDs.contains($0.id) && isTagEligible($0) }
-            prepareListAction(selected, kind: .addTags)
-        } else { tagEditorPresented = true }
+        tagEditorPresented = true
     }
 
     private func cancelFileExport() {
@@ -1053,7 +1088,6 @@ struct TransactionsView: View {
     }
 
     private func applyTags(_ tags: [String]) async throws {
-        let selected = transactions.filter { selectedTransactionIDs.contains($0.id) && isTagEligible($0) }
         let appliedCount: Int
         if session.isLocal {
             guard let localAction else { throw CancellationError() }
@@ -1061,6 +1095,7 @@ struct TransactionsView: View {
             do { try await session.addLocalTransactionTags(action: localAction, tags: tags) }
             catch { failListAction(error); throw error }
         } else {
+            let selected = transactions.filter { selectedTransactionIDs.contains($0.id) && isTagEligible($0) }
             guard !selected.isEmpty else { throw LedgerTagValidationError.empty }
             appliedCount = selected.count
             try await session.addTransactionTags(sources: selected.map(\.source), tags: tags)

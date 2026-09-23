@@ -7,6 +7,16 @@ import Foundation
 /// not remembered selection membership or the existing full-range tag scope.
 struct LocalTransactionSelectionScan {
     enum SelectionError: Error, Equatable { case sourceBytes, invalidBudget }
+    enum TagPreparationError: LocalizedError, Equatable {
+        case noEligibleSelection, tooMany, incomplete
+        var errorDescription: String? {
+            switch self {
+            case .noEligibleSelection: return "所选交易缺少并发校验信息，暂无法添加标签。"
+            case .tooMany: return "一次最多为 \(TransactionTagSelectionRules.maximumCount) 笔交易添加标签。"
+            case .incomplete: return "交易选择信息不完整，请重新读取后再试。"
+            }
+        }
+    }
     struct Result: Sendable {
         let rangeCount: Int
         let matchingCount: Int
@@ -17,6 +27,18 @@ struct LocalTransactionSelectionScan {
         /// Complete only when selectedEligibleCount <= existing tag action limit.
         /// On overflow returns nil, never a silently truncated batch.
         let tagSources: [TransactionSource]?
+        /// Preserve the filtered preflight and full-range application scope.
+        /// Reject a hidden-selection overflow before hydration, never take a prefix.
+        func sourcesForTagPreparation() throws -> [TransactionSource] {
+            guard selectedMatchingEligibleCount > 0 else { throw TagPreparationError.noEligibleSelection }
+            guard selectedEligibleCount <= TransactionTagSelectionRules.maximumCount else {
+                throw TagPreparationError.tooMany
+            }
+            guard let tagSources, !tagSources.isEmpty, tagSources.count == selectedEligibleCount else {
+                throw TagPreparationError.incomplete
+            }
+            return tagSources
+        }
         var allMatchingSelected: Bool { matchingCount > 0 && selectedMatchingCount == matchingCount }
     }
     private var validation: LocalTransactionScan
