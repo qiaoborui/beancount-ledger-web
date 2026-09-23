@@ -390,6 +390,10 @@ struct TransactionsView: View {
     @State private var actionTask: Task<Void, Never>?
     @State private var actionRequestID: UUID?
     @State private var preparingTags = false
+    @State private var exportTask: Task<Void, Never>?
+    @State private var exportRequestID: UUID?
+    @State private var fileExport: LocalTransactionShareExport?
+    @State private var fileExportOwner: LocalTransactionShareExport?
 
     private struct WindowRequestKey: Equatable {
         let revision: UUID?
@@ -763,6 +767,11 @@ struct TransactionsView: View {
                 .environmentObject(session)
                 .ledgerPrivacyProtectedSheet()
             }
+            .sheet(item: $fileExport, onDismiss: cancelFileExport) { export in
+                TransactionTextExportSheet(export: export)
+                    .environmentObject(session)
+                    .ledgerPrivacyProtectedSheet()
+            }
             .sheet(item: $singleShareTarget) { tx in
                 TransactionShareSheet(
                     transactions: [tx],
@@ -784,7 +793,9 @@ struct TransactionsView: View {
                         allSelected: allVisibleSelected,
                         onToggleAll: toggleAllVisible,
                         onAddTags: handleAddTags,
-                        onShare: handleShare
+                        onShare: handleShare,
+                        onExport: session.isLocal ? { prepareFileExport() } : nil,
+                        isExporting: exportRequestID != nil
                     )
                 }
             }
@@ -803,14 +814,18 @@ struct TransactionsView: View {
                     session.pendingTransactionFilter = nil
                 }
             }
+        .onChange(of: windowRequestKey) { _, _ in cancelFileExport() }
         .onChange(of: selectedTransactionIDs) { _, _ in
+            cancelFileExport()
             if preparingTags { revokeListAction() }
         }
         .onChange(of: isSelecting) { _, selected in
+            if !selected { cancelFileExport() }
             if !selected && preparingTags { revokeListAction() }
         }
         .onDisappear {
             if editingTarget == nil && deletionTarget == nil && !tagEditorPresented { revokeListAction() }
+            if fileExport == nil { cancelFileExport() }
         }
         .onChange(of: session.privacyShielded) { _, hidden in
             if hidden { clearListActionPresentation() }
@@ -994,6 +1009,41 @@ struct TransactionsView: View {
             let selected = transactions.filter { selectedTransactionIDs.contains($0.id) && isTagEligible($0) }
             prepareListAction(selected, kind: .addTags)
         } else { tagEditorPresented = true }
+    }
+
+    private func cancelFileExport() {
+        exportRequestID = nil
+        exportTask?.cancel()
+        exportTask = nil
+        if let fileExportOwner { session.discardLocalTransactionShare(fileExportOwner) }
+        fileExportOwner = nil
+        fileExport = nil
+    }
+
+    private func prepareFileExport() {
+        guard session.isLocal, isSelecting, !selectedTransactionIDs.isEmpty, exportRequestID == nil else { return }
+        cancelFileExport()
+        let id = UUID(), key = windowRequestKey
+        let selection = selectedTransactionIDs
+        exportRequestID = id
+        exportTask = Task { @MainActor in
+            do {
+                let export = try await session.prepareLocalTransactionShare(filter: key.filter, selectedIDs: selection)
+                guard !Task.isCancelled, exportRequestID == id, windowRequestKey == key,
+                      isSelecting, selectedTransactionIDs == selection else {
+                    session.discardLocalTransactionShare(export)
+                    return
+                }
+                fileExportOwner = export
+                fileExport = export
+            } catch {
+                if !Task.isCancelled, exportRequestID == id {
+                    actionMessageStyle = .failure
+                    actionMessage = error.localizedDescription
+                }
+            }
+            if exportRequestID == id { exportRequestID = nil; exportTask = nil }
+        }
     }
 
     private func handleShare() {
@@ -1467,6 +1517,8 @@ private struct TransactionBatchActionBar: View {
     let onToggleAll: () -> Void
     let onAddTags: () -> Void
     let onShare: () -> Void
+    var onExport: (() -> Void)? = nil
+    var isExporting = false
 
     var body: some View {
         HStack(spacing: LedgerSpacing.sm) {
@@ -1501,13 +1553,16 @@ private struct TransactionBatchActionBar: View {
             .disabled(selectedCount == 0)
             .accessibilityIdentifier("transaction-bulk-tag-trigger")
 
-            Button(action: onShare) {
+            Menu {
+                Button("合并分享（长图与文字）", action: onShare)
+                if let onExport { Button("导出完整文字文件", action: onExport).disabled(isExporting) }
+            } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "square.and.arrow.up")
                         .font(.system(size: 11, weight: .semibold))
-                    Text("合并分享")
+                    Text(isExporting ? "正在导出" : "合并分享")
                 }
-            }
+            } primaryAction: { onShare() }
             .font(.system(.footnote, design: .default, weight: .semibold))
             .foregroundStyle(LedgerPalette.onBrand)
             .padding(.horizontal, 12)
