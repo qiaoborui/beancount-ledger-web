@@ -239,6 +239,11 @@ final class LedgerSession: ObservableObject {
     private var accountTrendRequestID: UUID?
     private var accountReadSequence: AccountReadSequence?
 
+    private var widgetWindowTask: Task<LocalTransactionWindow.Window, Error>?
+    private var widgetWindowRequestID: UUID?
+    private var widgetSummaryTask: Task<LocalTransactionScan.Result, Error>?
+    private var widgetSummaryRequestID: UUID?
+
     private struct AccountReadSequence {
         let id: UUID
         let context: LocalReadContext
@@ -2899,6 +2904,74 @@ final class LedgerSession: ObservableObject {
         self.primaryDestinationID = LedgerDestination.transactions.rawValue
     }
 
+    /// Read-only Widget drill-down: its day never changes the main range or
+    /// bootstrap. A caller owns only one <=100-row window, with replay for older
+    /// windows rather than accumulating history. Complete counts load separately.
+    func localWidgetDayWindow(_ day: String, index: Int = 0) async throws -> LocalTransactionWindow.Window {
+        guard LedgerWidgetLink.isValidDay(day), (0..<10_000).contains(index) else {
+            throw LedgerAPIError.incompatibleServer("无效的消费日期或分页")
+        }
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let dayRange = LedgerDateRange(start: day, end: day, preset: .custom)
+        widgetWindowTask?.cancel()
+        let id = UUID(); widgetWindowRequestID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            let reader = try await repository.makeTransactionWindow(start: day, end: dayRange.queryEndExclusive,
+                filter: .init(kind: .expense), expectedRevisionID: context.revisionID, limits: .init(maxRows: 100))
+            do {
+                var window = try await reader.nextWindow()
+                if index > 0 {
+                    for _ in 0..<index {
+                        try validateLocalRead(context)
+                        guard !window.isComplete else { throw LocalLedgerError.operationFailed("支出分页已变化，请返回第一页") }
+                        window = try await reader.nextWindow()
+                    }
+                }
+                await reader.invalidate()
+                return window
+            } catch {
+                await reader.invalidate()
+                throw error
+            }
+        }
+        widgetWindowTask = task
+        defer { if widgetWindowRequestID == id { widgetWindowTask = nil; widgetWindowRequestID = nil } }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(context)
+        guard widgetWindowRequestID == id else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard widgetWindowRequestID == id else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
+    }
+
+    func localWidgetDaySummary(_ day: String) async throws -> LocalTransactionScan.Result {
+        guard LedgerWidgetLink.isValidDay(day) else { throw LedgerAPIError.incompatibleServer("无效的消费日期") }
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let dayRange = LedgerDateRange(start: day, end: day, preset: .custom)
+        widgetSummaryTask?.cancel()
+        let id = UUID(); widgetSummaryRequestID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            return try await repository.scanTransactions(start: day, end: dayRange.queryEndExclusive,
+                filter: .init(kind: .expense), expectedRevisionID: context.revisionID, limits: .init(maxVisibleCount: 0))
+        }
+        widgetSummaryTask = task
+        defer { if widgetSummaryRequestID == id { widgetSummaryTask = nil; widgetSummaryRequestID = nil } }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(context)
+        guard widgetSummaryRequestID == id else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard widgetSummaryRequestID == id else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
+    }
+
     /// A day drill-down owns its payload and never replaces the global range or ledger.
     func widgetDayLedger(_ day: String) async throws -> LedgerBootstrap {
         guard LedgerWidgetLink.isValidDay(day) else {
@@ -3415,6 +3488,10 @@ final class LedgerSession: ObservableObject {
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
     func resetLocalTransactionWindow() {
+        widgetWindowRequestID = nil
+        widgetWindowTask?.cancel(); widgetWindowTask = nil
+        widgetSummaryRequestID = nil
+        widgetSummaryTask?.cancel(); widgetSummaryTask = nil
         accountPageRequestID = nil
         accountPageTask?.cancel(); accountPageTask = nil
         accountTrendRequestID = nil
