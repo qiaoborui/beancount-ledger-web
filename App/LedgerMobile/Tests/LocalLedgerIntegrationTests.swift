@@ -108,6 +108,20 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         let legacyRefund = try XCTUnwrap(rows.first { $0.id == refund.id })
         XCTAssertEqual(legacyRefund.metadata?["fixture"], .string("not candidate evidence"))
 
+        // Both native candidates and legacy responses use snapshotTransactionsDesc.
+        // Verify the actual producer order, including a split inside one day, so
+        // the summary's last expense-currency rule is not an assumed ID sort.
+        var eventScan = try LocalEventTagSummaryScan(revision: first.revision)
+        XCTAssertNil(try eventScan.consume(first, requestedCursor: nil))
+        let events = try XCTUnwrap(eventScan.consume(last, requestedCursor: cursor))
+        XCTAssertEqual(events.sorted { $0.tag < $1.tag },
+            EventTagCalculator.summarizeAllTags(from: rows).sorted { $0.tag < $1.tag })
+        let one = try await repository.candidatePage(start: start, end: end, limit: 1, expectedRevisionID: bootstrap.revisionID)
+        let two = try await repository.candidatePage(start: start, end: end, cursor: XCTUnwrap(one.nextCursor),
+            limit: 1, expectedRevisionID: bootstrap.revisionID)
+        XCTAssertEqual(one.transactions.first?.id, rows[0].id)
+        XCTAssertEqual(two.transactions.first?.id, rows[1].id)
+
         // Global search needs arbitrary metadata, not just list presentation's
         // type. Exercise the real native dialect with exact Swift matching.
         let searchFirst = try await repository.searchCandidatePage(start: start, end: end,
