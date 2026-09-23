@@ -8,11 +8,13 @@ enum LocalLedgerError: LocalizedError, Equatable {
     case invalidConfiguration(String)
     case operationFailed(String)
     case previewRequired
+    case staleTransactionCursor
 
     var errorDescription: String? {
         switch self {
         case .runtimeUnavailable: "此版本缺少设备端账本引擎，请安装完整的本地账本版本"
         case let .invalidConfiguration(message), let .operationFailed(message): message
+        case .staleTransactionCursor: "账本版本已变更，请重新加载交易列表"
         case .previewRequired: "请刷新账本并预览修改后再保存"
         }
     }
@@ -59,6 +61,20 @@ struct LocalLedgerResponse: Sendable {
     func decode<T: Decodable>(_ type: T.Type) throws -> T {
         if isEnvelope { return try LocalLedgerJSON.decodeResult(type, from: data) }
         return try JSONDecoder().decode(type, from: data)
+    }
+
+    func decodeTransactionPage() throws -> LedgerTransactionPage {
+        do { return try decode(LedgerTransactionPage.self) }
+        catch let error as LocalLedgerError {
+            // Interpret conflict only at this endpoint; other mutation conflicts
+            // retain their existing error behavior and messages.
+            struct Header: Decodable { let status: Int }
+            if isEnvelope, case .operationFailed = error,
+               (try? JSONDecoder().decode(Header.self, from: data).status) == 409 {
+                throw LocalLedgerError.staleTransactionCursor
+            }
+            throw error
+        }
     }
 
     func resultData() throws -> Data {

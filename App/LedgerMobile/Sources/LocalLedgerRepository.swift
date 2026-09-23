@@ -87,6 +87,19 @@ actor LocalLedgerRepository: LedgerRepository {
     func homeReport(start: String, end: String, valuationCurrency: String) async throws -> LedgerHomeReport {
         try await read("/api/ledger/home-report", query: range(start, end, valuationCurrency))
     }
+    /// Additive native page API. Callers must keep cursor and query together and
+    /// restart after a revision conflict; it is not an all-history response.
+    func transactionPage(start: String = "0001-01-01", end: String = "9999-12-31",
+                         query: String = "", cursor: String? = nil, limit: Int = 100) async throws -> LedgerTransactionPage {
+        guard (1...500).contains(limit) else { throw LocalLedgerError.invalidConfiguration("分页数量必须为 1 到 500") }
+        var parameters = ["start": start, "end": end, "q": query, "limit": String(limit)]
+        parameters["cursor"] = cursor
+        let (revision, response) = try await readSnapshot("/api/ledger/transactions/page", query: parameters)
+        let page = try response.decodeTransactionPage()
+        presentedRevisionID = revision
+        return page
+    }
+
     func globalTransactions() async throws -> LedgerGlobalTransactions {
         try await read("/api/ledger/transactions", query: ["start": "0001-01-01", "end": "9999-12-31"])
     }

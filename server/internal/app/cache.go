@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -18,7 +19,11 @@ type LedgerVersion struct {
 	FileCount   int     `json:"fileCount"`
 }
 
+var localSnapshotSequence atomic.Uint64
+
 type LedgerSnapshot struct {
+	// Process-local identity binds cursors to this exact transformed model.
+	localReadModelID uint64
 	LedgerVersion
 	BeanEntries       []BeanEntry       `json:"-"`
 	SourceBeanEntries []BeanEntry       `json:"-"`
@@ -209,6 +214,9 @@ func sortedTransactionViews(txns []Transaction) ([]Transaction, []Transaction) {
 func prepareLedgerSnapshot(snapshot *LedgerSnapshot) {
 	if snapshot == nil {
 		return
+	}
+	if snapshot.localReadModelID == 0 {
+		snapshot.localReadModelID = localSnapshotSequence.Add(1)
 	}
 	if snapshot.RawBalances == nil {
 		snapshot.RawBalances = CurrentBalances(snapshot.Transactions)

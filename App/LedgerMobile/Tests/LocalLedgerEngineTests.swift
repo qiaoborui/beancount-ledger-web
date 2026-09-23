@@ -115,6 +115,17 @@ final class LocalLedgerEngineTests: XCTestCase {
         }
     }
 
+    func testPageCursorConflictIsStructuredAndOtherFailuresUnchanged() throws {
+        for (status, expected) in [(409, LocalLedgerError.staleTransactionCursor),
+                                   (400, LocalLedgerError.operationFailed("invalid")),
+                                   (413, LocalLedgerError.operationFailed("invalid"))] {
+            let response = LocalLedgerResponse(envelope: Data("{\"ok\":false,\"status\":\(status),\"result\":{\"error\":\"invalid\"}}".utf8))
+            XCTAssertThrowsError(try response.decodeTransactionPage()) {
+                XCTAssertEqual($0 as? LocalLedgerError, expected)
+            }
+        }
+    }
+
     func testRequestSplicesCanonicalModelWithoutChangingQueryOrBody() throws {
         let canonical = Data(#"{"version":1,"entries":[{"Postings":[{"Quantity":{"Number":"0.0001","Currency":"BTC"}}]}],"options":{"operating_currency":"CNY"}}"#.utf8)
         let request = LocalLedgerEngineRequest(workspaceRoot: "/fixture/generations/one/workspace", runtimeRoot: "/fixture/runtime",
