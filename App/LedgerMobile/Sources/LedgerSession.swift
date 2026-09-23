@@ -233,6 +233,33 @@ final class LedgerSession: ObservableObject {
     private var globalSearchRequestID: UUID?
     private var localSearchSequence: LocalSearchSequence?
 
+    private var accountPageTask: Task<LedgerAccountPage, Error>?
+    private var accountPageRequestID: UUID?
+    private var accountTrendTask: Task<LocalAccountTrendScan.Result, Error>?
+    private var accountTrendRequestID: UUID?
+    private var accountReadSequence: AccountReadSequence?
+
+    private struct AccountReadSequence {
+        let id: UUID
+        let context: LocalReadContext
+        let account: String
+        let currency: String
+    }
+    struct LocalAccountContinuation: Sendable {
+        fileprivate let sequenceID: UUID
+        fileprivate let revision: String
+        fileprivate let cursor: String
+        fileprivate let header: LedgerAccountDetail
+        fileprivate let count: Int
+        fileprivate let consumed: Int
+        fileprivate let lastBalance: Int
+        fileprivate let lastDate: String
+    }
+    struct LocalAccountWindow: Sendable {
+        let page: LedgerAccountPage
+        let continuation: LocalAccountContinuation?
+    }
+
     private struct LocalSearchSequence {
         let id: UUID
         let context: LocalReadContext
@@ -3386,6 +3413,11 @@ final class LedgerSession: ObservableObject {
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
     func resetLocalTransactionWindow() {
+        accountPageRequestID = nil
+        accountPageTask?.cancel(); accountPageTask = nil
+        accountTrendRequestID = nil
+        accountTrendTask?.cancel(); accountTrendTask = nil
+        accountReadSequence = nil
         localGlobalSearchInvalidation &+= 1
         globalSearchTask?.cancel()
         globalSearchTask = nil
@@ -3628,6 +3660,87 @@ final class LedgerSession: ObservableObject {
             throw LocalLedgerWorkspace.WorkspaceError.staleRevision
         }
         return detail
+    }
+
+    /// Account windows and the complete chart have independent tasks. Neither
+    /// may publish into legacy arrays or infer missing/deleted history from a page.
+    func localAccountWindow(account: String, currency: String,
+                            continuation: LocalAccountContinuation? = nil,
+                            limit: Int = 100) async throws -> LocalAccountWindow {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let sequence: AccountReadSequence
+        if let continuation {
+            guard let existing = accountReadSequence, existing.id == continuation.sequenceID,
+                  existing.account == account, existing.currency == currency else { throw CancellationError() }
+            try validateLocalRead(existing.context)
+            sequence = existing
+        } else {
+            sequence = AccountReadSequence(id: UUID(), context: context, account: account, currency: currency)
+            accountReadSequence = sequence
+        }
+        accountPageTask?.cancel()
+        let id = UUID(); accountPageRequestID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(sequence.context)
+            return try await repository.accountPage(account: account, currency: currency,
+                start: context.range.start, end: context.range.queryEndExclusive,
+                cursor: continuation?.cursor, limit: limit, expectedRevisionID: context.revisionID)
+        }
+        accountPageTask = task
+        defer { if accountPageRequestID == id { accountPageTask = nil; accountPageRequestID = nil } }
+        let page = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(sequence.context)
+        guard accountPageRequestID == id, accountReadSequence?.id == sequence.id else { throw CancellationError() }
+        var header = page.detail
+        // This small immutable header is carried by one opaque continuation.
+        header = LedgerAccountDetail(account: header.account, label: header.label, alias: header.alias,
+            group: header.group, active: header.active, currency: header.currency, currentBalance: header.currentBalance,
+            rows: [], start: header.start, end: header.end, openingBalance: header.openingBalance,
+            closingBalance: header.closingBalance, periodChange: header.periodChange)
+        let consumed = try LocalTransactionScan.add(continuation?.consumed ?? 0, page.detail.rows.count)
+        guard consumed <= page.rowCount, (page.nextCursor != nil) == (consumed < page.rowCount) else {
+            throw LocalLedgerError.operationFailed("账户分页总数不一致")
+        }
+        if let continuation {
+            guard page.revision == continuation.revision, page.rowCount == continuation.count,
+                  header == continuation.header, let first = page.detail.rows.first,
+                  continuation.lastDate <= first.date else { throw LocalLedgerError.operationFailed("账户分页上下文已变化") }
+            let (balance, overflow) = continuation.lastBalance.addingReportingOverflow(first.change)
+            guard !overflow, balance == first.balance else { throw LocalLedgerError.operationFailed("账户分页余额不连续") }
+        }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(sequence.context)
+        guard accountPageRequestID == id, accountReadSequence?.id == sequence.id else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        let next: LocalAccountContinuation?
+        if let cursor = page.nextCursor, let last = page.detail.rows.last {
+            next = LocalAccountContinuation(sequenceID: sequence.id, revision: page.revision, cursor: cursor,
+                header: header, count: page.rowCount, consumed: consumed, lastBalance: last.balance, lastDate: last.date)
+        } else { next = nil }
+        return LocalAccountWindow(page: page, continuation: next)
+    }
+
+    func localAccountTrend(account: String, currency: String) async throws -> LocalAccountTrendScan.Result {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        accountTrendTask?.cancel()
+        let id = UUID(); accountTrendRequestID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            return try await repository.accountTrend(account: account, currency: currency,
+                range: context.range, expectedRevisionID: context.revisionID)
+        }
+        accountTrendTask = task
+        defer { if accountTrendRequestID == id { accountTrendTask = nil; accountTrendRequestID = nil } }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(context)
+        guard accountTrendRequestID == id else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard accountTrendRequestID == id else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
     }
 
     /// Caller owns one bounded result; this never seeds legacy global arrays or

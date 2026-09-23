@@ -90,6 +90,24 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
             if request.path == "/api/ledger/transactions/detail" {
                 return try JSONEncoder().encode(rows.first { $0.source.line == Int(request.query["line"] ?? "1") }!)
             }
+            if request.path == "/api/ledger/accounts/detail/page" {
+                let offset = Int(request.query["cursor"] ?? "0") ?? 0
+                let limit = Int(request.query["limit"] ?? "100") ?? 100
+                let end = min(rows.count, offset + limit)
+                let accountRows = try rows[offset..<end].enumerated().map { index, row -> [String: Any] in
+                    ["date": row.date, "payee": row.payee, "narration": row.narration, "change": 125,
+                     "balance": (offset + index + 1) * 125,
+                     "txn": try JSONSerialization.jsonObject(with: JSONEncoder().encode(row))]
+                }
+                let detail: [String: Any] = ["account": request.query["account"]!, "label": "Synthetic", "group": "Expenses", "active": true,
+                    "currency": request.query["currency"]!, "currentBalance": rows.count * 125,
+                    "openingBalance": 0, "closingBalance": rows.count * 125, "periodChange": rows.count * 125,
+                    "start": request.query["start"]!, "end": request.query["end"]!, "rows": accountRows]
+                let next: Any = end < rows.count ? String(end) as Any : NSNull()
+                let response: [String: Any] = ["revision": "native-synthetic", "sensitiveUnlocked": true,
+                    "rowCount": rows.count, "nextCursor": next, "detail": detail]
+                return try JSONSerialization.data(withJSONObject: response)
+            }
             if request.path == "/api/ledger/transactions/page" {
                 if successfulEdits {
                     rows = rows.filter { $0.date >= request.query["start"]! && $0.date < request.query["end"]! }
@@ -122,7 +140,8 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         let session = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
             defaults: defaults,
             widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: suite, lockDirectory: root),
-            widgetCredentialStore: InertWidgetStore())
+            widgetCredentialStore: InertWidgetStore(),
+            ledgerNow: { Date(timeIntervalSince1970: 1_790_164_800) })
         await session.openLocalLedger(descriptor)
         XCTAssertEqual(session.phase, .ready)
         return (session, engine, try XCTUnwrap(session.localRepository))
@@ -554,6 +573,61 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
             }
             await gate.release()
             do { _ = try await loading.value; XCTFail("Revoked share published") } catch { }
+        }
+    }
+
+    func testAccountPagesAndCompleteTrendAreIndependentAndDoNotSeedLegacyArrays() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let original = session.ledger?.transactions
+        let presented = await repository.presentedRevisionID
+        let first = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", limit: 1)
+        XCTAssertEqual(first.page.rowCount, 3)
+        XCTAssertEqual(first.page.detail.rows.map(\.balance), [125])
+        let trend = try await session.localAccountTrend(account: "Expenses:Food", currency: "CNY")
+        XCTAssertEqual(trend.rowCount, 3); XCTAssertTrue(trend.detail.rows.isEmpty)
+        XCTAssertEqual(trend.points.last?.balance, 375)
+        let next = try XCTUnwrap(first.continuation)
+        do {
+            _ = try await session.localAccountWindow(account: "Expenses:Other", currency: "CNY", continuation: next)
+            XCTFail("cross-account cursor accepted")
+        } catch {}
+        let second = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: next, limit: 1)
+        XCTAssertEqual(second.page.detail.rows.map(\.balance), [250])
+        let last = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: second.continuation, limit: 1)
+        XCTAssertEqual(last.page.detail.rows.map(\.balance), [375]); XCTAssertNil(last.continuation)
+        _ = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", limit: 1)
+        do {
+            _ = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: next)
+            XCTFail("old sequence accepted")
+        } catch {}
+        XCTAssertEqual(session.ledger?.transactions, original)
+        let authority = await repository.presentedRevisionID
+        XCTAssertEqual(authority, presented)
+    }
+
+    func testAccountPageAndTrendRejectLateReadsOnResetPrivacyRevisionAndCancellation() async throws {
+        for trend in [false, true] {
+            for operation in 0..<4 {
+                let (session, engine, repository) = try await fixture()
+                defer { session.chooseLedger() }
+                let entered = expectation(description: "account awaiting")
+                let gate = Gate(entered)
+                await engine.pause("/api/ledger/accounts/detail/page", gate: gate)
+                let old = Task {
+                    if trend { _ = try await session.localAccountTrend(account: "Expenses:Food", currency: "CNY") }
+                    else { _ = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY") }
+                }
+                await fulfillment(of: [entered], timeout: 3)
+                switch operation {
+                case 0: session.resetLocalTransactionWindow()
+                case 1: await session.updateActivity(isActive: false, isBackground: true)
+                case 2: try await advance(repository)
+                default: old.cancel()
+                }
+                await gate.release()
+                do { try await old.value; XCTFail("late account read returned") } catch {}
+            }
         }
     }
 
