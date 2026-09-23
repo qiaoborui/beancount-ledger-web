@@ -41,6 +41,7 @@ type LocalRequest struct {
 	Staging       bool                 `json:"staging"`
 	ImportFile    *LocalImportFile     `json:"importFile,omitempty"`
 	Canonical     *LocalCanonicalModel `json:"canonical,omitempty"`
+	ModelHandle   string               `json:"modelHandle,omitempty"`
 }
 
 type LocalImportFile struct {
@@ -55,6 +56,15 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 	cfg, err := localConfig(input)
 	if err != nil {
 		return http.StatusBadRequest, nil, err
+	}
+	if input.ModelHandle != "" {
+		if input.Canonical != nil {
+			return http.StatusBadRequest, nil, errors.New("handle and canonical are mutually exclusive")
+		}
+		cfg, err = resolveLocalModel(cfg, input.ModelHandle, input.Staging)
+		if err != nil {
+			return http.StatusConflict, nil, err
+		}
 	}
 	// Preserve the preview and runtime receipts until canonical validation has
 	// accepted the staged workspace. Swift discards this staging directory.
@@ -167,6 +177,9 @@ func localRequestCache(cfg Config, staging bool) (*LedgerCache, error) {
 	version, err := ledgerVersion(cfg)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.localRegisteredCache != nil {
+		return cfg.localRegisteredCache, nil
 	}
 	if staging || filepath.Base(filepath.Dir(filepath.Dir(cfg.LedgerRoot))) != "generations" {
 		return NewLedgerCache(cfg), nil
@@ -356,6 +369,11 @@ func copyLocalRuntime(source, destination string) error {
 		relative, err := filepath.Rel(source, path)
 		if err != nil {
 			return err
+		}
+		// Canonical export is scratch owned by the serialized native bridge,
+		// never an import receipt. Do not copy/read orphaned huge stream files.
+		if relative == "canonical-stream" && entry.IsDir() {
+			return filepath.SkipDir
 		}
 		target := filepath.Join(destination, relative)
 		if entry.IsDir() {
