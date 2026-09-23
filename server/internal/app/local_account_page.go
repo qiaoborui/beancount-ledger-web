@@ -24,10 +24,17 @@ type localAccountPage struct {
 func localAccountPageResponse(cfg Config, snapshot *LedgerSnapshot, query map[string]string) (int, json.RawMessage, error) {
 	for key := range query {
 		switch key {
-		case "account", "currency", "start", "end", "limit", "cursor":
+		case "account", "currency", "start", "end", "limit", "cursor", "order":
 		default:
 			return 400, nil, errors.New("unsupported account page query parameter")
 		}
+	}
+	order := query["order"]
+	if order == "" {
+		order = "asc"
+	}
+	if order != "asc" && order != "desc" {
+		return 400, nil, errors.New("invalid account page order")
 	}
 	account, start, end := query["account"], query["start"], query["end"]
 	if account == "" {
@@ -64,7 +71,7 @@ func localAccountPageResponse(cfg Config, snapshot *LedgerSnapshot, query map[st
 		return 413, nil, errors.New("account metadata exceeds page budget")
 	}
 	revision := fmt.Sprintf("%s:%d", snapshot.Version, snapshot.localReadModelID)
-	scopeBytes, _ := json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, revision, "native-account-page-v1", account, currency, start, end})
+	scopeBytes, _ := json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, revision, "native-account-page-v1", account, currency, start, end, order})
 	scope := fmt.Sprintf("%x", sha256.Sum256(scopeBytes))
 	offset := 0
 	if raw := query["cursor"]; raw != "" {
@@ -98,40 +105,74 @@ func localAccountPageResponse(cfg Config, snapshot *LedgerSnapshot, query map[st
 	capacity := func() (int, json.RawMessage, error) {
 		return 413, nil, errors.New("account history exceeds numeric or response capacity")
 	}
+	// Ascending totals establish exact legacy running balances, including
+	// intermediate overflow checks. Descending then reverses this same sequence
+	// (not the transaction-list descending order, which has different day ties).
+	if order == "desc" {
+		for index := 0; index < txns.Len(); index++ {
+			txn := txns.At(index)
+			change, matched, valid := localAccountChange(txn, account, currency)
+			if !valid {
+				return capacity()
+			}
+			if !matched {
+				continue
+			}
+			balance, ok = localOverviewAdd(balance, change)
+			if !ok {
+				return capacity()
+			}
+			if start != "" && txn.Date < start {
+				page.Detail.OpeningBalance = balance
+			}
+			if end == "" || txn.Date < end {
+				page.Detail.ClosingBalance = balance
+			}
+			if start == "" || (txn.Date >= start && txn.Date < end) {
+				page.RowCount++
+			}
+		}
+		page.Detail.CurrentBalance = balance
+	}
 	for index := 0; index < txns.Len(); index++ {
-		txn := txns.At(index)
-		change, matched := 0, false
-		for _, posting := range txn.Postings {
-			c := posting.Currency
-			if c == "" {
-				c = "CNY"
-			}
-			if posting.Account == account && c == currency {
-				var ok bool
-				change, ok = localOverviewAdd(change, posting.Amount)
-				if !ok {
-					return capacity()
-				}
-				matched = true
-			}
+		position := index
+		if order == "desc" {
+			position = txns.Len() - 1 - index
+		}
+		txn := txns.At(position)
+		change, matched, valid := localAccountChange(txn, account, currency)
+		if !valid {
+			return capacity()
 		}
 		if !matched {
 			continue
 		}
-		balance, ok = localOverviewAdd(balance, change)
-		if !ok {
-			return capacity()
-		}
-		if start != "" && txn.Date < start {
-			page.Detail.OpeningBalance = balance
-		}
-		if end == "" || txn.Date < end {
-			page.Detail.ClosingBalance = balance
+		rowBalance := balance
+		if order == "desc" {
+			var valid bool
+			balance, valid = localAccountSubtract(balance, change)
+			if !valid {
+				return capacity()
+			}
+		} else {
+			balance, ok = localOverviewAdd(balance, change)
+			if !ok {
+				return capacity()
+			}
+			rowBalance = balance
+			if start != "" && txn.Date < start {
+				page.Detail.OpeningBalance = balance
+			}
+			if end == "" || txn.Date < end {
+				page.Detail.ClosingBalance = balance
+			}
 		}
 		if start != "" && (txn.Date < start || txn.Date >= end) {
 			continue
 		}
-		page.RowCount++
+		if order == "asc" {
+			page.RowCount++
+		}
 		if index < offset || page.NextCursor != "" {
 			continue
 		}
@@ -159,7 +200,7 @@ func localAccountPageResponse(cfg Config, snapshot *LedgerSnapshot, query map[st
 			}
 			txn.Source.File = filepath.ToSlash(relative)
 		}
-		row := AccountDetailRow{Date: txn.Date, Payee: txn.Payee, Narration: txn.Narration, Change: change, Balance: balance, Txn: txn}
+		row := AccountDetailRow{Date: txn.Date, Payee: txn.Payee, Narration: txn.Narration, Change: change, Balance: rowBalance, Txn: txn}
 		encoded, err := json.Marshal(row)
 		if err != nil {
 			return 500, nil, errors.New("cannot encode account row")
@@ -174,11 +215,13 @@ func localAccountPageResponse(cfg Config, snapshot *LedgerSnapshot, query map[st
 		used += len(encoded) + 1
 		page.Detail.Rows = append(page.Detail.Rows, row)
 	}
-	page.Detail.CurrentBalance = balance
+	if order == "asc" {
+		page.Detail.CurrentBalance = balance
+	}
 	// Checked subtraction, including MinInt (which cannot be safely negated).
 	closing, opening := page.Detail.ClosingBalance, page.Detail.OpeningBalance
-	change := closing - opening
-	if (opening > 0 && change > closing) || (opening < 0 && change < closing) {
+	change, valid := localAccountSubtract(closing, opening)
+	if !valid {
 		return capacity()
 	}
 	page.Detail.PeriodChange = change
@@ -241,4 +284,27 @@ func localAccountRowFitsEncodingBudget(txn Transaction) bool {
 		}
 	}
 	return true
+}
+
+func localAccountChange(txn Transaction, account, currency string) (int, bool, bool) {
+	change, matched := 0, false
+	for _, posting := range txn.Postings {
+		c := posting.Currency
+		if c == "" {
+			c = "CNY"
+		}
+		if posting.Account == account && c == currency {
+			var ok bool
+			change, ok = localOverviewAdd(change, posting.Amount)
+			if !ok {
+				return 0, false, false
+			}
+			matched = true
+		}
+	}
+	return change, matched, true
+}
+func localAccountSubtract(a, b int) (int, bool) {
+	value := a - b
+	return value, !((b > 0 && value > a) || (b < 0 && value < a))
 }
