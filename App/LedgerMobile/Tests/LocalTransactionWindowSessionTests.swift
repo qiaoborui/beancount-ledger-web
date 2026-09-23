@@ -121,7 +121,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         }
         private static func row(_ line: Int) -> LedgerTransaction {
             LedgerTransaction(date: "2026-09-23", payee: line == 2 ? "Needle" : "Synthetic", narration: "window only",
-                postings: [LedgerPosting(account: "Expenses:Food", amount: 125, currency: "CNY")],
+                tags: ["synthetic-event"], postings: [LedgerPosting(account: "Expenses:Food", amount: 125, currency: "CNY")],
                 source: TransactionSource(file: "synthetic.bean", line: line, hash: "row-\(line)"))
         }
     }
@@ -575,6 +575,74 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
             await gate.release()
             do { _ = try await loading.value; XCTFail("Revoked share published") } catch { }
         }
+    }
+
+    func testEventTagSummaryCoalescesReadersAndResetRejectsLatePublication() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let original = session.ledger?.transactions
+        let entered = expectation(description: "events awaiting")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate)
+        let first = Task { await session.loadLocalEventTagSummaries() }
+        await fulfillment(of: [entered], timeout: 3)
+        let second = Task { await session.loadLocalEventTagSummaries() }
+        await Task.yield()
+        await gate.release()
+        await first.value; await second.value
+        XCTAssertEqual(session.localEventTagSummaries?.first?.transactionCount, 3)
+        XCTAssertEqual(session.localEventTagSummaries?.first?.totalExpense, 375)
+        let requests = await engine.pageRequests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(session.ledger?.transactions, original)
+        await session.loadLocalEventTagSummaries()
+        let cachedRequests = await engine.pageRequests
+        XCTAssertEqual(cachedRequests.count, 1)
+        session.resetLocalTransactionWindow()
+        XCTAssertNil(session.localEventTagSummaries)
+        let lateEntered = expectation(description: "late events")
+        let lateGate = Gate(lateEntered)
+        await engine.pause(gate: lateGate)
+        let late = Task { await session.loadLocalEventTagSummaries() }
+        await fulfillment(of: [lateEntered], timeout: 3)
+        session.resetLocalTransactionWindow()
+        await lateGate.release(); await late.value
+        XCTAssertNil(session.localEventTagSummaries)
+        XCTAssertFalse(session.isLocalEventTagSummaryLoading)
+    }
+
+    func testEventSummaryOwnedTaskCompletesAfterAllWaitersCancelAndCacheRejectsNewRevision() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let entered = expectation(description: "cancelled event waiter")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate)
+        let waiter = Task { await session.loadLocalEventTagSummaries() }
+        await fulfillment(of: [entered], timeout: 3)
+        waiter.cancel()
+        await gate.release(); await waiter.value
+        XCTAssertFalse(session.isLocalEventTagSummaryLoading)
+        XCTAssertEqual(session.localEventTagSummaries?.first?.transactionCount, 3)
+        try await advance(repository)
+        await session.loadLocalEventTagSummaries()
+        XCTAssertNil(session.localEventTagSummaries)
+        XCTAssertNotNil(session.localEventTagSummaryError)
+    }
+
+    func testForcedEventSummarySuccessCannotBeOverwrittenByOldFailure() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let entered = expectation(description: "old event failure")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate, fail: true)
+        let old = Task { await session.loadLocalEventTagSummaries() }
+        await fulfillment(of: [entered], timeout: 3)
+        await session.loadLocalEventTagSummaries(force: true)
+        XCTAssertEqual(session.localEventTagSummaries?.first?.transactionCount, 3)
+        await gate.release(); await old.value
+        XCTAssertEqual(session.localEventTagSummaries?.first?.transactionCount, 3)
+        XCTAssertNil(session.localEventTagSummaryError)
+        XCTAssertFalse(session.isLocalEventTagSummaryLoading)
     }
 
     func testWidgetDayWindowsAndSummaryDoNotChangeMainRangeOrLegacyArrays() async throws {

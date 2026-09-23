@@ -239,6 +239,12 @@ final class LedgerSession: ObservableObject {
     private var accountTrendRequestID: UUID?
     private var accountReadSequence: AccountReadSequence?
 
+    @Published private(set) var localEventTagSummaries: [EventTagSummary]?
+    @Published private(set) var localEventTagSummaryError: String?
+    @Published private(set) var isLocalEventTagSummaryLoading = false
+    private var eventTagSummaryTask: Task<Void, Never>?
+    private var eventTagSummaryID: UUID?
+
     private var widgetWindowTask: Task<LocalTransactionWindow.Window, Error>?
     private var widgetWindowRequestID: UUID?
     private var widgetSummaryTask: Task<LocalTransactionScan.Result, Error>?
@@ -3488,6 +3494,9 @@ final class LedgerSession: ObservableObject {
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
     func resetLocalTransactionWindow() {
+        eventTagSummaryID = nil
+        eventTagSummaryTask?.cancel(); eventTagSummaryTask = nil
+        localEventTagSummaries = nil; localEventTagSummaryError = nil; isLocalEventTagSummaryLoading = false
         widgetWindowRequestID = nil
         widgetWindowTask?.cancel(); widgetWindowTask = nil
         widgetSummaryRequestID = nil
@@ -3739,6 +3748,63 @@ final class LedgerSession: ObservableObject {
             throw LocalLedgerWorkspace.WorkspaceError.staleRevision
         }
         return detail
+    }
+
+    /// Range-complete bounded summaries shared by the event list and analysis
+    /// card. A second visible consumer joins, rather than superseding, the scan.
+    func loadLocalEventTagSummaries(force: Bool = false) async {
+        guard isLocal, !Task.isCancelled else { return }
+        do {
+            let context = try localReadContext()
+            guard let repository = localRepository else { throw CancellationError() }
+            if localEventTagSummaries != nil && !force {
+                let current = try await repository.workspace.currentRevision()
+                try validateLocalRead(context)
+                guard current?.id == context.revisionID else {
+                    localEventTagSummaries = nil
+                    localEventTagSummaryError = "账本已变化，请刷新后重试。"
+                    return
+                }
+                return
+            }
+            if let running = eventTagSummaryTask, !force {
+                await running.value
+                return
+            }
+            eventTagSummaryTask?.cancel()
+            let id = UUID(); eventTagSummaryID = id
+            isLocalEventTagSummaryLoading = true; localEventTagSummaryError = nil
+            // The session-owned task publishes and cleans up even if every view
+            // waiter disappears. Only context invalidation/force cancels shared work.
+            let task = Task { @MainActor [self] in
+                defer {
+                    if eventTagSummaryID == id {
+                        isLocalEventTagSummaryLoading = false
+                        eventTagSummaryTask = nil; eventTagSummaryID = nil
+                    }
+                }
+                do {
+                    try validateLocalRead(context)
+                    let result = try await repository.eventTagSummaries(start: context.range.start,
+                        end: context.range.queryEndExclusive, expectedRevisionID: context.revisionID)
+                    try validateLocalRead(context)
+                    guard eventTagSummaryID == id else { return }
+                    let current = try await repository.workspace.currentRevision()
+                    try validateLocalRead(context)
+                    guard eventTagSummaryID == id else { return }
+                    guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                    localEventTagSummaries = result
+                    localEventTagSummaryError = nil
+                } catch {
+                    if eventTagSummaryID == id {
+                        localEventTagSummaries = nil
+                        if !(error is CancellationError) { localEventTagSummaryError = error.localizedDescription }
+                    }
+                }
+            }
+            eventTagSummaryTask = task
+            await task.value
+        } catch { /* Unreadable contexts publish no financial state. */ }
     }
 
     /// Account windows and the complete chart have independent tasks. Neither
