@@ -112,6 +112,25 @@ final class LocalTransactionShareExportTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: parent.path), [])
     }
 
+    func testSynchronousAdoptionOwnsCompletedFileBeforeAsyncReturn() async throws {
+        let (repository, _, revision, parent) = try await fixture()
+        var adopted: LocalTransactionShareExport?
+        let export = try await LocalTransactionShareExport.prepare(repository: repository,
+            start: "2026-09-01", end: "2026-10-01", filter: .init(), selectedIDs: nil,
+            expectedRevisionID: revision, currency: "CNY", accountLabels: [:], parentDirectory: parent,
+            adopt: { value in
+                adopted = value
+                XCTAssertTrue(FileManager.default.fileExists(atPath: value.url.path))
+                // Model synchronous owner revocation before the awaiting task
+                // can resume; completed result must not postpone file deletion.
+                value.discard()
+                XCTAssertFalse(FileManager.default.fileExists(atPath: value.url.path))
+            }, validate: {})
+        XCTAssertTrue(adopted === export)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: export.url.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: parent.path), [])
+    }
+
     func testSecondPassFailureDeletesPartialExport() async throws {
         let (repository, engine, revision, parent) = try await fixture()
         await engine.fail(2)
