@@ -147,6 +147,17 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         XCTAssertEqual(pendingRows.map(\.id), rows.map(\.id))
         XCTAssertEqual(pendingRows.map(\.pendingReasons), rows.map(\.pendingReasons))
         XCTAssertTrue(pendingRows.allSatisfy { $0.editableEntry == nil && $0.pendingReviewFlag != nil })
+        for tab in LedgerPendingFilter.allCases {
+            var pendingScan = try LocalPendingScan(revision: pendingFirst.revision, filter: tab,
+                declaredAccounts: bootstrap.payload.accounts.map(\.account), limits: .init(rows: 2))
+            XCTAssertNil(try pendingScan.consume(pendingFirst, requestedCursor: nil))
+            let scanned = try XCTUnwrap(pendingScan.consume(pendingLast, requestedCursor: pendingFirst.nextCursor))
+            let pending = rows.filter { !$0.pendingReasons.isEmpty }
+            let matched = pending.filter { tab.includes($0.pendingReasons) }
+            XCTAssertEqual(scanned.totalCount, pending.count)
+            XCTAssertEqual(scanned.totalMinorUnits, pending.reduce(0) { $0 + TransactionPresentation(transaction: $1).minorUnits })
+            XCTAssertEqual(scanned.transactions.map(\.id), Array(matched.prefix(2)).map(\.id))
+        }
 
         // Global search needs arbitrary metadata, not just list presentation's
         // type. Exercise the real native dialect with exact Swift matching.
