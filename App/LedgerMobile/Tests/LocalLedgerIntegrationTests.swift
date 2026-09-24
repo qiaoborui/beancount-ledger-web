@@ -116,6 +116,19 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         let events = try XCTUnwrap(eventScan.consume(last, requestedCursor: cursor))
         XCTAssertEqual(events.sorted { $0.tag < $1.tag },
             EventTagCalculator.summarizeAllTags(from: rows).sorted { $0.tag < $1.tag })
+        for tag in ["ordinary", "unicode", "refund", "missing"] {
+            var reportScan = try LocalEventTagReportScan(revision: first.revision, tag: tag)
+            XCTAssertNil(try reportScan.consume(first, requestedCursor: nil))
+            let actual = try XCTUnwrap(reportScan.consume(last, requestedCursor: cursor))
+            let expected = EventTagCalculator.generateReport(tag: tag, from: rows)
+            XCTAssertEqual(actual.summary.transactionCount, expected.transactions.count)
+            XCTAssertEqual(actual.summary.totalExpense, expected.totalExpense)
+            XCTAssertEqual(actual.summary.totalIncome, expected.totalIncome)
+            XCTAssertEqual(actual.summary.currency, expected.currency)
+            XCTAssertEqual(actual.dailySeries, expected.dailySeries)
+            XCTAssertEqual(actual.categoryBreakdown.sorted { $0.account < $1.account },
+                expected.categoryBreakdown.sorted { $0.account < $1.account })
+        }
         let one = try await repository.candidatePage(start: start, end: end, limit: 1, expectedRevisionID: bootstrap.revisionID)
         let two = try await repository.candidatePage(start: start, end: end, cursor: XCTUnwrap(one.nextCursor),
             limit: 1, expectedRevisionID: bootstrap.revisionID)
