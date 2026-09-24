@@ -79,6 +79,21 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         let bootstrap = try await repository.bootstrapSnapshot(start: start, end: end, today: "2026-09-23", valuationCurrency: "CNY")
         XCTAssertEqual(bootstrap.revisionID, initial.id)
         XCTAssertTrue(bootstrap.payload.sensitiveUnlocked)
+        let boundedBootstrap = try await repository.bootstrapPage(start: start, end: end,
+            today: "2026-09-23", valuationCurrency: "CNY", limit: 2, expectedRevisionID: initial.id)
+        XCTAssertTrue(boundedBootstrap.bootstrap.transactions.isEmpty)
+        XCTAssertEqual(boundedBootstrap.bootstrap.summary, bootstrap.payload.summary)
+        XCTAssertEqual(boundedBootstrap.bootstrap.accountBalances, bootstrap.payload.accountBalances)
+        XCTAssertEqual(boundedBootstrap.bootstrap.accounts, bootstrap.payload.accounts)
+        XCTAssertEqual(boundedBootstrap.bootstrap.reconciliationRows, bootstrap.payload.reconciliationRows)
+        XCTAssertEqual(boundedBootstrap.bootstrap.netWorthHistory, bootstrap.payload.netWorthHistory)
+        XCTAssertEqual(boundedBootstrap.bootstrap.prices, bootstrap.payload.prices)
+        XCTAssertEqual(boundedBootstrap.transactionPage.transactions.map(\.id), Array(bootstrap.payload.transactions.prefix(2)).map(\.id))
+        let continuedBootstrap = try await repository.candidatePage(start: start, end: end,
+            cursor: XCTUnwrap(boundedBootstrap.transactionPage.nextCursor), limit: 2, expectedRevisionID: initial.id)
+        XCTAssertEqual(continuedBootstrap.transactions.map(\.id), Array(bootstrap.payload.transactions[2..<4]).map(\.id))
+        let authorityAfterBootstrapPage = await repository.presentedRevisionID
+        XCTAssertEqual(authorityAfterBootstrapPage, initial.id)
         let reconciliation = try await repository.reconciliationSnapshot(start: start, end: end, expectedRevisionID: bootstrap.revisionID)
         XCTAssertEqual(reconciliation.rows.count, bootstrap.payload.reconciliationRows.count)
         for row in reconciliation.rows {

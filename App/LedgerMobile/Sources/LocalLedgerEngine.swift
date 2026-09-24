@@ -94,8 +94,12 @@ struct LocalLedgerResponse: Sendable {
         }
     }
 
-    func decodeBootstrapPage(maximumBytes: Int = (1 << 20) - 4_096) throws -> LocalBootstrapPage {
-        guard data.count <= maximumBytes else { throw LocalLedgerError.operationFailed("启动分页响应超过容量限制") }
+    func decodeBootstrapPage(maximumBytes: Int = 1 << 20) throws -> LocalBootstrapPage {
+        // The native result reserves 4KiB for the bridge envelope. Bound the
+        // entire response here so a valid near-limit enveloped result still fits.
+        guard (0...(1 << 20)).contains(maximumBytes), data.count <= maximumBytes else {
+            throw LocalLedgerError.operationFailed("启动分页响应超过容量限制")
+        }
         do { return try decode(LocalBootstrapPage.self) }
         catch let error as LocalLedgerError {
             struct Header: Decodable { let status: Int }
