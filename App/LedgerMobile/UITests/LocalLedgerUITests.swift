@@ -144,6 +144,11 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertFalse(app.buttons["account-history-next"].isEnabled)
         let trend = app.descendants(matching: .any)["account-balance-trend-chart"]
         XCTAssertTrue(trend.waitForExistence(timeout: 20), app.debugDescription)
+        app.buttons["校对余额"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["校对余额"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["reconciliation-card-Assets:Bank"].waitForExistence(timeout: 20), app.debugDescription)
+        app.navigationBars["校对余额"].buttons["取消"].tap()
+        XCTAssertTrue(app.navigationBars["校对余额"].waitForNonExistence(timeout: 10))
         let accountRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'account-history-row-'")).firstMatch
         XCTAssertTrue(accountRow.waitForExistence(timeout: 10), app.debugDescription)
         if !accountRow.isHittable { app.swipeUp() }

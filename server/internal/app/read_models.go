@@ -8,7 +8,9 @@ type ReconciliationRow struct {
 	LedgerBalance int               `json:"ledgerBalance"`
 	Status        string            `json:"status"`
 	LastAssertion *BalanceAssertion `json:"lastAssertion"`
-	StatusError   *bool             `json:"statusError,omitempty"`
+	// Native snapshot evidence only. Legacy bootstrap/HTTP omit these fields.
+	StatusError    *bool          `json:"statusError,omitempty"`
+	SnapshotStatus *AccountStatus `json:"snapshotStatus,omitempty"`
 }
 
 type BootstrapResult struct {

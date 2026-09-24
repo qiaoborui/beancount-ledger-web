@@ -197,6 +197,14 @@ func TestLocalReconciliationSnapshotRouteMatchesLegacyAndBounds(t *testing.T) {
 		Rows []ReconciliationRow `json:"rows"`
 	}
 	_ = json.Unmarshal(legacyRaw, &legacy)
+	for i := range native.Rows {
+		if native.Rows[i].SnapshotStatus == nil || native.Rows[i].StatusError == nil {
+			t.Fatal("missing native status evidence")
+		}
+		// Additional native evidence must not alter the legacy row contract.
+		native.Rows[i].SnapshotStatus = nil
+		native.Rows[i].StatusError = nil
+	}
 	if !reflect.DeepEqual(native.Rows, legacy.Rows) {
 		t.Fatal("snapshot differs from legacy rows")
 	}

@@ -609,7 +609,8 @@ struct LedgerReconciliationRow: Codable, Equatable, Identifiable, Sendable {
     let ledgerBalance: Int
     let status: String // "pending" | "asserted"
     let lastAssertion: LedgerBalanceAssertion?
-    let statusError: Bool?
+    var statusError: Bool? = nil
+    var snapshotStatus: LedgerAccountStatus? = nil
 
     var isAsserted: Bool { status == "asserted" }
     var hasSnapshotIssue: Bool { statusError == true }
