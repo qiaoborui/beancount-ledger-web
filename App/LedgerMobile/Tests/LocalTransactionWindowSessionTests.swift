@@ -645,6 +645,54 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertFalse(session.isLocalEventTagSummaryLoading)
     }
 
+    func testEventWindowsAreBoundedAndIndependentOfCompleteReport() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(205)
+        let original = session.ledger?.transactions
+        let authority = await repository.presentedRevisionID
+        let first = try await session.localEventTagWindow("synthetic-event")
+        XCTAssertEqual(first.transactions.count, 100)
+        XCTAssertFalse(first.isComplete)
+        let report = try await session.localEventTagReport("synthetic-event")
+        XCTAssertEqual(report.summary.transactionCount, 205)
+        let last = try await session.localEventTagWindow("synthetic-event", index: 2)
+        XCTAssertEqual(last.transactions.map(\.source.line), [201, 202, 203, 204, 205])
+        XCTAssertTrue(last.isComplete)
+        let missing = try await session.localEventTagWindow("missing")
+        XCTAssertTrue(missing.transactions.isEmpty)
+        XCTAssertTrue(missing.isComplete)
+        let emptyTag = try await session.localEventTagWindow("")
+        XCTAssertTrue(emptyTag.transactions.isEmpty, "empty tag must not select all rows")
+        do { _ = try await session.localEventTagWindow("synthetic-event", index: 3); XCTFail("invalid page accepted") } catch {}
+        XCTAssertEqual(session.ledger?.transactions, original)
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(after, authority)
+    }
+
+    func testEventWindowRejectsSupersessionResetPrivacyRevisionAndCancellation() async throws {
+        for operation in 0..<5 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "event window awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let old = Task { try await session.localEventTagWindow("synthetic-event") }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0:
+                let replacement = try await session.localEventTagWindow("missing")
+                XCTAssertTrue(replacement.transactions.isEmpty)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            case 3: try await advance(repository)
+            default: old.cancel()
+            }
+            await gate.release()
+            do { _ = try await old.value; XCTFail("late event window returned") } catch {}
+        }
+    }
+
     func testEventReportReturnsCompleteAggregatesWithoutChangingPresentation() async throws {
         let (session, engine, repository) = try await fixture()
         defer { session.chooseLedger() }

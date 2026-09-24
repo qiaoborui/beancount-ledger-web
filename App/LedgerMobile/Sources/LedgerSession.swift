@@ -246,6 +246,8 @@ final class LedgerSession: ObservableObject {
     private var eventTagSummaryID: UUID?
     private var eventReportTask: Task<LocalEventTagReportScan.Result, Error>?
     private var eventReportID: UUID?
+    private var eventWindowTask: Task<LocalTransactionWindow.Window, Error>?
+    private var eventWindowID: UUID?
 
     private var widgetWindowTask: Task<LocalTransactionWindow.Window, Error>?
     private var widgetWindowRequestID: UUID?
@@ -3496,6 +3498,8 @@ final class LedgerSession: ObservableObject {
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
     func resetLocalTransactionWindow() {
+        eventWindowID = nil
+        eventWindowTask?.cancel(); eventWindowTask = nil
         eventReportID = nil
         eventReportTask?.cancel(); eventReportTask = nil
         eventTagSummaryID = nil
@@ -3752,6 +3756,47 @@ final class LedgerSession: ObservableObject {
             throw LocalLedgerWorkspace.WorkspaceError.staleRevision
         }
         return detail
+    }
+
+    /// Report history remains independent of complete aggregates. Keep only a
+    /// bounded window; replay earlier pages instead of collecting every tagged row.
+    func localEventTagWindow(_ tag: String, index: Int = 0) async throws -> LocalTransactionWindow.Window {
+        guard (0..<10_000).contains(index) else { throw LocalLedgerError.invalidConfiguration("事件分页无效") }
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        eventWindowTask?.cancel()
+        let id = UUID(); eventWindowID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            let reader = try await repository.makeTransactionWindow(start: context.range.start,
+                end: context.range.queryEndExclusive, filter: .init(tags: [tag]),
+                expectedRevisionID: context.revisionID, limits: .init(maxRows: 100))
+            do {
+                var window = try await reader.nextWindow()
+                if index > 0 {
+                    for _ in 0..<index {
+                        try validateLocalRead(context)
+                        guard !window.isComplete else { throw LocalLedgerError.operationFailed("事件分页已变化，请返回第一页") }
+                        window = try await reader.nextWindow()
+                    }
+                }
+                await reader.invalidate()
+                return window
+            } catch {
+                await reader.invalidate()
+                throw error
+            }
+        }
+        eventWindowTask = task
+        defer { if eventWindowID == id { eventWindowTask = nil; eventWindowID = nil } }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(context)
+        guard eventWindowID == id else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard eventWindowID == id else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
     }
 
     /// Complete report aggregates are caller-owned and independent of the
