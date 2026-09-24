@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -174,4 +175,47 @@ func TestLocalTransportGlobEntrypointAndDefaultImport(t *testing.T) {
 	}
 	input.WorkspaceRoot = retryStage
 	localTestDispatch(t, input)
+}
+
+func TestLocalReconciliationSnapshotRouteMatchesLegacyAndBounds(t *testing.T) {
+	input := localTestRequest(t)
+	input.Path = "/api/ledger/reconciliation/snapshot"
+	input.Query = map[string]string{"start": "2026-05-01", "end": "2026-06-01"}
+	raw := localTestDispatch(t, input)
+	var native localReconciliationSnapshot
+	if err := json.Unmarshal(raw, &native); err != nil {
+		t.Fatal(err)
+	}
+	if !native.SensitiveUnlocked || native.Start != "2026-05-01" || native.End != "2026-06-01" || len(native.Rows) == 0 {
+		t.Fatalf("invalid snapshot: %#v", native)
+	}
+	status, legacyRaw, err := DispatchLocalRequest(LocalRequest{WorkspaceRoot: input.WorkspaceRoot, RuntimeRoot: input.RuntimeRoot, Entrypoint: input.Entrypoint, Method: "GET", Path: "/api/ledger/reconciliation", Query: input.Query})
+	if status != 200 || err != nil {
+		t.Fatal(status, err)
+	}
+	var legacy struct {
+		Rows []ReconciliationRow `json:"rows"`
+	}
+	_ = json.Unmarshal(legacyRaw, &legacy)
+	if !reflect.DeepEqual(native.Rows, legacy.Rows) {
+		t.Fatal("snapshot differs from legacy rows")
+	}
+	if len(raw) > localTransactionPageBytes-4096 {
+		t.Fatal("snapshot exceeds budget")
+	}
+}
+func TestLocalReconciliationSnapshotRejectsStagingAndRanges(t *testing.T) {
+	input := localTestRequest(t)
+	input.Path = "/api/ledger/reconciliation/snapshot"
+	for _, q := range []map[string]string{{"start": "bad", "end": "2026-06-01"}, {"start": "2026-06-01", "end": "2026-05-01"}, {"start": "2026-05-01", "end": "2026-06-01", "q": ""}} {
+		input.Query = q
+		if status, raw, err := DispatchLocalRequest(input); status != 400 || raw != nil || err == nil {
+			t.Fatal(status, err)
+		}
+	}
+	input.Query = map[string]string{"start": "2026-05-01", "end": "2026-06-01"}
+	input.Staging = true
+	if status, raw, err := DispatchLocalRequest(input); status != 400 || raw != nil || err == nil {
+		t.Fatal(status, err)
+	}
 }

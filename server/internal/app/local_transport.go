@@ -53,6 +53,10 @@ type LocalImportFile struct {
 // mutation is a staged proposal; canonical validation and publication belong
 // to the caller's workspace transaction.
 func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
+	if input.Path == "/api/ledger/reconciliation/snapshot" && (input.Staging || input.ImportFile != nil) {
+		return http.StatusBadRequest, nil, errors.New("reconciliation snapshot requires a committed generation without an import file")
+	}
+
 	if input.Path == "/api/ledger/bootstrap/page" && (input.Staging || input.ImportFile != nil) {
 		return http.StatusBadRequest, nil, errors.New("bootstrap pages require a committed generation without an import file")
 	}
@@ -73,6 +77,9 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 	}
 	if input.Path == "/api/ledger/accounts/detail/page" && filepath.Base(filepath.Dir(filepath.Dir(cfg.LedgerRoot))) != "generations" {
 		return http.StatusBadRequest, nil, errors.New("account pages require a committed generation directory")
+	}
+	if input.Path == "/api/ledger/reconciliation/snapshot" && filepath.Base(filepath.Dir(filepath.Dir(cfg.LedgerRoot))) != "generations" {
+		return http.StatusBadRequest, nil, errors.New("reconciliation requires a committed generation directory")
 	}
 	if input.Path == "/api/ledger/bootstrap/page" && filepath.Base(filepath.Dir(filepath.Dir(cfg.LedgerRoot))) != "generations" {
 		return http.StatusBadRequest, nil, errors.New("bootstrap pages require a committed generation directory")
@@ -98,6 +105,13 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 	cache, err := localRequestCache(cfg, input.Staging)
 	if err != nil {
 		return http.StatusBadRequest, nil, err
+	}
+	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && input.Path == "/api/ledger/reconciliation/snapshot" {
+		snapshot, err := cache.Snapshot()
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		return localReconciliationSnapshotResponse(snapshot, input.Query)
 	}
 	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && input.Path == "/api/ledger/bootstrap/page" {
 		snapshot, err := cache.Snapshot()

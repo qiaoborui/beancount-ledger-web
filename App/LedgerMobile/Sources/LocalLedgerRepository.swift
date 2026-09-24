@@ -557,6 +557,33 @@ actor LocalLedgerRepository: LedgerRepository {
         importPreviewDates.removeValue(forKey: request.importID)
         return result
     }
+    /// Complete account snapshot with independent wire/count limits. Does not
+    /// advance the revision that authorizes writes; no legacy fallback on error.
+    func reconciliationSnapshot(start: String, end: String, expectedRevisionID: UUID) async throws -> LocalReconciliationSnapshot {
+        guard LedgerWidgetLink.isValidDay(start), LedgerWidgetLink.isValidDay(end), start < end else {
+            throw LocalLedgerError.invalidConfiguration("对账日期范围无效")
+        }
+        try Task.checkCancellation()
+        let (_, response) = try await readSnapshot("/api/ledger/reconciliation/snapshot",
+            query: ["start": start, "end": end], expectedRevisionID: expectedRevisionID)
+        try Task.checkCancellation()
+        let result = try response.decodeReconciliationSnapshot()
+        guard result.sensitiveUnlocked else { throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定") }
+        guard !result.revision.isEmpty, result.start == start, result.end == end,
+              result.monthPrefix == String(start.prefix(7)), result.rows.count <= 10_000,
+              result.rows.allSatisfy({ row in
+                  (row.account.hasPrefix("Assets:") || row.account.hasPrefix("Liabilities:"))
+                    && !row.currency.isEmpty && ["pending", "asserted"].contains(row.status)
+                    && (row.lastAssertion.map { assertion in
+                        assertion.account == row.account && LedgerWidgetLink.isValidDay(assertion.date)
+                    } ?? true)
+              }) else { throw LocalLedgerError.operationFailed("对账快照响应无效") }
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
+    }
+
     func reconciliation(start: String, end: String) async throws -> LedgerReconciliationResponse {
         try await read("/api/ledger/reconciliation", query: ["start": start, "end": end])
     }
