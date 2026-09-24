@@ -525,6 +525,59 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertNotNil(session.localTransactionWindow)
     }
 
+    func testEventExportFullCountAndRevocationOnDismissResetPrivacyOrSwitch() async throws {
+        for operation in 0..<4 {
+            let (session, _, _) = try await fixture()
+            defer { session.chooseLedger() }
+            let export = try await session.prepareLocalEventReportExport("synthetic-event")
+            XCTAssertEqual(export.count, 3)
+            let text = try String(contentsOf: export.url, encoding: .utf8)
+            XCTAssertTrue(text.contains("## 交易清单 (3 笔)"))
+            XCTAssertTrue(text.contains("Needle"))
+            switch operation {
+            case 0: session.discardLocalEventReportExport(export)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            default: session.chooseLedger()
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: export.url.path))
+        }
+    }
+
+    func testNewEventExportRevokesOldAndOldDismissalCannotRevokeReplacement() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let old = try await session.prepareLocalEventReportExport("synthetic-event")
+        let new = try await session.prepareLocalEventReportExport("missing")
+        XCTAssertEqual(new.count, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.url.path))
+        session.discardLocalEventReportExport(old)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: new.url.path))
+        session.discardLocalEventReportExport(new)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: new.url.path))
+    }
+
+    func testLateEventExportCannotPublishAfterResetPrivacyRangeRevisionCancellation() async throws {
+        for operation in 0..<5 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "event export awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let task = Task { try await session.prepareLocalEventReportExport("synthetic-event") }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0: session.resetLocalTransactionWindow()
+            case 1: await session.updateActivity(isActive: false, isBackground: true)
+            case 2: await session.applyRange(.month(year: 2026, month: 8))
+            case 3: try await advance(repository)
+            default: task.cancel()
+            }
+            await gate.release()
+            do { _ = try await task.value; XCTFail("late event export returned") } catch {}
+        }
+    }
+
     func testShareExportExactSelectionAndPublishedFileRevokedByPrivacyResetAndDismissal() async throws {
         for operation in 0..<4 {
             let (session, _, _) = try await fixture()
