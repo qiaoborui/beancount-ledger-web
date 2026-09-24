@@ -24,9 +24,10 @@ struct RootView: View {
             case .checking:
                 // A search deep link can arrive before authentication finishes. Keep native
                 // search controllers unmounted until the ready shell has a stable lifetime.
+                // The local ledger's startup cover is layered below rather than living here,
+                // so it can animate away when the first authenticated frame arrives.
                 Group {
-                    if session.isLocal { PrivacyCover() }
-                    else { ProgressView("正在连接账本") }
+                    if !session.isLocal { ProgressView("正在连接账本") }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             case let .locked(authenticated):
@@ -35,14 +36,26 @@ struct RootView: View {
                 MainTabView()
             }
 
-            if session.presentsPrivacyCover(sceneIsActive: scenePhase == .active) {
-                PrivacyCover()
-                    .transition(.opacity)
+            // The cover gets its own animation scope so only its own presence
+            // animates. Animating `session.phase` instead cross-fades the cover,
+            // toolbar and populated list as one, which is why the local path had
+            // animation disabled and cut into the ledger with no transition at all.
+            ZStack {
+                if coverVisible {
+                    PrivacyCover()
+                        .transition(coverTransition)
+                }
             }
+            .zIndex(1)
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: LedgerMotion.Cover.exitDuration),
+                value: coverVisible
+            )
         }
         .tint(LedgerPalette.cobalt)
-        // Local startup presents one authenticated frame; animating the whole
-        // navigation hierarchy cross-fades the cover, toolbar and populated list.
+        // Remote startup cross-fades its connecting surface into the shell. The
+        // local path is excluded here because it presents one authenticated frame;
+        // its cover lifts on the scope above instead.
         .animation(session.isLocal || reduceMotion ? nil : .easeOut(duration: 0.18), value: session.phase)
         .onAppear {
             if let tab = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--tab=") })?.replacingOccurrences(of: "--tab=", with: "") {
@@ -131,25 +144,129 @@ struct RootView: View {
         }
         #endif
     }
+
+    /// True while the local ledger loads behind the startup cover. This is the
+    /// cover's first-frame case, so it is the one that plays the entrance reveal.
+    private var isStartupCover: Bool {
+        session.isLocal && session.phase == .checking
+    }
+
+    /// The cover is on screen for the local ledger's load and whenever the
+    /// session shields its content. It sits above the phase switch so that its
+    /// exit animates on its own terms; animating the phase instead drags the
+    /// cover, toolbar and populated list through one cross-fade, which is why
+    /// the local path had animation switched off and cut in with nothing at all.
+    private var coverVisible: Bool {
+        isStartupCover || session.presentsPrivacyCover(sceneIsActive: scenePhase == .active)
+    }
+
+    /// The cover snaps in — it is either the app's first frame or a shield that
+    /// must not fade over the content it is hiding — and lifts with a short fade
+    /// and a slight swell, so the ledger appears to rise out from behind it.
+    private var coverTransition: AnyTransition {
+        guard !reduceMotion else { return .identity }
+        return .asymmetric(
+            insertion: .identity,
+            removal: .opacity.combined(with: .scale(scale: LedgerMotion.Cover.exitScale))
+        )
+    }
 }
 
+/// The startup surface. It is on screen for the whole ledger load, so it is
+/// built to look alive while it waits: the mark breathes, the labels rise into
+/// place in sequence, and the dots pulse. All three are suppressed by Reduce
+/// Motion and by the launch arguments used for UI testing.
 struct PrivacyCover: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// One flag per line, not one for the pair: separate states let each label
+    /// carry its own delay, which is what makes the entrance read as a sequence
+    /// rather than two lines arriving at once.
+    @State private var titleRevealed = false
+    @State private var subtitleRevealed = false
+
+    private var animates: Bool { !reduceMotion && LedgerMotion.allowsAmbientMotion }
+
     var body: some View {
         VStack(spacing: LedgerSpacing.lg) {
-            LedgerBrandMark(size: 48)
+            LedgerBrandMark(size: 48, breathes: true)
             VStack(spacing: LedgerSpacing.xs) {
                 Text("Ledger")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(LedgerPalette.ink)
+                    .opacity(titleRevealed ? 1 : 0)
+                    .offset(y: titleRevealed ? 0 : 8)
                 Text("敏感数据已隐藏")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(LedgerPalette.secondary)
+                    .opacity(subtitleRevealed ? 1 : 0)
+                    .offset(y: subtitleRevealed ? 0 : 8)
+            }
+            LedgerAmbientMotion(duration: StartupWaitingDots.cycle, autoreverses: false) { phase in
+                StartupWaitingDots(phase: phase)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(LedgerPalette.canvas)
         .ignoresSafeArea()
         .accessibilityElement(children: .combine)
+        .onAppear(perform: reveal)
+    }
+
+    /// The mark is on screen from the first frame, so only the text animates in.
+    private func reveal() {
+        guard animates else {
+            titleRevealed = true
+            subtitleRevealed = true
+            return
+        }
+        withAnimation(.easeOut(duration: LedgerMotion.Cover.revealDuration).delay(0.10)) {
+            titleRevealed = true
+        }
+        withAnimation(.easeOut(duration: LedgerMotion.Cover.revealDuration).delay(0.18)) {
+            subtitleRevealed = true
+        }
+    }
+}
+
+/// Three dots that swell and fade in sequence, so the cover keeps a heartbeat
+/// while the ledger loads. The row is always laid out at its full size and only
+/// the motion is conditional, which keeps the cover from shifting when motion is
+/// off.
+private struct StartupWaitingDots: View {
+    /// The shared driver's 0…1 value, or `nil` when motion is off.
+    var phase: Double?
+
+    /// The row runs one dot behind the next, so the three read as a travelling
+    /// pulse. Each dot lags by a slice of the cycle, which is also what lets the
+    /// row loop cleanly: by the time the first dot comes round again, it is
+    /// exactly where the third one started.
+    static let cycle: TimeInterval = 1.2
+    private static let stagger: TimeInterval = 0.16
+    private static let count = 3
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(0..<Self.count, id: \.self) { index in
+                // With motion off the dots sit level and fully drawn. Laying them
+                // out at the resting value instead would freeze the row at three
+                // different opacities, which reads as a stalled animation.
+                let value = phase.map { Self.pulse(at: $0, lagging: Self.stagger * Double(index)) } ?? 1
+                Circle()
+                    .fill(LedgerPalette.cobalt)
+                    .frame(width: 5, height: 5)
+                    .scaleEffect(0.8 + 0.4 * value)
+                    .opacity(0.3 + 0.7 * value)
+            }
+        }
+        .frame(height: 6)
+        .accessibilityHidden(true)
+    }
+
+    /// Folds the driver's 0…1 into a single swell, offset by the dot's slice.
+    private static func pulse(at phase: Double, lagging lag: Double) -> Double {
+        let wrapped = (phase - lag / cycle).truncatingRemainder(dividingBy: 1)
+        let normalized = wrapped < 0 ? wrapped + 1 : wrapped
+        return 0.5 - 0.5 * cos(2 * .pi * normalized)
     }
 }
 
