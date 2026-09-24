@@ -615,17 +615,35 @@ actor LocalLedgerRepository: LedgerRepository {
         let _: BQLCell = try await mutate("/api/ledger/transactions/tags", method: "POST",
             body: json(LedgerTransactionTagsRequest(sources: sources, tags: tags)))
     }
-    func updateTransaction(source: TransactionSource, entry: LedgerTransactionEntry, expectedRevisionID: UUID) async throws {
-        let _: BQLCell = try await mutate("/api/ledger/transactions", method: "PUT",
+    /// A receipt names the generation actually committed by this operation, not
+    /// whichever revision a concurrent read later assigned to presentedRevisionID.
+    /// It is confirmation evidence only, never authority for another write.
+    struct TransactionCommitReceipt: Sendable, Equatable {
+        let ledgerID: UUID
+        let baseRevisionID: UUID
+        let revisionID: UUID
+        fileprivate init(ledgerID: UUID, baseRevisionID: UUID, revisionID: UUID) {
+            self.ledgerID = ledgerID; self.baseRevisionID = baseRevisionID; self.revisionID = revisionID
+        }
+    }
+
+    @discardableResult
+    func updateTransaction(source: TransactionSource, entry: LedgerTransactionEntry, expectedRevisionID: UUID) async throws -> TransactionCommitReceipt {
+        let committed: CommittedResult<BQLCell> = try await mutateWithRevision("/api/ledger/transactions", method: "PUT",
             body: json(LedgerTransactionUpdateRequest(source: source, entry: entry)), expected: expectedRevisionID)
+        return TransactionCommitReceipt(ledgerID: descriptor.id, baseRevisionID: expectedRevisionID, revisionID: committed.revision.id)
     }
-    func deleteTransaction(source: TransactionSource, reason: String, expectedRevisionID: UUID) async throws {
-        let _: BQLCell = try await mutate("/api/ledger/transactions", method: "DELETE",
+    @discardableResult
+    func deleteTransaction(source: TransactionSource, reason: String, expectedRevisionID: UUID) async throws -> TransactionCommitReceipt {
+        let committed: CommittedResult<BQLCell> = try await mutateWithRevision("/api/ledger/transactions", method: "DELETE",
             body: json(LedgerTransactionDeleteRequest(source: source, reason: reason)), expected: expectedRevisionID)
+        return TransactionCommitReceipt(ledgerID: descriptor.id, baseRevisionID: expectedRevisionID, revisionID: committed.revision.id)
     }
-    func addTransactionTags(sources: [TransactionSource], tags: [String], expectedRevisionID: UUID) async throws {
-        let _: BQLCell = try await mutate("/api/ledger/transactions/tags", method: "POST",
+    @discardableResult
+    func addTransactionTags(sources: [TransactionSource], tags: [String], expectedRevisionID: UUID) async throws -> TransactionCommitReceipt {
+        let committed: CommittedResult<BQLCell> = try await mutateWithRevision("/api/ledger/transactions/tags", method: "POST",
             body: json(LedgerTransactionTagsRequest(sources: sources, tags: tags)), expected: expectedRevisionID)
+        return TransactionCommitReceipt(ledgerID: descriptor.id, baseRevisionID: expectedRevisionID, revisionID: committed.revision.id)
     }
     func addTransaction(entry: LedgerTransactionEntry) async throws {
         let _: BQLCell = try await mutate("/api/ledger/append", method: "POST", body: json(entry))
@@ -925,8 +943,20 @@ actor LocalLedgerRepository: LedgerRepository {
         var data: LocalLedgerResponse?
         func set(_ value: LocalLedgerResponse) { data = value }
     }
+    private struct CommittedResult<T: Sendable>: Sendable {
+        let value: T
+        let revision: LocalLedgerWorkspace.Revision
+    }
+
     private func mutate<T: Decodable & Sendable>(_ path: String, method: String, body: BQLCell,
         expected: UUID? = nil, consumingImportID: String? = nil) async throws -> T {
+        let committed: CommittedResult<T> = try await mutateWithRevision(path, method: method, body: body,
+            expected: expected, consumingImportID: consumingImportID)
+        return committed.value
+    }
+
+    private func mutateWithRevision<T: Decodable & Sendable>(_ path: String, method: String, body: BQLCell,
+        expected: UUID? = nil, consumingImportID: String? = nil) async throws -> CommittedResult<T> {
         guard let revisionID = expected ?? presentedRevisionID else { throw LocalLedgerError.previewRequired }
         let engine = engine, validator = validator, entrypoint = descriptor.entrypoint
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
@@ -943,7 +973,7 @@ actor LocalLedgerRepository: LedgerRepository {
         presentedRevisionID = revision.id
         await storage.didCommit(revision)
         NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
-        return try data.decode(T.self)
+        return CommittedResult(value: try data.decode(T.self), revision: revision)
     }
 }
 
