@@ -160,6 +160,26 @@ final class LocalTransactionRepositoryTests: XCTestCase {
         }
     }
 
+    func testBootstrapPageUsesTypedAccountingAndExplicitCandidatePageWithoutAuthorityAdvance() async throws {
+        let (workspace, revision) = try await workspace()
+        let object: [String: Any] = ["bootstrap": ["start": start, "end": end, "summary": ["currency": "CNY", "income": 9007199254740993, "expense": 2, "net": 9007199254740991],
+            "accountBalances": [], "netWorthHistory": [], "monthEndNetWorth": [], "transactions": [], "reconciliationRows": [],
+            "accounts": [], "commodities": [], "prices": [], "valuationCurrency": "CNY", "accountStatuses": [], "sensitiveUnlocked": true],
+            "transactionPage": ["revision": "native-one", "transactions": [["date": "2026-09-23", "payee": "Synthetic", "narration": "", "postings": [], "source": ["file": "main.bean", "line": 1]]], "sensitiveUnlocked": true]]
+        let engine = Engine([try JSONSerialization.data(withJSONObject: object)])
+        let repository = repository(workspace, engine)
+        let page = try await repository.bootstrapPage(start: start, end: end, today: "2026-09-23", valuationCurrency: "CNY", limit: 1, expectedRevisionID: revision)
+        XCTAssertTrue(page.bootstrap.transactions.isEmpty); XCTAssertEqual(page.transactionPage.transactions.count, 1)
+        XCTAssertEqual(page.bootstrap.summary.income, 9007199254740993)
+        let existing = try await repository.workspace.currentRevision()
+        XCTAssertEqual(existing?.id, revision)
+        let request = await engine.requests.first
+        XCTAssertEqual(request?.path, "/api/ledger/bootstrap/page")
+        XCTAssertEqual(request?.query["limit"], "1")
+        let presented = await repository.presentedRevisionID
+        XCTAssertNil(presented)
+    }
+
     func testCandidateDialectHasOnlyDatesCursorAndLimitAndNeverPresentsRevision() async throws {
         let (workspace, revision) = try await workspace()
         let engine = Engine([try page(cursor: "raw-next")])
@@ -417,4 +437,27 @@ final class LocalTransactionRepositoryTests: XCTestCase {
         XCTAssertEqual(result.visibleTransactions.count, 1)
         XCTAssertTrue(result.hasMoreMatches)
     }
+
+    func testBootstrapPageRejectsLockedMalformedRowsAndNonemptyLegacyTransactions() async throws {
+        for mutation in 0..<6 {
+            let (workspace, revision) = try await workspace()
+            var object: [String: Any] = ["bootstrap": ["start": start, "end": end, "summary": ["currency":"CNY","income":0,"expense":0,"net":0], "accountBalances":[],"netWorthHistory":[],"monthEndNetWorth":[],"transactions":[],"reconciliationRows":[],"accounts":[],"commodities":[],"prices":[],"valuationCurrency":"CNY","accountStatuses":[],"sensitiveUnlocked":true], "transactionPage":["revision":"r","transactions":[],"sensitiveUnlocked":true]]
+            var bootstrap = object["bootstrap"] as! [String: Any]
+            var page = object["transactionPage"] as! [String: Any]
+            switch mutation {
+            case 0: page["sensitiveUnlocked"] = false
+            case 1: page["revision"] = ""
+            case 2: page["transactions"] = [["date":"2026-09-23","payee":"x","narration":"","postings":[],"source":["file":"x","line":1]], ["date":"2026-09-23","payee":"x","narration":"","postings":[],"source":["file":"x","line":2]]]
+            case 3: bootstrap["transactions"] = [["date":"2026-09-23","payee":"legacy","narration":"","postings":[],"source":["file":"x","line":1]]]
+            case 4: bootstrap["sensitiveUnlocked"] = false
+            case 5: bootstrap["start"] = "changed"
+            default: break
+            }
+            object["bootstrap"] = bootstrap; object["transactionPage"] = page
+            let repository = repository(workspace, Engine([try JSONSerialization.data(withJSONObject: object)]))
+            do { _ = try await repository.bootstrapPage(start: start,end: end,today:"2026-09-23",valuationCurrency:"CNY",limit:1,expectedRevisionID:revision); XCTFail("malformed bootstrap accepted") } catch {}
+        }
+    }
+
+
 }

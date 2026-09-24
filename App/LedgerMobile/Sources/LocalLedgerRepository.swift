@@ -63,6 +63,30 @@ actor LocalLedgerRepository: LedgerRepository {
 
     /// Return the revision that produced the presentation, including when a writer
     /// publishes a new generation while the engine is reading the pinned snapshot.
+    /// Additive native bootstrap contract. Legacy bootstrap remains complete;
+    /// this adapter returns typed accounting plus an explicit page only.
+    func bootstrapPage(start: String, end: String, today: String, valuationCurrency: String,
+                       limit: Int = 100, expectedRevisionID: UUID) async throws -> LocalBootstrapPage {
+        guard (1...500).contains(limit), start < end else { throw LocalLedgerError.invalidConfiguration("启动分页参数无效") }
+        try Task.checkCancellation()
+        let (_, response) = try await readSnapshot("/api/ledger/bootstrap/page", query: [
+            "start": start, "end": end, "today": today, "valuationCurrency": valuationCurrency, "limit": String(limit)
+        ], expectedRevisionID: expectedRevisionID)
+        try Task.checkCancellation()
+        let result = try response.decodeBootstrapPage()
+        guard result.bootstrap.start == start, result.bootstrap.end == end,
+              result.bootstrap.sensitiveUnlocked, result.transactionPage.sensitiveUnlocked,
+              result.bootstrap.transactions.isEmpty,
+              result.transactionPage.transactions.count <= limit,
+              result.transactionPage.revision.isEmpty == false else {
+            throw LocalLedgerError.operationFailed("启动分页响应无效")
+        }
+        guard let current = try await workspace.currentRevision(), current.id == expectedRevisionID else {
+            throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+        }
+        return result
+    }
+
     func bootstrapSnapshot(start: String, end: String, today: String, valuationCurrency: String) async throws
         -> (revisionID: UUID, payload: LedgerBootstrap) {
         var query = range(start, end, valuationCurrency)
