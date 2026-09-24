@@ -121,6 +121,10 @@ final class LocalLedgerIntegrationTests: XCTestCase {
             XCTAssertNil(try reportScan.consume(first, requestedCursor: nil))
             let actual = try XCTUnwrap(reportScan.consume(last, requestedCursor: cursor))
             let expected = EventTagCalculator.generateReport(tag: tag, from: rows)
+            let throughRepository = try await repository.eventTagReport(tag: tag, start: start, end: end,
+                accountLabels: [:], expectedRevisionID: bootstrap.revisionID)
+            XCTAssertEqual(throughRepository.summary, actual.summary)
+            XCTAssertEqual(throughRepository.dailySeries, actual.dailySeries)
             XCTAssertEqual(actual.summary.transactionCount, expected.transactions.count)
             XCTAssertEqual(actual.summary.totalExpense, expected.totalExpense)
             XCTAssertEqual(actual.summary.totalIncome, expected.totalIncome)
