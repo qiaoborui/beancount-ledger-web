@@ -6,6 +6,7 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if DEBUG
     @State private var testingTagReport: String? = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--open-tag-report=") })?.replacingOccurrences(of: "--open-tag-report=", with: "")
+    @State private var testingPendingInbox = false
     @State private var testingEventTags: Bool = ProcessInfo.processInfo.arguments.contains("--open-event-tags")
     @State private var testingTransactionDetail: Bool = ProcessInfo.processInfo.arguments.contains("--open-transaction-detail")
     @State private var testingCreateTransaction: Bool = ProcessInfo.processInfo.arguments.contains("--open-create-transaction")
@@ -64,6 +65,18 @@ struct RootView: View {
             }
         }
         #if DEBUG
+        #if targetEnvironment(simulator)
+        .overlay(alignment: .bottomLeading) {
+            if ProcessInfo.processInfo.arguments.contains("--local-ui-testing"),
+               ProcessInfo.processInfo.arguments.contains("--pending-ui-testing"), session.phase == .ready {
+                Button("测试待整理入口") { testingPendingInbox = true }
+                    .accessibilityIdentifier("test-open-pending-inbox")
+            }
+        }
+        .sheet(isPresented: $testingPendingInbox) {
+            PendingInboxView().ledgerPrivacyProtectedSheet()
+        }
+        #endif
         .sheet(isPresented: $testingEventTags) {
             EventTagListView()
                 .ledgerPrivacyProtectedSheet()

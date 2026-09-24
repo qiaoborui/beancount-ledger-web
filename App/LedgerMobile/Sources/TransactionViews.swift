@@ -4592,6 +4592,7 @@ struct TransactionEditorView: View {
     let accounts: [LedgerAccount]
     let commodities: [String]
     let onSave: (LedgerTransactionEntry) async throws -> Void
+    private var requiresAdvancedEditor = false
 
     @State private var mode: EditorMode
     @State private var date: Date
@@ -4613,6 +4614,7 @@ struct TransactionEditorView: View {
         accounts: [LedgerAccount],
         commodities: [String],
         initialMode: EditorMode? = nil,
+        requiresAdvancedEditor: Bool = false,
         onSave: @escaping (LedgerTransactionEntry) async throws -> Void
     ) {
         let baseline = transaction.editableEntry
@@ -4620,9 +4622,10 @@ struct TransactionEditorView: View {
         self.accounts = accounts
         self.commodities = commodities
         self.onSave = onSave
+        self.requiresAdvancedEditor = requiresAdvancedEditor
 
         let hasComplexCostOrPrice = baseline?.postings.contains(where: { $0.costKind != nil || $0.priceKind != nil }) ?? false
-        _mode = State(initialValue: initialMode ?? (hasComplexCostOrPrice ? .advanced : .fast))
+        _mode = State(initialValue: requiresAdvancedEditor ? .advanced : (initialMode ?? (hasComplexCostOrPrice ? .advanced : .fast)))
 
         _date = State(initialValue: Self.parseDate(baseline?.date ?? transaction.date) ?? Date())
         _payee = State(initialValue: baseline?.payee ?? transaction.payee)
@@ -4893,7 +4896,7 @@ struct TransactionEditorView: View {
                         }
                     }
                     .font(.system(size: 15, weight: .medium))
-                    .disabled(saving)
+                    .disabled(saving || requiresAdvancedEditor)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
