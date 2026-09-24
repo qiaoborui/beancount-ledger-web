@@ -183,6 +183,53 @@ final class LocalLedgerUITests: XCTestCase {
         #endif
     }
 
+    func testLocalPendingInboxHydratesPayeeCancelReopenAndCommit() throws {
+        continueAfterFailure = false
+        #if targetEnvironment(simulator)
+        let app = XCUIApplication()
+        app.launchArguments = ["--local-ui-testing", "--pending-ui-testing"]
+        app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
+        app.launch()
+        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        app.buttons["local-ledger-create"].tap(); app.buttons["local-ledger-confirm-create"].tap()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 30))
+        app.tabBars.buttons["交易"].tap()
+        app.buttons["transaction-create-local"].tap()
+        XCTAssertTrue(app.buttons["高级"].waitForExistence(timeout: 5)); app.buttons["高级"].tap()
+        // The backend requires a nonempty payee. A generic payee with blank
+        // narration is still classified as missing-payee by the exact inbox rules.
+        let genericPayee = app.textFields["transaction-edit-payee"]
+        XCTAssertTrue(genericPayee.waitForExistence(timeout: 5))
+        genericPayee.tap(); genericPayee.typeText("商户")
+        replaceActionText(app.textFields["transaction-edit-posting-amount-0"], with: "12.34", in: app)
+        replaceActionText(app.textFields["transaction-edit-posting-amount-1"], with: "-12.34", in: app)
+        app.buttons["transaction-edit-save"].tap()
+        XCTAssertTrue(app.buttons["bookkeeping-confirm-save"].waitForExistence(timeout: 30))
+        app.buttons["bookkeeping-confirm-save"].tap()
+        XCTAssertTrue(app.navigationBars["流水"].waitForExistence(timeout: 30))
+        app.buttons["test-open-pending-inbox"].tap()
+        XCTAssertTrue(app.navigationBars["待整理账单"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["pending-inbox-total"].waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertEqual(app.staticTexts["pending-inbox-total"].label, "1 笔待办")
+        let edit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pending-edit-payee-'")).firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 10)); edit.tap()
+        XCTAssertTrue(app.textFields["pending-payee-input"].waitForExistence(timeout: 15))
+        app.buttons["取消"].firstMatch.tap()
+        XCTAssertTrue(app.textFields["pending-payee-input"].waitForNonExistence(timeout: 5))
+        edit.tap()
+        let input = app.textFields["pending-payee-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 15))
+        replaceActionText(input, with: "Synthetic pending resolved", in: app)
+        app.buttons["保存"].firstMatch.tap()
+        XCTAssertTrue(input.waitForNonExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["账本全部整理完毕！"].waitForExistence(timeout: 20), app.debugDescription)
+        app.buttons["关闭"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Synthetic pending resolved"].firstMatch.waitForExistence(timeout: 15))
+        #else
+        throw XCTSkip("Isolated synthetic simulator only")
+        #endif
+    }
+
     private func replaceActionText(_ field: XCUIElement, with text: String, in app: XCUIApplication) {
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
