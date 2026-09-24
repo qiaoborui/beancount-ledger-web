@@ -1315,6 +1315,18 @@ final class LedgerSession: ObservableObject {
         return result
     }
 
+    func localReconciliationRows(start: String, end: String) async throws -> [LedgerReconciliationRow] {
+        try Task.checkCancellation()
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let snapshot = try await repository.reconciliationSnapshot(start: start, end: end, expectedRevisionID: context.revisionID)
+        try validateLocalRead(context)
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return snapshot.rows
+    }
+
     func fetchReconciliationRows(start: String, end: String) async throws -> [LedgerReconciliationRow] {
         guard phase == .ready else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")

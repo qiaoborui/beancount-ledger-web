@@ -354,31 +354,36 @@ func buildReconciliationRows(snapshot *LedgerSnapshot, start, end string) []Reco
 		if !account.Active || !(strings.HasPrefix(account.Account, "Assets:") || strings.HasPrefix(account.Account, "Liabilities:")) {
 			continue
 		}
-		status := "pending"
-		var last *BalanceAssertion
-		for i := range snapshot.BalanceAssertions {
-			assertion := snapshot.BalanceAssertions[i]
-			if assertion.Account != account.Account {
-				continue
-			}
-			if last == nil || assertion.Date > last.Date {
-				last = &assertion
-			}
-			if assertion.Date >= start && assertion.Date < end {
-				status = "asserted"
-			}
-		}
-		rows = append(rows, ReconciliationRow{
-			Account:       account.Account,
-			Alias:         account.Alias,
-			Label:         account.Label,
-			Currency:      defaultAccountCurrency(account.Account, account.Currency),
-			LedgerBalance: snapshot.Balances[account.Account],
-			Status:        status,
-			LastAssertion: last,
-		})
+		rows = append(rows, reconciliationRowForAccount(snapshot, account, start, end))
 	}
 	return rows
+}
+
+// Shared by complete legacy rows and the independently bounded native snapshot.
+func reconciliationRowForAccount(snapshot *LedgerSnapshot, account Account, start, end string) ReconciliationRow {
+	status := "pending"
+	var last *BalanceAssertion
+	for i := range snapshot.BalanceAssertions {
+		assertion := snapshot.BalanceAssertions[i]
+		if assertion.Account != account.Account {
+			continue
+		}
+		if last == nil || assertion.Date > last.Date {
+			last = &assertion
+		}
+		if assertion.Date >= start && assertion.Date < end {
+			status = "asserted"
+		}
+	}
+	return ReconciliationRow{
+		Account:       account.Account,
+		Alias:         account.Alias,
+		Label:         account.Label,
+		Currency:      defaultAccountCurrency(account.Account, account.Currency),
+		LedgerBalance: snapshot.Balances[account.Account],
+		Status:        status,
+		LastAssertion: last,
+	}
 }
 
 func ledgerWriteErrorStatus(err error) int {

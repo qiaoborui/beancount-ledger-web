@@ -60,6 +60,9 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
                 await gate.suspend() // Intentionally ignores cancellation, like an embedded interpreter.
                 if fail { throw LocalLedgerError.operationFailed("Synthetic late failure") }
             }
+            if request.path == "/api/ledger/reconciliation/snapshot" {
+                return Data(#"{"revision":"native-synthetic","sensitiveUnlocked":true,"start":"2026-09-01","end":"2026-10-01","monthPrefix":"2026-09","rows":[{"account":"Assets:Cash","label":"Synthetic","currency":"CNY","ledgerBalance":125,"status":"pending"}]}"#.utf8)
+            }
             let saved = URL(fileURLWithPath: request.workspaceRoot).appendingPathComponent("window-edit.json")
             var rows = (1...rowCount).map { Self.row($0) }
             if successfulEdits, let data = try? Data(contentsOf: saved) {
@@ -841,6 +844,38 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
             }
             await gate.release()
             do { _ = try await old.value; XCTFail("late event report returned") } catch {}
+        }
+    }
+
+    func testLocalReconciliationReadPinsRevisionAndDoesNotMutateLegacyState() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let original = session.ledger?.transactions
+        let authority = await repository.presentedRevisionID
+        let rows = try await session.localReconciliationRows(start: "2026-09-01", end: "2026-10-01")
+        XCTAssertEqual(rows.map(\.ledgerBalance), [125])
+        XCTAssertEqual(session.ledger?.transactions, original)
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(after, authority)
+    }
+
+    func testLocalReconciliationRejectsResetPrivacyRevisionAndCancellationWhileAwaiting() async throws {
+        for operation in 0..<4 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "reconciliation suspended")
+            let gate = Gate(entered)
+            await engine.pause("/api/ledger/reconciliation/snapshot", gate: gate)
+            let task = Task { try await session.localReconciliationRows(start: "2026-09-01", end: "2026-10-01") }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0: session.resetLocalTransactionWindow()
+            case 1: await session.updateActivity(isActive: false, isBackground: true)
+            case 2: try await advance(repository)
+            default: task.cancel()
+            }
+            await gate.release()
+            do { _ = try await task.value; XCTFail("late reconciliation returned") } catch {}
         }
     }
 

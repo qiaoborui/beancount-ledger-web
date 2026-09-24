@@ -107,6 +107,11 @@ struct LocalLedgerResponse: Sendable {
         }
     }
 
+    func decodeReconciliationSnapshot() throws -> LocalReconciliationSnapshot {
+        guard data.count <= 1 << 20 else { throw LocalLedgerError.operationFailed("对账快照响应超过容量限制") }
+        return try decode(LocalReconciliationSnapshot.self)
+    }
+
     func decodeAccountPage() throws -> LedgerAccountPage {
         guard data.count <= 1 << 20 else {
             throw LocalLedgerError.operationFailed("账户分页响应超过容量限制")

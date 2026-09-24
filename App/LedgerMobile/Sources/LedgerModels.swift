@@ -613,6 +613,16 @@ struct LedgerReconciliationRow: Codable, Equatable, Identifiable, Sendable {
     var isAsserted: Bool { status == "asserted" }
 }
 
+/// Complete bounded native account rows, not a page of transaction history.
+struct LocalReconciliationSnapshot: Decodable, Sendable {
+    let revision: String
+    let sensitiveUnlocked: Bool
+    let start: String
+    let end: String
+    let monthPrefix: String
+    let rows: [LedgerReconciliationRow]
+}
+
 struct LedgerReconciliationResponse: Codable, Equatable, Sendable {
     let start: String
     let end: String
