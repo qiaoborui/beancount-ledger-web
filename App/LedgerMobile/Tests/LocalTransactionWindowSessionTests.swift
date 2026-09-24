@@ -645,6 +645,48 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertFalse(session.isLocalEventTagSummaryLoading)
     }
 
+    func testEventReportReturnsCompleteAggregatesWithoutChangingPresentation() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let original = session.ledger?.transactions
+        let authority = await repository.presentedRevisionID
+        await engine.setRowCount(205)
+        let result = try await session.localEventTagReport("synthetic-event")
+        XCTAssertEqual(result.summary.transactionCount, 205)
+        XCTAssertEqual(result.summary.totalExpense, 25_625)
+        XCTAssertEqual(result.categoryBreakdown.first?.amount, 25_625)
+        XCTAssertEqual(result.dailySeries.first?.amount, 25_625)
+        XCTAssertEqual(session.ledger?.transactions, original)
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(after, authority)
+        let requests = await engine.pageRequests
+        XCTAssertEqual(requests.first?.query["start"], session.selectedRange.start)
+        XCTAssertEqual(requests.first?.query["end"], session.selectedRange.queryEndExclusive)
+    }
+
+    func testEventReportRejectsSupersessionResetPrivacyRevisionAndCancellation() async throws {
+        for operation in 0..<5 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "event report awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let old = Task { try await session.localEventTagReport("synthetic-event") }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0:
+                let new = try await session.localEventTagReport("missing")
+                XCTAssertEqual(new.summary.transactionCount, 0)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            case 3: try await advance(repository)
+            default: old.cancel()
+            }
+            await gate.release()
+            do { _ = try await old.value; XCTFail("late event report returned") } catch {}
+        }
+    }
+
     func testWidgetDayWindowsAndSummaryDoNotChangeMainRangeOrLegacyArrays() async throws {
         let (session, engine, repository) = try await fixture()
         defer { session.chooseLedger() }

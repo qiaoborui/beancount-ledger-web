@@ -220,6 +220,27 @@ actor LocalLedgerRepository: LedgerRepository {
         }
     }
 
+    func eventTagReport(tag: String, start: String, end: String, accountLabels: [String: String],
+                        expectedRevisionID: UUID) async throws -> LocalEventTagReportScan.Result {
+        var scan: LocalEventTagReportScan?
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await candidatePage(start: start, end: end, cursor: cursor, expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil {
+                scan = try LocalEventTagReportScan(revision: page.revision, tag: tag, accountLabels: accountLabels)
+            }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return result
+            }
+            cursor = page.nextCursor
+        }
+    }
+
     /// Pinned additive account page. Complete balances/counts do not make the
     /// rows complete; callers must keep chart aggregation independent of windows.
     func accountPage(account: String, currency: String, start: String, end: String,

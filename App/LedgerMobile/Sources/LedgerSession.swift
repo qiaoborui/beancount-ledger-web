@@ -244,6 +244,8 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var isLocalEventTagSummaryLoading = false
     private var eventTagSummaryTask: Task<Void, Never>?
     private var eventTagSummaryID: UUID?
+    private var eventReportTask: Task<LocalEventTagReportScan.Result, Error>?
+    private var eventReportID: UUID?
 
     private var widgetWindowTask: Task<LocalTransactionWindow.Window, Error>?
     private var widgetWindowRequestID: UUID?
@@ -3494,6 +3496,8 @@ final class LedgerSession: ObservableObject {
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
     func resetLocalTransactionWindow() {
+        eventReportID = nil
+        eventReportTask?.cancel(); eventReportTask = nil
         eventTagSummaryID = nil
         eventTagSummaryTask?.cancel(); eventTagSummaryTask = nil
         localEventTagSummaries = nil; localEventTagSummaryError = nil; isLocalEventTagSummaryLoading = false
@@ -3748,6 +3752,32 @@ final class LedgerSession: ObservableObject {
             throw LocalLedgerWorkspace.WorkspaceError.staleRevision
         }
         return detail
+    }
+
+    /// Complete report aggregates are caller-owned and independent of the
+    /// paginated transaction list. Never hydrate an all-history report array.
+    func localEventTagReport(_ tag: String) async throws -> LocalEventTagReportScan.Result {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let accounts = ledger?.accounts ?? []
+        let labels = TransactionCategoryPresentation.accountLabels(accounts)
+        eventReportTask?.cancel()
+        let id = UUID(); eventReportID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            return try await repository.eventTagReport(tag: tag, start: context.range.start,
+                end: context.range.queryEndExclusive, accountLabels: labels, expectedRevisionID: context.revisionID)
+        }
+        eventReportTask = task
+        defer { if eventReportID == id { eventReportTask = nil; eventReportID = nil } }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(context)
+        guard eventReportID == id, ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard eventReportID == id, ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
     }
 
     /// Range-complete bounded summaries shared by the event list and analysis
