@@ -257,6 +257,25 @@ final class LedgerSession: ObservableObject {
     private var widgetSummaryTask: Task<LocalTransactionScan.Result, Error>?
     private var widgetSummaryRequestID: UUID?
 
+    private var pendingWindowTask: Task<LocalPendingScan.Result, Error>?
+    private var pendingWindowID: UUID?
+    private var pendingReadSequence: PendingReadSequence?
+    private struct PendingReadSequence {
+        let id: UUID
+        let context: LocalReadContext
+        let filter: LedgerPendingFilter
+        let accounts: [LedgerAccount]
+    }
+    struct LocalPendingContinuation: Sendable {
+        fileprivate let sequenceID: UUID
+        fileprivate let revision: String
+        fileprivate let offset: Int
+    }
+    struct LocalPendingWindow: Sendable {
+        let result: LocalPendingScan.Result
+        let continuation: LocalPendingContinuation?
+    }
+
     private struct AccountReadSequence {
         let id: UUID
         let context: LocalReadContext
@@ -3501,6 +3520,9 @@ final class LedgerSession: ObservableObject {
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
     func resetLocalTransactionWindow() {
+        pendingWindowID = nil
+        pendingWindowTask?.cancel(); pendingWindowTask = nil
+        pendingReadSequence = nil
         discardLocalEventReportExport()
         eventWindowID = nil
         eventWindowTask?.cancel(); eventWindowTask = nil
@@ -3967,6 +3989,47 @@ final class LedgerSession: ObservableObject {
         guard accountTrendRequestID == id else { throw CancellationError() }
         guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
         return result
+    }
+
+    /// Range-complete inbox facts with one bounded row window. Continuations
+    /// bind filter, account choices, native model and the session read context.
+    func localPendingWindow(filter: LedgerPendingFilter = .all,
+                            continuation: LocalPendingContinuation? = nil) async throws -> LocalPendingWindow {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let accounts = ledger?.accounts ?? []
+        let sequence: PendingReadSequence
+        if let continuation {
+            guard let existing = pendingReadSequence, existing.id == continuation.sequenceID,
+                  existing.filter == filter, existing.accounts == accounts else { throw CancellationError() }
+            try validateLocalRead(existing.context)
+            sequence = existing
+        } else {
+            sequence = PendingReadSequence(id: UUID(), context: context, filter: filter, accounts: accounts)
+            pendingReadSequence = sequence
+        }
+        pendingWindowTask?.cancel()
+        let id = UUID(); pendingWindowID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(sequence.context)
+            return try await repository.pendingWindow(start: context.range.start, end: context.range.queryEndExclusive,
+                filter: filter, offset: continuation?.offset ?? 0, declaredAccounts: accounts.map(\.account),
+                nativeRevision: continuation?.revision, expectedRevisionID: context.revisionID)
+        }
+        pendingWindowTask = task
+        defer { if pendingWindowID == id { pendingWindowTask = nil; pendingWindowID = nil } }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(sequence.context)
+        guard pendingWindowID == id, pendingReadSequence?.id == sequence.id,
+              ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(sequence.context)
+        guard pendingWindowID == id, pendingReadSequence?.id == sequence.id,
+              ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return LocalPendingWindow(result: result, continuation: result.nextOffset.map {
+            LocalPendingContinuation(sequenceID: sequence.id, revision: result.revision, offset: $0)
+        })
     }
 
     /// Caller owns one bounded result; this never seeds legacy global arrays or

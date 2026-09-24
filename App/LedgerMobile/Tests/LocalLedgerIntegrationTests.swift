@@ -152,6 +152,10 @@ final class LocalLedgerIntegrationTests: XCTestCase {
                 declaredAccounts: bootstrap.payload.accounts.map(\.account), limits: .init(rows: 2))
             XCTAssertNil(try pendingScan.consume(pendingFirst, requestedCursor: nil))
             let scanned = try XCTUnwrap(pendingScan.consume(pendingLast, requestedCursor: pendingFirst.nextCursor))
+            let repositoryPending = try await repository.pendingWindow(start: start, end: end, filter: tab, offset: 0,
+                declaredAccounts: bootstrap.payload.accounts.map(\.account), expectedRevisionID: bootstrap.revisionID)
+            XCTAssertEqual(repositoryPending.counts, scanned.counts)
+            XCTAssertEqual(repositoryPending.totalMinorUnits, scanned.totalMinorUnits)
             let pending = rows.filter { !$0.pendingReasons.isEmpty }
             let matched = pending.filter { tab.includes($0.pendingReasons) }
             XCTAssertEqual(scanned.totalCount, pending.count)
