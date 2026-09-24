@@ -99,7 +99,26 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["transaction-actions"].tap()
         app.buttons["事件与项目核算"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["事件与项目核算"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["event-tag-summary-synthetic-reviewed"].waitForExistence(timeout: 20), app.debugDescription)
+        let event = app.buttons["event-tag-summary-synthetic-reviewed"]
+        XCTAssertTrue(event.waitForExistence(timeout: 20), app.debugDescription)
+        event.tap()
+        XCTAssertTrue(app.staticTexts["event-report-count"].waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertEqual(app.staticTexts["event-report-count"].label, "1 笔流水")
+        XCTAssertTrue(app.staticTexts["event-report-page"].waitForExistence(timeout: 20))
+        let eventRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'event-report-row-'")).firstMatch
+        XCTAssertTrue(eventRow.waitForExistence(timeout: 10))
+        if !eventRow.isHittable { app.swipeUp() }
+        eventRow.tap()
+        XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 10))
+        app.navigationBars["交易详情"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.staticTexts["event-report-count"].waitForExistence(timeout: 15))
+        app.buttons["event-report-export-menu"].tap()
+        app.buttons["导出完整 Markdown 文件"].tap()
+        let eventFile = app.buttons["event-report-file-share"]
+        XCTAssertTrue(eventFile.waitForExistence(timeout: 20), app.debugDescription)
+        app.navigationBars["事件文件导出"].buttons["完成"].tap()
+        XCTAssertTrue(eventFile.waitForNonExistence(timeout: 5))
+        app.navigationBars["#synthetic-reviewed"].buttons.element(boundBy: 0).tap()
         app.buttons["关闭"].firstMatch.tap()
         // Native global search uses complete metadata candidates, not the
         // legacy all-history transaction array. Drill-down must survive refresh.
