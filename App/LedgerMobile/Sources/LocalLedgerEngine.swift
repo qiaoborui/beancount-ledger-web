@@ -94,6 +94,19 @@ struct LocalLedgerResponse: Sendable {
         }
     }
 
+    func decodeBootstrapPage(maximumBytes: Int = (1 << 20) - 4_096) throws -> LocalBootstrapPage {
+        guard data.count <= maximumBytes else { throw LocalLedgerError.operationFailed("启动分页响应超过容量限制") }
+        do { return try decode(LocalBootstrapPage.self) }
+        catch let error as LocalLedgerError {
+            struct Header: Decodable { let status: Int }
+            if isEnvelope, case .operationFailed = error,
+               (try? JSONDecoder().decode(Header.self, from: data).status) == 409 {
+                throw LocalLedgerError.staleTransactionCursor
+            }
+            throw error
+        }
+    }
+
     func decodeAccountPage() throws -> LedgerAccountPage {
         guard data.count <= 1 << 20 else {
             throw LocalLedgerError.operationFailed("账户分页响应超过容量限制")

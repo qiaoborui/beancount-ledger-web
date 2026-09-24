@@ -478,7 +478,12 @@ struct APIErrorPayload: Decodable {
     let error: String?
 }
 
-struct LedgerBootstrap: Decodable {
+struct LocalBootstrapPage: Decodable, Sendable {
+    let bootstrap: LedgerBootstrap
+    let transactionPage: LedgerTransactionPage
+}
+
+struct LedgerBootstrap: Decodable, Sendable {
     let start: String
     let end: String
     let summary: LedgerSummary
