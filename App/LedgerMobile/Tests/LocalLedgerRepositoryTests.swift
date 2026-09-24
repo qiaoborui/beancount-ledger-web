@@ -120,6 +120,106 @@ final class LocalLedgerRepositoryTests: XCTestCase {
         XCTAssertEqual(request?.query["line"], "1")
     }
 
+    private actor CommitGateStorage: LogicalLocalStorage {
+        nonisolated let workspace: LocalLedgerWorkspace
+        let entered: XCTestExpectation
+        private var continuation: CheckedContinuation<Void, Never>?
+        private(set) var committed: LocalLedgerWorkspace.Revision?
+        init(workspace: LocalLedgerWorkspace, entered: XCTestExpectation) {
+            self.workspace = workspace; self.entered = entered
+        }
+        func didCommit(_ revision: LocalLedgerWorkspace.Revision) async {
+            committed = revision
+            await withCheckedContinuation { continuation = $0; entered.fulfill() }
+        }
+        func release() { continuation?.resume(); continuation = nil }
+        func status() async throws -> LocalStorageSyncStatus { .init(mode: .device, phase: .localOnly) }
+        func synchronize(validator: @escaping LocalLedgerWorkspace.Validator) async throws -> LocalStorageSyncStatus {
+            try await status()
+        }
+    }
+
+    func testExplicitMutationReceiptsNameValidatedCommittedGeneration() async throws {
+        let engine = Engine()
+        let workspace = LocalLedgerWorkspace(rootDirectory: try root())
+        var current = try await workspace.commit(changes: [.write(Data("; synthetic\n".utf8), to: "main.bean")]) { _ in }
+        let descriptor = LocalLedgerDescriptor(id: UUID(), name: "Receipt fixture", entrypoint: "main.bean", createdAt: Date())
+        let repository = LocalLedgerRepository(descriptor: descriptor, workspace: workspace, engine: engine,
+            validator: { _, _ in })
+        let source = TransactionSource(file: "main.bean", line: 1, hash: "synthetic")
+        let entry = LedgerTransactionEntry(date: "2026-09-24", payee: "Synthetic", narration: "receipt", postings: [])
+        for operation in 0..<3 {
+            let before = current
+            let receipt: LocalLedgerRepository.TransactionCommitReceipt
+            switch operation {
+            case 0: receipt = try await repository.updateTransaction(source: source, entry: entry, expectedRevisionID: before.id)
+            case 1: receipt = try await repository.addTransactionTags(sources: [source], tags: ["synthetic"], expectedRevisionID: before.id)
+            default: receipt = try await repository.deleteTransaction(source: source, reason: "Synthetic", expectedRevisionID: before.id)
+            }
+            let actual = try await workspace.currentRevision()
+            current = try XCTUnwrap(actual)
+            XCTAssertEqual(receipt.ledgerID, descriptor.id)
+            XCTAssertEqual(receipt.baseRevisionID, before.id)
+            XCTAssertEqual(receipt.revisionID, current.id)
+            XCTAssertEqual(current.parentID, before.id)
+            XCTAssertNotEqual(receipt.revisionID, receipt.baseRevisionID)
+        }
+        let requests = await engine.requests.filter(\.staging)
+        XCTAssertEqual(requests.map(\.method), ["PUT", "POST", "DELETE"])
+    }
+
+    func testReceiptRemainsExactAfterConcurrentRevisionReadAndPostCommitCancellation() async throws {
+        let workspace = LocalLedgerWorkspace(rootDirectory: try root())
+        let before = try await workspace.commit(changes: [.write(Data("; synthetic\n".utf8), to: "main.bean")]) { _ in }
+        let entered = expectation(description: "receipt committed before storage acknowledgement")
+        let storage = CommitGateStorage(workspace: workspace, entered: entered)
+        let descriptor = LocalLedgerDescriptor(id: UUID(), name: "Receipt race", entrypoint: "main.bean", createdAt: Date())
+        let repository = LocalLedgerRepository(descriptor: descriptor, storage: storage, engine: Engine(), validator: { _, _ in })
+        let operation = Task {
+            try await repository.deleteTransaction(source: .init(file: "main.bean", line: 1, hash: "synthetic"),
+                reason: "Synthetic", expectedRevisionID: before.id)
+        }
+        await fulfillment(of: [entered], timeout: 3)
+        let committed = await storage.committed
+        let committedRevision = try XCTUnwrap(committed)
+        let newer = try await workspace.commit(expectedRevisionID: committedRevision.id,
+            changes: [.write(Data("; later generation\n".utf8), to: "main.bean")]) { _ in }
+        // Ordinary read advances mutable authority while the first operation is
+        // suspended. A receipt must not borrow that newer value.
+        _ = try await repository.runBQL(query: "SELECT 1", valuationCurrency: "CNY")
+        let presented = await repository.presentedRevisionID
+        XCTAssertEqual(presented, newer.id)
+        operation.cancel() // Commit already happened: do not falsely report rollback.
+        await storage.release()
+        let receipt = try await operation.value
+        XCTAssertEqual(receipt.baseRevisionID, before.id)
+        XCTAssertEqual(receipt.revisionID, committedRevision.id)
+        XCTAssertNotEqual(receipt.revisionID, newer.id)
+    }
+
+    func testReceiptIsNotReturnedForStaleFailedValidationOrMalformedMutation() async throws {
+        for failure in 0..<3 {
+            let engine = Engine()
+            let workspace = LocalLedgerWorkspace(rootDirectory: try root())
+            let before = try await workspace.commit(changes: [.write(Data("; synthetic\n".utf8), to: "main.bean")]) { _ in }
+            let descriptor = LocalLedgerDescriptor(id: UUID(), name: "Receipt rollback", entrypoint: "main.bean", createdAt: Date())
+            let repository = LocalLedgerRepository(descriptor: descriptor, workspace: workspace, engine: engine,
+                validator: { _, _ in
+                    if failure == 1 { throw LocalLedgerError.operationFailed("Synthetic canonical rejection") }
+                })
+            if failure == 2 { await engine.configure(text: "; changed\n", response: Data("invalid JSON".utf8)) }
+            do {
+                _ = try await repository.deleteTransaction(source: .init(file: "main.bean", line: 1, hash: "synthetic"),
+                    reason: "Synthetic", expectedRevisionID: failure == 0 ? UUID() : before.id)
+                XCTFail("failed operation returned a receipt")
+            } catch {}
+            let after = try await workspace.currentRevision()
+            XCTAssertEqual(after?.id, before.id)
+            let authority = await repository.presentedRevisionID
+            XCTAssertNil(authority)
+        }
+    }
+
     private actor Engine: LocalLedgerEngine {
         var requests: [LocalLedgerEngineRequest] = []
         var mutationText = "; accepted\n"

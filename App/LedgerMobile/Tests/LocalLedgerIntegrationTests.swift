@@ -487,8 +487,12 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         let afterInvalid = try await repository.workspace.currentRevision()
         XCTAssertEqual(beforeInvalid?.id, afterInvalid?.id)
 
-        try await repository.updateTransaction(source: transaction.source,
-            entry: entry("15.67", credit: "-15.67", narration: "edited offline"))
+        let updateReceipt = try await repository.updateTransaction(source: transaction.source,
+            entry: entry("15.67", credit: "-15.67", narration: "edited offline"), expectedRevisionID: XCTUnwrap(beforeInvalid?.id))
+        let updateRevision = try await repository.workspace.currentRevision()
+        XCTAssertEqual(updateReceipt.ledgerID, descriptor.id)
+        XCTAssertEqual(updateReceipt.baseRevisionID, beforeInvalid?.id)
+        XCTAssertEqual(updateReceipt.revisionID, updateRevision?.id)
         let updated = try await repository.globalTransactions()
         XCTAssertEqual(updated.transactions.count, 1)
         XCTAssertEqual(updated.transactions.first?.narration, "edited offline")
@@ -506,7 +510,12 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         let restored = reopened.repository(for: descriptor)
         let restoredTransactions = try await restored.globalTransactions()
         XCTAssertEqual(restoredTransactions.transactions.first?.narration, "edited offline")
-        try await restored.deleteTransaction(source: XCTUnwrap(restoredTransactions.transactions.first).source, reason: "Integration fixture cleanup")
+        let beforeDelete = try await restored.workspace.currentRevision()
+        let deleteReceipt = try await restored.deleteTransaction(source: XCTUnwrap(restoredTransactions.transactions.first).source,
+            reason: "Integration fixture cleanup", expectedRevisionID: XCTUnwrap(beforeDelete?.id))
+        let deleteRevision = try await restored.workspace.currentRevision()
+        XCTAssertEqual(deleteReceipt.baseRevisionID, beforeDelete?.id)
+        XCTAssertEqual(deleteReceipt.revisionID, deleteRevision?.id)
         let deleted = try await restored.globalTransactions()
         XCTAssertTrue(deleted.transactions.isEmpty)
         let exported = try await restored.exportLedger()
