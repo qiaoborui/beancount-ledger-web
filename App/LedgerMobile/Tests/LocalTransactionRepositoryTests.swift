@@ -160,6 +160,107 @@ final class LocalTransactionRepositoryTests: XCTestCase {
         }
     }
 
+    private func bootstrapPageData(_ mutate: (inout [String: Any]) -> Void = { _ in }) throws -> Data {
+        var bootstrap = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(LedgerModelsTests.bootstrapJSON.utf8)) as? [String: Any])
+        bootstrap["start"] = start; bootstrap["end"] = end; bootstrap["transactions"] = []
+        var object: [String: Any] = ["bootstrap": bootstrap,
+            "transactionPage": try JSONSerialization.jsonObject(with: page(rows: 1))]
+        mutate(&object)
+        return try JSONSerialization.data(withJSONObject: object)
+    }
+
+    func testBootstrapPageRejectsInvalidDatesBeforeDispatchAndKeepsExistingAuthority() async throws {
+        let (workspace, revision) = try await workspace()
+        let engine = Engine([try page(), try bootstrapPageData()])
+        let repository = repository(workspace, engine)
+        _ = try await repository.transactionPage(start: start, end: end)
+        let authority = await repository.presentedRevisionID
+        XCTAssertEqual(authority, revision)
+        for dates in [("bad", end, "2026-09-23"), (start, "2026-02-30", "2026-09-23"),
+                      (start, end, "2026-02-30"), (end, start, "2026-09-23")] {
+            do {
+                _ = try await repository.bootstrapPage(start: dates.0, end: dates.1, today: dates.2,
+                    valuationCurrency: "CNY", expectedRevisionID: revision)
+                XCTFail("invalid bootstrap date reached engine")
+            } catch LocalLedgerError.invalidConfiguration { }
+        }
+        let before = await engine.requests
+        XCTAssertEqual(before.count, 1)
+        _ = try await repository.bootstrapPage(start: start, end: end, today: "2026-09-23",
+            valuationCurrency: "CNY", expectedRevisionID: revision)
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(after, authority)
+    }
+
+    func testBootstrapPageRejectsReplacementRevisionAndCancelledRead() async throws {
+        for replacement in [false, true] {
+            let (workspace, revision) = try await workspace()
+            let engine = Engine([try bootstrapPageData()]) { _ in
+                if replacement {
+                    _ = try await workspace.commit(expectedRevisionID: revision,
+                        changes: [.write(Data("; changed".utf8), to: "main.bean")]) { _ in }
+                } else { withUnsafeCurrentTask { $0?.cancel() } }
+            }
+            let repository = repository(workspace, engine)
+            let start = self.start, end = self.end
+            let task = Task { try await repository.bootstrapPage(start: start, end: end, today: "2026-09-23",
+                valuationCurrency: "CNY", expectedRevisionID: revision) }
+            do { _ = try await task.value; XCTFail("obsolete bootstrap returned") }
+            catch {
+                if replacement { XCTAssertEqual(error as? LocalLedgerWorkspace.WorkspaceError, .staleRevision) }
+                else { XCTAssertTrue(error is CancellationError) }
+            }
+            let authority = await repository.presentedRevisionID
+            XCTAssertNil(authority)
+        }
+    }
+
+    func testBootstrapPageRejectsInvalidContinuationAndOutOfRangeRows() async throws {
+        for mutation in 0..<6 {
+            let (workspace, revision) = try await workspace()
+            let data = try bootstrapPageData { object in
+                var candidate = object["transactionPage"] as! [String: Any]
+                switch mutation {
+                case 0: candidate["nextCursor"] = ""
+                case 1: candidate["nextCursor"] = String(repeating: "x", count: 1_025)
+                case 2: candidate["nextCursor"] = "n"; candidate["transactions"] = []
+                default:
+                    var rows = candidate["transactions"] as! [[String: Any]]
+                    rows[0]["date"] = ["2026-10-01", "2026-09-31", "2026-09-23junk"][mutation - 3]
+                    candidate["transactions"] = rows
+                }
+                object["transactionPage"] = candidate
+            }
+            let repository = repository(workspace, Engine([data]))
+            do {
+                _ = try await repository.bootstrapPage(start: start, end: end, today: "2026-09-23",
+                    valuationCurrency: "CNY", expectedRevisionID: revision)
+                XCTFail("invalid bootstrap continuation/row accepted")
+            } catch LocalLedgerError.operationFailed { }
+        }
+    }
+
+    func testBootstrapEnvelopeBoundAndIntegerPrecision() throws {
+        let raw = try bootstrapPageData { object in
+            var bootstrap = object["bootstrap"] as! [String: Any]
+            bootstrap["summary"] = ["currency": "CNY", "income": 9007199254740993, "expense": 2, "net": 9007199254740991]
+            object["bootstrap"] = bootstrap
+        }
+        var envelope = Data(#"{"ok":true,"status":200,"diagnostics":[],"result":"#.utf8)
+        envelope.append(raw); envelope.append(Data("}".utf8))
+        // Whitespace is valid JSON; near-limit envelope must not lose its 4KiB
+        // transport headroom by applying the result-only budget a second time.
+        envelope.append(Data(repeating: 32, count: (1 << 20) - envelope.count))
+        let decoded = try LocalLedgerResponse(envelope: envelope).decodeBootstrapPage()
+        XCTAssertEqual(decoded.bootstrap.summary.income, 9007199254740993)
+        envelope.append(32)
+        XCTAssertThrowsError(try LocalLedgerResponse(envelope: envelope).decodeBootstrapPage())
+        XCTAssertThrowsError(try LocalLedgerResponse(result: raw).decodeBootstrapPage(maximumBytes: -1))
+        XCTAssertThrowsError(try LocalLedgerResponse(envelope: Data(#"{"ok":false,"status":409,"diagnostics":[],"result":{"error":"stale"}}"#.utf8)).decodeBootstrapPage()) {
+            XCTAssertEqual($0 as? LocalLedgerError, .staleTransactionCursor)
+        }
+    }
+
     func testBootstrapPageUsesTypedAccountingAndExplicitCandidatePageWithoutAuthorityAdvance() async throws {
         let (workspace, revision) = try await workspace()
         let object: [String: Any] = ["bootstrap": ["start": start, "end": end, "summary": ["currency": "CNY", "income": 9007199254740993, "expense": 2, "net": 9007199254740991],

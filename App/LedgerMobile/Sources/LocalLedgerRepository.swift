@@ -61,13 +61,14 @@ actor LocalLedgerRepository: LedgerRepository {
         try await bootstrapSnapshot(start: start, end: end, today: today, valuationCurrency: valuationCurrency).payload
     }
 
-    /// Return the revision that produced the presentation, including when a writer
-    /// publishes a new generation while the engine is reading the pinned snapshot.
     /// Additive native bootstrap contract. Legacy bootstrap remains complete;
     /// this adapter returns typed accounting plus an explicit page only.
     func bootstrapPage(start: String, end: String, today: String, valuationCurrency: String,
                        limit: Int = 100, expectedRevisionID: UUID) async throws -> LocalBootstrapPage {
-        guard (1...500).contains(limit), start < end else { throw LocalLedgerError.invalidConfiguration("启动分页参数无效") }
+        guard (1...500).contains(limit), LedgerWidgetLink.isValidDay(start),
+              LedgerWidgetLink.isValidDay(end), LedgerWidgetLink.isValidDay(today), start < end else {
+            throw LocalLedgerError.invalidConfiguration("启动分页参数无效")
+        }
         try Task.checkCancellation()
         let (_, response) = try await readSnapshot("/api/ledger/bootstrap/page", query: [
             "start": start, "end": end, "today": today, "valuationCurrency": valuationCurrency, "limit": String(limit)
@@ -78,15 +79,22 @@ actor LocalLedgerRepository: LedgerRepository {
               result.bootstrap.sensitiveUnlocked, result.transactionPage.sensitiveUnlocked,
               result.bootstrap.transactions.isEmpty,
               result.transactionPage.transactions.count <= limit,
-              result.transactionPage.revision.isEmpty == false else {
+              result.transactionPage.revision.isEmpty == false,
+              result.transactionPage.nextCursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 }) ?? true,
+              result.transactionPage.nextCursor == nil || !result.transactionPage.transactions.isEmpty,
+              result.transactionPage.transactions.allSatisfy({ row in
+                  LedgerWidgetLink.isValidDay(row.date) && row.date >= start && row.date < end && row.editableEntry == nil
+              }) else {
             throw LocalLedgerError.operationFailed("启动分页响应无效")
         }
-        guard let current = try await workspace.currentRevision(), current.id == expectedRevisionID else {
-            throw LocalLedgerWorkspace.WorkspaceError.staleRevision
-        }
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
         return result
     }
 
+    /// Return the revision that produced the presentation, including when a writer
+    /// publishes a new generation while the engine is reading the pinned snapshot.
     func bootstrapSnapshot(start: String, end: String, today: String, valuationCurrency: String) async throws
         -> (revisionID: UUID, payload: LedgerBootstrap) {
         var query = range(start, end, valuationCurrency)
