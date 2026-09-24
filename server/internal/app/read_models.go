@@ -8,6 +8,7 @@ type ReconciliationRow struct {
 	LedgerBalance int               `json:"ledgerBalance"`
 	Status        string            `json:"status"`
 	LastAssertion *BalanceAssertion `json:"lastAssertion"`
+	StatusError   *bool             `json:"statusError,omitempty"`
 }
 
 type BootstrapResult struct {

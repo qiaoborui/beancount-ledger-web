@@ -61,7 +61,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
                 if fail { throw LocalLedgerError.operationFailed("Synthetic late failure") }
             }
             if request.path == "/api/ledger/reconciliation/snapshot" {
-                return Data(#"{"revision":"native-synthetic","sensitiveUnlocked":true,"start":"2026-09-01","end":"2026-10-01","monthPrefix":"2026-09","rows":[{"account":"Assets:Cash","label":"Synthetic","currency":"CNY","ledgerBalance":125,"status":"pending"}]}"#.utf8)
+                return Data(#"{"revision":"native-synthetic","sensitiveUnlocked":true,"start":"2026-09-01","end":"2026-10-01","monthPrefix":"2026-09","rows":[{"account":"Assets:Cash","alias":null,"label":"Synthetic","currency":"CNY","ledgerBalance":125,"status":"pending","lastAssertion":null,"statusError":false}]}"#.utf8)
             }
             let saved = URL(fileURLWithPath: request.workspaceRoot).appendingPathComponent("window-edit.json")
             var rows = (1...rowCount).map { Self.row($0) }
@@ -104,7 +104,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
                      "txn": try JSONSerialization.jsonObject(with: JSONEncoder().encode(row))]
                 }
                 let detail: [String: Any] = ["account": request.query["account"]!, "label": "Synthetic", "group": "Expenses", "active": true,
-                    "currency": request.query["currency"]!, "currentBalance": rows.count * 125,
+                    "currency": request.query["currency"]!, "statusError": false, "currentBalance": rows.count * 125,
                     "openingBalance": 0, "closingBalance": rows.count * 125, "periodChange": rows.count * 125,
                     "start": request.query["start"]!, "end": request.query["end"]!, "rows": accountRows]
                 let next: Any = end < rows.count ? String(end) as Any : NSNull()

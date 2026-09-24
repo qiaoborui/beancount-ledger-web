@@ -55,6 +55,8 @@ func localReconciliationSnapshotResponse(snapshot *LedgerSnapshot, query map[str
 			return 413, nil, errors.New("reconciliation account count exceeds capacity")
 		}
 		row := reconciliationRowForAccount(snapshot, account, start, end)
+		issue := row.Status == "error"
+		row.StatusError = &issue
 		// Bound per-row serializer input before allocating escaped JSON. Final wire
 		// size is checked below; at most one bounded row is considered at a time.
 		budget := localTransactionPageBytes - 4096

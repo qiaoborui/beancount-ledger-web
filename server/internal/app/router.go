@@ -354,7 +354,10 @@ func buildReconciliationRows(snapshot *LedgerSnapshot, start, end string) []Reco
 		if !account.Active || !(strings.HasPrefix(account.Account, "Assets:") || strings.HasPrefix(account.Account, "Liabilities:")) {
 			continue
 		}
-		rows = append(rows, reconciliationRowForAccount(snapshot, account, start, end))
+		row := reconciliationRowForAccount(snapshot, account, start, end)
+		issue := row.Status == "error"
+		row.StatusError = &issue
+		rows = append(rows, row)
 	}
 	return rows
 }

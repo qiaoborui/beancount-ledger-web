@@ -609,8 +609,10 @@ struct LedgerReconciliationRow: Codable, Equatable, Identifiable, Sendable {
     let ledgerBalance: Int
     let status: String // "pending" | "asserted"
     let lastAssertion: LedgerBalanceAssertion?
+    let statusError: Bool?
 
     var isAsserted: Bool { status == "asserted" }
+    var hasSnapshotIssue: Bool { statusError == true }
 }
 
 /// Complete bounded native account rows, not a page of transaction history.

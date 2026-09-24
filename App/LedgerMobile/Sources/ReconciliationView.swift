@@ -82,10 +82,23 @@ struct ReconciliationView: View {
     @State private var errorFeedback = 0
     @State private var successMessage: String?
     @State private var isRefreshing = false
+    @State private var localRows: [LedgerReconciliationRow]?
+    @State private var localError: String?
+    @State private var localReadActive = false
+    @State private var localReadID = UUID()
+    @State private var localReadLoading = false
+    private var localReadable: Bool {
+        session.isLocal && session.phase == .ready && !session.privacyShielded && !session.isRangeLoading
+            && !session.isValuationCurrencyLoading && !session.transactionMutationStates.values.contains(.pending)
+    }
+    private var localReadKey: String {
+        "\(session.localTransactionPresentationRevision?.uuidString ?? "")/\(session.localGlobalSearchInvalidation)/\(session.selectedRange.start)/\(session.selectedRange.end)/\(localReadable)"
+    }
 
     var isRoot = false
 
     private var allRows: [LedgerReconciliationRow] {
+        if session.isLocal { return localReadable && !localReadLoading ? (localRows ?? []) : [] }
         if let rows = session.ledger?.reconciliationRows, !rows.isEmpty {
             return rows
         }
@@ -122,16 +135,17 @@ struct ReconciliationView: View {
             }
 
             // Status filter
-            let status = session.accountStatus(for: row.account)
+            let statusIsError = session.isLocal ? row.hasSnapshotIssue : (session.accountStatus(for: row.account)?.hasIssue == true)
+            let statusIsAsserted = row.status == "asserted"
             switch selectedStatus {
             case .all:
                 break
             case .pending:
-                if status?.isReconciled == true { return false }
+                if statusIsAsserted { return false }
             case .error:
-                if status?.hasIssue != true { return false }
+                if !statusIsError { return false }
             case .asserted:
-                if row.status != "asserted" && status?.isReconciled != true { return false }
+                if !statusIsAsserted { return false }
             }
 
             // Search filter
@@ -153,10 +167,10 @@ struct ReconciliationView: View {
         var pending = 0
         var error = 0
         for row in allRows {
-            let st = session.accountStatus(for: row.account)
-            if st?.hasIssue == true {
+            let statusError = session.isLocal ? row.hasSnapshotIssue : (session.accountStatus(for: row.account)?.hasIssue == true)
+            if statusError {
                 error += 1
-            } else if row.status == "asserted" || st?.isReconciled == true {
+            } else if row.status == "asserted" {
                 asserted += 1
             } else {
                 pending += 1
@@ -263,7 +277,12 @@ struct ReconciliationView: View {
                 }
 
                 // Account Cards
-                if filteredRows.isEmpty {
+                if localReadable, let localError {
+                    Text("对账读取失败：" + localError).foregroundStyle(.secondary)
+                    Button("重试") { Task { await loadLocalRows() } }
+                } else if session.isLocal && (localRows == nil || localReadLoading) {
+                    ProgressView("正在读取对账账户…")
+                } else if filteredRows.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "checkmark.shield")
                             .font(.system(size: 36))
@@ -280,7 +299,7 @@ struct ReconciliationView: View {
                             let isExpanded = expandedAccountID == row.account
                             ReconciliationCard(
                                 row: row,
-                                accountStatus: session.accountStatus(for: row.account),
+                                accountStatus: session.isLocal ? nil : session.accountStatus(for: row.account),
                                 isExpanded: isExpanded,
                                 onToggleExpand: {
                                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -333,6 +352,22 @@ struct ReconciliationView: View {
         }
         .sensoryFeedback(.success, trigger: successFeedback)
         .sensoryFeedback(.error, trigger: errorFeedback)
+        .task(id: localReadKey) { await loadLocalRows() }
+        .onChange(of: session.privacyShielded) { _, hidden in if hidden { localReadID = UUID(); localRows = nil; localError = nil; localReadLoading = false } }
+    }
+
+    private func loadLocalRows() async {
+        guard localReadable else { localRows = nil; localError = nil; localReadLoading = false; return }
+        let key = localReadKey
+        let id = UUID(); localReadID = id; localReadLoading = true; localRows = nil; localError = nil
+        defer { if localReadID == id { localReadLoading = false } }
+        do {
+            let rows = try await session.localReconciliationRows(start: session.selectedRange.start, end: session.selectedRange.queryEndExclusive)
+            guard !Task.isCancelled, localReadID == id, key == localReadKey, localReadable else { return }
+            localRows = rows; localError = nil
+        } catch {
+            if !Task.isCancelled, localReadID == id, key == localReadKey { localError = error.localizedDescription; localRows = nil }
+        }
     }
 }
 
@@ -343,7 +378,7 @@ private struct ReconciliationSummaryHero: View {
     let currency: String
 
     private var progressRatio: Double {
-        guard metrics.total > 0 else { return 1.0 }
+        guard metrics.total > 0 else { return 0 }
         return Double(metrics.asserted) / Double(metrics.total)
     }
 
@@ -361,7 +396,7 @@ private struct ReconciliationSummaryHero: View {
                         Text("%")
                             .font(.system(size: 18, weight: .bold, design: .rounded))
                             .foregroundStyle(LedgerPalette.secondary)
-                        Text("已核平")
+                        Text(metrics.total == 0 ? "尚未读取" : "已核平")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(LedgerPalette.secondary)
                             .padding(.leading, 4)
@@ -496,10 +531,10 @@ struct ReconciliationCard: View {
     }
 
     private var statusBadge: (title: String, color: Color, icon: String) {
-        if accountStatus?.hasIssue == true {
+        if (session.isLocal ? row.hasSnapshotIssue : (accountStatus?.hasIssue == true)) {
             return ("断言差额", LedgerPalette.expense, "exclamationmark.circle.fill")
         }
-        if row.status == "asserted" || accountStatus?.isReconciled == true {
+        if row.status == "asserted" || (!session.isLocal && accountStatus?.isReconciled == true) {
             return ("已核平", LedgerPalette.income, "checkmark.circle.fill")
         }
         return ("待核对", LedgerPalette.gold, "clock.arrow.circlepath")
@@ -844,7 +879,7 @@ struct SingleAccountReconciliationSheet: View {
                 VStack(spacing: 16) {
                     ReconciliationCard(
                         row: resolvedRow,
-                        accountStatus: session.accountStatus(for: account),
+                        accountStatus: session.isLocal ? nil : session.accountStatus(for: account),
                         isExpanded: true,
                         onToggleExpand: {},
                         onReconcileSuccess: { _ in
