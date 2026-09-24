@@ -283,6 +283,13 @@ func (s *LedgerReadService) IncomeStatement(start, end string, unlocked bool, ra
 }
 
 func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency, today string) BootstrapResult {
+	return buildLedgerBootstrap(snapshot, start, end, unlocked, rawValuationCurrency, today, true)
+}
+
+// Native bounded bootstrap uses the same complete accounting projections but
+// omits the legacy full-range transaction materialization. HTTP callers retain
+// the original contract through BuildLedgerBootstrap above.
+func buildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency, today string, includeTransactions bool) BootstrapResult {
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards, allNetWorthRows := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
@@ -296,6 +303,10 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 		investments = BuildInvestmentSummaryFromSnapshot(snapshot)
 	}
 	incomeStatement := buildLedgerIncomeStatementFields(snapshot, start, end, unlocked, valuationCurrency)
+	transactions := []Transaction{}
+	if includeTransactions {
+		transactions = filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked, nil)
+	}
 	return BootstrapResult{
 		Start:              start,
 		End:                end,
@@ -308,7 +319,7 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 		NetWorthWindows:    windows,
 		CreditCards:        creditCards,
 		Investments:        investments,
-		Transactions:       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked, nil),
+		Transactions:       transactions,
 		ReconciliationRows: reconciliationRows,
 		Accounts:           snapshot.Accounts,
 		Commodities:        snapshot.Commodities,
