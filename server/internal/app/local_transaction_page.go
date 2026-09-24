@@ -26,6 +26,9 @@ const localNativeCandidatesDialect = "native-candidates-v1"
 // must not reuse the list dialect, whose type-only projection loses matches.
 const localNativeSearchCandidatesDialect = "native-search-candidates-v1"
 
+// Pending classification needs source editor flag evidence, but never a draft.
+const localNativePendingCandidatesDialect = "native-pending-candidates-v1"
+
 // Process-scoped MAC makes cursors opaque: restarting the app requires a fresh
 // first page, and clients cannot substitute a source revision or filter set.
 var localCursorKey = func() []byte {
@@ -91,12 +94,13 @@ func localTransactionPageResponse(cfg Config, snapshot *LedgerSnapshot, query ma
 func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query map[string]string, evidence bool) (int, json.RawMessage, error) {
 	candidates := false
 	searchCandidates := false
+	pendingCandidates := false
 	if dialect, exists := query["dialect"]; exists {
 		if evidence {
 			return 400, nil, errors.New("dialect is not valid on history-page")
 		}
 		switch dialect {
-		case localNativeCandidatesDialect, localNativeSearchCandidatesDialect:
+		case localNativeCandidatesDialect, localNativeSearchCandidatesDialect, localNativePendingCandidatesDialect:
 			// Presence, including an empty value, is an error: silently accepting
 			// a filter could make a caller mistake raw candidates for matches.
 			for _, key := range []string{"q", "account", "tag", "tags", "kind"} {
@@ -106,6 +110,7 @@ func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query 
 			}
 			candidates = true
 			searchCandidates = dialect == localNativeSearchCandidatesDialect
+			pendingCandidates = dialect == localNativePendingCandidatesDialect
 		default:
 			return 400, nil, errors.New("unsupported transaction page dialect")
 		}
@@ -189,11 +194,27 @@ func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query 
 		}
 		// Listing projection deliberately omits rich editor drafts and metadata.
 		// These remain in the model for filtering and legacy/detail requests.
+		txn.PendingReviewFlag = nil
+		if pendingCandidates {
+			flagged := txn.Entry != nil && (txn.Entry.Flag == "!" || txn.Entry.NeedsReview)
+			txn.PendingReviewFlag = &flagged
+		}
 		txn.Entry = nil
 		if evidence {
 			metadata := make(map[string]MetadataValue, 3)
 			for _, key := range []string{"method", "cardLast4", "source"} {
 				if value, ok := txn.Metadata[key]; ok {
+					metadata[key] = value
+				}
+			}
+			txn.Metadata = metadata
+		} else if pendingCandidates {
+			metadata := make(map[string]MetadataValue, 3)
+			for _, key := range []string{"type", "needs_review", "status"} {
+				if value, ok := txn.Metadata[key].(string); ok {
+					if len(value) > localTransactionPageBytes {
+						return 413, nil, errors.New("pending evidence exceeds page byte budget")
+					}
 					metadata[key] = value
 				}
 			}

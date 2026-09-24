@@ -121,6 +121,18 @@ actor LocalLedgerRepository: LedgerRepository {
             cursor: cursor, limit: limit, expectedRevisionID: expectedRevisionID)
     }
 
+    /// Exact pending classifier evidence without rich editor drafts. The other
+    /// candidate dialects deliberately do not carry this source-entry evidence.
+    func pendingCandidatePage(start: String, end: String, cursor: String? = nil, limit: Int = 500,
+                              expectedRevisionID: UUID) async throws -> LedgerTransactionPage {
+        let page = try await nativeCandidatePage(dialect: "native-pending-candidates-v1", start: start, end: end,
+            cursor: cursor, limit: limit, expectedRevisionID: expectedRevisionID)
+        guard page.transactions.allSatisfy({ $0.pendingReviewFlag != nil && $0.editableEntry == nil }) else {
+            throw LocalLedgerError.operationFailed("待整理分页缺少审核依据")
+        }
+        return page
+    }
+
     private func nativeCandidatePage(dialect: String, start: String, end: String, cursor: String?, limit: Int,
                                      expectedRevisionID: UUID) async throws -> LedgerTransactionPage {
         guard (1...500).contains(limit),

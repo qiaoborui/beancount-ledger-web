@@ -766,6 +766,16 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertFalse(verified.tags.contains("待确认"))
     }
 
+    func testPendingNativeEvidenceMatchesSourceEntryFlagWithoutDraft() {
+        for flag in [false, true] {
+            let tx = LedgerTransaction(date: "2026-09-24", payee: "Synthetic", narration: "Known",
+                postings: [.init(account: "Expenses:Food", amount: 100, currency: "CNY")],
+                pendingReviewFlag: flag, source: .init(file: "fixture.bean", line: 1))
+            XCTAssertEqual(tx.pendingReasons, flag ? [.needsReviewFlag] : [])
+            XCTAssertNil(tx.editableEntry)
+        }
+    }
+
     func testEventTagCalculatorAggregatesSpendAndDailyRhythm() {
         let tx1 = LedgerTransaction(
             date: "2026-04-01",
