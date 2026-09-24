@@ -574,6 +574,11 @@ actor LocalLedgerRepository: LedgerRepository {
               result.rows.allSatisfy({ row in
                   (row.account.hasPrefix("Assets:") || row.account.hasPrefix("Liabilities:"))
                     && !row.currency.isEmpty && ["pending", "asserted"].contains(row.status)
+                    && (row.statusError != nil)
+                    && (row.snapshotStatus.map { status in
+                        status.account == row.account && ["red", "green", "yellow", "grey"].contains(status.status)
+                            && row.statusError == status.hasIssue
+                    } ?? false)
                     && (row.lastAssertion.map { assertion in
                         assertion.account == row.account && LedgerWidgetLink.isValidDay(assertion.date)
                     } ?? true)

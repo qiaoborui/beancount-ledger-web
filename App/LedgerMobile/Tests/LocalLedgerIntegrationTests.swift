@@ -79,6 +79,16 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         let bootstrap = try await repository.bootstrapSnapshot(start: start, end: end, today: "2026-09-23", valuationCurrency: "CNY")
         XCTAssertEqual(bootstrap.revisionID, initial.id)
         XCTAssertTrue(bootstrap.payload.sensitiveUnlocked)
+        let reconciliation = try await repository.reconciliationSnapshot(start: start, end: end, expectedRevisionID: bootstrap.revisionID)
+        XCTAssertEqual(reconciliation.rows.count, bootstrap.payload.reconciliationRows.count)
+        for row in reconciliation.rows {
+            let legacyRow = try XCTUnwrap(bootstrap.payload.reconciliationRows.first { $0.account == row.account })
+            XCTAssertEqual(row.ledgerBalance, legacyRow.ledgerBalance)
+            XCTAssertEqual(row.status, legacyRow.status)
+            XCTAssertEqual(row.lastAssertion, legacyRow.lastAssertion)
+            XCTAssertEqual(row.snapshotStatus, bootstrap.payload.accountStatuses.first { $0.account == row.account })
+            XCTAssertEqual(row.statusError, row.snapshotStatus?.hasIssue)
+        }
         let legacy = try await repository.globalTransactions()
         XCTAssertEqual(legacy.transactions.count, 507)
         let rows = legacy.transactions.filter { $0.date >= start && $0.date < end }

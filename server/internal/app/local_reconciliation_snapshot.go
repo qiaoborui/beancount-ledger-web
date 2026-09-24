@@ -46,8 +46,21 @@ func localReconciliationSnapshotResponse(snapshot *LedgerSnapshot, query map[str
 	}
 	result := localReconciliationSnapshot{Revision: fmt.Sprintf("%s:%d", snapshot.Version, snapshot.localReadModelID), SensitiveUnlocked: true,
 		Start: start, End: end, MonthPrefix: start[:7], Rows: []ReconciliationRow{}}
-	used := 4096
+	// Bound eligible account references before computing statuses, and use the
+	// existing status calculator on THIS snapshot, never infer red/green from
+	// the range's independent pending/asserted marker.
+	eligible := make([]Account, 0)
 	for _, account := range snapshot.Accounts {
+		if account.Active && (strings.HasPrefix(account.Account, "Assets:") || strings.HasPrefix(account.Account, "Liabilities:")) {
+			if len(eligible) >= localReconciliationMaxRows {
+				return 413, nil, errors.New("reconciliation account count exceeds capacity")
+			}
+			eligible = append(eligible, account)
+		}
+	}
+	statuses := AccountStatusIndicators(snapshot.Transactions, snapshot.BalanceAssertions, eligible)
+	used := 4096
+	for index, account := range eligible {
 		if !account.Active || !(strings.HasPrefix(account.Account, "Assets:") || strings.HasPrefix(account.Account, "Liabilities:")) {
 			continue
 		}
@@ -55,10 +68,20 @@ func localReconciliationSnapshotResponse(snapshot *LedgerSnapshot, query map[str
 			return 413, nil, errors.New("reconciliation account count exceeds capacity")
 		}
 		row := reconciliationRowForAccount(snapshot, account, start, end)
+		status := statuses[index]
+		row.SnapshotStatus = &status
+		issue := status.Status == "red"
+		row.StatusError = &issue
 		// Bound per-row serializer input before allocating escaped JSON. Final wire
 		// size is checked below; at most one bounded row is considered at a time.
 		budget := localTransactionPageBytes - 4096
-		values := []string{row.Account, row.Label, row.Currency, row.Status}
+		values := []string{row.Account, row.Label, row.Currency, row.Status, status.Account, status.Status}
+		if status.LastEntryDate != nil {
+			values = append(values, *status.LastEntryDate)
+		}
+		if status.LastEntryType != nil {
+			values = append(values, *status.LastEntryType)
+		}
 		if row.Alias != nil {
 			values = append(values, *row.Alias)
 		}
