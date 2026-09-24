@@ -136,6 +136,30 @@ final class LocalTransactionRepositoryTests: XCTestCase {
         } catch { XCTAssertEqual(error as? LocalLedgerWorkspace.WorkspaceError, .staleRevision) }
     }
 
+    func testPendingCandidateEvidenceRequiredAndNoEditorAuthority() async throws {
+        for evidence: Bool? in [nil, false, true] {
+            let (workspace, revision) = try await workspace()
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: page(rows: 1)) as? [String: Any])
+            var rows = try XCTUnwrap(object["transactions"] as? [[String: Any]])
+            rows[0]["pendingReviewFlag"] = evidence
+            rows[0]["metadata"] = ["status": "Pending", "needs_review": "TRUE"]
+            object["transactions"] = rows
+            let engine = Engine([try JSONSerialization.data(withJSONObject: object)])
+            let repository = repository(workspace, engine)
+            do {
+                let page = try await repository.pendingCandidatePage(start: start, end: end, expectedRevisionID: revision)
+                XCTAssertNotNil(evidence)
+                XCTAssertEqual(page.transactions[0].pendingReviewFlag, evidence)
+                XCTAssertNil(page.transactions[0].editableEntry)
+                XCTAssertTrue(page.transactions[0].pendingReasons.contains(.needsReviewFlag))
+            } catch { XCTAssertNil(evidence, "\(error)") }
+            let requests = await engine.requests
+            XCTAssertEqual(requests[0].query["dialect"], "native-pending-candidates-v1")
+            let authority = await repository.presentedRevisionID
+            XCTAssertNil(authority)
+        }
+    }
+
     func testCandidateDialectHasOnlyDatesCursorAndLimitAndNeverPresentsRevision() async throws {
         let (workspace, revision) = try await workspace()
         let engine = Engine([try page(cursor: "raw-next")])

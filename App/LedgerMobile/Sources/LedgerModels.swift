@@ -778,6 +778,9 @@ struct LedgerTransaction: Codable, Identifiable, Equatable, Sendable {
     let tags: [String]?
     let postings: [LedgerPosting]
     let editableEntry: LedgerTransactionEntry?
+    /// Native pending pages carry only the exact source-entry review condition.
+    /// This never grants edit authority or reconstructs an editable draft.
+    let pendingReviewFlag: Bool?
     let source: TransactionSource
 
     private enum CodingKeys: String, CodingKey {
@@ -788,6 +791,7 @@ struct LedgerTransaction: Codable, Identifiable, Equatable, Sendable {
         case tags
         case postings
         case editableEntry = "entry"
+        case pendingReviewFlag
         case source
     }
 
@@ -799,6 +803,7 @@ struct LedgerTransaction: Codable, Identifiable, Equatable, Sendable {
         tags: [String]? = nil,
         postings: [LedgerPosting],
         editableEntry: LedgerTransactionEntry? = nil,
+        pendingReviewFlag: Bool? = nil,
         source: TransactionSource
     ) {
         self.date = date
@@ -808,6 +813,7 @@ struct LedgerTransaction: Codable, Identifiable, Equatable, Sendable {
         self.tags = tags
         self.postings = postings
         self.editableEntry = editableEntry
+        self.pendingReviewFlag = pendingReviewFlag
         self.source = source
     }
 
@@ -2158,7 +2164,8 @@ enum PendingTransactionClassifier {
         }
 
         // 2. Needs review flag / metadata
-        let isFlagged = transaction.editableEntry?.flag == "!"
+        let isFlagged = transaction.pendingReviewFlag == true
+            || transaction.editableEntry?.flag == "!"
             || transaction.editableEntry?.needsReview == true
             || transaction.metadata?["needs_review"]?.stringValue?.lowercased() == "true"
             || transaction.metadata?["status"]?.stringValue?.lowercased() == "pending"

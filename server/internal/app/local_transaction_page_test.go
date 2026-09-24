@@ -758,3 +758,72 @@ func TestLocalSearchCandidateMetadataByteBudgetAndContinuation(t *testing.T) {
 		t.Fatal("oversized search metadata accepted", status, err)
 	}
 }
+
+func TestLocalPendingCandidatesPreserveClassifierEvidenceWithoutEditorDraft(t *testing.T) {
+	cfg, snapshot := pageFixture(4)
+	snapshot.Transactions[0].Entry = &LedgerEntry{Flag: "!"}
+	snapshot.Transactions[1].Entry = &LedgerEntry{Flag: "*", NeedsReview: true}
+	snapshot.Transactions[2].Entry = &LedgerEntry{Flag: "*"}
+	snapshot.Transactions[3].Entry = nil
+	for i := range snapshot.Transactions {
+		snapshot.Transactions[i].Metadata = map[string]MetadataValue{"type": "退款", "needs_review": "TRUE", "status": "Pending", "receipt": "not classifier", "method": "not classifier"}
+	}
+	before, _ := json.Marshal(snapshot.Transactions)
+	page := readCandidatePage(t, cfg, snapshot, map[string]string{"dialect": localNativePendingCandidatesDialect})
+	for i, row := range page.Transactions {
+		if row.PendingReviewFlag == nil || *row.PendingReviewFlag != (i < 2) || row.Entry != nil {
+			t.Fatal("incorrect pending source evidence", i)
+		}
+		if len(row.Metadata) != 3 || row.Metadata["needs_review"] != "TRUE" || row.Metadata["status"] != "Pending" {
+			t.Fatal("pending metadata changed")
+		}
+	}
+	after, _ := json.Marshal(snapshot.Transactions)
+	if string(before) != string(after) {
+		t.Fatal("projection mutated model")
+	}
+	for _, dialect := range []string{localNativeCandidatesDialect, localNativeSearchCandidatesDialect} {
+		other := readCandidatePage(t, cfg, snapshot, map[string]string{"dialect": dialect})
+		if other.Transactions[0].PendingReviewFlag != nil {
+			t.Fatal("evidence leaked to other dialect")
+		}
+	}
+	for _, value := range []any{true, 123, nil, []any{"true"}} {
+		snapshot.Transactions[0].Metadata["needs_review"] = value
+		page := readCandidatePage(t, cfg, snapshot, map[string]string{"dialect": localNativePendingCandidatesDialect})
+		if _, ok := page.Transactions[0].Metadata["needs_review"]; ok {
+			t.Fatal("nonstring evidence was stringified")
+		}
+	}
+}
+func TestLocalPendingCandidatesScopesFiltersAndByteLimits(t *testing.T) {
+	cfg, snapshot := pageFixture(3)
+	first := readCandidatePage(t, cfg, snapshot, map[string]string{"dialect": localNativePendingCandidatesDialect, "limit": "1"})
+	for _, dialect := range []string{localNativeCandidatesDialect, localNativeSearchCandidatesDialect} {
+		if status, _, err := localTransactionPageResponse(cfg, snapshot, map[string]string{"dialect": dialect, "cursor": first.NextCursor}); status != 409 || err == nil {
+			t.Fatal("pending cursor escaped scope")
+		}
+	}
+	for _, key := range []string{"q", "account", "tag", "tags", "kind"} {
+		if status, _, err := localTransactionPageResponse(cfg, snapshot, map[string]string{"dialect": localNativePendingCandidatesDialect, key: ""}); status != 400 || err == nil {
+			t.Fatal("filter presence accepted")
+		}
+	}
+	for i := range snapshot.Transactions {
+		snapshot.Transactions[i].Metadata = map[string]MetadataValue{"status": strings.Repeat("<", 60000)}
+	}
+	q := map[string]string{"dialect": localNativePendingCandidatesDialect}
+	first = readCandidatePage(t, cfg, snapshot, q)
+	if len(first.Transactions) != 2 || first.NextCursor == "" {
+		t.Fatal("pending bytes omitted from budget")
+	}
+	q["cursor"] = first.NextCursor
+	last := readCandidatePage(t, cfg, snapshot, q)
+	if len(last.Transactions) != 1 || last.Transactions[0].Source.Line != 3 || last.NextCursor != "" {
+		t.Fatal("pending byte continuation invalid")
+	}
+	snapshot.Transactions[0].Metadata["status"] = strings.Repeat("<", localTransactionPageBytes/6+1)
+	if status, _, err := localTransactionPageResponse(cfg, snapshot, map[string]string{"dialect": localNativePendingCandidatesDialect}); status != 413 || err == nil {
+		t.Fatal("oversize pending evidence accepted")
+	}
+}

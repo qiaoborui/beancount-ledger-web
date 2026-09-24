@@ -139,6 +139,15 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         XCTAssertEqual(one.transactions.first?.id, rows[0].id)
         XCTAssertEqual(two.transactions.first?.id, rows[1].id)
 
+        let pendingFirst = try await repository.pendingCandidatePage(start: start, end: end,
+            expectedRevisionID: bootstrap.revisionID)
+        let pendingLast = try await repository.pendingCandidatePage(start: start, end: end,
+            cursor: XCTUnwrap(pendingFirst.nextCursor), expectedRevisionID: bootstrap.revisionID)
+        let pendingRows = pendingFirst.transactions + pendingLast.transactions
+        XCTAssertEqual(pendingRows.map(\.id), rows.map(\.id))
+        XCTAssertEqual(pendingRows.map(\.pendingReasons), rows.map(\.pendingReasons))
+        XCTAssertTrue(pendingRows.allSatisfy { $0.editableEntry == nil && $0.pendingReviewFlag != nil })
+
         // Global search needs arbitrary metadata, not just list presentation's
         // type. Exercise the real native dialect with exact Swift matching.
         let searchFirst = try await repository.searchCandidatePage(start: start, end: end,

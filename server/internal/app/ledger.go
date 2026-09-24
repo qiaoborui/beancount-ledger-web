@@ -25,7 +25,9 @@ type Transaction struct {
 	Links     []string                 `json:"links,omitempty"`
 	Postings  []Posting                `json:"postings"`
 	Entry     *LedgerEntry             `json:"entry,omitempty"`
-	Source    TransactionSource        `json:"source"`
+	// Native pending-candidate evidence only; nil on canonical/legacy models.
+	PendingReviewFlag *bool             `json:"pendingReviewFlag,omitempty"`
+	Source            TransactionSource `json:"source"`
 }
 
 type TransactionSource struct {
