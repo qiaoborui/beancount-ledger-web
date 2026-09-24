@@ -214,6 +214,29 @@ actor LocalLedgerRepository: LedgerRepository {
         }
     }
 
+    func pendingWindow(start: String, end: String, filter: LedgerPendingFilter, offset: Int,
+                       declaredAccounts: [String], nativeRevision: String? = nil,
+                       expectedRevisionID: UUID) async throws -> LocalPendingScan.Result {
+        var scan: LocalPendingScan?
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await pendingCandidatePage(start: start, end: end, cursor: cursor, expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil {
+                if let nativeRevision, nativeRevision != page.revision { throw LocalLedgerError.staleTransactionCursor }
+                scan = try LocalPendingScan(revision: page.revision, filter: filter, offset: offset, declaredAccounts: declaredAccounts)
+            }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return result
+            }
+            cursor = page.nextCursor
+        }
+    }
+
     func eventTagSummaries(start: String, end: String, expectedRevisionID: UUID) async throws -> [EventTagSummary] {
         var scan: LocalEventTagSummaryScan?
         var cursor: String?

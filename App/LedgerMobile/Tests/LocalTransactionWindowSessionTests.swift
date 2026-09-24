@@ -113,6 +113,13 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
                 if successfulEdits {
                     rows = rows.filter { $0.date >= request.query["start"]! && $0.date < request.query["end"]! }
                 }
+                if request.query["dialect"] == "native-pending-candidates-v1" {
+                    rows = rows.map {
+                        LedgerTransaction(date: $0.date, payee: $0.payee, narration: $0.narration,
+                            metadata: $0.metadata, tags: $0.tags, postings: $0.postings,
+                            pendingReviewFlag: true, source: $0.source)
+                    }
+                }
                 return try JSONSerialization.data(withJSONObject: ["revision": "native-synthetic",
                     "transactions": JSONSerialization.jsonObject(with: JSONEncoder().encode(rows)),
                     "nextCursor": NSNull(), "sensitiveUnlocked": true])
@@ -743,6 +750,55 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
             }
             await gate.release()
             do { _ = try await old.value; XCTFail("late event window returned") } catch {}
+        }
+    }
+
+    func testPendingWindowsKeepCompleteFactsAndPinFilterContinuation() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(205)
+        let original = session.ledger?.transactions
+        let authority = await repository.presentedRevisionID
+        let first = try await session.localPendingWindow()
+        XCTAssertEqual(first.result.totalCount, 205)
+        XCTAssertEqual(first.result.totalMinorUnits, 25_625)
+        XCTAssertEqual(first.result.transactions.count, 100)
+        let next = try XCTUnwrap(first.continuation)
+        do { _ = try await session.localPendingWindow(filter: .missingPayee, continuation: next); XCTFail("wrong filter accepted") } catch {}
+        let second = try await session.localPendingWindow(continuation: next)
+        XCTAssertEqual(second.result.transactions.first?.source.line, 101)
+        let last = try await session.localPendingWindow(continuation: second.continuation)
+        XCTAssertEqual(last.result.transactions.map(\.source.line), [201, 202, 203, 204, 205])
+        XCTAssertNil(last.continuation)
+        let filtered = try await session.localPendingWindow(filter: .missingPayee)
+        XCTAssertEqual(filtered.result.totalCount, 205)
+        XCTAssertTrue(filtered.result.transactions.isEmpty)
+        do { _ = try await session.localPendingWindow(continuation: next); XCTFail("old sequence accepted") } catch {}
+        XCTAssertEqual(session.ledger?.transactions, original)
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(after, authority)
+    }
+
+    func testPendingWindowRejectsSupersessionResetPrivacyRevisionAndCancellation() async throws {
+        for operation in 0..<5 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "pending awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let old = Task { try await session.localPendingWindow() }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0:
+                let new = try await session.localPendingWindow(filter: .missingPayee)
+                XCTAssertTrue(new.result.transactions.isEmpty)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            case 3: try await advance(repository)
+            default: old.cancel()
+            }
+            await gate.release()
+            do { _ = try await old.value; XCTFail("late pending result returned") } catch {}
         }
     }
 
