@@ -231,6 +231,50 @@ struct EventTagReportView: View {
 
     @State private var sharePresented = false
     @State private var selectedDailyDate: String? = nil
+    @State private var aggregate: LocalEventTagReportScan.Result?
+    @State private var selectedTransaction: LedgerTransaction?
+    @State private var window: LocalTransactionWindow.Window?
+    @State private var aggregateScope: ReadScope?
+    @State private var windowScope: ReadScope?
+    @State private var aggregateError: String?
+    @State private var windowError: String?
+    @State private var aggregateLoading = false
+    @State private var windowLoading = false
+    @State private var active = false
+    @State private var page = 0
+    @State private var displayedPage = 0
+    @State private var reload = 0
+    @State private var export: LocalEventReportExport?
+    @State private var exportOwner: LocalEventReportExport?
+    @State private var exportTask: Task<Void, Never>?
+    @State private var exportID: UUID?
+    @State private var exportError: String?
+
+    private struct ReadScope: Equatable {
+        let tag: String
+        let revision: UUID?
+        let invalidation: Int
+        let range: LedgerDateRange
+        let readable: Bool
+        let reload: Int
+    }
+    private struct ReadRequest: Equatable {
+        let scope: ReadScope
+        let active: Bool
+        let page: Int
+    }
+    private var scope: ReadScope {
+        .init(tag: tag, revision: session.localTransactionPresentationRevision,
+            invalidation: session.localGlobalSearchInvalidation, range: session.selectedRange,
+            readable: session.phase == .ready && !session.privacyShielded && !session.isRangeLoading
+                && !session.isValuationCurrencyLoading && !session.transactionMutationStates.values.contains(.pending),
+            reload: reload)
+    }
+    private var request: ReadRequest { .init(scope: scope, active: active, page: page) }
+    private var aggregateRequest: ReadRequest { .init(scope: scope, active: active, page: 0) }
+    private var aggregateCurrent: Bool { aggregate != nil && aggregateScope == scope && scope.readable }
+    private var windowCurrent: Bool { window != nil && windowScope == scope && scope.readable }
+    private var completeCount: Int { session.isLocal ? (aggregate?.summary.transactionCount ?? 0) : report.transactions.count }
 
     private var allTransactions: [LedgerTransaction] {
         session.visibleTransactions
@@ -241,7 +285,18 @@ struct EventTagReportView: View {
     }
 
     private var report: EventTagReport {
-        EventTagCalculator.generateReport(tag: tag, from: allTransactions, accountLabels: accountLabels)
+        guard session.isLocal else {
+            return EventTagCalculator.generateReport(tag: tag, from: allTransactions, accountLabels: accountLabels)
+        }
+        // Only the row window is partial. Totals, categories and daily rhythm
+        // are complete EOF aggregates; no caller exports this as a full report.
+        let summary = aggregate?.summary
+        return EventTagReport(tag: tag, transactions: windowCurrent ? (window?.transactions ?? []) : [],
+            totalExpense: summary?.totalExpense ?? 0, totalIncome: summary?.totalIncome ?? 0,
+            netSpend: summary?.netSpend ?? 0, currency: summary?.currency ?? "CNY",
+            startDate: summary?.startDate, endDate: summary?.endDate,
+            daysCount: summary?.daysCount ?? 0, dailyAverage: summary?.dailyAverage ?? 0,
+            categoryBreakdown: aggregate?.categoryBreakdown ?? [], dailySeries: aggregate?.dailySeries ?? [])
     }
 
     private var groupedTransactions: [(date: String, transactions: [LedgerTransaction])] {
@@ -253,21 +308,50 @@ struct EventTagReportView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                // 1. Hero Event Voucher Card
-                eventHeroCard
-
-                // 2. Category Breakdown Card
-                if !report.categoryBreakdown.isEmpty {
-                    categoryBreakdownCard
+                if session.isLocal, let aggregateError, aggregateCurrent {
+                    Text("事件汇总刷新失败：" + aggregateError).foregroundStyle(.secondary)
+                    Button("重试汇总") { reload += 1 }
                 }
-
-                // 3. Daily Rhythm Card
-                if report.dailySeries.count > 1 {
-                    dailyRhythmCard
+                if !session.isLocal || aggregateCurrent {
+                    eventHeroCard
+                    if !report.categoryBreakdown.isEmpty { categoryBreakdownCard }
+                    if report.dailySeries.count > 1 { dailyRhythmCard }
+                } else if let aggregateError {
+                    Text("事件汇总读取失败：" + aggregateError).foregroundStyle(.secondary)
+                    Button("重试汇总") { reload += 1 }
+                } else if aggregateLoading {
+                    ProgressView("正在核算完整事件…")
+                } else {
+                    Button("读取完整事件汇总") { reload += 1 }
                 }
-
-                // 4. Grouped Transactions Section
-                transactionsSection
+                if session.isLocal {
+                    if let windowError {
+                        Text("事件流水读取失败：" + windowError).foregroundStyle(.secondary)
+                        Button("重试流水") { reload += 1 }
+                    }
+                    if windowLoading { ProgressView("正在读取事件流水…") }
+                    if windowCurrent {
+                        transactionsSection
+                        HStack {
+                            Button("上一页") {
+                                let target = max(0, displayedPage - 1)
+                                if page == target { reload += 1 } else { page = target }
+                            }.disabled(displayedPage == 0 || windowLoading)
+                            Spacer()
+                            Text("第 \(displayedPage + 1) 页").font(.caption)
+                                .accessibilityIdentifier("event-report-page")
+                            Spacer()
+                            Button("下一页") {
+                                let target = displayedPage + 1
+                                if page == target { reload += 1 } else { page = target }
+                            }.disabled(window?.isComplete != false || windowLoading)
+                        }
+                    }
+                } else { transactionsSection }
+                if let exportError {
+                    Text(exportError).foregroundStyle(.secondary)
+                }
+                if exportID != nil { ProgressView("正在生成完整事件文件…") }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -277,17 +361,120 @@ struct EventTagReportView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    sharePresented = true
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 15, weight: .semibold))
+                if session.isLocal {
+                    Menu {
+                        Button("导出完整 Markdown 文件", action: prepareExport)
+                            .disabled(exportID != nil || !scope.readable)
+                        Button("图片与剪贴板导出") { sharePresented = true }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    .accessibilityIdentifier("event-report-export-menu")
+                    .disabled(!scope.readable)
+                } else {
+                    Button { sharePresented = true } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
                 }
             }
         }
         .sheet(isPresented: $sharePresented) {
-            EventReportShareSheet(report: report, accountLabels: accountLabels)
+            // Preserve existing full clipboard/image semantics until that API
+            // can consume a file. Never pass the current page as a complete list.
+            EventReportShareSheet(report: session.isLocal
+                ? EventTagCalculator.generateReport(tag: tag, from: allTransactions, accountLabels: accountLabels)
+                : report, accountLabels: accountLabels)
                 .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(item: $export, onDismiss: cancelExport) { value in
+            NavigationStack {
+                VStack(spacing: 16) {
+                    Text("完整事件 Markdown").font(.headline)
+                    Text("共 \(value.count) 笔流水，包含全部分类与核算结果。")
+                    ShareLink(item: value.url) { Label("分享完整文件", systemImage: "square.and.arrow.up") }
+                        .accessibilityIdentifier("event-report-file-share")
+                }
+                .padding()
+                .navigationTitle("事件文件导出")
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { export = nil } } }
+            }
+            .ledgerPrivacyProtectedSheet()
+        }
+        .navigationDestination(isPresented: Binding(
+            get: { selectedTransaction != nil },
+            set: { if !$0 { selectedTransaction = nil } }
+        )) {
+            if let selectedTransaction { TransactionDetailView(transaction: selectedTransaction) }
+        }
+        .task(id: aggregateRequest) { if session.isLocal { await loadAggregate() } }
+        .task(id: request) { if session.isLocal { await loadWindow() } }
+        .onAppear { active = true }
+        .onDisappear {
+            active = false
+            if export == nil { cancelExport() }
+        }
+        .onChange(of: scope) { _, value in
+            cancelExport()
+            if !value.readable {
+                aggregate = nil; window = nil; aggregateScope = nil; windowScope = nil
+                sharePresented = false
+            }
+        }
+        .onChange(of: tag) { _, _ in page = 0; displayedPage = 0; selectedDailyDate = nil }
+        .onChange(of: session.selectedRange) { _, _ in page = 0; displayedPage = 0; selectedDailyDate = nil }
+        .onChange(of: session.localTransactionPresentationRevision) { _, _ in page = 0; displayedPage = 0 }
+    }
+
+    private func loadAggregate() async {
+        guard active, scope.readable else { return }
+        let key = aggregateRequest
+        aggregateLoading = true; aggregateError = nil
+        defer { if key == aggregateRequest { aggregateLoading = false } }
+        do {
+            let result = try await session.localEventTagReport(tag)
+            guard !Task.isCancelled, key == aggregateRequest, scope.readable else { return }
+            aggregate = result; aggregateScope = key.scope
+        } catch {
+            if !Task.isCancelled, key == aggregateRequest { aggregateError = error.localizedDescription }
+        }
+    }
+    private func loadWindow() async {
+        guard active, scope.readable else { return }
+        let key = request
+        windowLoading = true; windowError = nil
+        defer { if key == request { windowLoading = false } }
+        do {
+            let result = try await session.localEventTagWindow(tag, index: key.page)
+            guard !Task.isCancelled, key == request, scope.readable else { return }
+            window = result; windowScope = key.scope; displayedPage = key.page
+        } catch {
+            if !Task.isCancelled, key == request { windowError = error.localizedDescription }
+        }
+    }
+    private func cancelExport() {
+        exportID = nil
+        exportTask?.cancel(); exportTask = nil
+        if let exportOwner { session.discardLocalEventReportExport(exportOwner) }
+        exportOwner = nil; export = nil
+    }
+    private func prepareExport() {
+        guard session.isLocal, scope.readable, exportID == nil else { return }
+        cancelExport()
+        let id = UUID(), captured = scope
+        exportID = id; exportError = nil
+        exportTask = Task { @MainActor in
+            defer { if exportID == id { exportID = nil; exportTask = nil } }
+            do {
+                let result = try await session.prepareLocalEventReportExport(tag)
+                guard !Task.isCancelled, exportID == id, captured == scope else {
+                    session.discardLocalEventReportExport(result); return
+                }
+                exportOwner = result; export = result
+            } catch {
+                if !Task.isCancelled, exportID == id { exportError = error.localizedDescription }
+            }
         }
     }
 
@@ -303,7 +490,8 @@ struct EventTagReportView: View {
                         .foregroundStyle(LedgerPalette.ink)
                 }
                 Spacer()
-                Text("\(report.transactions.count) 笔流水")
+                Text("\(completeCount) 笔流水")
+                    .accessibilityIdentifier("event-report-count")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(LedgerPalette.cobalt)
                     .padding(.horizontal, 9)
@@ -567,11 +755,14 @@ struct EventTagReportView: View {
 
                         VStack(spacing: 0) {
                             ForEach(group.transactions) { tx in
-                                NavigationLink {
-                                    TransactionDetailView(transaction: tx)
+                                Button {
+                                    selectedTransaction = tx
                                 } label: {
                                     TransactionRow(transaction: tx, accountLabels: accountLabels)
                                 }
+                                .buttonStyle(.plain)
+                                .disabled(session.isLocal && windowLoading)
+                                .accessibilityIdentifier("event-report-row-" + tx.id)
                                 .padding(.horizontal, 12)
 
                                 if tx.id != group.transactions.last?.id {
