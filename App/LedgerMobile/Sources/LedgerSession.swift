@@ -248,6 +248,9 @@ final class LedgerSession: ObservableObject {
     private var eventReportID: UUID?
     private var eventWindowTask: Task<LocalTransactionWindow.Window, Error>?
     private var eventWindowID: UUID?
+    private var eventExportTask: Task<LocalEventReportExport, Error>?
+    private var eventExportID: UUID?
+    private var eventExport: LocalEventReportExport?
 
     private var widgetWindowTask: Task<LocalTransactionWindow.Window, Error>?
     private var widgetWindowRequestID: UUID?
@@ -3498,6 +3501,7 @@ final class LedgerSession: ObservableObject {
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
     func resetLocalTransactionWindow() {
+        discardLocalEventReportExport()
         eventWindowID = nil
         eventWindowTask?.cancel(); eventWindowTask = nil
         eventReportID = nil
@@ -4045,6 +4049,50 @@ final class LedgerSession: ObservableObject {
         guard transactionSelectionID == id else { throw CancellationError() }
         guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
         return result
+    }
+
+    func discardLocalEventReportExport(_ export: LocalEventReportExport? = nil) {
+        if let export, eventExport !== export { export.discard(); return }
+        eventExportID = nil
+        eventExportTask?.cancel(); eventExportTask = nil
+        eventExport?.discard(); eventExport = nil
+    }
+
+    func prepareLocalEventReportExport(_ tag: String) async throws -> LocalEventReportExport {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let accounts = ledger?.accounts ?? []
+        let labels = TransactionCategoryPresentation.accountLabels(accounts)
+        discardLocalEventReportExport()
+        let id = UUID(); eventExportID = id
+        let task = Task { @MainActor [self] in
+            try await LocalEventReportExport.prepare(repository: repository, tag: tag,
+                start: context.range.start, end: context.range.queryEndExclusive,
+                expectedRevisionID: context.revisionID, accountLabels: labels,
+                parentDirectory: FileManager.default.temporaryDirectory.resolvingSymlinksInPath(),
+                adopt: { self.eventExport = $0 }) {
+                    try self.validateLocalRead(context)
+                    guard self.eventExportID == id, self.ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+                }
+        }
+        eventExportTask = task
+        do {
+            let export = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            do {
+                try validateLocalRead(context)
+                guard eventExportID == id, ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+                let current = try await repository.workspace.currentRevision()
+                try validateLocalRead(context)
+                guard eventExportID == id, ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+                guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+            } catch { export.discard(); throw error }
+            eventExport = export
+            eventExportTask = nil
+            return export
+        } catch {
+            if eventExportID == id { discardLocalEventReportExport() }
+            throw error
+        }
     }
 
     /// Retain at most one export, revoking its file synchronously whenever the
