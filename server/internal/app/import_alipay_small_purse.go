@@ -224,6 +224,8 @@ func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipay
 		if incomeKind == "refund" {
 			txType = "退款"
 			target = config.DefaultPlusAccount
+		} else if incomeKind == "income" {
+			target = config.DefaultMinusAccount
 		} else {
 			target = alipaySmallPursePartnerLiabilityAccount(config)
 		}
@@ -232,6 +234,9 @@ func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipay
 	ignore, target, tags := alipaySmallPurseApplyRules(row, payee, amount, txType, target, config)
 	if ignore {
 		return "", true, nil
+	}
+	if income > 0 && incomeKind == "unknown" {
+		return "", false, fmt.Errorf("支付宝小荷包第 %d 行无法识别收入类型: %s", row.RowNumber, row.Description)
 	}
 
 	lines := []string{fmt.Sprintf(`%s * "%s" "%s"`, date, escapeBean(payee), escapeBean(narration))}
@@ -268,6 +273,9 @@ func renderAlipaySmallPurseEntry(statement alipaySmallPurseStatement, row alipay
 		lines = append(lines, fmt.Sprintf(`  merchantId: "%s"`, escapeBean(merchant)))
 	}
 	if income > 0 {
+		if allocator != nil && incomeKind == "income" {
+			allocator.add(alipaySmallPurseContributorOwner, amount)
+		}
 		if allocator != nil && incomeKind == "topup" {
 			contributor, err := alipaySmallPurseTopupContributor(row, config)
 			if err != nil {
@@ -849,6 +857,8 @@ func alipaySmallPurseRowGeneratesEntry(statement alipaySmallPurseStatement, row 
 		if incomeKind == "refund" {
 			txType = "退款"
 			target = config.DefaultPlusAccount
+		} else if incomeKind == "income" {
+			target = config.DefaultMinusAccount
 		} else {
 			target = alipaySmallPursePartnerLiabilityAccount(config)
 		}
@@ -858,6 +868,9 @@ func alipaySmallPurseRowGeneratesEntry(statement alipaySmallPurseStatement, row 
 	ignore, _, _ := alipaySmallPurseApplyRules(row, payee, amount, txType, target, config)
 	if ignore {
 		return false, nil
+	}
+	if income > 0 && incomeKind == "unknown" {
+		return false, fmt.Errorf("支付宝小荷包第 %d 行无法识别收入类型: %s", row.RowNumber, row.Description)
 	}
 	if incomeKind == "topup" && alipaySmallPurseUsesRunningContributionBalance(config) && alipaySmallPurseSharedExpenseSplit(config) {
 		contributor, err := alipaySmallPurseTopupContributor(row, config)
@@ -977,10 +990,15 @@ func alipaySmallPurseDigitsOnly(value string) bool {
 
 func alipaySmallPurseIncomeKind(row alipaySmallPurseRow) string {
 	description := strings.TrimSpace(row.Description)
-	if strings.HasPrefix(description, "转入") {
+	switch {
+	case strings.HasPrefix(description, "转入"):
 		return "topup"
+	case strings.HasPrefix(description, "退款"):
+		return "refund"
+	case strings.HasPrefix(description, "余额收益"):
+		return "income"
 	}
-	return "refund"
+	return "unknown"
 }
 
 func alipaySmallPurseTopupContributor(row alipaySmallPurseRow, config alipaySmallPurseConfig) (alipaySmallPurseContributor, error) {

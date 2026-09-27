@@ -990,6 +990,94 @@ func TestAlipaySmallPurseRefundWithoutOriginalAllocationIsRejected(t *testing.T)
 	}
 }
 
+func TestAlipaySmallPurseBalanceYieldIsIncome(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultMinusAccount: Income:Other",
+		"defaultPlusAccount: Expenses:Shopping",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"  partnerLiabilityAccount: Liabilities:Payable:Friends:SmallPurse",
+		"  allocationMode: runningContributionBalance",
+		"  rules:",
+		"    - item: 余额收益",
+		"      type: 收入",
+		"      targetAccount: Income:Interest",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "yield-order", DateTime: "2026-09-21 05:45:40", Description: "余额收益", Income: "0.07"},
+		{OrderID: "spend-order", DateTime: "2026-09-21 06:00:00", Description: "购物", Expense: "0.07"},
+	})
+
+	server := &Server{cfg: cfg}
+	prepared, err := server.prepareAlipaySmallPurseInput(input, "yield")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.FilteredRowCount != 2 {
+		t.Fatalf("filtered row count = %d, want 2", prepared.FilteredRowCount)
+	}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	if err := server.generateAlipaySmallPurseBean(context.Background(), input, output); err != nil {
+		t.Fatal(err)
+	}
+	generated := string(mustRead(t, output))
+	yield := transactionBlockForOrderID(t, generated, "yield-order")
+	if !strings.Contains(yield, `type: "收入"`) {
+		t.Fatalf("yield entry has wrong type:\n%s", yield)
+	}
+	requirePostingLine(t, yield, "Income:Interest", "-0.07")
+	requirePostingLine(t, yield, "Assets:SmallPurse", "0.07")
+	spend := transactionBlockForOrderID(t, generated, "spend-order")
+	requirePostingLine(t, spend, "Expenses:Shopping", "0.07")
+	if strings.Contains(spend, "Liabilities:Payable:Friends:SmallPurse") {
+		t.Fatalf("yield-funded spend allocated to partner:\n%s", spend)
+	}
+}
+
+func TestAlipaySmallPurseBalanceYieldUsesDefaultIncomeAccount(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), strings.Join([]string{
+		"defaultMinusAccount: Income:Other",
+		"defaultCurrency: CNY",
+		"alipaySmallPurse:",
+		"  cashAccount: Assets:SmallPurse",
+		"",
+	}, "\n"))
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "yield-order", DateTime: "2026-09-21 05:45:40", Description: "余额收益", Income: "0.07"},
+	})
+	server := &Server{cfg: cfg}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	if err := server.generateAlipaySmallPurseBean(context.Background(), input, output); err != nil {
+		t.Fatal(err)
+	}
+	yield := transactionBlockForOrderID(t, string(mustRead(t, output)), "yield-order")
+	requirePostingLine(t, yield, "Income:Other", "-0.07")
+	requirePostingLine(t, yield, "Assets:SmallPurse", "0.07")
+}
+
+func TestAlipaySmallPurseUnknownIncomeRequiresReview(t *testing.T) {
+	cfg := testLedger(t)
+	mustWrite(t, filepath.Join(cfg.LedgerRoot, "imports", "alipay-config.yaml"), "alipaySmallPurse: {}\n")
+	input := filepath.Join(t.TempDir(), "支付宝小荷包余额收支明细.xlsx")
+	mustWriteAlipaySmallPurseRowsXLSX(t, input, []alipaySmallPurseTestRow{
+		{OrderID: "unknown-income", DateTime: "2026-09-21 05:45:40", Description: "其他入账", Income: "0.07"},
+	})
+	server := &Server{cfg: cfg}
+	if _, err := server.prepareAlipaySmallPurseInput(input, "unknown"); err == nil || !strings.Contains(err.Error(), "无法识别收入类型") {
+		t.Fatalf("prepare error = %v, want unknown income", err)
+	}
+	output := filepath.Join(t.TempDir(), "smallpurse.bean")
+	if err := server.generateAlipaySmallPurseBean(context.Background(), input, output); err == nil || !strings.Contains(err.Error(), "无法识别收入类型") {
+		t.Fatalf("generate error = %v, want unknown income", err)
+	}
+}
+
 func TestAlipaySmallPurseRefundTrackerReusesAlreadyImportedRefund(t *testing.T) {
 	config := alipaySmallPurseConfig{
 		DefaultCurrency: "CNY",

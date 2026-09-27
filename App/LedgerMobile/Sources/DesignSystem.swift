@@ -50,6 +50,87 @@ enum LedgerLayout {
     static let compactTabBarClearance: CGFloat = 24
 }
 
+/// Ambient motion runs for people and stops for machines. A repeating Core
+/// Animation never lets the app report idle, so XCUITest interactions time out
+/// waiting for quiescence. Every UI-test fixture argument in this target follows
+/// a `--safe-`/`--local-` prefix, so the prefix itself is the gate — a new
+/// fixture is covered without anyone having to remember to add it here.
+enum LedgerMotion {
+    static let allowsAmbientMotion = !ProcessInfo.processInfo.arguments.contains {
+        $0.hasPrefix("--safe-") || $0.hasPrefix("--local-")
+    }
+
+    /// Startup reveal timings, kept in one place so the cover's entrance and the
+    /// app's reveal stay paired if either is retuned.
+    enum Cover {
+        static let revealDuration: TimeInterval = 0.45
+        static let breathDuration: TimeInterval = 1.9
+        static let exitDuration: TimeInterval = 0.32
+        static let exitScale: CGFloat = 1.06
+    }
+}
+
+/// Drives a repeating Core Animation. The cover holds its motion for the whole
+/// ledger load, which on a 100k-transaction ledger is exactly when the main
+/// thread is busiest — so this is deliberately not a `TimelineView`, which would
+/// re-render SwiftUI every frame. Core Animation runs this on the render server
+/// and the app's own thread stays free for the load.
+struct LedgerAmbientMotion<Content: View>: View {
+    /// One full cycle, in seconds. The content's own shaping function is written
+    /// to meet itself at the wrap, so the repeat has no visible seam.
+    let duration: TimeInterval
+    /// `true` runs out and back in one cycle (the mark's breath); `false` runs one
+    /// way and restarts (the waiting dots, which rank the driver into a pulse).
+    var autoreverses = true
+    /// Handed the driver's 0…1 value, or `nil` when motion is off — so the content
+    /// picks its own resting state instead of being stranded mid-motion.
+    @ViewBuilder let content: (Double?) -> Content
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var phase: CGFloat = 0
+
+    private var animates: Bool { !reduceMotion && LedgerMotion.allowsAmbientMotion }
+
+    var body: some View {
+        content(animates ? Double(phase) : nil)
+            .onAppear {
+                guard animates, phase == 0 else { return }
+                withAnimation(
+                    .easeInOut(duration: duration).repeatForever(autoreverses: autoreverses)
+                ) {
+                    phase = 1
+                }
+            }
+    }
+}
+
+struct LedgerBrandMark: View {
+    var size: CGFloat = 40
+    /// The privacy cover lets the mark breathe; ordinary chrome keeps it still.
+    var breathes = false
+
+    var body: some View {
+        if breathes {
+            LedgerAmbientMotion(duration: LedgerMotion.Cover.breathDuration) { phase in
+                mark(scale: 1 + 0.04 * (phase ?? 0))
+            }
+        } else {
+            mark(scale: 1)
+        }
+    }
+
+    private func mark(scale: CGFloat) -> some View {
+        Image(systemName: "waveform.path.ecg")
+            .font(.system(size: size * 0.46, weight: .medium))
+            .foregroundStyle(LedgerPalette.onBrand)
+            .frame(width: size, height: size)
+            .background(LedgerPalette.cobalt)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+            .scaleEffect(scale)
+            .accessibilityHidden(true)
+    }
+}
+
 extension Color {
     fileprivate static func dynamic(light: UInt, dark: UInt) -> Color {
         Color(uiColor: UIColor { traits in
@@ -66,20 +147,6 @@ extension UIColor {
             blue: CGFloat(hex & 0xFF) / 255,
             alpha: 1
         )
-    }
-}
-
-struct LedgerBrandMark: View {
-    var size: CGFloat = 40
-
-    var body: some View {
-        Image(systemName: "waveform.path.ecg")
-            .font(.system(size: size * 0.46, weight: .medium))
-            .foregroundStyle(LedgerPalette.onBrand)
-            .frame(width: size, height: size)
-            .background(LedgerPalette.cobalt)
-            .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
-            .accessibilityHidden(true)
     }
 }
 
