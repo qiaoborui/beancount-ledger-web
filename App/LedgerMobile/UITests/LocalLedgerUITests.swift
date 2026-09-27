@@ -80,6 +80,7 @@ final class LocalLedgerUITests: XCTestCase {
         // opening/cancelling either editor must not revoke a future action.
         row.tap()
         XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["正在读取交易"].exists)
         let edit = app.buttons["transaction-edit"]
         XCTAssertTrue(edit.waitForExistence(timeout: 10))
         let enabled = NSPredicate(format: "enabled == true")

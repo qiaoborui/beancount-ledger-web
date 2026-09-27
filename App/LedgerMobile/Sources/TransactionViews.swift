@@ -2729,9 +2729,6 @@ struct TransactionDetailView: View {
         .onChange(of: session.phase) { _, phase in
             if phase != .ready { editorPresented = false; deletionPresented = false; cancelDetail(); revokeAction() }
         }
-        .overlay(alignment: .top) {
-            if detailRequestID != nil { ProgressView("正在读取交易").padding().background(.regularMaterial) }
-        }
         .alert("交易操作未完成", isPresented: Binding(
             get: { detailError != nil }, set: { if !$0 { detailError = nil } }
         )) { Button("好", role: .cancel) { detailError = nil } }
