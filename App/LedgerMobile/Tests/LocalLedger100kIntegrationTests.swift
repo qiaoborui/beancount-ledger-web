@@ -3,7 +3,22 @@ import XCTest
 @testable import LedgerMobile
 
 /// Opt-in synthetic capacity probe. Never opens the configured app catalog.
+@MainActor
 final class LocalLedger100kIntegrationTests: XCTestCase {
+    private struct Authenticator: LocalLedgerAuthenticating {
+        let isAvailable = true
+        func authenticate() async throws { }
+    }
+
+    private struct InertWidgetStore: LedgerWidgetCredentialStoring {
+        let isAvailable = false
+        func load() throws -> LedgerWidgetCredential? { nil }
+        func save(_ credential: LedgerWidgetCredential) throws { }
+        func suspend() throws { }
+        func pendingRevocation() throws -> LedgerWidgetCredential? { nil }
+        func completeRevocation(deviceID: String) throws { }
+    }
+
     func testSynthetic100kPagedReadAndConfirmedWrite() async throws {
         #if os(iOS)
         guard ProcessInfo.processInfo.environment["LEDGER_100K_TEST"] == "1" else {
@@ -30,6 +45,31 @@ final class LocalLedger100kIntegrationTests: XCTestCase {
         let descriptor = try await catalog.importLedger(from: source, name: "Synthetic capacity")
         print("SYNTHETIC100K import_ms=\(Self.ms(start.duration(to: .now)))")
         let repository = catalog.repository(for: descriptor)
+        let suite = "synthetic-100k-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let session = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+            defaults: defaults, widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: suite, lockDirectory: root),
+            widgetCredentialStore: InertWidgetStore(), ledgerNow: { Date(timeIntervalSince1970: 1_790_164_800) })
+        let sessionStart = ContinuousClock.now
+        await session.openLocalLedger(descriptor)
+        XCTAssertEqual(session.phase, .ready)
+        await session.applyRange(.year(year: 2026))
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(session.ledger?.summary.expense, 10_000_000)
+        XCTAssertEqual(session.ledger?.transactions.count, 100)
+        XCTAssertFalse(session.hasCachedGlobalTransactions)
+        XCTAssertTrue(session.globalTransactions.isEmpty)
+        let selectionRevision = try XCTUnwrap(session.localTransactionPresentationRevision)
+        var selection = LocalTransactionSelection(revisionID: selectionRevision,
+            start: session.selectedRange.start, end: session.selectedRange.queryEndExclusive)
+        selection.setAll(matching: .init(), selected: true)
+        let selectionFacts = try await session.localTransactionSelectionFacts(filter: .init(), selection: selection)
+        XCTAssertEqual(selectionFacts.selectedCount, 100_000)
+        XCTAssertEqual(selectionFacts.selectedMatchingCount, 100_000)
+        XCTAssertNil(selectionFacts.tagSources)
+        print("SYNTHETIC100K default_session_and_selection_ms=\(Self.ms(sessionStart.duration(to: .now)))")
+        session.chooseLedger()
         let pageStart = ContinuousClock.now
         let first = try await repository.transactionPage(limit: 100)
         XCTAssertEqual(first.transactions.count, 100)
