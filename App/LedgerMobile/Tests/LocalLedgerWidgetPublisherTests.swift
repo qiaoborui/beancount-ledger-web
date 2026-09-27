@@ -18,7 +18,15 @@ final class LocalLedgerWidgetPublisherTests: XCTestCase {
             requests.append(request)
             switch request.path {
             case "/api/ledger/version": return Data("{}".utf8)
-            case "/api/ledger/bootstrap": return Data(LedgerModelsTests.bootstrapJSON.utf8)
+            case "/api/ledger/bootstrap/page":
+                var bootstrap = try JSONSerialization.jsonObject(with: Data(LedgerModelsTests.bootstrapJSON.utf8)) as! [String: Any]
+                bootstrap["start"] = request.query["start"]
+                bootstrap["end"] = request.query["end"]
+                bootstrap["transactions"] = []
+                return try JSONSerialization.data(withJSONObject: [
+                    "bootstrap": bootstrap,
+                    "transactionPage": ["revision": "widget-fixture", "transactions": [], "sensitiveUnlocked": true]
+                ])
             case "/api/ledger/imports/documents":
                 if rejectImports { throw LocalLedgerError.operationFailed("fixture imports failure") }
                 return Data(#"{"documents":[{"provider":"alipay","dateStart":"2026-08-01","dateEnd":"2026-08-28","modTime":"2026-08-29T08:00:00Z"}]}"#.utf8)
@@ -76,6 +84,8 @@ final class LocalLedgerWidgetPublisherTests: XCTestCase {
         XCTAssertEqual(snapshot.insights?.history.end, "2026-09-01")
         let requests = await fixture.engine.requests.filter { $0.path != "/api/ledger/version" }
         XCTAssertEqual(requests.count, 6)
+        XCTAssertEqual(requests.first?.path, "/api/ledger/bootstrap/page")
+        XCTAssertEqual(requests.first?.query["limit"], "1")
         XCTAssertEqual(Set(requests.map(\.workspaceRoot)).count, 1)
         XCTAssertTrue(requests.allSatisfy { $0.method == "GET" && !$0.staging })
     }
@@ -134,7 +144,7 @@ final class LocalLedgerWidgetPublisherTests: XCTestCase {
             XCTFail("An expired background task must cancel publication")
         } catch { XCTAssertTrue(error is CancellationError) }
         let requests = await fixture.engine.requests.filter { $0.path != "/api/ledger/version" }
-        XCTAssertEqual(requests.map(\.path), ["/api/ledger/bootstrap", "/api/ledger/home-report"])
+        XCTAssertEqual(requests.map(\.path), ["/api/ledger/bootstrap/page", "/api/ledger/home-report"])
         XCTAssertNil(fixture.store.load())
     }
 
