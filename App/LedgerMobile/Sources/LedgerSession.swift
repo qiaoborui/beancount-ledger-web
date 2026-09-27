@@ -317,6 +317,30 @@ final class LedgerSession: ObservableObject {
         let continuation: LocalAccountContinuation?
     }
 
+    private struct AccountPresentationKey: Hashable {
+        let account: String
+        let currency: String
+        let revision: UUID
+        let start: String
+        let end: String
+    }
+    // Bounded display snapshots. Opaque paging continuations are never reused.
+    private var accountDetailCache: [AccountPresentationKey: LedgerAccountDetail] = [:]
+    private var accountTrendCache: [AccountPresentationKey: LocalAccountTrendScan.Result] = [:]
+    private func accountPresentationKey(account: String, currency: String) -> AccountPresentationKey? {
+        guard isLocal, phase == .ready, !privacyShielded, let revision = localTransactionPresentationRevision else { return nil }
+        return AccountPresentationKey(account: account, currency: currency, revision: revision,
+            start: selectedRange.start, end: selectedRange.end)
+    }
+    func cachedLocalAccountDetail(account: String, currency: String) -> LedgerAccountDetail? {
+        guard let key = accountPresentationKey(account: account, currency: currency) else { return nil }
+        return accountDetailCache[key]
+    }
+    func cachedLocalAccountTrend(account: String, currency: String) -> LocalAccountTrendScan.Result? {
+        guard let key = accountPresentationKey(account: account, currency: currency) else { return nil }
+        return accountTrendCache[key]
+    }
+
     private struct LocalSearchSequence {
         let id: UUID
         let context: LocalReadContext
@@ -1756,8 +1780,10 @@ final class LedgerSession: ObservableObject {
         }
     }
 
-    func analysisResource(_ kind: LedgerAnalysisResourceKind) async throws -> LedgerAnalysisResource {
-        guard phase == .ready, let contextURL else {
+    var analysisPresentationID: Int { requestGeneration }
+
+    func analysisResource(_ kind: LedgerAnalysisResourceKind, forceRefresh: Bool = false) async throws -> LedgerAnalysisResource {
+        guard phase == .ready, !privacyShielded, let contextURL else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
         }
         let generation = requestGeneration
@@ -1765,7 +1791,7 @@ final class LedgerSession: ObservableObject {
         let valuationCurrency = ledger?.valuationCurrency ?? storedValuationCurrency(for: contextURL)
         let cacheKey = AnalysisCacheKey(kind: kind, start: range.start, end: range.queryEndExclusive,
             currency: valuationCurrency, generation: generation, localRevision: localTransactionPresentationRevision)
-        if let cached = analysisCache[cacheKey] { return cached }
+        if !forceRefresh, let cached = analysisCache[cacheKey] { return cached }
         do {
             let repository = try repository(at: contextURL)
             let resource: LedgerAnalysisResource
@@ -1808,9 +1834,11 @@ final class LedgerSession: ObservableObject {
             }
             guard generation == requestGeneration,
                   self.contextURL == contextURL,
-                  phase == .ready else {
+                  phase == .ready, !privacyShielded else {
                 throw CancellationError()
             }
+            // Only the current presentation's three resource kinds are retained.
+            analysisCache = analysisCache.filter { $0.key.generation == generation && $0.key.localRevision == cacheKey.localRevision }
             analysisCache[cacheKey] = resource
             return resource
         } catch let error as LedgerAPIError {
@@ -1829,7 +1857,7 @@ final class LedgerSession: ObservableObject {
     }
 
     func cachedAnalysisResource(_ kind: LedgerAnalysisResourceKind) -> LedgerAnalysisResource? {
-        guard phase == .ready, let contextURL else { return nil }
+        guard phase == .ready, !privacyShielded, let contextURL else { return nil }
         let range = selectedRange
         let currency = ledger?.valuationCurrency ?? storedValuationCurrency(for: contextURL)
         let key = AnalysisCacheKey(kind: kind, start: range.start, end: range.queryEndExclusive,
@@ -4136,11 +4164,17 @@ final class LedgerSession: ObservableObject {
             next = LocalAccountContinuation(sequenceID: sequence.id, revision: page.revision, cursor: cursor,
                 header: header, count: page.rowCount, consumed: consumed, lastBalance: last.balance, lastChange: last.change, lastDate: last.date)
         } else { next = nil }
+        if continuation == nil, order == .desc,
+           let key = accountPresentationKey(account: account, currency: currency) {
+            if accountDetailCache[key] == nil, accountDetailCache.count >= 8 { accountDetailCache.removeAll() }
+            accountDetailCache[key] = page.detail
+        }
         return LocalAccountWindow(page: page, continuation: next)
     }
 
-    func localAccountTrend(account: String, currency: String) async throws -> LocalAccountTrendScan.Result {
+    func localAccountTrend(account: String, currency: String, forceRefresh: Bool = false) async throws -> LocalAccountTrendScan.Result {
         let context = try localReadContext()
+        if !forceRefresh, let cached = cachedLocalAccountTrend(account: account, currency: currency) { return cached }
         guard let repository = localRepository else { throw CancellationError() }
         accountTrendTask?.cancel()
         let id = UUID(); accountTrendRequestID = id
@@ -4158,6 +4192,10 @@ final class LedgerSession: ObservableObject {
         try validateLocalRead(context)
         guard accountTrendRequestID == id else { throw CancellationError() }
         guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        if let key = accountPresentationKey(account: account, currency: currency) {
+            if accountTrendCache[key] == nil, accountTrendCache.count >= 8 { accountTrendCache.removeAll() }
+            accountTrendCache[key] = result
+        }
         return result
     }
 
@@ -4603,6 +4641,9 @@ final class LedgerSession: ObservableObject {
 
     @discardableResult
     private func invalidateRequests() -> Int {
+        analysisCache.removeAll()
+        accountDetailCache.removeAll()
+        accountTrendCache.removeAll()
         resetLocalTransactionWindow()
         invalidateOverviewCategories()
         requestGeneration &+= 1

@@ -739,11 +739,13 @@ struct NativeImportFlowView: View {
                     else { confirmationPresented = true }
                 }
             } label: {
-                HStack {
-                    if isCommitting { ProgressView().tint(.white) }
-                    Text(commitButtonTitle).foregroundStyle(.white)
-                }
-                .frame(maxWidth: .infinity)
+                Text(commitButtonTitle)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .opacity(isCommitting ? 0 : 1)
+                    .frame(maxWidth: .infinity)
+                    .overlay { if isCommitting { ProgressView().tint(.white) } }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)

@@ -1108,6 +1108,24 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertEqual(third.page.detail.rows.map(\.balance), [125]); XCTAssertNil(third.continuation)
     }
 
+    func testAccountPresentationCacheKeepsFirstPageAndRejectsReset() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        XCTAssertNil(session.cachedLocalAccountDetail(account: "Expenses:Food", currency: "CNY"))
+        let first = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", limit: 1, order: .desc)
+        _ = try await session.localAccountTrend(account: "Expenses:Food", currency: "CNY")
+        XCTAssertEqual(session.cachedLocalAccountDetail(account: "Expenses:Food", currency: "CNY"), first.page.detail)
+        XCTAssertNotNil(session.cachedLocalAccountTrend(account: "Expenses:Food", currency: "CNY"))
+        _ = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: first.continuation, limit: 1, order: .desc)
+        XCTAssertEqual(session.cachedLocalAccountDetail(account: "Expenses:Food", currency: "CNY"), first.page.detail)
+        XCTAssertNil(session.cachedLocalAccountDetail(account: "Expenses:Food", currency: "USD"))
+        await session.updateActivity(isActive: false, isBackground: true)
+        XCTAssertNil(session.cachedLocalAccountDetail(account: "Expenses:Food", currency: "CNY"))
+        XCTAssertNil(session.cachedLocalAccountTrend(account: "Expenses:Food", currency: "CNY"))
+        session.chooseLedger()
+        XCTAssertNil(session.cachedLocalAccountDetail(account: "Expenses:Food", currency: "CNY"))
+    }
+
     func testAccountPageAndTrendRejectLateReadsOnResetPrivacyRevisionAndCancellation() async throws {
         for trend in [false, true] {
             for operation in 0..<4 {

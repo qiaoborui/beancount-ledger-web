@@ -2,6 +2,79 @@ import XCTest
 
 @MainActor
 final class LocalLedgerUITests: XCTestCase {
+    func test292TransactionsPageThroughListButtons() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--local-ui-testing", "--pagination-ui-testing"]
+        app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
+        app.launch()
+        let seed = app.buttons["test-import-pagination-ledger"]
+        XCTAssertTrue(seed.waitForExistence(timeout: 10))
+        seed.tap()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["pagination-fixture-ready"].waitForExistence(timeout: 30))
+        app.tabBars.buttons["交易"].tap()
+        if !app.navigationBars["流水"].waitForExistence(timeout: 3) { app.tabBars.buttons["交易"].tap() }
+        XCTAssertTrue(app.navigationBars["流水"].waitForExistence(timeout: 10), app.debugDescription)
+        let next = app.buttons["transaction-window-next"]
+        XCTAssertTrue(next.waitForExistence(timeout: 10))
+        func capture(_ name: String) {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        XCTAssertTrue(app.staticTexts["第 1 页"].exists)
+        XCTAssertTrue(next.isHittable)
+        capture("transactions-first-page")
+        // Scroll away from the top; the pager stays reachable and flips return to the filter.
+        app.swipeUp()
+        app.swipeUp()
+        XCTAssertTrue(next.isHittable)
+        next.tap()
+        XCTAssertTrue(app.staticTexts["第 2 页"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.segmentedControls["transaction-kind-filter"].isHittable)
+        next.tap()
+        XCTAssertTrue(app.staticTexts["第 3 页"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(next.isEnabled)
+        XCTAssertTrue(app.staticTexts["共 292 笔 · 本页 92 笔"].exists)
+        capture("transactions-third-page")
+        let previous = app.buttons["transaction-window-previous"]
+        previous.tap()
+        XCTAssertTrue(app.staticTexts["第 2 页"].waitForExistence(timeout: 10))
+        previous.tap()
+        XCTAssertTrue(app.staticTexts["第 1 页"].waitForExistence(timeout: 10))
+        XCTAssertFalse(previous.isEnabled)
+        app.buttons["transaction-actions"].tap()
+        let sync = app.buttons["transaction-storage"]
+        XCTAssertTrue(sync.waitForExistence(timeout: 3), app.debugDescription)
+        sync.tap()
+        XCTAssertTrue(app.navigationBars["存储与同步"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["完成"].tap()
+        app.buttons["transaction-actions"].tap()
+        app.buttons["transaction-tag-selection"].tap()
+        XCTAssertTrue(next.isHittable)
+        next.tap()
+        XCTAssertTrue(app.staticTexts["第 2 页"].waitForExistence(timeout: 10))
+        app.buttons["完成多选"].tap()
+        previous.tap()
+        XCTAssertTrue(app.staticTexts["第 1 页"].waitForExistence(timeout: 10))
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'transaction-row-'")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["正在读取交易"].exists)
+        capture("transaction-detail-money-flow")
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "DailySpendingAccount")).firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["资金分录"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Assets:Bank:International:DailySpendingAccount"].exists)
+        capture("transaction-flow-full-account")
+        #else
+        throw XCTSkip("Uses isolated simulator ledger")
+        #endif
+    }
+
     func testLocalRestartDoesNotShowPassiveLoadingCards() throws {
         #if targetEnvironment(simulator)
         let app = XCUIApplication()

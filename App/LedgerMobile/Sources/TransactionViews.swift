@@ -54,56 +54,6 @@ enum TransactionDateHeaderFormatter {
     }
 }
 
-struct TransactionRow: View {
-    let transaction: LedgerTransaction
-    var accountLabels: [String: String] = [:]
-
-    private var presentation: TransactionPresentation {
-        TransactionPresentation(transaction: transaction)
-    }
-
-    private var categoryVisual: TransactionVisualCategory {
-        TransactionVisualCategory.resolve(
-            transaction: transaction,
-            presentation: presentation,
-            accountLabels: accountLabels
-        )
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(categoryVisual.color.opacity(0.14))
-                    .frame(width: 38, height: 38)
-                Image(systemName: categoryVisual.iconName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(categoryVisual.color)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(presentation.title)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(LedgerPalette.ink)
-                    .lineLimit(1)
-                TransactionContextLine(transaction: transaction, accountLabels: accountLabels)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            AmountLabel(
-                minorUnits: presentation.minorUnits,
-                currency: presentation.currency,
-                prefix: amountPrefix(presentation.kind),
-                font: .system(size: 15.5, weight: .semibold, design: .rounded),
-                color: amountColor(presentation.kind)
-            )
-            .lineLimit(1)
-        }
-        .padding(.vertical, LedgerLayout.rowVerticalInset)
-        .contentShape(Rectangle())
-    }
-}
-
 extension View {
     func ledgerTransactionActions(_ transaction: LedgerTransaction) -> some View {
         modifier(LedgerTransactionActions(transaction: transaction))
@@ -325,49 +275,19 @@ private struct LedgerTransactionActions: ViewModifier {
     }
 }
 
-struct CookieTransactionFilterBar: View {
-    let filteredCount: Int?
+struct TransactionFilterBar: View {
     @Binding var kindFilter: TransactionKindFilter
 
     var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 4) {
-                ForEach(TransactionKindFilter.allCases) { filter in
-                    let isSelected = kindFilter == filter
-                    Button {
-                        LedgerFeedback.selection()
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                            kindFilter = filter
-                        }
-                    } label: {
-                        Text(filter.title)
-                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected ? Color.white : LedgerPalette.ink)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                isSelected ? LedgerPalette.cobalt : Color(uiColor: .tertiarySystemFill),
-                                in: Capsule()
-                            )
-                    }
-                    .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
-                    .accessibilityLabel("按\(filter.title)筛选")
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                }
-            }
-
-            Spacer()
-
-            if let filteredCount {
-                Text("\(filteredCount) 笔")
-                    .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
-                    .foregroundStyle(LedgerPalette.secondary)
+        Picker("交易类型", selection: $kindFilter) {
+            ForEach(TransactionKindFilter.allCases) { filter in
+                Text(filter.title).tag(filter)
             }
         }
-        .padding(.vertical, 2)
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("transaction-kind-filter")
     }
 }
-
 
 struct TransactionsView: View {
     static let localWindowLimits = LocalTransactionWindow.Limits(maxRows: LocalTransactionWindow.listPageRows)
@@ -376,6 +296,7 @@ struct TransactionsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var filters = LedgerTransactionFilter()
     @State private var filterPresented = false
+    @State private var storagePresented = false
     @State private var creatingTransaction = false
     @State private var duplicateTarget: LedgerTransaction?
     @State private var editingTarget: LedgerTransaction?
@@ -596,12 +517,9 @@ struct TransactionsView: View {
         let dayExpenses = Dictionary(uniqueKeysWithValues:
             (session.localTransactionSummary?.days ?? []).map { ($0.date, $0.expense) })
         return List {
-            Color.clear.frame(height: 1).id("transaction-list-top")
             Section {
-                CookieTransactionFilterBar(
-                    filteredCount: displayedCount,
-                    kindFilter: $filters.kind
-                )
+                TransactionFilterBar(kindFilter: $filters.kind)
+                    .id("transaction-list-top")
             }
             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
             .listRowBackground(Color.clear)
@@ -673,28 +591,7 @@ struct TransactionsView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
-            if session.isLocal, session.localTransactionWindow != nil {
-                Section {
-                    HStack {
-                        Button("上一页") { Task { await session.loadPreviousLocalTransactionWindow() } }
-                            .disabled(session.localTransactionWindowIndex == 0 || session.isLocalTransactionWindowLoading)
-                            .accessibilityIdentifier("transaction-window-previous")
-                        Spacer()
-                        Text("第 \(session.localTransactionWindowIndex + 1) 页").font(.footnote.monospacedDigit())
-                        Spacer()
-                        Button("下一页") { Task { await session.loadNextLocalTransactionWindow() } }
-                            .disabled(session.localTransactionWindow?.continuation == nil || session.isLocalTransactionWindowLoading)
-                            .accessibilityIdentifier("transaction-window-next")
-                    }
-                    if let summary = session.localTransactionSummary {
-                        Text("\(summary.matchedCount) / \(summary.fullRangeCount) 笔 · 本页 \(displayedTransactions.count) 笔")
-                            .font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
-                    } else if session.localTransactionSummaryError != nil {
-                        Text("完整统计暂不可用")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
-            } else if !session.isLocal && !filteredTransactions.isEmpty {
+            if !session.isLocal && !filteredTransactions.isEmpty {
                 Section {
                     Text("\(filteredTransactions.count) / \(transactions.count) 笔")
                         .font(.footnote.monospacedDigit())
@@ -703,6 +600,38 @@ struct TransactionsView: View {
                 .listRowBackground(Color.clear)
             }
         }
+    }
+
+    private var pageNavigation: some View {
+        HStack(spacing: 16) {
+            Button { Task { await session.loadPreviousLocalTransactionWindow() } } label: {
+                Image(systemName: "chevron.left").frame(width: 44, height: 44)
+            }
+            .disabled(session.localTransactionWindowIndex == 0 || session.isLocalTransactionWindowLoading)
+            .accessibilityLabel("上一页")
+            .accessibilityIdentifier("transaction-window-previous")
+            Spacer(minLength: 0)
+            VStack(spacing: 2) {
+                Text("第 \(session.localTransactionWindowIndex + 1) 页")
+                    .font(.subheadline.monospacedDigit())
+                if let displayedCount {
+                    Text("共 \(displayedCount) 笔 · 本页 \(displayedTransactions.count) 笔")
+                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            }
+            .lineLimit(1)
+            Spacer(minLength: 0)
+            Button { Task { await session.loadNextLocalTransactionWindow() } } label: {
+                Image(systemName: "chevron.right").frame(width: 44, height: 44)
+            }
+            .disabled(session.localTransactionWindow?.continuation == nil || session.isLocalTransactionWindowLoading)
+            .accessibilityLabel("下一页")
+            .accessibilityIdentifier("transaction-window-next")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .background(.bar)
     }
 
     private var navigationContent: some View {
@@ -717,7 +646,7 @@ struct TransactionsView: View {
                 }
         }
         .ledgerReadingList()
-        .ledgerNavigation("流水", isRoot: isRoot, showsTimeRange: true)
+        .ledgerNavigation("流水", isRoot: isRoot, showsTimeRange: true, showsSync: false)
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
         .task(id: windowRequestKey) {
@@ -740,6 +669,8 @@ struct TransactionsView: View {
                     }
                     .fontWeight(.semibold)
                     .accessibilityLabel("完成多选")
+                } else if actionRequestID != nil {
+                    ProgressView().accessibilityLabel("准备交易操作")
                 } else {
                     Menu {
                         Button {
@@ -758,6 +689,13 @@ struct TransactionsView: View {
                         }
                         .accessibilityIdentifier("transaction-tag-selection")
 
+                        if session.isLocal {
+                            Button("存储与同步", systemImage: "internaldrive") { storagePresented = true }
+                                .accessibilityIdentifier("transaction-storage")
+                        } else {
+                            Button("刷新账本", systemImage: "arrow.clockwise") { Task { await session.refresh() } }
+                        }
+
                         Button {
                             eventTagListPresented = true
                         } label: {
@@ -775,6 +713,9 @@ struct TransactionsView: View {
 
     private var presentedContent: some View {
         navigationContent
+            .sheet(isPresented: $storagePresented) {
+                LedgerStorageSheet().ledgerPrivacyProtectedSheet()
+            }
             .sheet(isPresented: $creatingTransaction) {
                 TransactionEditorView(accounts: session.ledger?.accounts ?? [], commodities: session.ledger?.commodities ?? []) { entry in
                     try await session.addLocalTransaction(entry)
@@ -891,22 +832,27 @@ struct TransactionsView: View {
         presentedContent
             .task(id: selectionReadKey) { await loadSelectionFacts(selectionReadKey) }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if isSelecting {
-                    TransactionBatchActionBar(
-                        selectedCount: selectedCount,
-                        totalCount: session.isLocal ? (session.localTransactionSummary?.matchedCount ?? 0) : filteredTransactions.count,
-                        allSelected: allVisibleSelected,
-                        allSelectedTitle: session.isLocal ? "取消当前" : "清空",
-                        isCounting: session.isLocal && currentLocalSelection?.hasDecisions == true
-                            && currentLocalSelection?.explicitSelectedCount == nil && localSelectionFacts == nil,
-                        canToggleAll: !session.isLocal || (session.localTransactionSummary != nil
-                            && (currentLocalSelection?.explicitSelectedCount != nil || localSelectionFacts != nil)),
-                        onToggleAll: toggleAllVisible,
-                        onAddTags: handleAddTags,
-                        onShare: handleShare,
-                        onExport: session.isLocal ? { prepareFileExport() } : nil,
-                        isExporting: exportRequestID != nil || preparingLegacyShare
-                    )
+                VStack(spacing: 0) {
+                    if session.isLocal, session.localTransactionWindow != nil {
+                        pageNavigation
+                    }
+                    if isSelecting {
+                        TransactionBatchActionBar(
+                            selectedCount: selectedCount,
+                            totalCount: session.isLocal ? (session.localTransactionSummary?.matchedCount ?? 0) : filteredTransactions.count,
+                            allSelected: allVisibleSelected,
+                            allSelectedTitle: session.isLocal ? "取消当前" : "清空",
+                            isCounting: session.isLocal && currentLocalSelection?.hasDecisions == true
+                                && currentLocalSelection?.explicitSelectedCount == nil && localSelectionFacts == nil,
+                            canToggleAll: !session.isLocal || (session.localTransactionSummary != nil
+                                && (currentLocalSelection?.explicitSelectedCount != nil || localSelectionFacts != nil)),
+                            onToggleAll: toggleAllVisible,
+                            onAddTags: handleAddTags,
+                            onShare: handleShare,
+                            onExport: session.isLocal ? { prepareFileExport() } : nil,
+                            isExporting: exportRequestID != nil || preparingLegacyShare
+                        )
+                    }
                 }
             }
             .onChange(of: session.isLocal ? [] : transactions.map(\.id)) { _, ids in
@@ -971,9 +917,6 @@ struct TransactionsView: View {
                 if session.isLocal { endSelection() }
             }
         }
-        .overlay(alignment: .top) {
-            if actionRequestID != nil { ProgressView("正在读取交易").padding().background(.regularMaterial) }
-        }
         .sensoryFeedback(.success, trigger: confirmationFeedback)
         .sensoryFeedback(.selection, trigger: selectionFeedback)
     }
@@ -1001,7 +944,7 @@ struct TransactionsView: View {
             NavigationLink {
                 TransactionDetailView(transaction: transaction)
             } label: {
-                TransactionCard(
+                TransactionRow(
                     transaction: transaction,
                     accountLabels: accountLabels,
                     mutationPhase: session.transactionMutationPhase(for: transaction)
@@ -1338,7 +1281,7 @@ struct WidgetDayTransactionsView: View {
                     NavigationLink {
                         TransactionDetailView(transaction: transaction, snapshotOnly: true)
                     } label: {
-                        TransactionCard(
+                        TransactionRow(
                             transaction: transaction,
                             accountLabels: TransactionCategoryPresentation.accountLabels(session.isLocal ? (session.ledger?.accounts ?? []) : (payload?.accounts ?? []))
                         )
@@ -1684,7 +1627,7 @@ struct TransactionContextLine: View {
     }
 }
 
-private struct TransactionCard: View {
+struct TransactionRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let transaction: LedgerTransaction
     let accountLabels: [String: String]
@@ -1797,7 +1740,7 @@ private struct TransactionSelectableCard: View {
     let accountLabels: [String: String]
 
     var body: some View {
-        TransactionCard(transaction: transaction, accountLabels: accountLabels, selectionState: selected)
+        TransactionRow(transaction: transaction, accountLabels: accountLabels, selectionState: selected)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityLabel("\(selected ? "已选择" : "未选择")，\(transaction.payee)")
@@ -1839,7 +1782,7 @@ private struct TransactionBatchActionBar: View {
                 HStack(spacing: 3) {
                     Image(systemName: "tag")
                         .font(.system(size: 11, weight: .semibold))
-                    Text("添加标签")
+                    Text("标签")
                 }
             }
             .font(.system(.footnote, design: .default, weight: .semibold))
@@ -1849,6 +1792,7 @@ private struct TransactionBatchActionBar: View {
             .background(LedgerPalette.cobalt.opacity(selectedCount > 0 ? 0.12 : 0.06))
             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
             .disabled(selectedCount == 0)
+            .accessibilityLabel("添加标签")
             .accessibilityIdentifier("transaction-bulk-tag-trigger")
 
             Menu {
@@ -1858,7 +1802,7 @@ private struct TransactionBatchActionBar: View {
                 HStack(spacing: 4) {
                     Image(systemName: "square.and.arrow.up")
                         .font(.system(size: 11, weight: .semibold))
-                    Text(isExporting ? "正在导出" : "合并分享")
+                    if isExporting { ProgressView().tint(.white) } else { Text("分享") }
                 }
             } primaryAction: { onShare() }
             .font(.system(.footnote, design: .default, weight: .semibold))
@@ -1868,8 +1812,11 @@ private struct TransactionBatchActionBar: View {
             .background(selectedCount > 0 ? LedgerPalette.cobalt : LedgerPalette.secondary.opacity(0.35))
             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
             .disabled(selectedCount == 0)
+            .accessibilityLabel("合并分享")
             .accessibilityIdentifier("transaction-batch-share")
         }
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
         .buttonStyle(PressScaleButtonStyle())
         .padding(.horizontal, LedgerSpacing.lg)
         .padding(.vertical, LedgerSpacing.sm)
@@ -1980,296 +1927,118 @@ struct TransactionMoneyFlowLeg: Identifiable, Sendable {
 struct TransactionMoneyFlow: Sendable {
     let fromLegs: [TransactionMoneyFlowLeg]
     let toLegs: [TransactionMoneyFlowLeg]
-    let totalAmount: Int
-    let currency: String
-    let isDirect1to1: Bool
 
     static func build(
         transaction: LedgerTransaction,
         accountLabels: [String: String],
         defaultCurrency: String
     ) -> TransactionMoneyFlow {
-        let p = TransactionPresentation(transaction: transaction)
-        let mainCurr = p.currency.isEmpty ? defaultCurrency : p.currency
-
         var outflows: [TransactionMoneyFlowLeg] = []
         var inflows: [TransactionMoneyFlowLeg] = []
-
-        for (i, posting) in transaction.postings.enumerated() {
-            let acct = posting.account
-            let label = accountLabels[acct] ?? acct.split(separator: ":").last.map(String.init) ?? acct
-            let visual = TransactionVisualCategory.resolve(account: acct, label: label)
-            let curr = posting.currency ?? mainCurr
-            let amt = abs(posting.amount)
+        for (index, posting) in transaction.postings.enumerated() where posting.amount != 0 {
+            let alias = accountLabels[posting.account].flatMap { $0 == posting.account ? nil : $0 }
+            let label = alias ?? posting.account.split(separator: ":").last.map(String.init) ?? posting.account
+            let visual = TransactionVisualCategory.resolve(account: posting.account, label: label)
             let leg = TransactionMoneyFlowLeg(
-                id: "\(acct)-\(i)",
-                account: acct,
-                label: label,
-                iconName: visual.iconName,
-                iconColor: visual.color,
-                amount: amt,
-                currency: curr
-            )
-
-            if p.isRefund {
-                if posting.amount < 0 {
-                    outflows.append(leg)
-                } else {
-                    inflows.append(leg)
-                }
-            } else if p.kind == .income {
-                if posting.amount < 0 {
-                    outflows.append(leg)
-                } else {
-                    inflows.append(leg)
-                }
-            } else {
-                if posting.amount < 0 {
-                    outflows.append(leg)
-                } else {
-                    inflows.append(leg)
-                }
-            }
+                id: "\(posting.account)-\(index)", account: posting.account, label: label,
+                iconName: visual.iconName, iconColor: visual.color,
+                amount: posting.amount, currency: posting.currency ?? defaultCurrency)
+            if posting.amount < 0 { outflows.append(leg) }
+            else { inflows.append(leg) }
         }
-
-        if outflows.isEmpty && !inflows.isEmpty {
-            outflows = [inflows.removeFirst()]
-        } else if inflows.isEmpty && !outflows.isEmpty {
-            inflows = [outflows.removeFirst()]
-        }
-
-        let total = outflows.reduce(0) { $0 + $1.amount }
-        let is1to1 = outflows.count == 1 && inflows.count == 1
-
-        return TransactionMoneyFlow(
-            fromLegs: outflows,
-            toLegs: inflows,
-            totalAmount: total > 0 ? total : p.minorUnits,
-            currency: mainCurr,
-            isDirect1to1: is1to1
-        )
+        return TransactionMoneyFlow(fromLegs: outflows, toLegs: inflows)
     }
 }
 
+/// Stable columns for both simple and split transactions. Each leg keeps its
+/// own currency; unrelated currencies must never be added into a flow total.
 struct TransactionMoneyFlowView: View {
     let flow: TransactionMoneyFlow
     var compact: Bool = false
+    @State private var selectedLeg: TransactionMoneyFlowLeg?
 
     var body: some View {
-        if flow.fromLegs.isEmpty && flow.toLegs.isEmpty {
-            EmptyView()
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.triangle.swap")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.cobalt)
-                    Text("资金流向")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    Spacer()
-                }
-
-                if flow.isDirect1to1, let from = flow.fromLegs.first, let to = flow.toLegs.first {
-                    direct1to1Flow(from: from, to: to)
-                } else {
-                    multiLegFlow
-                }
-            }
-            .padding(compact ? 10 : 12)
-            .background(Color(uiColor: .tertiarySystemGroupedBackground).opacity(0.8))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-    }
-
-    private func direct1to1Flow(from: TransactionMoneyFlowLeg, to: TransactionMoneyFlowLeg) -> some View {
-        // ViewThatFits tries the horizontal layout first; if either account name is
-        // too long to fit, it automatically falls back to the vertical stacked layout.
-        ViewThatFits(in: .horizontal) {
-            horizontalFlow(from: from, to: to)
-            verticalFlow(from: from, to: to)
-        }
-    }
-
-    private func horizontalFlow(from: TransactionMoneyFlowLeg, to: TransactionMoneyFlowLeg) -> some View {
-        HStack(spacing: 6) {
-            legBox(leg: from, title: "流出 / 来源", alignment: .leading)
-
-            VStack(spacing: 3) {
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(LedgerPalette.cobalt)
-
-                Text(MoneyText.format(minorUnits: flow.totalAmount, currency: flow.currency))
-                    .font(.system(size: 10.5, weight: .semibold, design: .rounded).monospacedDigit())
+        if !flow.fromLegs.isEmpty || !flow.toLegs.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("资金流向")
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(LedgerPalette.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                HStack(alignment: .top, spacing: 12) {
+                    column("来源", legs: flow.fromLegs)
+                    Image(systemName: "arrow.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .padding(.top, 45)
+                        .accessibilityHidden(true)
+                    column("去向", legs: flow.toLegs)
+                }
             }
-            .frame(width: 68)
-
-            legBox(leg: to, title: "流入 / 去向", alignment: .trailing)
+            .padding(compact ? 12 : 16)
+            .background(LedgerPalette.canvas.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
+            .accessibilityIdentifier("transaction-money-flow")
+            .sheet(item: $selectedLeg) { leg in
+                NavigationStack {
+                    Form {
+                        Section("账户") {
+                            Text(leg.label)
+                            Text(leg.account).font(.footnote.monospaced()).textSelection(.enabled)
+                        }
+                        Section("本笔金额") {
+                            AmountLabel(minorUnits: leg.amount, currency: leg.currency)
+                        }
+                    }
+                    .navigationTitle("资金分录")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { selectedLeg = nil }
+                    } }
+                }
+                .presentationDetents([.medium, .large])
+                .ledgerPrivacyProtectedSheet()
+            }
         }
     }
 
-    private func verticalFlow(from: TransactionMoneyFlowLeg, to: TransactionMoneyFlowLeg) -> some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                iconBadge(leg: from)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("流出 / 来源")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    Text(from.label)
-                        .font(.system(size: 13, weight: .semibold))
+    private func column(_ title: String, legs: [TransactionMoneyFlowLeg]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(legs) { leg in
+                VStack(alignment: .leading, spacing: 6) {
+                    Image(systemName: leg.iconName)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(leg.iconColor)
+                        .frame(width: 32, height: 32)
+                        .background(leg.iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                    Text(leg.label)
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(LedgerPalette.ink)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(shortAccount(from.account))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(LedgerPalette.secondary)
                         .lineLimit(1)
-                }
-                Spacer()
-            }
-
-            HStack {
-                Rectangle().fill(LedgerPalette.line.opacity(0.6)).frame(height: 0.5)
-                VStack(spacing: 2) {
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(LedgerPalette.cobalt)
-                    Text(MoneyText.format(minorUnits: flow.totalAmount, currency: flow.currency))
-                        .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(LedgerPalette.secondary)
+                        .truncationMode(.middle)
+                    Text(leg.account)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    AmountLabel(minorUnits: leg.amount, currency: leg.currency,
+                        font: .system(.subheadline, design: .rounded, weight: .semibold),
+                        color: LedgerPalette.ink)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
-                .padding(.horizontal, 6)
-                Rectangle().fill(LedgerPalette.line.opacity(0.6)).frame(height: 0.5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .contentShape(Rectangle())
+                .onTapGesture { if !compact { selectedLeg = leg } }
+                .accessibilityAddTraits(compact ? [] : .isButton)
+                .accessibilityHint(compact ? "" : "查看账户全称与金额")
             }
-
-            HStack(spacing: 8) {
-                iconBadge(leg: to)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("流入 / 去向")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    Text(to.label)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.ink)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(shortAccount(to.account))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
+            if legs.isEmpty {
+                Text("无对应分录").font(.caption).foregroundStyle(.secondary)
             }
         }
-    }
-
-    private func legBox(leg: TransactionMoneyFlowLeg, title: String, alignment: HorizontalAlignment) -> some View {
-        VStack(alignment: alignment, spacing: 3) {
-            Text(title)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(LedgerPalette.secondary)
-
-            HStack(spacing: 6) {
-                if alignment == .leading {
-                    iconBadge(leg: leg)
-                }
-
-                VStack(alignment: alignment, spacing: 1) {
-                    Text(leg.label)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.ink)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                    Text(shortAccount(leg.account))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-
-                if alignment == .trailing {
-                    iconBadge(leg: leg)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
-    }
-
-    private func iconBadge(leg: TransactionMoneyFlowLeg) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(leg.iconColor.opacity(0.15))
-                .frame(width: 28, height: 28)
-            Image(systemName: leg.iconName)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(leg.iconColor)
-        }
-    }
-
-    private func shortAccount(_ acct: String) -> String {
-        let parts = acct.split(separator: ":")
-        if parts.count >= 2 {
-            return parts.suffix(2).joined(separator: ":")
-        }
-        return acct
-    }
-
-    private var multiLegFlow: some View {
-        VStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("资金来源")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(LedgerPalette.secondary)
-                ForEach(flow.fromLegs) { leg in
-                    legRow(leg: leg, isOutflow: true)
-                }
-            }
-
-            HStack {
-                Rectangle().fill(LedgerPalette.line.opacity(0.6)).frame(height: 0.5)
-                Image(systemName: "arrow.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(LedgerPalette.cobalt)
-                    .padding(.horizontal, 4)
-                Rectangle().fill(LedgerPalette.line.opacity(0.6)).frame(height: 0.5)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("资金去向")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(LedgerPalette.secondary)
-                ForEach(flow.toLegs) { leg in
-                    legRow(leg: leg, isOutflow: false)
-                }
-            }
-        }
-    }
-
-    private func legRow(leg: TransactionMoneyFlowLeg, isOutflow: Bool) -> some View {
-        HStack(spacing: 8) {
-            iconBadge(leg: leg)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(leg.label)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(LedgerPalette.ink)
-                    .lineLimit(1)
-                Text(shortAccount(leg.account))
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(LedgerPalette.secondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Text((isOutflow ? "-" : "+") + MoneyText.format(minorUnits: leg.amount, currency: leg.currency))
-                .font(.system(size: 12.5, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(isOutflow ? LedgerPalette.expense : LedgerPalette.income)
-        }
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -2478,6 +2247,8 @@ struct TransactionDetailView: View {
                                         Text(accountLabel(posting.account))
                                             .font(.system(size: 14, weight: .medium))
                                             .foregroundStyle(LedgerPalette.ink)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
                                         if accountLabel(posting.account) != posting.account {
                                             Text(posting.account)
                                                 .font(.system(size: 11, design: .monospaced))
@@ -5060,7 +4831,7 @@ struct TransactionEditorView: View {
                     Button {
                         Task { await save() }
                     } label: {
-                        if saving { ProgressView("正在验证并保存") } else { Text(transaction == nil ? "预览" : "保存修改") }
+                        if saving { ProgressView() } else { Text(transaction == nil ? "预览" : "保存") }
                     }
                     .disabled(saving)
                     .accessibilityLabel(saving ? "正在验证并保存" : (transaction == nil ? "预览" : "保存修改"))

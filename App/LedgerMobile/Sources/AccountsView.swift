@@ -519,6 +519,8 @@ struct AccountDetailView: View {
         Group {
             if let detail {
                 detailContent(detail)
+            } else if let cached = session.cachedLocalAccountDetail(account: account, currency: currency) {
+                detailContent(cached)
             } else if let errorMessage {
                 VStack(spacing: LedgerSpacing.lg) {
                     EmptyLedgerState(
@@ -538,6 +540,8 @@ struct AccountDetailView: View {
                     .buttonStyle(PressScaleButtonStyle())
                     .padding(.bottom, LedgerSpacing.xxl)
                 }
+            } else if session.isLocal {
+                localAccountSummary
             } else {
                 VStack(spacing: LedgerSpacing.md) {
                     ProgressView()
@@ -578,7 +582,13 @@ struct AccountDetailView: View {
             else { await load(replacingContent: detail == nil) }
         }
         .task(id: trendKey) { if session.isLocal { await loadLocalTrend() } }
-        .onAppear { active = true }
+        .onAppear {
+            active = true
+            if let cached = session.cachedLocalAccountTrend(account: account, currency: currency) {
+                completeTrend = cached
+                completedTrendRequest = trendKey
+            }
+        }
         .onDisappear { active = false }
         .onChange(of: readable) { _, allowed in
             if session.isLocal && !allowed {
@@ -588,6 +598,24 @@ struct AccountDetailView: View {
         }
         .onChange(of: session.selectedRange) { _, _ in pageIndex = 0 }
         .onChange(of: session.localTransactionPresentationRevision) { _, _ in pageIndex = 0 }
+    }
+
+    // The bootstrap already contains the account catalog and current balances.
+    // Present those facts immediately while the bounded history page is read.
+    private var localAccountSummary: some View {
+        List {
+            Section("账户") {
+                Text(session.ledger?.accounts.first(where: { $0.account == account })?.label ?? account)
+                    .font(.headline)
+                Text(account).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            if let balance = session.ledger?.accountBalances.first(where: { $0.account == account && $0.currency == currency }) {
+                Section("当前余额") {
+                    AmountLabel(minorUnits: balance.amount, currency: balance.currency, font: .title2.weight(.semibold))
+                }
+            }
+        }
+        .ledgerReadingList()
     }
 
     private func detailContent(_ detail: LedgerAccountDetail) -> some View {
@@ -623,7 +651,6 @@ struct AccountDetailView: View {
                         Text("余额趋势需要重新读取。").foregroundStyle(.secondary)
                         Button("重新读取余额趋势") { reloadToken += 1 }
                     }
-                    if pageLoading { ProgressView("正在读取账户流水…") }
                 } else {
                     AccountBalanceTrendPanel(detail: detail, range: session.selectedRange)
                 }
@@ -740,7 +767,8 @@ struct AccountDetailView: View {
         trendError = nil
         defer { if key == trendKey { trendLoading = false } }
         do {
-            let result = try await session.localAccountTrend(account: account, currency: currency)
+            let result = try await session.localAccountTrend(account: account, currency: currency,
+                forceRefresh: key.reloadToken != 0 && completedTrendRequest?.reloadToken != key.reloadToken)
             guard !Task.isCancelled, key == trendKey, readable else { return }
             completeTrend = result
             completedTrendRequest = key

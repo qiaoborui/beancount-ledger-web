@@ -538,6 +538,7 @@ private struct MonthlyConclusion: View {
                 Spacer()
                 if let stats = session.overviewTransactionStats {
                     Text("\(stats.transactionCount) 笔流水")
+                        .lineLimit(1)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(LedgerPalette.secondary)
                         .padding(.horizontal, 7)
@@ -553,7 +554,7 @@ private struct MonthlyConclusion: View {
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(LedgerPalette.secondary)
 
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     AmountLabel(
                         minorUnits: ledger.summary.net,
                         currency: ledger.summary.currency,
@@ -564,17 +565,21 @@ private struct MonthlyConclusion: View {
                     .lineLimit(1)
                     .accessibilityIdentifier("overview-monthly-net")
 
-                    primaryComparisonBadge
+                    HStack(spacing: 8) {
+                        primaryComparisonBadge
 
-                    if let rate = savingsRate, session.amountsVisible {
-                        Text("储蓄率 \(Int(max(0, rate * 100)))%")
-                            .font(.system(size: 10, weight: .medium, design: .rounded).monospacedDigit())
-                            .foregroundStyle(LedgerPalette.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color(uiColor: .tertiarySystemFill))
-                            .clipShape(Capsule())
+                        if let rate = savingsRate, session.amountsVisible {
+                            Text("储蓄率 \(Int(max(0, rate * 100)))%")
+                                .font(.system(size: 10, weight: .medium, design: .rounded).monospacedDigit())
+                                .foregroundStyle(LedgerPalette.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color(uiColor: .tertiarySystemFill))
+                                .clipShape(Capsule())
+                        }
                     }
+                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
 

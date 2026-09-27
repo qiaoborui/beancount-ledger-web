@@ -7,6 +7,7 @@ struct RootView: View {
     #if DEBUG
     @State private var testingTagReport: String? = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--open-tag-report=") })?.replacingOccurrences(of: "--open-tag-report=", with: "")
     @State private var testingPendingInbox = false
+    @State private var testingPaginationReady = false
     @State private var testingEventTags: Bool = ProcessInfo.processInfo.arguments.contains("--open-event-tags")
     @State private var testingTransactionDetail: Bool = ProcessInfo.processInfo.arguments.contains("--open-transaction-detail")
     @State private var testingCreateTransaction: Bool = ProcessInfo.processInfo.arguments.contains("--open-create-transaction")
@@ -80,6 +81,29 @@ struct RootView: View {
         #if DEBUG
         #if targetEnvironment(simulator)
         .overlay(alignment: .bottomLeading) {
+            if ProcessInfo.processInfo.arguments.contains("--local-ui-testing"),
+               ProcessInfo.processInfo.arguments.contains("--pagination-ui-testing"), session.phase != .ready {
+                Button("测试分页账本") {
+                    Task {
+                        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Pagination-" + UUID().uuidString)
+                        do {
+                            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                            defer { try? FileManager.default.removeItem(at: directory) }
+                            var text = "2000-01-01 open Assets:Bank:International:DailySpendingAccount CNY\n2000-01-01 open Expenses:Food CNY\n\n"
+                            for index in 1...292 {
+                                text += "\(LedgerDateRange.today()) * \"Pagination \(index)\" \"Synthetic\"\n  Expenses:Food 1 CNY\n  Assets:Bank:International:DailySpendingAccount -1 CNY\n\n"
+                            }
+                            try text.write(to: directory.appendingPathComponent("main.bean"), atomically: true, encoding: .utf8)
+                            await session.importLocalLedger(from: directory, name: "Pagination fixture", entrypoint: "main.bean")
+                            testingPaginationReady = session.phase == .ready
+                        } catch { session.errorMessage = error.localizedDescription }
+                    }
+                }
+                .accessibilityIdentifier("test-import-pagination-ledger")
+            }
+            if testingPaginationReady {
+                Text("Fixture ready").font(.system(size: 1)).foregroundStyle(.clear).accessibilityIdentifier("pagination-fixture-ready")
+            }
             if ProcessInfo.processInfo.arguments.contains("--local-ui-testing"),
                ProcessInfo.processInfo.arguments.contains("--pending-ui-testing"), session.phase == .ready {
                 Button("测试待整理入口") { testingPendingInbox = true }
