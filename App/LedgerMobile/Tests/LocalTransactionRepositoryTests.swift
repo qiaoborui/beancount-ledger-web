@@ -261,7 +261,7 @@ final class LocalTransactionRepositoryTests: XCTestCase {
         }
     }
 
-    func testBootstrapPageUsesTypedAccountingAndExplicitCandidatePageWithoutAuthorityAdvance() async throws {
+    func testBootstrapPageUsesTypedAccountingAndPresentsValidatedRevision() async throws {
         let (workspace, revision) = try await workspace()
         let object: [String: Any] = ["bootstrap": ["start": start, "end": end, "summary": ["currency": "CNY", "income": 9007199254740993, "expense": 2, "net": 9007199254740991],
             "accountBalances": [], "netWorthHistory": [], "monthEndNetWorth": [], "transactions": [], "reconciliationRows": [],
@@ -278,7 +278,7 @@ final class LocalTransactionRepositoryTests: XCTestCase {
         XCTAssertEqual(request?.path, "/api/ledger/bootstrap/page")
         XCTAssertEqual(request?.query["limit"], "1")
         let presented = await repository.presentedRevisionID
-        XCTAssertNil(presented)
+        XCTAssertEqual(presented, revision)
     }
 
     func testCandidateDialectHasOnlyDatesCursorAndLimitAndNeverPresentsRevision() async throws {

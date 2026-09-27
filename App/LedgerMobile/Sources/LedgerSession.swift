@@ -3169,10 +3169,14 @@ final class LedgerSession: ObservableObject {
         let payload: LedgerBootstrap
         let presentationRevision: UUID?
         if let local {
-            let snapshot = try await local.bootstrapSnapshot(start: targetRange.start,
-                end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency)
-            payload = snapshot.payload
-            presentationRevision = snapshot.revisionID
+            guard let revision = try await local.workspace.currentRevision() else {
+                throw LocalLedgerError.operationFailed("账本版本尚未就绪")
+            }
+            let page = try await local.bootstrapPage(start: targetRange.start,
+                end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency,
+                expectedRevisionID: revision.id)
+            payload = page.bootstrap.replacingTransactions(with: page.transactionPage.transactions)
+            presentationRevision = revision.id
         } else {
             payload = try await source.bootstrap(start: targetRange.start,
                 end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency)
@@ -3190,7 +3194,13 @@ final class LedgerSession: ObservableObject {
             phase = .locked(authenticated: true)
             return
         }
-        if !globalTransactions.isEmpty {
+        if local != nil {
+            // A previous explicit full-history share must not remain a default
+            // session cache after a bounded bootstrap or a revision change.
+            globalTransactions = []
+            globalTransactionsLoadedAt = nil
+            localGlobalTransactionsRevision = nil
+        } else if !globalTransactions.isEmpty {
             globalTransactions.removeAll { transaction in
                 if payload.transactions.contains(where: { $0.source == transaction.source }) { return true }
                 let key = Self.transactionMutationKey(transaction.source)

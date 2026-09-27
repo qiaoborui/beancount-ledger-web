@@ -61,8 +61,8 @@ actor LocalLedgerRepository: LedgerRepository {
         try await bootstrapSnapshot(start: start, end: end, today: today, valuationCurrency: valuationCurrency).payload
     }
 
-    /// Additive native bootstrap contract. Legacy bootstrap remains complete;
-    /// this adapter returns typed accounting plus an explicit page only.
+    /// Default native bootstrap contract for local sessions. Legacy bootstrap
+    /// remains complete for explicit compatibility callers.
     func bootstrapPage(start: String, end: String, today: String, valuationCurrency: String,
                        limit: Int = 100, expectedRevisionID: UUID) async throws -> LocalBootstrapPage {
         guard (1...500).contains(limit), LedgerWidgetLink.isValidDay(start),
@@ -70,11 +70,36 @@ actor LocalLedgerRepository: LedgerRepository {
             throw LocalLedgerError.invalidConfiguration("启动分页参数无效")
         }
         try Task.checkCancellation()
-        let (_, response) = try await readSnapshot("/api/ledger/bootstrap/page", query: [
-            "start": start, "end": end, "today": today, "valuationCurrency": valuationCurrency, "limit": String(limit)
-        ], expectedRevisionID: expectedRevisionID)
+        let query = ["start": start, "end": end, "today": today,
+            "valuationCurrency": valuationCurrency, "limit": String(limit)]
+        let cache = BootstrapPresentationCache(ledgerID: descriptor.id, entrypoint: descriptor.entrypoint,
+            url: workspace.rootDirectory.appendingPathComponent(".bootstrap-page-presentation.json"))
+        if let restored = try await workspace.withCurrentSnapshot({ revision, _ in
+            revision.id == expectedRevisionID ? cache.loadPage(revisionID: revision.id, query: query) : nil
+        }) {
+            try Task.checkCancellation()
+            try Self.validateBootstrapPage(restored, start: start, end: end, limit: limit)
+            let current = try await workspace.currentRevision()
+            try Task.checkCancellation()
+            guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+            presentedRevisionID = expectedRevisionID
+            return restored
+        }
+        let (_, response) = try await readSnapshot("/api/ledger/bootstrap/page", query: query,
+            expectedRevisionID: expectedRevisionID)
         try Task.checkCancellation()
         let result = try response.decodeBootstrapPage()
+        try Self.validateBootstrapPage(result, start: start, end: end, limit: limit)
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        if let data = try? response.resultData() { cache.save(data, revisionID: expectedRevisionID, query: query) }
+        presentedRevisionID = expectedRevisionID
+        return result
+    }
+
+    private static func validateBootstrapPage(_ result: LocalBootstrapPage,
+        start: String, end: String, limit: Int) throws {
         guard result.bootstrap.start == start, result.bootstrap.end == end,
               result.bootstrap.sensitiveUnlocked, result.transactionPage.sensitiveUnlocked,
               result.bootstrap.transactions.isEmpty,
@@ -87,10 +112,6 @@ actor LocalLedgerRepository: LedgerRepository {
               }) else {
             throw LocalLedgerError.operationFailed("启动分页响应无效")
         }
-        let current = try await workspace.currentRevision()
-        try Task.checkCancellation()
-        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
-        return result
     }
 
     /// Return the revision that produced the presentation, including when a writer
@@ -1051,6 +1072,21 @@ private struct BootstrapPresentationCache: Sendable {
               let payload = try? JSONDecoder().decode(LedgerBootstrap.self, from: record.payload),
               payload.sensitiveUnlocked else { return nil }
         return Restored(revisionID: revisionID, payload: payload)
+    }
+
+    func loadPage(revisionID: UUID, query: [String: String]) -> LocalBootstrapPage? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? NSNumber, size.intValue <= Self.maximumBytes,
+              let data = try? Data(contentsOf: url),
+              let record = try? JSONDecoder().decode(Record.self, from: data),
+              record.formatVersion == 1, record.applicationVersion == Self.applicationVersion,
+              record.ledgerID == ledgerID, record.revisionID == revisionID,
+              record.entrypoint == entrypoint, record.query == query,
+              record.payload.count <= (1 << 20),
+              let payload = try? JSONDecoder().decode(LocalBootstrapPage.self, from: record.payload),
+              payload.bootstrap.sensitiveUnlocked else { return nil }
+        return payload
     }
 
     func save(_ payload: Data, revisionID: UUID, query: [String: String]) {

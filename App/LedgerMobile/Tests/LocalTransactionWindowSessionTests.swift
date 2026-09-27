@@ -45,6 +45,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         private var gatedPath = ""
         private var failAfterGate = false
         private(set) var pageRequests: [LocalLedgerEngineRequest] = []
+        private(set) var bootstrapPaths: [String] = []
         func pause(_ path: String = "/api/ledger/transactions/page", gate: Gate, fail: Bool = false) {
             self.gate = gate
             gatedPath = path
@@ -91,12 +92,34 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
                 return Data(#"{"ok":true}"#.utf8)
             }
             if request.path == "/api/ledger/bootstrap" {
-                guard successfulEdits else { return Data(LedgerModelsTests.bootstrapJSON.utf8) }
+                bootstrapPaths.append(request.path)
+                return Data(LedgerModelsTests.bootstrapJSON.utf8)
+            }
+            if request.path == "/api/ledger/bootstrap/page" {
+                bootstrapPaths.append(request.path)
                 var payload = try JSONSerialization.jsonObject(with: Data(LedgerModelsTests.bootstrapJSON.utf8)) as! [String: Any]
-                payload["transactions"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(rows.filter {
-                    $0.date >= request.query["start"]! && $0.date < request.query["end"]!
-                }))
-                return try JSONSerialization.data(withJSONObject: payload)
+                let start = request.query["start"]!, end = request.query["end"]!
+                let pageRows: [[String: Any]]
+                if successfulEdits {
+                    pageRows = try JSONSerialization.jsonObject(with: JSONEncoder().encode(rows.filter {
+                        $0.date >= start && $0.date < end
+                    })) as! [[String: Any]]
+                } else {
+                    pageRows = (payload["transactions"] as? [[String: Any]] ?? []).filter {
+                        ($0["date"] as? String ?? "") >= start && ($0["date"] as? String ?? "") < end
+                    }
+                }
+                payload["start"] = start
+                payload["end"] = end
+                payload["transactions"] = []
+                let limit = Int(request.query["limit"] ?? "100") ?? 100
+                let page: [String: Any] = ["revision": "native-synthetic", "sensitiveUnlocked": true,
+                    "transactions": pageRows.prefix(limit).map { row in
+                        var candidate = row
+                        candidate.removeValue(forKey: "entry")
+                        return candidate
+                    }, "nextCursor": pageRows.count > limit ? "remaining" as Any : NSNull()]
+                return try JSONSerialization.data(withJSONObject: ["bootstrap": payload, "transactionPage": page])
             }
             if request.path == "/api/ledger/transactions/detail" {
                 return try JSONEncoder().encode(rows.first { $0.source.line == Int(request.query["line"] ?? "1") }!)
@@ -180,6 +203,32 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
 
     private func actionSource(_ line: Int = 1) -> TransactionSource {
         .init(file: "synthetic.bean", line: line, hash: "row-\(line)")
+    }
+
+    func testDefaultLocalBootstrapKeepsOnlyFirstPageAndReleasesExplicitFullHistory() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.enableSuccessfulEdits()
+        await engine.setRowCount(250)
+        try await advance(repository)
+        await session.refresh()
+        XCTAssertEqual(session.ledger?.transactions.count, 100)
+        XCTAssertEqual(session.ledger?.transactions.first?.source.line, 1)
+        XCTAssertEqual(session.ledger?.transactions.last?.source.line, 100)
+        let bootstrapPaths = await engine.bootstrapPaths
+        XCTAssertEqual(bootstrapPaths, ["/api/ledger/bootstrap/page", "/api/ledger/bootstrap/page"])
+        let currentRevision = try await repository.workspace.currentRevision()
+        let revision = try XCTUnwrap(currentRevision?.id)
+        let page = try await repository.bootstrapPage(start: "2026-09-01", end: "2026-10-01",
+            today: "2026-09-23", valuationCurrency: "CNY", expectedRevisionID: revision)
+        XCTAssertNotNil(page.transactionPage.nextCursor)
+        try await session.loadGlobalTransactions()
+        XCTAssertEqual(session.globalTransactions.count, 250)
+        XCTAssertTrue(session.hasCachedGlobalTransactions)
+        await session.refresh()
+        XCTAssertEqual(session.ledger?.transactions.count, 100)
+        XCTAssertTrue(session.globalTransactions.isEmpty)
+        XCTAssertFalse(session.hasCachedGlobalTransactions)
     }
 
     func testPreparedActionDoesNotPopulateLegacyArraysAndEditsUnknownExactOriginal() async throws {
@@ -1409,7 +1458,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
                 postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")])
             let entered = expectation(description: "receipt bootstrap suspended")
             let gate = Gate(entered)
-            await engine.pause("/api/ledger/bootstrap", gate: gate)
+            await engine.pause("/api/ledger/bootstrap/page", gate: gate)
             try await session.updateLocalTransaction(action: action, entry: entry)
             await fulfillment(of: [entered], timeout: 3)
             XCTAssertEqual(session.transactionMutationPhase(for: original), .confirmed)
@@ -1495,7 +1544,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         let action = try await session.prepareLocalTransactionAction(sources: [original.source], kind: .edit)
         let entered = expectation(description: "failed receipt bootstrap")
         let gate = Gate(entered)
-        await engine.pause("/api/ledger/bootstrap", gate: gate, fail: true)
+        await engine.pause("/api/ledger/bootstrap/page", gate: gate, fail: true)
         try await session.updateLocalTransaction(action: action,
             entry: .init(date: "2026-10-02", payee: "Moved", narration: "Synthetic",
                 postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")]))
@@ -1537,7 +1586,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
             } catch is CancellationError { }
             let refreshing = expectation(description: "committed bootstrap awaiting")
             let bootstrapGate = Gate(refreshing)
-            await engine.pause("/api/ledger/bootstrap", gate: bootstrapGate)
+            await engine.pause("/api/ledger/bootstrap/page", gate: bootstrapGate)
             await gate.release()
             try await mutation.value
             await fulfillment(of: [refreshing], timeout: 3)

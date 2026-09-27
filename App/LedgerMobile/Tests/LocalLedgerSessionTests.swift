@@ -3,6 +3,28 @@ import XCTest
 import Combine
 @testable import LedgerMobile
 
+enum SyntheticBootstrapPage {
+    static func response(_ data: Data, request: LocalLedgerEngineRequest) throws -> Data {
+        var bootstrap = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let start = try XCTUnwrap(request.query["start"])
+        let end = try XCTUnwrap(request.query["end"])
+        let limit = Int(request.query["limit"] ?? "100") ?? 100
+        let rows = (bootstrap["transactions"] as? [[String: Any]] ?? []).filter {
+            ($0["date"] as? String ?? "") >= start && ($0["date"] as? String ?? "") < end
+        }
+        bootstrap["start"] = start
+        bootstrap["end"] = end
+        bootstrap["transactions"] = []
+        let page: [String: Any] = ["revision": "synthetic", "sensitiveUnlocked": bootstrap["sensitiveUnlocked"] ?? true,
+            "transactions": rows.prefix(limit).map { row in
+                var candidate = row
+                candidate.removeValue(forKey: "entry")
+                return candidate
+            }, "nextCursor": rows.count > limit ? "remaining" as Any : NSNull()]
+        return try JSONSerialization.data(withJSONObject: ["bootstrap": bootstrap, "transactionPage": page])
+    }
+}
+
 @MainActor
 final class LocalLedgerSessionTests: XCTestCase {
     @MainActor
@@ -106,7 +128,7 @@ final class LocalLedgerSessionTests: XCTestCase {
                 if failure { throw LocalLedgerError.operationFailed("Synthetic aggregate capacity failure") }
                 return try OverviewCategoriesFixture.data(start: request.query["start"]!, end: request.query["end"]!, empty: empty)
             }
-            guard request.path == "/api/ledger/bootstrap" else {
+            guard request.path == "/api/ledger/bootstrap/page" else {
                 throw LocalLedgerError.operationFailed("Synthetic optional report unavailable")
             }
             bootstrapCalls += 1
@@ -121,7 +143,7 @@ final class LocalLedgerSessionTests: XCTestCase {
                 summary["expense"] = 777
                 payload["summary"] = summary
             }
-            return try JSONSerialization.data(withJSONObject: payload)
+            return try SyntheticBootstrapPage.response(JSONSerialization.data(withJSONObject: payload), request: request)
         }
     }
 
@@ -146,7 +168,9 @@ final class LocalLedgerSessionTests: XCTestCase {
             self.changesRevision = changesRevision
         }
         func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
-            if request.path == "/api/ledger/bootstrap" { return Data(LedgerModelsTests.bootstrapJSON.utf8) }
+            if request.path == "/api/ledger/bootstrap/page" {
+                return try SyntheticBootstrapPage.response(Data(LedgerModelsTests.bootstrapJSON.utf8), request: request)
+            }
             if request.path == "/api/ledger/version" { return Data("{}".utf8) }
             guard request.path == "/api/ledger/transactions/history-page" else {
                 throw LocalLedgerError.operationFailed("Unexpected history fallback")
@@ -281,15 +305,16 @@ final class LocalLedgerSessionTests: XCTestCase {
         }
     }
 
-    func testOverviewAggregateFailureIsNotEmptyAndDoesNotTruncateBootstrapOrGlobalArrays() async throws {
+    func testOverviewAggregateFailureDoesNotTruncateBoundedBootstrap() async throws {
         let fixture = try await openedResumeFixture()
         let session = fixture.session
         defer { session.chooseLedger() }
+        await session.applyRange(.month(year: 2026, month: 8))
         let transactions = try XCTUnwrap(session.ledger).transactions
         XCTAssertFalse(transactions.isEmpty)
         try await session.loadGlobalTransactions(forceRefresh: true)
         let globalTransactions = session.globalTransactions
-        XCTAssertEqual(globalTransactions, transactions)
+        XCTAssertEqual(globalTransactions.map(\.source), transactions.map(\.source))
         XCTAssertEqual(session.localOverviewCategories?.categories.count, 4)
         XCTAssertEqual(session.localOverviewCategories?.positiveTotalMinorUnits, 2_000)
         XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
@@ -299,7 +324,8 @@ final class LocalLedgerSessionTests: XCTestCase {
         await session.refresh()
         XCTAssertEqual(session.phase, .ready)
         XCTAssertEqual(session.ledger?.transactions, transactions)
-        XCTAssertEqual(session.globalTransactions, globalTransactions)
+        XCTAssertTrue(session.globalTransactions.isEmpty)
+        XCTAssertFalse(session.hasCachedGlobalTransactions)
         XCTAssertNil(session.localOverviewCategories)
         XCTAssertNil(session.overviewTransactionStats)
         XCTAssertTrue(session.localOverviewCategoriesError?.contains("capacity") == true)
