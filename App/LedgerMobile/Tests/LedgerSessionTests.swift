@@ -1494,6 +1494,11 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(calls.dashboard, 1)
         XCTAssertEqual(calls.incomeStatement, 1)
         XCTAssertEqual(calls.investments, 1)
+        _ = try await session.analysisResource(.incomeExpense)
+        XCTAssertNotNil(session.cachedAnalysisResource(.incomeExpense))
+        let cachedCalls = await api.callCounts()
+        XCTAssertEqual(cachedCalls.dashboard, 1)
+        XCTAssertEqual(cachedCalls.incomeStatement, 1)
     }
 
     func testAnalysisSensitiveLockClearsLoadedLedger() async {

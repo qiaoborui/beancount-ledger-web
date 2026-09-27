@@ -596,6 +596,7 @@ struct TransactionsView: View {
         let dayExpenses = Dictionary(uniqueKeysWithValues:
             (session.localTransactionSummary?.days ?? []).map { ($0.date, $0.expense) })
         return List {
+            Color.clear.frame(height: 1).id("transaction-list-top")
             Section {
                 CookieTransactionFilterBar(
                     filteredCount: displayedCount,
@@ -705,7 +706,16 @@ struct TransactionsView: View {
     }
 
     private var navigationContent: some View {
-        transactionList
+        ScrollViewReader { proxy in
+            transactionList
+                .onChange(of: session.localTransactionWindowIndex) { _, _ in
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        proxy.scrollTo("transaction-list-top", anchor: .top)
+                    }
+                }
+        }
         .ledgerReadingList()
         .ledgerNavigation("流水", isRoot: isRoot, showsTimeRange: true)
         .scrollDismissesKeyboard(.interactively)

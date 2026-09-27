@@ -581,6 +581,28 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertEqual(session.localTransactionWindowIndex, 0)
     }
 
+    func test292TransactionsTraverseAllThreePagesAndReturn() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(292)
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 100))
+        await session.loadLocalTransactionSummary()
+        for (page, range) in [(0, 1...100), (1, 101...200), (2, 201...292)] {
+            if page > 0 { await session.loadNextLocalTransactionWindow() }
+            XCTAssertEqual(session.localTransactionWindowIndex, page)
+            XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), Array(range))
+            XCTAssertEqual(session.localTransactionWindow?.continuation != nil, page < 2)
+            XCTAssertEqual(session.localTransactionSummary?.matchedCount, 292)
+        }
+        for page in [1, 0, 1, 2] {
+            if page < session.localTransactionWindowIndex { await session.loadPreviousLocalTransactionWindow() }
+            else { await session.loadNextLocalTransactionWindow() }
+            XCTAssertEqual(session.localTransactionWindowIndex, page)
+            XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, page * 100 + 1)
+            XCTAssertEqual(session.localTransactionWindow?.transactions.count, page == 2 ? 92 : 100)
+        }
+    }
+
     func testPreviousNavigationReplaysEvictedAnchorsWithoutAccumulatingRows() async throws {
         let (session, engine, _) = try await fixture()
         defer { session.chooseLedger() }

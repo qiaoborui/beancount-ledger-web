@@ -65,6 +65,8 @@ struct LedgerAnalysisView: View {
             Group {
                 if let resource {
                     content(resource)
+                } else if let cached = session.cachedAnalysisResource(kind.resourceKind) {
+                    content(cached)
                 } else if let errorMessage {
                     VStack(spacing: LedgerSpacing.lg) {
                         EmptyLedgerState(icon: "exclamationmark.triangle", title: "分析数据加载失败", detail: errorMessage)
@@ -416,6 +418,8 @@ private struct AssetsHeroCard: View {
                             Text("负债率 \(debtRatio.formatted(.percent.precision(.fractionLength(1))))")
                                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                                 .foregroundStyle(debtRatioColor(debtRatio))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)

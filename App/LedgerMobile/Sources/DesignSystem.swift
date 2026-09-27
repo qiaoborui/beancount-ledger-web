@@ -674,6 +674,8 @@ struct PrimaryButtonLabel: View {
             }
             Text(title)
                 .font(.body.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
         }
         .foregroundStyle(LedgerPalette.onBrand)
         .frame(maxWidth: .infinity, minHeight: 48)
@@ -699,14 +701,10 @@ struct LedgerSyncToolbarButton: View {
     var body: some View {
         LedgerToolbarButton(action: activate,
             accessibilityLabel: session.isLocal ? presentation.title : "刷新账本") {
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(indicatorColor)
-                    .frame(width: 8, height: 8)
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(indicatorColor)
-            }
+            Image(systemName: indicatorSymbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(indicatorColor)
+                .symbolEffect(.pulse, isActive: presentation.indicator == .syncing)
         }
         .disabled(presentation.isBusy || session.phase != .ready)
         .accessibilityIdentifier("ledger-sync-status")
@@ -746,6 +744,17 @@ struct LedgerSyncToolbarButton: View {
         case .synced: return LedgerPalette.success
         case .pending: return LedgerPalette.gold
         case .attention: return LedgerPalette.risk
+        }
+    }
+
+    private var indicatorSymbol: String {
+        guard session.isLocal else { return "arrow.clockwise" }
+        switch presentation.indicator {
+        case .local: return "internaldrive"
+        case .syncing: return "arrow.triangle.2.circlepath"
+        case .synced: return "checkmark.circle"
+        case .pending: return "arrow.up.circle"
+        case .attention: return "exclamationmark.circle"
         }
     }
 

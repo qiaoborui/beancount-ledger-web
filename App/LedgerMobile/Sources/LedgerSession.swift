@@ -97,6 +97,15 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var ledger: LedgerBootstrap?
     @Published private(set) var localOverviewCategories: LedgerOverviewCategories?
     @Published private(set) var isLocalOverviewCategoriesLoading = false
+    private struct AnalysisCacheKey: Hashable {
+        let kind: LedgerAnalysisResourceKind
+        let start: String
+        let end: String
+        let currency: String
+        let generation: Int
+        let localRevision: UUID?
+    }
+    private var analysisCache: [AnalysisCacheKey: LedgerAnalysisResource] = [:]
     @Published private(set) var localOverviewCategoriesError: String?
     var overviewTransactionStats: OverviewTransactionStats? {
         guard let ledger else { return nil }
@@ -1754,6 +1763,9 @@ final class LedgerSession: ObservableObject {
         let generation = requestGeneration
         let range = selectedRange
         let valuationCurrency = ledger?.valuationCurrency ?? storedValuationCurrency(for: contextURL)
+        let cacheKey = AnalysisCacheKey(kind: kind, start: range.start, end: range.queryEndExclusive,
+            currency: valuationCurrency, generation: generation, localRevision: localTransactionPresentationRevision)
+        if let cached = analysisCache[cacheKey] { return cached }
         do {
             let repository = try repository(at: contextURL)
             let resource: LedgerAnalysisResource
@@ -1799,6 +1811,7 @@ final class LedgerSession: ObservableObject {
                   phase == .ready else {
                 throw CancellationError()
             }
+            analysisCache[cacheKey] = resource
             return resource
         } catch let error as LedgerAPIError {
             if case let .server(status, _) = error,
@@ -1813,6 +1826,15 @@ final class LedgerSession: ObservableObject {
             }
             throw error
         }
+    }
+
+    func cachedAnalysisResource(_ kind: LedgerAnalysisResourceKind) -> LedgerAnalysisResource? {
+        guard phase == .ready, let contextURL else { return nil }
+        let range = selectedRange
+        let currency = ledger?.valuationCurrency ?? storedValuationCurrency(for: contextURL)
+        let key = AnalysisCacheKey(kind: kind, start: range.start, end: range.queryEndExclusive,
+            currency: currency, generation: requestGeneration, localRevision: localTransactionPresentationRevision)
+        return analysisCache[key]
     }
 
     func importDocuments() async throws -> [LedgerImportDocument] {
