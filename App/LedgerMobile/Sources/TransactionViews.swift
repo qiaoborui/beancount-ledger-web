@@ -358,9 +358,11 @@ struct CookieTransactionFilterBar: View {
 
             Spacer()
 
-            Text(filteredCount.map { "\($0) 笔" } ?? "统计中…")
-                .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
-                .foregroundStyle(LedgerPalette.secondary)
+            if let filteredCount {
+                Text("\(filteredCount) 笔")
+                    .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                    .foregroundStyle(LedgerPalette.secondary)
+            }
         }
         .padding(.vertical, 2)
     }
@@ -433,7 +435,11 @@ struct TransactionsView: View {
     }
 
     private var displayedTransactions: [LedgerTransaction] {
-        session.isLocal ? (session.localTransactionWindow?.transactions ?? []) : filteredTransactions
+        if session.isLocal {
+            return (session.localTransactionWindow?.transactions ?? session.localBootstrapTransactions)
+                .filter(filters.matches)
+        }
+        return filteredTransactions
     }
 
     private var displayedCount: Int? {
@@ -621,9 +627,6 @@ struct TransactionsView: View {
                         Button("重新统计完整范围") { Task { await session.loadLocalTransactionSummary() } }
                     }
                 }
-                if session.isLocalTransactionWindowLoading && displayedTransactions.isEmpty {
-                    Section { ProgressView("正在读取流水") }
-                }
             }
             if displayedTransactions.isEmpty && (!session.isLocal || session.localTransactionWindow?.isComplete == true) {
                 ContentUnavailableView(
@@ -680,8 +683,8 @@ struct TransactionsView: View {
                     if let summary = session.localTransactionSummary {
                         Text("\(summary.matchedCount) / \(summary.fullRangeCount) 笔 · 本页 \(displayedTransactions.count) 笔")
                             .font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
-                    } else {
-                        Text(session.localTransactionSummaryError == nil ? "正在统计完整范围…" : "完整统计暂不可用")
+                    } else if session.localTransactionSummaryError != nil {
+                        Text("完整统计暂不可用")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }

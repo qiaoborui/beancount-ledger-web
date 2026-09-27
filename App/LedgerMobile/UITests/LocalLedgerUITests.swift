@@ -2,6 +2,38 @@ import XCTest
 
 @MainActor
 final class LocalLedgerUITests: XCTestCase {
+    func testLocalRestartDoesNotShowPassiveLoadingCards() throws {
+        #if targetEnvironment(simulator)
+        let app = XCUIApplication()
+        app.launchArguments = ["--local-ui-testing"]
+        app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
+        app.launch()
+        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        app.buttons["local-ledger-create"].tap()
+        app.buttons["local-ledger-confirm-create"].tap()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 30))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.staticTexts["正在加载概览汇总…"].exists)
+        XCTAssertFalse(app.staticTexts["流水统计加载中…"].exists)
+        let overview = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        overview.name = "overview-without-loading-card"
+        overview.lifetime = .keepAlways
+        add(overview)
+        app.tabBars.buttons["交易"].tap()
+        XCTAssertTrue(app.navigationBars["流水"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["正在读取流水"].exists)
+        XCTAssertFalse(app.staticTexts["统计中…"].exists)
+        let transactions = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        transactions.name = "transactions-without-loading-card"
+        transactions.lifetime = .keepAlways
+        add(transactions)
+        #else
+        throw XCTSkip("Uses isolated simulator ledger")
+        #endif
+    }
+
     func testLocalContextActionsHydrateCancelReopenAndCommit() throws {
         continueAfterFailure = false
         #if targetEnvironment(simulator)

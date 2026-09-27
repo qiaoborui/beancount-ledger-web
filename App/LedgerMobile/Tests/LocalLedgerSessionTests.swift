@@ -328,8 +328,8 @@ final class LocalLedgerSessionTests: XCTestCase {
         XCTAssertEqual(session.ledger?.transactions, transactions)
         XCTAssertTrue(session.globalTransactions.isEmpty)
         XCTAssertFalse(session.hasCachedGlobalTransactions)
-        XCTAssertNil(session.localOverviewCategories)
-        XCTAssertNil(session.overviewTransactionStats)
+        XCTAssertEqual(session.localOverviewCategories?.categories.count, 4)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
         XCTAssertTrue(session.localOverviewCategoriesError?.contains("capacity") == true)
         XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
         await fixture.engine.configureOverview(empty: true)
@@ -352,8 +352,8 @@ final class LocalLedgerSessionTests: XCTestCase {
             let loading = Task { await session.refreshLocalOverviewCategories() }
             await fulfillment(of: [entered], timeout: 3)
             XCTAssertTrue(session.isLocalOverviewCategoriesLoading)
-            XCTAssertNil(session.localOverviewCategories)
-            XCTAssertNil(session.overviewTransactionStats)
+            XCTAssertNotNil(session.localOverviewCategories)
+            XCTAssertNotNil(session.overviewTransactionStats)
             if shouldLock { await session.lock() } else { session.chooseLedger() }
             XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
             await gate.release()
@@ -560,6 +560,8 @@ final class LocalLedgerSessionTests: XCTestCase {
         await fulfillment(of: [entered], timeout: 3)
         XCTAssertEqual(session.phase, .ready)
         XCTAssertNotNil(session.ledger)
+        XCTAssertEqual(session.localOverviewCategories?.categories.count, 4)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
         await fulfillment(of: [completed], timeout: 0.25)
         await gate.release()
         await opening.value

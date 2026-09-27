@@ -703,14 +703,9 @@ struct LedgerSyncToolbarButton: View {
                 Circle()
                     .fill(indicatorColor)
                     .frame(width: 8, height: 8)
-                if presentation.isBusy {
-                    ProgressView()
-                        .controlSize(.mini)
-                } else {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(indicatorColor)
-                }
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(indicatorColor)
             }
         }
         .disabled(presentation.isBusy || session.phase != .ready)

@@ -213,6 +213,8 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         try await advance(repository)
         await session.refresh()
         XCTAssertEqual(session.ledger?.transactions.count, 100)
+        XCTAssertNil(session.localTransactionWindow)
+        XCTAssertEqual(session.localBootstrapTransactions.count, 100)
         XCTAssertEqual(session.ledger?.transactions.first?.source.line, 1)
         XCTAssertEqual(session.ledger?.transactions.last?.source.line, 100)
         let bootstrapPaths = await engine.bootstrapPaths

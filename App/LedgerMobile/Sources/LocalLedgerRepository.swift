@@ -482,9 +482,44 @@ actor LocalLedgerRepository: LedgerRepository {
     /// pairing boundary. Check it inside the pinned snapshot, not in a prior read.
     func overviewCategories(start: String, end: String,
                             expectedRevisionID: UUID) async throws -> LedgerOverviewCategories {
+        let cache = overviewCache
         let (_, response) = try await readSnapshot("/api/ledger/overview/categories",
             query: ["start": start, "end": end], expectedRevisionID: expectedRevisionID)
         let result = try response.decode(LedgerOverviewCategories.self)
+        try Self.validateOverviewCategories(result, start: start, end: end)
+        // A pinned caller may legitimately finish after a writer publishes. Keep
+        // that response for the caller, but never cache it as the current view.
+        let current = try? await workspace.currentRevision()
+        if !Task.isCancelled, current?.id == expectedRevisionID,
+           let data = try? response.resultData() {
+            cache.save(data, revisionID: expectedRevisionID, query: ["start": start, "end": end])
+        }
+        return result
+    }
+
+    func cachedOverviewCategories(start: String, end: String,
+                                  expectedRevisionID: UUID) async throws -> LedgerOverviewCategories? {
+        let cache = overviewCache
+        let result = try await workspace.withCurrentSnapshot { revision, _ in
+            revision.id == expectedRevisionID
+                ? cache.loadOverview(revisionID: revision.id, query: ["start": start, "end": end]) : nil
+        }
+        try Task.checkCancellation()
+        guard let result else { return nil }
+        try Self.validateOverviewCategories(result, start: start, end: end)
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
+    }
+
+    private var overviewCache: BootstrapPresentationCache {
+        BootstrapPresentationCache(ledgerID: descriptor.id, entrypoint: descriptor.entrypoint,
+            url: workspace.rootDirectory.appendingPathComponent(".overview-categories-presentation.json"))
+    }
+
+    private static func validateOverviewCategories(_ result: LedgerOverviewCategories,
+                                                   start: String, end: String) throws {
         guard result.sensitiveUnlocked else {
             throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定")
         }
@@ -497,8 +532,6 @@ actor LocalLedgerRepository: LedgerRepository {
                   && $0.positiveTransactionCount > 0 }) else {
             throw LocalLedgerError.operationFailed("概览汇总响应无效")
         }
-        // This read must not change the revision used to authorize financial writes.
-        return result
     }
 
     func transactionDetail(source: TransactionSource) async throws -> LedgerTransaction {
@@ -1099,6 +1132,22 @@ private struct BootstrapPresentationCache: Sendable {
               record.payload.count <= (1 << 20),
               let payload = try? JSONDecoder().decode(LocalBootstrapPage.self, from: record.payload),
               payload.bootstrap.sensitiveUnlocked else { return nil }
+        return payload
+    }
+
+    func loadOverview(revisionID: UUID, query: [String: String]) -> LedgerOverviewCategories? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? NSNumber, size.intValue <= Self.maximumBytes,
+              let data = try? Data(contentsOf: url),
+              let record = try? JSONDecoder().decode(Record.self, from: data),
+              record.formatVersion == Self.formatVersion,
+              Self.compatibleApplicationVersion(record.applicationVersion),
+              record.ledgerID == ledgerID, record.revisionID == revisionID,
+              record.entrypoint == entrypoint, record.query == query,
+              record.payload.count <= (1 << 20),
+              let payload = try? JSONDecoder().decode(LedgerOverviewCategories.self, from: record.payload),
+              payload.sensitiveUnlocked else { return nil }
         return payload
     }
 

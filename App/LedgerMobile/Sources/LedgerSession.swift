@@ -209,6 +209,13 @@ final class LedgerSession: ObservableObject {
     // Bounded reads. These do not replace bootstrap/global arrays or grant
     // mutation authority. Only the caller of localTransactionDetail holds detail.
     @Published private(set) var localTransactionWindow: LocalTransactionWindow.Window?
+    var localBootstrapTransactions: [LedgerTransaction] {
+        guard isLocal, phase == .ready, !privacyShielded, applicationActive,
+              !isRangeLoading, !isValuationCurrencyLoading,
+              !transactionMutations.values.contains(where: { $0.phase == .pending }),
+              localPresentation?.revisionID != nil else { return [] }
+        return ledger?.transactions ?? []
+    }
     @Published private(set) var isLocalTransactionWindowLoading = false
     @Published private(set) var localTransactionWindowError: String?
     @Published private(set) var localTransactionSummary: LocalTransactionScan.Result?
@@ -3223,6 +3230,23 @@ final class LedgerSession: ObservableObject {
         if local == nil {
             reconcileTransactionMutations(in: payload.transactions, start: targetRange.start, end: targetRange.queryEndExclusive)
         }
+        if let local, let revisionID = presentationRevision {
+            let matches = overviewCategoriesRevisionID == revisionID
+                && localOverviewCategories?.start == targetRange.start
+                && localOverviewCategories?.end == targetRange.queryEndExclusive
+            if !matches {
+                invalidateOverviewCategories()
+                let cached = try? await local.cachedOverviewCategories(start: targetRange.start,
+                    end: targetRange.queryEndExclusive, expectedRevisionID: revisionID)
+                guard generation == requestGeneration else { return }
+                let current = try await local.workspace.currentRevision()
+                guard generation == requestGeneration, current?.id == revisionID else {
+                    throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+                }
+                localOverviewCategories = cached
+                overviewCategoriesRevisionID = cached == nil ? nil : revisionID
+            }
+        }
         ledger = payload
         localPresentation = local.map {
             LocalPresentation(ledgerID: $0.descriptor.id,
@@ -4519,7 +4543,14 @@ final class LedgerSession: ObservableObject {
               let presentation = localPresentation,
               presentation.ledgerID == repository.descriptor.id,
               let revisionID = presentation.revisionID else { return }
-        invalidateOverviewCategories()
+        let matches = overviewCategoriesRevisionID == revisionID
+            && localOverviewCategories?.start == selectedRange.start
+            && localOverviewCategories?.end == selectedRange.queryEndExclusive
+        if !matches { invalidateOverviewCategories() }
+        else {
+            overviewCategoriesGeneration &+= 1
+            localOverviewCategoriesError = nil
+        }
         let token = overviewCategoriesGeneration, generation = requestGeneration
         let epoch = sessionEpoch, expectedLocation = location, range = selectedRange
         isLocalOverviewCategoriesLoading = true
@@ -4540,6 +4571,10 @@ final class LedgerSession: ObservableObject {
             overviewCategoriesRevisionID = revisionID
         } catch {
             guard isCurrent(), !Task.isCancelled else { return }
+            if case LocalLedgerWorkspace.WorkspaceError.staleRevision = error {
+                localOverviewCategories = nil
+                overviewCategoriesRevisionID = nil
+            }
             localOverviewCategoriesError = error.localizedDescription
         }
     }

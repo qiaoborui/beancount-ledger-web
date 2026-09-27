@@ -9,12 +9,8 @@ struct LedgerTimeRangeButton: View {
             session.presentRangePicker()
         } label: {
             HStack(spacing: 5) {
-                if session.isRangeLoading {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Image(systemName: "calendar")
-                        .font(.system(size: 13, weight: .semibold))
-                }
+                Image(systemName: "calendar")
+                    .font(.system(size: 13, weight: .semibold))
                 Text(session.selectedRange.toolbarTitle())
                     .font(.system(.subheadline, design: .rounded, weight: .semibold))
                     .lineLimit(1)
