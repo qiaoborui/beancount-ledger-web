@@ -12,6 +12,9 @@ import Foundation
 /// cursor state, and the scan's separately bounded summary state. Accounting uses
 /// LocalTransactionScan, not JSON copies, and is not an allocator/RSS guarantee.
 actor LocalTransactionWindow {
+    /// Keep the first list window the same size as the cached bootstrap page.
+    static let listPageRows = 100
+
     struct Request: Sendable {
         let workspaceID: UUID
         let cursor: String?

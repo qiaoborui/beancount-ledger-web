@@ -370,6 +370,8 @@ struct CookieTransactionFilterBar: View {
 
 
 struct TransactionsView: View {
+    static let localWindowLimits = LocalTransactionWindow.Limits(maxRows: LocalTransactionWindow.listPageRows)
+
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var filters = LedgerTransactionFilter()
@@ -590,7 +592,10 @@ struct TransactionsView: View {
     }
 
     private var transactionList: some View {
-        List {
+        let labels = accountLabels
+        let dayExpenses = Dictionary(uniqueKeysWithValues:
+            (session.localTransactionSummary?.days ?? []).map { ($0.date, $0.expense) })
+        return List {
             Section {
                 CookieTransactionFilterBar(
                     filteredCount: displayedCount,
@@ -638,7 +643,7 @@ struct TransactionsView: View {
             ForEach(groupedTransactions, id: \.date) { group in
                 Section {
                     ForEach(group.transactions) { transaction in
-                        transactionRow(for: transaction)
+                        transactionRow(for: transaction, accountLabels: labels)
                     }
                 } header: {
                     HStack(alignment: .firstTextBaseline) {
@@ -647,7 +652,7 @@ struct TransactionsView: View {
                             .foregroundStyle(LedgerPalette.ink)
                         Spacer()
                         let dayExpense = session.isLocal
-                            ? (session.localTransactionSummary?.days.first(where: { $0.date == group.date })?.expense ?? 0)
+                            ? (dayExpenses[group.date] ?? 0)
                             : groupExpense(for: group.transactions)
                         if dayExpense > 0 {
                             HStack(spacing: 3) {
@@ -964,7 +969,8 @@ struct TransactionsView: View {
     }
 
     @ViewBuilder
-    private func transactionRow(for transaction: LedgerTransaction) -> some View {
+    private func transactionRow(for transaction: LedgerTransaction,
+                                accountLabels: [String: String]) -> some View {
         if isSelecting {
             let isSelected = session.isLocal
                 ? (currentLocalSelection?.contains(transaction) ?? false)
@@ -1048,9 +1054,9 @@ struct TransactionsView: View {
     private func loadWindow(reuseCurrent: Bool = false) async {
         guard session.isLocal, session.phase == .ready, !session.privacyShielded else { return }
         if reuseCurrent {
-            await session.ensureLocalTransactionWindow(filter: filters)
+            await session.ensureLocalTransactionWindow(filter: filters, limits: Self.localWindowLimits)
         } else {
-            await session.loadLocalTransactionWindow(filter: filters)
+            await session.loadLocalTransactionWindow(filter: filters, limits: Self.localWindowLimits)
         }
         guard !Task.isCancelled else { return }
         await session.loadLocalTransactionSummary()

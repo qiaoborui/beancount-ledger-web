@@ -64,7 +64,7 @@ actor LocalLedgerRepository: LedgerRepository {
     /// Default native bootstrap contract for local sessions. Legacy bootstrap
     /// remains complete for explicit compatibility callers.
     func bootstrapPage(start: String, end: String, today: String, valuationCurrency: String,
-                       limit: Int = 100, expectedRevisionID: UUID) async throws -> LocalBootstrapPage {
+                       limit: Int = LocalTransactionWindow.listPageRows, expectedRevisionID: UUID) async throws -> LocalBootstrapPage {
         guard (1...500).contains(limit), LedgerWidgetLink.isValidDay(start),
               LedgerWidgetLink.isValidDay(end), LedgerWidgetLink.isValidDay(today), start < end else {
             throw LocalLedgerError.invalidConfiguration("启动分页参数无效")

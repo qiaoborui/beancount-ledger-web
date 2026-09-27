@@ -217,6 +217,21 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertEqual(session.localBootstrapTransactions.count, 100)
         XCTAssertEqual(session.ledger?.transactions.first?.source.line, 1)
         XCTAssertEqual(session.ledger?.transactions.last?.source.line, 100)
+        #if os(iOS)
+        let listLimits = TransactionsView.localWindowLimits
+        #else
+        let listLimits = LocalTransactionWindow.Limits(maxRows: LocalTransactionWindow.listPageRows)
+        #endif
+        await session.ensureLocalTransactionWindow(limits: listLimits)
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.id),
+            session.localBootstrapTransactions.map(\.id),
+            "The first list window must not grow while the user is scrolling the cached page")
+        XCTAssertNotNil(session.localTransactionWindow?.continuation)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, 101)
+        await session.loadPreviousLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.id),
+            session.localBootstrapTransactions.map(\.id))
         let bootstrapPaths = await engine.bootstrapPaths
         XCTAssertEqual(bootstrapPaths, ["/api/ledger/bootstrap/page", "/api/ledger/bootstrap/page"])
         let currentRevision = try await repository.workspace.currentRevision()
