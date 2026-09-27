@@ -532,6 +532,39 @@ final class LocalLedgerSessionTests: XCTestCase {
         return (session, engine, authenticator, catalog)
     }
 
+    func testLocalStartupShowsBootstrapBeforeOverviewRefreshFinishes() async throws {
+        let fixture = try fixture()
+        let engine = ResumeEngine()
+        let catalog = LocalLedgerCatalog(rootDirectory: fixture.root.appendingPathComponent("managed"),
+            engine: engine, validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Async overview fixture")
+        let first = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+            defaults: fixture.defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+            widgetCredentialStore: InertWidgetStore())
+        await first.openLocalLedger(descriptor)
+        let session = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+            defaults: fixture.defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+            widgetCredentialStore: InertWidgetStore())
+        defer { session.chooseLedger(); first.chooseLedger() }
+        XCTAssertEqual(session.phase, .checking)
+        let entered = expectation(description: "overview scan started")
+        let completed = expectation(description: "startup completed while overview scan is blocked")
+        let gate = Gate(entered)
+        await engine.configureOverview(gate: gate)
+        let opening = Task {
+            await session.start()
+            completed.fulfill()
+        }
+        await fulfillment(of: [entered], timeout: 3)
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertNotNil(session.ledger)
+        await fulfillment(of: [completed], timeout: 0.25)
+        await gate.release()
+        await opening.value
+    }
+
     func testWarmLocalUnlockShowsAuthenticatedRetainedContentWhileChangedRevisionRefreshes() async throws {
         let fixture = try await openedResumeFixture()
         let session = fixture.session

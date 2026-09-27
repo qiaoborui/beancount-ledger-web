@@ -231,6 +231,22 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertFalse(session.hasCachedGlobalTransactions)
     }
 
+    func testBootstrapPageCacheSurvivesCompatibleBuildNumber() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let cache = repository.workspace.rootDirectory.appendingPathComponent(".bootstrap-page-presentation.json")
+        var record = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: cache)) as? [String: Any])
+        let version = try XCTUnwrap(record["applicationVersion"] as? String)
+        let release = try XCTUnwrap(version.split(separator: "/").first)
+        record["applicationVersion"] = "\(release)/999999"
+        try JSONSerialization.data(withJSONObject: record).write(to: cache, options: .atomic)
+        let before = await engine.bootstrapPaths.count
+        await session.refresh()
+        let after = await engine.bootstrapPaths.count
+        XCTAssertEqual(after, before, "A compatible build should reuse the validated same-revision page")
+        XCTAssertEqual(session.phase, .ready)
+    }
+
     func testPreparedActionDoesNotPopulateLegacyArraysAndEditsUnknownExactOriginal() async throws {
         let (session, engine, repository) = try await fixture()
         defer { session.chooseLedger() }

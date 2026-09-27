@@ -745,7 +745,8 @@ final class LedgerSession: ObservableObject {
         guard applicationActive, sessionEpoch == epoch, location == expectedLocation else { throw CancellationError() }
     }
 
-    private func activateLocalLedger(_ descriptor: LocalLedgerDescriptor) async throws {
+    private func activateLocalLedger(_ descriptor: LocalLedgerDescriptor,
+                                     deferDerivedRefreshes: Bool = false) async throws {
         guard let localCatalog else { throw LedgerRepositoryError.capabilityUnavailable("local storage") }
         let generation = invalidateSession()
         stopImportIndexTracking()
@@ -767,7 +768,8 @@ final class LedgerSession: ObservableObject {
         setLocallyLocked(false, for: contextURL)
         clearBackgroundDate(for: contextURL)
         do {
-            try await loadLedger(from: contextURL, generation: generation)
+            try await loadLedger(from: contextURL, generation: generation,
+                deferLocalDerivedRefreshes: deferDerivedRefreshes)
             await prepareLocalAutomaticSync()
         } catch {
             guard generation == requestGeneration else { throw error }
@@ -778,6 +780,7 @@ final class LedgerSession: ObservableObject {
 
     func unlockLocalLedger() async {
         guard isLocal, !isAuthenticationBusy, applicationActive else { return }
+        let coldStartup = phase == .checking
         isAuthenticationBusy = true
         systemAuthenticationInProgress = true
         errorMessage = nil
@@ -797,7 +800,7 @@ final class LedgerSession: ObservableObject {
                   let descriptor = localLedgers.first(where: { $0.id == id }) else {
                 throw LedgerRepositoryError.capabilityUnavailable("找不到本地账本，请重新选择")
             }
-            try await activateLocalLedger(descriptor)
+            try await activateLocalLedger(descriptor, deferDerivedRefreshes: coldStartup)
         } catch {
             if expectedLocation == location {
                 phase = .locked(authenticated: true)
@@ -3160,7 +3163,8 @@ final class LedgerSession: ObservableObject {
         generation: Int,
         range: LedgerDateRange? = nil,
         valuationCurrency: String? = nil,
-        preserveCachedLedgerOnSensitiveLock: Bool = false
+        preserveCachedLedgerOnSensitiveLock: Bool = false,
+        deferLocalDerivedRefreshes: Bool = false
     ) async throws {
         let targetRange = range ?? selectedRange
         let targetCurrency = valuationCurrency ?? storedValuationCurrency(for: contextURL)
@@ -3234,14 +3238,29 @@ final class LedgerSession: ObservableObject {
         }
         phase = .ready
         Task { await restoreImportIndexTrackingIfNeeded() }
-        if local != nil { await refreshLocalOverviewCategories() }
-        guard generation == requestGeneration else { return }
-        await publishWidgetSnapshot(
-            ledger: payload,
-            contextURL: contextURL,
-            valuationCurrency: payload.valuationCurrency,
-            generation: generation
-        )
+        if local != nil, deferLocalDerivedRefreshes {
+            let epoch = sessionEpoch, expectedLocation = location
+            Task(priority: .utility) { @MainActor [weak self] in
+                await Task.yield()
+                guard let self, generation == self.requestGeneration,
+                      epoch == self.sessionEpoch, expectedLocation == self.location,
+                      self.phase == .ready else { return }
+                await self.refreshLocalOverviewCategories()
+                guard generation == self.requestGeneration, epoch == self.sessionEpoch,
+                      expectedLocation == self.location, self.phase == .ready else { return }
+                await self.publishWidgetSnapshot(ledger: payload, contextURL: contextURL,
+                    valuationCurrency: payload.valuationCurrency, generation: generation)
+            }
+        } else {
+            if local != nil { await refreshLocalOverviewCategories() }
+            guard generation == requestGeneration else { return }
+            await publishWidgetSnapshot(
+                ledger: payload,
+                contextURL: contextURL,
+                valuationCurrency: payload.valuationCurrency,
+                generation: generation
+            )
+        }
     }
 
     private func beginImportIndexPolling(

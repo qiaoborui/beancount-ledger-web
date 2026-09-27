@@ -1033,15 +1033,26 @@ actor LocalLedgerRepository: LedgerRepository {
 
 /// A derived presentation of one immutable generation. A reopened app can show
 /// authenticated local content without starting Python or rebuilding analytics.
-/// Date, range, currency, entrypoint and build changes all require a fresh read.
+/// Date, range, currency, entrypoint and cache-contract changes require a fresh read.
 private struct BootstrapPresentationCache: Sendable {
     let ledgerID: UUID
     let entrypoint: String
     let url: URL
     private static let maximumBytes = 16 * 1_024 * 1_024
+    // Bump this when the bootstrap read model changes incompatibly. A signing
+    // build number alone does not change the cached financial projection.
+    private static let formatVersion = 1
     private static let applicationVersion = ["CFBundleShortVersionString", "CFBundleVersion"]
         .map { Bundle.main.object(forInfoDictionaryKey: $0) as? String ?? "development" }
         .joined(separator: "/")
+
+    private static func compatibleApplicationVersion(_ stored: String) -> Bool {
+        if stored == applicationVersion { return true }
+        let current = applicationVersion.split(separator: "/", omittingEmptySubsequences: false)
+        let cached = stored.split(separator: "/", omittingEmptySubsequences: false)
+        return current.count == 2 && cached.count == 2 && current[0] == cached[0]
+            && Int(cached[1]) != nil
+    }
 
     private struct Record: Codable {
         let formatVersion: Int
@@ -1066,7 +1077,8 @@ private struct BootstrapPresentationCache: Sendable {
               let size = attributes[.size] as? NSNumber, size.intValue <= Self.maximumBytes,
               let data = try? Data(contentsOf: url),
               let record = try? JSONDecoder().decode(Record.self, from: data),
-              record.formatVersion == 1, record.applicationVersion == Self.applicationVersion,
+              record.formatVersion == Self.formatVersion,
+              Self.compatibleApplicationVersion(record.applicationVersion),
               record.ledgerID == ledgerID, record.revisionID == revisionID,
               record.entrypoint == entrypoint, record.query == query,
               let payload = try? JSONDecoder().decode(LedgerBootstrap.self, from: record.payload),
@@ -1080,7 +1092,8 @@ private struct BootstrapPresentationCache: Sendable {
               let size = attributes[.size] as? NSNumber, size.intValue <= Self.maximumBytes,
               let data = try? Data(contentsOf: url),
               let record = try? JSONDecoder().decode(Record.self, from: data),
-              record.formatVersion == 1, record.applicationVersion == Self.applicationVersion,
+              record.formatVersion == Self.formatVersion,
+              Self.compatibleApplicationVersion(record.applicationVersion),
               record.ledgerID == ledgerID, record.revisionID == revisionID,
               record.entrypoint == entrypoint, record.query == query,
               record.payload.count <= (1 << 20),
@@ -1093,7 +1106,7 @@ private struct BootstrapPresentationCache: Sendable {
         guard payload.count <= Self.maximumBytes else { return }
         if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
            attributes[.type] as? FileAttributeType != .typeRegular { return }
-        let record = Record(formatVersion: 1, applicationVersion: Self.applicationVersion,
+        let record = Record(formatVersion: Self.formatVersion, applicationVersion: Self.applicationVersion,
             ledgerID: ledgerID, revisionID: revisionID, entrypoint: entrypoint, query: query, payload: payload)
         guard let data = try? JSONEncoder().encode(record), data.count <= Self.maximumBytes else { return }
         do {
