@@ -72,6 +72,7 @@ private struct LedgerTransactionMutation {
     let projected: LedgerTransaction
     let kind: Kind
     var phase: LedgerTransactionMutationPhase
+    var commitReceipt: LocalLedgerRepository.TransactionCommitReceipt? = nil
 }
 
 @MainActor
@@ -2025,6 +2026,7 @@ final class LedgerSession: ObservableObject {
 
     @Published private(set) var globalTransactions: [LedgerTransaction] = []
     private var globalTransactionsLoadedAt: Date?
+    private var localGlobalTransactionsRevision: UUID?
     var hasCachedGlobalTransactions: Bool { globalTransactionsLoadedAt != nil }
 
     /// Consume bounded pages without publishing or retaining an all-history list.
@@ -2083,15 +2085,33 @@ final class LedgerSession: ObservableObject {
     }
 
     func loadGlobalTransactions(forceRefresh: Bool = false) async throws {
-        if !forceRefresh, phase == .ready,
-           let loadedAt = globalTransactionsLoadedAt,
-           Date().timeIntervalSince(loadedAt) < 60 { return }
-        let payload = try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
-            let payload = try await repository.globalTransactions()
-            guard payload.sensitiveUnlocked else {
-                throw LedgerAPIError.server(status: 423, message: "服务器敏感数据已锁定")
+        let payload: LedgerGlobalTransactions
+        if isLocal {
+            let context = try localReadContext()
+            guard let repository = localRepository else { throw CancellationError() }
+            if !forceRefresh, localGlobalTransactionsRevision == context.revisionID,
+               let loadedAt = globalTransactionsLoadedAt, Date().timeIntervalSince(loadedAt) < 60 {
+                let current = try await repository.workspace.currentRevision()
+                try validateLocalRead(context)
+                guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return
             }
-            return payload
+            payload = try await repository.globalTransactions(expectedRevisionID: context.revisionID)
+            try validateLocalRead(context)
+            let current = try await repository.workspace.currentRevision()
+            try validateLocalRead(context)
+            guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+            localGlobalTransactionsRevision = context.revisionID
+        } else {
+            if !forceRefresh, phase == .ready,
+               let loadedAt = globalTransactionsLoadedAt, Date().timeIntervalSince(loadedAt) < 60 { return }
+            payload = try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
+                let payload = try await repository.globalTransactions()
+                guard payload.sensitiveUnlocked else {
+                    throw LedgerAPIError.server(status: 423, message: "服务器敏感数据已锁定")
+                }
+                return payload
+            }
         }
         try Task.checkCancellation()
         reconcileTransactionMutations(in: payload.transactions)
@@ -2152,13 +2172,42 @@ final class LedgerSession: ObservableObject {
         transactionMutationStates[key] = .pending
     }
 
-    private func confirmTransactionMutations(keys: [String], operationID: UUID) {
+    private func confirmTransactionMutations(keys: [String], operationID: UUID,
+        receipt: LocalLedgerRepository.TransactionCommitReceipt? = nil) {
         for key in keys {
             guard var mutation = transactionMutations[key], mutation.operationID == operationID else { continue }
             mutation.phase = .confirmed
+            mutation.commitReceipt = receipt
             transactionMutations[key] = mutation
             transactionMutationStates[key] = .confirmed
         }
+        if receipt != nil { retirePublishedLocalCommitReceipts() }
+    }
+
+    /// A receipt is proof of a validated local commit, but not proof that the
+    /// currently displayed generation includes it. Retire only against the exact
+    /// published revision, independent of month/page presence. Newer unknown
+    /// generations remain conservative until separately reconciled.
+    private func retirePublishedLocalCommitReceipts() {
+        guard let presentation = localPresentation, let revision = presentation.revisionID,
+              location == .local(presentation.ledgerID) else { return }
+        let keys = transactionMutations.compactMap { key, mutation -> String? in
+            guard mutation.phase == .confirmed, let receipt = mutation.commitReceipt,
+                  receipt.ledgerID == presentation.ledgerID, receipt.revisionID == revision else { return nil }
+            return key
+        }
+        guard !keys.isEmpty else { return }
+        for key in keys {
+            transactionMutations.removeValue(forKey: key)
+            transactionMutationStates.removeValue(forKey: key)
+            transactionMutationAliases = transactionMutationAliases.filter { $0.value != key }
+        }
+        // A legacy all-history cache may still contain a cross-month original.
+        // Do not expose it when its overlay is retired; local search owns bounded
+        // fresh reads and explicit legacy consumers may reload if needed.
+        globalTransactions = []
+        globalTransactionsLoadedAt = nil
+        localGlobalTransactionsRevision = nil
     }
 
     private func failTransactionMutations(keys: [String], operationID: UUID, error: Error) {
@@ -2187,6 +2236,10 @@ final class LedgerSession: ObservableObject {
         var reconciledKeys: [String] = []
 
         for (key, mutation) in transactionMutations {
+            // Receipt-backed confirmation is not reconciled from a potentially
+            // partial transaction list. Only exact published-generation evidence
+            // can retire it, including changes moved outside the current month.
+            if mutation.commitReceipt != nil { continue }
             guard mutation.original.date >= start, mutation.original.date < end,
                   mutation.projected.date >= start, mutation.projected.date < end else { continue }
             switch mutation.phase {
@@ -3143,6 +3196,7 @@ final class LedgerSession: ObservableObject {
             LocalPresentation(ledgerID: $0.descriptor.id,
                 revisionID: presentationRevision, today: today)
         }
+        if local != nil { retirePublishedLocalCommitReceipts() }
         storeValuationCurrency(payload.valuationCurrency, for: contextURL)
         selectedRange = targetRange
         amountsVisible = applicationActive
@@ -4311,21 +4365,21 @@ final class LedgerSession: ObservableObject {
                     projected: projected, kind: mutation, phase: .pending))
         }
         do {
-            try await performSensitiveRequest(validatesRequestGeneration: false) { _ in
+            let receipt: LocalLedgerRepository.TransactionCommitReceipt = try await performSensitiveRequest(validatesRequestGeneration: false) { _ in
                 // Never use mutable presentedRevisionID as the authority for this action.
                 switch mutation {
                 case .edit(let entry):
-                    try await repository.updateTransaction(source: sources[0], entry: entry,
+                    return try await repository.updateTransaction(source: sources[0], entry: entry,
                         expectedRevisionID: action.context.revisionID)
                 case .delete:
-                    try await repository.deleteTransaction(source: sources[0], reason: reason,
+                    return try await repository.deleteTransaction(source: sources[0], reason: reason,
                         expectedRevisionID: action.context.revisionID)
                 case .addTags(let tags):
-                    try await repository.addTransactionTags(sources: sources, tags: tags,
+                    return try await repository.addTransactionTags(sources: sources, tags: tags,
                         expectedRevisionID: action.context.revisionID)
                 }
             }
-            confirmTransactionMutations(keys: keys, operationID: operationID)
+            confirmTransactionMutations(keys: keys, operationID: operationID, receipt: receipt)
             scheduleTransactionReconciliation()
         } catch {
             failTransactionMutations(keys: keys, operationID: operationID, error: error)
@@ -4390,6 +4444,7 @@ final class LedgerSession: ObservableObject {
         finishLocalAuthenticationForegroundWaiters(cancelled: true)
         globalTransactions = []
         globalTransactionsLoadedAt = nil
+        localGlobalTransactionsRevision = nil
         sessionEpoch &+= 1
         return invalidateRequests()
     }

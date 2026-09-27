@@ -530,6 +530,20 @@ actor LocalLedgerRepository: LedgerRepository {
     func globalTransactions() async throws -> LedgerGlobalTransactions {
         try await read("/api/ledger/transactions", query: ["start": "0001-01-01", "end": "9999-12-31"])
     }
+    /// Explicit legacy all-history read for callers not yet migrated. Pin both
+    /// sides of the read and never advance write authority from a delayed result.
+    func globalTransactions(expectedRevisionID: UUID) async throws -> LedgerGlobalTransactions {
+        try Task.checkCancellation()
+        let (_, response) = try await readSnapshot("/api/ledger/transactions",
+            query: ["start": "0001-01-01", "end": "9999-12-31"], expectedRevisionID: expectedRevisionID)
+        try Task.checkCancellation()
+        let payload = try response.decode(LedgerGlobalTransactions.self)
+        guard payload.sensitiveUnlocked else { throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定") }
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return payload
+    }
     func importDocuments() async throws -> [LedgerImportDocument] {
         let result: LedgerImportDocumentsResponse = try await read("/api/ledger/imports/documents")
         return result.documents

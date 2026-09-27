@@ -38,6 +38,8 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         func setRowCount(_ count: Int) { rowCount = count }
         private var successfulEdits = false
         private var successfulOtherWrites = false
+        private var realisticDelete = false
+        func enableRealisticDelete() { realisticDelete = true; successfulOtherWrites = true; successfulEdits = true }
         func enableSuccessfulOtherWrites() { successfulOtherWrites = true }
         func enableSuccessfulEdits() { successfulEdits = true }
         private var gatedPath = ""
@@ -68,6 +70,11 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
             if successfulEdits, let data = try? Data(contentsOf: saved) {
                 rows[0] = try JSONDecoder().decode(LedgerTransaction.self, from: data)
             }
+            let deleted = URL(fileURLWithPath: request.workspaceRoot).appendingPathComponent("receipt-deleted.bean")
+            if realisticDelete, FileManager.default.fileExists(atPath: deleted.path) { rows.removeFirst() }
+            if request.path == "/api/ledger/transactions", request.method == "GET" {
+                return try JSONSerialization.data(withJSONObject: ["transactions": JSONSerialization.jsonObject(with: JSONEncoder().encode(rows)), "sensitiveUnlocked": true])
+            }
             if successfulEdits, request.path == "/api/ledger/transactions", request.method == "PUT",
                case let .object(body) = request.body, let value = body["entry"] {
                 let entry = try JSONDecoder().decode(LedgerTransactionEntry.self, from: JSONEncoder().encode(value))
@@ -78,6 +85,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
                 return Data(#"{"ok":true}"#.utf8)
             }
             if successfulOtherWrites, request.method == "DELETE" || request.path == "/api/ledger/transactions/tags" {
+                if realisticDelete, request.method == "DELETE" { try Data("; deleted synthetic original".utf8).write(to: deleted) }
                 try Data("; successful synthetic write".utf8).write(to:
                     URL(fileURLWithPath: request.workspaceRoot).appendingPathComponent("action-write.bean"))
                 return Data(#"{"ok":true}"#.utf8)
@@ -1371,6 +1379,122 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         assertCleared(session)
         await gate.release()
         _ = await mutation.result // Mock write deliberately fails; no mutation semantics changed.
+    }
+
+    func testPinnedCommitRetiresOnlyAfterExactPresentationEvenWhenEditMovesOutsideMonth() async throws {
+        for moved in [false, true] {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            await engine.enableSuccessfulEdits()
+            try await advance(repository)
+            await session.applyRange(.month(year: 2026, month: 9))
+            let original = try XCTUnwrap(session.ledger?.transactions.first)
+            let action = try await session.prepareLocalTransactionAction(sources: [original.source], kind: .edit)
+            let entry = LedgerTransactionEntry(date: moved ? "2026-10-02" : "2026-09-24",
+                payee: "Receipt committed", narration: "Synthetic exact generation",
+                postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")])
+            let entered = expectation(description: "receipt bootstrap suspended")
+            let gate = Gate(entered)
+            await engine.pause("/api/ledger/bootstrap", gate: gate)
+            try await session.updateLocalTransaction(action: action, entry: entry)
+            await fulfillment(of: [entered], timeout: 3)
+            XCTAssertEqual(session.transactionMutationPhase(for: original), .confirmed)
+            let committed = try await repository.workspace.currentRevision()
+            XCTAssertNotEqual(session.localTransactionPresentationRevision, committed?.id)
+            let refreshed = expectation(description: "receipt bootstrap published")
+            let observation = session.$ledger.dropFirst().prefix(1).sink { _ in refreshed.fulfill() }
+            await gate.release()
+            await fulfillment(of: [refreshed], timeout: 3)
+            observation.cancel()
+            await session.refresh()
+            XCTAssertEqual(session.localTransactionPresentationRevision, committed?.id)
+            XCTAssertNil(session.transactionMutationPhase(for: original))
+            XCTAssertTrue(session.globalTransactions.isEmpty)
+            XCTAssertFalse(session.hasCachedGlobalTransactions)
+            XCTAssertFalse(session.visibleTransactions.contains { $0.source == original.source })
+            if moved {
+                XCTAssertFalse(session.visibleTransactions.contains { $0.date == entry.date })
+                await session.applyRange(.month(year: 2026, month: 10))
+                let replacement = try XCTUnwrap(session.ledger?.transactions.first)
+                XCTAssertEqual(replacement.payee, entry.payee)
+                let reopened = try await session.prepareLocalTransactionAction(sources: [replacement.source], kind: .edit)
+                session.cancelLocalTransactionAction(reopened)
+            }
+        }
+    }
+
+    func testDelayedLegacyGlobalReadCannotResurrectOriginalAfterReceiptRetirement() async throws {
+        for deleting in [false, true] {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            if deleting { await engine.enableRealisticDelete() } else { await engine.enableSuccessfulEdits() }
+            try await advance(repository)
+            await session.applyRange(.month(year: 2026, month: 9))
+            let original = try XCTUnwrap(session.ledger?.transactions.first)
+            // Prove the test starts with a populated cache, not an always-empty assertion.
+            try await session.loadGlobalTransactions()
+            XCTAssertTrue(session.hasCachedGlobalTransactions)
+            XCTAssertTrue(session.globalTransactions.contains { $0.source == original.source })
+            let action = try await session.prepareLocalTransactionAction(sources: [original.source], kind: deleting ? .delete : .edit)
+            let entered = expectation(description: "old global response")
+            let gate = Gate(entered)
+            await engine.pause("/api/ledger/transactions", gate: gate)
+            let stale = Task { try await session.loadGlobalTransactions(forceRefresh: true) }
+            await fulfillment(of: [entered], timeout: 3)
+            if deleting { try await session.deleteLocalTransaction(action: action, reason: "Synthetic") }
+            else {
+                try await session.updateLocalTransaction(action: action,
+                    entry: .init(date: "2026-10-02", payee: "Moved receipt", narration: "Synthetic",
+                        postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")]))
+            }
+            // The mutation schedules its own refresh. An explicit refresh can
+            // be superseded by that task, so awaiting refresh() alone is not a
+            // publication barrier. Observe actual retirement before releasing R0.
+            if session.transactionMutationPhase(for: original) != nil {
+                let retired = expectation(description: "exact receipt retired")
+                let observation = session.$transactionMutationStates
+                    .filter { $0.isEmpty }.prefix(1).sink { _ in retired.fulfill() }
+                await session.refresh()
+                await fulfillment(of: [retired], timeout: 3)
+                observation.cancel()
+            }
+            XCTAssertNil(session.transactionMutationPhase(for: original))
+            XCTAssertFalse(session.visibleTransactions.contains { $0.source == original.source })
+            XCTAssertTrue(session.globalTransactions.isEmpty)
+            await gate.release()
+            do { try await stale.value; XCTFail("old global response published after retirement") } catch {}
+            XCTAssertFalse(session.hasCachedGlobalTransactions)
+            XCTAssertTrue(session.globalTransactions.isEmpty)
+            XCTAssertFalse(session.ledger?.transactions.contains { $0.source == original.source } ?? true)
+            let current = try await repository.workspace.currentRevision()
+            XCTAssertEqual(session.localTransactionPresentationRevision, current?.id)
+        }
+    }
+
+    func testUnknownNewerGenerationDoesNotRetireReceiptByPageAbsence() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.enableSuccessfulEdits()
+        try await advance(repository)
+        await session.applyRange(.month(year: 2026, month: 9))
+        let original = try XCTUnwrap(session.ledger?.transactions.first)
+        let action = try await session.prepareLocalTransactionAction(sources: [original.source], kind: .edit)
+        let entered = expectation(description: "failed receipt bootstrap")
+        let gate = Gate(entered)
+        await engine.pause("/api/ledger/bootstrap", gate: gate, fail: true)
+        try await session.updateLocalTransaction(action: action,
+            entry: .init(date: "2026-10-02", payee: "Moved", narration: "Synthetic",
+                postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")]))
+        await fulfillment(of: [entered], timeout: 3)
+        let committed = try await repository.workspace.currentRevision()
+        try await advance(repository)
+        await gate.release()
+        // The newer generation is valid, but is not the receipt's exact snapshot.
+        // No absence-based claim of inclusion may replace that evidence.
+        await session.refresh()
+        await session.refresh()
+        XCTAssertNotEqual(session.localTransactionPresentationRevision, committed?.id)
+        XCTAssertEqual(session.transactionMutationPhase(for: original), .confirmed)
     }
 
     func testSuccessfulEditsResumePinnedReadsAfterMonthlyRefreshIncludingRetainedCrossRangeOverlay() async throws {
