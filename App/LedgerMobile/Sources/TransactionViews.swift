@@ -703,7 +703,7 @@ struct TransactionsView: View {
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
         .task(id: windowRequestKey) {
-            if windowRequestKey.readable { await loadWindow() }
+            if windowRequestKey.readable { await loadWindow(reuseCurrent: true) }
         }
         .toolbar {
             if session.isLocal {
@@ -1042,9 +1042,13 @@ struct TransactionsView: View {
         }
     }
 
-    private func loadWindow() async {
+    private func loadWindow(reuseCurrent: Bool = false) async {
         guard session.isLocal, session.phase == .ready, !session.privacyShielded else { return }
-        await session.loadLocalTransactionWindow(filter: filters)
+        if reuseCurrent {
+            await session.ensureLocalTransactionWindow(filter: filters)
+        } else {
+            await session.loadLocalTransactionWindow(filter: filters)
+        }
         guard !Task.isCancelled else { return }
         await session.loadLocalTransactionSummary()
     }

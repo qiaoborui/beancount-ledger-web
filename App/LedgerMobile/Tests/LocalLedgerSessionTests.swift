@@ -101,6 +101,7 @@ final class LocalLedgerSessionTests: XCTestCase {
 
     private actor ResumeEngine: LocalLedgerEngine {
         private(set) var bootstrapCalls = 0
+        private(set) var overviewCalls = 0
         private var bootstrapGate: Gate?
         private var overviewGate: Gate?
         private var overviewFailure = false
@@ -123,6 +124,7 @@ final class LocalLedgerSessionTests: XCTestCase {
                     JSONSerialization.jsonObject(with: JSONEncoder().encode(bootstrap.transactions)), "sensitiveUnlocked": true])
             }
             if request.path == "/api/ledger/overview/categories" {
+                overviewCalls += 1
                 let failure = overviewFailure, empty = overviewEmpty
                 if let gate = overviewGate { overviewGate = nil; await gate.suspend() }
                 if failure { throw LocalLedgerError.operationFailed("Synthetic aggregate capacity failure") }
@@ -613,6 +615,7 @@ final class LocalLedgerSessionTests: XCTestCase {
         let fixture = try await openedResumeFixture()
         let session = fixture.session
         defer { session.chooseLedger() }
+        let overviewCalls = await fixture.engine.overviewCalls
         await session.updateActivity(isActive: false, isBackground: true)
         XCTAssertFalse(session.amountsVisible)
         let unnecessaryRead = expectation(description: "same revision foreground return avoids bootstrap")
@@ -622,6 +625,23 @@ final class LocalLedgerSessionTests: XCTestCase {
         XCTAssertEqual(session.phase, .ready)
         XCTAssertTrue(session.amountsVisible)
         await fulfillment(of: [unnecessaryRead], timeout: 0.1)
+        let resumedOverviewCalls = await fixture.engine.overviewCalls
+        XCTAssertEqual(resumedOverviewCalls, overviewCalls)
+    }
+
+    func testUnchangedOverviewAggregateIsReusedAndExplicitRefreshStillReads() async throws {
+        let fixture = try await openedResumeFixture()
+        let session = fixture.session
+        defer { session.chooseLedger() }
+        XCTAssertNotNil(session.localOverviewCategories)
+        let initialCalls = await fixture.engine.overviewCalls
+        await session.ensureLocalOverviewCategories()
+        let reusedCalls = await fixture.engine.overviewCalls
+        XCTAssertEqual(reusedCalls, initialCalls)
+        XCTAssertNotNil(session.localOverviewCategories)
+        await session.refreshLocalOverviewCategories()
+        let refreshedCalls = await fixture.engine.overviewCalls
+        XCTAssertEqual(refreshedCalls, initialCalls + 1)
     }
 
     private func assertInterruptedValidation(importing: Bool, background: Bool) async throws {

@@ -105,6 +105,7 @@ final class LedgerSession: ObservableObject {
     }
 
     private var overviewCategoriesGeneration = 0
+    private var overviewCategoriesRevisionID: UUID?
     private var overviewSaveObserver: AnyCancellable?
     @Published private(set) var location: LedgerLocation?
     @Published private(set) var localSyncStatus: LocalStorageSyncStatus?
@@ -843,7 +844,7 @@ final class LedgerSession: ObservableObject {
                     || presentation.today != LedgerDateRange.today(now: self.ledgerNow()) {
                     await self.refresh()
                 } else {
-                    await self.refreshLocalOverviewCategories()
+                    await self.ensureLocalOverviewCategories()
                 }
                 guard !Task.isCancelled, self.sessionEpoch == epoch, self.location == expectedLocation,
                       self.applicationActive, self.phase == .ready else { return }
@@ -3692,8 +3693,19 @@ final class LedgerSession: ObservableObject {
         }
     }
 
-    /// Explicit first-window selection; a new filter supersedes any older read.
-    /// Defaults stay unchanged: no caller is implicitly migrated to this API.
+    /// Reuse the published page while its read context and filter remain valid.
+    func ensureLocalTransactionWindow(filter: LedgerTransactionFilter = .init(),
+                                      limits: LocalTransactionWindow.Limits = .init()) async {
+        if localTransactionWindow != nil, transactionWindowReader != nil,
+           transactionWindowFilter == filter, transactionWindowLimits == limits,
+           let context = transactionWindowContext,
+           (try? validateLocalRead(context)) != nil {
+            return
+        }
+        await loadLocalTransactionWindow(filter: filter, limits: limits)
+    }
+
+    /// Explicitly reload the first window, including after a retry.
     func loadLocalTransactionWindow(filter: LedgerTransactionFilter = .init(),
                                     limits: LocalTransactionWindow.Limits = .init()) async {
         guard !Task.isCancelled else { return }
@@ -4464,6 +4476,7 @@ final class LedgerSession: ObservableObject {
 
     private func invalidateOverviewCategories() {
         overviewCategoriesGeneration &+= 1
+        overviewCategoriesRevisionID = nil
         localOverviewCategories = nil
         localOverviewCategoriesError = nil
         isLocalOverviewCategoriesLoading = false
@@ -4471,6 +4484,17 @@ final class LedgerSession: ObservableObject {
 
     /// Never substitute bootstrap/global transaction arrays for a failed local
     /// aggregate: those arrays will eventually be independently bounded.
+    func ensureLocalOverviewCategories() async {
+        if phase == .ready, let aggregate = localOverviewCategories,
+           overviewCategoriesRevisionID == localPresentation?.revisionID,
+           localPresentation?.revisionID != nil,
+           aggregate.start == selectedRange.start,
+           aggregate.end == selectedRange.queryEndExclusive {
+            return
+        }
+        await refreshLocalOverviewCategories()
+    }
+
     func refreshLocalOverviewCategories() async {
         guard phase == .ready, let repository = localRepository,
               let presentation = localPresentation,
@@ -4494,6 +4518,7 @@ final class LedgerSession: ObservableObject {
             guard isCurrent(), !Task.isCancelled else { return }
             guard current?.id == revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
             localOverviewCategories = result
+            overviewCategoriesRevisionID = revisionID
         } catch {
             guard isCurrent(), !Task.isCancelled else { return }
             localOverviewCategoriesError = error.localizedDescription

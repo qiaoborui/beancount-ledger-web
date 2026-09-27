@@ -433,6 +433,25 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertNil(session.localTransactionSummary)
     }
 
+    func testReturningToTransactionsReusesPublishedWindowUntilFilterChanges() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let limits = LocalTransactionWindow.Limits(maxRows: 1)
+        await session.loadLocalTransactionWindow(limits: limits)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindowIndex, 1)
+        let pageRequests = await engine.pageRequests.count
+        await session.ensureLocalTransactionWindow(limits: limits)
+        XCTAssertEqual(session.localTransactionWindowIndex, 1)
+        let reusedPageRequests = await engine.pageRequests.count
+        XCTAssertEqual(reusedPageRequests, pageRequests)
+        await session.ensureLocalTransactionWindow(filter: .init(query: "Needle"), limits: limits)
+        XCTAssertEqual(session.localTransactionWindowIndex, 0)
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.payee), ["Needle"])
+        let filteredPageRequests = await engine.pageRequests.count
+        XCTAssertGreaterThan(filteredPageRequests, pageRequests)
+    }
+
     func testLateSummaryCannotPublishAfterResetPrivacyRangeOrRevisionChange() async throws {
         for operation in 0..<4 {
             let (session, engine, repository) = try await fixture()
