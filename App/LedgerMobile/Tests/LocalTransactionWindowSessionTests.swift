@@ -1083,6 +1083,20 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertEqual(facts.selectedCount, 2)
         XCTAssertEqual(facts.selectedMatchingCount, 1)
         XCTAssertEqual(facts.tagSources, [first.source, second.source])
+        var scope = LocalTransactionSelection(revisionID: try XCTUnwrap(session.localTransactionPresentationRevision),
+            start: session.selectedRange.start, end: session.selectedRange.queryEndExclusive)
+        scope.setAll(matching: .init(query: "Needle"), selected: true)
+        scope.set(first, selected: true)
+        let scoped = try await session.localTransactionSelectionFacts(filter: .init(query: "Needle"), selection: scope)
+        XCTAssertEqual(scoped.selectedCount, 2)
+        XCTAssertEqual(scoped.selectedMatchingCount, 1)
+        XCTAssertEqual(scoped.tagSources, facts.tagSources)
+        let stale = LocalTransactionSelection(revisionID: UUID(),
+            start: session.selectedRange.start, end: session.selectedRange.queryEndExclusive)
+        do {
+            _ = try await session.localTransactionSelectionFacts(filter: .init(), selection: stale)
+            XCTFail("A selection from another generation was accepted")
+        } catch LocalLedgerWorkspace.WorkspaceError.staleRevision { }
         XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [1])
         XCTAssertEqual(session.ledger?.transactions, originalRows)
         let after = await repository.presentedRevisionID

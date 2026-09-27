@@ -225,6 +225,26 @@ actor LocalLedgerRepository: LedgerRepository {
     func selectionFacts(start: String, end: String, filter: LedgerTransactionFilter,
                         selectedIDs: Set<String>, blockedIDs: Set<String>, expectedRevisionID: UUID) async throws
         -> LocalTransactionSelectionScan.Result {
+        try await scanSelectionFacts(start: start, end: end, expectedRevisionID: expectedRevisionID) { revision in
+            try LocalTransactionSelectionScan(revision: revision, filter: filter,
+                selectedIDs: selectedIDs, blockedIDs: blockedIDs)
+        }
+    }
+
+    func selectionFacts(start: String, end: String, filter: LedgerTransactionFilter,
+                        selection: LocalTransactionSelection, blockedIDs: Set<String>, expectedRevisionID: UUID) async throws
+        -> LocalTransactionSelectionScan.Result {
+        guard selection.revisionID == expectedRevisionID, selection.start == start, selection.end == end else {
+            throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+        }
+        return try await scanSelectionFacts(start: start, end: end, expectedRevisionID: expectedRevisionID) { revision in
+            try LocalTransactionSelectionScan(revision: revision, filter: filter,
+                selection: selection, blockedIDs: blockedIDs)
+        }
+    }
+
+    private func scanSelectionFacts(start: String, end: String, expectedRevisionID: UUID,
+        makeScan: (String) throws -> LocalTransactionSelectionScan) async throws -> LocalTransactionSelectionScan.Result {
         var scan: LocalTransactionSelectionScan?
         var cursor: String?
         while true {
@@ -233,8 +253,7 @@ actor LocalLedgerRepository: LedgerRepository {
                 expectedRevisionID: expectedRevisionID)
             try Task.checkCancellation()
             if scan == nil {
-                scan = try LocalTransactionSelectionScan(revision: page.revision, filter: filter,
-                    selectedIDs: selectedIDs, blockedIDs: blockedIDs)
+                scan = try makeScan(page.revision)
             }
             if let result = try scan?.consume(page, requestedCursor: cursor) {
                 let current = try await workspace.currentRevision()

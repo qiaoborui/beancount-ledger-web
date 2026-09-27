@@ -378,6 +378,8 @@ struct TransactionsView: View {
     @State private var deletionTarget: LedgerTransaction?
     @State private var isSelecting = false
     @State private var selectedTransactionIDs: Set<String> = []
+    @State private var localSelection: LocalTransactionSelection?
+    @State private var localSelectionFacts: LocalTransactionSelectionScan.Result?
     @State private var batchSharePresented = false
     @State private var singleShareTarget: LedgerTransaction?
     @State private var tagEditorPresented = false
@@ -392,6 +394,7 @@ struct TransactionsView: View {
     @State private var preparingTags = false
     @State private var exportTask: Task<Void, Never>?
     @State private var exportRequestID: UUID?
+    @State private var preparingLegacyShare = false
     @State private var fileExport: LocalTransactionShareExport?
     @State private var fileExportOwner: LocalTransactionShareExport?
 
@@ -410,8 +413,25 @@ struct TransactionsView: View {
                 && !session.transactionMutationStates.values.contains(.pending))
     }
 
-    // Only rendering is migrated here. Existing full-range selection/share still
-    // uses the complete legacy universe until its independent migration lands.
+    private struct SelectionReadKey: Equatable {
+        let selection: LocalTransactionSelection?
+        let filter: LedgerTransactionFilter
+        let readable: Bool
+    }
+
+    private var selectionReadKey: SelectionReadKey {
+        .init(selection: isSelecting && session.isLocal ? localSelection : nil,
+              filter: filters, readable: windowRequestKey.readable)
+    }
+
+    private var currentLocalSelection: LocalTransactionSelection? {
+        guard let localSelection,
+              localSelection.revisionID == session.localTransactionPresentationRevision,
+              localSelection.start == session.selectedRange.start,
+              localSelection.end == session.selectedRange.queryEndExclusive else { return nil }
+        return localSelection
+    }
+
     private var displayedTransactions: [LedgerTransaction] {
         session.isLocal ? (session.localTransactionWindow?.transactions ?? []) : filteredTransactions
     }
@@ -455,14 +475,35 @@ struct TransactionsView: View {
     }
 
     private var selectedTransactions: [LedgerTransaction] {
-        filteredTransactions.filter { selectedTransactionIDs.contains($0.id) }
+        if session.isLocal {
+            guard let selection = currentLocalSelection else { return [] }
+            return session.visibleGlobalTransactions.filter { filters.matches($0) && selection.contains($0) }
+        }
+        return filteredTransactions.filter { selectedTransactionIDs.contains($0.id) }
+    }
+
+    private var selectedCount: Int {
+        session.isLocal
+            ? (localSelectionFacts?.selectedCount ?? currentLocalSelection?.explicitSelectedCount ?? 0)
+            : selectedTransactionIDs.count
     }
 
     private var allVisibleSelected: Bool {
-        !filteredTransactions.isEmpty && filteredTransactions.allSatisfy { selectedTransactionIDs.contains($0.id) }
+        if session.isLocal { return localSelectionFacts?.allMatchingSelected ?? false }
+        return !filteredTransactions.isEmpty && filteredTransactions.allSatisfy { selectedTransactionIDs.contains($0.id) }
     }
 
     private func toggleAllVisible() {
+        if session.isLocal {
+            guard var selection = currentLocalSelection,
+                  selection.explicitSelectedCount != nil || localSelectionFacts != nil,
+                  (session.localTransactionSummary?.matchedCount ?? 0) > 0 else { return }
+            selection.setAll(matching: filters, selected: !allVisibleSelected)
+            localSelection = selection
+            localSelectionFacts = nil
+            selectionFeedback &+= 1
+            return
+        }
         if allVisibleSelected {
             selectedTransactionIDs.removeAll()
         } else {
@@ -473,10 +514,57 @@ struct TransactionsView: View {
 
     private func toggleSelection(_ transaction: LedgerTransaction) {
         LedgerFeedback.selection()
+        if session.isLocal {
+            guard var selection = currentLocalSelection else { return }
+            selection.toggle(transaction)
+            localSelection = selection
+            localSelectionFacts = nil
+            return
+        }
         if selectedTransactionIDs.contains(transaction.id) {
             selectedTransactionIDs.remove(transaction.id)
         } else {
             selectedTransactionIDs.insert(transaction.id)
+        }
+    }
+
+    private func beginSelection(with transaction: LedgerTransaction? = nil) {
+        if session.isLocal {
+            guard let revision = session.localTransactionPresentationRevision else {
+                actionMessageStyle = .failure
+                actionMessage = "账本版本尚未就绪，请刷新后重试。"
+                return
+            }
+            var selection = LocalTransactionSelection(revisionID: revision,
+                start: session.selectedRange.start, end: session.selectedRange.queryEndExclusive)
+            if let transaction { selection.set(transaction, selected: true) }
+            localSelection = selection
+            localSelectionFacts = nil
+        } else {
+            selectedTransactionIDs = Set(transaction.map { [$0.id] } ?? [])
+        }
+        isSelecting = true
+    }
+
+    private func endSelection() {
+        isSelecting = false
+        localSelection = nil
+        localSelectionFacts = nil
+        selectedTransactionIDs.removeAll()
+    }
+
+    private func loadSelectionFacts(_ key: SelectionReadKey) async {
+        localSelectionFacts = nil
+        guard key.readable, let selection = key.selection, selection.hasDecisions,
+              currentLocalSelection == selection else { return }
+        do {
+            let facts = try await session.localTransactionSelectionFacts(filter: key.filter, selection: selection)
+            guard !Task.isCancelled, selectionReadKey == key else { return }
+            localSelectionFacts = facts
+        } catch {
+            guard !Task.isCancelled, selectionReadKey == key else { return }
+            actionMessageStyle = .failure
+            actionMessage = error.localizedDescription
         }
     }
 
@@ -630,8 +718,7 @@ struct TransactionsView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 if isSelecting {
                     Button("完成") {
-                        isSelecting = false
-                        selectedTransactionIDs.removeAll()
+                        endSelection()
                     }
                     .fontWeight(.semibold)
                     .accessibilityLabel("完成多选")
@@ -647,8 +734,7 @@ struct TransactionsView: View {
                         }
 
                         Button {
-                            selectedTransactionIDs.removeAll()
-                            isSelecting = true
+                            beginSelection()
                         } label: {
                             Label("多选流水", systemImage: "checkmark.circle")
                         }
@@ -749,7 +835,7 @@ struct TransactionsView: View {
             }
             .sheet(isPresented: $tagEditorPresented, onDismiss: revokeListAction) {
                 TransactionTagEditorSheet(
-                    selectedCount: localAction?.originals.count ?? selectedTransactionIDs.count,
+                    selectedCount: localAction?.originals.count ?? selectedCount,
                     onApply: { tags in
                         try await applyTags(tags)
                     }
@@ -785,23 +871,44 @@ struct TransactionsView: View {
 
     var body: some View {
         presentedContent
+            .task(id: selectionReadKey) { await loadSelectionFacts(selectionReadKey) }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isSelecting {
                     TransactionBatchActionBar(
-                        selectedCount: selectedTransactionIDs.count,
-                        totalCount: filteredTransactions.count,
+                        selectedCount: selectedCount,
+                        totalCount: session.isLocal ? (session.localTransactionSummary?.matchedCount ?? 0) : filteredTransactions.count,
                         allSelected: allVisibleSelected,
+                        allSelectedTitle: session.isLocal ? "取消当前" : "清空",
+                        isCounting: session.isLocal && currentLocalSelection?.hasDecisions == true
+                            && currentLocalSelection?.explicitSelectedCount == nil && localSelectionFacts == nil,
+                        canToggleAll: !session.isLocal || (session.localTransactionSummary != nil
+                            && (currentLocalSelection?.explicitSelectedCount != nil || localSelectionFacts != nil)),
                         onToggleAll: toggleAllVisible,
                         onAddTags: handleAddTags,
                         onShare: handleShare,
                         onExport: session.isLocal ? { prepareFileExport() } : nil,
-                        isExporting: exportRequestID != nil
+                        isExporting: exportRequestID != nil || preparingLegacyShare
                     )
                 }
             }
-            .onChange(of: transactions.map(\.id)) { _, ids in
-                selectedTransactionIDs.formIntersection(ids)
+            .onChange(of: session.isLocal ? [] : transactions.map(\.id)) { _, ids in
+                if !session.isLocal { selectedTransactionIDs.formIntersection(ids) }
             }
+            .onChange(of: session.localTransactionPresentationRevision) { _, _ in
+                if session.isLocal && isSelecting {
+                    endSelection()
+                    actionMessageStyle = .failure
+                    actionMessage = "账本已更新，多选已清空，请重新选择。"
+                }
+            }
+            .onChange(of: session.selectedRange) { _, _ in
+                if session.isLocal && isSelecting {
+                    endSelection()
+                    actionMessageStyle = .failure
+                    actionMessage = "时间范围已更改，多选已清空，请重新选择。"
+                }
+            }
+            .onChange(of: selectionReadKey) { _, _ in localSelectionFacts = nil }
             .onChange(of: session.pendingTransactionFilter) { _, newFilter in
                 if let newFilter {
                     filters = newFilter
@@ -822,6 +929,10 @@ struct TransactionsView: View {
             cancelFileExport()
             if preparingTags { revokeListAction() }
         }
+        .onChange(of: localSelection) { _, _ in
+            cancelFileExport()
+            if preparingTags { revokeListAction() }
+        }
         .onChange(of: isSelecting) { _, selected in
             if !selected { cancelFileExport() }
             if !selected && preparingTags { revokeListAction() }
@@ -831,10 +942,16 @@ struct TransactionsView: View {
             if fileExport == nil { cancelFileExport() }
         }
         .onChange(of: session.privacyShielded) { _, hidden in
-            if hidden { clearListActionPresentation() }
+            if hidden {
+                clearListActionPresentation()
+                if session.isLocal { endSelection() }
+            }
         }
         .onChange(of: session.phase) { _, phase in
-            if phase != .ready { clearListActionPresentation() }
+            if phase != .ready {
+                clearListActionPresentation()
+                if session.isLocal { endSelection() }
+            }
         }
         .overlay(alignment: .top) {
             if actionRequestID != nil { ProgressView("正在读取交易").padding().background(.regularMaterial) }
@@ -846,7 +963,9 @@ struct TransactionsView: View {
     @ViewBuilder
     private func transactionRow(for transaction: LedgerTransaction) -> some View {
         if isSelecting {
-            let isSelected = selectedTransactionIDs.contains(transaction.id)
+            let isSelected = session.isLocal
+                ? (currentLocalSelection?.contains(transaction) ?? false)
+                : selectedTransactionIDs.contains(transaction.id)
             Button {
                 toggleSelection(transaction)
             } label: {
@@ -914,8 +1033,7 @@ struct TransactionsView: View {
                 }
 
                 Button {
-                    isSelecting = true
-                    selectedTransactionIDs = [transaction.id]
+                    beginSelection(with: transaction)
                 } label: {
                     Label("多选", systemImage: "checklist")
                 }
@@ -995,23 +1113,22 @@ struct TransactionsView: View {
     }
 
     private func prepareLocalSelectedTags() {
-        guard actionRequestID == nil, isSelecting, !selectedTransactionIDs.isEmpty else { return }
+        guard actionRequestID == nil, isSelecting, selectedCount > 0,
+              let selection = currentLocalSelection else { return }
         revokeListAction()
         let id = UUID(), key = windowRequestKey
-        let selection = selectedTransactionIDs
         preparingTags = true
         actionRequestID = id
         actionTask = Task { @MainActor in
             defer {
                 if actionRequestID == id { preparingTags = false; actionRequestID = nil; actionTask = nil }
             }
-            func stillCurrent() -> Bool {
+            @MainActor func stillCurrent() -> Bool {
                 !Task.isCancelled && actionRequestID == id && windowRequestKey == key
-                    && TransactionTagSelectionRules.canPresentPreparedBatch(
-                        captured: selection, current: selectedTransactionIDs, isSelecting: isSelecting)
+                    && isSelecting && currentLocalSelection == selection
             }
             do {
-                let facts = try await session.localTransactionSelectionFacts(filter: key.filter, selectedIDs: selection)
+                let facts = try await session.localTransactionSelectionFacts(filter: key.filter, selection: selection)
                 guard stillCurrent() else { return }
                 let sources = try facts.sourcesForTagPreparation()
                 let prepared = try await session.prepareLocalTransactionAction(sources: sources, kind: .addTags)
@@ -1056,16 +1173,16 @@ struct TransactionsView: View {
     }
 
     private func prepareFileExport() {
-        guard session.isLocal, isSelecting, !selectedTransactionIDs.isEmpty, exportRequestID == nil else { return }
+        guard session.isLocal, isSelecting, selectedCount > 0, exportRequestID == nil,
+              let selection = currentLocalSelection else { return }
         cancelFileExport()
         let id = UUID(), key = windowRequestKey
-        let selection = selectedTransactionIDs
         exportRequestID = id
         exportTask = Task { @MainActor in
             do {
-                let export = try await session.prepareLocalTransactionShare(filter: key.filter, selectedIDs: selection)
+                let export = try await session.prepareLocalTransactionShare(filter: key.filter, selection: selection)
                 guard !Task.isCancelled, exportRequestID == id, windowRequestKey == key,
-                      isSelecting, selectedTransactionIDs == selection else {
+                      isSelecting, currentLocalSelection == selection else {
                     session.discardLocalTransactionShare(export)
                     return
                 }
@@ -1082,8 +1199,26 @@ struct TransactionsView: View {
     }
 
     private func handleShare() {
-        guard !selectedTransactionIDs.isEmpty else { return }
+        guard selectedCount > 0 else { return }
         LedgerFeedback.light()
+        if session.isLocal {
+            guard let selection = currentLocalSelection, !preparingLegacyShare else { return }
+            preparingLegacyShare = true
+            let key = windowRequestKey
+            Task { @MainActor in
+                defer { preparingLegacyShare = false }
+                do {
+                    try await session.loadGlobalTransactions()
+                    guard isSelecting, currentLocalSelection == selection, windowRequestKey == key else { return }
+                    batchSharePresented = true
+                } catch {
+                    guard isSelecting, currentLocalSelection == selection, windowRequestKey == key else { return }
+                    actionMessageStyle = .failure
+                    actionMessage = error.localizedDescription
+                }
+            }
+            return
+        }
         batchSharePresented = true
     }
 
@@ -1100,8 +1235,7 @@ struct TransactionsView: View {
             appliedCount = selected.count
             try await session.addTransactionTags(sources: selected.map(\.source), tags: tags)
         }
-        selectedTransactionIDs.removeAll()
-        isSelecting = false
+        endSelection()
         confirmationFeedback &+= 1
         actionMessageStyle = .confirmed
         actionMessage = "已验证，并为 \(appliedCount) 条交易添加标签。"
@@ -1651,6 +1785,9 @@ private struct TransactionBatchActionBar: View {
     let selectedCount: Int
     let totalCount: Int
     let allSelected: Bool
+    var allSelectedTitle = "清空"
+    var isCounting = false
+    var canToggleAll = true
     let onToggleAll: () -> Void
     let onAddTags: () -> Void
     let onShare: () -> Void
@@ -1659,13 +1796,14 @@ private struct TransactionBatchActionBar: View {
 
     var body: some View {
         HStack(spacing: LedgerSpacing.sm) {
-            Button(allSelected ? "清空" : "全选") { onToggleAll() }
+            Button(allSelected ? allSelectedTitle : "全选") { onToggleAll() }
                 .font(.system(.caption, design: .default, weight: .semibold))
                 .foregroundStyle(LedgerPalette.cobalt)
                 .frame(minWidth: 44, minHeight: 40)
+                .disabled(!canToggleAll || totalCount == 0)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("已选 \(selectedCount) 笔")
+                Text(isCounting ? "正在统计已选" : "已选 \(selectedCount) 笔")
                     .font(.system(.caption, design: .default, weight: .semibold).monospacedDigit())
                     .foregroundStyle(LedgerPalette.ink)
                 Text("当前可选 \(totalCount) 笔")

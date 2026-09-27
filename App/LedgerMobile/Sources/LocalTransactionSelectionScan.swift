@@ -1,8 +1,66 @@
 import Foundation
 
+/// A local selection is a sequence of decisions against one committed ledger
+/// generation. Filter rules cover the full range without storing every ID;
+/// explicit row decisions override older rules. Callers must discard this
+/// value when its workspace revision or date range changes.
+struct LocalTransactionSelection: Equatable, Sendable {
+    private struct FilterRule: Equatable, Sendable {
+        let sequence: Int
+        let filter: LedgerTransactionFilter
+        let selected: Bool
+    }
+    private struct RowRule: Equatable, Sendable {
+        let sequence: Int
+        let selected: Bool
+    }
+
+    let revisionID: UUID
+    let start: String
+    let end: String
+    private var nextSequence = 0
+    private var filterRules: [FilterRule] = []
+    private var rowRules: [String: RowRule] = [:]
+    var hasDecisions: Bool { !filterRules.isEmpty || !rowRules.isEmpty }
+    var explicitSelectedCount: Int? {
+        guard filterRules.isEmpty else { return nil }
+        return rowRules.values.reduce(into: 0) { if $1.selected { $0 += 1 } }
+    }
+
+    init(revisionID: UUID, start: String, end: String) {
+        self.revisionID = revisionID
+        self.start = start
+        self.end = end
+    }
+
+    mutating func setAll(matching filter: LedgerTransactionFilter, selected: Bool) {
+        nextSequence += 1
+        filterRules.append(.init(sequence: nextSequence, filter: filter, selected: selected))
+    }
+
+    mutating func set(_ row: LedgerTransaction, selected: Bool) {
+        guard row.date >= start, row.date < end else { return }
+        nextSequence += 1
+        rowRules[row.id] = .init(sequence: nextSequence, selected: selected)
+    }
+
+    mutating func toggle(_ row: LedgerTransaction) {
+        set(row, selected: !contains(row))
+    }
+
+    func contains(_ row: LedgerTransaction) -> Bool {
+        let explicit = rowRules[row.id]
+        for rule in filterRules.reversed() {
+            if let explicit, rule.sequence < explicit.sequence { break }
+            if rule.filter.matches(row) { return rule.selected }
+        }
+        return explicit?.selected ?? false
+    }
+}
+
 /// Computes complete selection facts without retaining selected transaction rows.
-/// The existing ID selection is caller-owned (and can itself be large); this is
-/// not a constant-memory selection representation or an all-history ID collector.
+/// Legacy caller-owned ID sets remain supported; filter-rule selection does not
+/// collect IDs for a full-range select-all operation.
 /// Raw candidates must cover the entire range. Filters narrow sharing/preflight,
 /// not remembered selection membership or the existing full-range tag scope.
 struct LocalTransactionSelectionScan {
@@ -43,7 +101,18 @@ struct LocalTransactionSelectionScan {
     }
     private var validation: LocalTransactionScan
     private let filter: LedgerTransactionFilter
-    private let selectedIDs: Set<String>
+    private enum Membership {
+        case ids(Set<String>)
+        case selection(LocalTransactionSelection)
+
+        func contains(_ row: LedgerTransaction) -> Bool {
+            switch self {
+            case .ids(let ids): ids.contains(row.id)
+            case .selection(let selection): selection.contains(row)
+            }
+        }
+    }
+    private let membership: Membership
     private let blockedIDs: Set<String>
     private var selectedCount = 0
     private var selectedMatchingCount = 0
@@ -60,7 +129,18 @@ struct LocalTransactionSelectionScan {
         self.validation = try LocalTransactionScan(expectedRevision: revision, filter: filter,
             limits: .init(maxVisibleCount: 0))
         self.filter = filter
-        self.selectedIDs = selectedIDs
+        self.membership = .ids(selectedIDs)
+        self.blockedIDs = blockedIDs
+    }
+
+    init(revision: String, filter: LedgerTransactionFilter, selection: LocalTransactionSelection,
+         blockedIDs: Set<String> = [], maximumSourceBytes: Int = 256 * 1_024) throws {
+        guard (0...256 * 1_024).contains(maximumSourceBytes) else { throw SelectionError.invalidBudget }
+        self.maximumSourceBytes = maximumSourceBytes
+        self.validation = try LocalTransactionScan(expectedRevision: revision, filter: filter,
+            limits: .init(maxVisibleCount: 0))
+        self.filter = filter
+        self.membership = .selection(selection)
         self.blockedIDs = blockedIDs
     }
 
@@ -70,7 +150,7 @@ struct LocalTransactionSelectionScan {
             // Validate the whole page (including arithmetic and source revision)
             // before evaluating matching or retaining any selection facts.
             let summary = try validation.consume(page, requestedCursor: requestedCursor)
-            for row in page.transactions where selectedIDs.contains(row.id) {
+            for row in page.transactions where membership.contains(row) {
                 selectedCount = try LocalTransactionScan.add(selectedCount, 1)
                 let matches = filter.matches(row)
                 if matches { selectedMatchingCount = try LocalTransactionScan.add(selectedMatchingCount, 1) }

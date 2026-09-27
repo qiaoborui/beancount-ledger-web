@@ -69,6 +69,35 @@ final class LocalTransactionShareExportTests: XCTestCase {
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: parent.path), [])
         }
     }
+    func testPinnedFilterSelectionExportsExactIntersectionWithoutIDCollection() async throws {
+        let (repository, _, revision, parent) = try await fixture()
+        let filter = LedgerTransactionFilter(query: "Needle")
+        var selection = LocalTransactionSelection(revisionID: revision,
+            start: "2026-09-01", end: "2026-10-01")
+        selection.setAll(matching: .init(), selected: true)
+        selection.set(Engine.row(2), selected: false)
+        let empty = try await LocalTransactionShareExport.prepare(repository: repository,
+            start: selection.start, end: selection.end, filter: filter, selection: selection,
+            expectedRevisionID: revision, currency: "CNY", accountLabels: [:], parentDirectory: parent, validate: {})
+        XCTAssertEqual(empty.count, 0)
+        empty.discard()
+        selection.set(Engine.row(2), selected: true)
+        let exact = try await LocalTransactionShareExport.prepare(repository: repository,
+            start: selection.start, end: selection.end, filter: filter, selection: selection,
+            expectedRevisionID: revision, currency: "CNY", accountLabels: [:], parentDirectory: parent, validate: {})
+        XCTAssertEqual(exact.count, 1)
+        XCTAssertEqual(try String(contentsOf: exact.url, encoding: .utf8),
+            TransactionShareTextFormatter.format(transactions: [Engine.row(2)], currency: "CNY"))
+        exact.discard()
+        let stale = LocalTransactionSelection(revisionID: UUID(), start: selection.start, end: selection.end)
+        do {
+            _ = try await LocalTransactionShareExport.prepare(repository: repository,
+                start: selection.start, end: selection.end, filter: filter, selection: stale,
+                expectedRevisionID: revision, currency: "CNY", accountLabels: [:], parentDirectory: parent, validate: {})
+            XCTFail("Stale selection was exported")
+        } catch LocalLedgerWorkspace.WorkspaceError.staleRevision { }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: parent.path), [])
+    }
     func testSingleReceiptRejectsExtremePostingWithoutTrappingOrLeavingFile() async throws {
         let (repository, engine, revision, parent) = try await fixture()
         let transaction = LedgerTransaction(date: "2026-09-23", payee: "Synthetic", narration: "Extreme",

@@ -11,6 +11,41 @@ final class LocalTransactionSelectionScanTests: XCTestCase {
         .init(revision: revision, transactions: rows, nextCursor: next, sensitiveUnlocked: true)
     }
 
+    func testFilterRulesRememberHiddenRowsAndExplicitOverridesInActionOrder() throws {
+        let rows = [row(1, payee: "Needle"), row(2, payee: "Hidden"), row(3, payee: "Needle")]
+        let filter = LedgerTransactionFilter(query: "Needle")
+        var selection = LocalTransactionSelection(revisionID: UUID(), start: "2026-09-01", end: "2026-10-01")
+        selection.setAll(matching: filter, selected: true)
+        selection.set(rows[1], selected: true)
+        selection.setAll(matching: filter, selected: false)
+        selection.toggle(rows[0])
+        XCTAssertEqual(rows.map(selection.contains), [true, true, false])
+        var scan = try LocalTransactionSelectionScan(revision: "r", filter: filter, selection: selection)
+        let facts = try XCTUnwrap(scan.consume(page(rows), requestedCursor: nil))
+        XCTAssertEqual(facts.selectedCount, 2)
+        XCTAssertEqual(facts.selectedMatchingCount, 1)
+        XCTAssertEqual(try facts.sourcesForTagPreparation(), [rows[0].source, rows[1].source])
+        XCTAssertFalse(facts.allMatchingSelected)
+    }
+
+    func testFullRangeRuleCountsHundredThousandWithoutCollectingIDs() throws {
+        var selection = LocalTransactionSelection(revisionID: UUID(), start: "2026-09-01", end: "2026-10-01")
+        selection.setAll(matching: .init(), selected: true)
+        var scan = try LocalTransactionSelectionScan(revision: "r", filter: .init(), selection: selection)
+        var result: LocalTransactionSelectionScan.Result?
+        for index in 0..<200 {
+            let rows = (0..<500).map { row(index * 500 + $0) }
+            result = try scan.consume(page(rows, next: index == 199 ? nil : String(index + 1)),
+                requestedCursor: index == 0 ? nil : String(index))
+        }
+        XCTAssertEqual(result?.selectedCount, 100_000)
+        XCTAssertTrue(try XCTUnwrap(result).allMatchingSelected)
+        XCTAssertNil(result?.tagSources)
+        XCTAssertThrowsError(try XCTUnwrap(result).sourcesForTagPreparation()) {
+            XCTAssertEqual($0 as? LocalTransactionSelectionScan.TagPreparationError, .tooMany)
+        }
+    }
+
     func testSelectionScopesMatchLegacyAcrossFilterHiddenAndBlockedRows() throws {
         let rows = [row(1, payee: "Needle"), row(2), row(3, payee: "Needle"), row(4, hash: nil)]
         var scan = try LocalTransactionSelectionScan(revision: "r", filter: .init(query: "Needle"),

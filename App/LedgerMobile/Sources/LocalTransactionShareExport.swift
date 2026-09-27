@@ -4,6 +4,17 @@ import Foundation
 /// this value on lock/revision change/dismissal, including after publication.
 @MainActor
 final class LocalTransactionShareExport: Identifiable {
+    private enum Membership {
+        case ids(Set<String>?)
+        case selection(LocalTransactionSelection)
+
+        func contains(_ row: LedgerTransaction) -> Bool {
+            switch self {
+            case .ids(let ids): ids?.contains(row.id) ?? true
+            case .selection(let selection): selection.contains(row)
+            }
+        }
+    }
     let id = UUID()
     let url: URL
     let count: Int
@@ -28,6 +39,29 @@ final class LocalTransactionShareExport: Identifiable {
                         expectedRevisionID: UUID, currency: String, accountLabels: [String: String],
                         parentDirectory: URL, adopt: @MainActor (LocalTransactionShareExport) -> Void = { _ in },
                         validate: @MainActor () throws -> Void) async throws -> LocalTransactionShareExport {
+        try await prepare(repository: repository, start: start, end: end, filter: filter,
+            membership: .ids(selectedIDs), expectedRevisionID: expectedRevisionID, currency: currency,
+            accountLabels: accountLabels, parentDirectory: parentDirectory, adopt: adopt, validate: validate)
+    }
+
+    static func prepare(repository: LocalLedgerRepository, start: String, end: String,
+                        filter: LedgerTransactionFilter, selection: LocalTransactionSelection,
+                        expectedRevisionID: UUID, currency: String, accountLabels: [String: String],
+                        parentDirectory: URL, adopt: @MainActor (LocalTransactionShareExport) -> Void = { _ in },
+                        validate: @MainActor () throws -> Void) async throws -> LocalTransactionShareExport {
+        guard selection.revisionID == expectedRevisionID, selection.start == start, selection.end == end else {
+            throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+        }
+        return try await prepare(repository: repository, start: start, end: end, filter: filter,
+            membership: .selection(selection), expectedRevisionID: expectedRevisionID, currency: currency,
+            accountLabels: accountLabels, parentDirectory: parentDirectory, adopt: adopt, validate: validate)
+    }
+
+    private static func prepare(repository: LocalLedgerRepository, start: String, end: String,
+                        filter: LedgerTransactionFilter, membership: Membership,
+                        expectedRevisionID: UUID, currency: String, accountLabels: [String: String],
+                        parentDirectory: URL, adopt: @MainActor (LocalTransactionShareExport) -> Void,
+                        validate: @MainActor () throws -> Void) async throws -> LocalTransactionShareExport {
         try validate()
         try Task.checkCancellation()
         let first = try await repository.makeTransactionWindow(start: start, end: end,
@@ -43,7 +77,7 @@ final class LocalTransactionShareExport: Identifiable {
                 let window = try await first.nextWindow()
                 try validate()
                 nativeRevision = window.revision
-                for row in window.transactions where selectedIDs?.contains(row.id) ?? true {
+                for row in window.transactions where membership.contains(row) {
                     if count == 0 { firstDate = row.date }
                     guard lastDate == nil || row.date <= lastDate! else {
                         throw TransactionShareTextStream.StreamError.invalidOrder
@@ -71,7 +105,7 @@ final class LocalTransactionShareExport: Identifiable {
                 let window = try await reader.nextWindow()
                 try validate()
                 guard window.revision == nativeRevision else { throw LocalLedgerError.staleTransactionCursor }
-                for row in window.transactions where selectedIDs?.contains(row.id) ?? true {
+                for row in window.transactions where membership.contains(row) {
                     try Task.checkCancellation()
                     try formatter.append(row, write: sink.append)
                 }

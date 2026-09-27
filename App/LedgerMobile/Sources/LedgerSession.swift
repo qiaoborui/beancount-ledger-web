@@ -4168,6 +4168,21 @@ final class LedgerSession: ObservableObject {
     /// previous one; the UI must also compare its captured selection before use.
     func localTransactionSelectionFacts(filter: LedgerTransactionFilter,
                                         selectedIDs: Set<String>) async throws -> LocalTransactionSelectionScan.Result {
+        try await localTransactionSelectionFacts(filter: filter, request: .ids(selectedIDs))
+    }
+
+    func localTransactionSelectionFacts(filter: LedgerTransactionFilter,
+                                        selection: LocalTransactionSelection) async throws -> LocalTransactionSelectionScan.Result {
+        try await localTransactionSelectionFacts(filter: filter, request: .selection(selection))
+    }
+
+    private enum LocalSelectionRequest: Sendable {
+        case ids(Set<String>)
+        case selection(LocalTransactionSelection)
+    }
+
+    private func localTransactionSelectionFacts(filter: LedgerTransactionFilter,
+        request: LocalSelectionRequest) async throws -> LocalTransactionSelectionScan.Result {
         let context = try localReadContext()
         guard let repository = localRepository else { throw CancellationError() }
         transactionSelectionTask?.cancel()
@@ -4176,9 +4191,17 @@ final class LedgerSession: ObservableObject {
         let blocked = Set(transactionMutations.values.filter { $0.phase.blocksFurtherWrites }.map { $0.original.id })
         let task = Task { @MainActor [self] in
             try validateLocalRead(context)
-            let result = try await repository.selectionFacts(start: context.range.start,
-                end: context.range.queryEndExclusive, filter: filter, selectedIDs: selectedIDs,
-                blockedIDs: blocked, expectedRevisionID: context.revisionID)
+            let result: LocalTransactionSelectionScan.Result
+            switch request {
+            case .ids(let selectedIDs):
+                result = try await repository.selectionFacts(start: context.range.start,
+                    end: context.range.queryEndExclusive, filter: filter, selectedIDs: selectedIDs,
+                    blockedIDs: blocked, expectedRevisionID: context.revisionID)
+            case .selection(let selection):
+                result = try await repository.selectionFacts(start: context.range.start,
+                    end: context.range.queryEndExclusive, filter: filter, selection: selection,
+                    blockedIDs: blocked, expectedRevisionID: context.revisionID)
+            }
             try validateLocalRead(context)
             guard transactionSelectionID == id else { throw CancellationError() }
             return result
@@ -4258,6 +4281,21 @@ final class LedgerSession: ObservableObject {
 
     func prepareLocalTransactionShare(filter: LedgerTransactionFilter,
                                       selectedIDs: Set<String>?) async throws -> LocalTransactionShareExport {
+        try await prepareLocalTransactionShare(filter: filter, request: .ids(selectedIDs))
+    }
+
+    func prepareLocalTransactionShare(filter: LedgerTransactionFilter,
+                                      selection: LocalTransactionSelection) async throws -> LocalTransactionShareExport {
+        try await prepareLocalTransactionShare(filter: filter, request: .selection(selection))
+    }
+
+    private enum LocalShareRequest: Sendable {
+        case ids(Set<String>?)
+        case selection(LocalTransactionSelection)
+    }
+
+    private func prepareLocalTransactionShare(filter: LedgerTransactionFilter,
+        request: LocalShareRequest) async throws -> LocalTransactionShareExport {
         let context = try localReadContext()
         guard let repository = localRepository else { throw CancellationError() }
         // Serial ownership: a new explicit share revokes the previous file/task.
@@ -4267,15 +4305,25 @@ final class LedgerSession: ObservableObject {
         let currency = ledger?.valuationCurrency ?? "CNY"
         let labels = TransactionCategoryPresentation.accountLabels(ledger?.accounts ?? [])
         let task = Task { @MainActor [self] in
-            try await LocalTransactionShareExport.prepare(repository: repository,
-                start: context.range.start, end: context.range.queryEndExclusive,
-                filter: filter, selectedIDs: selectedIDs, expectedRevisionID: context.revisionID,
-                currency: currency, accountLabels: labels,
-                parentDirectory: FileManager.default.temporaryDirectory.resolvingSymlinksInPath(),
-                adopt: { export in self.transactionShareExport = export }) {
-                    try self.validateLocalRead(context)
-                    guard self.transactionShareID == id else { throw CancellationError() }
-                }
+            let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+            let validate: @MainActor () throws -> Void = {
+                try self.validateLocalRead(context)
+                guard self.transactionShareID == id else { throw CancellationError() }
+            }
+            switch request {
+            case .ids(let selectedIDs):
+                return try await LocalTransactionShareExport.prepare(repository: repository,
+                    start: context.range.start, end: context.range.queryEndExclusive,
+                    filter: filter, selectedIDs: selectedIDs, expectedRevisionID: context.revisionID,
+                    currency: currency, accountLabels: labels, parentDirectory: directory,
+                    adopt: { export in self.transactionShareExport = export }, validate: validate)
+            case .selection(let selection):
+                return try await LocalTransactionShareExport.prepare(repository: repository,
+                    start: context.range.start, end: context.range.queryEndExclusive,
+                    filter: filter, selection: selection, expectedRevisionID: context.revisionID,
+                    currency: currency, accountLabels: labels, parentDirectory: directory,
+                    adopt: { export in self.transactionShareExport = export }, validate: validate)
+            }
         }
         transactionShareTask = task
         do {
