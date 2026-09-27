@@ -222,12 +222,13 @@ def _write_canonical_stream(root, entries, options, output):
     bounds additional serialization, not the canonical loader's booked AST.
     The caller owns an isolated output directory; never overwrite an artifact.
     """
-    path = Path(os.path.abspath(output))
-    parent = path.parent.resolve(strict=True)
+    requested = Path(os.path.abspath(output))
+    parent = requested.parent.resolve(strict=True)
     if parent == root or parent.is_relative_to(root):
         raise ValueError("Canonical export must be outside source workspace")
-    if path.parent != parent:
-        raise ValueError("Canonical export parent must be resolved and non-symlinked")
+    # Use the resolved parent for the actual open as well as the confinement
+    # check. System container paths can have aliases even when caller-owned.
+    path = parent / requested.name
     digest = hashlib.sha256()
     total = 0
     count = 0

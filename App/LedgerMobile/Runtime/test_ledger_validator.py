@@ -226,6 +226,27 @@ plugin "beancount.plugins.implicit_prices"
             self.assertTrue(json.loads(ledger_validator.export_canonical_json(str(self.root), "main.bean", str(output)))["errors"])
             self.assertFalse(output.exists())
 
+    def test_stream_resolves_export_parent_alias_outside_source(self):
+        self.assertEqual(self.validate("2000-01-01 open Assets:Cash CNY\n"), [])
+        with tempfile.TemporaryDirectory() as directory:
+            parent = pathlib.Path(directory) / "actual"
+            parent.mkdir()
+            alias = pathlib.Path(directory) / "alias"
+            alias.symlink_to(parent, target_is_directory=True)
+            output = alias / "model.records"
+            reply = json.loads(ledger_validator.export_canonical_json(str(self.root), "main.bean", str(output)))
+            self.assertEqual(reply["errors"], [])
+            self.assertEqual(reply["stream"]["entries"], 1)
+            self.assertTrue((parent / output.name).is_file())
+            self.assertTrue(json.loads(ledger_validator.export_canonical_json(
+                str(self.root), "main.bean", str(output)))["errors"])
+            inside_alias = pathlib.Path(directory) / "inside-alias"
+            inside_alias.symlink_to(self.root, target_is_directory=True)
+            inside = inside_alias / "forbidden.records"
+            self.assertTrue(json.loads(ledger_validator.export_canonical_json(
+                str(self.root), "main.bean", str(inside)))["errors"])
+            self.assertFalse((self.root / inside.name).exists())
+
     def test_stream_rejects_huge_projection_before_canonical_entry_allocation(self):
         from beancount.core import data as bean_data
         from datetime import date
