@@ -169,6 +169,118 @@ final class LocalLedger100kIntegrationTests: XCTestCase {
         #endif
     }
 
+    func testSyntheticRichLedgerGoldenAccountingAndBoundedSession() async throws {
+        #if os(iOS)
+        let rawCount = ProcessInfo.processInfo.environment["LEDGER_RICH_CAPACITY_COUNT"] ?? ""
+        guard let count = Int(rawCount), [1_000, 10_000, 50_000, 100_000].contains(count) else {
+            throw XCTSkip("Set LEDGER_RICH_CAPACITY_COUNT to an approved synthetic fixture size")
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("SyntheticRich-" + UUID().uuidString)
+        let source = root.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let groups = count / 4
+        var main = """
+        plugin "beancount.plugins.auto_accounts"
+        option "operating_currency" "CNY"
+        2000-01-01 commodity CNY
+        2000-01-01 commodity USD
+        2000-01-01 commodity VT
+        2026-01-01 price USD 7.10 CNY
+        2026-01-01 price VT 160 CNY
+
+        """
+        var sourceBytes = 0
+        var metadataRows = 0
+        var transactionHeaderBytes = 0
+        var postingBytes = 0
+        var metadataBytes = 0
+        for file in 0..<(count / 1_000) {
+            var lines: [String] = []
+            lines.reserveCapacity(4_000)
+            for offset in 0..<1_000 {
+                let number = file * 1_000 + offset
+                let date = "2026-\(String(format: "%02d", number % 12 + 1))-\(String(format: "%02d", number % 28 + 1))"
+                switch number % 4 {
+                case 0:
+                    lines.append("\(date) * \"Synthetic\" \"CNY expense \(number)\"\n  Expenses:Food 1 CNY\n  Assets:Cash -1 CNY\n")
+                case 1:
+                    lines.append("\(date) * \"Synthetic\" \"USD expense \(number)\"\n  Expenses:Travel 1 USD\n  Assets:Dollar -1 USD\n")
+                case 2:
+                    lines.append("\(date) * \"Synthetic\" \"Stock buy \(number)\"\n  Assets:Broker 1 VT {10 USD}\n  Assets:Dollar -10 USD\n")
+                default:
+                    lines.append("\(date) * \"Synthetic\" \"Metadata \(number)\" #fixture\n  note: \"synthetic metadata only\"\n  Expenses:Food 2 CNY\n  Assets:Cash -2 CNY\n")
+                    metadataRows += 1
+                }
+                let recordLines = lines[lines.count - 1].split(separator: "\n")
+                transactionHeaderBytes += recordLines[0].utf8.count + 1
+                for line in recordLines.dropFirst() {
+                    if line.hasPrefix("  note:") { metadataBytes += line.utf8.count + 1 }
+                    else { postingBytes += line.utf8.count + 1 }
+                }
+            }
+            let name = "part-\(file).bean"
+            let data = Data(lines.joined().utf8)
+            try data.write(to: source.appendingPathComponent(name))
+            sourceBytes += data.count
+            main += "include \"\(name)\"\n"
+        }
+        let mainData = Data(main.utf8)
+        try mainData.write(to: source.appendingPathComponent("main.bean"))
+        sourceBytes += mainData.count
+        XCTAssertEqual(transactionHeaderBytes + postingBytes + metadataBytes, sourceBytes - mainData.count)
+        let manifest: [String: Int] = ["transactions": count, "postings": count * 2,
+            "metadataTransactions": metadataRows, "sourceFiles": count / 1_000 + 1,
+            "sourceBytes": sourceBytes, "sourceRecordCount": count * 3 + metadataRows,
+            "sourceRecordBytes": transactionHeaderBytes + postingBytes + metadataBytes,
+            "transactionHeaderBytes": transactionHeaderBytes, "postingBytes": postingBytes,
+            "metadataBytes": metadataBytes, "expectedExpenseCNYMinor": groups * 1_010,
+            "expectedCashCNYMinor": -groups * 300, "expectedDollarUSDMinor": -groups * 1_100,
+            "expectedBrokerVTMinor": groups * 100]
+        let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
+        let attachment = XCTAttachment(data: manifestData, uniformTypeIdentifier: "public.json")
+        attachment.name = "synthetic-rich-\(count)-manifest.json"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let catalog = LocalLedgerCatalog(rootDirectory: root.appendingPathComponent("catalog"))
+        let started = ContinuousClock.now
+        let descriptor = try await catalog.importLedger(from: source, name: "Synthetic rich \(count)")
+        let repository = catalog.repository(for: descriptor)
+        let currentRevision = try await repository.workspace.currentRevision()
+        let revision = try XCTUnwrap(currentRevision?.id)
+        let page = try await repository.bootstrapPage(start: "2026-01-01", end: "2027-01-01",
+            today: "2026-09-23", valuationCurrency: "CNY", expectedRevisionID: revision)
+        XCTAssertTrue(page.bootstrap.transactions.isEmpty)
+        XCTAssertEqual(page.transactionPage.transactions.count, 100)
+        XCTAssertNotNil(page.transactionPage.nextCursor)
+        XCTAssertEqual(page.bootstrap.summary.expense, groups * 1_010)
+        let balances = Dictionary(uniqueKeysWithValues: page.bootstrap.accountBalances.map {
+            ("\($0.account):\($0.currency)", $0.amount)
+        })
+        XCTAssertEqual(balances["Assets:Cash:CNY"], -groups * 300)
+        XCTAssertEqual(balances["Assets:Dollar:USD"], -groups * 1_100)
+        XCTAssertEqual(balances["Assets:Broker:VT"], groups * 100)
+        let bql = try await repository.runBQL(query: "SELECT count(*), sum(amount) FROM postings WHERE account = 'Expenses:Food'", valuationCurrency: "CNY")
+        XCTAssertEqual(bql.rows, [[.number(Double(groups * 2)), .number(Double(groups * 300))]])
+        let suite = "synthetic-rich-\(count)-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let session = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+            defaults: defaults, widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: suite, lockDirectory: root),
+            widgetCredentialStore: InertWidgetStore(), ledgerNow: { Date(timeIntervalSince1970: 1_790_164_800) })
+        await session.openLocalLedger(descriptor)
+        await session.applyRange(.year(year: 2026))
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(session.ledger?.summary.expense, groups * 1_010)
+        XCTAssertEqual(session.ledger?.transactions.count, 100)
+        XCTAssertTrue(session.globalTransactions.isEmpty)
+        session.chooseLedger()
+        print("SYNTHETIC_RICH count=\(count) source_bytes=\(sourceBytes) total_ms=\(Self.ms(started.duration(to: .now)))")
+        #else
+        throw XCTSkip("Requires embedded iOS runtime")
+        #endif
+    }
+
     private static func ms(_ duration: Duration) -> Double {
         let value = duration.components
         return Double(value.seconds) * 1000 + Double(value.attoseconds) / 1e15
