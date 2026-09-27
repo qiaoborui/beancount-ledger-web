@@ -1908,6 +1908,11 @@ final class LedgerSession: ObservableObject {
         source: TransactionSource,
         entry: LedgerTransactionEntry
     ) async throws {
+        if isLocal {
+            let action = try await prepareLocalTransactionAction(sources: [source], kind: .edit)
+            try await updateLocalTransaction(action: action, entry: entry)
+            return
+        }
         guard phase == .ready, contextURL != nil else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
         }
@@ -1940,6 +1945,11 @@ final class LedgerSession: ObservableObject {
     }
 
     func deleteTransaction(source: TransactionSource, reason: String) async throws {
+        if isLocal {
+            let action = try await prepareLocalTransactionAction(sources: [source], kind: .delete)
+            try await deleteLocalTransaction(action: action, reason: reason)
+            return
+        }
         guard phase == .ready, contextURL != nil else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
         }
@@ -1975,6 +1985,11 @@ final class LedgerSession: ObservableObject {
         sources: [TransactionSource],
         tags: [String]
     ) async throws {
+        if isLocal {
+            let action = try await prepareLocalTransactionAction(sources: sources, kind: .addTags)
+            try await addLocalTransactionTags(action: action, tags: tags)
+            return
+        }
         guard phase == .ready, contextURL != nil else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
         }
@@ -2114,7 +2129,7 @@ final class LedgerSession: ObservableObject {
             }
         }
         try Task.checkCancellation()
-        reconcileTransactionMutations(in: payload.transactions)
+        if !isLocal { reconcileTransactionMutations(in: payload.transactions) }
         globalTransactions = payload.transactions
         globalTransactionsLoadedAt = Date()
         if let ledger {
@@ -3190,7 +3205,9 @@ final class LedgerSession: ObservableObject {
             }
             globalTransactions.append(contentsOf: payload.transactions)
         }
-        reconcileTransactionMutations(in: payload.transactions, start: targetRange.start, end: targetRange.queryEndExclusive)
+        if local == nil {
+            reconcileTransactionMutations(in: payload.transactions, start: targetRange.start, end: targetRange.queryEndExclusive)
+        }
         ledger = payload
         localPresentation = local.map {
             LocalPresentation(ledgerID: $0.descriptor.id,

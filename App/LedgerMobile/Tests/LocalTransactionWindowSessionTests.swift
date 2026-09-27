@@ -1368,7 +1368,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         let (session, engine, _) = try await fixture()
         defer { session.chooseLedger() }
         await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
-        let original = try XCTUnwrap(session.ledger?.transactions.first)
+        let original = try await session.localTransactionDetail(source: actionSource())
         let entered = expectation(description: "delete awaiting")
         let gate = Gate(entered)
         await engine.pause("/api/ledger/transactions", gate: gate)
@@ -1497,15 +1497,15 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertEqual(session.transactionMutationPhase(for: original), .confirmed)
     }
 
-    func testSuccessfulEditsResumePinnedReadsAfterMonthlyRefreshIncludingRetainedCrossRangeOverlay() async throws {
+    func testLegacyLocalEditEntryPointUsesPinnedReceiptAcrossMonthlyRefresh() async throws {
         for date in ["2026-09-24", "2026-10-02"] {
             let (session, engine, repository) = try await fixture()
             defer { session.chooseLedger() }
             await engine.enableSuccessfulEdits()
             try await advance(repository) // Invalidate the initial bootstrap presentation cache.
             await session.applyRange(.month(year: 2026, month: 9))
-            let original = try XCTUnwrap(session.ledger?.transactions.first)
-            let unrelated = try XCTUnwrap(session.ledger?.transactions.last)
+            let original = try await session.localTransactionDetail(source: actionSource())
+            let unrelated = try await session.localTransactionDetail(source: actionSource(2))
             let before = try await repository.workspace.currentRevision()
             let entry = LedgerTransactionEntry(date: date, payee: "Committed", narration: "Edited",
                 postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")])
@@ -1543,7 +1543,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
             let committed = try await repository.workspace.currentRevision()
             XCTAssertNotEqual(committed?.id, before?.id)
             let crossRange = date.hasPrefix("2026-10")
-            XCTAssertEqual(session.transactionMutationPhase(for: original), crossRange ? .confirmed : nil)
+            XCTAssertNil(session.transactionMutationPhase(for: original))
             await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
             XCTAssertNotNil(session.localTransactionWindow)
             await session.loadNextLocalTransactionWindow()
