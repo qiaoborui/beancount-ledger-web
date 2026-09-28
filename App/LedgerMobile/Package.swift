@@ -30,6 +30,7 @@ let package = Package(
                 "MoreView.swift",
                 "NativeImportFlowView.swift",
                 "OverviewView.swift",
+                "TerminalDesignSystem.swift",
                 "RootView.swift",
                 "SafePreviewLedgerAPI.swift",
                 "SettingsView.swift",

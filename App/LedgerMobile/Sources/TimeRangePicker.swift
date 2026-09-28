@@ -12,7 +12,7 @@ struct LedgerTimeRangeButton: View {
                 Image(systemName: "calendar")
                     .font(.system(size: 13, weight: .semibold))
                 Text(session.selectedRange.toolbarTitle())
-                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .font(.system(.subheadline, design: .monospaced, weight: .semibold))
                     .lineLimit(1)
             }
             .frame(minHeight: 44)
@@ -42,7 +42,7 @@ private struct LedgerTimeRangeSheetPresenter: ViewModifier {
         content.sheet(isPresented: sheetBinding) {
             LedgerTimeRangeSheet()
                 .ledgerPrivacyProtectedSheet()
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
     }
@@ -155,6 +155,9 @@ private struct LedgerTimeRangeSheet: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(TerminalPalette.page)
+            .tint(TerminalPalette.accent)
             .navigationTitle("时间范围")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -167,6 +170,7 @@ private struct LedgerTimeRangeSheet: View {
                 }
             }
         }
+        .tint(TerminalPalette.accent)
     }
 
     // MARK: - Month Grid View
@@ -181,16 +185,16 @@ private struct LedgerTimeRangeSheet: View {
                     } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 13, weight: .semibold))
-                            .frame(width: 32, height: 32)
+                            .frame(width: 44, height: 44)
                             .background(Color(uiColor: .tertiarySystemFill))
-                            .clipShape(Circle())
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     .buttonStyle(.plain)
 
                     Spacer()
 
                     Text(verbatim: "\(selectedYear)年")
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .font(.system(.subheadline, design: .monospaced, weight: .bold))
                         .foregroundStyle(LedgerPalette.ink)
 
                     Spacer()
@@ -201,16 +205,16 @@ private struct LedgerTimeRangeSheet: View {
                     } label: {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 13, weight: .semibold))
-                            .frame(width: 32, height: 32)
+                            .frame(width: 44, height: 44)
                             .background(Color(uiColor: .tertiarySystemFill))
-                            .clipShape(Circle())
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 4)
 
                 // 12-Month Squircle Grid
-                let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+                let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
                 LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(1...12, id: \.self) { month in
                         let isSelected = selectedMonth == month
@@ -219,11 +223,11 @@ private struct LedgerTimeRangeSheet: View {
                             session.setDraftRange(LedgerDateRange.month(year: selectedYear, month: month))
                         } label: {
                             Text("\(month)月")
-                                .font(.system(size: 13.5, weight: isSelected ? .bold : .medium, design: .rounded))
-                                .foregroundStyle(isSelected ? Color(uiColor: .systemBackground) : Color.primary)
-                                .frame(maxWidth: .infinity, minHeight: 38)
-                                .background(isSelected ? Color.primary : Color(uiColor: .tertiarySystemFill))
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .font(.system(size: 13.5, weight: isSelected ? .bold : .medium, design: .monospaced))
+                                .foregroundStyle(isSelected ? TerminalPalette.onAccent : TerminalPalette.ink)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(isSelected ? TerminalPalette.accent : TerminalPalette.panel)
+                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle(pressedScale: 0.94, enablesHaptic: false))
                     }
@@ -247,16 +251,16 @@ private struct LedgerTimeRangeSheet: View {
                     } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 13, weight: .semibold))
-                            .frame(width: 32, height: 32)
+                            .frame(width: 44, height: 44)
                             .background(Color(uiColor: .tertiarySystemFill))
-                            .clipShape(Circle())
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     .buttonStyle(.plain)
 
                     Spacer()
 
                     Text(verbatim: "\(selectedYear)年")
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .font(.system(.subheadline, design: .monospaced, weight: .bold))
                         .foregroundStyle(LedgerPalette.ink)
 
                     Spacer()
@@ -267,9 +271,9 @@ private struct LedgerTimeRangeSheet: View {
                     } label: {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 13, weight: .semibold))
-                            .frame(width: 32, height: 32)
+                            .frame(width: 44, height: 44)
                             .background(Color(uiColor: .tertiarySystemFill))
-                            .clipShape(Circle())
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     .buttonStyle(.plain)
                 }
@@ -286,15 +290,15 @@ private struct LedgerTimeRangeSheet: View {
                         } label: {
                             VStack(spacing: 3) {
                                 Text("第\(q)季度")
-                                    .font(.system(size: 14.5, weight: isSelected ? .bold : .medium, design: .rounded))
+                                    .font(.system(size: 14.5, weight: isSelected ? .bold : .medium, design: .monospaced))
                                 Text(quarterMonthsLabel(q))
                                     .font(.system(size: 11, weight: .regular))
                                     .opacity(0.8)
                             }
-                            .foregroundStyle(isSelected ? Color(uiColor: .systemBackground) : Color.primary)
+                            .foregroundStyle(isSelected ? TerminalPalette.onAccent : TerminalPalette.ink)
                             .frame(maxWidth: .infinity, minHeight: 52)
-                            .background(isSelected ? Color.primary : Color(uiColor: .tertiarySystemFill))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(isSelected ? TerminalPalette.accent : TerminalPalette.panel)
+                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle(pressedScale: 0.94, enablesHaptic: false))
                     }
@@ -320,11 +324,11 @@ private struct LedgerTimeRangeSheet: View {
                         session.setDraftRange(LedgerDateRange.year(year: y))
                     } label: {
                         Text(verbatim: "\(y)年")
-                            .font(.system(size: 14, weight: isSelected ? .bold : .medium, design: .rounded))
-                            .foregroundStyle(isSelected ? Color(uiColor: .systemBackground) : Color.primary)
-                            .frame(maxWidth: .infinity, minHeight: 42)
-                            .background(isSelected ? Color.primary : Color(uiColor: .tertiarySystemFill))
-                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                            .font(.system(size: 14, weight: isSelected ? .bold : .medium, design: .monospaced))
+                            .foregroundStyle(isSelected ? TerminalPalette.onAccent : TerminalPalette.ink)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(isSelected ? TerminalPalette.accent : TerminalPalette.panel)
+                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                     }
                     .buttonStyle(PressScaleButtonStyle(pressedScale: 0.94, enablesHaptic: false))
                 }
@@ -347,10 +351,11 @@ private struct LedgerTimeRangeSheet: View {
                         applyYearToDate()
                     } label: {
                         Text("今年至今")
-                            .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                            .font(.system(size: 12.5, weight: .medium, design: .monospaced))
                             .foregroundStyle(Color.primary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
+                            .frame(minHeight: 44)
                             .background(Color(uiColor: .tertiarySystemFill))
                             .clipShape(Capsule())
                     }
@@ -362,7 +367,7 @@ private struct LedgerTimeRangeSheet: View {
                         .font(.system(size: 12))
                         .foregroundStyle(LedgerPalette.secondary)
                     Text("当前跨度：共 \(customDaysCount) 天")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundStyle(LedgerPalette.secondary)
                 }
                 .padding(.top, 2)
@@ -378,10 +383,11 @@ private struct LedgerTimeRangeSheet: View {
             applyCustomPreset(days: days)
         } label: {
             Text(title)
-                .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                .font(.system(size: 12.5, weight: .medium, design: .monospaced))
                 .foregroundStyle(Color.primary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
+                .frame(minHeight: 44)
                 .background(Color(uiColor: .tertiarySystemFill))
                 .clipShape(Capsule())
         }

@@ -410,7 +410,12 @@ private struct MainTabView: View {
             if horizontalSizeClass == .regular {
                 LedgerRegularShell(selection: selection)
             } else {
-                compactTabs.ledgerAdaptiveTabBar()
+                VStack(spacing: 0) {
+                    compactTabs
+                    TerminalTabBar(destinations: session.compactTabDestinations + [.settings], selection: compactSelection)
+                        .frame(height: 60)
+                        .background(TerminalPalette.page.ignoresSafeArea(edges: .bottom))
+                }
             }
         }
         .ledgerTimeRangeSheet()
@@ -425,43 +430,22 @@ private struct MainTabView: View {
         }
     }
 
-    @ViewBuilder
     private var compactTabs: some View {
-        if #available(iOS 26.0, *) {
-            TabView(selection: compactSelection) {
-                ForEach(session.compactTabDestinations) { destination in
-                    Tab(destination.compactTitle, systemImage: destination.systemImage, value: destination) {
-                        NavigationStack { LedgerDestinationView(destination: destination, isRoot: true) }
-                    }
-                }
-                Tab("更多", systemImage: "ellipsis", value: LedgerDestination.settings) {
-                    NavigationStack { MoreView(overflowDestination: $moreDestination) }
-                }
-                Tab(value: LedgerDestination.search, role: .search) {
-                    NavigationStack { GlobalSearchView(query: $session.globalSearchQuery, usesNativeSearchTab: true) }
-                        .searchable(text: $session.globalSearchQuery, prompt: "搜索整个账本")
-                        .onSubmit(of: .search) { session.recordGlobalSearch(session.globalSearchQuery) }
-                }
-            }
-            .tabViewSearchActivation(.searchTabSelection)
-        } else {
-            legacyCompactTabs
-        }
-    }
-
-    private var legacyCompactTabs: some View {
         TabView(selection: compactSelection) {
             ForEach(session.compactTabDestinations) { destination in
                 NavigationStack {
                     LedgerDestinationView(destination: destination, isRoot: true)
                 }
+                .toolbar(.hidden, for: .tabBar)
                 .tabItem { Label(destination.compactTitle, systemImage: destination.systemImage) }
                 .tag(destination)
             }
             NavigationStack { MoreView(overflowDestination: $moreDestination) }
+                .toolbar(.hidden, for: .tabBar)
                 .tabItem { Label("更多", systemImage: "ellipsis") }
                 .tag(LedgerDestination.settings)
             NavigationStack { GlobalSearchPage() }
+                .toolbar(.hidden, for: .tabBar)
                 .tabItem { Label("搜索", systemImage: "magnifyingglass") }
                 .tag(LedgerDestination.search)
         }

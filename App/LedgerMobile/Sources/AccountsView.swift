@@ -26,135 +26,6 @@ enum AccountFilterCategory: String, CaseIterable, Identifiable {
     }
 }
 
-struct CookieNetWorthHeroCard: View {
-    @EnvironmentObject private var session: LedgerSession
-    let totals: BalanceSheetTotals
-    let currency: String
-    var onReconcile: (() -> Void)? = nil
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center) {
-                HStack(spacing: 6) {
-                    Text("净资产")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.secondary)
-
-                    if session.privacyShielded {
-                        Image(systemName: "lock.shield.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(LedgerPalette.gold)
-                    }
-                }
-
-                Spacer()
-
-                if let onReconcile {
-                    Button(action: onReconcile) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.seal")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text("对账")
-                                .font(.system(size: 11.5, weight: .medium))
-                        }
-                        .foregroundStyle(LedgerPalette.cobalt)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4.5)
-                        .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
-                    }
-                    .buttonStyle(PressScaleButtonStyle())
-                    .accessibilityLabel("账户对账与余额校准")
-                }
-
-                NavigationLink {
-                    LedgerAnalysisView(kind: .assets, isRoot: false)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chart.line.uptrend.xyaxis")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text("分析")
-                            .font(.system(size: 11.5, weight: .medium))
-                    }
-                    .foregroundStyle(LedgerPalette.cobalt)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4.5)
-                    .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
-                }
-                .buttonStyle(PressScaleButtonStyle())
-                .accessibilityLabel("查看资产分析与净值趋势")
-
-                Button {
-                    LedgerFeedback.selection()
-                    session.toggleAmounts()
-                } label: {
-                    Image(systemName: session.amountsVisible ? "eye" : "eye.slash")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .padding(6)
-                        .background(Color(uiColor: .tertiarySystemFill), in: Circle())
-                }
-                .buttonStyle(PressScaleButtonStyle())
-                .accessibilityLabel(session.amountsVisible ? "隐藏金额" : "显示金额")
-            }
-
-            AmountLabel(
-                minorUnits: totals.netWorth,
-                currency: currency,
-                font: .system(size: 32, weight: .bold, design: .rounded),
-                color: LedgerPalette.ink
-            )
-
-            Divider()
-                .overlay(LedgerPalette.line.opacity(0.6))
-
-            HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(LedgerPalette.income)
-                            .frame(width: 6, height: 6)
-                        Text("总资产")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(LedgerPalette.secondary)
-                    }
-                    AmountLabel(
-                        minorUnits: totals.assets,
-                        currency: currency,
-                        font: .system(size: 16, weight: .semibold, design: .rounded),
-                        color: LedgerPalette.ink
-                    )
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Rectangle()
-                    .fill(LedgerPalette.line.opacity(0.6))
-                    .frame(width: 1, height: 28)
-                    .padding(.horizontal, 12)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(LedgerPalette.expense)
-                            .frame(width: 6, height: 6)
-                        Text("总负债")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(LedgerPalette.secondary)
-                    }
-                    AmountLabel(
-                        minorUnits: totals.liabilities,
-                        currency: currency,
-                        prefix: totals.liabilities > 0 ? "-" : "",
-                        font: .system(size: 16, weight: .semibold, design: .rounded),
-                        color: LedgerPalette.ink
-                    )
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .ledgerFrostedCard(cornerRadius: 18, padding: 18)
-    }
-}
-
 struct AccountsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -206,200 +77,154 @@ struct AccountsView: View {
             if let error = session.errorMessage {
                 Section { StatusBanner(message: error, onDismiss: session.dismissError) }
             }
-
-            // Cookie Net Worth Hero Card
             Section {
-                CookieNetWorthHeroCard(
-                    totals: totals,
-                    currency: session.ledger?.valuationCurrency ?? "CNY",
-                    onReconcile: { showingReconciliationView = true }
-                )
-                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 6, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-            }
-
-            // Cookie Category Filter Pills
-            Section {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(AccountFilterCategory.allCases) { filter in
-                            let isSelected = selectedFilter == filter
-                            let count: Int = {
-                                if filter == .all {
-                                    return allSections.reduce(0) { $0 + $1.rows.count }
-                                }
-                                return allSections.filter { filter.matches(section: $0) }.reduce(0) { $0 + $1.rows.count }
-                            }()
-
-                            Button {
-                                LedgerFeedback.selection()
-                                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                                    selectedFilter = filter
-                                }
-                            } label: {
-                                HStack(spacing: 5) {
-                                    Text(filter.rawValue)
-                                        .font(.system(size: 13.5, weight: isSelected ? .semibold : .medium))
-                                    Text("\(count)")
-                                        .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
-                                        .foregroundStyle(isSelected ? Color.white.opacity(0.85) : LedgerPalette.secondary)
-                                }
-                                .foregroundStyle(isSelected ? Color.white : LedgerPalette.ink)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background {
-                                    if isSelected {
-                                        Capsule()
-                                            .fill(LedgerPalette.cobalt)
-                                            .shadow(color: LedgerPalette.cobalt.opacity(0.3), radius: 4, x: 0, y: 2)
-                                    } else {
-                                        Capsule()
-                                            .fill(LedgerPalette.panel)
-                                            .overlay(Capsule().stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
-                                    }
-                                }
-                            }
-                            .buttonStyle(PressScaleButtonStyle())
-                        }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(session.accountPeriodBalancesAvailable && (session.ledger?.periodAccountBalancesAvailable ?? false) ? "期末净资产" : "当前净资产")
+                            .terminalFont(size: 12, weight: .semibold, design: .monospaced)
+                            .foregroundStyle(TerminalPalette.secondary)
+                        Spacer()
+                        Button { session.toggleAmounts() } label: {
+                            Image(systemName: session.amountsVisible ? "eye" : "eye.slash")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(TerminalPalette.accent)
+                                .frame(width: 44, height: 44)
+                        }.buttonStyle(.plain)
+                            .accessibilityLabel(session.amountsVisible ? "隐藏金额" : "显示金额")
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 2)
+                    TerminalAmount(minorUnits: totals.netWorth, currency: session.ledger?.valuationCurrency ?? "CNY", color: TerminalPalette.ink, size: 28, showsCurrency: true)
+                    TerminalRule()
+                    let metricLayout = dynamicTypeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                        : AnyLayout(HStackLayout(spacing: 0))
+                    metricLayout {
+                        accountMetric("资产", value: totals.assets, color: TerminalPalette.positive)
+                        if !dynamicTypeSize.isAccessibilitySize {
+                            Rectangle().fill(TerminalPalette.line).frame(width: 1, height: 30).padding(.horizontal, 12)
+                        }
+                        accountMetric("负债", value: totals.liabilities, color: TerminalPalette.negative, prefix: totals.liabilities > 0 ? "-" : "")
+                    }
                 }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                .padding(.horizontal, 4).padding(.vertical, 8)
             }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
+            Section {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: dynamicTypeSize.isAccessibilitySize ? 3 : 5), spacing: 12) {
+                    ForEach(AccountFilterCategory.allCases) { filter in
+                        let count = filter == .all
+                            ? allSections.reduce(0) { $0 + $1.rows.count }
+                            : allSections.filter { filter.matches(section: $0) }.reduce(0) { $0 + $1.rows.count }
+                        Button {
+                            LedgerFeedback.selection()
+                            withAnimation(.easeOut(duration: 0.18)) { selectedFilter = filter }
+                        } label: {
+                            VStack(spacing: 6) {
+                                Text(filter.rawValue).terminalFont(size: 13, weight: selectedFilter == filter ? .semibold : .regular).lineLimit(1).minimumScaleFactor(0.6)
+                                Text("\(count)").terminalFont(size: 10, design: .monospaced).foregroundStyle(TerminalPalette.secondary)
+                                Rectangle().fill(selectedFilter == filter ? TerminalPalette.accent : .clear).frame(height: 2)
+                            }
+                            .foregroundStyle(selectedFilter == filter ? TerminalPalette.accent : TerminalPalette.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        }.buttonStyle(.plain)
+                        .accessibilityAddTraits(selectedFilter == filter ? .isSelected : [])
+                    }
+                }.padding(.top, 2)
+            }
+            .listRowBackground(Color.clear).listRowSeparator(.hidden)
 
             Section {
                 ForEach(sections) { section in
                     DisclosureGroup(isExpanded: expandedBinding(for: section.id)) {
                         ForEach(section.rows) { row in
-                            NavigationLink {
-                                AccountDetailView(account: row.account, currency: row.nativeCurrency)
-                            } label: {
+                            NavigationLink { AccountDetailView(account: row.account, currency: row.nativeCurrency) } label: {
                                 AccountRowView(row: row)
                             }
+                            .listRowBackground(Color.clear)
                             .accessibilityIdentifier("account-link-" + row.account + "-" + row.nativeCurrency)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button {
-                                    selectedAccountForReconciliation = row
-                                } label: {
+                                Button { selectedAccountForReconciliation = row } label: {
                                     Label("校对余额", systemImage: "checkmark.seal")
-                                }
-                                .tint(LedgerPalette.cobalt)
+                                }.tint(TerminalPalette.accent)
                             }
                             .contextMenu {
-                                Button {
-                                    selectedAccountForReconciliation = row
-                                } label: {
+                                Button { selectedAccountForReconciliation = row } label: {
                                     Label("校对余额 (对账)", systemImage: "checkmark.seal")
                                 }
                             }
                         }
                     } label: {
-                        HStack(spacing: 12) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .fill(AccountGroupSymbol.color(for: section.id).opacity(0.14))
-                                    .frame(width: 34, height: 34)
-                                Image(systemName: AccountGroupSymbol.symbol(for: section.id))
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(AccountGroupSymbol.color(for: section.id))
-                            }
-                            let layout = dynamicTypeSize.isAccessibilitySize
-                                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                                : AnyLayout(HStackLayout())
-                            layout {
-                                Text(section.title).font(.subheadline.weight(.semibold))
-                                if !dynamicTypeSize.isAccessibilitySize { Spacer() }
-                                VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 3) {
-                                    Text("\(section.rows.count) 个账户").font(.caption2).foregroundStyle(.secondary)
-                                    AmountLabel(
-                                        minorUnits: section.rows.filter {
-                                            $0.periodBalancesAvailable ? !$0.periodValuationMissing : !$0.valuationMissing
-                                        }.reduce(0) { $0 + ($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation) },
-                                        currency: session.ledger?.valuationCurrency ?? "CNY",
-                                        font: .system(.subheadline, design: .rounded, weight: .semibold)
-                                    )
-                                }
-                            }
-                        }
-                        .padding(.vertical, 3)
+                        let layout = dynamicTypeSize.isAccessibilitySize
+                            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                            : AnyLayout(HStackLayout(spacing: 10))
+                        layout {
+                            Text(section.title)
+                                .terminalFont(size: 14, weight: .semibold)
+                            Text("\(section.rows.count)")
+                                .terminalFont(size: 11, design: .monospaced)
+                                .foregroundStyle(TerminalPalette.secondary)
+                            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
+                            TerminalAmount(
+                                minorUnits: section.rows.filter { $0.periodBalancesAvailable ? !$0.periodValuationMissing : !$0.valuationMissing }
+                                    .reduce(0) { $0 + ($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation) },
+                                currency: session.ledger?.valuationCurrency ?? "CNY", size: 14
+                            )
+                        }.padding(.vertical, 8)
+                            .accessibilityIdentifier("account-group-\(section.id)")
                     }
-                    .accessibilityIdentifier("account-group-\(section.id)")
+                    .listRowBackground(Color.clear)
                 }
             } header: {
                 if !sections.isEmpty {
                     HStack {
-                        Text("\(sections.count) 个分组")
-                            .foregroundStyle(.secondary)
+                        TerminalSectionLabel(text: "\(sections.count) 个账户组")
                         Spacer()
-                        Button {
+                        Button(allVisibleSectionsExpanded ? "全部折叠" : "全部展开") {
                             let visibleIDs = Set(sections.map(\.id))
-                            setExpandedSectionIDs(allVisibleSectionsExpanded
-                                ? activeExpandedSectionIDs.subtracting(visibleIDs)
-                                : activeExpandedSectionIDs.union(visibleIDs))
-                        } label: {
-                            Text(allVisibleSectionsExpanded ? "全部折叠" : "全部展开")
-                                .frame(minHeight: 44)
-                                .contentShape(Rectangle())
+                            setExpandedSectionIDs(allVisibleSectionsExpanded ? activeExpandedSectionIDs.subtracting(visibleIDs) : activeExpandedSectionIDs.union(visibleIDs))
                         }
-                        .buttonStyle(.borderless)
+                        .terminalFont(size: 12, weight: .semibold)
+                        .foregroundStyle(TerminalPalette.accent)
+                        .frame(minHeight: 44)
                         .accessibilityIdentifier("account-groups-toggle-all")
                     }
-                    .font(.caption)
-                    .textCase(nil)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 }
             }
             if sections.isEmpty {
                 ContentUnavailableView("暂无账户", systemImage: "building.columns", description: Text("当前筛选分类下暂无账户。"))
             }
         }
-        .ledgerReadingList()
+        .listStyle(.plain)
+        .listSectionSpacing(8)
+        .tint(TerminalPalette.accent)
         .accessibilityIdentifier("accounts-list")
-        .ledgerNavigation("账户", isRoot: isRoot, showsTimeRange: true)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: LedgerSpacing.md) {
-                    Button {
-                        showingAddAccount = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("新建账户")
+        .terminalPageChrome("账户", isRoot: isRoot, actions: AnyView(
+            Menu {
+                Button("新建账户") { showingAddAccount = true }
                     .accessibilityIdentifier("accounts-add-button")
-
-                    Button {
-                        showingReconciliationView = true
-                    } label: {
-                        Image(systemName: "checkmark.seal")
-                    }
-                    .accessibilityLabel("账户对账")
-                }
-            }
-        }
+                Button("账户对账") { showingReconciliationView = true }
+            } label: {
+                Image(systemName: "ellipsis").font(.system(size: 16)).foregroundStyle(TerminalPalette.accent).frame(width: 44, height: 44)
+            }.accessibilityLabel("账户操作")
+        ))
         .navigationDestination(item: $session.externalAccount) { account in
             AccountDetailView(account: account.account, currency: account.currency)
         }
-        .sheet(isPresented: $showingAddAccount) {
-            AddAccountView()
-                .ledgerPrivacyProtectedSheet()
-        }
-        .sheet(isPresented: $showingReconciliationView) {
-            NavigationStack {
-                ReconciliationView()
-            }
-        }
+        .sheet(isPresented: $showingAddAccount) { AddAccountView().ledgerPrivacyProtectedSheet() }
+        .sheet(isPresented: $showingReconciliationView) { NavigationStack { ReconciliationView() } }
         .sheet(item: $selectedAccountForReconciliation) { row in
-            SingleAccountReconciliationSheet(
-                account: row.account,
-                label: row.label,
-                currency: row.nativeCurrency
-            )
+            SingleAccountReconciliationSheet(account: row.account, label: row.label, currency: row.nativeCurrency)
         }
         .refreshable { await session.refresh() }
+    }
+
+    @ViewBuilder
+    private func accountMetric(_ label: String, value: Int, color: Color, prefix: String = "") -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).terminalFont(size: 11, weight: .semibold, design: .monospaced).foregroundStyle(TerminalPalette.secondary)
+            TerminalAmount(minorUnits: value, currency: session.ledger?.valuationCurrency ?? "CNY", color: color, size: 15, prefix: prefix)
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func setExpandedSectionIDs(_ ids: Set<String>) {
@@ -1242,14 +1067,11 @@ private struct AccountRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(accountIcon.color.opacity(0.14))
-                    .frame(width: 36, height: 36)
-                Image(systemName: accountIcon.name)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(accountIcon.color)
-            }
+            Image(systemName: accountIcon.name)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(TerminalPalette.accent)
+                .frame(width: 22)
+
 
             VStack(alignment: .leading, spacing: 4) {
                 headingLayout {
@@ -1257,7 +1079,7 @@ private struct AccountRowView: View {
                         HStack(spacing: 5) {
                             Text(row.label)
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(LedgerPalette.ink)
+                                .foregroundStyle(TerminalPalette.ink)
                             if let status = session.accountStatus(for: row.account) {
                                 Circle()
                                     .fill(status.statusColor)
@@ -1266,7 +1088,7 @@ private struct AccountRowView: View {
                         }
                         Text(row.account)
                             .font(.system(.caption2, design: .default))
-                            .foregroundStyle(LedgerPalette.secondary)
+                            .foregroundStyle(TerminalPalette.secondary)
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1279,11 +1101,11 @@ private struct AccountRowView: View {
                         VStack(alignment: .trailing, spacing: 2) {
                             Text(row.periodBalancesAvailable ? "期末" : "当前")
                                 .font(.system(.caption2, design: .default, weight: .semibold))
-                                .foregroundStyle(LedgerPalette.secondary)
+                                .foregroundStyle(TerminalPalette.secondary)
                             AmountLabel(
                                 minorUnits: row.periodBalancesAvailable ? row.closingValuation : row.valuation,
                                 currency: row.valuationCurrency,
-                                font: .system(.subheadline, design: .rounded, weight: .semibold)
+                                font: .system(.subheadline, design: .monospaced, weight: .semibold)
                             )
                             .lineLimit(1)
                         }
@@ -1295,12 +1117,12 @@ private struct AccountRowView: View {
                         HStack(spacing: 4) {
                             Text("期初")
                                 .font(.system(.caption2, design: .default, weight: .medium))
-                                .foregroundStyle(LedgerPalette.secondary)
+                                .foregroundStyle(TerminalPalette.secondary)
                             AmountLabel(
                                 minorUnits: row.openingValuation,
                                 currency: row.valuationCurrency,
-                                font: .system(.caption2, design: .rounded, weight: .medium),
-                                color: LedgerPalette.secondary
+                                font: .system(.caption2, design: .monospaced, weight: .medium),
+                                color: TerminalPalette.secondary
                             )
                             .lineLimit(1)
                         }
@@ -1310,12 +1132,12 @@ private struct AccountRowView: View {
                         HStack(spacing: 4) {
                             Text("变化")
                                 .font(.system(.caption2, design: .default, weight: .medium))
-                                .foregroundStyle(LedgerPalette.secondary)
+                                .foregroundStyle(TerminalPalette.secondary)
                             AmountLabel(
                                 minorUnits: row.periodValuationChange,
                                 currency: row.valuationCurrency,
                                 prefix: row.periodValuationChange > 0 ? "+" : "",
-                                font: .system(.caption2, design: .rounded, weight: .semibold),
+                                font: .system(.caption2, design: .monospaced, weight: .semibold),
                                 color: row.periodValuationChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
                             )
                             .lineLimit(1)
@@ -1327,13 +1149,13 @@ private struct AccountRowView: View {
                     HStack(spacing: 4) {
                         Text(row.periodBalancesAvailable ? "原币期末" : "原币余额")
                             .font(.system(.caption2, design: .default, weight: .medium))
-                            .foregroundStyle(LedgerPalette.secondary)
+                            .foregroundStyle(TerminalPalette.secondary)
                         Spacer(minLength: 0)
                         AmountLabel(
                             minorUnits: row.periodBalancesAvailable ? row.closingNativeAmount : row.nativeAmount,
                             currency: row.nativeCurrency,
-                            font: .system(.caption2, design: .rounded, weight: .medium),
-                            color: LedgerPalette.secondary
+                            font: .system(.caption2, design: .monospaced, weight: .medium),
+                            color: TerminalPalette.secondary
                         )
                     }
                 }

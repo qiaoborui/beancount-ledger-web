@@ -7,83 +7,42 @@ struct MoreView: View {
     var body: some View {
         List {
             Section {
-                NavigationLink {
-                    SettingsView(isRoot: false)
-                } label: {
-                    HStack(spacing: LedgerSpacing.md) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color.gray.opacity(0.14))
-                                .frame(width: 36, height: 36)
-                            Image(systemName: "gearshape.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(Color.gray)
-                        }
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("设置")
-                                .font(.body.weight(.medium))
-                                .foregroundStyle(LedgerPalette.ink)
-                            Text("\(session.localLedgerName) · 本地")
-                                .font(.footnote)
-                                .foregroundStyle(LedgerPalette.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                .accessibilityIdentifier("more-settings")
-            }
+                NavigationLink { SettingsView(isRoot: false) } label: {
+                    MoreNavigationRow(index: "00", icon: "gearshape", title: "设置", detail: "\(session.localLedgerName) · 本地")
+                }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).accessibilityIdentifier("more-settings")
+            } header: { TerminalSectionLabel(text: "00 / 系统") }
+
             let remaining = [LedgerDestination.overview, .transactions, .accounts]
                 .filter { !session.compactTabDestinations.contains($0) }
             if !remaining.isEmpty {
-                Section("账本") {
-                    ForEach(remaining) { destination in
-                        MoreDestinationButton(destination: destination, detail: destination.title)
-                    }
-                }
+                Section { ForEach(remaining) { destination in
+                    MoreDestinationButton(destination: destination, detail: destination.title)
+                }} header: { TerminalSectionLabel(text: "01 / 账本") }
             }
-            Section("财务分析") {
-                ForEach(LedgerAnalysisKind.allCases, id: \.self) { kind in
-                    MoreDestinationButton(
-                        destination: destination(for: kind),
-                        detail: kind.detail,
-                        accessibilityIdentifier: "more-analysis-\(kind.rawValue)"
-                    )
-                }
-            }
-            Section("账本工具") {
-                NavigationLink {
-                    CategoriesManagementView()
-                } label: {
-                    HStack(spacing: LedgerSpacing.md) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color.orange.opacity(0.14))
-                                .frame(width: 36, height: 36)
-                            Image(systemName: "tag.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(Color.orange)
-                        }
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("分类管理")
-                                .font(.body.weight(.medium))
-                                .foregroundStyle(LedgerPalette.ink)
-                            Text("查看与新增收支分类")
-                                .font(.footnote)
-                                .foregroundStyle(LedgerPalette.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                .accessibilityIdentifier("more-categories")
-
+            Section { ForEach(LedgerAnalysisKind.allCases, id: \.self) { kind in
+                MoreDestinationButton(destination: destination(for: kind), detail: kind.detail,
+                    accessibilityIdentifier: "more-analysis-\(kind.rawValue)")
+            }} header: { TerminalSectionLabel(text: remaining.isEmpty ? "01 / 财务分析" : "02 / 财务分析") }
+            Section {
+                MoreDestinationButton(destination: .search, detail: "搜索整个账本", accessibilityIdentifier: "more-search")
+                NavigationLink { CategoriesManagementView() } label: {
+                    MoreNavigationRow(index: "02", icon: "tag", title: "分类管理", detail: "查看与新增收支分类")
+                }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).accessibilityIdentifier("more-categories")
                 MoreDestinationButton(destination: .imports, detail: "账单导入与归档", accessibilityIdentifier: "more-imports")
                 MoreDestinationButton(destination: .currencies, detail: "估值货币与汇率", accessibilityIdentifier: "more-currencies")
                 MoreDestinationButton(destination: .query, detail: "查询与历史", accessibilityIdentifier: "more-query")
-            }
+            } header: { TerminalSectionLabel(text: remaining.isEmpty ? "02 / 账本工具" : "03 / 账本工具") }
         }
-        .ledgerReadingList()
+        .listStyle(.plain)
+        .listSectionSpacing(8)
+        .tint(TerminalPalette.accent)
         .font(.subheadline)
-        .ledgerNavigation("更多")
+        .accessibilityIdentifier("more-list")
+        .terminalPageChrome("更多", isRoot: true,
+            actions: AnyView(Button { session.primaryDestinationID = LedgerDestination.search.rawValue } label: {
+                Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(TerminalPalette.accent).frame(width: 44, height: 44)
+            }.buttonStyle(.plain).accessibilityLabel("搜索账本").accessibilityIdentifier("more-header-search")))
         .navigationDestination(item: $overflowDestination) { destination in
             LedgerDestinationView(destination: destination)
         }
@@ -91,9 +50,7 @@ struct MoreView: View {
         .onChange(of: overflowDestination) { _, destination in
             guard destination == nil else { return }
             let current = LedgerDestination.stored(session.primaryDestinationID)
-            if current.isCompactOverflow(in: session.compactTabDestinations) {
-                session.primaryDestinationID = LedgerDestination.settings.rawValue
-            }
+            if current.isCompactOverflow(in: session.compactTabDestinations) { session.primaryDestinationID = LedgerDestination.settings.rawValue }
         }
     }
 
@@ -104,86 +61,50 @@ struct MoreView: View {
     }
 
     private func destination(for kind: LedgerAnalysisKind) -> LedgerDestination {
-        switch kind {
-        case .assets: .assets
-        case .incomeExpense: .incomeExpense
-        case .investments: .investments
-        }
+        switch kind { case .assets: .assets; case .incomeExpense: .incomeExpense; case .investments: .investments }
     }
 }
 
 private struct MoreDestinationButton: View {
     @EnvironmentObject private var session: LedgerSession
-
     let destination: LedgerDestination
     let detail: String
     var accessibilityIdentifier: String? = nil
-
-    private var destinationColor: Color {
-        switch destination {
-        case .overview: Color(red: 0.16, green: 0.54, blue: 0.95)
-        case .transactions: Color(red: 0.96, green: 0.55, blue: 0.18)
-        case .accounts: Color(red: 0.12, green: 0.68, blue: 0.36)
-        case .assets: Color(red: 0.16, green: 0.54, blue: 0.95)
-        case .incomeExpense: Color(red: 0.10, green: 0.72, blue: 0.44)
-        case .investments: Color(red: 0.65, green: 0.36, blue: 0.88)
-        case .imports: Color(red: 0.96, green: 0.55, blue: 0.18)
-        case .currencies: Color(red: 0.12, green: 0.66, blue: 0.72)
-        case .query: Color(red: 0.35, green: 0.45, blue: 0.88)
-        case .settings: Color.gray
-        case .search: Color(red: 0.08, green: 0.68, blue: 0.55)
-        }
-    }
-
     var body: some View {
         Group {
             if destination == .assets || destination == .incomeExpense || destination == .investments {
-                NavigationLink {
-                    LedgerDestinationView(destination: destination, isRoot: false)
-                } label: {
-                    MoreNavigationRow(icon: destination.systemImage, color: destinationColor, title: destination.title, detail: detail)
+                NavigationLink { LedgerDestinationView(destination: destination, isRoot: false) } label: {
+                    MoreNavigationRow(index: index, icon: destination.systemImage, title: destination.title, detail: detail)
                 }
             } else {
-                Button {
-                    session.primaryDestinationID = destination.rawValue
-                } label: {
-                    MoreNavigationRow(icon: destination.systemImage, color: destinationColor, title: destination.title, detail: detail)
+                Button { session.primaryDestinationID = destination.rawValue } label: {
+                    MoreNavigationRow(index: index, icon: destination.systemImage, title: destination.title, detail: detail)
                 }
             }
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(accessibilityIdentifier ?? "more-\(destination.rawValue)")
+        }.buttonStyle(.plain).listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).accessibilityIdentifier(accessibilityIdentifier ?? "more-\(destination.rawValue)")
+    }
+    private var index: String {
+        switch destination { case .overview: "01"; case .transactions: "02"; case .accounts: "03"; case .assets: "01"; case .incomeExpense: "02"; case .investments: "03"; case .search: "01"; case .imports: "03"; case .currencies: "04"; case .query: "05"; case .settings: "00" }
     }
 }
 
 private struct MoreNavigationRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let index: String
     let icon: String
-    var color: Color = LedgerPalette.cobalt
     let title: String
     let detail: String
-
     var body: some View {
-        HStack(spacing: LedgerSpacing.md) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(color.opacity(0.14))
-                    .frame(width: 36, height: 36)
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(color)
+        HStack(spacing: 12) {
+            if !dynamicTypeSize.isAccessibilitySize {
+                Text(index).terminalFont(size: 11, design: .monospaced).foregroundStyle(TerminalPalette.accent).frame(width: 22, alignment: .leading)
+                Image(systemName: icon).font(.system(size: 15, weight: .medium)).foregroundStyle(TerminalPalette.accent).frame(width: 22)
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(LedgerPalette.ink)
-                Text(detail)
-                    .font(.footnote)
-                    .foregroundStyle(LedgerPalette.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "chevron.right")
-                .font(.system(.caption2, design: .default, weight: .semibold))
-                .foregroundStyle(LedgerPalette.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).terminalFont(size: 15, weight: .medium).foregroundStyle(TerminalPalette.ink)
+                Text(detail).terminalFont(size: 12).foregroundStyle(TerminalPalette.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())

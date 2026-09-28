@@ -2,7 +2,7 @@ import XCTest
 
 @MainActor
 final class LocalSyncToolbarUITests: XCTestCase {
-    func testToolbarOpensDeviceStorageThenDirectlySyncsConfiguredGitTwice() throws {
+    func testLocalOnlyOverviewHidesSyncAndConfiguredOverviewOpensDetails() throws {
         #if targetEnvironment(simulator)
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -13,42 +13,51 @@ final class LocalSyncToolbarUITests: XCTestCase {
         app.buttons["local-ledger-create"].tap()
         XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForExistence(timeout: 5))
         app.buttons["local-ledger-confirm-create"].tap()
-        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(app.buttons["navigation-time-range"].waitForExistence(timeout: 30), app.debugDescription)
 
+        XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForNonExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["ledger-sync-status"].exists, "Local-only overview has no sync indicator")
+        let accounts = app.buttons["terminal-tab-accounts"]
+        accounts.tap()
+        // Creating the first local ledger replaces the onboarding host. As in
+        // LocalLedgerUITests, allow its first navigation transition to settle.
+        if !app.collectionViews["accounts-list"].waitForExistence(timeout: 3) { accounts.tap() }
+        XCTAssertTrue(app.collectionViews["accounts-list"].waitForExistence(timeout: 5))
         let toolbar = app.buttons["ledger-sync-status"]
-        XCTAssertTrue(toolbar.waitForExistence(timeout: 5))
-        expect(toolbar, label: "已保存到本机", enabled: true)
-        toolbar.tap()
+        XCTAssertFalse(toolbar.exists, "Local-only Accounts also hides sync")
+        app.buttons["terminal-tab-settings"].tap()
+        app.buttons["more-settings"].tap()
+        let storage = app.buttons["存储与同步"]
+        for _ in 0..<5 where !storage.isHittable { app.swipeUp() }
+        storage.tap()
         XCTAssertTrue(app.navigationBars["存储与同步"].waitForExistence(timeout: 5))
         let repository = app.textFields["local-git-url"]
         XCTAssertTrue(repository.waitForExistence(timeout: 5))
         repository.tap()
-        repository.typeText("https://example.invalid/ledger.git")
+        repository.typeText("https://example.invalid/ledger.git\n")
         let save = app.buttons["local-git-save"]
         for _ in 0..<4 where !save.isHittable { app.swipeUp() }
         XCTAssertTrue(save.isHittable, app.debugDescription)
         save.tap()
+        app.swipeUp()
         XCTAssertTrue(app.switches["local-git-auto-sync"].waitForExistence(timeout: 10), app.debugDescription)
+        app.navigationBars["存储与同步"].buttons.firstMatch.tap()
+        app.buttons["terminal-tab-accounts"].tap()
+        expect(toolbar, label: "等待同步", enabled: true)
+        toolbar.tap()
+        XCTAssertTrue(app.navigationBars["存储与同步"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.alerts["同步这个 Git 工作区？"].exists)
         app.navigationBars["存储与同步"].buttons["完成"].tap()
         expect(toolbar, label: "等待同步", enabled: true)
-
-        // The configured toolbar starts the exchange directly. Each invocation
-        // must expose a disabled busy state and recover an enabled synced state.
-        for attempt in 1...2 {
-            toolbar.tap()
-            expect(toolbar, label: "正在同步", enabled: false, timeout: 5)
-            XCTAssertEqual(app.navigationBars["财务概览"].progressIndicators.count, 0,
-                "Sync status uses a static dot while the action remains disabled")
-            let busyScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            busyScreenshot.name = "local-toolbar-busy-\(attempt)"
-            busyScreenshot.lifetime = .keepAlways
-            add(busyScreenshot)
-            XCTAssertFalse(app.navigationBars["存储与同步"].exists)
-            XCTAssertFalse(app.alerts["同步这个 Git 工作区？"].exists)
-            expect(toolbar, label: "已同步", enabled: true, timeout: 30)
-        }
+        app.buttons["terminal-tab-overview"].tap()
+        expect(toolbar, label: "等待同步", enabled: true)
+        toolbar.tap()
+        XCTAssertTrue(app.navigationBars["存储与同步"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.alerts["同步这个 Git 工作区？"].exists)
+        app.navigationBars["存储与同步"].buttons["完成"].tap()
+        expect(toolbar, label: "等待同步", enabled: true)
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        screenshot.name = "local-toolbar-synced"
+        screenshot.name = "local-toolbar-pending"
         screenshot.lifetime = .keepAlways
         add(screenshot)
         #else

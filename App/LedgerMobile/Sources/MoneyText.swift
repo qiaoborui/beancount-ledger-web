@@ -7,17 +7,18 @@ enum MoneyText {
         case compact
     }
 
-    static func format(minorUnits: Int, currency: String, showSign: Bool = false) -> String {
+    static func format(minorUnits: Int, currency: String, showSign: Bool = false, showsCurrency: Bool = true) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = currency.isEmpty ? "CNY" : currency
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.usesGroupingSeparator = true
+        if !showsCurrency { formatter.currencySymbol = "" }
         if showSign {
             formatter.positivePrefix = "+" + (formatter.positivePrefix ?? "")
         }
         let value = NSDecimalNumber(value: Double(minorUnits) / 100)
-        return formatter.string(from: value) ?? "\(currency) \(value)"
+        return formatter.string(from: value)?.trimmingCharacters(in: .whitespaces) ?? "\(currency) \(value)"
     }
 
     static func formatCompact(minorUnits: Int, currency: String, showSign: Bool = false) -> String {
