@@ -359,7 +359,7 @@ final class LedgerMobileUITests: XCTestCase {
         app = XCUIApplication()
         app.launchArguments = ["--safe-preview", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
         app.launch()
-        let overviewTitle = app.navigationBars["财务概览"].staticTexts["财务概览"]
+        let overviewTitle = app.navigationBars["财务概览"].staticTexts["概览"]
         XCTAssertTrue(overviewTitle.waitForExistence(timeout: 8))
         let titleMidY = overviewTitle.frame.midY
         capture("compact-flat-overview")
@@ -422,7 +422,7 @@ final class LedgerMobileUITests: XCTestCase {
         ]
         app.launch()
         XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
-        let summaryHeading = app.staticTexts["月度概览"]
+        let summaryHeading = app.staticTexts["净结余"]
         XCTAssertTrue(summaryHeading.exists)
         XCTAssertGreaterThanOrEqual(summaryHeading.frame.minX, 0)
         XCTAssertLessThanOrEqual(summaryHeading.frame.maxX, app.frame.maxX)

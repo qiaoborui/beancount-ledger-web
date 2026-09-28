@@ -140,7 +140,7 @@ extension Color {
 }
 
 extension UIColor {
-    fileprivate convenience init(hex: UInt) {
+    convenience init(hex: UInt) {
         self.init(
             red: CGFloat((hex >> 16) & 0xFF) / 255,
             green: CGFloat((hex >> 8) & 0xFF) / 255,

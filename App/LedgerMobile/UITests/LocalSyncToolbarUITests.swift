@@ -2,7 +2,7 @@ import XCTest
 
 @MainActor
 final class LocalSyncToolbarUITests: XCTestCase {
-    func testToolbarOpensDeviceStorageThenDirectlySyncsConfiguredGitTwice() throws {
+    func testLocalOnlyOverviewHidesSyncAndConfiguredOverviewOpensDetails() throws {
         #if targetEnvironment(simulator)
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -15,6 +15,8 @@ final class LocalSyncToolbarUITests: XCTestCase {
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 30), app.debugDescription)
 
+        XCTAssertFalse(app.buttons["ledger-sync-status"].exists, "Local-only overview has no sync indicator")
+        app.tabBars.buttons["账户"].tap()
         let toolbar = app.buttons["ledger-sync-status"]
         XCTAssertTrue(toolbar.waitForExistence(timeout: 5))
         expect(toolbar, label: "已保存到本机", enabled: true)
@@ -37,7 +39,7 @@ final class LocalSyncToolbarUITests: XCTestCase {
         for attempt in 1...2 {
             toolbar.tap()
             expect(toolbar, label: "正在同步", enabled: false, timeout: 5)
-            XCTAssertEqual(app.navigationBars["财务概览"].progressIndicators.count, 0,
+            XCTAssertEqual(app.navigationBars["账户"].progressIndicators.count, 0,
                 "Sync status uses a static dot while the action remains disabled")
             let busyScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             busyScreenshot.name = "local-toolbar-busy-\(attempt)"
@@ -47,6 +49,13 @@ final class LocalSyncToolbarUITests: XCTestCase {
             XCTAssertFalse(app.alerts["同步这个 Git 工作区？"].exists)
             expect(toolbar, label: "已同步", enabled: true, timeout: 30)
         }
+        app.tabBars.buttons["概览"].tap()
+        expect(toolbar, label: "已同步", enabled: true)
+        toolbar.tap()
+        XCTAssertTrue(app.navigationBars["存储与同步"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.alerts["同步这个 Git 工作区？"].exists)
+        app.navigationBars["存储与同步"].buttons["完成"].tap()
+        expect(toolbar, label: "已同步", enabled: true)
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "local-toolbar-synced"
         screenshot.lifetime = .keepAlways
