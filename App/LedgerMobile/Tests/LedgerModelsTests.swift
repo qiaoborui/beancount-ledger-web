@@ -526,6 +526,15 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(candidates.filter(updated.contains).count, 50)
     }
 
+    func testMoneyWithoutRepeatedSymbolPreservesCurrencyPrecisionAndSigns() {
+        XCTAssertEqual(MoneyText.format(minorUnits: 123456, currency: "CNY", showsCurrency: false), "1,234.56")
+        XCTAssertEqual(MoneyText.format(minorUnits: -123456, currency: "USD", showsCurrency: false), "-1,234.56")
+        XCTAssertEqual(MoneyText.format(minorUnits: 123456, currency: "JPY", showsCurrency: false), "1,235")
+        XCTAssertEqual(MoneyText.format(minorUnits: 0, currency: "CNY", showsCurrency: false), "0.00")
+        XCTAssertEqual(MoneyText.format(minorUnits: 100, currency: "CNY", showSign: true, showsCurrency: false), "+1.00")
+        XCTAssertEqual(MoneyText.format(minorUnits: 100, currency: "CNY"), "¥1.00")
+    }
+
     func testCompactMoneyUsesChineseAndInternationalUnits() {
         XCTAssertEqual(MoneyText.formatCompact(minorUnits: 999_999, currency: "CNY"), "¥9,999.99")
         XCTAssertEqual(MoneyText.formatCompact(minorUnits: 1_234_567, currency: "CNY"), "¥1.2w")

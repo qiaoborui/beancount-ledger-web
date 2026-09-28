@@ -37,12 +37,13 @@ struct TerminalAmount: View {
     var color: Color = TerminalPalette.ink
     var size: CGFloat = 16
     var prefix: String = ""
+    var showsCurrency = false
 
     @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
 
     var body: some View {
-        Text(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency) : "••••••")
-            .font(.system(size: size * scale, weight: .semibold, design: .monospaced))
+        Text(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: showsCurrency) : "••••••")
+            .font(.system(size: size * scale, weight: .medium, design: .monospaced))
             .foregroundStyle(color)
             .lineLimit(1)
             .minimumScaleFactor(0.35)
@@ -51,7 +52,7 @@ struct TerminalAmount: View {
 }
 
 struct TerminalRule: View {
-    var body: some View { Rectangle().fill(TerminalPalette.line).frame(height: 1 / UIScreen.main.scale) }
+    var body: some View { Rectangle().fill(TerminalPalette.line).frame(height: 1) }
 }
 
 struct TerminalDateRangeButton: View {
@@ -60,14 +61,10 @@ struct TerminalDateRangeButton: View {
     var body: some View {
         Button { session.presentRangePicker() } label: {
             HStack(spacing: 5) {
-                Image(systemName: "calendar").font(.system(size: 12, weight: .semibold))
-                Text(session.selectedRange.toolbarTitle()).font(.system(size: 13, weight: .semibold, design: .monospaced))
+                Text(session.selectedRange.preset == .custom ? "自定义" : session.selectedRange.displayTitle).font(.system(size: 13, weight: .regular, design: .monospaced))
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
             }
-            .foregroundStyle(TerminalPalette.ink)
-            .padding(.horizontal, 9).padding(.vertical, 6)
-            .background(TerminalPalette.panel)
-            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .foregroundStyle(TerminalPalette.accent)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
@@ -79,6 +76,9 @@ struct TerminalDateRangeButton: View {
 }
 
 struct TerminalPageChrome: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    var isRoot = true
     @EnvironmentObject private var session: LedgerSession
     let title: String
     let compactTitle: String?
@@ -89,32 +89,50 @@ struct TerminalPageChrome: ViewModifier {
             .background(TerminalPalette.page)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(horizontalSizeClass == .regular ? .visible : .hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1) }
-                    .terminalPlainBackground()
-                ToolbarItem(placement: .topBarLeading) {
-                    Text(compactTitle ?? title)
-                        .font(.system(size: 17, weight: .bold, design: .monospaced))
-                        .foregroundStyle(TerminalPalette.accent)
-                }
-                .terminalPlainBackground()
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 8) {
-                        TerminalDateRangeButton().fixedSize(horizontal: true, vertical: false)
-                        if !session.isLocal || session.localGitConfiguration != nil {
-                            TerminalSyncButton()
+                if horizontalSizeClass == .regular {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        HStack(spacing: 8) {
+                            TerminalDateRangeButton()
+                            if !session.isLocal || session.localGitConfiguration != nil { TerminalSyncButton() }
                         }
                     }
                 }
-                .terminalPlainBackground()
             }
-
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if horizontalSizeClass != .regular {
+                    VStack(spacing: 0) {
+                        HStack(spacing: 8) {
+                            if !isRoot {
+                                Button { dismiss() } label: {
+                                    Image(systemName: "chevron.left").font(.system(size: 18))
+                                        .frame(width: 44, height: 44)
+                                }.buttonStyle(.plain).foregroundStyle(TerminalPalette.accent)
+                                    .accessibilityLabel("返回上一页")
+                            }
+                            Text(compactTitle ?? title)
+                                .accessibilityLabel(title)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(TerminalPalette.accent)
+                            Spacer(minLength: 4)
+                            TerminalDateRangeButton().fixedSize(horizontal: true, vertical: false)
+                            if !session.isLocal || session.localGitConfiguration != nil {
+                                TerminalSyncButton()
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(height: 55)
+                        TerminalRule()
+                    }.background(TerminalPalette.page)
+                }
+            }
     }
 }
 
 extension View {
-    func terminalPageChrome(_ title: String, compactTitle: String? = nil) -> some View {
-        modifier(TerminalPageChrome(title: title, compactTitle: compactTitle))
+    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true) -> some View {
+        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle))
     }
 }
 
@@ -133,10 +151,10 @@ private struct TerminalSyncButton: View {
 
     private var symbol: String {
         switch presentation.indicator {
-        case .local, .synced: "checkmark.circle"
+        case .local, .synced: "checkmark"
         case .syncing: "arrow.triangle.2.circlepath"
-        case .pending: "arrow.up.circle"
-        case .attention: "exclamationmark.circle"
+        case .pending: "square.and.arrow.up"
+        case .attention: "exclamationmark.triangle"
         }
     }
 
@@ -144,7 +162,7 @@ private struct TerminalSyncButton: View {
         if session.isLocal {
             Button { detailsPresented = true } label: {
                 Image(systemName: symbol)
-                    .font(.system(size: 17, weight: .medium))
+                    .font(.system(size: 18, weight: .regular))
                     .foregroundStyle(presentation.indicator == .attention ? TerminalPalette.negative : TerminalPalette.accent)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
@@ -160,6 +178,7 @@ private struct TerminalSyncButton: View {
             // Server mode has no local Git status. Keep its refresh semantics explicit.
             Button { Task { await session.refresh() } } label: {
                 Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 18, weight: .regular))
                     .foregroundStyle(TerminalPalette.accent)
                     .frame(width: 44, height: 44)
             }
@@ -171,13 +190,56 @@ private struct TerminalSyncButton: View {
     }
 }
 
-private extension ToolbarContent {
-    @ToolbarContentBuilder
-    func terminalPlainBackground() -> some ToolbarContent {
-        if #available(iOS 26.0, *) {
-            sharedBackgroundVisibility(.hidden)
-        } else {
-            self
-        }
+/// The native TabView retains each navigation stack; only its visual tab strip is replaced.
+struct TerminalTabBar: View {
+    let destinations: [LedgerDestination]
+    @Binding var selection: LedgerDestination
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TerminalRule()
+            HStack(spacing: 8) {
+                ForEach(destinations) { destination in
+                    let selected = selection == destination || (selection == .search && destination == .settings)
+                    Button { selection = destination } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: destination == .settings ? "ellipsis" : destination.systemImage)
+                                .font(.system(size: 18, weight: .regular)).frame(height: 20)
+                            Text(destination == .transactions ? "流水" : destination.compactTitle)
+                                .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                            Rectangle().fill(selected ? TerminalPalette.accent : .clear).frame(width: 16, height: 2)
+                        }
+                        .foregroundStyle(selected ? TerminalPalette.ink : TerminalPalette.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("terminal-tab-" + destination.rawValue)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }.padding(.horizontal, 12).padding(.vertical, 7.5)
+        }.background(TerminalPalette.page)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("terminal-tab-bar")
+    }
+}
+
+private struct TerminalFont: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    var weight: Font.Weight
+    var design: Font.Design
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design) {
+        _size = ScaledMetric(wrappedValue: size, relativeTo: .body)
+        self.weight = weight
+        self.design = design
+    }
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weight, design: design))
+    }
+}
+
+extension View {
+    func terminalFont(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> some View {
+        modifier(TerminalFont(size: size, weight: weight, design: design))
     }
 }

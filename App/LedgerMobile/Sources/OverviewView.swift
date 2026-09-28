@@ -3,12 +3,15 @@ import SwiftUI
 struct OverviewView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var ratioLabelWidth: CGFloat = 32
+    @ScaledMetric(relativeTo: .body) private var ratioValueWidth: CGFloat = 40
+    @ScaledMetric(relativeTo: .body) private var shareWidth: CGFloat = 48
     var isRoot = true
 
     var body: some View {
         let accountLabels = TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 16) {
                 if let error = session.errorMessage {
                     StatusBanner(message: error, onDismiss: session.dismissError)
                 }
@@ -24,122 +27,124 @@ struct OverviewView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 32)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .terminalPageChrome("财务概览", compactTitle: "概览")
+        .terminalPageChrome("财务概览", compactTitle: "概览", isRoot: isRoot)
         .refreshable { await session.refresh() }
     }
 
     private func summary(_ ledger: LedgerBootstrap) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("净结余").font(.subheadline)
-                Spacer()
-                if let stats = session.overviewTransactionStats {
-                    Text("\(stats.transactionCount) 笔流水").font(.caption.monospacedDigit())
-                }
-            }
-            .foregroundStyle(TerminalPalette.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("净结余").terminalFont(size: 13).foregroundStyle(TerminalPalette.secondary)
+                .padding(.bottom, 8)
             TerminalAmount(minorUnits: ledger.summary.net, currency: ledger.summary.currency,
-                color: ledger.summary.net < 0 ? TerminalPalette.negative : TerminalPalette.accent, size: 28)
+                color: TerminalPalette.accent, size: 28)
+                .tracking(-1)
                 .accessibilityIdentifier("overview-monthly-net")
-            TerminalRule()
-            metric("收入", amount: ledger.summary.income, currency: ledger.summary.currency,
-                color: TerminalPalette.ink, prefix: "+")
-            metric("支出", amount: ledger.summary.expense, currency: ledger.summary.currency,
-                color: TerminalPalette.ink, prefix: "−")
-            let income = Double(max(0, ledger.summary.income))
-            let expense = Double(max(0, ledger.summary.expense))
+            TerminalRule().padding(.vertical, 16)
+            VStack(spacing: 12) {
+                metric("收入", amount: ledger.summary.income, currency: ledger.summary.currency, prefix: "+")
+                metric("支出", amount: ledger.summary.expense, currency: ledger.summary.currency, prefix: "−")
+            }
+            VStack(spacing: 8) {
+                ratio("收入", amount: ledger.summary.income, maximum: max(ledger.summary.income, ledger.summary.expense), color: TerminalPalette.accent)
+                ratio("支出", amount: ledger.summary.expense, maximum: max(ledger.summary.income, ledger.summary.expense), color: TerminalPalette.secondary)
+            }.padding(.top, 16)
+        }
+        .padding(.vertical, 16).padding(.horizontal, 12)
+        .background(TerminalPalette.panel)
+        .overlay(Rectangle().stroke(TerminalPalette.line, lineWidth: 1))
+    }
+
+    private func metric(_ title: String, amount: Int, currency: String, prefix: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title).terminalFont(size: 13).foregroundStyle(TerminalPalette.secondary)
+            Spacer(minLength: 0)
+            TerminalAmount(minorUnits: amount, currency: currency, size: 16, prefix: amount >= 0 ? prefix : "")
+        }
+    }
+
+    private func ratio(_ title: String, amount: Int, maximum: Int, color: Color) -> some View {
+        let fraction = maximum > 0 ? min(1, max(0, Double(amount) / Double(maximum))) : 0
+        return HStack(spacing: 8) {
+            Text(title).frame(width: ratioLabelWidth, alignment: .leading)
             GeometryReader { geometry in
-                HStack(spacing: 2) {
-                    if session.amountsVisible, income + expense > 0 {
-                        Rectangle().fill(TerminalPalette.accent)
-                            .frame(width: max(0, geometry.size.width - 2) * income / (income + expense))
-                        Rectangle().fill(TerminalPalette.secondary)
-                    } else {
-                        Rectangle().fill(TerminalPalette.line)
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(TerminalPalette.line)
+                    if session.amountsVisible {
+                        Rectangle().fill(color).frame(width: geometry.size.width * fraction)
                     }
                 }
-            }
-            .frame(height: 4)
-            .accessibilityHidden(true)
-        }
-        .padding(16)
-        .background(TerminalPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(TerminalPalette.line, lineWidth: 0.5))
+            }.frame(height: 4).accessibilityHidden(true)
+            Text(session.amountsVisible ? String(format: "%.0f%%", fraction * 100) : "—")
+                .frame(width: ratioValueWidth, alignment: .trailing)
+        }.terminalFont(size: 11, design: .monospaced).foregroundStyle(TerminalPalette.secondary)
     }
 
-    private func metric(_ title: String, amount: Int, currency: String, color: Color, prefix: String) -> some View {
+    private func sectionTitle(_ title: String, action: String, destination: LedgerDestination? = nil) -> some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 16))
+            : AnyLayout(HStackLayout())
         return layout {
-            Text(title).font(.subheadline).foregroundStyle(TerminalPalette.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            TerminalAmount(minorUnits: amount, currency: currency, color: color, size: 16,
-                prefix: amount >= 0 ? prefix : "")
-        }
-    }
-
-    private func sectionTitle(_ title: String, action: String, destination: LedgerDestination) -> some View {
-        HStack {
-            Text(title).font(.system(.subheadline, design: .monospaced, weight: .bold))
+            Text(title).terminalFont(size: 13, weight: .semibold)
                 .foregroundStyle(TerminalPalette.accent)
-            Spacer()
-            Button { session.primaryDestinationID = destination.rawValue } label: {
-                HStack(spacing: 5) {
-                    Text(action)
-                    Image(systemName: "arrow.up.right")
-                }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(TerminalPalette.accent)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
+            if let destination {
+                Button { session.primaryDestinationID = destination.rawValue } label: {
+                    Text(action).terminalFont(size: 12).foregroundStyle(TerminalPalette.accent)
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            } else {
+                Text(action).terminalFont(size: 12).foregroundStyle(TerminalPalette.secondary)
             }
-            .buttonStyle(.plain)
-        }
+        }.frame(minHeight: 44)
     }
 
     private func spending(_ categories: [OverviewCategorySpending], currency: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionTitle("01 / 支出矩阵", action: "分析", destination: .incomeExpense)
+            sectionTitle("01 / 支出矩阵", action: "金额 · 占比")
             TerminalRule()
             if categories.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(session.localOverviewCategoriesError ?? "所选范围暂无支出")
-                        .font(.subheadline).foregroundStyle(TerminalPalette.secondary)
+                        .terminalFont(size: 13).foregroundStyle(TerminalPalette.secondary)
                     if session.localOverviewCategoriesError != nil {
                         Button("重试") { Task { await session.refresh() } }
                     }
                 }.padding(.vertical, 16)
             } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16),
-                    count: dynamicTypeSize.isAccessibilitySize ? 1 : 2), alignment: .leading, spacing: 20) {
-                    ForEach(categories) { item in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 6) {
-                                Text(item.label).font(.subheadline).foregroundStyle(TerminalPalette.ink)
-                                Spacer(minLength: 0)
-                                Text(session.amountsVisible ? String(format: "%.0f%%", item.percentage * 100) : "—")
-                                    .font(.caption.monospacedDigit()).foregroundStyle(TerminalPalette.secondary)
-                            }
-                            TerminalAmount(minorUnits: item.totalMinorUnits, currency: currency)
-                            GeometryReader { geometry in
-                                ZStack(alignment: .leading) {
-                                    Rectangle().fill(TerminalPalette.line)
-                                    if session.amountsVisible {
-                                        Rectangle().fill(TerminalPalette.accent)
-                                            .frame(width: geometry.size.width * min(1, max(0, item.percentage)))
-                                    }
-                                }
-                            }.frame(height: 3).accessibilityHidden(true)
-                        }
-                    }
-                }.padding(.vertical, 16)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    HStack(spacing: 0) {
+                        Text("序").frame(width: 32, alignment: .leading)
+                        Text("分类").frame(maxWidth: .infinity, alignment: .leading)
+                        Text("金额 / \(currency)")
+                        Text("占比").frame(width: 48, alignment: .trailing)
+                    }.terminalFont(size: 11, design: .monospaced)
+                        .foregroundStyle(TerminalPalette.secondary).padding(.vertical, 8)
+                } else {
+                    Text("金额 / \(currency)").terminalFont(size: 11, design: .monospaced)
+                        .foregroundStyle(TerminalPalette.secondary).padding(.vertical, 8)
+                }
+                ForEach(Array(categories.enumerated()), id: \.element.id) { index, item in
+                    TerminalRule()
+                    let layout = dynamicTypeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                        : AnyLayout(HStackLayout(spacing: 0))
+                    layout {
+                        Text(String(format: "%02d", index + 1))
+                            .terminalFont(size: 12, design: .monospaced)
+                            .foregroundStyle(TerminalPalette.accent).frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 32, alignment: .leading)
+                        Text(item.label).terminalFont(size: 13).foregroundStyle(TerminalPalette.ink)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        TerminalAmount(minorUnits: item.totalMinorUnits, currency: currency, size: 13)
+                        Text(session.amountsVisible ? String(format: "%.1f%%", item.percentage * 100) : "—")
+                            .terminalFont(size: 13, design: .monospaced).foregroundStyle(TerminalPalette.secondary)
+                            .frame(width: shareWidth, alignment: .trailing)
+                    }.padding(.vertical, 8).frame(minHeight: 36)
+                }
             }
         }
     }
@@ -156,11 +161,16 @@ struct OverviewView: View {
                 NavigationLink {
                     TransactionDetailView(transaction: transaction)
                 } label: {
-                    TerminalTransactionRow(transaction: transaction, accountLabels: accountLabels)
+                    TerminalTransactionRow(transaction: transaction, accountLabels: accountLabels, accountCurrency: ledger.summary.currency)
                 }
                 .buttonStyle(.plain)
                 .ledgerTransactionActions(transaction)
                 TerminalRule()
+            }
+            if let stats = session.overviewTransactionStats {
+                Text("所选期间 \(stats.transactionCount) 笔流水 · 转账不计收支")
+                    .terminalFont(size: 12).foregroundStyle(TerminalPalette.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 12)
             }
         }
     }
@@ -171,7 +181,7 @@ struct OverviewView: View {
         return response.categories.sorted {
             $0.totalMinorUnits == $1.totalMinorUnits
                 ? $0.label < $1.label : $0.totalMinorUnits > $1.totalMinorUnits
-        }.prefix(4).map { item in
+        }.map { item in
             let visual = TransactionVisualCategory.resolve(
                 transaction: item.representative,
                 presentation: TransactionPresentation(transaction: item.representative),
@@ -223,7 +233,6 @@ struct OverviewView: View {
 
         return positiveCategories
             .sorted { $0.amount == $1.amount ? $0.label < $1.label : $0.amount > $1.amount }
-            .prefix(4)
             .map { item in
                 OverviewCategorySpending(
                     id: item.label,
@@ -252,6 +261,8 @@ private struct TerminalTransactionRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let transaction: LedgerTransaction
     let accountLabels: [String: String]
+    let accountCurrency: String
+    @ScaledMetric(relativeTo: .body) private var dateWidth: CGFloat = 36
 
     var body: some View {
         let presentation = TransactionPresentation(transaction: transaction)
@@ -259,21 +270,27 @@ private struct TerminalTransactionRow: View {
             presentation: presentation, accountLabels: accountLabels)
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
         layout {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(presentation.title).font(.subheadline.weight(.medium))
+            Text(String(transaction.date.suffix(5)).replacingOccurrences(of: "-", with: "/"))
+                .terminalFont(size: 11, design: .monospaced).foregroundStyle(TerminalPalette.accent)
+                .frame(width: dateWidth, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(presentation.title).terminalFont(size: 16, weight: .medium)
                     .foregroundStyle(TerminalPalette.ink)
                     .lineLimit(2)
-                Text("\(transaction.date) · \(visual.categoryLabel)")
-                    .font(.caption).foregroundStyle(TerminalPalette.secondary)
+                Text(presentation.subtitle)
+                    .terminalFont(size: 12).foregroundStyle(TerminalPalette.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            TerminalAmount(minorUnits: presentation.minorUnits, currency: presentation.currency,
-                color: presentation.kind == .income ? TerminalPalette.positive : TerminalPalette.ink,
-                prefix: presentation.kind == .expense ? "−" : presentation.kind == .income ? "+" : "↔ ")
+            VStack(alignment: .trailing, spacing: 4) {
+                TerminalAmount(minorUnits: presentation.minorUnits, currency: presentation.currency,
+                    size: 13, prefix: presentation.kind == .expense ? "−" : presentation.kind == .income ? "+" : "",
+                    showsCurrency: presentation.currency != accountCurrency)
+                Text(visual.categoryLabel).terminalFont(size: 11).foregroundStyle(TerminalPalette.secondary)
+            }
         }
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }

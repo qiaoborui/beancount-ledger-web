@@ -51,6 +51,7 @@ struct MoreView: View {
                 }
             }
             Section("账本工具") {
+                MoreDestinationButton(destination: .search, detail: "搜索整个账本", accessibilityIdentifier: "more-search")
                 NavigationLink {
                     CategoriesManagementView()
                 } label: {

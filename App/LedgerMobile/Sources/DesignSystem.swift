@@ -161,6 +161,7 @@ private struct LedgerNavigation: ViewModifier {
         content
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.visible, for: .navigationBar)
             .toolbar {
                 if showsTimeRange {
                     ToolbarItem(placement: .topBarLeading) {

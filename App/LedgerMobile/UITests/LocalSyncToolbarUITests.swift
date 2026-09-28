@@ -13,10 +13,16 @@ final class LocalSyncToolbarUITests: XCTestCase {
         app.buttons["local-ledger-create"].tap()
         XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForExistence(timeout: 5))
         app.buttons["local-ledger-confirm-create"].tap()
-        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(app.buttons["navigation-time-range"].waitForExistence(timeout: 30), app.debugDescription)
 
+        XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForNonExistence(timeout: 10))
         XCTAssertFalse(app.buttons["ledger-sync-status"].exists, "Local-only overview has no sync indicator")
-        app.tabBars.buttons["账户"].tap()
+        let accounts = app.buttons["terminal-tab-accounts"]
+        accounts.tap()
+        // Creating the first local ledger replaces the onboarding host. As in
+        // LocalLedgerUITests, allow its first navigation transition to settle.
+        if !app.navigationBars["账户"].waitForExistence(timeout: 3) { accounts.tap() }
+        XCTAssertTrue(app.navigationBars["账户"].waitForExistence(timeout: 5))
         let toolbar = app.buttons["ledger-sync-status"]
         XCTAssertTrue(toolbar.waitForExistence(timeout: 5))
         expect(toolbar, label: "已保存到本机", enabled: true)
@@ -25,7 +31,7 @@ final class LocalSyncToolbarUITests: XCTestCase {
         let repository = app.textFields["local-git-url"]
         XCTAssertTrue(repository.waitForExistence(timeout: 5))
         repository.tap()
-        repository.typeText("https://example.invalid/ledger.git")
+        repository.typeText("https://example.invalid/ledger.git\n")
         let save = app.buttons["local-git-save"]
         for _ in 0..<4 where !save.isHittable { app.swipeUp() }
         XCTAssertTrue(save.isHittable, app.debugDescription)
@@ -49,7 +55,7 @@ final class LocalSyncToolbarUITests: XCTestCase {
             XCTAssertFalse(app.alerts["同步这个 Git 工作区？"].exists)
             expect(toolbar, label: "已同步", enabled: true, timeout: 30)
         }
-        app.tabBars.buttons["概览"].tap()
+        app.buttons["terminal-tab-overview"].tap()
         expect(toolbar, label: "已同步", enabled: true)
         toolbar.tap()
         XCTAssertTrue(app.navigationBars["存储与同步"].waitForExistence(timeout: 5))

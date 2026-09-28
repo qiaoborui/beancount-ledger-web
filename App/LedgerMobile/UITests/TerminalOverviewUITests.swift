@@ -12,6 +12,12 @@ final class TerminalOverviewUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["月度概览"].exists)
         XCTAssertFalse(app.staticTexts["消费节奏"].exists)
         XCTAssertTrue(app.staticTexts["01 / 支出矩阵"].exists)
+        XCTAssertTrue(app.staticTexts["金额 / CNY"].exists)
+        XCTAssertTrue(app.staticTexts["05"].exists)
+        XCTAssertLessThan(app.staticTexts["overview-monthly-net"].frame.height, 40)
+        let sync = app.buttons["ledger-sync-status"]
+        XCTAssertEqual(date.frame.midY, sync.frame.midY, accuracy: 2)
+        XCTAssertLessThanOrEqual(sync.frame.width, 44)
         capture("terminal-overview")
         date.tap()
         app.buttons["上一周期"].tap()
@@ -59,17 +65,31 @@ final class TerminalOverviewUITests: XCTestCase {
     func testPrivacyMasksOverviewAmountsAndCategoryPercentages() {
         let app = launch()
         XCTAssertTrue(app.buttons["navigation-time-range"].waitForExistence(timeout: 15))
-        app.tabBars.buttons["账户"].tap()
+        app.buttons["terminal-tab-accounts"].tap()
         let hide = app.buttons["隐藏金额"]
         XCTAssertTrue(hide.waitForExistence(timeout: 5))
         hide.tap()
-        app.tabBars.buttons["概览"].tap()
+        app.buttons["terminal-tab-overview"].tap()
         let net = app.staticTexts["overview-monthly-net"]
         XCTAssertTrue(net.waitForExistence(timeout: 5))
         XCTAssertEqual(net.label, "金额已隐藏")
         XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '¥'")).count, 0)
         XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "%")).count, 0)
         capture("terminal-overview-private")
+    }
+
+    func testFlatNavigationKeepsSearchAndOverviewReachable() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["navigation-time-range"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.tabBars.firstMatch.exists)
+        app.buttons["terminal-tab-settings"].tap()
+        let search = app.buttons["more-search"]
+        for _ in 0..<4 where !search.isHittable { app.swipeUp() }
+        XCTAssertTrue(search.isHittable)
+        search.tap()
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
+        app.buttons["terminal-tab-overview"].tap()
+        XCTAssertTrue(app.buttons["navigation-time-range"].waitForExistence(timeout: 5))
     }
 
     private func launch(category: String = "UICTContentSizeCategoryL") -> XCUIApplication {

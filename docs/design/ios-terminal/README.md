@@ -1,6 +1,6 @@
 # Native terminal design
 
-The approved visual reference is the terminal variant. This first native increment covers reusable visual primitives and overview; other screens retain their current implementation.
+The approved visual reference is the terminal variant. This native increment covers reusable visual primitives, overview, and the compact navigation strip; other content screens retain their current implementation.
 
 | Token | Light | Dark |
 | --- | --- | --- |
@@ -11,7 +11,23 @@ The approved visual reference is the terminal variant. This first native increme
 | Rule | `#CBD3CF` | `#354047` |
 | Accent | `#855300` | `#E5B55F` |
 
-System Chinese typography with monospaced amounts, 16 pt outer spacing, 4 pt corners, thin separators, no content shadows or gradients. Native text scaling and privacy masking remain functional.
+System Chinese typography with monospaced amounts, square summary borders, 1 pt rules, no content shadows or gradients. Content fonts scale with Dynamic Type; accessibility category rows stack vertically. The navigation controls keep 44 pt hit targets.
+
+The implementation follows the terminal prototype's CSS dimensions:
+
+| Element | Default logical size |
+| --- | --- |
+| Header | 56 pt, 12 pt horizontal inset, 16 pt title |
+| Date | 13 pt plain text and chevron, no calendar or capsule |
+| Sync | 18 pt outline glyph, 44 pt target beside date |
+| Content | 16 pt horizontal, 12 pt top, 16 pt section gaps |
+| Summary | 16 pt vertical / 12 pt horizontal inset; 28 pt medium net |
+| Income and expense | 13 pt labels, 16 pt values; separate 4 pt ratio bars |
+| Category table | 13 pt rows, 11 pt header, 32 pt sequence / 48 pt share columns |
+| Recent transaction | 36 pt date column, 16 pt title, 12 pt subtitle, 13 pt amount |
+| Compact navigation | Flat 60 pt strip, four default destinations, 18 pt icons / 11 pt labels |
+
+Amounts omit repeated currency symbols where the summary/table establishes the unit; VoiceOver retains the currency. Transactions in a different currency still show their symbol. Category rows include all positive categories rather than truncating at four.
 
 Overview hierarchy: one navigation row (title, compact date, optional sync icon), net balance and income/expense, spending matrix, recent transactions. The date sheet edits a draft; cancel does not change the active range. No duplicate period row or quick-entry dock.
 
@@ -29,8 +45,8 @@ All images use the safe synthetic preview fixture on an iPhone 13 mini (375 pt).
 | --- | --- |
 | ![Light overview](overview-light.png) | ![Dark overview](overview-dark.png) |
 
-Additional checks: [largest accessibility type](overview-accessibility.png), [amounts hidden](overview-private.png), [date sheet](date-sheet-dark.png).
+Additional checks: [local Git synced state](overview-synced.png), [largest accessibility type](overview-accessibility.png), [amounts hidden](overview-private.png), [date sheet](date-sheet-dark.png).
 
-Validation uses Xcode simulator builds, `LedgerModelsTests`, `LocalSyncPresentationTests`, the two date-session tests, `TerminalOverviewUITests`, and `LocalSyncToolbarUITests`. The overview checks exercise draft cancel/apply, native detail return, 44 pt date targets, accessibility reachability, and privacy masking including percentages. No physical-device, signing, or IPA distribution acceptance is implied.
+The fidelity correction is validated with simulator builds, 34 `LedgerModelsTests` (including currency precision and symbol omission), and nine focused UI scenarios. These cover light/dark date draft/apply/cancel, native detail return, header geometry, all category rows, accessibility reachability, privacy masking, local Git status/details, configurable tabs and overflow return, and global search state across tabs/detail navigation. No full-app sweep, iPad runtime, physical-device, signing, or IPA distribution acceptance is implied.
 
-The existing app tab bar and other pages are deliberately outside this increment. Shared date controls use native sheets and pickers with terminal colors; all accounting calculations and transaction confirmation flows continue through the existing models and views.
+The compact system tab strip is replaced because iOS 26+ imposes floating glass geometry. Independent navigation stacks and configurable destinations remain; global search is accessible from More. The regular sidebar and other content pages remain in their existing design. Shared date controls use native sheets and pickers with terminal colors; all accounting calculations and transaction confirmation flows continue through the existing models and views.
