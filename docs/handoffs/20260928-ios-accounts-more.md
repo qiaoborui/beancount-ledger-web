@@ -5,7 +5,7 @@ Status: completed. Updated: 2026-09-28T16:34+08:00.
 ## Goal and scope
 Continue the approved compact terminal design on Accounts and More, with light/dark colors and a single date/sync header. Preserve filtering, account navigation, reconciliation, privacy and overflow routes. Account detail content, investment content and editing sheets are outside this increment.
 
-Branch: `codex/ios-terminal-overview`. Base revision: `ca0fb84`. PR: https://github.com/qiaoborui/beancount-ledger-web/pull/498. The code, tests and safe screenshots accompany this note; commit/push status is recorded locally after delivery.
+Branch: `codex/ios-terminal-overview`. Code revision: `59f9bd9` (base `ca0fb84`). PR: https://github.com/qiaoborui/beancount-ledger-web/pull/498. Code, tests and safe screenshots are committed; this note accompanies the same PR update.
 
 ## Completed
 - Accounts uses a ruled balance summary, flat filters and a contextual add/reconcile menu. Existing period balance calculations and row reconciliation actions are retained. Labels distinguish period end from current values; summary establishes currency.
