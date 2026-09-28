@@ -322,3 +322,11 @@ extension View {
         modifier(TerminalFont(size: size, weight: weight, design: design))
     }
 }
+
+struct TerminalSectionLabel: View {
+    let text: String
+    var body: some View {
+        Text(text.uppercased()).terminalFont(size: 11, weight: .semibold, design: .monospaced)
+            .tracking(0.7).foregroundStyle(TerminalPalette.secondary).textCase(nil)
+    }
+}

@@ -1,6 +1,6 @@
 # Native terminal design
 
-The approved visual reference is the terminal variant. This native migration covers reusable visual primitives, overview, income/expense analysis, asset analysis, the transaction list and the compact navigation strip. Account management, More, investment content and editing/detail sheets retain their existing implementation.
+The approved visual reference is the terminal variant. This native migration covers reusable visual primitives, overview, income/expense analysis, asset analysis, the transaction list, Accounts, More and the compact navigation strip. Investment content and editing/detail sheets retain their existing implementation.
 
 | Token | Light | Dark |
 | --- | --- | --- |
@@ -72,3 +72,17 @@ Final report screenshots and validation for this increment are recorded in `docs
 | Transactions | [Screenshot](transactions-light.png) | [Screenshot](transactions-dark.png) |
 
 Details: [categories](income-categories-light.png), [account valuations](assets-accounts-light.png), [selection](transactions-selection.png), [report privacy](income-private.png), [accessible report layout](report-accessibility-dark.png).
+
+
+## Accounts and More
+
+Accounts uses a ruled net-worth summary with currency, assets/debt columns, underlined category filters and expandable account groups. Summary labels distinguish period-end balances from current values. Add/reconcile actions are in the header menu; account context/swipe reconciliation remains available. Group labels keep their own accessibility identifiers so expanded account links can be targeted independently. More uses compact numbered menu rows and a header search shortcut. Both pages share the single date/sync header. Local-only ledgers hide sync; configured ledger icons open storage details without initiating exchange.
+
+Text uses the shared scaled terminal font; account group headers stack at accessibility sizes. Safe preview screenshots:
+
+| Page | Light | Dark |
+| --- | --- | --- |
+| Accounts | [Screenshot](accounts-light.png) | [Screenshot](accounts-dark.png) |
+| More | [Screenshot](more-light.png) | [Screenshot](more-dark.png) |
+
+See `docs/handoffs/20260928-ios-accounts-more.md` for verification and remaining scope.

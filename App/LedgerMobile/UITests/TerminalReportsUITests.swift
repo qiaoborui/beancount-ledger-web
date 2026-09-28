@@ -76,7 +76,7 @@ final class TerminalReportsUITests: XCTestCase {
         for _ in 0..<5 where !categories.isHittable { app.swipeUp() }
         XCTAssertTrue(categories.isHittable, app.debugDescription)
         app.buttons["返回上一页"].tap()
-        XCTAssertTrue(app.navigationBars["更多"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5))
     }
 
     private func openReport(_ app: XCUIApplication, id: String) {
