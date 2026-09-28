@@ -93,8 +93,8 @@ struct LedgerAnalysisView: View {
                 }
             }
         }
-        .background(LedgerPalette.canvas)
-        .ledgerNavigation(kind.title, isRoot: isRoot, showsTimeRange: true)
+        .background(TerminalPalette.page)
+        .terminalPageChrome(kind.title, isRoot: isRoot)
         .task(id: requestKey) {
             await load(replacingContent: resource == nil)
         }
@@ -110,16 +110,16 @@ struct LedgerAnalysisView: View {
 
                 switch resource {
                 case let .assets(data):
-                    AssetsAnalysisContent(data: data)
+                    TerminalAssetsReport(data: data)
                 case let .incomeExpense(data):
-                    IncomeExpenseAnalysisContent(data: data)
+                    TerminalIncomeExpenseReport(data: data)
                 case let .investments(data):
                     InvestmentsAnalysisContent(data: data)
                 }
             }
             .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-            .padding(.top, LedgerLayout.pageTopInset)
-            .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
             .ledgerAdaptivePageWidth()
         }
         .id(kind)

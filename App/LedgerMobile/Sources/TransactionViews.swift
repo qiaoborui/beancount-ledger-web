@@ -279,12 +279,19 @@ struct TransactionFilterBar: View {
     @Binding var kindFilter: TransactionKindFilter
 
     var body: some View {
-        Picker("交易类型", selection: $kindFilter) {
+        HStack(spacing: 0) {
             ForEach(TransactionKindFilter.allCases) { filter in
-                Text(filter.title).tag(filter)
+                Button { kindFilter = filter } label: {
+                    Text(filter.title).terminalFont(size: 13, weight: kindFilter == filter ? .semibold : .regular)
+                        .foregroundStyle(kindFilter == filter ? TerminalPalette.accent : TerminalPalette.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .overlay(alignment: .bottom) {
+                            if kindFilter == filter { Rectangle().fill(TerminalPalette.accent).frame(height: 2) }
+                        }
+                }.buttonStyle(.plain).accessibilityAddTraits(kindFilter == filter ? .isSelected : [])
             }
         }
-        .pickerStyle(.segmented)
+        .overlay(alignment: .bottom) { TerminalRule().offset(y: 1) }
         .accessibilityIdentifier("transaction-kind-filter")
     }
 }
@@ -501,25 +508,35 @@ struct TransactionsView: View {
         TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
     }
 
-    private func groupExpense(for transactions: [LedgerTransaction]) -> Int {
-        var total = 0
-        for tx in transactions {
-            let txExpense = tx.postings
-                .filter { $0.account.hasPrefix("Expenses:") }
-                .reduce(0) { $0 + $1.amount }
-            total += txExpense
-        }
-        return max(0, total)
-    }
-
     private var transactionList: some View {
         let labels = accountLabels
-        let dayExpenses = Dictionary(uniqueKeysWithValues:
-            (session.localTransactionSummary?.days ?? []).map { ($0.date, $0.expense) })
         return List {
             Section {
-                TransactionFilterBar(kindFilter: $filters.kind)
-                    .id("transaction-list-top")
+                VStack(spacing: 12) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 16))
+                        TextField("商户、备注或标签", text: $filters.query)
+                            .terminalFont(size: 16).autocorrectionDisabled()
+                            .accessibilityIdentifier("transaction-quick-search")
+                        if !filters.query.isEmpty {
+                            Button { filters.query = "" } label: { Image(systemName: "xmark.circle") }
+                                .frame(width: 44, height: 44).accessibilityLabel("清除流水搜索")
+                        }
+                    }
+                    .foregroundStyle(TerminalPalette.secondary).padding(.horizontal, 12)
+                    .frame(minHeight: 44).background(TerminalPalette.panel)
+                    .overlay { RoundedRectangle(cornerRadius: 4).stroke(TerminalPalette.line) }
+                    TransactionFilterBar(kindFilter: $filters.kind)
+                    HStack {
+                        Text((filters.account.flatMap { labels[$0] ?? $0 } ?? "全部账户") + " · " + (displayedCount.map { "\($0) 笔" } ?? "统计中"))
+                            .terminalFont(size: 12).foregroundStyle(TerminalPalette.secondary)
+                        Spacer(minLength: 8)
+                        Button("筛选", systemImage: "line.3.horizontal.decrease") { filterPresented = true }
+                            .terminalFont(size: 12).foregroundStyle(TerminalPalette.accent).frame(minHeight: 44)
+                    }
+                }
+                .padding(.top, 10)
+                .id("transaction-list-top")
             }
             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
             .listRowBackground(Color.clear)
@@ -564,30 +581,6 @@ struct TransactionsView: View {
                     ForEach(group.transactions) { transaction in
                         transactionRow(for: transaction, accountLabels: labels)
                     }
-                } header: {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(TransactionDateHeaderFormatter.format(group.date))
-                            .font(.system(.footnote, design: .rounded, weight: .semibold))
-                            .foregroundStyle(LedgerPalette.ink)
-                        Spacer()
-                        let dayExpense = session.isLocal
-                            ? (dayExpenses[group.date] ?? 0)
-                            : groupExpense(for: group.transactions)
-                        if dayExpense > 0 {
-                            HStack(spacing: 3) {
-                                Text("支出")
-                                    .font(.system(size: 11, weight: .regular))
-                                    .foregroundStyle(LedgerPalette.secondary)
-                                AmountLabel(
-                                    minorUnits: dayExpense,
-                                    currency: session.ledger?.valuationCurrency ?? "CNY",
-                                    font: .system(size: 12, weight: .semibold, design: .rounded),
-                                    color: LedgerPalette.secondary
-                                )
-                            }
-                        }
-                    }
-                    .textCase(nil)
                 }
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
@@ -645,69 +638,45 @@ struct TransactionsView: View {
                     }
                 }
         }
-        .ledgerReadingList()
-        .ledgerNavigation("流水", isRoot: isRoot, showsTimeRange: true, showsSync: false)
+        .listStyle(.plain)
+        .listSectionSpacing(0)
+        .tint(TerminalPalette.accent)
+        .terminalPageChrome("流水", isRoot: isRoot, actions: AnyView(transactionActions))
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
         .task(id: windowRequestKey) {
             if windowRequestKey.readable { await loadWindow(reuseCurrent: true) }
         }
-        .toolbar {
-            if session.isLocal {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("记一笔", systemImage: "plus") {
-                        LedgerFeedback.light()
-                        creatingTransaction = true
-                    }
-                    .accessibilityIdentifier("transaction-create-local")
+    }
+
+    @ViewBuilder
+    private var transactionActions: some View {
+        if isSelecting {
+            Button("完成") { endSelection() }
+                .font(.system(size: 13)).frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel("完成多选")
+        } else if actionRequestID != nil {
+            ProgressView().frame(width: 44, height: 44).accessibilityLabel("准备交易操作")
+        } else {
+            Menu {
+                if session.isLocal {
+                    Button("记一笔", systemImage: "plus") { creatingTransaction = true }
+                        .accessibilityIdentifier("transaction-create-local")
                 }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                if isSelecting {
-                    Button("完成") {
-                        endSelection()
-                    }
-                    .fontWeight(.semibold)
-                    .accessibilityLabel("完成多选")
-                } else if actionRequestID != nil {
-                    ProgressView().accessibilityLabel("准备交易操作")
-                } else {
-                    Menu {
-                        Button {
-                            filterPresented = true
-                        } label: {
-                            Label(
-                                activeStructuredFilterCount > 0 ? "筛选交易 (\(activeStructuredFilterCount))" : "筛选交易",
-                                systemImage: activeStructuredFilterCount > 0 ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
-                            )
-                        }
-
-                        Button {
-                            beginSelection()
-                        } label: {
-                            Label("多选流水", systemImage: "checkmark.circle")
-                        }
-                        .accessibilityIdentifier("transaction-tag-selection")
-
-                        if session.isLocal {
-                            Button("存储与同步", systemImage: "internaldrive") { storagePresented = true }
-                                .accessibilityIdentifier("transaction-storage")
-                        } else {
-                            Button("刷新账本", systemImage: "arrow.clockwise") { Task { await session.refresh() } }
-                        }
-
-                        Button {
-                            eventTagListPresented = true
-                        } label: {
-                            Label("事件与项目核算", systemImage: "tag")
-                        }
-                    } label: {
-                        Image(systemName: activeStructuredFilterCount > 0 ? "ellipsis.circle.fill" : "ellipsis")
-                    }
-                    .accessibilityLabel("流水操作")
-                    .accessibilityIdentifier("transaction-actions")
+                Button("筛选交易", systemImage: "line.3.horizontal.decrease") { filterPresented = true }
+                Button("多选流水", systemImage: "checkmark.circle") { beginSelection() }
+                    .accessibilityIdentifier("transaction-tag-selection")
+                if session.isLocal {
+                    Button("存储与同步", systemImage: "internaldrive") { storagePresented = true }
+                        .accessibilityIdentifier("transaction-storage")
                 }
+                Button("事件与项目核算", systemImage: "tag") { eventTagListPresented = true }
+            } label: {
+                Image(systemName: "ellipsis").font(.system(size: 18)).frame(width: 44, height: 44)
+                    .foregroundStyle(TerminalPalette.accent)
             }
+            .accessibilityLabel("流水操作")
+            .accessibilityIdentifier("transaction-actions")
         }
     }
 
@@ -931,27 +900,35 @@ struct TransactionsView: View {
             Button {
                 toggleSelection(transaction)
             } label: {
-                TransactionSelectableCard(
-                    transaction: transaction,
-                    selected: isSelected,
-                    accountLabels: accountLabels
-                )
+                HStack(spacing: 8) {
+                    Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(TerminalPalette.accent)
+                    TerminalTransactionRow(transaction: transaction, accountLabels: accountLabels,
+                        accountCurrency: session.ledger?.valuationCurrency ?? "CNY",
+                        showsYear: session.selectedRange.start.prefix(4) != session.selectedRange.end.prefix(4))
+                }
             }
             .buttonStyle(.plain)
-            .listRowBackground(isSelected ? LedgerPalette.cobalt.opacity(0.08) : LedgerPalette.canvas)
+            .listRowBackground(isSelected ? TerminalPalette.panel : TerminalPalette.page)
             .accessibilityIdentifier("transaction-select-row-\(transaction.source.line)")
+            .accessibilityValue(isSelected ? "已选择" : "未选择")
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
         } else {
             NavigationLink {
                 TransactionDetailView(transaction: transaction)
             } label: {
-                TransactionRow(
-                    transaction: transaction,
-                    accountLabels: accountLabels,
-                    mutationPhase: session.transactionMutationPhase(for: transaction)
-                )
+                VStack(alignment: .leading, spacing: 0) {
+                    TerminalTransactionRow(transaction: transaction, accountLabels: accountLabels,
+                        accountCurrency: session.ledger?.valuationCurrency ?? "CNY",
+                        showsYear: session.selectedRange.start.prefix(4) != session.selectedRange.end.prefix(4))
+                    if let phase = session.transactionMutationPhase(for: transaction) {
+                        TransactionMutationBadge(phase: phase)
+                    }
+                }
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
+            .listRowBackground(TerminalPalette.page)
             .ledgerTransactionActions(transaction)
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                 Button {

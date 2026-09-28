@@ -82,6 +82,7 @@ struct TerminalPageChrome: ViewModifier {
     @EnvironmentObject private var session: LedgerSession
     let title: String
     let compactTitle: String?
+    var actions: AnyView? = nil
 
     func body(content: Content) -> some View {
         content
@@ -89,6 +90,11 @@ struct TerminalPageChrome: ViewModifier {
             .background(TerminalPalette.page)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+            .background {
+                if !isRoot && horizontalSizeClass != .regular {
+                    TerminalBackGestureBridge().frame(width: 0, height: 0)
+                }
+            }
             .toolbar(horizontalSizeClass == .regular ? .visible : .hidden, for: .navigationBar)
             .toolbar {
                 if horizontalSizeClass == .regular {
@@ -96,6 +102,7 @@ struct TerminalPageChrome: ViewModifier {
                         HStack(spacing: 8) {
                             TerminalDateRangeButton()
                             if !session.isLocal || session.localGitConfiguration != nil { TerminalSyncButton() }
+                            actions
                         }
                     }
                 }
@@ -120,6 +127,7 @@ struct TerminalPageChrome: ViewModifier {
                             if !session.isLocal || session.localGitConfiguration != nil {
                                 TerminalSyncButton()
                             }
+                            actions
                         }
                         .padding(.horizontal, 12)
                         .frame(height: 55)
@@ -130,9 +138,80 @@ struct TerminalPageChrome: ViewModifier {
     }
 }
 
+/// A custom compact header must not disable UINavigationController's edge-swipe pop.
+/// Scope the delegate to the visible destination and restore UIKit's delegate on exit.
+private struct TerminalBackGestureBridge: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> Controller { Controller() }
+    func updateUIViewController(_ controller: Controller, context: Context) { controller.installIfVisible() }
+    static func dismantleUIViewController(_ controller: Controller, coordinator: ()) { controller.restore() }
+
+    final class Controller: UIViewController, UIGestureRecognizerDelegate {
+        private struct OriginalGesture {
+            weak var recognizer: UIGestureRecognizer?
+            weak var delegate: UIGestureRecognizerDelegate?
+            var enabled: Bool
+        }
+        private var originals: [OriginalGesture] = []
+        private var isVisible = false
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            isVisible = true
+            installIfVisible()
+        }
+
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            installIfVisible()
+        }
+
+        func installIfVisible() {
+            guard isVisible, let navigationController else { return }
+            var recognizers = [navigationController.interactivePopGestureRecognizer].compactMap { $0 }
+            // iOS 26+ also routes back swipes through the content-area recognizer.
+            if #available(iOS 26.0, *), let content = navigationController.interactiveContentPopGestureRecognizer {
+                recognizers.append(content)
+            }
+            for recognizer in recognizers where recognizer.delegate !== self {
+                originals.append(OriginalGesture(recognizer: recognizer, delegate: recognizer.delegate, enabled: recognizer.isEnabled))
+                recognizer.delegate = self
+                recognizer.isEnabled = true
+            }
+        }
+
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            isVisible = false
+            restore()
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let navigationController,
+                  navigationController.viewControllers.count > 1,
+                  navigationController.transitionCoordinator == nil else { return false }
+            if let pan = gestureRecognizer as? UIPanGestureRecognizer {
+                let velocity = pan.velocity(in: pan.view)
+                let direction: CGFloat = view.effectiveUserInterfaceLayoutDirection == .rightToLeft ? -1 : 1
+                return velocity.x * direction > abs(velocity.y)
+            }
+            return true
+        }
+
+        func restore() {
+            for original in originals.reversed() {
+                guard let recognizer = original.recognizer, recognizer.delegate === self else { continue }
+                recognizer.delegate = original.delegate
+                recognizer.isEnabled = original.enabled
+            }
+            originals.removeAll()
+        }
+    }
+
+}
+
 extension View {
-    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true) -> some View {
-        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle))
+    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, actions: AnyView? = nil) -> some View {
+        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions))
     }
 }
 

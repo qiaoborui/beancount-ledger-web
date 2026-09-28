@@ -59,7 +59,7 @@ final class TerminalOverviewUITests: XCTestCase {
         for _ in 0..<8 where !all.isHittable { app.swipeUp() }
         XCTAssertTrue(all.isHittable, app.debugDescription)
         all.tap()
-        XCTAssertTrue(app.navigationBars["流水"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 5))
     }
 
     func testPrivacyMasksOverviewAmountsAndCategoryPercentages() {

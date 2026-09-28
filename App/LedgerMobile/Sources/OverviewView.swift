@@ -257,11 +257,12 @@ private struct OverviewCategorySpending: Identifiable {
     let percentage: Double
 }
 
-private struct TerminalTransactionRow: View {
+struct TerminalTransactionRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let transaction: LedgerTransaction
     let accountLabels: [String: String]
     let accountCurrency: String
+    var showsYear = false
     @ScaledMetric(relativeTo: .body) private var dateWidth: CGFloat = 36
 
     var body: some View {
@@ -272,9 +273,14 @@ private struct TerminalTransactionRow: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
         layout {
-            Text(String(transaction.date.suffix(5)).replacingOccurrences(of: "-", with: "/"))
-                .terminalFont(size: 11, design: .monospaced).foregroundStyle(TerminalPalette.accent)
-                .frame(width: dateWidth, alignment: .leading)
+            VStack(alignment: .leading, spacing: 3) {
+                if showsYear { Text(String(transaction.date.prefix(4))) }
+                Text(String(transaction.date.suffix(5)).replacingOccurrences(of: "-", with: "/"))
+            }
+            .terminalFont(size: 11, design: .monospaced).foregroundStyle(TerminalPalette.accent)
+            .frame(width: dateWidth, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(transaction.date)
             VStack(alignment: .leading, spacing: 4) {
                 Text(presentation.title).terminalFont(size: 16, weight: .medium)
                     .foregroundStyle(TerminalPalette.ink)
@@ -288,6 +294,7 @@ private struct TerminalTransactionRow: View {
                     size: 13, prefix: presentation.kind == .expense ? "−" : presentation.kind == .income ? "+" : "",
                     showsCurrency: presentation.currency != accountCurrency)
                 Text(visual.categoryLabel).terminalFont(size: 11).foregroundStyle(TerminalPalette.secondary)
+                    .accessibilityIdentifier("transaction-category-\(transaction.source.line)")
             }
         }
         .padding(.vertical, 12)

@@ -20,7 +20,7 @@ final class LedgerMobileUITests: XCTestCase {
         let entry = app.buttons["more-analysis-incomeExpense"]
         XCTAssertTrue(entry.waitForExistence(timeout: 5), app.debugDescription)
         entry.tap()
-        XCTAssertTrue(app.navigationBars["收支分析"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["01 / 月度收支"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.scrollViews["analysis-content-incomeExpense"].waitForExistence(timeout: 10))
         capture("income-expense-native")
         // Native interactive pop starts at the left edge.
@@ -84,7 +84,7 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.buttons["transaction-delete"].waitForExistence(timeout: 3))
         app.buttons["transaction-delete"].tap()
         app.buttons["transaction-delete-confirm"].tap()
-        XCTAssertTrue(app.navigationBars["流水"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 5))
         XCTAssertTrue(row.waitForNonExistence(timeout: 5))
         let search = revealSearch("收付款对象、说明、账户或标签")
         search.tap()
@@ -334,7 +334,7 @@ final class LedgerMobileUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
         openDestination(compact: "交易", regular: "交易账本")
-        let dateButton = app.navigationBars.buttons["navigation-time-range"]
+        let dateButton = app.buttons["navigation-time-range"]
         XCTAssertTrue(dateButton.waitForExistence(timeout: 3))
         XCTAssertFalse(app.otherElements["page-time-range"].exists)
         XCTAssertTrue(dateButton.label.contains("2026年8月"))
@@ -437,7 +437,7 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertFalse(app.buttons["显示金额"].exists)
         capture("native-accessibility-sync-status")
         openDestination(compact: "交易", regular: "交易账本")
-        XCTAssertTrue(app.navigationBars["流水"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 3))
         capture("native-accessibility-transactions")
         openDestination(compact: "账户", regular: "账户")
         XCTAssertTrue(app.navigationBars["账户"].waitForExistence(timeout: 3))
@@ -452,12 +452,12 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
         app.buttons["terminal-tab-settings"].tap()
         app.buttons["more-analysis-assets"].tap()
-        XCTAssertTrue(app.navigationBars["资产分析"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["01 / 净资产历史"].waitForExistence(timeout: 3))
         app.buttons["terminal-tab-accounts"].tap()
         XCTAssertTrue(app.navigationBars["账户"].waitForExistence(timeout: 3))
         app.buttons["terminal-tab-settings"].tap()
-        XCTAssertTrue(app.navigationBars["资产分析"].waitForExistence(timeout: 3))
-        app.navigationBars["资产分析"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["01 / 净资产历史"].waitForExistence(timeout: 3))
+        app.buttons["返回上一页"].tap()
         XCTAssertTrue(app.navigationBars["更多"].waitForExistence(timeout: 3))
         app.buttons["terminal-tab-accounts"].tap()
         app.buttons["terminal-tab-settings"].tap()
@@ -768,7 +768,7 @@ final class LedgerMobileUITests: XCTestCase {
         capture("compact-tabs-04-tab-bar")
 
         app.buttons["terminal-tab-assets"].tap()
-        XCTAssertTrue(app.navigationBars["资产分析"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["01 / 净资产历史"].waitForExistence(timeout: 4))
         capture("compact-tabs-05-assets")
 
         app.buttons["terminal-tab-settings"].tap()
