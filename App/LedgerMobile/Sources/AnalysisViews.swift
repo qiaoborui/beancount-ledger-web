@@ -49,6 +49,7 @@ struct LedgerAnalysisView: View {
     @State private var resource: LedgerAnalysisResource?
     @State private var errorMessage: String?
     @State private var reloadToken = 0
+    @State private var loadedKey: AnalysisRequestKey?
 
     private var requestKey: AnalysisRequestKey {
         AnalysisRequestKey(
@@ -56,6 +57,8 @@ struct LedgerAnalysisView: View {
             start: session.selectedRange.start,
             end: session.selectedRange.end,
             valuationCurrency: session.ledger?.valuationCurrency ?? "CNY",
+            presentationID: session.analysisPresentationID,
+            revision: session.localTransactionPresentationRevision,
             reloadToken: reloadToken
         )
     }
@@ -63,8 +66,10 @@ struct LedgerAnalysisView: View {
     var body: some View {
         VStack(spacing: 0) {
             Group {
-                if let resource {
+                if let resource, loadedKey == requestKey, session.phase == .ready, !session.privacyShielded {
                     content(resource)
+                } else if let cached = session.cachedAnalysisResource(kind.resourceKind) {
+                    content(cached)
                 } else if let errorMessage {
                     VStack(spacing: LedgerSpacing.lg) {
                         EmptyLedgerState(icon: "exclamationmark.triangle", title: "分析数据加载失败", detail: errorMessage)
@@ -97,52 +102,44 @@ struct LedgerAnalysisView: View {
 
     @ViewBuilder
     private func content(_ resource: LedgerAnalysisResource) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: LedgerSpacing.lg) {
-                    Color.clear
-                        .frame(height: 0)
-                        .id(analysisTopID)
-
-                    if let errorMessage {
-                        StatusBanner(message: errorMessage) { self.errorMessage = nil }
-                    }
-
-                    switch resource {
-                    case let .assets(data):
-                        AssetsAnalysisContent(data: data)
-                    case let .incomeExpense(data):
-                        IncomeExpenseAnalysisContent(data: data)
-                    case let .investments(data):
-                        InvestmentsAnalysisContent(data: data)
-                    }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: LedgerSpacing.lg) {
+                if let errorMessage {
+                    StatusBanner(message: errorMessage) { self.errorMessage = nil }
                 }
-                .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-                .padding(.top, LedgerLayout.pageTopInset)
-                .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
-                .ledgerAdaptivePageWidth()
+
+                switch resource {
+                case let .assets(data):
+                    AssetsAnalysisContent(data: data)
+                case let .incomeExpense(data):
+                    IncomeExpenseAnalysisContent(data: data)
+                case let .investments(data):
+                    InvestmentsAnalysisContent(data: data)
+                }
             }
-            .id(kind)
-            .accessibilityIdentifier("analysis-content-\(kind.rawValue)")
-            .refreshable { await refresh() }
-            .onAppear {
-                proxy.scrollTo(analysisTopID, anchor: .top)
-            }
+            .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
+            .padding(.top, LedgerLayout.pageTopInset)
+            .padding(.bottom, horizontalSizeClass == .regular ? LedgerSpacing.xxl : LedgerLayout.compactTabBarClearance)
+            .ledgerAdaptivePageWidth()
         }
+        .id(kind)
+        .accessibilityIdentifier("analysis-content-\(kind.rawValue)")
+        .refreshable { await refresh() }
     }
 
-    private var analysisTopID: String { "analysis-top-\(kind.rawValue)" }
-
     private func load(replacingContent: Bool = true) async {
+        let key = requestKey
         if replacingContent { resource = nil }
         errorMessage = nil
         do {
             let updated = try await session.analysisResource(kind.resourceKind)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, key == requestKey else { return }
             resource = updated
+            loadedKey = key
         } catch is CancellationError {
             return
         } catch {
+            guard !Task.isCancelled, key == requestKey else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -155,7 +152,17 @@ struct LedgerAnalysisView: View {
                 return
             }
         }
-        await load(replacingContent: false)
+        let key = requestKey
+        do {
+            let updated = try await session.analysisResource(kind.resourceKind, forceRefresh: true)
+            guard !Task.isCancelled, key == requestKey else { return }
+            resource = updated
+            loadedKey = key
+            errorMessage = nil
+        } catch is CancellationError { } catch {
+            guard !Task.isCancelled, key == requestKey else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 }
 
@@ -164,6 +171,8 @@ private struct AnalysisRequestKey: Hashable {
     let start: String
     let end: String
     let valuationCurrency: String
+    let presentationID: Int
+    let revision: UUID?
     let reloadToken: Int
 }
 
@@ -416,6 +425,8 @@ private struct AssetsHeroCard: View {
                             Text("负债率 \(debtRatio.formatted(.percent.precision(.fractionLength(1))))")
                                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                                 .foregroundStyle(debtRatioColor(debtRatio))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -967,19 +978,28 @@ private struct IncomeExpenseAnalysisContent: View {
     private var dashboard: LedgerDashboard { data.dashboard }
     private var statement: LedgerIncomeStatement { data.statement }
 
+    private var eventSummaries: [EventTagSummary] {
+        if session.isLocal { return session.localEventTagSummaries ?? [] }
+        return EventTagCalculator.summarizeAllTags(from: session.visibleTransactions,
+            accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? []))
+    }
+    private var eventReadKey: String {
+        "\(session.localGlobalSearchInvalidation)/\(session.phase)/\(session.privacyShielded)/\(session.isRangeLoading)/\(session.isValuationCurrencyLoading)/\(session.transactionMutationStates.values.contains(.pending))"
+    }
+
     var body: some View {
         VStack(spacing: LedgerSpacing.lg) {
             AnalysisMetricGrid(
                 metrics: [
+                    AnalysisMetric("期间结余", amount: statement.netIncome, color: statement.netIncome >= 0 ? LedgerPalette.ink : LedgerPalette.expense),
                     AnalysisMetric("收入", amount: statement.totalIncome, color: LedgerPalette.income),
                     AnalysisMetric("支出", amount: statement.totalExpense, color: LedgerPalette.expense),
-                    AnalysisMetric("期间结余", amount: statement.netIncome, color: statement.netIncome >= 0 ? LedgerPalette.gold : LedgerPalette.expense),
                 ],
                 currency: statement.valuationCurrency,
                 onSelect: { idx in
                     switch idx {
-                    case 0: session.navigateToTransactions(kind: .income)
-                    case 1: session.navigateToTransactions(kind: .expense)
+                    case 1: session.navigateToTransactions(kind: .income)
+                    case 2: session.navigateToTransactions(kind: .expense)
                     default: session.navigateToTransactions(kind: .all)
                     }
                 }
@@ -1010,10 +1030,15 @@ private struct IncomeExpenseAnalysisContent: View {
             )
 
             // Event & Tag Project Accounting Card
-            let allSummaries = EventTagCalculator.summarizeAllTags(
-                from: session.visibleTransactions,
-                accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
-            )
+            let allSummaries = eventSummaries
+            if session.isLocal, let error = session.localEventTagSummaryError {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("事件汇总读取失败：" + error).foregroundStyle(.secondary)
+                    Button("重试事件汇总") { Task { await session.loadLocalEventTagSummaries(force: true) } }
+                }
+            } else if session.isLocal && session.localEventTagSummaries == nil {
+                ProgressView("正在统计事件与项目…")
+            }
             if !allSummaries.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
@@ -1105,6 +1130,7 @@ private struct IncomeExpenseAnalysisContent: View {
                 }
             }
         }
+        .task(id: eventReadKey) { if session.isLocal { await session.loadLocalEventTagSummaries() } }
         .sheet(isPresented: $eventTagListPresented) {
             EventTagListView()
                 .ledgerPrivacyProtectedSheet()
@@ -1553,8 +1579,6 @@ private struct AnalysisMetricGrid: View {
 }
 
 private struct AnalysisMetricCell: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-
     let metric: AnalysisMetric
     let currency: String
     var onTap: (() -> Void)? = nil
@@ -1584,7 +1608,7 @@ private struct AnalysisMetricCell: View {
                         currency: currency,
                         font: .system(size: 20, weight: .semibold),
                         color: metric.color,
-                        displayMode: horizontalSizeClass == .regular ? .adaptive : .compact
+                        displayMode: .adaptive
                     )
                     .tracking(-0.4)
                     .lineLimit(1)

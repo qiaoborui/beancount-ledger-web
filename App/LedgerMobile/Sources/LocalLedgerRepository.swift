@@ -20,7 +20,7 @@ actor LocalLedgerRepository: LedgerRepository {
     private struct PreparedOperation: Sendable {
         let preview: PreparedBookkeepingChange
         let importID: String?
-        let result: Data?
+        let result: LocalLedgerResponse?
     }
     private var preparedOperations: [UUID: PreparedOperation] = [:]
 
@@ -61,6 +61,59 @@ actor LocalLedgerRepository: LedgerRepository {
         try await bootstrapSnapshot(start: start, end: end, today: today, valuationCurrency: valuationCurrency).payload
     }
 
+    /// Default native bootstrap contract for local sessions. Legacy bootstrap
+    /// remains complete for explicit compatibility callers.
+    func bootstrapPage(start: String, end: String, today: String, valuationCurrency: String,
+                       limit: Int = LocalTransactionWindow.listPageRows, expectedRevisionID: UUID) async throws -> LocalBootstrapPage {
+        guard (1...500).contains(limit), LedgerWidgetLink.isValidDay(start),
+              LedgerWidgetLink.isValidDay(end), LedgerWidgetLink.isValidDay(today), start < end else {
+            throw LocalLedgerError.invalidConfiguration("启动分页参数无效")
+        }
+        try Task.checkCancellation()
+        let query = ["start": start, "end": end, "today": today,
+            "valuationCurrency": valuationCurrency, "limit": String(limit)]
+        let cache = BootstrapPresentationCache(ledgerID: descriptor.id, entrypoint: descriptor.entrypoint,
+            url: workspace.rootDirectory.appendingPathComponent(".bootstrap-page-presentation.json"))
+        if let restored = try await workspace.withCurrentSnapshot({ revision, _ in
+            revision.id == expectedRevisionID ? cache.loadPage(revisionID: revision.id, query: query) : nil
+        }) {
+            try Task.checkCancellation()
+            try Self.validateBootstrapPage(restored, start: start, end: end, limit: limit)
+            let current = try await workspace.currentRevision()
+            try Task.checkCancellation()
+            guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+            presentedRevisionID = expectedRevisionID
+            return restored
+        }
+        let (_, response) = try await readSnapshot("/api/ledger/bootstrap/page", query: query,
+            expectedRevisionID: expectedRevisionID)
+        try Task.checkCancellation()
+        let result = try response.decodeBootstrapPage()
+        try Self.validateBootstrapPage(result, start: start, end: end, limit: limit)
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        if let data = try? response.resultData() { cache.save(data, revisionID: expectedRevisionID, query: query) }
+        presentedRevisionID = expectedRevisionID
+        return result
+    }
+
+    private static func validateBootstrapPage(_ result: LocalBootstrapPage,
+        start: String, end: String, limit: Int) throws {
+        guard result.bootstrap.start == start, result.bootstrap.end == end,
+              result.bootstrap.sensitiveUnlocked, result.transactionPage.sensitiveUnlocked,
+              result.bootstrap.transactions.isEmpty,
+              result.transactionPage.transactions.count <= limit,
+              result.transactionPage.revision.isEmpty == false,
+              result.transactionPage.nextCursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 }) ?? true,
+              result.transactionPage.nextCursor == nil || !result.transactionPage.transactions.isEmpty,
+              result.transactionPage.transactions.allSatisfy({ row in
+                  LedgerWidgetLink.isValidDay(row.date) && row.date >= start && row.date < end && row.editableEntry == nil
+              }) else {
+            throw LocalLedgerError.operationFailed("启动分页响应无效")
+        }
+    }
+
     /// Return the revision that produced the presentation, including when a writer
     /// publishes a new generation while the engine is reading the pinned snapshot.
     func bootstrapSnapshot(start: String, end: String, today: String, valuationCurrency: String) async throws
@@ -77,18 +130,492 @@ actor LocalLedgerRepository: LedgerRepository {
             return (restored.revisionID, restored.payload)
         }
         let (revisionID, data) = try await readSnapshot("/api/ledger/bootstrap", query: query)
-        let payload = try JSONDecoder().decode(LedgerBootstrap.self, from: data)
+        let payload = try data.decode(LedgerBootstrap.self)
         presentedRevisionID = revisionID
-        if payload.sensitiveUnlocked {
-            cache.save(data, revisionID: revisionID, query: query)
+        if payload.sensitiveUnlocked, let cachedData = try? data.resultData() {
+            cache.save(cachedData, revisionID: revisionID, query: query)
         }
         return (revisionID, payload)
     }
     func homeReport(start: String, end: String, valuationCurrency: String) async throws -> LedgerHomeReport {
         try await read("/api/ledger/home-report", query: range(start, end, valuationCurrency))
     }
+    /// Additive native page API. Callers must keep cursor and query together and
+    /// restart after a revision conflict; it is not an all-history response.
+    func transactionPage(start: String = "0001-01-01", end: String = "9999-12-31",
+                         query: String = "", cursor: String? = nil, limit: Int = 100,
+                         account: String? = nil, tag: String? = nil, kind: String? = nil) async throws -> LedgerTransactionPage {
+        guard (1...500).contains(limit) else { throw LocalLedgerError.invalidConfiguration("分页数量必须为 1 到 500") }
+        var parameters = ["start": start, "end": end, "q": query, "limit": String(limit)]
+        parameters["cursor"] = cursor
+        parameters["account"] = account
+        parameters["tag"] = tag
+        parameters["kind"] = kind
+        let (revision, response) = try await readSnapshot("/api/ledger/transactions/page", query: parameters)
+        let page = try response.decodeTransactionPage()
+        presentedRevisionID = revision
+        return page
+    }
+
+    /// Raw date-range candidates; filtering belongs exclusively to the Swift reducer.
+    /// This read never advances the presentation revision that authorizes writes.
+    func candidatePage(start: String, end: String, cursor: String? = nil, limit: Int = 500,
+                       expectedRevisionID: UUID) async throws -> LedgerTransactionPage {
+        try await nativeCandidatePage(dialect: "native-candidates-v1", start: start, end: end,
+            cursor: cursor, limit: limit, expectedRevisionID: expectedRevisionID)
+    }
+
+    /// Global-search evidence includes every metadata key/value. Matching and
+    /// date+ID result ordering still belong to LedgerGlobalSearch, not this page.
+    func searchCandidatePage(start: String = "0001-01-01", end: String = "9999-12-31",
+                             cursor: String? = nil, limit: Int = 500,
+                             expectedRevisionID: UUID) async throws -> LedgerTransactionPage {
+        try await nativeCandidatePage(dialect: "native-search-candidates-v1", start: start, end: end,
+            cursor: cursor, limit: limit, expectedRevisionID: expectedRevisionID)
+    }
+
+    /// Exact pending classifier evidence without rich editor drafts. The other
+    /// candidate dialects deliberately do not carry this source-entry evidence.
+    func pendingCandidatePage(start: String, end: String, cursor: String? = nil, limit: Int = 500,
+                              expectedRevisionID: UUID) async throws -> LedgerTransactionPage {
+        let page = try await nativeCandidatePage(dialect: "native-pending-candidates-v1", start: start, end: end,
+            cursor: cursor, limit: limit, expectedRevisionID: expectedRevisionID)
+        guard page.transactions.allSatisfy({ $0.pendingReviewFlag != nil && $0.editableEntry == nil }) else {
+            throw LocalLedgerError.operationFailed("待整理分页缺少审核依据")
+        }
+        return page
+    }
+
+    private func nativeCandidatePage(dialect: String, start: String, end: String, cursor: String?, limit: Int,
+                                     expectedRevisionID: UUID) async throws -> LedgerTransactionPage {
+        guard (1...500).contains(limit),
+              cursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 }) ?? true else {
+            throw LocalLedgerError.invalidConfiguration("候选分页参数无效")
+        }
+        var query = ["dialect": dialect, "start": start, "end": end, "limit": String(limit)]
+        query["cursor"] = cursor
+        try Task.checkCancellation()
+        let (_, response) = try await readSnapshot("/api/ledger/transactions/page", query: query,
+                                                  expectedRevisionID: expectedRevisionID)
+        try Task.checkCancellation()
+        let page = try response.decodeTransactionPage(maximumBytes: 1 << 20)
+        guard page.sensitiveUnlocked else {
+            throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定")
+        }
+        guard !page.revision.isEmpty, page.transactions.count <= limit,
+              page.nextCursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 && $0 != cursor }) ?? true else {
+            throw LocalLedgerError.operationFailed("候选分页响应无效")
+        }
+        // Pinning keeps the generation readable, not current: a writer can commit
+        // while the engine is suspended, including on the very last page.
+        try Task.checkCancellation()
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return page
+    }
+
+    func scanTransactions(start: String, end: String, filter: LedgerTransactionFilter,
+                          expectedRevisionID: UUID, limits: LocalTransactionScan.Limits = .init()) async throws
+        -> LocalTransactionScan.Result {
+        var scan: LocalTransactionScan?
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await candidatePage(start: start, end: end, cursor: cursor,
+                                               expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil {
+                scan = try LocalTransactionScan(expectedRevision: page.revision, filter: filter, limits: limits)
+            }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                try Task.checkCancellation()
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                // Session/request guards still own publication after this async return.
+                return result
+            }
+            // Empty/nonmatching pages are not EOF; follow the raw continuation.
+            cursor = scan?.nextCursor
+        }
+    }
+
+    /// Complete selection facts from unfiltered candidates, not the UI window.
+    /// Does not advance mutable write-presentation authority or retain rows.
+    func selectionFacts(start: String, end: String, filter: LedgerTransactionFilter,
+                        selectedIDs: Set<String>, blockedIDs: Set<String>, expectedRevisionID: UUID) async throws
+        -> LocalTransactionSelectionScan.Result {
+        try await scanSelectionFacts(start: start, end: end, expectedRevisionID: expectedRevisionID) { revision in
+            try LocalTransactionSelectionScan(revision: revision, filter: filter,
+                selectedIDs: selectedIDs, blockedIDs: blockedIDs)
+        }
+    }
+
+    func selectionFacts(start: String, end: String, filter: LedgerTransactionFilter,
+                        selection: LocalTransactionSelection, blockedIDs: Set<String>, expectedRevisionID: UUID) async throws
+        -> LocalTransactionSelectionScan.Result {
+        guard selection.revisionID == expectedRevisionID, selection.start == start, selection.end == end else {
+            throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+        }
+        return try await scanSelectionFacts(start: start, end: end, expectedRevisionID: expectedRevisionID) { revision in
+            try LocalTransactionSelectionScan(revision: revision, filter: filter,
+                selection: selection, blockedIDs: blockedIDs)
+        }
+    }
+
+    private func scanSelectionFacts(start: String, end: String, expectedRevisionID: UUID,
+        makeScan: (String) throws -> LocalTransactionSelectionScan) async throws -> LocalTransactionSelectionScan.Result {
+        var scan: LocalTransactionSelectionScan?
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await candidatePage(start: start, end: end, cursor: cursor,
+                expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil {
+                scan = try makeScan(page.revision)
+            }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return result
+            }
+            cursor = page.nextCursor
+        }
+    }
+
+    func pendingWindow(start: String, end: String, filter: LedgerPendingFilter, offset: Int,
+                       declaredAccounts: [String], nativeRevision: String? = nil,
+                       expectedRevisionID: UUID) async throws -> LocalPendingScan.Result {
+        var scan: LocalPendingScan?
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await pendingCandidatePage(start: start, end: end, cursor: cursor, expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil {
+                if let nativeRevision, nativeRevision != page.revision { throw LocalLedgerError.staleTransactionCursor }
+                scan = try LocalPendingScan(revision: page.revision, filter: filter, offset: offset, declaredAccounts: declaredAccounts)
+            }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return result
+            }
+            cursor = page.nextCursor
+        }
+    }
+
+    func eventTagSummaries(start: String, end: String, expectedRevisionID: UUID) async throws -> [EventTagSummary] {
+        var scan: LocalEventTagSummaryScan?
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await candidatePage(start: start, end: end, cursor: cursor, expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil { scan = try LocalEventTagSummaryScan(revision: page.revision) }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return result
+            }
+            cursor = page.nextCursor
+        }
+    }
+
+    func eventTagReport(tag: String, start: String, end: String, accountLabels: [String: String],
+                        expectedRevisionID: UUID) async throws -> LocalEventTagReportScan.Result {
+        var scan: LocalEventTagReportScan?
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await candidatePage(start: start, end: end, cursor: cursor, expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil {
+                scan = try LocalEventTagReportScan(revision: page.revision, tag: tag, accountLabels: accountLabels)
+            }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return result
+            }
+            cursor = page.nextCursor
+        }
+    }
+
+    /// Pinned additive account page. Complete balances/counts do not make the
+    /// rows complete; callers must keep chart aggregation independent of windows.
+    func accountPage(account: String, currency: String, start: String, end: String,
+                     cursor: String? = nil, limit: Int = 100, order: LedgerAccountPageOrder = .asc,
+                     expectedRevisionID: UUID) async throws -> LedgerAccountPage {
+        guard !account.isEmpty, !currency.isEmpty, (1...500).contains(limit),
+              cursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 }) ?? true else {
+            throw LocalLedgerError.invalidConfiguration("账户分页参数无效")
+        }
+        var query = ["account": account, "currency": currency, "start": start, "end": end, "limit": String(limit)]
+        query["cursor"] = cursor
+        if order == .desc { query["order"] = order.rawValue }
+        try Task.checkCancellation()
+        let (_, response) = try await readSnapshot("/api/ledger/accounts/detail/page", query: query,
+            expectedRevisionID: expectedRevisionID)
+        try Task.checkCancellation()
+        let page = try response.decodeAccountPage()
+        guard page.sensitiveUnlocked else { throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定") }
+        let detail = page.detail
+        guard !page.revision.isEmpty, detail.account == account, detail.currency == currency,
+              detail.start ?? "" == start, detail.end ?? "" == end,
+              detail.rows.count <= limit, page.rowCount >= detail.rows.count,
+              let opening = detail.openingBalance, let closing = detail.closingBalance, let change = detail.periodChange,
+              page.nextCursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 && $0 != cursor }) ?? true,
+              page.nextCursor == nil || (!detail.rows.isEmpty && page.rowCount > detail.rows.count) else {
+            throw LocalLedgerError.operationFailed("账户分页响应无效")
+        }
+        if cursor == nil {
+            guard (page.nextCursor != nil) == (page.rowCount > detail.rows.count),
+                  page.rowCount == 0 || !detail.rows.isEmpty else {
+                throw LocalLedgerError.operationFailed("账户首页流水不完整")
+            }
+            if let first = detail.rows.first {
+                if order == .asc {
+                    let (balance, overflow) = opening.addingReportingOverflow(first.change)
+                    guard !overflow, balance == first.balance else { throw LocalLedgerError.operationFailed("账户期初流水余额不一致") }
+                } else if first.balance != closing { throw LocalLedgerError.operationFailed("账户期末流水余额不一致") }
+            }
+        }
+        if page.nextCursor == nil, let last = detail.rows.last {
+            if order == .asc {
+                guard last.balance == closing else { throw LocalLedgerError.operationFailed("账户期末流水余额不一致") }
+            } else {
+                let (balance, overflow) = last.balance.subtractingReportingOverflow(last.change)
+                guard !overflow, balance == opening else { throw LocalLedgerError.operationFailed("账户期初流水余额不一致") }
+            }
+        }
+        if page.rowCount == 0 {
+            guard opening == closing, detail.rows.isEmpty, page.nextCursor == nil else {
+                throw LocalLedgerError.operationFailed("空账户期间余额不一致")
+            }
+        }
+        let (calculated, overflow) = closing.subtractingReportingOverflow(opening)
+        guard !overflow, calculated == change else { throw LocalLedgerError.operationFailed("账户期间余额不一致") }
+        var previous: LedgerAccountDetailRow?
+        var ids: Set<String> = []
+        for row in detail.rows {
+            guard row.date == row.transaction.date, row.payee == row.transaction.payee,
+                  row.narration == row.transaction.narration, ids.insert(row.id).inserted,
+                  start.isEmpty || (row.date >= start && row.date < end),
+                  previous.map({ order == .asc ? $0.date <= row.date : $0.date >= row.date }) ?? true else {
+                throw LocalLedgerError.operationFailed("账户分页流水不一致")
+            }
+            if let previous {
+                let (balance, overflow) = order == .asc
+                    ? previous.balance.addingReportingOverflow(row.change)
+                    : previous.balance.subtractingReportingOverflow(previous.change)
+                guard !overflow, balance == row.balance else { throw LocalLedgerError.operationFailed("账户流水余额不一致") }
+            }
+            previous = row
+        }
+        try Task.checkCancellation()
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return page
+    }
+
+    func accountTrend(account: String, currency: String, range: LedgerDateRange,
+                      expectedRevisionID: UUID) async throws -> LocalAccountTrendScan.Result {
+        var scan: LocalAccountTrendScan?
+        var cursor: String?
+        let end = range.queryEndExclusive
+        while true {
+            try Task.checkCancellation()
+            let page = try await accountPage(account: account, currency: currency, start: range.start, end: end,
+                cursor: cursor, limit: 500, expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil {
+                scan = try LocalAccountTrendScan(range: range, account: account, currency: currency, revision: page.revision)
+            }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return result
+            }
+            cursor = page.nextCursor
+        }
+    }
+
+    /// Complete full-history scan, retaining only a bounded globally sorted window.
+    /// Continuations must be bound by the session to the same query/account context.
+    func globalSearchWindow(query: String, accounts: [LedgerAccount], scope: LedgerGlobalSearchScope,
+                            filters: LedgerGlobalSearchFilters, after: LocalGlobalSearchScan.Anchor? = nil,
+                            nativeRevision: String? = nil, expectedRevisionID: UUID,
+                            limits: LocalGlobalSearchScan.Limits = .init()) async throws -> LocalGlobalSearchScan.Result {
+        var scan: LocalGlobalSearchScan?
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            let page = try await searchCandidatePage(cursor: cursor, expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if scan == nil {
+                if let nativeRevision, nativeRevision != page.revision {
+                    throw LocalGlobalSearchScan.ScanError.revisionMismatch
+                }
+                scan = try LocalGlobalSearchScan(revision: page.revision, query: query, accounts: accounts,
+                    scope: scope, filters: filters, after: after, limits: limits)
+            }
+            if let result = try scan?.consume(page, requestedCursor: cursor) {
+                let current = try await workspace.currentRevision()
+                try Task.checkCancellation()
+                guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return result
+            }
+            cursor = page.nextCursor
+        }
+    }
+
+    /// The native model revision is opaque; the workspace UUID is the bootstrap
+    /// pairing boundary. Check it inside the pinned snapshot, not in a prior read.
+    func overviewCategories(start: String, end: String,
+                            expectedRevisionID: UUID) async throws -> LedgerOverviewCategories {
+        let cache = overviewCache
+        let (_, response) = try await readSnapshot("/api/ledger/overview/categories",
+            query: ["start": start, "end": end], expectedRevisionID: expectedRevisionID)
+        let result = try response.decode(LedgerOverviewCategories.self)
+        try Self.validateOverviewCategories(result, start: start, end: end)
+        // A pinned caller may legitimately finish after a writer publishes. Keep
+        // that response for the caller, but never cache it as the current view.
+        let current = try? await workspace.currentRevision()
+        if !Task.isCancelled, current?.id == expectedRevisionID,
+           let data = try? response.resultData() {
+            cache.save(data, revisionID: expectedRevisionID, query: ["start": start, "end": end])
+        }
+        return result
+    }
+
+    func cachedOverviewCategories(start: String, end: String,
+                                  expectedRevisionID: UUID) async throws -> LedgerOverviewCategories? {
+        let cache = overviewCache
+        let result = try await workspace.withCurrentSnapshot { revision, _ in
+            revision.id == expectedRevisionID
+                ? cache.loadOverview(revisionID: revision.id, query: ["start": start, "end": end]) : nil
+        }
+        try Task.checkCancellation()
+        guard let result else { return nil }
+        try Self.validateOverviewCategories(result, start: start, end: end)
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
+    }
+
+    private var overviewCache: BootstrapPresentationCache {
+        BootstrapPresentationCache(ledgerID: descriptor.id, entrypoint: descriptor.entrypoint,
+            url: workspace.rootDirectory.appendingPathComponent(".overview-categories-presentation.json"))
+    }
+
+    private static func validateOverviewCategories(_ result: LedgerOverviewCategories,
+                                                   start: String, end: String) throws {
+        guard result.sensitiveUnlocked else {
+            throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定")
+        }
+        guard result.start == start, result.end == end, !result.revision.isEmpty,
+              result.categories.count <= 4, result.positiveTotalMinorUnits >= 0,
+              result.categories.isEmpty == (result.positiveTotalMinorUnits == 0),
+              Set(result.categories.map(\.label)).count == result.categories.count,
+              result.categories.allSatisfy({ $0.totalMinorUnits > 0
+                  && $0.totalMinorUnits <= result.positiveTotalMinorUnits
+                  && $0.positiveTransactionCount > 0 }) else {
+            throw LocalLedgerError.operationFailed("概览汇总响应无效")
+        }
+    }
+
+    func transactionDetail(source: TransactionSource) async throws -> LedgerTransaction {
+        try await read("/api/ledger/transactions/detail", query: ["file": source.file, "line": String(source.line), "hash": source.hash ?? ""])
+    }
+
+    /// Bare detail transport has no sensitiveUnlocked flag: authentication belongs
+    /// to the owning session, which must discard results on lock/workspace changes.
+    /// Unlike presentation reads, this pinned read never authorizes later writes.
+    func transactionDetail(source: TransactionSource, expectedRevisionID: UUID) async throws -> LedgerTransaction {
+        try Task.checkCancellation()
+        guard !source.file.isEmpty, !source.file.hasPrefix("/"),
+              !source.file.contains("\\"), !source.file.contains("\0"),
+              source.line >= 0, let hash = source.hash, !hash.isEmpty else {
+            throw LocalLedgerError.invalidConfiguration("交易来源无效")
+        }
+        var depth = 0
+        for component in source.file.split(separator: "/") where component != "." {
+            depth += component == ".." ? -1 : 1
+            guard depth >= 0 else { throw LocalLedgerError.invalidConfiguration("交易来源无效") }
+        }
+        let (_, response) = try await readSnapshot("/api/ledger/transactions/detail",
+            query: ["file": source.file, "line": String(source.line), "hash": hash],
+            expectedRevisionID: expectedRevisionID)
+        try Task.checkCancellation()
+        let detail = try response.decode(LedgerTransaction.self)
+        guard detail.source == source else { throw LocalLedgerError.staleTransactionCursor }
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return detail
+    }
+
+    /// Additive reader only, not production UI wiring. The provider checks freshness
+    /// after each new page read; it is NOT called when serving cached rows. The owner
+    /// must explicitly invalidate the window on revision, workspace or lock changes
+    /// and discard already returned windows. Authentication belongs to that session.
+    func makeTransactionWindow(start: String, end: String, filter: LedgerTransactionFilter = .init(),
+                               expectedRevisionID: UUID, limits: LocalTransactionWindow.Limits = .init(),
+                               checkpoint: LocalTransactionWindow.Checkpoint? = nil) async throws -> LocalTransactionWindow {
+        try Task.checkCancellation()
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        let workspaceID = descriptor.id
+        let scope = [workspaceID.uuidString, expectedRevisionID.uuidString, start, end].joined(separator: "|")
+        return try LocalTransactionWindow(workspaceID: workspaceID, scope: scope, filter: filter, limits: limits,
+                                          checkpoint: checkpoint) { request in
+            guard request.workspaceID == workspaceID else {
+                throw LocalTransactionWindow.WindowError.invalidConfiguration
+            }
+            let page = try await self.candidatePage(start: start, end: end, cursor: request.cursor,
+                                                  limit: request.limit, expectedRevisionID: expectedRevisionID)
+            try Task.checkCancellation()
+            if let expected = request.expectedRevision, page.revision != expected {
+                throw LocalTransactionWindow.WindowError.revisionMismatch
+            }
+            return page
+        }
+    }
+
+    func classificationHistoryPage(cursor: String?) async throws -> LedgerTransactionPage {
+        var query = ["limit": "500"]
+        query["cursor"] = cursor
+        let (_, response) = try await readSnapshot("/api/ledger/transactions/history-page", query: query)
+        return try response.decodeTransactionPage()
+    }
+
     func globalTransactions() async throws -> LedgerGlobalTransactions {
         try await read("/api/ledger/transactions", query: ["start": "0001-01-01", "end": "9999-12-31"])
+    }
+    /// Explicit legacy all-history read for callers not yet migrated. Pin both
+    /// sides of the read and never advance write authority from a delayed result.
+    func globalTransactions(expectedRevisionID: UUID) async throws -> LedgerGlobalTransactions {
+        try Task.checkCancellation()
+        let (_, response) = try await readSnapshot("/api/ledger/transactions",
+            query: ["start": "0001-01-01", "end": "9999-12-31"], expectedRevisionID: expectedRevisionID)
+        try Task.checkCancellation()
+        let payload = try response.decode(LedgerGlobalTransactions.self)
+        guard payload.sensitiveUnlocked else { throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定") }
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return payload
     }
     func importDocuments() async throws -> [LedgerImportDocument] {
         let result: LedgerImportDocumentsResponse = try await read("/api/ledger/imports/documents")
@@ -105,7 +632,7 @@ actor LocalLedgerRepository: LedgerRepository {
             "alipayFundRounding": .bool(alipayFundRounding), "archivePassword": .string(archivePassword)])
         let (revision, data) = try await readSnapshot("/api/ledger/imports/preview", method: "POST", body: body,
             importFile: .init(name: file.name, data: file.data))
-        let result = try JSONDecoder().decode(LedgerImportPreview.self, from: data)
+        let result = try data.decode(LedgerImportPreview.self)
         presentedRevisionID = revision
         importRevisionIDs[result.importID] = revision
         importPreviewDates[result.importID] = Date()
@@ -125,6 +652,38 @@ actor LocalLedgerRepository: LedgerRepository {
         importPreviewDates.removeValue(forKey: request.importID)
         return result
     }
+    /// Complete account snapshot with independent wire/count limits. Does not
+    /// advance the revision that authorizes writes; no legacy fallback on error.
+    func reconciliationSnapshot(start: String, end: String, expectedRevisionID: UUID) async throws -> LocalReconciliationSnapshot {
+        guard LedgerWidgetLink.isValidDay(start), LedgerWidgetLink.isValidDay(end), start < end else {
+            throw LocalLedgerError.invalidConfiguration("对账日期范围无效")
+        }
+        try Task.checkCancellation()
+        let (_, response) = try await readSnapshot("/api/ledger/reconciliation/snapshot",
+            query: ["start": start, "end": end], expectedRevisionID: expectedRevisionID)
+        try Task.checkCancellation()
+        let result = try response.decodeReconciliationSnapshot()
+        guard result.sensitiveUnlocked else { throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定") }
+        guard !result.revision.isEmpty, result.start == start, result.end == end,
+              result.monthPrefix == String(start.prefix(7)), result.rows.count <= 10_000,
+              result.rows.allSatisfy({ row in
+                  (row.account.hasPrefix("Assets:") || row.account.hasPrefix("Liabilities:"))
+                    && !row.currency.isEmpty && ["pending", "asserted"].contains(row.status)
+                    && (row.statusError != nil)
+                    && (row.snapshotStatus.map { status in
+                        status.account == row.account && ["red", "green", "yellow", "grey"].contains(status.status)
+                            && row.statusError == status.hasIssue
+                    } ?? false)
+                    && (row.lastAssertion.map { assertion in
+                        assertion.account == row.account && LedgerWidgetLink.isValidDay(assertion.date)
+                    } ?? true)
+              }) else { throw LocalLedgerError.operationFailed("对账快照响应无效") }
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
+    }
+
     func reconciliation(start: String, end: String) async throws -> LedgerReconciliationResponse {
         try await read("/api/ledger/reconciliation", query: ["start": start, "end": end])
     }
@@ -142,6 +701,36 @@ actor LocalLedgerRepository: LedgerRepository {
     func addTransactionTags(sources: [TransactionSource], tags: [String]) async throws {
         let _: BQLCell = try await mutate("/api/ledger/transactions/tags", method: "POST",
             body: json(LedgerTransactionTagsRequest(sources: sources, tags: tags)))
+    }
+    /// A receipt names the generation actually committed by this operation, not
+    /// whichever revision a concurrent read later assigned to presentedRevisionID.
+    /// It is confirmation evidence only, never authority for another write.
+    struct TransactionCommitReceipt: Sendable, Equatable {
+        let ledgerID: UUID
+        let baseRevisionID: UUID
+        let revisionID: UUID
+        fileprivate init(ledgerID: UUID, baseRevisionID: UUID, revisionID: UUID) {
+            self.ledgerID = ledgerID; self.baseRevisionID = baseRevisionID; self.revisionID = revisionID
+        }
+    }
+
+    @discardableResult
+    func updateTransaction(source: TransactionSource, entry: LedgerTransactionEntry, expectedRevisionID: UUID) async throws -> TransactionCommitReceipt {
+        let committed: CommittedResult<BQLCell> = try await mutateWithRevision("/api/ledger/transactions", method: "PUT",
+            body: json(LedgerTransactionUpdateRequest(source: source, entry: entry)), expected: expectedRevisionID)
+        return TransactionCommitReceipt(ledgerID: descriptor.id, baseRevisionID: expectedRevisionID, revisionID: committed.revision.id)
+    }
+    @discardableResult
+    func deleteTransaction(source: TransactionSource, reason: String, expectedRevisionID: UUID) async throws -> TransactionCommitReceipt {
+        let committed: CommittedResult<BQLCell> = try await mutateWithRevision("/api/ledger/transactions", method: "DELETE",
+            body: json(LedgerTransactionDeleteRequest(source: source, reason: reason)), expected: expectedRevisionID)
+        return TransactionCommitReceipt(ledgerID: descriptor.id, baseRevisionID: expectedRevisionID, revisionID: committed.revision.id)
+    }
+    @discardableResult
+    func addTransactionTags(sources: [TransactionSource], tags: [String], expectedRevisionID: UUID) async throws -> TransactionCommitReceipt {
+        let committed: CommittedResult<BQLCell> = try await mutateWithRevision("/api/ledger/transactions/tags", method: "POST",
+            body: json(LedgerTransactionTagsRequest(sources: sources, tags: tags)), expected: expectedRevisionID)
+        return TransactionCommitReceipt(ledgerID: descriptor.id, baseRevisionID: expectedRevisionID, revisionID: committed.revision.id)
     }
     func addTransaction(entry: LedgerTransactionEntry) async throws {
         let _: BQLCell = try await mutate("/api/ledger/append", method: "POST", body: json(entry))
@@ -203,10 +792,10 @@ actor LocalLedgerRepository: LedgerRepository {
         let box = ResultBox()
         let files = try await workspace.prepare(expectedRevisionID: expected, mutateStage: { root in
             for (path, body) in operations {
-                let data = try await engine.dispatch(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+                let data = try await engine.response(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                     entrypoint: entrypoint, method: "POST", path: path, body: body, staging: true))
-                if importID != nil { _ = try JSONDecoder().decode(LedgerImportCommitResult.self, from: data) }
-                else { _ = try JSONDecoder().decode(BQLCell.self, from: data) }
+                if importID != nil { _ = try data.decode(LedgerImportCommitResult.self) }
+                else { _ = try data.decode(BQLCell.self) }
                 await box.set(data)
             }
         }, validator: { root in try await validator(root, entrypoint) })
@@ -240,7 +829,7 @@ actor LocalLedgerRepository: LedgerRepository {
         await storage.didCommit(revision)
         NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
         if operation.importID != nil, let result = operation.result {
-            return try JSONDecoder().decode(LedgerImportCommitResult.self, from: result)
+            return try result.decode(LedgerImportCommitResult.self)
         }
         return nil
     }
@@ -403,12 +992,13 @@ actor LocalLedgerRepository: LedgerRepository {
     private func read<T: Decodable>(_ path: String, method: String = "GET", query: [String: String] = [:],
         body: BQLCell? = nil, importFile: LocalLedgerEngineRequest.ImportFile? = nil) async throws -> T {
         let (revision, data) = try await readSnapshot(path, method: method, query: query, body: body, importFile: importFile)
-        let result = try JSONDecoder().decode(T.self, from: data)
+        let result = try data.decode(T.self)
         presentedRevisionID = revision
         return result
     }
     private func readSnapshot(_ path: String, method: String = "GET", query: [String: String] = [:],
-        body: BQLCell? = nil, importFile: LocalLedgerEngineRequest.ImportFile? = nil) async throws -> (UUID, Data) {
+        body: BQLCell? = nil, importFile: LocalLedgerEngineRequest.ImportFile? = nil,
+        expectedRevisionID: UUID? = nil) async throws -> (UUID, LocalLedgerResponse) {
         let now = Date()
         if lastRuntimeMaintenance.map({ now.timeIntervalSince($0) >= 60 * 60 }) ?? true {
             // Opportunistic maintenance also runs for read-only app sessions.
@@ -423,8 +1013,11 @@ actor LocalLedgerRepository: LedgerRepository {
         }
         let engine = engine, entrypoint = descriptor.entrypoint
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
-        let operation: @Sendable (LocalLedgerWorkspace.Revision, URL) async throws -> (UUID, Data) = { revision, root in
-            let data = try await engine.dispatch(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+        let operation: @Sendable (LocalLedgerWorkspace.Revision, URL) async throws -> (UUID, LocalLedgerResponse) = { revision, root in
+            if let expectedRevisionID, revision.id != expectedRevisionID {
+                throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+            }
+            let data = try await engine.response(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                 entrypoint: entrypoint, method: method, path: path, query: query, body: body, importFile: importFile))
             return (revision.id, data)
         }
@@ -434,42 +1027,65 @@ actor LocalLedgerRepository: LedgerRepository {
         return try await workspace.withCurrentSnapshot(operation)
     }
     private actor ResultBox {
-        var data: Data?
-        func set(_ value: Data) { data = value }
+        var data: LocalLedgerResponse?
+        func set(_ value: LocalLedgerResponse) { data = value }
     }
+    private struct CommittedResult<T: Sendable>: Sendable {
+        let value: T
+        let revision: LocalLedgerWorkspace.Revision
+    }
+
     private func mutate<T: Decodable & Sendable>(_ path: String, method: String, body: BQLCell,
         expected: UUID? = nil, consumingImportID: String? = nil) async throws -> T {
+        let committed: CommittedResult<T> = try await mutateWithRevision(path, method: method, body: body,
+            expected: expected, consumingImportID: consumingImportID)
+        return committed.value
+    }
+
+    private func mutateWithRevision<T: Decodable & Sendable>(_ path: String, method: String, body: BQLCell,
+        expected: UUID? = nil, consumingImportID: String? = nil) async throws -> CommittedResult<T> {
         guard let revisionID = expected ?? presentedRevisionID else { throw LocalLedgerError.previewRequired }
         let engine = engine, validator = validator, entrypoint = descriptor.entrypoint
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
         let box = ResultBox()
         let revision = try await workspace.commit(expectedRevisionID: revisionID, changes: [],
             consumingImportID: consumingImportID, mutateStage: { root in
-            let data = try await engine.dispatch(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+            let data = try await engine.response(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                 entrypoint: entrypoint, method: method, path: path, body: body, staging: true))
             // Decode before publication; malformed replies cannot produce a successful financial write.
-            _ = try JSONDecoder().decode(T.self, from: data)
+            _ = try data.decode(T.self)
             await box.set(data)
         }, validator: { root in try await validator(root, entrypoint) })
         guard let data = await box.data else { throw LocalLedgerError.operationFailed("本地修改缺少结果") }
         presentedRevisionID = revision.id
         await storage.didCommit(revision)
         NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
-        return try JSONDecoder().decode(T.self, from: data)
+        return CommittedResult(value: try data.decode(T.self), revision: revision)
     }
 }
 
 /// A derived presentation of one immutable generation. A reopened app can show
 /// authenticated local content without starting Python or rebuilding analytics.
-/// Date, range, currency, entrypoint and build changes all require a fresh read.
+/// Date, range, currency, entrypoint and cache-contract changes require a fresh read.
 private struct BootstrapPresentationCache: Sendable {
     let ledgerID: UUID
     let entrypoint: String
     let url: URL
     private static let maximumBytes = 16 * 1_024 * 1_024
+    // Bump this when the bootstrap read model changes incompatibly. A signing
+    // build number alone does not change the cached financial projection.
+    private static let formatVersion = 1
     private static let applicationVersion = ["CFBundleShortVersionString", "CFBundleVersion"]
         .map { Bundle.main.object(forInfoDictionaryKey: $0) as? String ?? "development" }
         .joined(separator: "/")
+
+    private static func compatibleApplicationVersion(_ stored: String) -> Bool {
+        if stored == applicationVersion { return true }
+        let current = applicationVersion.split(separator: "/", omittingEmptySubsequences: false)
+        let cached = stored.split(separator: "/", omittingEmptySubsequences: false)
+        return current.count == 2 && cached.count == 2 && current[0] == cached[0]
+            && Int(cached[1]) != nil
+    }
 
     private struct Record: Codable {
         let formatVersion: Int
@@ -494,7 +1110,8 @@ private struct BootstrapPresentationCache: Sendable {
               let size = attributes[.size] as? NSNumber, size.intValue <= Self.maximumBytes,
               let data = try? Data(contentsOf: url),
               let record = try? JSONDecoder().decode(Record.self, from: data),
-              record.formatVersion == 1, record.applicationVersion == Self.applicationVersion,
+              record.formatVersion == Self.formatVersion,
+              Self.compatibleApplicationVersion(record.applicationVersion),
               record.ledgerID == ledgerID, record.revisionID == revisionID,
               record.entrypoint == entrypoint, record.query == query,
               let payload = try? JSONDecoder().decode(LedgerBootstrap.self, from: record.payload),
@@ -502,11 +1119,43 @@ private struct BootstrapPresentationCache: Sendable {
         return Restored(revisionID: revisionID, payload: payload)
     }
 
+    func loadPage(revisionID: UUID, query: [String: String]) -> LocalBootstrapPage? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? NSNumber, size.intValue <= Self.maximumBytes,
+              let data = try? Data(contentsOf: url),
+              let record = try? JSONDecoder().decode(Record.self, from: data),
+              record.formatVersion == Self.formatVersion,
+              Self.compatibleApplicationVersion(record.applicationVersion),
+              record.ledgerID == ledgerID, record.revisionID == revisionID,
+              record.entrypoint == entrypoint, record.query == query,
+              record.payload.count <= (1 << 20),
+              let payload = try? JSONDecoder().decode(LocalBootstrapPage.self, from: record.payload),
+              payload.bootstrap.sensitiveUnlocked else { return nil }
+        return payload
+    }
+
+    func loadOverview(revisionID: UUID, query: [String: String]) -> LedgerOverviewCategories? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? NSNumber, size.intValue <= Self.maximumBytes,
+              let data = try? Data(contentsOf: url),
+              let record = try? JSONDecoder().decode(Record.self, from: data),
+              record.formatVersion == Self.formatVersion,
+              Self.compatibleApplicationVersion(record.applicationVersion),
+              record.ledgerID == ledgerID, record.revisionID == revisionID,
+              record.entrypoint == entrypoint, record.query == query,
+              record.payload.count <= (1 << 20),
+              let payload = try? JSONDecoder().decode(LedgerOverviewCategories.self, from: record.payload),
+              payload.sensitiveUnlocked else { return nil }
+        return payload
+    }
+
     func save(_ payload: Data, revisionID: UUID, query: [String: String]) {
         guard payload.count <= Self.maximumBytes else { return }
         if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
            attributes[.type] as? FileAttributeType != .typeRegular { return }
-        let record = Record(formatVersion: 1, applicationVersion: Self.applicationVersion,
+        let record = Record(formatVersion: Self.formatVersion, applicationVersion: Self.applicationVersion,
             ledgerID: ledgerID, revisionID: revisionID, entrypoint: entrypoint, query: query, payload: payload)
         guard let data = try? JSONEncoder().encode(record), data.count <= Self.maximumBytes else { return }
         do {

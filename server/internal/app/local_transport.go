@@ -41,6 +41,7 @@ type LocalRequest struct {
 	Staging       bool                 `json:"staging"`
 	ImportFile    *LocalImportFile     `json:"importFile,omitempty"`
 	Canonical     *LocalCanonicalModel `json:"canonical,omitempty"`
+	ModelHandle   string               `json:"modelHandle,omitempty"`
 }
 
 type LocalImportFile struct {
@@ -52,9 +53,45 @@ type LocalImportFile struct {
 // mutation is a staged proposal; canonical validation and publication belong
 // to the caller's workspace transaction.
 func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
+	if input.Path == "/api/ledger/reconciliation/snapshot" && (input.Staging || input.ImportFile != nil) {
+		return http.StatusBadRequest, nil, errors.New("reconciliation snapshot requires a committed generation without an import file")
+	}
+
+	if input.Path == "/api/ledger/bootstrap/page" && (input.Staging || input.ImportFile != nil) {
+		return http.StatusBadRequest, nil, errors.New("bootstrap pages require a committed generation without an import file")
+	}
+	if input.Path == "/api/ledger/accounts/detail/page" && (input.Staging || input.ImportFile != nil) {
+		return http.StatusBadRequest, nil, errors.New("account pages require a committed generation without an import file")
+	}
+	if input.Path == "/api/ledger/overview/categories" && (input.Staging || input.ImportFile != nil) {
+		return http.StatusBadRequest, nil, errors.New("overview categories require a committed generation without an import file")
+	}
+	if input.Path == "/api/ledger/transactions/history-page" {
+		if _, exists := input.Query["dialect"]; exists {
+			return http.StatusBadRequest, nil, errors.New("dialect is not valid on history-page")
+		}
+	}
 	cfg, err := localConfig(input)
 	if err != nil {
 		return http.StatusBadRequest, nil, err
+	}
+	if input.Path == "/api/ledger/accounts/detail/page" && filepath.Base(filepath.Dir(filepath.Dir(cfg.LedgerRoot))) != "generations" {
+		return http.StatusBadRequest, nil, errors.New("account pages require a committed generation directory")
+	}
+	if input.Path == "/api/ledger/reconciliation/snapshot" && filepath.Base(filepath.Dir(filepath.Dir(cfg.LedgerRoot))) != "generations" {
+		return http.StatusBadRequest, nil, errors.New("reconciliation requires a committed generation directory")
+	}
+	if input.Path == "/api/ledger/bootstrap/page" && filepath.Base(filepath.Dir(filepath.Dir(cfg.LedgerRoot))) != "generations" {
+		return http.StatusBadRequest, nil, errors.New("bootstrap pages require a committed generation directory")
+	}
+	if input.ModelHandle != "" {
+		if input.Canonical != nil {
+			return http.StatusBadRequest, nil, errors.New("handle and canonical are mutually exclusive")
+		}
+		cfg, err = resolveLocalModel(cfg, input.ModelHandle, input.Staging)
+		if err != nil {
+			return http.StatusConflict, nil, err
+		}
 	}
 	// Preserve the preview and runtime receipts until canonical validation has
 	// accepted the staged workspace. Swift discards this staging directory.
@@ -68,6 +105,76 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 	cache, err := localRequestCache(cfg, input.Staging)
 	if err != nil {
 		return http.StatusBadRequest, nil, err
+	}
+	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && input.Path == "/api/ledger/reconciliation/snapshot" {
+		snapshot, err := cache.Snapshot()
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		return localReconciliationSnapshotResponse(snapshot, input.Query)
+	}
+	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && input.Path == "/api/ledger/bootstrap/page" {
+		snapshot, err := cache.Snapshot()
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		return localBootstrapPageResponse(cfg, snapshot, input.Query)
+	}
+	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && input.Path == "/api/ledger/accounts/detail/page" {
+		snapshot, err := cache.Snapshot()
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		return localAccountPageResponse(cfg, snapshot, input.Query)
+	}
+	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && input.Path == "/api/ledger/transactions/detail" {
+		snapshot, err := cache.Snapshot()
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		return localTransactionDetailResponse(cfg, snapshot, input.Query)
+	}
+	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && (input.Path == "/api/ledger/transactions/page" || input.Path == "/api/ledger/transactions/history-page") {
+		if input.Staging {
+			return http.StatusBadRequest, nil, errors.New("transaction pages require a committed generation")
+		}
+		snapshot, err := cache.Snapshot()
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		return localTransactionPageProjection(cfg, snapshot, input.Query, input.Path == "/api/ledger/transactions/history-page")
+	}
+	if (input.Method == "" || strings.EqualFold(input.Method, http.MethodGet)) && input.Path == "/api/ledger/overview/categories" {
+		snapshot, err := cache.Snapshot()
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		return localOverviewCategoriesResponse(cfg, snapshot, input.Query)
+	}
+	if strings.EqualFold(input.Method, http.MethodPost) && input.Path == "/api/ledger/bql" {
+		if input.ImportFile != nil {
+			return http.StatusBadRequest, nil, errors.New("importFile is valid only for import preview")
+		}
+		if len(input.Body) > bqlMaxRequestBodyLength {
+			return http.StatusRequestEntityTooLarge, nil, errors.New("BQL request exceeds byte budget")
+		}
+		var request BQLRequest
+		if err := json.Unmarshal(input.Body, &request); err != nil {
+			return http.StatusBadRequest, nil, errors.New("invalid BQL request")
+		}
+		snapshot, err := cache.Snapshot()
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		result, err := executeLocalBQL(snapshot, request.Query, request.ValuationCurrency)
+		if errors.Is(err, errLocalBQLCapacity) {
+			return http.StatusRequestEntityTooLarge, nil, err
+		}
+		if err != nil {
+			return http.StatusBadRequest, nil, err
+		}
+		raw, err := json.Marshal(result)
+		return http.StatusOK, raw, err
 	}
 	runtime := newFilesystemRuntimeStore(cfg.RuntimeDir)
 	writer := NewLedgerWriterWithRuntimeStore(cfg, cache, runtime)
@@ -154,6 +261,11 @@ type localPageCacheKey struct {
 }
 
 func localRequestCache(cfg Config, staging bool) (*LedgerCache, error) {
+	if cfg.localRegisteredCache != nil {
+		// resolveLocalModel checks source freshness before handing out this cache;
+		// LedgerCache.Snapshot must still recheck it to catch changes after resolve.
+		return cfg.localRegisteredCache, nil
+	}
 	version, err := ledgerVersion(cfg)
 	if err != nil {
 		return nil, err
@@ -347,6 +459,11 @@ func copyLocalRuntime(source, destination string) error {
 		if err != nil {
 			return err
 		}
+		// Canonical export is scratch owned by the serialized native bridge,
+		// never an import receipt. Do not copy/read orphaned huge stream files.
+		if relative == "canonical-stream" && entry.IsDir() {
+			return filepath.SkipDir
+		}
 		target := filepath.Join(destination, relative)
 		if entry.IsDir() {
 			return os.MkdirAll(target, 0o700)
@@ -371,6 +488,12 @@ func readConfiguredLedgerLines(cfg Config) ([]BeanLine, error) {
 }
 
 func localLedgerSource(cfg Config) ([]BeanLine, []fileStat, error) {
+	return walkLocalLedgerSource(cfg, true)
+}
+
+// Version checks use the same include traversal and content hashes as source
+// loading, but must not retain every line of the ledger just to discard it.
+func walkLocalLedgerSource(cfg Config, collectLines bool) ([]BeanLine, []fileStat, error) {
 	seen := map[string]bool{}
 	var lines []BeanLine
 	var stats []fileStat
@@ -404,9 +527,13 @@ func localLedgerSource(cfg Config) ([]BeanLine, []fileStat, error) {
 			return errors.New("local ledger exceeds 64 MiB")
 		}
 		stats = append(stats, fileStat{relative: filepath.ToSlash(relative), contentHash: sha256.Sum256(raw), mtimeMs: info.ModTime().UnixMilli()})
-		for index, line := range strings.Split(string(raw), "\n") {
+		index := 0
+		for line := range strings.SplitSeq(string(raw), "\n") {
+			index++
 			line = strings.TrimSuffix(line, "\r")
-			lines = append(lines, BeanLine{File: full, Line: index + 1, Text: line})
+			if collectLines {
+				lines = append(lines, BeanLine{File: full, Line: index, Text: line})
+			}
 			match := includeRe.FindStringSubmatch(strings.TrimSpace(line))
 			if match == nil {
 				continue

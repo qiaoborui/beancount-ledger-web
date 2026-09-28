@@ -155,6 +155,7 @@ private struct LedgerNavigation: ViewModifier {
     let title: String
     let isRoot: Bool
     let showsTimeRange: Bool
+    let showsSync: Bool
 
     func body(content: Content) -> some View {
         content
@@ -166,16 +167,18 @@ private struct LedgerNavigation: ViewModifier {
                         LedgerTimeRangeButton()
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    LedgerSyncToolbarButton()
+                if showsSync {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        LedgerSyncToolbarButton()
+                    }
                 }
             }
     }
 }
 
 extension View {
-    func ledgerNavigation(_ title: String, isRoot: Bool = true, showsTimeRange: Bool = false) -> some View {
-        modifier(LedgerNavigation(title: title, isRoot: isRoot, showsTimeRange: showsTimeRange))
+    func ledgerNavigation(_ title: String, isRoot: Bool = true, showsTimeRange: Bool = false, showsSync: Bool = true) -> some View {
+        modifier(LedgerNavigation(title: title, isRoot: isRoot, showsTimeRange: showsTimeRange, showsSync: showsSync))
     }
 
     /// Reading surfaces share modern Apple grouped card layout with native feel.
@@ -668,13 +671,15 @@ struct PrimaryButtonLabel: View {
     let loading: Bool
 
     var body: some View {
-        HStack(spacing: LedgerSpacing.sm) {
-            if loading {
-                ProgressView().tint(LedgerPalette.onBrand)
-            }
-            Text(title)
-                .font(.body.weight(.semibold))
-        }
+        Text(title)
+            .font(.body.weight(.semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+            .padding(.horizontal, 16)
+            .opacity(loading ? 0 : 1)
+            .overlay { if loading { ProgressView().tint(LedgerPalette.onBrand) } }
+            .accessibilityLabel(title)
+            .accessibilityValue(loading ? "处理中" : "")
         .foregroundStyle(LedgerPalette.onBrand)
         .frame(maxWidth: .infinity, minHeight: 48)
         .background(LedgerPalette.cobalt)
@@ -699,33 +704,17 @@ struct LedgerSyncToolbarButton: View {
     var body: some View {
         LedgerToolbarButton(action: activate,
             accessibilityLabel: session.isLocal ? presentation.title : "刷新账本") {
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(indicatorColor)
-                    .frame(width: 8, height: 8)
-                if presentation.isBusy {
-                    ProgressView()
-                        .controlSize(.mini)
-                } else {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(indicatorColor)
-                }
-            }
+            Image(systemName: indicatorSymbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(indicatorColor)
+                .symbolEffect(.pulse, isActive: presentation.indicator == .syncing)
         }
         .disabled(presentation.isBusy || session.phase != .ready)
         .accessibilityIdentifier("ledger-sync-status")
         .accessibilityHint(session.isLocal && presentation.action == .storageSettings
             ? "打开存储与同步设置" : "立即同步账本")
         .sheet(isPresented: $settingsPresented) {
-            NavigationStack {
-                LocalLedgerStorageView()
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("完成") { settingsPresented = false }
-                        }
-                    }
-            }
+            LedgerStorageSheet()
             .ledgerPrivacyProtectedSheet()
         }
         .alert("同步未完成", isPresented: Binding(
@@ -754,6 +743,17 @@ struct LedgerSyncToolbarButton: View {
         }
     }
 
+    private var indicatorSymbol: String {
+        guard session.isLocal else { return "arrow.clockwise" }
+        switch presentation.indicator {
+        case .local: return "internaldrive"
+        case .syncing: return "arrow.triangle.2.circlepath"
+        case .synced: return "checkmark.circle"
+        case .pending: return "arrow.up.circle"
+        case .attention: return "exclamationmark.circle"
+        }
+    }
+
     private func activate() {
         guard !presentation.isBusy, session.phase == .ready else { return }
         if session.isLocal, presentation.action == .storageSettings {
@@ -772,6 +772,19 @@ struct LedgerSyncToolbarButton: View {
             } catch {
                 if session.location == location { failureMessage = error.localizedDescription }
             }
+        }
+    }
+}
+
+struct LedgerStorageSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            LocalLedgerStorageView()
+                .toolbar { ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                } }
         }
     }
 }

@@ -56,6 +56,7 @@ enum LedgerTransactionMutationError: LocalizedError, Equatable {
 
 enum LedgerTransactionResolution: Equatable {
     case visible(LedgerTransaction)
+    case unloaded // Local absence from a UI window is not evidence of deletion.
     case unavailable
 }
 
@@ -71,6 +72,7 @@ private struct LedgerTransactionMutation {
     let projected: LedgerTransaction
     let kind: Kind
     var phase: LedgerTransactionMutationPhase
+    var commitReceipt: LocalLedgerRepository.TransactionCommitReceipt? = nil
 }
 
 @MainActor
@@ -93,6 +95,27 @@ final class LedgerSession: ObservableObject {
 
     @Published private(set) var phase: Phase
     @Published private(set) var ledger: LedgerBootstrap?
+    @Published private(set) var localOverviewCategories: LedgerOverviewCategories?
+    @Published private(set) var isLocalOverviewCategoriesLoading = false
+    private struct AnalysisCacheKey: Hashable {
+        let kind: LedgerAnalysisResourceKind
+        let start: String
+        let end: String
+        let currency: String
+        let generation: Int
+        let localRevision: UUID?
+    }
+    private var analysisCache: [AnalysisCacheKey: LedgerAnalysisResource] = [:]
+    @Published private(set) var localOverviewCategoriesError: String?
+    var overviewTransactionStats: OverviewTransactionStats? {
+        guard let ledger else { return nil }
+        return OverviewTransactionStats(isLocal: isLocal, aggregate: localOverviewCategories,
+            transactions: ledger.transactions)
+    }
+
+    private var overviewCategoriesGeneration = 0
+    private var overviewCategoriesRevisionID: UUID?
+    private var overviewSaveObserver: AnyCancellable?
     @Published private(set) var location: LedgerLocation?
     @Published private(set) var localSyncStatus: LocalStorageSyncStatus?
     @Published private(set) var localAutomaticSyncEnabled = true
@@ -136,14 +159,18 @@ final class LedgerSession: ObservableObject {
     @Published var pendingTransactionFilter: LedgerTransactionFilter?
     @Published private(set) var pendingWidgetExpenseDay: String?
     @Published private(set) var compactTabDestinations = LedgerDestination.defaultCompactTabs
-    @Published private(set) var selectedRange: LedgerDateRange
+    @Published private(set) var selectedRange: LedgerDateRange {
+        didSet { if selectedRange != oldValue { resetLocalTransactionWindow() } }
+    }
     @Published private(set) var draftRange: LedgerDateRange
     @Published private(set) var isRangeLoading = false
     @Published private(set) var isValuationCurrencyLoading = false
     @Published private(set) var accountPeriodBalancesAvailable = false
     @Published var rangePickerPresented = false
     @Published private(set) var passkeyAvailable = false
-    @Published private(set) var privacyShielded = true
+    @Published private(set) var privacyShielded = true {
+        didSet { if privacyShielded { resetLocalTransactionWindow() } }
+    }
     @Published private(set) var privacyCoverArmed = false
     @Published private(set) var isAuthenticationBusy = false
     @Published private(set) var isBiometricSettingBusy = false
@@ -176,12 +203,188 @@ final class LedgerSession: ObservableObject {
     private var systemAuthenticationInProgress = false
     private var requestGeneration = 0
     private var sessionEpoch = 0
-    private struct LocalPresentation {
+    fileprivate struct LocalPresentation: Equatable, Sendable {
         let ledgerID: UUID
         let revisionID: UUID?
         let today: String
     }
-    private var localPresentation: LocalPresentation?
+    private var localPresentation: LocalPresentation? {
+        didSet { if localPresentation != oldValue { resetLocalTransactionWindow() } }
+    }
+
+    var localTransactionPresentationRevision: UUID? { localPresentation?.revisionID }
+    @Published private(set) var localTransactionReloadID = 0
+
+    // Bounded reads. These do not replace bootstrap/global arrays or grant
+    // mutation authority. Only the caller of localTransactionDetail holds detail.
+    @Published private(set) var localTransactionWindow: LocalTransactionWindow.Window?
+    var localBootstrapTransactions: [LedgerTransaction] {
+        guard isLocal, phase == .ready, !privacyShielded, applicationActive,
+              !isRangeLoading, !isValuationCurrencyLoading,
+              !transactionMutations.values.contains(where: { $0.phase == .pending }),
+              localPresentation?.revisionID != nil else { return [] }
+        return ledger?.transactions ?? []
+    }
+    @Published private(set) var isLocalTransactionWindowLoading = false
+    @Published private(set) var localTransactionWindowError: String?
+    @Published private(set) var localTransactionSummary: LocalTransactionScan.Result?
+    @Published private(set) var isLocalTransactionSummaryLoading = false
+    @Published private(set) var localTransactionSummaryError: String?
+    private var transactionSummaryTask: Task<Void, Never>?
+    private var transactionWindowFilter = LedgerTransactionFilter()
+    private var transactionWindowLimits = LocalTransactionWindow.Limits()
+    private var transactionWindowAnchors = LocalTransactionWindow.Anchors()
+    @Published private(set) var localTransactionWindowIndex = 0
+    private var transactionWindowReader: LocalTransactionWindow?
+    private var transactionWindowContext: LocalReadContext?
+    private var transactionWindowGeneration = 0
+    private var transactionWindowTask: Task<Void, Never>?
+    private var transactionDetailTask: Task<LedgerTransaction, Error>?
+    private var localTransactionActionID: UUID?
+    private var transactionShareTask: Task<LocalTransactionShareExport, Error>?
+    private var transactionShareID: UUID?
+    private var transactionShareExport: LocalTransactionShareExport?
+    private var transactionSelectionTask: Task<LocalTransactionSelectionScan.Result, Error>?
+    private var transactionSelectionID: UUID?
+    @Published private(set) var localGlobalSearchInvalidation = 0
+    private var globalSearchTask: Task<LocalGlobalSearchScan.Result, Error>?
+    private var globalSearchRequestID: UUID?
+    private var localSearchSequence: LocalSearchSequence?
+
+    private var accountPageTask: Task<LedgerAccountPage, Error>?
+    private var accountPageRequestID: UUID?
+    private var accountTrendTask: Task<LocalAccountTrendScan.Result, Error>?
+    private var accountTrendRequestID: UUID?
+    private var accountReadSequence: AccountReadSequence?
+
+    @Published private(set) var localEventTagSummaries: [EventTagSummary]?
+    @Published private(set) var localEventTagSummaryError: String?
+    @Published private(set) var isLocalEventTagSummaryLoading = false
+    private var eventTagSummaryTask: Task<Void, Never>?
+    private var eventTagSummaryID: UUID?
+    private var eventReportTask: Task<LocalEventTagReportScan.Result, Error>?
+    private var eventReportID: UUID?
+    private var eventWindowTask: Task<LocalTransactionWindow.Window, Error>?
+    private var eventWindowID: UUID?
+    private var eventExportTask: Task<LocalEventReportExport, Error>?
+    private var eventExportID: UUID?
+    private var eventExport: LocalEventReportExport?
+
+    private var widgetWindowTask: Task<LocalTransactionWindow.Window, Error>?
+    private var widgetWindowRequestID: UUID?
+    private var widgetSummaryTask: Task<LocalTransactionScan.Result, Error>?
+    private var widgetSummaryRequestID: UUID?
+
+    private var pendingWindowTask: Task<LocalPendingScan.Result, Error>?
+    private var pendingWindowID: UUID?
+    private var pendingReadSequence: PendingReadSequence?
+    private struct PendingReadSequence {
+        let id: UUID
+        let context: LocalReadContext
+        let filter: LedgerPendingFilter
+        let accounts: [LedgerAccount]
+    }
+    struct LocalPendingContinuation: Sendable {
+        fileprivate let sequenceID: UUID
+        fileprivate let revision: String
+        fileprivate let offset: Int
+    }
+    struct LocalPendingWindow: Sendable {
+        let result: LocalPendingScan.Result
+        let continuation: LocalPendingContinuation?
+    }
+
+    private struct AccountReadSequence {
+        let id: UUID
+        let context: LocalReadContext
+        let account: String
+        let currency: String
+        let order: LedgerAccountPageOrder
+    }
+    struct LocalAccountContinuation: Sendable {
+        fileprivate let sequenceID: UUID
+        fileprivate let revision: String
+        fileprivate let cursor: String
+        fileprivate let header: LedgerAccountDetail
+        fileprivate let count: Int
+        fileprivate let consumed: Int
+        fileprivate let lastBalance: Int
+        fileprivate let lastChange: Int
+        fileprivate let lastDate: String
+    }
+    struct LocalAccountWindow: Sendable {
+        let page: LedgerAccountPage
+        let continuation: LocalAccountContinuation?
+    }
+
+    private struct AccountPresentationKey: Hashable {
+        let account: String
+        let currency: String
+        let revision: UUID
+        let start: String
+        let end: String
+    }
+    // Bounded display snapshots. Opaque paging continuations are never reused.
+    private var accountDetailCache: [AccountPresentationKey: LedgerAccountDetail] = [:]
+    private var accountTrendCache: [AccountPresentationKey: LocalAccountTrendScan.Result] = [:]
+    private func accountPresentationKey(account: String, currency: String) -> AccountPresentationKey? {
+        guard isLocal, phase == .ready, !privacyShielded, let revision = localTransactionPresentationRevision else { return nil }
+        return AccountPresentationKey(account: account, currency: currency, revision: revision,
+            start: selectedRange.start, end: selectedRange.end)
+    }
+    func cachedLocalAccountDetail(account: String, currency: String) -> LedgerAccountDetail? {
+        guard let key = accountPresentationKey(account: account, currency: currency) else { return nil }
+        return accountDetailCache[key]
+    }
+    func cachedLocalAccountTrend(account: String, currency: String) -> LocalAccountTrendScan.Result? {
+        guard let key = accountPresentationKey(account: account, currency: currency) else { return nil }
+        return accountTrendCache[key]
+    }
+
+    private struct LocalSearchSequence {
+        let id: UUID
+        let context: LocalReadContext
+        let query: String
+        let scope: LedgerGlobalSearchScope
+        let filters: LedgerGlobalSearchFilters
+        let accounts: [LedgerAccount]
+    }
+    struct LocalSearchContinuation: Sendable {
+        fileprivate let sequenceID: UUID
+        fileprivate let nativeRevision: String
+        fileprivate let anchor: LocalGlobalSearchScan.Anchor
+    }
+    struct LocalSearchWindow: Sendable {
+        let result: LocalGlobalSearchScan.Result
+        let continuation: LocalSearchContinuation?
+    }
+
+    enum LocalTransactionActionKind: Sendable { case edit, delete, addTags }
+
+    /// Caller-owned exact originals, never an all-history session detail cache.
+    /// The opaque nonce is single-use and revocable independently of this value.
+    struct LocalTransactionAction: Sendable {
+        let kind: LocalTransactionActionKind
+        let originals: [LedgerTransaction]
+        fileprivate let id: UUID
+        fileprivate let context: LocalReadContext
+        fileprivate init(kind: LocalTransactionActionKind, originals: [LedgerTransaction],
+                         id: UUID, context: LocalReadContext) {
+            self.kind = kind
+            self.originals = originals
+            self.id = id
+            self.context = context
+        }
+    }
+
+    fileprivate struct LocalReadContext: Sendable {
+        let generation: Int
+        let request: Int
+        let epoch: Int
+        let presentation: LocalPresentation
+        let revisionID: UUID
+        let range: LedgerDateRange
+    }
     private var localResumeTask: Task<Void, Never>?
     private var localResumeID: UUID?
     private var importIndexTask: Task<Void, Never>?
@@ -300,6 +503,25 @@ final class LedgerSession: ObservableObject {
                 phase = .locked(authenticated: true)
             }
         }
+        // Aggregate invalidation is independent of optional automatic Git sync.
+        overviewSaveObserver = NotificationCenter.default.publisher(for: LocalLedgerRepository.didSaveNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let id = notification.object as? UUID else { return }
+                Task { @MainActor [weak self] in
+                    guard let self, self.location == .local(id), let repository = self.localRepository else { return }
+                    let epoch = self.sessionEpoch, request = self.requestGeneration
+                    let presentation = self.localPresentation
+                    let revision = try? await repository.workspace.currentRevision()
+                    guard self.sessionEpoch == epoch, self.requestGeneration == request,
+                          self.localPresentation == presentation, self.location == .local(id),
+                          self.phase == .ready,
+                          revision?.id != self.localPresentation?.revisionID else { return }
+                    self.resetLocalTransactionWindow()
+                    self.invalidateOverviewCategories()
+                    self.localOverviewCategoriesError = "账本已更新，请刷新概览汇总"
+                }
+            }
         widgetRefreshStatusObserver = LedgerWidgetRefreshStatusObserver(
             store: resolvedWidgetRefreshStatusStore
         ) { [weak self] in
@@ -563,7 +785,8 @@ final class LedgerSession: ObservableObject {
         guard applicationActive, sessionEpoch == epoch, location == expectedLocation else { throw CancellationError() }
     }
 
-    private func activateLocalLedger(_ descriptor: LocalLedgerDescriptor) async throws {
+    private func activateLocalLedger(_ descriptor: LocalLedgerDescriptor,
+                                     deferDerivedRefreshes: Bool = false) async throws {
         guard let localCatalog else { throw LedgerRepositoryError.capabilityUnavailable("local storage") }
         let generation = invalidateSession()
         stopImportIndexTracking()
@@ -585,7 +808,8 @@ final class LedgerSession: ObservableObject {
         setLocallyLocked(false, for: contextURL)
         clearBackgroundDate(for: contextURL)
         do {
-            try await loadLedger(from: contextURL, generation: generation)
+            try await loadLedger(from: contextURL, generation: generation,
+                deferLocalDerivedRefreshes: deferDerivedRefreshes)
             await prepareLocalAutomaticSync()
         } catch {
             guard generation == requestGeneration else { throw error }
@@ -596,6 +820,7 @@ final class LedgerSession: ObservableObject {
 
     func unlockLocalLedger() async {
         guard isLocal, !isAuthenticationBusy, applicationActive else { return }
+        let coldStartup = phase == .checking
         isAuthenticationBusy = true
         systemAuthenticationInProgress = true
         errorMessage = nil
@@ -615,7 +840,7 @@ final class LedgerSession: ObservableObject {
                   let descriptor = localLedgers.first(where: { $0.id == id }) else {
                 throw LedgerRepositoryError.capabilityUnavailable("找不到本地账本，请重新选择")
             }
-            try await activateLocalLedger(descriptor)
+            try await activateLocalLedger(descriptor, deferDerivedRefreshes: coldStartup)
         } catch {
             if expectedLocation == location {
                 phase = .locked(authenticated: true)
@@ -661,6 +886,8 @@ final class LedgerSession: ObservableObject {
                 if presentation.revisionID == nil || presentation.revisionID != revision?.id
                     || presentation.today != LedgerDateRange.today(now: self.ledgerNow()) {
                     await self.refresh()
+                } else {
+                    await self.ensureLocalOverviewCategories()
                 }
                 guard !Task.isCancelled, self.sessionEpoch == epoch, self.location == expectedLocation,
                       self.applicationActive, self.phase == .ready else { return }
@@ -1057,6 +1284,8 @@ final class LedgerSession: ObservableObject {
             throw LedgerRepositoryError.capabilityUnavailable("local writes")
         }
         let epoch = sessionEpoch
+        resetLocalTransactionWindow()
+        defer { if epoch == sessionEpoch { localTransactionReloadID &+= 1 } }
         try await localRepository.addTransaction(entry: entry)
         guard epoch == sessionEpoch else { throw CancellationError() }
         await refresh()
@@ -1129,6 +1358,18 @@ final class LedgerSession: ObservableObject {
         }
         await refresh()
         return result
+    }
+
+    func localReconciliationRows(start: String, end: String) async throws -> [LedgerReconciliationRow] {
+        try Task.checkCancellation()
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let snapshot = try await repository.reconciliationSnapshot(start: start, end: end, expectedRevisionID: context.revisionID)
+        try validateLocalRead(context)
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return snapshot.rows
     }
 
     func fetchReconciliationRows(start: String, end: String) async throws -> [LedgerReconciliationRow] {
@@ -1440,6 +1681,7 @@ final class LedgerSession: ObservableObject {
     private func refreshWithResult() async -> Bool {
         guard phase == .ready, let contextURL, !isRangeLoading, !isValuationCurrencyLoading else { return false }
         let generation = invalidateRequests()
+        defer { if generation == requestGeneration { localTransactionReloadID &+= 1 } }
         do {
             try await loadLedger(from: contextURL, generation: generation)
             guard generation == requestGeneration else { return false }
@@ -1456,6 +1698,7 @@ final class LedgerSession: ObservableObject {
     private func refreshAfterBiometricUnlock() async -> Bool {
         guard phase == .ready, let contextURL, !isRangeLoading, !isValuationCurrencyLoading else { return false }
         let generation = invalidateRequests()
+        defer { if generation == requestGeneration { localTransactionReloadID &+= 1 } }
         do {
             try await loadLedger(
                 from: contextURL,
@@ -1537,13 +1780,18 @@ final class LedgerSession: ObservableObject {
         }
     }
 
-    func analysisResource(_ kind: LedgerAnalysisResourceKind) async throws -> LedgerAnalysisResource {
-        guard phase == .ready, let contextURL else {
+    var analysisPresentationID: Int { requestGeneration }
+
+    func analysisResource(_ kind: LedgerAnalysisResourceKind, forceRefresh: Bool = false) async throws -> LedgerAnalysisResource {
+        guard phase == .ready, !privacyShielded, let contextURL else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
         }
         let generation = requestGeneration
         let range = selectedRange
         let valuationCurrency = ledger?.valuationCurrency ?? storedValuationCurrency(for: contextURL)
+        let cacheKey = AnalysisCacheKey(kind: kind, start: range.start, end: range.queryEndExclusive,
+            currency: valuationCurrency, generation: generation, localRevision: localTransactionPresentationRevision)
+        if !forceRefresh, let cached = analysisCache[cacheKey] { return cached }
         do {
             let repository = try repository(at: contextURL)
             let resource: LedgerAnalysisResource
@@ -1586,9 +1834,12 @@ final class LedgerSession: ObservableObject {
             }
             guard generation == requestGeneration,
                   self.contextURL == contextURL,
-                  phase == .ready else {
+                  phase == .ready, !privacyShielded else {
                 throw CancellationError()
             }
+            // Only the current presentation's three resource kinds are retained.
+            analysisCache = analysisCache.filter { $0.key.generation == generation && $0.key.localRevision == cacheKey.localRevision }
+            analysisCache[cacheKey] = resource
             return resource
         } catch let error as LedgerAPIError {
             if case let .server(status, _) = error,
@@ -1603,6 +1854,15 @@ final class LedgerSession: ObservableObject {
             }
             throw error
         }
+    }
+
+    func cachedAnalysisResource(_ kind: LedgerAnalysisResourceKind) -> LedgerAnalysisResource? {
+        guard phase == .ready, !privacyShielded, let contextURL else { return nil }
+        let range = selectedRange
+        let currency = ledger?.valuationCurrency ?? storedValuationCurrency(for: contextURL)
+        let key = AnalysisCacheKey(kind: kind, start: range.start, end: range.queryEndExclusive,
+            currency: currency, generation: requestGeneration, localRevision: localTransactionPresentationRevision)
+        return analysisCache[key]
     }
 
     func importDocuments() async throws -> [LedgerImportDocument] {
@@ -1709,6 +1969,11 @@ final class LedgerSession: ObservableObject {
         source: TransactionSource,
         entry: LedgerTransactionEntry
     ) async throws {
+        if isLocal {
+            let action = try await prepareLocalTransactionAction(sources: [source], kind: .edit)
+            try await updateLocalTransaction(action: action, entry: entry)
+            return
+        }
         guard phase == .ready, contextURL != nil else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
         }
@@ -1741,6 +2006,11 @@ final class LedgerSession: ObservableObject {
     }
 
     func deleteTransaction(source: TransactionSource, reason: String) async throws {
+        if isLocal {
+            let action = try await prepareLocalTransactionAction(sources: [source], kind: .delete)
+            try await deleteLocalTransaction(action: action, reason: reason)
+            return
+        }
         guard phase == .ready, contextURL != nil else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
         }
@@ -1776,6 +2046,11 @@ final class LedgerSession: ObservableObject {
         sources: [TransactionSource],
         tags: [String]
     ) async throws {
+        if isLocal {
+            let action = try await prepareLocalTransactionAction(sources: sources, kind: .addTags)
+            try await addLocalTransactionTags(action: action, tags: tags)
+            return
+        }
         guard phase == .ready, contextURL != nil else {
             throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
         }
@@ -1827,21 +2102,95 @@ final class LedgerSession: ObservableObject {
 
     @Published private(set) var globalTransactions: [LedgerTransaction] = []
     private var globalTransactionsLoadedAt: Date?
+    private var localGlobalTransactionsRevision: UUID?
     var hasCachedGlobalTransactions: Bool { globalTransactionsLoadedAt != nil }
 
+    /// Consume bounded pages without publishing or retaining an all-history list.
+    /// performSensitiveRequest rejects late results on lock/ledger/write changes;
+    /// the native cursor rejects any revision change between pages.
+    func classificationEvidence(for entry: LedgerImportEntry) async throws -> ImportClassificationContext.Evidence {
+        let epoch = sessionEpoch, generation = requestGeneration
+        return try await performSensitiveRequest { repository in
+            var accumulator = ImportClassificationContext.Accumulator(entry: entry)
+            var cursor: String?
+            var revision: String?
+            repeat {
+                try Task.checkCancellation()
+                try await self.validateHistoryRead(epoch: epoch, generation: generation)
+                let page = try await repository.classificationHistoryPage(cursor: cursor)
+                guard page.sensitiveUnlocked, revision == nil || revision == page.revision else {
+                    throw LedgerAPIError.server(status: 409, message: "历史记录已变化，请重试")
+                }
+                try await self.validateHistoryRead(epoch: epoch, generation: generation)
+                revision = page.revision
+                accumulator.consume(page.transactions)
+                cursor = page.nextCursor
+            } while cursor != nil
+            return accumulator.evidence
+        }
+    }
+
+    func bookkeepingHistory(for entry: LedgerTransactionEntry) async throws -> [LedgerTransaction] {
+        guard !entry.payee.isEmpty else { return [] }
+        let epoch = sessionEpoch, generation = requestGeneration
+        return try await performSensitiveRequest { repository in
+            var related: [LedgerTransaction] = []
+            var cursor: String?
+            var revision: String?
+            repeat {
+                try Task.checkCancellation()
+                try await self.validateHistoryRead(epoch: epoch, generation: generation)
+                let page = try await repository.classificationHistoryPage(cursor: cursor)
+                guard page.sensitiveUnlocked, revision == nil || revision == page.revision else {
+                    throw LedgerAPIError.server(status: 409, message: "历史记录已变化，请重试")
+                }
+                try await self.validateHistoryRead(epoch: epoch, generation: generation)
+                revision = page.revision
+                related = Array((related + page.transactions.filter { $0.date <= entry.date && $0.payee == entry.payee })
+                    .sorted { $0.date > $1.date }.prefix(5))
+                cursor = page.nextCursor
+            } while cursor != nil
+            return related
+        }
+    }
+
+    private func validateHistoryRead(epoch: Int, generation: Int) throws {
+        guard sessionEpoch == epoch, requestGeneration == generation, phase == .ready, !privacyShielded else {
+            throw CancellationError()
+        }
+    }
+
     func loadGlobalTransactions(forceRefresh: Bool = false) async throws {
-        if !forceRefresh, phase == .ready,
-           let loadedAt = globalTransactionsLoadedAt,
-           Date().timeIntervalSince(loadedAt) < 60 { return }
-        let payload = try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
-            let payload = try await repository.globalTransactions()
-            guard payload.sensitiveUnlocked else {
-                throw LedgerAPIError.server(status: 423, message: "服务器敏感数据已锁定")
+        let payload: LedgerGlobalTransactions
+        if isLocal {
+            let context = try localReadContext()
+            guard let repository = localRepository else { throw CancellationError() }
+            if !forceRefresh, localGlobalTransactionsRevision == context.revisionID,
+               let loadedAt = globalTransactionsLoadedAt, Date().timeIntervalSince(loadedAt) < 60 {
+                let current = try await repository.workspace.currentRevision()
+                try validateLocalRead(context)
+                guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                return
             }
-            return payload
+            payload = try await repository.globalTransactions(expectedRevisionID: context.revisionID)
+            try validateLocalRead(context)
+            let current = try await repository.workspace.currentRevision()
+            try validateLocalRead(context)
+            guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+            localGlobalTransactionsRevision = context.revisionID
+        } else {
+            if !forceRefresh, phase == .ready,
+               let loadedAt = globalTransactionsLoadedAt, Date().timeIntervalSince(loadedAt) < 60 { return }
+            payload = try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
+                let payload = try await repository.globalTransactions()
+                guard payload.sensitiveUnlocked else {
+                    throw LedgerAPIError.server(status: 423, message: "服务器敏感数据已锁定")
+                }
+                return payload
+            }
         }
         try Task.checkCancellation()
-        reconcileTransactionMutations(in: payload.transactions)
+        if !isLocal { reconcileTransactionMutations(in: payload.transactions) }
         globalTransactions = payload.transactions
         globalTransactionsLoadedAt = Date()
         if let ledger {
@@ -1875,12 +2224,12 @@ final class LedgerSession: ObservableObject {
             return .visible(projectedTransaction(transaction))
         }
         let key = Self.transactionMutationKey(source)
-        guard let mutation = transactionMutations[key] else { return .unavailable }
+        guard let mutation = transactionMutations[key] else { return isLocal ? .unloaded : .unavailable }
         switch mutation.phase {
         case .pending, .confirmed:
             return .visible(mutation.projected)
         case .failed:
-            return .unavailable
+            return isLocal ? .unloaded : .unavailable
         }
     }
 
@@ -1891,17 +2240,50 @@ final class LedgerSession: ObservableObject {
         if transactionMutations[key]?.phase.blocksFurtherWrites == true {
             throw LedgerTransactionMutationError.alreadyInProgress
         }
+        if isLocal {
+            resetLocalTransactionWindow()
+            invalidateOverviewCategories()
+        }
         transactionMutations[key] = mutation
         transactionMutationStates[key] = .pending
     }
 
-    private func confirmTransactionMutations(keys: [String], operationID: UUID) {
+    private func confirmTransactionMutations(keys: [String], operationID: UUID,
+        receipt: LocalLedgerRepository.TransactionCommitReceipt? = nil) {
         for key in keys {
             guard var mutation = transactionMutations[key], mutation.operationID == operationID else { continue }
             mutation.phase = .confirmed
+            mutation.commitReceipt = receipt
             transactionMutations[key] = mutation
             transactionMutationStates[key] = .confirmed
         }
+        if receipt != nil { retirePublishedLocalCommitReceipts() }
+    }
+
+    /// A receipt is proof of a validated local commit, but not proof that the
+    /// currently displayed generation includes it. Retire only against the exact
+    /// published revision, independent of month/page presence. Newer unknown
+    /// generations remain conservative until separately reconciled.
+    private func retirePublishedLocalCommitReceipts() {
+        guard let presentation = localPresentation, let revision = presentation.revisionID,
+              location == .local(presentation.ledgerID) else { return }
+        let keys = transactionMutations.compactMap { key, mutation -> String? in
+            guard mutation.phase == .confirmed, let receipt = mutation.commitReceipt,
+                  receipt.ledgerID == presentation.ledgerID, receipt.revisionID == revision else { return nil }
+            return key
+        }
+        guard !keys.isEmpty else { return }
+        for key in keys {
+            transactionMutations.removeValue(forKey: key)
+            transactionMutationStates.removeValue(forKey: key)
+            transactionMutationAliases = transactionMutationAliases.filter { $0.value != key }
+        }
+        // A legacy all-history cache may still contain a cross-month original.
+        // Do not expose it when its overlay is retired; local search owns bounded
+        // fresh reads and explicit legacy consumers may reload if needed.
+        globalTransactions = []
+        globalTransactionsLoadedAt = nil
+        localGlobalTransactionsRevision = nil
     }
 
     private func failTransactionMutations(keys: [String], operationID: UUID, error: Error) {
@@ -1930,6 +2312,10 @@ final class LedgerSession: ObservableObject {
         var reconciledKeys: [String] = []
 
         for (key, mutation) in transactionMutations {
+            // Receipt-backed confirmation is not reconciled from a potentially
+            // partial transaction list. Only exact published-generation evidence
+            // can retire it, including changes moved outside the current month.
+            if mutation.commitReceipt != nil { continue }
             guard mutation.original.date >= start, mutation.original.date < end,
                   mutation.projected.date >= start, mutation.projected.date < end else { continue }
             switch mutation.phase {
@@ -2493,6 +2879,7 @@ final class LedgerSession: ObservableObject {
         let wasActive = applicationActive
         applicationActive = isActive
         applicationBackground = isBackground
+        if !isActive || isBackground { resetLocalTransactionWindow() }
         if isBackground {
             if isLocalOperationBusy || (isLocal && isAuthenticationBusy) { _ = invalidateSession() }
             finishLocalAuthenticationForegroundWaiters(cancelled: true)
@@ -2690,6 +3077,74 @@ final class LedgerSession: ObservableObject {
         self.primaryDestinationID = LedgerDestination.transactions.rawValue
     }
 
+    /// Read-only Widget drill-down: its day never changes the main range or
+    /// bootstrap. A caller owns only one <=100-row window, with replay for older
+    /// windows rather than accumulating history. Complete counts load separately.
+    func localWidgetDayWindow(_ day: String, index: Int = 0) async throws -> LocalTransactionWindow.Window {
+        guard LedgerWidgetLink.isValidDay(day), (0..<10_000).contains(index) else {
+            throw LedgerAPIError.incompatibleServer("无效的消费日期或分页")
+        }
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let dayRange = LedgerDateRange(start: day, end: day, preset: .custom)
+        widgetWindowTask?.cancel()
+        let id = UUID(); widgetWindowRequestID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            let reader = try await repository.makeTransactionWindow(start: day, end: dayRange.queryEndExclusive,
+                filter: .init(kind: .expense), expectedRevisionID: context.revisionID, limits: .init(maxRows: 100))
+            do {
+                var window = try await reader.nextWindow()
+                if index > 0 {
+                    for _ in 0..<index {
+                        try validateLocalRead(context)
+                        guard !window.isComplete else { throw LocalLedgerError.operationFailed("支出分页已变化，请返回第一页") }
+                        window = try await reader.nextWindow()
+                    }
+                }
+                await reader.invalidate()
+                return window
+            } catch {
+                await reader.invalidate()
+                throw error
+            }
+        }
+        widgetWindowTask = task
+        defer { if widgetWindowRequestID == id { widgetWindowTask = nil; widgetWindowRequestID = nil } }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(context)
+        guard widgetWindowRequestID == id else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard widgetWindowRequestID == id else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
+    }
+
+    func localWidgetDaySummary(_ day: String) async throws -> LocalTransactionScan.Result {
+        guard LedgerWidgetLink.isValidDay(day) else { throw LedgerAPIError.incompatibleServer("无效的消费日期") }
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let dayRange = LedgerDateRange(start: day, end: day, preset: .custom)
+        widgetSummaryTask?.cancel()
+        let id = UUID(); widgetSummaryRequestID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            return try await repository.scanTransactions(start: day, end: dayRange.queryEndExclusive,
+                filter: .init(kind: .expense), expectedRevisionID: context.revisionID, limits: .init(maxVisibleCount: 0))
+        }
+        widgetSummaryTask = task
+        defer { if widgetSummaryRequestID == id { widgetSummaryTask = nil; widgetSummaryRequestID = nil } }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(context)
+        guard widgetSummaryRequestID == id else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard widgetSummaryRequestID == id else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
+    }
+
     /// A day drill-down owns its payload and never replaces the global range or ledger.
     func widgetDayLedger(_ day: String) async throws -> LedgerBootstrap {
         guard LedgerWidgetLink.isValidDay(day) else {
@@ -2765,7 +3220,8 @@ final class LedgerSession: ObservableObject {
         generation: Int,
         range: LedgerDateRange? = nil,
         valuationCurrency: String? = nil,
-        preserveCachedLedgerOnSensitiveLock: Bool = false
+        preserveCachedLedgerOnSensitiveLock: Bool = false,
+        deferLocalDerivedRefreshes: Bool = false
     ) async throws {
         let targetRange = range ?? selectedRange
         let targetCurrency = valuationCurrency ?? storedValuationCurrency(for: contextURL)
@@ -2775,10 +3231,14 @@ final class LedgerSession: ObservableObject {
         let payload: LedgerBootstrap
         let presentationRevision: UUID?
         if let local {
-            let snapshot = try await local.bootstrapSnapshot(start: targetRange.start,
-                end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency)
-            payload = snapshot.payload
-            presentationRevision = snapshot.revisionID
+            guard let revision = try await local.workspace.currentRevision() else {
+                throw LocalLedgerError.operationFailed("账本版本尚未就绪")
+            }
+            let page = try await local.bootstrapPage(start: targetRange.start,
+                end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency,
+                expectedRevisionID: revision.id)
+            payload = page.bootstrap.replacingTransactions(with: page.transactionPage.transactions)
+            presentationRevision = revision.id
         } else {
             payload = try await source.bootstrap(start: targetRange.start,
                 end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency)
@@ -2796,7 +3256,13 @@ final class LedgerSession: ObservableObject {
             phase = .locked(authenticated: true)
             return
         }
-        if !globalTransactions.isEmpty {
+        if local != nil {
+            // A previous explicit full-history share must not remain a default
+            // session cache after a bounded bootstrap or a revision change.
+            globalTransactions = []
+            globalTransactionsLoadedAt = nil
+            localGlobalTransactionsRevision = nil
+        } else if !globalTransactions.isEmpty {
             globalTransactions.removeAll { transaction in
                 if payload.transactions.contains(where: { $0.source == transaction.source }) { return true }
                 let key = Self.transactionMutationKey(transaction.source)
@@ -2811,12 +3277,32 @@ final class LedgerSession: ObservableObject {
             }
             globalTransactions.append(contentsOf: payload.transactions)
         }
-        reconcileTransactionMutations(in: payload.transactions, start: targetRange.start, end: targetRange.queryEndExclusive)
+        if local == nil {
+            reconcileTransactionMutations(in: payload.transactions, start: targetRange.start, end: targetRange.queryEndExclusive)
+        }
+        if let local, let revisionID = presentationRevision {
+            let matches = overviewCategoriesRevisionID == revisionID
+                && localOverviewCategories?.start == targetRange.start
+                && localOverviewCategories?.end == targetRange.queryEndExclusive
+            if !matches {
+                invalidateOverviewCategories()
+                let cached = try? await local.cachedOverviewCategories(start: targetRange.start,
+                    end: targetRange.queryEndExclusive, expectedRevisionID: revisionID)
+                guard generation == requestGeneration else { return }
+                let current = try await local.workspace.currentRevision()
+                guard generation == requestGeneration, current?.id == revisionID else {
+                    throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+                }
+                localOverviewCategories = cached
+                overviewCategoriesRevisionID = cached == nil ? nil : revisionID
+            }
+        }
         ledger = payload
         localPresentation = local.map {
             LocalPresentation(ledgerID: $0.descriptor.id,
                 revisionID: presentationRevision, today: today)
         }
+        if local != nil { retirePublishedLocalCommitReceipts() }
         storeValuationCurrency(payload.valuationCurrency, for: contextURL)
         selectedRange = targetRange
         amountsVisible = applicationActive
@@ -2826,12 +3312,29 @@ final class LedgerSession: ObservableObject {
         }
         phase = .ready
         Task { await restoreImportIndexTrackingIfNeeded() }
-        await publishWidgetSnapshot(
-            ledger: payload,
-            contextURL: contextURL,
-            valuationCurrency: payload.valuationCurrency,
-            generation: generation
-        )
+        if local != nil, deferLocalDerivedRefreshes {
+            let epoch = sessionEpoch, expectedLocation = location
+            Task(priority: .utility) { @MainActor [weak self] in
+                await Task.yield()
+                guard let self, generation == self.requestGeneration,
+                      epoch == self.sessionEpoch, expectedLocation == self.location,
+                      self.phase == .ready else { return }
+                await self.refreshLocalOverviewCategories()
+                guard generation == self.requestGeneration, epoch == self.sessionEpoch,
+                      expectedLocation == self.location, self.phase == .ready else { return }
+                await self.publishWidgetSnapshot(ledger: payload, contextURL: contextURL,
+                    valuationCurrency: payload.valuationCurrency, generation: generation)
+            }
+        } else {
+            if local != nil { await refreshLocalOverviewCategories() }
+            guard generation == requestGeneration else { return }
+            await publishWidgetSnapshot(
+                ledger: payload,
+                contextURL: contextURL,
+                valuationCurrency: payload.valuationCurrency,
+                generation: generation
+            )
+        }
     }
 
     private func beginImportIndexPolling(
@@ -3201,8 +3704,948 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    /// Revocation is synchronous on the session actor. Reader cleanup may run
+    /// later; generation checks, not actor-task ordering, prevent late publication.
+    func resetLocalTransactionWindow() {
+        pendingWindowID = nil
+        pendingWindowTask?.cancel(); pendingWindowTask = nil
+        pendingReadSequence = nil
+        discardLocalEventReportExport()
+        eventWindowID = nil
+        eventWindowTask?.cancel(); eventWindowTask = nil
+        eventReportID = nil
+        eventReportTask?.cancel(); eventReportTask = nil
+        eventTagSummaryID = nil
+        eventTagSummaryTask?.cancel(); eventTagSummaryTask = nil
+        localEventTagSummaries = nil; localEventTagSummaryError = nil; isLocalEventTagSummaryLoading = false
+        widgetWindowRequestID = nil
+        widgetWindowTask?.cancel(); widgetWindowTask = nil
+        widgetSummaryRequestID = nil
+        widgetSummaryTask?.cancel(); widgetSummaryTask = nil
+        accountPageRequestID = nil
+        accountPageTask?.cancel(); accountPageTask = nil
+        accountTrendRequestID = nil
+        accountTrendTask?.cancel(); accountTrendTask = nil
+        accountReadSequence = nil
+        localGlobalSearchInvalidation &+= 1
+        globalSearchTask?.cancel()
+        globalSearchTask = nil
+        globalSearchRequestID = nil
+        localSearchSequence = nil
+        transactionSelectionID = nil
+        transactionSelectionTask?.cancel()
+        transactionSelectionTask = nil
+        discardLocalTransactionShare()
+        localTransactionActionID = nil
+        transactionWindowGeneration &+= 1
+        transactionSummaryTask?.cancel()
+        transactionSummaryTask = nil
+        localTransactionSummary = nil
+        isLocalTransactionSummaryLoading = false
+        localTransactionSummaryError = nil
+        transactionWindowAnchors.removeAll()
+        localTransactionWindowIndex = 0
+        transactionWindowTask?.cancel()
+        transactionWindowTask = nil
+        transactionDetailTask?.cancel()
+        transactionDetailTask = nil
+        let reader = transactionWindowReader
+        transactionWindowReader = nil
+        transactionWindowContext = nil
+        localTransactionWindow = nil
+        isLocalTransactionWindowLoading = false
+        localTransactionWindowError = nil
+        if let reader { Task { await reader.invalidate() } }
+    }
+
+    private func localReadContext() throws -> LocalReadContext {
+        guard let presentation = localPresentation, let revision = presentation.revisionID else {
+            throw CancellationError()
+        }
+        let context = LocalReadContext(generation: transactionWindowGeneration,
+            request: requestGeneration, epoch: sessionEpoch, presentation: presentation,
+            revisionID: revision, range: selectedRange)
+        try validateLocalRead(context)
+        return context
+    }
+
+    /// Use on both sides of every suspension, including cached-window reads and
+    /// the final workspace revision lookup. No await may follow final validation
+    /// before publication/return to the caller. Confirmed overlays may outlive a
+    /// monthly refresh; revision-verified native rows, not those overlays, own reads.
+    private func validateLocalRead(_ context: LocalReadContext) throws {
+        try Task.checkCancellation()
+        guard context.generation == transactionWindowGeneration,
+              context.request == requestGeneration, context.epoch == sessionEpoch,
+              location == .local(context.presentation.ledgerID),
+              localPresentation == context.presentation, selectedRange == context.range,
+              phase == .ready, !privacyShielded, applicationActive, !applicationBackground,
+              !isRangeLoading, !isValuationCurrencyLoading,
+              !transactionMutations.values.contains(where: { $0.phase == .pending }) else {
+            throw CancellationError()
+        }
+    }
+
+    /// Reuse the published page while its read context and filter remain valid.
+    func ensureLocalTransactionWindow(filter: LedgerTransactionFilter = .init(),
+                                      limits: LocalTransactionWindow.Limits = .init()) async {
+        if localTransactionWindow != nil, transactionWindowReader != nil,
+           transactionWindowFilter == filter, transactionWindowLimits == limits,
+           let context = transactionWindowContext,
+           (try? validateLocalRead(context)) != nil {
+            return
+        }
+        await loadLocalTransactionWindow(filter: filter, limits: limits)
+    }
+
+    /// Explicitly reload the first window, including after a retry.
+    func loadLocalTransactionWindow(filter: LedgerTransactionFilter = .init(),
+                                    limits: LocalTransactionWindow.Limits = .init()) async {
+        guard !Task.isCancelled else { return }
+        resetLocalTransactionWindow()
+        transactionWindowFilter = filter
+        transactionWindowLimits = limits
+        guard let context = try? localReadContext(), let repository = localRepository else { return }
+        await runLocalTransactionWindow(context: context, repository: repository, filter: filter, limits: limits)
+    }
+
+    /// Concurrent next requests are no-ops and cannot overwrite the active read's
+    /// loading/error state. Retain exactly one published window, never append rows.
+    func loadNextLocalTransactionWindow() async {
+        guard !Task.isCancelled, !isLocalTransactionWindowLoading,
+              localTransactionWindow?.continuation != nil,
+              let context = transactionWindowContext, let repository = localRepository,
+              (try? validateLocalRead(context)) != nil else { return }
+        await runLocalTransactionWindow(context: context, repository: repository,
+            targetIndex: localTransactionWindowIndex + 1)
+    }
+
+    /// Reload evicted windows from bounded cursor anchors, or replay from the
+    /// beginning if the anchor was evicted. Never retain previously visible rows.
+    func loadPreviousLocalTransactionWindow() async {
+        guard !Task.isCancelled, !isLocalTransactionWindowLoading,
+              localTransactionWindowIndex > 0,
+              let context = transactionWindowContext, let repository = localRepository,
+              (try? validateLocalRead(context)) != nil else { return }
+        await runLocalTransactionWindow(context: context, repository: repository,
+            filter: transactionWindowFilter, limits: transactionWindowLimits,
+            targetIndex: localTransactionWindowIndex - 1, replay: true)
+    }
+
+    /// Complete counts/facets/day totals independently of scroll position.
+    /// No visible rows are retained by this scan and nothing is published before
+    /// EOF. Errors stay separate from the currently usable bounded list window.
+    func loadLocalTransactionSummary() async {
+        guard !Task.isCancelled, !isLocalTransactionSummaryLoading,
+              localTransactionSummary == nil,
+              let context = transactionWindowContext, let repository = localRepository,
+              (try? validateLocalRead(context)) != nil else { return }
+        let filter = transactionWindowFilter
+        isLocalTransactionSummaryLoading = true
+        localTransactionSummaryError = nil
+        let task = Task { @MainActor [self] in
+            defer {
+                if context.generation == transactionWindowGeneration {
+                    isLocalTransactionSummaryLoading = false
+                    transactionSummaryTask = nil
+                }
+            }
+            do {
+                try validateLocalRead(context)
+                let result = try await repository.scanTransactions(start: context.range.start,
+                    end: context.range.queryEndExclusive, filter: filter,
+                    expectedRevisionID: context.revisionID, limits: .init(maxVisibleCount: 0))
+                try validateLocalRead(context)
+                let revision = try await repository.workspace.currentRevision()
+                try validateLocalRead(context)
+                guard revision?.id == context.revisionID else {
+                    throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+                }
+                localTransactionSummary = result
+            } catch {
+                guard context.generation == transactionWindowGeneration else { return }
+                if localTransactionSummary == nil, !(error is CancellationError) && !Task.isCancelled {
+                    localTransactionSummaryError = error.localizedDescription
+                }
+            }
+        }
+        transactionSummaryTask = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+    }
+
+    private func runLocalTransactionWindow(context: LocalReadContext, repository: LocalLedgerRepository,
+        filter: LedgerTransactionFilter = .init(), limits: LocalTransactionWindow.Limits = .init(),
+        targetIndex: Int = 0, replay: Bool = false) async {
+        isLocalTransactionWindowLoading = true
+        localTransactionWindowError = nil
+        let task = Task { @MainActor [self] in
+            defer {
+                if context.generation == transactionWindowGeneration {
+                    isLocalTransactionWindowLoading = false
+                    transactionWindowTask = nil
+                }
+            }
+            do {
+                try validateLocalRead(context)
+                let reader: LocalTransactionWindow
+                let checkpoint = replay && targetIndex > 0 ? transactionWindowAnchors.checkpoint(for: targetIndex) : nil
+                var replayIndex = checkpoint == nil ? 0 : targetIndex
+                if replay, let old = transactionWindowReader {
+                    transactionWindowReader = nil
+                    await old.invalidate()
+                    try validateLocalRead(context)
+                }
+                if let existing = transactionWindowReader {
+                    reader = existing
+                } else {
+                    reader = try await repository.makeTransactionWindow(start: context.range.start,
+                        end: context.range.queryEndExclusive, filter: filter,
+                        expectedRevisionID: context.revisionID, limits: limits, checkpoint: checkpoint)
+                    do { try validateLocalRead(context) }
+                    catch {
+                        Task { await reader.invalidate() }
+                        throw error
+                    }
+                    transactionWindowReader = reader
+                    transactionWindowContext = context
+                }
+                try validateLocalRead(context)
+                var window = try await reader.nextWindow()
+                try validateLocalRead(context)
+                if replay {
+                    while replayIndex < targetIndex {
+                        guard let continuation = window.continuation else {
+                            throw LocalTransactionWindow.WindowError.invalidCheckpoint
+                        }
+                        transactionWindowAnchors.insert(continuation, for: replayIndex + 1)
+                        window = try await reader.nextWindow()
+                        try validateLocalRead(context)
+                        replayIndex += 1
+                    }
+                }
+                // A cached candidate page bypasses the repository provider. Always
+                // check the workspace again, even at EOF, before publishing it.
+                let revision = try await repository.workspace.currentRevision()
+                try validateLocalRead(context)
+                guard revision?.id == context.revisionID else {
+                    throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+                }
+                if let continuation = window.continuation {
+                    transactionWindowAnchors.insert(continuation, for: targetIndex + 1)
+                }
+                localTransactionWindowIndex = targetIndex
+                localTransactionWindow = window // complete summary exists only at EOF
+                if let summary = window.summary {
+                    localTransactionSummary = summary
+                    localTransactionSummaryError = nil
+                    transactionSummaryTask?.cancel()
+                    transactionSummaryTask = nil
+                    isLocalTransactionSummaryLoading = false
+                }
+            } catch {
+                guard context.generation == transactionWindowGeneration else { return }
+                let cancelled = error is CancellationError || Task.isCancelled
+                resetLocalTransactionWindow()
+                if !cancelled { localTransactionWindowError = error.localizedDescription }
+            }
+        }
+        transactionWindowTask = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+    }
+
+    /// Hydrate an exact, revision-verified original for a caller-owned operation.
+    /// Deliberately does NOT seed knownTransaction, resolution, or any detail cache.
+    /// Wiring this into editing requires a separate mutation-authority migration.
+    func localTransactionDetail(source: TransactionSource) async throws -> LedgerTransaction {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        guard transactionDetailTask == nil else { throw LocalTransactionWindow.WindowError.busy }
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            let detail = try await repository.transactionDetail(source: source, expectedRevisionID: context.revisionID)
+            try validateLocalRead(context)
+            return detail
+        }
+        transactionDetailTask = task
+        defer {
+            if context.generation == transactionWindowGeneration { transactionDetailTask = nil }
+        }
+        let detail = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        // The caller may resume after a lifecycle/revision change even if the
+        // child finished. The final freshness check belongs to the returning task.
+        try validateLocalRead(context)
+        let revision = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard revision?.id == context.revisionID else {
+            throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+        }
+        return detail
+    }
+
+    /// Report history remains independent of complete aggregates. Keep only a
+    /// bounded window; replay earlier pages instead of collecting every tagged row.
+    func localEventTagWindow(_ tag: String, index: Int = 0) async throws -> LocalTransactionWindow.Window {
+        guard (0..<10_000).contains(index) else { throw LocalLedgerError.invalidConfiguration("事件分页无效") }
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        eventWindowTask?.cancel()
+        let id = UUID(); eventWindowID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            let reader = try await repository.makeTransactionWindow(start: context.range.start,
+                end: context.range.queryEndExclusive, filter: .init(tags: [tag]),
+                expectedRevisionID: context.revisionID, limits: .init(maxRows: 100))
+            do {
+                var window = try await reader.nextWindow()
+                if index > 0 {
+                    for _ in 0..<index {
+                        try validateLocalRead(context)
+                        guard !window.isComplete else { throw LocalLedgerError.operationFailed("事件分页已变化，请返回第一页") }
+                        window = try await reader.nextWindow()
+                    }
+                }
+                await reader.invalidate()
+                return window
+            } catch {
+                await reader.invalidate()
+                throw error
+            }
+        }
+        eventWindowTask = task
+        defer { if eventWindowID == id { eventWindowTask = nil; eventWindowID = nil } }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(context)
+        guard eventWindowID == id else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard eventWindowID == id else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
+    }
+
+    /// Complete report aggregates are caller-owned and independent of the
+    /// paginated transaction list. Never hydrate an all-history report array.
+    func localEventTagReport(_ tag: String) async throws -> LocalEventTagReportScan.Result {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let accounts = ledger?.accounts ?? []
+        let labels = TransactionCategoryPresentation.accountLabels(accounts)
+        eventReportTask?.cancel()
+        let id = UUID(); eventReportID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            return try await repository.eventTagReport(tag: tag, start: context.range.start,
+                end: context.range.queryEndExclusive, accountLabels: labels, expectedRevisionID: context.revisionID)
+        }
+        eventReportTask = task
+        defer { if eventReportID == id { eventReportTask = nil; eventReportID = nil } }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(context)
+        guard eventReportID == id, ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard eventReportID == id, ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
+    }
+
+    /// Range-complete bounded summaries shared by the event list and analysis
+    /// card. A second visible consumer joins, rather than superseding, the scan.
+    func loadLocalEventTagSummaries(force: Bool = false) async {
+        guard isLocal, !Task.isCancelled else { return }
+        do {
+            let context = try localReadContext()
+            guard let repository = localRepository else { throw CancellationError() }
+            if localEventTagSummaries != nil && !force {
+                let current = try await repository.workspace.currentRevision()
+                try validateLocalRead(context)
+                guard current?.id == context.revisionID else {
+                    localEventTagSummaries = nil
+                    localEventTagSummaryError = "账本已变化，请刷新后重试。"
+                    return
+                }
+                return
+            }
+            if let running = eventTagSummaryTask, !force {
+                await running.value
+                return
+            }
+            eventTagSummaryTask?.cancel()
+            let id = UUID(); eventTagSummaryID = id
+            isLocalEventTagSummaryLoading = true; localEventTagSummaryError = nil
+            // The session-owned task publishes and cleans up even if every view
+            // waiter disappears. Only context invalidation/force cancels shared work.
+            let task = Task { @MainActor [self] in
+                defer {
+                    if eventTagSummaryID == id {
+                        isLocalEventTagSummaryLoading = false
+                        eventTagSummaryTask = nil; eventTagSummaryID = nil
+                    }
+                }
+                do {
+                    try validateLocalRead(context)
+                    let result = try await repository.eventTagSummaries(start: context.range.start,
+                        end: context.range.queryEndExclusive, expectedRevisionID: context.revisionID)
+                    try validateLocalRead(context)
+                    guard eventTagSummaryID == id else { return }
+                    let current = try await repository.workspace.currentRevision()
+                    try validateLocalRead(context)
+                    guard eventTagSummaryID == id else { return }
+                    guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+                    localEventTagSummaries = result
+                    localEventTagSummaryError = nil
+                } catch {
+                    if eventTagSummaryID == id {
+                        localEventTagSummaries = nil
+                        if !(error is CancellationError) { localEventTagSummaryError = error.localizedDescription }
+                    }
+                }
+            }
+            eventTagSummaryTask = task
+            await task.value
+        } catch { /* Unreadable contexts publish no financial state. */ }
+    }
+
+    /// Account windows and the complete chart have independent tasks. Neither
+    /// may publish into legacy arrays or infer missing/deleted history from a page.
+    func localAccountWindow(account: String, currency: String,
+                            continuation: LocalAccountContinuation? = nil,
+                            limit: Int = 100, order: LedgerAccountPageOrder = .asc) async throws -> LocalAccountWindow {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let sequence: AccountReadSequence
+        if let continuation {
+            guard let existing = accountReadSequence, existing.id == continuation.sequenceID,
+                  existing.account == account, existing.currency == currency, existing.order == order else { throw CancellationError() }
+            try validateLocalRead(existing.context)
+            sequence = existing
+        } else {
+            sequence = AccountReadSequence(id: UUID(), context: context, account: account, currency: currency, order: order)
+            accountReadSequence = sequence
+        }
+        accountPageTask?.cancel()
+        let id = UUID(); accountPageRequestID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(sequence.context)
+            return try await repository.accountPage(account: account, currency: currency,
+                start: context.range.start, end: context.range.queryEndExclusive,
+                cursor: continuation?.cursor, limit: limit, order: order, expectedRevisionID: context.revisionID)
+        }
+        accountPageTask = task
+        defer { if accountPageRequestID == id { accountPageTask = nil; accountPageRequestID = nil } }
+        let page = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(sequence.context)
+        guard accountPageRequestID == id, accountReadSequence?.id == sequence.id else { throw CancellationError() }
+        var header = page.detail
+        // This small immutable header is carried by one opaque continuation.
+        header = LedgerAccountDetail(account: header.account, label: header.label, alias: header.alias,
+            group: header.group, active: header.active, currency: header.currency, currentBalance: header.currentBalance,
+            rows: [], start: header.start, end: header.end, openingBalance: header.openingBalance,
+            closingBalance: header.closingBalance, periodChange: header.periodChange)
+        let consumed = try LocalTransactionScan.add(continuation?.consumed ?? 0, page.detail.rows.count)
+        guard consumed <= page.rowCount, (page.nextCursor != nil) == (consumed < page.rowCount) else {
+            throw LocalLedgerError.operationFailed("账户分页总数不一致")
+        }
+        if let continuation {
+            guard page.revision == continuation.revision, page.rowCount == continuation.count,
+                  header == continuation.header, let first = page.detail.rows.first,
+                  (order == .asc ? continuation.lastDate <= first.date : continuation.lastDate >= first.date) else { throw LocalLedgerError.operationFailed("账户分页上下文已变化") }
+            let (balance, overflow) = order == .asc
+                ? continuation.lastBalance.addingReportingOverflow(first.change)
+                : continuation.lastBalance.subtractingReportingOverflow(continuation.lastChange)
+            guard !overflow, balance == first.balance else { throw LocalLedgerError.operationFailed("账户分页余额不连续") }
+        }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(sequence.context)
+        guard accountPageRequestID == id, accountReadSequence?.id == sequence.id else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        let next: LocalAccountContinuation?
+        if let cursor = page.nextCursor, let last = page.detail.rows.last {
+            next = LocalAccountContinuation(sequenceID: sequence.id, revision: page.revision, cursor: cursor,
+                header: header, count: page.rowCount, consumed: consumed, lastBalance: last.balance, lastChange: last.change, lastDate: last.date)
+        } else { next = nil }
+        if continuation == nil, order == .desc,
+           let key = accountPresentationKey(account: account, currency: currency) {
+            if accountDetailCache[key] == nil, accountDetailCache.count >= 8 { accountDetailCache.removeAll() }
+            accountDetailCache[key] = page.detail
+        }
+        return LocalAccountWindow(page: page, continuation: next)
+    }
+
+    func localAccountTrend(account: String, currency: String, forceRefresh: Bool = false) async throws -> LocalAccountTrendScan.Result {
+        let context = try localReadContext()
+        if !forceRefresh, let cached = cachedLocalAccountTrend(account: account, currency: currency) { return cached }
+        guard let repository = localRepository else { throw CancellationError() }
+        accountTrendTask?.cancel()
+        let id = UUID(); accountTrendRequestID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            return try await repository.accountTrend(account: account, currency: currency,
+                range: context.range, expectedRevisionID: context.revisionID)
+        }
+        accountTrendTask = task
+        defer { if accountTrendRequestID == id { accountTrendTask = nil; accountTrendRequestID = nil } }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(context)
+        guard accountTrendRequestID == id else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard accountTrendRequestID == id else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        if let key = accountPresentationKey(account: account, currency: currency) {
+            if accountTrendCache[key] == nil, accountTrendCache.count >= 8 { accountTrendCache.removeAll() }
+            accountTrendCache[key] = result
+        }
+        return result
+    }
+
+    /// Range-complete inbox facts with one bounded row window. Continuations
+    /// bind filter, account choices, native model and the session read context.
+    func localPendingWindow(filter: LedgerPendingFilter = .all,
+                            continuation: LocalPendingContinuation? = nil) async throws -> LocalPendingWindow {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let accounts = ledger?.accounts ?? []
+        let sequence: PendingReadSequence
+        if let continuation {
+            guard let existing = pendingReadSequence, existing.id == continuation.sequenceID,
+                  existing.filter == filter, existing.accounts == accounts else { throw CancellationError() }
+            try validateLocalRead(existing.context)
+            sequence = existing
+        } else {
+            sequence = PendingReadSequence(id: UUID(), context: context, filter: filter, accounts: accounts)
+            pendingReadSequence = sequence
+        }
+        pendingWindowTask?.cancel()
+        let id = UUID(); pendingWindowID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(sequence.context)
+            return try await repository.pendingWindow(start: context.range.start, end: context.range.queryEndExclusive,
+                filter: filter, offset: continuation?.offset ?? 0, declaredAccounts: accounts.map(\.account),
+                nativeRevision: continuation?.revision, expectedRevisionID: context.revisionID)
+        }
+        pendingWindowTask = task
+        defer { if pendingWindowID == id { pendingWindowTask = nil; pendingWindowID = nil } }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(sequence.context)
+        guard pendingWindowID == id, pendingReadSequence?.id == sequence.id,
+              ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(sequence.context)
+        guard pendingWindowID == id, pendingReadSequence?.id == sequence.id,
+              ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return LocalPendingWindow(result: result, continuation: result.nextOffset.map {
+            LocalPendingContinuation(sequenceID: sequence.id, revision: result.revision, offset: $0)
+        })
+    }
+
+    /// Caller owns one bounded result; this never seeds legacy global arrays or
+    /// reconciles deletion from a partial window. Continuations are opaque and
+    /// bind account labels, filters, scope, query, native model and read context.
+    func localGlobalSearchWindow(query: String, scope: LedgerGlobalSearchScope,
+                                 filters: LedgerGlobalSearchFilters,
+                                 continuation: LocalSearchContinuation? = nil,
+                                 limits: LocalGlobalSearchScan.Limits = .init()) async throws -> LocalSearchWindow {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let accounts = ledger?.accounts ?? []
+        let sequence: LocalSearchSequence
+        if let continuation {
+            guard let existing = localSearchSequence, existing.id == continuation.sequenceID,
+                  existing.query == query, existing.scope == scope, existing.filters == filters,
+                  existing.accounts == accounts else { throw CancellationError() }
+            try validateLocalRead(existing.context)
+            sequence = existing
+        } else {
+            sequence = LocalSearchSequence(id: UUID(), context: context, query: query,
+                scope: scope, filters: filters, accounts: accounts)
+            localSearchSequence = sequence
+        }
+        globalSearchTask?.cancel()
+        let id = UUID()
+        globalSearchRequestID = id
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(sequence.context)
+            return try await repository.globalSearchWindow(query: query, accounts: accounts,
+                scope: scope, filters: filters, after: continuation?.anchor,
+                nativeRevision: continuation?.nativeRevision, expectedRevisionID: context.revisionID, limits: limits)
+        }
+        globalSearchTask = task
+        defer {
+            if globalSearchRequestID == id { globalSearchTask = nil; globalSearchRequestID = nil }
+        }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(sequence.context)
+        guard globalSearchRequestID == id, localSearchSequence?.id == sequence.id,
+              ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(sequence.context)
+        guard globalSearchRequestID == id, localSearchSequence?.id == sequence.id,
+              ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return LocalSearchWindow(result: result, continuation: result.continuation.map {
+            LocalSearchContinuation(sequenceID: sequence.id, nativeRevision: result.revision, anchor: $0)
+        })
+    }
+
+    /// Caller-owned complete facts. Every new selection request supersedes the
+    /// previous one; the UI must also compare its captured selection before use.
+    func localTransactionSelectionFacts(filter: LedgerTransactionFilter,
+                                        selectedIDs: Set<String>) async throws -> LocalTransactionSelectionScan.Result {
+        try await localTransactionSelectionFacts(filter: filter, request: .ids(selectedIDs))
+    }
+
+    func localTransactionSelectionFacts(filter: LedgerTransactionFilter,
+                                        selection: LocalTransactionSelection) async throws -> LocalTransactionSelectionScan.Result {
+        try await localTransactionSelectionFacts(filter: filter, request: .selection(selection))
+    }
+
+    private enum LocalSelectionRequest: Sendable {
+        case ids(Set<String>)
+        case selection(LocalTransactionSelection)
+    }
+
+    private func localTransactionSelectionFacts(filter: LedgerTransactionFilter,
+        request: LocalSelectionRequest) async throws -> LocalTransactionSelectionScan.Result {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        transactionSelectionTask?.cancel()
+        let id = UUID()
+        transactionSelectionID = id
+        let blocked = Set(transactionMutations.values.filter { $0.phase.blocksFurtherWrites }.map { $0.original.id })
+        let task = Task { @MainActor [self] in
+            try validateLocalRead(context)
+            let result: LocalTransactionSelectionScan.Result
+            switch request {
+            case .ids(let selectedIDs):
+                result = try await repository.selectionFacts(start: context.range.start,
+                    end: context.range.queryEndExclusive, filter: filter, selectedIDs: selectedIDs,
+                    blockedIDs: blocked, expectedRevisionID: context.revisionID)
+            case .selection(let selection):
+                result = try await repository.selectionFacts(start: context.range.start,
+                    end: context.range.queryEndExclusive, filter: filter, selection: selection,
+                    blockedIDs: blocked, expectedRevisionID: context.revisionID)
+            }
+            try validateLocalRead(context)
+            guard transactionSelectionID == id else { throw CancellationError() }
+            return result
+        }
+        transactionSelectionTask = task
+        defer {
+            if transactionSelectionID == id { transactionSelectionTask = nil; transactionSelectionID = nil }
+        }
+        let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try validateLocalRead(context)
+        guard transactionSelectionID == id else { throw CancellationError() }
+        let current = try await repository.workspace.currentRevision()
+        try validateLocalRead(context)
+        guard transactionSelectionID == id else { throw CancellationError() }
+        guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        return result
+    }
+
+    func discardLocalEventReportExport(_ export: LocalEventReportExport? = nil) {
+        if let export, eventExport !== export { export.discard(); return }
+        eventExportID = nil
+        eventExportTask?.cancel(); eventExportTask = nil
+        eventExport?.discard(); eventExport = nil
+    }
+
+    func prepareLocalEventReportExport(_ tag: String) async throws -> LocalEventReportExport {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        let accounts = ledger?.accounts ?? []
+        let labels = TransactionCategoryPresentation.accountLabels(accounts)
+        discardLocalEventReportExport()
+        let id = UUID(); eventExportID = id
+        let task = Task { @MainActor [self] in
+            try await LocalEventReportExport.prepare(repository: repository, tag: tag,
+                start: context.range.start, end: context.range.queryEndExclusive,
+                expectedRevisionID: context.revisionID, accountLabels: labels,
+                parentDirectory: FileManager.default.temporaryDirectory.resolvingSymlinksInPath(),
+                adopt: { self.eventExport = $0 }) {
+                    try self.validateLocalRead(context)
+                    guard self.eventExportID == id, self.ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+                }
+        }
+        eventExportTask = task
+        do {
+            let export = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            do {
+                try validateLocalRead(context)
+                guard eventExportID == id, ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+                let current = try await repository.workspace.currentRevision()
+                try validateLocalRead(context)
+                guard eventExportID == id, ledger?.accounts ?? [] == accounts else { throw CancellationError() }
+                guard current?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+            } catch { export.discard(); throw error }
+            eventExport = export
+            eventExportTask = nil
+            return export
+        } catch {
+            if eventExportID == id { discardLocalEventReportExport() }
+            throw error
+        }
+    }
+
+    /// Retain at most one export, revoking its file synchronously whenever the
+    /// session's read context is invalidated. The caller must also discard on
+    /// share-sheet dismissal; retaining an old URL never keeps its file alive.
+    func discardLocalTransactionShare(_ export: LocalTransactionShareExport? = nil) {
+        if let export, transactionShareExport !== export {
+            export.discard()
+            return
+        }
+        transactionShareID = nil
+        transactionShareTask?.cancel()
+        transactionShareTask = nil
+        transactionShareExport?.discard()
+        transactionShareExport = nil
+    }
+
+    func prepareLocalTransactionShare(filter: LedgerTransactionFilter,
+                                      selectedIDs: Set<String>?) async throws -> LocalTransactionShareExport {
+        try await prepareLocalTransactionShare(filter: filter, request: .ids(selectedIDs))
+    }
+
+    func prepareLocalTransactionShare(filter: LedgerTransactionFilter,
+                                      selection: LocalTransactionSelection) async throws -> LocalTransactionShareExport {
+        try await prepareLocalTransactionShare(filter: filter, request: .selection(selection))
+    }
+
+    private enum LocalShareRequest: Sendable {
+        case ids(Set<String>?)
+        case selection(LocalTransactionSelection)
+    }
+
+    private func prepareLocalTransactionShare(filter: LedgerTransactionFilter,
+        request: LocalShareRequest) async throws -> LocalTransactionShareExport {
+        let context = try localReadContext()
+        guard let repository = localRepository else { throw CancellationError() }
+        // Serial ownership: a new explicit share revokes the previous file/task.
+        discardLocalTransactionShare()
+        let id = UUID()
+        transactionShareID = id
+        let currency = ledger?.valuationCurrency ?? "CNY"
+        let labels = TransactionCategoryPresentation.accountLabels(ledger?.accounts ?? [])
+        let task = Task { @MainActor [self] in
+            let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+            let validate: @MainActor () throws -> Void = {
+                try self.validateLocalRead(context)
+                guard self.transactionShareID == id else { throw CancellationError() }
+            }
+            switch request {
+            case .ids(let selectedIDs):
+                return try await LocalTransactionShareExport.prepare(repository: repository,
+                    start: context.range.start, end: context.range.queryEndExclusive,
+                    filter: filter, selectedIDs: selectedIDs, expectedRevisionID: context.revisionID,
+                    currency: currency, accountLabels: labels, parentDirectory: directory,
+                    adopt: { export in self.transactionShareExport = export }, validate: validate)
+            case .selection(let selection):
+                return try await LocalTransactionShareExport.prepare(repository: repository,
+                    start: context.range.start, end: context.range.queryEndExclusive,
+                    filter: filter, selection: selection, expectedRevisionID: context.revisionID,
+                    currency: currency, accountLabels: labels, parentDirectory: directory,
+                    adopt: { export in self.transactionShareExport = export }, validate: validate)
+            }
+        }
+        transactionShareTask = task
+        do {
+            let export = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            do {
+                try validateLocalRead(context)
+                guard transactionShareID == id else { throw CancellationError() }
+                let revision = try await repository.workspace.currentRevision()
+                try validateLocalRead(context)
+                guard transactionShareID == id else { throw CancellationError() }
+                guard revision?.id == context.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+            } catch { export.discard(); throw error }
+            transactionShareExport = export
+            transactionShareTask = nil
+            return export
+        } catch {
+            if transactionShareID == id { discardLocalTransactionShare() }
+            throw error
+        }
+    }
+
+    /// An explicit user action hydrates exact sources from a pinned revision.
+    /// A newer completed preparation supersedes prior authority. While hydration
+    /// is busy, reject a second preparation without revoking the in-flight one.
+    /// No partial batch is authorized.
+    func prepareLocalTransactionAction(sources: [TransactionSource],
+                                       kind: LocalTransactionActionKind) async throws -> LocalTransactionAction {
+        let context = try localReadContext()
+        guard !sources.isEmpty, kind == .addTags || sources.count == 1,
+              Set(sources.map(Self.transactionMutationKey)).count == sources.count,
+              sources.allSatisfy({ $0.hash?.isEmpty == false }) else {
+            throw LedgerTransactionMutationError.sourceUnavailable
+        }
+        guard transactionDetailTask == nil else { throw LocalTransactionWindow.WindowError.busy }
+        let id = UUID()
+        localTransactionActionID = id
+        do {
+            var originals: [LedgerTransaction] = []
+            for source in sources {
+                try validateLocalRead(context)
+                guard localTransactionActionID == id else { throw CancellationError() }
+                guard transactionMutations[Self.transactionMutationKey(source)]?.phase.blocksFurtherWrites != true else {
+                    throw LedgerTransactionMutationError.alreadyInProgress
+                }
+                let original = try await localTransactionDetail(source: source)
+                try validateLocalRead(context)
+                guard localTransactionActionID == id else { throw CancellationError() }
+                originals.append(original)
+            }
+            return LocalTransactionAction(kind: kind, originals: originals, id: id, context: context)
+        } catch {
+            if localTransactionActionID == id { localTransactionActionID = nil }
+            throw error
+        }
+    }
+
+    func cancelLocalTransactionAction(_ action: LocalTransactionAction) {
+        if localTransactionActionID == action.id { localTransactionActionID = nil }
+    }
+
+    func updateLocalTransaction(action: LocalTransactionAction, entry: LedgerTransactionEntry) async throws {
+        try await performLocalTransactionAction(action, kind: .edit, mutation: .edit(entry))
+    }
+
+    func deleteLocalTransaction(action: LocalTransactionAction, reason: String) async throws {
+        try await performLocalTransactionAction(action, kind: .delete, mutation: .delete, reason: reason)
+    }
+
+    func addLocalTransactionTags(action: LocalTransactionAction, tags: [String]) async throws {
+        try await performLocalTransactionAction(action, kind: .addTags, mutation: .addTags(tags))
+    }
+
+    private func performLocalTransactionAction(_ action: LocalTransactionAction,
+        kind: LocalTransactionActionKind, mutation: LedgerTransactionMutation.Kind, reason: String = "") async throws {
+        func validate() throws {
+            try validateLocalRead(action.context)
+            guard localTransactionActionID == action.id, action.kind == kind else { throw CancellationError() }
+        }
+        try validate()
+        guard let repository = localRepository else { throw CancellationError() }
+        let revision = try await repository.workspace.currentRevision()
+        try validate()
+        guard revision?.id == action.context.revisionID else {
+            localTransactionActionID = nil
+            throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+        }
+        let sources = action.originals.map(\.source)
+        let keys = sources.map(Self.transactionMutationKey)
+        // Validate the entire batch before changing any optimistic overlay.
+        guard !keys.contains(where: { transactionMutations[$0]?.phase.blocksFurtherWrites == true }) else {
+            throw LedgerTransactionMutationError.alreadyInProgress
+        }
+        localTransactionActionID = nil // Consume BEFORE begin resets the window generation.
+        let operationID = UUID()
+        for original in action.originals {
+            let projected: LedgerTransaction
+            switch mutation {
+            case .edit(let entry): projected = original.projecting(entry: entry)
+            case .delete: projected = original
+            case .addTags(let tags): projected = original.projecting(addingTags: tags)
+            }
+            try beginTransactionMutation(key: Self.transactionMutationKey(original.source),
+                mutation: LedgerTransactionMutation(operationID: operationID, original: original,
+                    projected: projected, kind: mutation, phase: .pending))
+        }
+        do {
+            let receipt: LocalLedgerRepository.TransactionCommitReceipt = try await performSensitiveRequest(validatesRequestGeneration: false) { _ in
+                // Never use mutable presentedRevisionID as the authority for this action.
+                switch mutation {
+                case .edit(let entry):
+                    return try await repository.updateTransaction(source: sources[0], entry: entry,
+                        expectedRevisionID: action.context.revisionID)
+                case .delete:
+                    return try await repository.deleteTransaction(source: sources[0], reason: reason,
+                        expectedRevisionID: action.context.revisionID)
+                case .addTags(let tags):
+                    return try await repository.addTransactionTags(sources: sources, tags: tags,
+                        expectedRevisionID: action.context.revisionID)
+                }
+            }
+            confirmTransactionMutations(keys: keys, operationID: operationID, receipt: receipt)
+            scheduleTransactionReconciliation()
+        } catch {
+            failTransactionMutations(keys: keys, operationID: operationID, error: error)
+            throw error
+        }
+    }
+
+    private func invalidateOverviewCategories() {
+        overviewCategoriesGeneration &+= 1
+        overviewCategoriesRevisionID = nil
+        localOverviewCategories = nil
+        localOverviewCategoriesError = nil
+        isLocalOverviewCategoriesLoading = false
+    }
+
+    /// Never substitute bootstrap/global transaction arrays for a failed local
+    /// aggregate: those arrays will eventually be independently bounded.
+    func ensureLocalOverviewCategories() async {
+        if phase == .ready, let aggregate = localOverviewCategories,
+           overviewCategoriesRevisionID == localPresentation?.revisionID,
+           localPresentation?.revisionID != nil,
+           aggregate.start == selectedRange.start,
+           aggregate.end == selectedRange.queryEndExclusive {
+            return
+        }
+        await refreshLocalOverviewCategories()
+    }
+
+    func refreshLocalOverviewCategories() async {
+        guard phase == .ready, let repository = localRepository,
+              let presentation = localPresentation,
+              presentation.ledgerID == repository.descriptor.id,
+              let revisionID = presentation.revisionID else { return }
+        let matches = overviewCategoriesRevisionID == revisionID
+            && localOverviewCategories?.start == selectedRange.start
+            && localOverviewCategories?.end == selectedRange.queryEndExclusive
+        if !matches { invalidateOverviewCategories() }
+        else {
+            overviewCategoriesGeneration &+= 1
+            localOverviewCategoriesError = nil
+        }
+        let token = overviewCategoriesGeneration, generation = requestGeneration
+        let epoch = sessionEpoch, expectedLocation = location, range = selectedRange
+        isLocalOverviewCategoriesLoading = true
+        func isCurrent() -> Bool {
+            token == overviewCategoriesGeneration && generation == requestGeneration
+                && epoch == sessionEpoch && location == expectedLocation && phase == .ready
+                && selectedRange == range && localPresentation?.revisionID == revisionID
+        }
+        defer { if isCurrent() { isLocalOverviewCategoriesLoading = false } }
+        do {
+            let result = try await repository.overviewCategories(start: range.start,
+                end: range.queryEndExclusive, expectedRevisionID: revisionID)
+            // A writer may have published while the pinned engine read was suspended.
+            let current = try await repository.workspace.currentRevision()
+            guard isCurrent(), !Task.isCancelled else { return }
+            guard current?.id == revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+            localOverviewCategories = result
+            overviewCategoriesRevisionID = revisionID
+        } catch {
+            guard isCurrent(), !Task.isCancelled else { return }
+            if case LocalLedgerWorkspace.WorkspaceError.staleRevision = error {
+                localOverviewCategories = nil
+                overviewCategoriesRevisionID = nil
+            }
+            localOverviewCategoriesError = error.localizedDescription
+        }
+    }
+
     @discardableResult
     private func invalidateRequests() -> Int {
+        analysisCache.removeAll()
+        accountDetailCache.removeAll()
+        accountTrendCache.removeAll()
+        resetLocalTransactionWindow()
+        invalidateOverviewCategories()
         requestGeneration &+= 1
         return requestGeneration
     }
@@ -3218,6 +4661,7 @@ final class LedgerSession: ObservableObject {
         finishLocalAuthenticationForegroundWaiters(cancelled: true)
         globalTransactions = []
         globalTransactionsLoadedAt = nil
+        localGlobalTransactionsRevision = nil
         sessionEpoch &+= 1
         return invalidateRequests()
     }

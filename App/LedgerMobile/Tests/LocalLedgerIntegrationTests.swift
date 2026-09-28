@@ -1,10 +1,457 @@
 import Foundation
 import XCTest
+#if canImport(BeancountRuntime)
+import BeancountRuntime
+#endif
 @testable import LedgerMobile
 
 /// Exercises the production Go + CPython bridges in the signed app host.
 /// Every file belongs to a unique temporary fixture; no configured ledger is read.
 final class LocalLedgerIntegrationTests: XCTestCase {
+    func testCandidateScanMatchesLegacyUnicodeFiltersAndFullSummariesWithoutWrites() async throws {
+        #if os(iOS) && canImport(BeancountRuntime) && canImport(LedgerCore)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CandidateIntegration-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspace = LocalLedgerWorkspace(rootDirectory: root)
+        let composed = "Caf\u{00e9}"
+        let decomposed = "Cafe\u{0301}"
+        // One long grapheme, not hundreds of transactions or parser invocations.
+        let combining = "a" + String(repeating: "\u{0301}", count: 600)
+        let unicode = "✁ 👩\u{200d}💻 " + combining
+        var text = """
+        2000-01-01 open Assets:Cash CNY
+        2000-01-01 open Assets:Bank CNY
+        2000-01-01 open Expenses:Food CNY
+        2000-01-01 open Income:Other CNY
+        2000-01-01 open Expenses:Outside CNY
+
+        """
+        // The entire first page is deliberately irrelevant to Unicode/refund filters.
+        for index in 0..<500 {
+            text += """
+            2026-09-23 * "Ordinary" "Synthetic row \(index)" #ordinary
+              Expenses:Food 1 CNY
+              Assets:Cash -1 CNY
+
+            """
+        }
+        for payee in [composed, decomposed] {
+            text += """
+            2026-09-22 * "\(payee)" "\(unicode)" #unicode
+              Expenses:Food 2 CNY
+              Assets:Cash -2 CNY
+
+            """
+        }
+        text += """
+        2026-09-21 * "Synthetic credit" "Metadata-only evidence" #refund
+          type: "退款"
+          fixture: "not candidate evidence"
+          Income:Other -3 CNY
+          Assets:Cash 3 CNY
+
+        2026-09-21 * "Synthetic reversal" "Signed expense" #reversal
+          Expenses:Food -4 CNY
+          Assets:Cash 4 CNY
+
+        2026-09-20 * "Synthetic move" "Tail-only account and tag" #tail
+          Assets:Bank 5 CNY
+          Assets:Cash -5 CNY
+
+        2026-08-31 * "Outside" "Before range" #outside
+          Expenses:Outside 7 CNY
+          Assets:Cash -7 CNY
+
+        2026-10-01 * "Outside" "Exclusive end" #outside
+          Expenses:Outside 7 CNY
+          Assets:Cash -7 CNY
+
+        """
+        let original = Data(text.utf8)
+        // One real canonical validation/commit; never use the configured catalog.
+        let initial = try await workspace.commit(changes: [.write(original, to: "main.bean")]) { root in
+            try await EmbeddedBeancountValidator.shared.validate(workspace: root, entryFile: "main.bean")
+        }
+        let repository = LocalLedgerRepository(
+            descriptor: .init(id: UUID(), name: "Synthetic candidates", entrypoint: "main.bean", createdAt: Date()),
+            workspace: workspace)
+        let start = "2026-09-01", end = "2026-10-01"
+        let bootstrap = try await repository.bootstrapSnapshot(start: start, end: end, today: "2026-09-23", valuationCurrency: "CNY")
+        XCTAssertEqual(bootstrap.revisionID, initial.id)
+        XCTAssertTrue(bootstrap.payload.sensitiveUnlocked)
+        let boundedBootstrap = try await repository.bootstrapPage(start: start, end: end,
+            today: "2026-09-23", valuationCurrency: "CNY", limit: 2, expectedRevisionID: initial.id)
+        XCTAssertTrue(boundedBootstrap.bootstrap.transactions.isEmpty)
+        XCTAssertEqual(boundedBootstrap.bootstrap.summary, bootstrap.payload.summary)
+        XCTAssertEqual(boundedBootstrap.bootstrap.accountBalances, bootstrap.payload.accountBalances)
+        XCTAssertEqual(boundedBootstrap.bootstrap.accounts, bootstrap.payload.accounts)
+        XCTAssertEqual(boundedBootstrap.bootstrap.reconciliationRows, bootstrap.payload.reconciliationRows)
+        XCTAssertEqual(boundedBootstrap.bootstrap.netWorthHistory, bootstrap.payload.netWorthHistory)
+        XCTAssertEqual(boundedBootstrap.bootstrap.prices, bootstrap.payload.prices)
+        XCTAssertEqual(boundedBootstrap.transactionPage.transactions.map(\.id), Array(bootstrap.payload.transactions.prefix(2)).map(\.id))
+        let continuedBootstrap = try await repository.candidatePage(start: start, end: end,
+            cursor: XCTUnwrap(boundedBootstrap.transactionPage.nextCursor), limit: 2, expectedRevisionID: initial.id)
+        XCTAssertEqual(continuedBootstrap.transactions.map(\.id), Array(bootstrap.payload.transactions[2..<4]).map(\.id))
+        let authorityAfterBootstrapPage = await repository.presentedRevisionID
+        XCTAssertEqual(authorityAfterBootstrapPage, initial.id)
+        let reconciliation = try await repository.reconciliationSnapshot(start: start, end: end, expectedRevisionID: bootstrap.revisionID)
+        XCTAssertEqual(reconciliation.rows.count, bootstrap.payload.reconciliationRows.count)
+        for row in reconciliation.rows {
+            let legacyRow = try XCTUnwrap(bootstrap.payload.reconciliationRows.first { $0.account == row.account })
+            XCTAssertEqual(row.ledgerBalance, legacyRow.ledgerBalance)
+            XCTAssertEqual(row.status, legacyRow.status)
+            XCTAssertEqual(row.lastAssertion, legacyRow.lastAssertion)
+            XCTAssertEqual(row.snapshotStatus, bootstrap.payload.accountStatuses.first { $0.account == row.account })
+            XCTAssertEqual(row.statusError, row.snapshotStatus?.hasIssue)
+        }
+        let legacy = try await repository.globalTransactions()
+        XCTAssertEqual(legacy.transactions.count, 507)
+        let rows = legacy.transactions.filter { $0.date >= start && $0.date < end }
+        XCTAssertEqual(rows.count, 505)
+
+        let first = try await repository.candidatePage(start: start, end: end, expectedRevisionID: bootstrap.revisionID)
+        XCTAssertEqual(first.transactions.count, 500)
+        let cursor = try XCTUnwrap(first.nextCursor)
+        let last = try await repository.candidatePage(start: start, end: end, cursor: cursor, expectedRevisionID: bootstrap.revisionID)
+        XCTAssertEqual(last.transactions.count, 5)
+        XCTAssertNil(last.nextCursor)
+        XCTAssertEqual(last.revision, first.revision)
+        let candidates = first.transactions + last.transactions
+        // Compare the actual wire projection, not only IDs/counts. Candidate rows
+        // omit editor drafts and arbitrary metadata but retain string type evidence.
+        func projection(_ row: LedgerTransaction) -> LedgerTransaction {
+            let metadata = row.metadata?["type"]?.stringValue.map { ["type": LedgerMetadataValue.string($0)] }
+            return LedgerTransaction(date: row.date, payee: row.payee, narration: row.narration,
+                                     metadata: metadata, tags: row.tags, postings: row.postings, source: row.source)
+        }
+        XCTAssertEqual(candidates, rows.map(projection))
+        XCTAssertTrue(candidates.allSatisfy { $0.editableEntry == nil })
+        let refund = try XCTUnwrap(candidates.first { $0.narration == "Metadata-only evidence" })
+        XCTAssertEqual(refund.metadata, ["type": .string("退款")])
+        XCTAssertTrue(TransactionPresentation(transaction: refund).isRefund)
+        XCTAssertEqual(TransactionPresentation(transaction: refund).kind, .income)
+        let legacyRefund = try XCTUnwrap(rows.first { $0.id == refund.id })
+        XCTAssertEqual(legacyRefund.metadata?["fixture"], .string("not candidate evidence"))
+
+        // Both native candidates and legacy responses use snapshotTransactionsDesc.
+        // Verify the actual producer order, including a split inside one day, so
+        // the summary's last expense-currency rule is not an assumed ID sort.
+        var eventScan = try LocalEventTagSummaryScan(revision: first.revision)
+        XCTAssertNil(try eventScan.consume(first, requestedCursor: nil))
+        let events = try XCTUnwrap(eventScan.consume(last, requestedCursor: cursor))
+        XCTAssertEqual(events.sorted { $0.tag < $1.tag },
+            EventTagCalculator.summarizeAllTags(from: rows).sorted { $0.tag < $1.tag })
+        for tag in ["ordinary", "unicode", "refund", "missing"] {
+            var reportScan = try LocalEventTagReportScan(revision: first.revision, tag: tag)
+            XCTAssertNil(try reportScan.consume(first, requestedCursor: nil))
+            let actual = try XCTUnwrap(reportScan.consume(last, requestedCursor: cursor))
+            let expected = EventTagCalculator.generateReport(tag: tag, from: rows)
+            let throughRepository = try await repository.eventTagReport(tag: tag, start: start, end: end,
+                accountLabels: [:], expectedRevisionID: bootstrap.revisionID)
+            XCTAssertEqual(throughRepository.summary, actual.summary)
+            XCTAssertEqual(throughRepository.dailySeries, actual.dailySeries)
+            XCTAssertEqual(actual.summary.transactionCount, expected.transactions.count)
+            XCTAssertEqual(actual.summary.totalExpense, expected.totalExpense)
+            XCTAssertEqual(actual.summary.totalIncome, expected.totalIncome)
+            XCTAssertEqual(actual.summary.currency, expected.currency)
+            XCTAssertEqual(actual.dailySeries, expected.dailySeries)
+            XCTAssertEqual(actual.categoryBreakdown.sorted { $0.account < $1.account },
+                expected.categoryBreakdown.sorted { $0.account < $1.account })
+        }
+        let one = try await repository.candidatePage(start: start, end: end, limit: 1, expectedRevisionID: bootstrap.revisionID)
+        let two = try await repository.candidatePage(start: start, end: end, cursor: XCTUnwrap(one.nextCursor),
+            limit: 1, expectedRevisionID: bootstrap.revisionID)
+        XCTAssertEqual(one.transactions.first?.id, rows[0].id)
+        XCTAssertEqual(two.transactions.first?.id, rows[1].id)
+
+        let pendingFirst = try await repository.pendingCandidatePage(start: start, end: end,
+            expectedRevisionID: bootstrap.revisionID)
+        let pendingLast = try await repository.pendingCandidatePage(start: start, end: end,
+            cursor: XCTUnwrap(pendingFirst.nextCursor), expectedRevisionID: bootstrap.revisionID)
+        let pendingRows = pendingFirst.transactions + pendingLast.transactions
+        XCTAssertEqual(pendingRows.map(\.id), rows.map(\.id))
+        XCTAssertEqual(pendingRows.map(\.pendingReasons), rows.map(\.pendingReasons))
+        XCTAssertTrue(pendingRows.allSatisfy { $0.editableEntry == nil && $0.pendingReviewFlag != nil })
+        for tab in LedgerPendingFilter.allCases {
+            var pendingScan = try LocalPendingScan(revision: pendingFirst.revision, filter: tab,
+                declaredAccounts: bootstrap.payload.accounts.map(\.account), limits: .init(rows: 2))
+            XCTAssertNil(try pendingScan.consume(pendingFirst, requestedCursor: nil))
+            let scanned = try XCTUnwrap(pendingScan.consume(pendingLast, requestedCursor: pendingFirst.nextCursor))
+            let repositoryPending = try await repository.pendingWindow(start: start, end: end, filter: tab, offset: 0,
+                declaredAccounts: bootstrap.payload.accounts.map(\.account), expectedRevisionID: bootstrap.revisionID)
+            XCTAssertEqual(repositoryPending.counts, scanned.counts)
+            XCTAssertEqual(repositoryPending.totalMinorUnits, scanned.totalMinorUnits)
+            let pending = rows.filter { !$0.pendingReasons.isEmpty }
+            let matched = pending.filter { tab.includes($0.pendingReasons) }
+            XCTAssertEqual(scanned.totalCount, pending.count)
+            XCTAssertEqual(scanned.totalMinorUnits, pending.reduce(0) { $0 + TransactionPresentation(transaction: $1).minorUnits })
+            XCTAssertEqual(scanned.transactions.map(\.id), Array(matched.prefix(2)).map(\.id))
+        }
+
+        // Global search needs arbitrary metadata, not just list presentation's
+        // type. Exercise the real native dialect with exact Swift matching.
+        let searchFirst = try await repository.searchCandidatePage(start: start, end: end,
+            expectedRevisionID: bootstrap.revisionID)
+        let searchLast = try await repository.searchCandidatePage(start: start, end: end,
+            cursor: XCTUnwrap(searchFirst.nextCursor), expectedRevisionID: bootstrap.revisionID)
+        let searchRows = searchFirst.transactions + searchLast.transactions
+        XCTAssertEqual(searchRows.count, rows.count)
+        XCTAssertTrue(searchRows.allSatisfy { $0.editableEntry == nil })
+        XCTAssertEqual(searchRows.map(\.metadata), rows.map(\.metadata))
+        for query in ["fixture", "not candidate evidence", "CAFÉ", "Ｃａｆｅ", "2.00", "✁", "👩", "payee:literal"] {
+            let actual = LedgerGlobalSearch.search(query, transactions: searchRows,
+                accounts: bootstrap.payload.accounts, documents: []).transactions.map(\.id)
+            let expected = LedgerGlobalSearch.search(query, transactions: rows,
+                accounts: bootstrap.payload.accounts, documents: []).transactions.map(\.id)
+            XCTAssertEqual(actual, expected, query)
+        }
+        XCTAssertNil(searchLast.nextCursor)
+
+        // Account windows retain complete balances while their rows stay bounded.
+        let legacyAccount = try await repository.accountDetail(account: "Assets:Cash", currency: "CNY", start: start, end: end)
+        var accountRows: [LedgerAccountDetailRow] = []
+        var accountCursor: String?
+        repeat {
+            let page = try await repository.accountPage(account: "Assets:Cash", currency: "CNY", start: start, end: end,
+                cursor: accountCursor, limit: 137, expectedRevisionID: bootstrap.revisionID)
+            XCTAssertEqual(page.rowCount, legacyAccount.rows.count)
+            XCTAssertEqual(page.detail.currentBalance, legacyAccount.currentBalance)
+            XCTAssertEqual(page.detail.openingBalance, legacyAccount.openingBalance)
+            XCTAssertEqual(page.detail.closingBalance, legacyAccount.closingBalance)
+            XCTAssertEqual(page.detail.periodChange, legacyAccount.periodChange)
+            XCTAssertLessThanOrEqual(page.detail.rows.count, 137)
+            accountRows += page.detail.rows
+            accountCursor = page.nextCursor
+        } while accountCursor != nil
+        XCTAssertEqual(accountRows.map(\.balance), legacyAccount.rows.map(\.balance))
+        XCTAssertEqual(accountRows.map(\.change), legacyAccount.rows.map(\.change))
+        XCTAssertEqual(accountRows.map { $0.transaction.id }, legacyAccount.rows.map { $0.transaction.id })
+
+        var descendingRows: [LedgerAccountDetailRow] = []
+        accountCursor = nil
+        repeat {
+            let page = try await repository.accountPage(account: "Assets:Cash", currency: "CNY", start: start, end: end,
+                cursor: accountCursor, limit: 137, order: .desc, expectedRevisionID: bootstrap.revisionID)
+            descendingRows += page.detail.rows
+            accountCursor = page.nextCursor
+        } while accountCursor != nil
+        XCTAssertEqual(descendingRows.map(\.balance), legacyAccount.rows.reversed().map(\.balance))
+        XCTAssertEqual(descendingRows.map(\.id), legacyAccount.rows.reversed().map(\.id))
+
+        let completeAccountTrend = try await repository.accountTrend(account: "Assets:Cash", currency: "CNY",
+            range: .init(start: start, end: "2026-09-30", preset: .custom), expectedRevisionID: bootstrap.revisionID)
+        XCTAssertEqual(completeAccountTrend.rowCount, legacyAccount.rows.count)
+        XCTAssertEqual(completeAccountTrend.points, legacyAccount.balanceTrend(in:
+            .init(start: start, end: "2026-09-30", preset: .custom), maxPoints: 180))
+
+        // Real paged navigation must resume within a candidate page, without
+        // re-counting the summary or interpreting window absence as deletion.
+        let windowLimits = LocalTransactionWindow.Limits(maxRows: 137)
+        let windowReader = try await repository.makeTransactionWindow(start: start, end: end,
+            expectedRevisionID: bootstrap.revisionID, limits: windowLimits)
+        var navigated: [LedgerTransaction] = []
+        var checkpoint: LocalTransactionWindow.Checkpoint?
+        while true {
+            let window = try await windowReader.nextWindow()
+            XCTAssertLessThanOrEqual(window.transactions.count, 137)
+            if checkpoint == nil { checkpoint = window.continuation }
+            navigated += window.transactions
+            if window.isComplete {
+                XCTAssertEqual(window.summary?.fullRangeCount, 505)
+                XCTAssertEqual(window.summary?.matchedCount, 505)
+                break
+            }
+            XCTAssertNil(window.summary)
+        }
+        XCTAssertEqual(navigated, candidates)
+        let resumed = try await repository.makeTransactionWindow(start: start, end: end,
+            expectedRevisionID: bootstrap.revisionID, limits: windowLimits, checkpoint: XCTUnwrap(checkpoint))
+        let replay = try await resumed.nextWindow()
+        XCTAssertEqual(replay.transactions, Array(candidates[137..<274]))
+        XCTAssertNil(replay.summary)
+        let detail = try await repository.transactionDetail(source: refund.source, expectedRevisionID: bootstrap.revisionID)
+        XCTAssertEqual(detail, legacyRefund)
+
+        let accounts = Array(Set(rows.flatMap { $0.postings.map(\.account) }))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        let tags = Array(Set(rows.flatMap { $0.tags ?? [] }.filter { !$0.isEmpty }))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        var limits = LocalTransactionScan.Limits()
+        limits.maxVisibleCount = 2
+        let filters = [
+            LedgerTransactionFilter(),
+            LedgerTransactionFilter(query: composed),
+            LedgerTransactionFilter(query: decomposed),
+            LedgerTransactionFilter(query: "✁"),
+            LedgerTransactionFilter(query: "👩\u{200d}💻"),
+            LedgerTransactionFilter(query: "👩"),
+            LedgerTransactionFilter(query: combining),
+            LedgerTransactionFilter(query: "\(decomposed) ✁", kind: .expense, account: "Expenses", tags: ["unicode"]),
+            LedgerTransactionFilter(kind: .income, tags: ["refund", "reversal"]),
+            LedgerTransactionFilter(kind: .transfer),
+            LedgerTransactionFilter(query: "no synthetic match")
+        ]
+        XCTAssertEqual(rows.filter(LedgerTransactionFilter(query: decomposed).matches).count, 2)
+        XCTAssertEqual(rows.filter(LedgerTransactionFilter(query: combining).matches).count, 2)
+        for filter in filters {
+            let result = try await repository.scanTransactions(start: start, end: end, filter: filter,
+                                                               expectedRevisionID: bootstrap.revisionID, limits: limits)
+            let matched = rows.filter(filter.matches)
+            XCTAssertEqual(result.revision, first.revision)
+            XCTAssertEqual(result.fullRangeCount, 505)
+            XCTAssertEqual(result.matchedCount, matched.count, "Filter: \(filter)")
+            XCTAssertEqual(result.visibleTransactions, matched.prefix(2).map(projection))
+            XCTAssertEqual(result.hasMoreMatches, matched.count > 2)
+            XCTAssertEqual(result.availableAccounts, accounts)
+            XCTAssertEqual(result.availableTags, tags)
+            XCTAssertTrue(result.availableAccounts.contains("Assets:Bank"))
+            XCTAssertTrue(result.availableTags.contains("tail"))
+            XCTAssertFalse(result.availableTags.contains("outside"))
+            let grouped = Dictionary(grouping: matched, by: \.date)
+            XCTAssertEqual(result.days.map(\.date), grouped.keys.sorted(by: >))
+            for day in result.days {
+                let group = try XCTUnwrap(grouped[day.date])
+                let signed = group.flatMap(\.postings).filter { $0.account.hasPrefix("Expenses:") }
+                    .reduce(0) { $0 + $1.amount }
+                XCTAssertEqual(day.matchedCount, group.count)
+                XCTAssertEqual(day.signedExpense, signed)
+                XCTAssertEqual(day.expense, max(0, signed))
+            }
+        }
+        // A workspace UUID, not the native page revision, pairs reads to bootstrap.
+        let wrongRevision = UUID()
+        do {
+            _ = try await repository.candidatePage(start: start, end: end, expectedRevisionID: wrongRevision)
+            XCTFail("Candidate page accepted a non-bootstrap UUID")
+        } catch {
+            XCTAssertEqual(error as? LocalLedgerWorkspace.WorkspaceError, .staleRevision)
+        }
+        do {
+            _ = try await repository.scanTransactions(start: start, end: end, filter: .init(), expectedRevisionID: wrongRevision)
+            XCTFail("Candidate scan accepted a non-bootstrap UUID")
+        } catch {
+            XCTAssertEqual(error as? LocalLedgerWorkspace.WorkspaceError, .staleRevision)
+        }
+        let after = try await workspace.currentRevision()
+        let saved = try await workspace.readFile(at: "main.bean")
+        let presented = await repository.presentedRevisionID
+        XCTAssertEqual(after, initial, "Read-only candidate operations must not publish a ledger revision")
+        XCTAssertEqual(saved, original, "Candidate operations must preserve exact ledger bytes")
+        XCTAssertEqual(presented, bootstrap.revisionID, "Candidate reads must not change the presented bootstrap UUID")
+        #else
+        throw XCTSkip("Requires the iOS app-host Python and Go bridges")
+        #endif
+    }
+
+    func testValidationOnlyBridgeKeepsCanonicalDiagnosticsAndReadModel() async throws {
+        #if os(iOS) && canImport(BeancountRuntime)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ValidationOnly-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let main = root.appendingPathComponent("main.bean")
+        let valid = """
+        plugin "beancount.plugins.auto_accounts"
+        2026-01-01 * "Synthetic precision fixture"
+          Assets:Cash -1.234567 CNY
+          Expenses:Food 1.234567 CNY
+
+        """
+        try valid.write(to: main, atomically: true, encoding: .utf8)
+        try await EmbeddedBeancountValidator.shared.validate(workspace: root)
+        let model = try await EmbeddedBeancountValidator.shared.canonicalModel(workspace: root)
+        XCTAssertTrue(String(decoding: model, as: UTF8.self).contains("1.234567"))
+        // Call the native symbol too: its success payload must contain no model.
+        let pointer = root.path.withCString { workspace in
+            "main.bean".withCString { BRValidateOnly(workspace, $0) }
+        }
+        let raw = try XCTUnwrap(pointer)
+        defer { BRFree(raw) }
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(String(cString: raw).utf8)) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), ["errors"])
+        XCTAssertEqual((object["errors"] as? [Any])?.count, 0)
+        try valid.replacingOccurrences(of: "Food 1.234567", with: "Food 1.000000")
+            .write(to: main, atomically: true, encoding: .utf8)
+        var messages: [String] = []
+        do {
+            try await EmbeddedBeancountValidator.shared.validate(workspace: root)
+            XCTFail("Validation-only accepted an unbalanced transaction")
+        } catch let error as EmbeddedBeancountValidator.ValidationError { messages.append(error.message) }
+        do {
+            _ = try await EmbeddedBeancountValidator.shared.canonicalModel(workspace: root)
+            XCTFail("Canonical load accepted an unbalanced transaction")
+        } catch let error as EmbeddedBeancountValidator.ValidationError { messages.append(error.message) }
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages.first, messages.last)
+        #else
+        throw XCTSkip("Requires the app-linked canonical Beancount runtime")
+        #endif
+    }
+
+    func testCanonicalStreamExportIsSmallExclusiveAndKeepsSourceUntouched() async throws {
+        #if os(iOS) && canImport(BeancountRuntime)
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("StreamIntegration-" + UUID().uuidString)
+        let source = base.appendingPathComponent("workspace")
+        let output = base.appendingPathComponent("canonical.records")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let text = "2000-01-01 open Assets:Cash CNY\n"
+        try text.write(to: source.appendingPathComponent("main.bean"), atomically: true, encoding: .utf8)
+        let result = try await EmbeddedBeancountValidator.shared.exportCanonical(workspace: source, to: output)
+        XCTAssertEqual(result.entries, 1)
+        XCTAssertGreaterThan(result.bytes, 0)
+        XCTAssertEqual(result.sha256.count, 64)
+        let exported = try Data(contentsOf: output)
+        XCTAssertEqual(result.bytes, exported.count)
+        XCTAssertTrue(String(decoding: exported, as: UTF8.self).contains("end_entry"))
+        do {
+            _ = try await EmbeddedBeancountValidator.shared.exportCanonical(workspace: source, to: output)
+            XCTFail("Existing export overwritten")
+        } catch is EmbeddedBeancountValidator.ValidationError { }
+        XCTAssertEqual(try Data(contentsOf: output), exported)
+        XCTAssertEqual(try String(contentsOf: source.appendingPathComponent("main.bean"), encoding: .utf8), text)
+        #else
+        throw XCTSkip("Requires embedded canonical runtime")
+        #endif
+    }
+
+    func testConcurrentModelReadsAndDiscardedPreviewKeepCursorValid() async throws {
+        #if os(iOS)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("HandleIntegration-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let catalog = LocalLedgerCatalog(rootDirectory: root)
+        let descriptor = try await catalog.create(name: "Handles")
+        let repository = catalog.repository(for: descriptor)
+        func entry(_ n: Int) -> LedgerTransactionEntry {
+            LedgerTransactionEntry(date: "2026-09-01", payee: "Synthetic", narration: "Row \(n)", postings: [
+                .init(account: "Expenses:Food", amount: "1", currency: "CNY"),
+                .init(account: "Assets:Cash", amount: "-1", currency: "CNY")])
+        }
+        _ = try await repository.bootstrap(start: "2026-09-01", end: "2026-10-01", today: "2026-09-01", valuationCurrency: "CNY")
+        for i in 0..<3 { try await repository.addTransaction(entry: entry(i)) }
+        let pages = try await withThrowingTaskGroup(of: LedgerTransactionPage.self) { group in
+            for _ in 0..<4 { group.addTask { try await repository.transactionPage(limit: 1) } }
+            var results: [LedgerTransactionPage] = []
+            for try await page in group { results.append(page) }
+            return results
+        }
+        XCTAssertEqual(Set(pages.map(\.revision)).count, 1)
+        let cursor = try XCTUnwrap(pages.first?.nextCursor)
+        let preview = try await repository.prepareBookkeeping(.manual(entry(4)))
+        await repository.discardPrepared(preview)
+        let probe = try await repository.transactionPage(limit: 1)
+        XCTAssertEqual(probe.revision, pages.first?.revision, "Preview must preserve exact committed model identity")
+        let next = try await repository.transactionPage(cursor: cursor, limit: 1)
+        XCTAssertEqual(next.revision, pages.first?.revision)
+        XCTAssertNotEqual(next.transactions.first?.id, pages.first?.transactions.first?.id)
+        let evidence = try await repository.classificationHistoryPage(cursor: nil)
+        XCTAssertEqual(evidence.revision, next.revision)
+        XCTAssertEqual(evidence.transactions.count, 3)
+        XCTAssertTrue(evidence.transactions.allSatisfy { $0.editableEntry == nil })
+        #else
+        throw XCTSkip("Requires embedded native model registry")
+        #endif
+    }
+
     func testCanonicalOfflineCreateReadAddEditDeleteAndReopen() async throws {
         #if os(iOS)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("LocalIntegration-" + UUID().uuidString)
@@ -40,8 +487,12 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         let afterInvalid = try await repository.workspace.currentRevision()
         XCTAssertEqual(beforeInvalid?.id, afterInvalid?.id)
 
-        try await repository.updateTransaction(source: transaction.source,
-            entry: entry("15.67", credit: "-15.67", narration: "edited offline"))
+        let updateReceipt = try await repository.updateTransaction(source: transaction.source,
+            entry: entry("15.67", credit: "-15.67", narration: "edited offline"), expectedRevisionID: XCTUnwrap(beforeInvalid?.id))
+        let updateRevision = try await repository.workspace.currentRevision()
+        XCTAssertEqual(updateReceipt.ledgerID, descriptor.id)
+        XCTAssertEqual(updateReceipt.baseRevisionID, beforeInvalid?.id)
+        XCTAssertEqual(updateReceipt.revisionID, updateRevision?.id)
         let updated = try await repository.globalTransactions()
         XCTAssertEqual(updated.transactions.count, 1)
         XCTAssertEqual(updated.transactions.first?.narration, "edited offline")
@@ -59,7 +510,12 @@ final class LocalLedgerIntegrationTests: XCTestCase {
         let restored = reopened.repository(for: descriptor)
         let restoredTransactions = try await restored.globalTransactions()
         XCTAssertEqual(restoredTransactions.transactions.first?.narration, "edited offline")
-        try await restored.deleteTransaction(source: XCTUnwrap(restoredTransactions.transactions.first).source, reason: "Integration fixture cleanup")
+        let beforeDelete = try await restored.workspace.currentRevision()
+        let deleteReceipt = try await restored.deleteTransaction(source: XCTUnwrap(restoredTransactions.transactions.first).source,
+            reason: "Integration fixture cleanup", expectedRevisionID: XCTUnwrap(beforeDelete?.id))
+        let deleteRevision = try await restored.workspace.currentRevision()
+        XCTAssertEqual(deleteReceipt.baseRevisionID, beforeDelete?.id)
+        XCTAssertEqual(deleteReceipt.revisionID, deleteRevision?.id)
         let deleted = try await restored.globalTransactions()
         XCTAssertTrue(deleted.transactions.isEmpty)
         let exported = try await restored.exportLedger()

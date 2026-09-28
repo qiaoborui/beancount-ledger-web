@@ -47,7 +47,17 @@ struct OverviewView: View {
 
 
                 // 3. Top Spending Categories
-                let topCategories = spendingCategories(from: ledger.transactions, accountLabels: accountLabels)
+                let topCategories = session.isLocal
+                    ? localSpendingCategories(accountLabels: accountLabels)
+                    : spendingCategories(from: ledger.transactions, accountLabels: accountLabels)
+                if session.isLocal && topCategories.isEmpty {
+                    if let error = session.localOverviewCategoriesError {
+                        Section("当月支出排行") {
+                            Text(error).foregroundStyle(LedgerPalette.secondary)
+                            Button("重试") { Task { await session.refresh() } }
+                        }
+                    }
+                }
                 if !topCategories.isEmpty {
                     Section {
                         OverviewTopCategoriesCard(
@@ -139,6 +149,24 @@ struct OverviewView: View {
         }
     }
 
+    private func localSpendingCategories(accountLabels: [String: String]) -> [OverviewCategorySpending] {
+        guard let response = session.localOverviewCategories,
+              response.positiveTotalMinorUnits > 0 else { return [] }
+        return response.categories.sorted {
+            $0.totalMinorUnits == $1.totalMinorUnits
+                ? $0.label < $1.label : $0.totalMinorUnits > $1.totalMinorUnits
+        }.prefix(4).map { item in
+            let visual = TransactionVisualCategory.resolve(
+                transaction: item.representative,
+                presentation: TransactionPresentation(transaction: item.representative),
+                accountLabels: accountLabels)
+            return OverviewCategorySpending(id: item.label, label: item.label,
+                iconName: visual.iconName, color: visual.color,
+                totalMinorUnits: item.totalMinorUnits, count: max(1, item.positiveTransactionCount),
+                percentage: Double(item.totalMinorUnits) / Double(response.positiveTotalMinorUnits))
+        }
+    }
+
     private func spendingCategories(
         from transactions: [LedgerTransaction],
         accountLabels: [String: String]
@@ -178,7 +206,7 @@ struct OverviewView: View {
         guard overallExpense > 0 else { return [] }
 
         return positiveCategories
-            .sorted { $0.amount > $1.amount }
+            .sorted { $0.amount == $1.amount ? $0.label < $1.label : $0.amount > $1.amount }
             .prefix(4)
             .map { item in
                 OverviewCategorySpending(
@@ -395,16 +423,8 @@ private struct OverviewSpendingRhythmCard: View {
         return ledger.summary.expense / daysElapsed
     }
 
-    private var highestExpense: (title: String, amount: Int)? {
-        let expenseTx = ledger.transactions.compactMap { tx -> (String, Int)? in
-            let presentation = TransactionPresentation(transaction: tx)
-            guard presentation.kind == .expense, !presentation.isRefund, presentation.minorUnits > 0 else { return nil }
-            return (presentation.title, presentation.minorUnits)
-        }
-        return expenseTx.max { $0.1 < $1.1 }
-    }
-
     var body: some View {
+        let stats = session.overviewTransactionStats
         HStack(spacing: 0) {
             // Daily average
             VStack(alignment: .leading, spacing: 3) {
@@ -429,43 +449,45 @@ private struct OverviewSpendingRhythmCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Rectangle()
-                .fill(LedgerPalette.line.opacity(0.5))
-                .frame(width: 0.5, height: 38)
-                .padding(.horizontal, 14)
+            if let stats {
+                Rectangle()
+                    .fill(LedgerPalette.line.opacity(0.5))
+                    .frame(width: 0.5, height: 38)
+                    .padding(.horizontal, 14)
 
-            // Highest single expense
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    Image(systemName: "flame")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    Text("单笔最高")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
-                }
-                if let highest = highestExpense {
-                    AmountLabel(
-                        minorUnits: highest.amount,
-                        currency: ledger.summary.currency,
-                        font: .system(size: 16, weight: .semibold, design: .rounded),
-                        color: LedgerPalette.ink
-                    )
-                    .lineLimit(1)
-                    Text(highest.title)
-                        .font(.system(size: 10, weight: .regular))
-                        .foregroundStyle(LedgerPalette.secondary)
+                // Highest single expense
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "flame")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                        Text("单笔最高")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
+                    if let highest = stats.highestExpense {
+                        AmountLabel(
+                            minorUnits: highest.minorUnits,
+                            currency: ledger.summary.currency,
+                            font: .system(size: 16, weight: .semibold, design: .rounded),
+                            color: LedgerPalette.ink
+                        )
                         .lineLimit(1)
-                } else {
-                    Text("暂无支出")
-                        .font(.system(size: 15, weight: .medium, design: .rounded))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    Text("—")
-                        .font(.system(size: 10, weight: .regular))
-                        .foregroundStyle(LedgerPalette.secondary)
+                        Text(highest.title)
+                            .font(.system(size: 10, weight: .regular))
+                            .foregroundStyle(LedgerPalette.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text("暂无支出")
+                            .font(.system(size: 15, weight: .medium, design: .rounded))
+                            .foregroundStyle(LedgerPalette.secondary)
+                        Text("—")
+                            .font(.system(size: 10, weight: .regular))
+                            .foregroundStyle(LedgerPalette.secondary)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(15)
         .background {
@@ -514,13 +536,16 @@ private struct MonthlyConclusion: View {
                         .foregroundStyle(LedgerPalette.secondary)
                 }
                 Spacer()
-                Text("\(ledger.transactions.count) 笔流水")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(LedgerPalette.secondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2.5)
-                    .background(Color(uiColor: .tertiarySystemFill))
-                    .clipShape(Capsule())
+                if let stats = session.overviewTransactionStats {
+                    Text("\(stats.transactionCount) 笔流水")
+                        .lineLimit(1)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(Color(uiColor: .tertiarySystemFill))
+                        .clipShape(Capsule())
+                }
             }
 
             // Net Metric Hero (Refined, comfortable scale)
@@ -529,7 +554,7 @@ private struct MonthlyConclusion: View {
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(LedgerPalette.secondary)
 
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     AmountLabel(
                         minorUnits: ledger.summary.net,
                         currency: ledger.summary.currency,
@@ -540,17 +565,21 @@ private struct MonthlyConclusion: View {
                     .lineLimit(1)
                     .accessibilityIdentifier("overview-monthly-net")
 
-                    primaryComparisonBadge
+                    HStack(spacing: 8) {
+                        primaryComparisonBadge
 
-                    if let rate = savingsRate, session.amountsVisible {
-                        Text("储蓄率 \(Int(max(0, rate * 100)))%")
-                            .font(.system(size: 10, weight: .medium, design: .rounded).monospacedDigit())
-                            .foregroundStyle(LedgerPalette.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color(uiColor: .tertiarySystemFill))
-                            .clipShape(Capsule())
+                        if let rate = savingsRate, session.amountsVisible {
+                            Text("储蓄率 \(Int(max(0, rate * 100)))%")
+                                .font(.system(size: 10, weight: .medium, design: .rounded).monospacedDigit())
+                                .foregroundStyle(LedgerPalette.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color(uiColor: .tertiarySystemFill))
+                                .clipShape(Capsule())
+                        }
                     }
+                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -796,5 +825,3 @@ private struct OverviewComparisonRow: View {
         "\(label)，\(valueText)，当前 \(comparison.currentRange.start) 至 \(comparison.currentRange.end)，对比 \(comparison.baselineRange.start) 至 \(comparison.baselineRange.end)"
     }
 }
-
-

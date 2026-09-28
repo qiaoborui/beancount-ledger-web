@@ -3,6 +3,28 @@ import XCTest
 import Combine
 @testable import LedgerMobile
 
+enum SyntheticBootstrapPage {
+    static func response(_ data: Data, request: LocalLedgerEngineRequest) throws -> Data {
+        var bootstrap = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let start = try XCTUnwrap(request.query["start"])
+        let end = try XCTUnwrap(request.query["end"])
+        let limit = Int(request.query["limit"] ?? "100") ?? 100
+        let rows = (bootstrap["transactions"] as? [[String: Any]] ?? []).filter {
+            ($0["date"] as? String ?? "") >= start && ($0["date"] as? String ?? "") < end
+        }
+        bootstrap["start"] = start
+        bootstrap["end"] = end
+        bootstrap["transactions"] = []
+        let page: [String: Any] = ["revision": "synthetic", "sensitiveUnlocked": bootstrap["sensitiveUnlocked"] ?? true,
+            "transactions": rows.prefix(limit).map { row in
+                var candidate = row
+                candidate.removeValue(forKey: "entry")
+                return candidate
+            }, "nextCursor": rows.count > limit ? "remaining" as Any : NSNull()]
+        return try JSONSerialization.data(withJSONObject: ["bootstrap": bootstrap, "transactionPage": page])
+    }
+}
+
 @MainActor
 final class LocalLedgerSessionTests: XCTestCase {
     @MainActor
@@ -79,7 +101,16 @@ final class LocalLedgerSessionTests: XCTestCase {
 
     private actor ResumeEngine: LocalLedgerEngine {
         private(set) var bootstrapCalls = 0
+        private(set) var overviewCalls = 0
         private var bootstrapGate: Gate?
+        private var overviewGate: Gate?
+        private var overviewFailure = false
+        private var overviewEmpty = false
+        func configureOverview(gate: Gate? = nil, failure: Bool = false, empty: Bool = false) {
+            overviewGate = gate
+            overviewFailure = failure
+            overviewEmpty = empty
+        }
         private var bootstrapExpectation: XCTestExpectation?
         func observeBootstrap(_ expectation: XCTestExpectation?, gate: Gate? = nil) {
             bootstrapExpectation = expectation
@@ -87,7 +118,19 @@ final class LocalLedgerSessionTests: XCTestCase {
         }
         func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
             if request.path == "/api/ledger/version" { return Data("{}".utf8) }
-            guard request.path == "/api/ledger/bootstrap" else {
+            if request.path == "/api/ledger/transactions" {
+                let bootstrap = try JSONDecoder().decode(LedgerBootstrap.self, from: Data(LedgerModelsTests.bootstrapJSON.utf8))
+                return try JSONSerialization.data(withJSONObject: ["transactions":
+                    JSONSerialization.jsonObject(with: JSONEncoder().encode(bootstrap.transactions)), "sensitiveUnlocked": true])
+            }
+            if request.path == "/api/ledger/overview/categories" {
+                overviewCalls += 1
+                let failure = overviewFailure, empty = overviewEmpty
+                if let gate = overviewGate { overviewGate = nil; await gate.suspend() }
+                if failure { throw LocalLedgerError.operationFailed("Synthetic aggregate capacity failure") }
+                return try OverviewCategoriesFixture.data(start: request.query["start"]!, end: request.query["end"]!, empty: empty)
+            }
+            guard request.path == "/api/ledger/bootstrap/page" else {
                 throw LocalLedgerError.operationFailed("Synthetic optional report unavailable")
             }
             bootstrapCalls += 1
@@ -102,7 +145,7 @@ final class LocalLedgerSessionTests: XCTestCase {
                 summary["expense"] = 777
                 payload["summary"] = summary
             }
-            return try JSONSerialization.data(withJSONObject: payload)
+            return try SyntheticBootstrapPage.response(JSONSerialization.data(withJSONObject: payload), request: request)
         }
     }
 
@@ -116,6 +159,71 @@ final class LocalLedgerSessionTests: XCTestCase {
             try? FileManager.default.removeItem(at: root)
         }
         return (root, defaults, suite)
+    }
+
+    private actor HistoryEngine: LocalLedgerEngine {
+        var gate: Gate?
+        var changesRevision = false
+        private(set) var historyCalls = 0
+        func configure(gate: Gate? = nil, changesRevision: Bool = false) {
+            self.gate = gate
+            self.changesRevision = changesRevision
+        }
+        func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
+            if request.path == "/api/ledger/bootstrap/page" {
+                return try SyntheticBootstrapPage.response(Data(LedgerModelsTests.bootstrapJSON.utf8), request: request)
+            }
+            if request.path == "/api/ledger/version" { return Data("{}".utf8) }
+            guard request.path == "/api/ledger/transactions/history-page" else {
+                throw LocalLedgerError.operationFailed("Unexpected history fallback")
+            }
+            historyCalls += 1
+            if let gate { self.gate = nil; await gate.suspend() }
+            let second = request.query["cursor"] != nil
+            let revision = second && changesRevision ? "changed" : "one"
+            let rows = (0..<500).map { index in
+                LedgerTransaction(date: "2026-09-01", payee: "Synthetic", narration: "Row",
+                    postings: [], source: .init(file: "main.bean", line: index + (second ? 500 : 0)))
+            }
+            let encoded = try JSONEncoder().encode(rows)
+            return Data(("{\"revision\":\"" + revision + "\",\"transactions\":" + String(decoding: encoded, as: UTF8.self)
+                + (second ? "" : ",\"nextCursor\":\"second\"") + ",\"sensitiveUnlocked\":true}").utf8)
+        }
+    }
+
+    func testBoundedHistoryRejectsMixedRevisionsAndLockDuringPage() async throws {
+        for mode in ["complete", "stale", "lock"] {
+            let fixture = try fixture()
+            let engine = HistoryEngine()
+            let catalog = LocalLedgerCatalog(rootDirectory: fixture.root.appendingPathComponent("managed"),
+                engine: engine, validator: { _, _ in })
+            let descriptor = try await catalog.create(name: "History evidence")
+            let session = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+                defaults: fixture.defaults,
+                widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+                widgetCredentialStore: InertWidgetStore())
+            await session.openLocalLedger(descriptor)
+            XCTAssertEqual(session.phase, .ready)
+            let waiting = expectation(description: "history page")
+            let gate = Gate(waiting)
+            await engine.configure(gate: mode == "lock" ? gate : nil, changesRevision: mode == "stale")
+            if mode != "lock" { waiting.fulfill() }
+            let entry = LedgerTransactionEntry(date: "2026-09-23", payee: "Synthetic", narration: "Probe", postings: [])
+            let operation = Task { try await session.bookkeepingHistory(for: entry) }
+            await fulfillment(of: [waiting], timeout: 3)
+            if mode == "lock" { await session.lock(); await gate.release() }
+            do {
+                let rows = try await operation.value
+                XCTAssertEqual(mode, "complete")
+                XCTAssertEqual(rows.count, 5)
+                XCTAssertTrue(session.visibleGlobalTransactions.isEmpty)
+            } catch {
+                XCTAssertNotEqual(mode, "complete", "Unexpected error: \(error)")
+            }
+            let calls = await engine.historyCalls
+            XCTAssertEqual(calls, mode == "lock" ? 1 : 2)
+            session.chooseLedger()
+        }
     }
 
     func testColdRelaunchRestoresValidatedPresentationAfterAuthenticationWithoutRebuilding() async throws {
@@ -199,6 +307,181 @@ final class LocalLedgerSessionTests: XCTestCase {
         }
     }
 
+    func testOverviewAggregateFailureDoesNotTruncateBoundedBootstrap() async throws {
+        let fixture = try await openedResumeFixture()
+        let session = fixture.session
+        defer { session.chooseLedger() }
+        await session.applyRange(.month(year: 2026, month: 8))
+        let transactions = try XCTUnwrap(session.ledger).transactions
+        XCTAssertFalse(transactions.isEmpty)
+        try await session.loadGlobalTransactions(forceRefresh: true)
+        let globalTransactions = session.globalTransactions
+        XCTAssertEqual(globalTransactions.map(\.source), transactions.map(\.source))
+        XCTAssertEqual(session.localOverviewCategories?.categories.count, 4)
+        XCTAssertEqual(session.localOverviewCategories?.positiveTotalMinorUnits, 2_000)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertEqual(session.overviewTransactionStats?.highestExpense, .init(title: "Outside bootstrap", minorUnits: 900_000))
+        XCTAssertNotEqual(session.overviewTransactionStats?.transactionCount, transactions.count)
+        await fixture.engine.configureOverview(failure: true)
+        await session.refresh()
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(session.ledger?.transactions, transactions)
+        XCTAssertTrue(session.globalTransactions.isEmpty)
+        XCTAssertFalse(session.hasCachedGlobalTransactions)
+        XCTAssertEqual(session.localOverviewCategories?.categories.count, 4)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertTrue(session.localOverviewCategoriesError?.contains("capacity") == true)
+        XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
+        await fixture.engine.configureOverview(empty: true)
+        await session.refresh()
+        XCTAssertEqual(session.localOverviewCategories?.categories.count, 0)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 0)
+        XCTAssertNotNil(session.overviewTransactionStats)
+        XCTAssertNil(session.overviewTransactionStats?.highestExpense)
+        XCTAssertNil(session.localOverviewCategoriesError)
+        XCTAssertEqual(session.ledger?.transactions, transactions)
+    }
+
+    func testOverviewLateResultCannotPublishAfterLockOrLedgerSwitch() async throws {
+        for shouldLock in [true, false] {
+            let fixture = try await openedResumeFixture()
+            let session = fixture.session
+            let entered = expectation(description: "aggregate suspended")
+            let gate = Gate(entered)
+            await fixture.engine.configureOverview(gate: gate)
+            let loading = Task { await session.refreshLocalOverviewCategories() }
+            await fulfillment(of: [entered], timeout: 3)
+            XCTAssertTrue(session.isLocalOverviewCategoriesLoading)
+            XCTAssertNotNil(session.localOverviewCategories)
+            XCTAssertNotNil(session.overviewTransactionStats)
+            if shouldLock { await session.lock() } else { session.chooseLedger() }
+            XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
+            await gate.release()
+            await loading.value
+            XCTAssertNil(session.localOverviewCategories)
+            XCTAssertNil(session.overviewTransactionStats)
+            XCTAssertNil(session.localOverviewCategoriesError)
+            session.chooseLedger()
+        }
+    }
+
+    func testOverviewLateFailureCannotClearSuccessfulRefresh() async throws {
+        let fixture = try await openedResumeFixture()
+        let session = fixture.session
+        defer { session.chooseLedger() }
+        let entered = expectation(description: "old failing aggregate suspended")
+        let gate = Gate(entered)
+        await fixture.engine.configureOverview(gate: gate, failure: true)
+        let old = Task { await session.refreshLocalOverviewCategories() }
+        await fulfillment(of: [entered], timeout: 3)
+        await fixture.engine.configureOverview()
+        await session.refresh()
+        XCTAssertNotNil(session.localOverviewCategories)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertEqual(session.overviewTransactionStats?.highestExpense, .init(title: "Outside bootstrap", minorUnits: 900_000))
+        await gate.release()
+        await old.value
+        XCTAssertNotNil(session.localOverviewCategories)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertEqual(session.overviewTransactionStats?.highestExpense, .init(title: "Outside bootstrap", minorUnits: 900_000))
+        XCTAssertNil(session.localOverviewCategoriesError)
+        XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
+    }
+
+    func testOverviewOlderRangeResultCannotReplaceNewerAggregate() async throws {
+        let fixture = try await openedResumeFixture()
+        let session = fixture.session
+        defer { session.chooseLedger() }
+        let entered = expectation(description: "old range suspended")
+        let gate = Gate(entered)
+        await fixture.engine.configureOverview(gate: gate)
+        let old = Task { await session.refreshLocalOverviewCategories() }
+        await fulfillment(of: [entered], timeout: 3)
+        await fixture.engine.configureOverview(empty: true)
+        let target = session.selectedRange.shifted(by: -1)
+        await session.applyRange(target)
+        XCTAssertEqual(session.localOverviewCategories?.start, target.start)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 0)
+        XCTAssertNotNil(session.overviewTransactionStats)
+        XCTAssertNil(session.overviewTransactionStats?.highestExpense)
+        XCTAssertEqual(session.localOverviewCategories?.end, target.queryEndExclusive)
+        await gate.release()
+        await old.value
+        XCTAssertEqual(session.localOverviewCategories?.start, target.start)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 0)
+        XCTAssertNotNil(session.overviewTransactionStats)
+        XCTAssertNil(session.overviewTransactionStats?.highestExpense)
+        XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
+    }
+
+    func testOverviewRejectsWriterPublishingDuringPinnedReadAndRefreshRecovers() async throws {
+        let fixture = try await openedResumeFixture()
+        let session = fixture.session
+        defer { session.chooseLedger() }
+        let entered = expectation(description: "aggregate before concurrent commit")
+        let gate = Gate(entered)
+        await fixture.engine.configureOverview(gate: gate)
+        let old = Task { await session.refreshLocalOverviewCategories() }
+        await fulfillment(of: [entered], timeout: 3)
+        let repository = try XCTUnwrap(session.localRepository)
+        // Workspace commit intentionally bypasses notifications: completion must
+        // independently verify that its bootstrap revision is still current.
+        let current = try await repository.workspace.currentRevision()
+        let revision = try XCTUnwrap(current)
+        _ = try await repository.workspace.commit(expectedRevisionID: revision.id,
+            changes: [.write(Data("; next".utf8), to: "main.bean")]) { _ in }
+        await gate.release()
+        await old.value
+        XCTAssertNil(session.localOverviewCategories)
+        XCTAssertNil(session.overviewTransactionStats)
+        XCTAssertNotNil(session.localOverviewCategoriesError)
+        await session.refresh()
+        XCTAssertNotNil(session.localOverviewCategories)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertEqual(session.overviewTransactionStats?.highestExpense, .init(title: "Outside bootstrap", minorUnits: 900_000))
+        XCTAssertNil(session.localOverviewCategoriesError)
+    }
+
+    func testOverviewWriteNotificationInvalidatesWithoutAutomaticSync() async throws {
+        let fixture = try await openedResumeFixture()
+        let session = fixture.session
+        defer { session.chooseLedger() }
+        let invalidated = expectation(description: "saved file invalidates aggregate")
+        let observation = session.$localOverviewCategoriesError.compactMap { $0 }.prefix(1).sink { _ in invalidated.fulfill() }
+        defer { observation.cancel() }
+        let repository = try XCTUnwrap(session.localRepository)
+        let draft = try await repository.readFile(path: "main.bean")
+        try await repository.saveFile(draft, text: draft.text + "; updated\n")
+        await fulfillment(of: [invalidated], timeout: 3)
+        XCTAssertNil(session.localOverviewCategories)
+        XCTAssertNil(session.overviewTransactionStats)
+        XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
+        await session.refresh()
+        XCTAssertNotNil(session.localOverviewCategories)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertEqual(session.overviewTransactionStats?.highestExpense, .init(title: "Outside bootstrap", minorUnits: 900_000))
+    }
+
+    func testOverviewWarmUnlockReloadsAggregateWithoutBootstrap() async throws {
+        let fixture = try await openedResumeFixture()
+        let session = fixture.session
+        defer { session.chooseLedger() }
+        await session.lock()
+        XCTAssertNil(session.localOverviewCategories)
+        XCTAssertNil(session.overviewTransactionStats)
+        let loaded = expectation(description: "warm aggregate reloaded")
+        let observation = session.$localOverviewCategories.compactMap { $0 }.prefix(1).sink { _ in loaded.fulfill() }
+        defer { observation.cancel() }
+        let calls = await fixture.engine.bootstrapCalls
+        await session.unlockLocalLedger()
+        await fulfillment(of: [loaded], timeout: 3)
+        let after = await fixture.engine.bootstrapCalls
+        XCTAssertEqual(after, calls)
+        XCTAssertNotNil(session.localOverviewCategories)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        XCTAssertEqual(session.overviewTransactionStats?.highestExpense, .init(title: "Outside bootstrap", minorUnits: 900_000))
+    }
+
     func testWarmLocalUnlockKeepsReadyShellAndSkipsUnchangedBootstrap() async throws {
         let fixture = try await openedResumeFixture()
         let engine = fixture.engine, session = fixture.session, authenticator = fixture.authenticator
@@ -247,6 +530,41 @@ final class LocalLedgerSessionTests: XCTestCase {
         await session.openLocalLedger(descriptor)
         XCTAssertEqual(session.phase, .ready)
         return (session, engine, authenticator, catalog)
+    }
+
+    func testLocalStartupShowsBootstrapBeforeOverviewRefreshFinishes() async throws {
+        let fixture = try fixture()
+        let engine = ResumeEngine()
+        let catalog = LocalLedgerCatalog(rootDirectory: fixture.root.appendingPathComponent("managed"),
+            engine: engine, validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Async overview fixture")
+        let first = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+            defaults: fixture.defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+            widgetCredentialStore: InertWidgetStore())
+        await first.openLocalLedger(descriptor)
+        let session = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+            defaults: fixture.defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+            widgetCredentialStore: InertWidgetStore())
+        defer { session.chooseLedger(); first.chooseLedger() }
+        XCTAssertEqual(session.phase, .checking)
+        let entered = expectation(description: "overview scan started")
+        let completed = expectation(description: "startup completed while overview scan is blocked")
+        let gate = Gate(entered)
+        await engine.configureOverview(gate: gate)
+        let opening = Task {
+            await session.start()
+            completed.fulfill()
+        }
+        await fulfillment(of: [entered], timeout: 3)
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertNotNil(session.ledger)
+        XCTAssertEqual(session.localOverviewCategories?.categories.count, 4)
+        XCTAssertEqual(session.overviewTransactionStats?.transactionCount, 100_000)
+        await fulfillment(of: [completed], timeout: 0.25)
+        await gate.release()
+        await opening.value
     }
 
     func testWarmLocalUnlockShowsAuthenticatedRetainedContentWhileChangedRevisionRefreshes() async throws {
@@ -332,6 +650,7 @@ final class LocalLedgerSessionTests: XCTestCase {
         let fixture = try await openedResumeFixture()
         let session = fixture.session
         defer { session.chooseLedger() }
+        let overviewCalls = await fixture.engine.overviewCalls
         await session.updateActivity(isActive: false, isBackground: true)
         XCTAssertFalse(session.amountsVisible)
         let unnecessaryRead = expectation(description: "same revision foreground return avoids bootstrap")
@@ -341,6 +660,23 @@ final class LocalLedgerSessionTests: XCTestCase {
         XCTAssertEqual(session.phase, .ready)
         XCTAssertTrue(session.amountsVisible)
         await fulfillment(of: [unnecessaryRead], timeout: 0.1)
+        let resumedOverviewCalls = await fixture.engine.overviewCalls
+        XCTAssertEqual(resumedOverviewCalls, overviewCalls)
+    }
+
+    func testUnchangedOverviewAggregateIsReusedAndExplicitRefreshStillReads() async throws {
+        let fixture = try await openedResumeFixture()
+        let session = fixture.session
+        defer { session.chooseLedger() }
+        XCTAssertNotNil(session.localOverviewCategories)
+        let initialCalls = await fixture.engine.overviewCalls
+        await session.ensureLocalOverviewCategories()
+        let reusedCalls = await fixture.engine.overviewCalls
+        XCTAssertEqual(reusedCalls, initialCalls)
+        XCTAssertNotNil(session.localOverviewCategories)
+        await session.refreshLocalOverviewCategories()
+        let refreshedCalls = await fixture.engine.overviewCalls
+        XCTAssertEqual(refreshedCalls, initialCalls + 1)
     }
 
     private func assertInterruptedValidation(importing: Bool, background: Bool) async throws {

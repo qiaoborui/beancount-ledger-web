@@ -5,85 +5,6 @@ import UIKit
 
 // MARK: - Text Formatter
 
-struct TransactionShareTextFormatter {
-    static func format(
-        transactions: [LedgerTransaction],
-        currency: String,
-        accountLabels: [String: String] = [:]
-    ) -> String {
-        if transactions.count == 1, let tx = transactions.first {
-            let p = TransactionPresentation(transaction: tx)
-            let kindStr = p.isRefund ? "退款" : (p.kind == .expense ? "支出" : (p.kind == .income ? "收入" : "转账"))
-            let sign = p.isRefund ? "+" : (p.kind == .expense ? "-" : (p.kind == .income ? "+" : ""))
-            var lines = [
-                "【Ledger 记账凭证】",
-                "类型：\(kindStr)",
-                "金额：\(sign)\(MoneyText.format(minorUnits: p.minorUnits, currency: p.currency))",
-                "时间：\(tx.date)"
-            ]
-            let desc = tx.payee.isEmpty ? (tx.narration.isEmpty ? p.title : tx.narration) : (tx.narration.isEmpty ? tx.payee : "\(tx.payee) - \(tx.narration)")
-            lines.append("描述：\(desc)")
-
-            if !tx.postings.isEmpty {
-                lines.append("分录：")
-                for posting in tx.postings {
-                    let label = accountLabels[posting.account] ?? posting.account
-                    let amt = MoneyText.format(minorUnits: abs(posting.amount), currency: posting.currency ?? p.currency)
-                    let sign = posting.amount >= 0 ? "+" : "-"
-                    lines.append("  · \(label): \(sign)\(amt)")
-                }
-            }
-            if let tags = tx.tags, !tags.isEmpty {
-                lines.append("标签：\(tags.map { "#\($0)" }.joined(separator: " "))")
-            }
-            lines.append("----------------------------")
-            lines.append("由 Beancount Ledger 生成")
-            return lines.joined(separator: "\n")
-        }
-
-        // Multiple transactions
-        let sorted = transactions.sorted { $0.date > $1.date }
-        let dates = sorted.map(\.date)
-        let dateRange = dates.last == dates.first ? (dates.first ?? "") : "\(dates.last ?? "") ~ \(dates.first ?? "")"
-
-        var lines = [
-            "【Ledger 流水明细】",
-            "时间：\(dateRange)（共 \(sorted.count) 笔）",
-            "----------------------------"
-        ]
-
-        let grouped = Dictionary(grouping: sorted, by: \.date)
-        let sortedDates = grouped.keys.sorted(by: >)
-
-        for date in sortedDates {
-            lines.append("[\(date)]")
-            for tx in (grouped[date] ?? []) {
-                let p = TransactionPresentation(transaction: tx)
-                let sign = p.kind == .expense ? "-" : (p.kind == .income ? "+" : "")
-                let amt = MoneyText.format(minorUnits: p.minorUnits, currency: p.currency)
-                let title = tx.payee.isEmpty ? (tx.narration.isEmpty ? p.title : tx.narration) : tx.payee
-
-                var detailParts: [String] = []
-                if !tx.payee.isEmpty && !tx.narration.isEmpty {
-                    detailParts.append(tx.narration)
-                }
-                if let posting = tx.postings.first(where: { $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:") }) {
-                    let acctLabel = accountLabels[posting.account] ?? posting.account.components(separatedBy: ":").last ?? posting.account
-                    detailParts.append(acctLabel)
-                }
-                let detailStr = detailParts.isEmpty ? "" : " · \(detailParts.joined(separator: " · "))"
-                lines.append("  · \(title)  \(sign)\(amt)\(detailStr)")
-            }
-            lines.append("")
-        }
-
-        if lines.last == "" { lines.removeLast() }
-        lines.append("----------------------------")
-        lines.append("由 Beancount Ledger 生成")
-        return lines.joined(separator: "\n")
-    }
-}
-
 // MARK: - Safe Share Amount Label (No EnvironmentObject dependency)
 
 struct ShareAmountText: View {
@@ -897,5 +818,41 @@ struct TransactionShareSheet: View {
                 actionNotice = nil
             }
         }
+    }
+}
+
+/// Explicit file export leaves existing image/text/clipboard sharing unchanged.
+/// Only the complete prepared file is shared; never read it back into one String.
+struct TransactionTextExportSheet: View {
+    @EnvironmentObject private var session: LedgerSession
+    @Environment(\.dismiss) private var dismiss
+    let export: LocalTransactionShareExport
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Label("完整文字文件已准备", systemImage: "doc.text")
+                    Text("共 \(export.count) 笔，包含当前筛选范围内的全部已选交易，不限于本页。")
+                        .foregroundStyle(.secondary)
+                }
+                Section {
+                    ShareLink(item: export.url) {
+                        Label("分享文字文件", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(session.phase != .ready || session.privacyShielded)
+                    .accessibilityIdentifier("transaction-text-export-share")
+                } footer: {
+                    Text("这是完整的 UTF-8 文字文件。关闭此窗口或锁定账本后，会清除本机临时文件；已交给其他应用的副本不受此清理影响。")
+                }
+            }
+            .navigationTitle("导出流水文字")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
+            }
+        }
+        // The presenting sheet owns cleanup via onDismiss. A system share
+        // controller may hide this view without ending the export presentation.
     }
 }

@@ -11,6 +11,28 @@ final class LedgerMobileUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testAnalysisNativeBackAndCachedReentry() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 10))
+        app.tabBars.buttons["更多"].tap()
+        let entry = app.buttons["more-analysis-incomeExpense"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5), app.debugDescription)
+        entry.tap()
+        XCTAssertTrue(app.navigationBars["收支分析"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.scrollViews["analysis-content-incomeExpense"].waitForExistence(timeout: 10))
+        capture("income-expense-native")
+        // Native interactive pop starts at the left edge.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
+        XCTAssertTrue(app.navigationBars["更多"].waitForExistence(timeout: 5))
+        entry.tap()
+        XCTAssertTrue(app.scrollViews["analysis-content-incomeExpense"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["正在整理收支分析数据"].exists)
+        capture("income-expense-cached-reentry")
+    }
+
     func testWidgetDaySheetOpensDetailsAndReturnsToOriginalMonth() throws {
         app = XCUIApplication()
         app.launchArguments = ["--safe-preview"]
@@ -117,8 +139,8 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.buttons["transaction-context-copy"].firstMatch.waitForExistence(timeout: 3))
         capture("native-transaction-context-menu")
         app.buttons["transaction-context-edit"].firstMatch.tap()
-        XCTAssertTrue(app.buttons["transaction-edit-cancel"].waitForExistence(timeout: 3))
-        app.buttons["transaction-edit-cancel"].tap()
+        XCTAssertTrue(app.buttons["取消"].firstMatch.waitForExistence(timeout: 3))
+        app.buttons["取消"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["编辑交易"].waitForNonExistence(timeout: 3))
         row.press(forDuration: 1)
         app.buttons["transaction-context-tags"].firstMatch.tap()
@@ -400,7 +422,7 @@ final class LedgerMobileUITests: XCTestCase {
         ]
         app.launch()
         XCTAssertTrue(app.navigationBars["财务概览"].waitForExistence(timeout: 8))
-        let summaryHeading = app.staticTexts["月度结论"]
+        let summaryHeading = app.staticTexts["月度概览"]
         XCTAssertTrue(summaryHeading.exists)
         XCTAssertGreaterThanOrEqual(summaryHeading.frame.minX, 0)
         XCTAssertLessThanOrEqual(summaryHeading.frame.maxX, app.frame.maxX)

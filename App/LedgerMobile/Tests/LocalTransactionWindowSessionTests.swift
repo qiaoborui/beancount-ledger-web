@@ -1,0 +1,1788 @@
+import Foundation
+import XCTest
+import Combine
+@testable import LedgerMobile
+
+@MainActor
+final class LocalTransactionWindowSessionTests: XCTestCase {
+    private actor Gate {
+        let entered: XCTestExpectation
+        private var continuation: CheckedContinuation<Void, Never>?
+        init(_ entered: XCTestExpectation) { self.entered = entered }
+        func suspend() async {
+            await withCheckedContinuation {
+                continuation = $0
+                entered.fulfill()
+            }
+        }
+        func release() { continuation?.resume(); continuation = nil }
+    }
+
+    @MainActor private final class Authenticator: LocalLedgerAuthenticating {
+        let isAvailable = true
+        func authenticate() async throws { }
+    }
+
+    private struct InertWidgetStore: LedgerWidgetCredentialStoring {
+        let isAvailable = false
+        func load() throws -> LedgerWidgetCredential? { nil }
+        func save(_ credential: LedgerWidgetCredential) throws { }
+        func suspend() throws { }
+        func pendingRevocation() throws -> LedgerWidgetCredential? { nil }
+        func completeRevocation(deviceID: String) throws { }
+    }
+
+    private actor Engine: LocalLedgerEngine {
+        private var gate: Gate?
+        private var rowCount = 3
+        func setRowCount(_ count: Int) { rowCount = count }
+        private var successfulEdits = false
+        private var successfulOtherWrites = false
+        private var realisticDelete = false
+        func enableRealisticDelete() { realisticDelete = true; successfulOtherWrites = true; successfulEdits = true }
+        func enableSuccessfulOtherWrites() { successfulOtherWrites = true }
+        func enableSuccessfulEdits() { successfulEdits = true }
+        private var gatedPath = ""
+        private var failAfterGate = false
+        private(set) var pageRequests: [LocalLedgerEngineRequest] = []
+        private(set) var bootstrapPaths: [String] = []
+        func pause(_ path: String = "/api/ledger/transactions/page", gate: Gate, fail: Bool = false) {
+            self.gate = gate
+            gatedPath = path
+            failAfterGate = fail
+        }
+        func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
+            if request.path == "/api/ledger/version" { return Data("{}".utf8) }
+            if request.path == "/api/ledger/overview/categories" {
+                return try OverviewCategoriesFixture.data(start: request.query["start"]!, end: request.query["end"]!)
+            }
+            if request.path == "/api/ledger/transactions/page" { pageRequests.append(request) }
+            if request.path == gatedPath, let gate {
+                self.gate = nil
+                let fail = failAfterGate
+                await gate.suspend() // Intentionally ignores cancellation, like an embedded interpreter.
+                if fail { throw LocalLedgerError.operationFailed("Synthetic late failure") }
+            }
+            if request.path == "/api/ledger/reconciliation/snapshot" {
+                return Data(#"{"revision":"native-synthetic","sensitiveUnlocked":true,"start":"2026-09-01","end":"2026-10-01","monthPrefix":"2026-09","rows":[{"account":"Assets:Cash","alias":null,"label":"Synthetic","currency":"CNY","ledgerBalance":125,"status":"pending","lastAssertion":null,"statusError":false,"snapshotStatus":{"account":"Assets:Cash","status":"yellow"}}]}"#.utf8)
+            }
+            let saved = URL(fileURLWithPath: request.workspaceRoot).appendingPathComponent("window-edit.json")
+            var rows = (1...rowCount).map { Self.row($0) }
+            if successfulEdits, let data = try? Data(contentsOf: saved) {
+                rows[0] = try JSONDecoder().decode(LedgerTransaction.self, from: data)
+            }
+            let deleted = URL(fileURLWithPath: request.workspaceRoot).appendingPathComponent("receipt-deleted.bean")
+            if realisticDelete, FileManager.default.fileExists(atPath: deleted.path) { rows.removeFirst() }
+            if request.path == "/api/ledger/transactions", request.method == "GET" {
+                return try JSONSerialization.data(withJSONObject: ["transactions": JSONSerialization.jsonObject(with: JSONEncoder().encode(rows)), "sensitiveUnlocked": true])
+            }
+            if successfulEdits, request.path == "/api/ledger/transactions", request.method == "PUT",
+               case let .object(body) = request.body, let value = body["entry"] {
+                let entry = try JSONDecoder().decode(LedgerTransactionEntry.self, from: JSONEncoder().encode(value))
+                let updated = LedgerTransaction(date: entry.date, payee: entry.payee, narration: entry.narration,
+                    postings: rows[0].postings, editableEntry: entry,
+                    source: TransactionSource(file: "synthetic.bean", line: 1, hash: "committed-row-1"))
+                try JSONEncoder().encode(updated).write(to: saved)
+                return Data(#"{"ok":true}"#.utf8)
+            }
+            if successfulOtherWrites, request.method == "DELETE" || request.path == "/api/ledger/transactions/tags" {
+                if realisticDelete, request.method == "DELETE" { try Data("; deleted synthetic original".utf8).write(to: deleted) }
+                try Data("; successful synthetic write".utf8).write(to:
+                    URL(fileURLWithPath: request.workspaceRoot).appendingPathComponent("action-write.bean"))
+                return Data(#"{"ok":true}"#.utf8)
+            }
+            if request.path == "/api/ledger/bootstrap" {
+                bootstrapPaths.append(request.path)
+                return Data(LedgerModelsTests.bootstrapJSON.utf8)
+            }
+            if request.path == "/api/ledger/bootstrap/page" {
+                bootstrapPaths.append(request.path)
+                var payload = try JSONSerialization.jsonObject(with: Data(LedgerModelsTests.bootstrapJSON.utf8)) as! [String: Any]
+                let start = request.query["start"]!, end = request.query["end"]!
+                let pageRows: [[String: Any]]
+                if successfulEdits {
+                    pageRows = try JSONSerialization.jsonObject(with: JSONEncoder().encode(rows.filter {
+                        $0.date >= start && $0.date < end
+                    })) as! [[String: Any]]
+                } else {
+                    pageRows = (payload["transactions"] as? [[String: Any]] ?? []).filter {
+                        ($0["date"] as? String ?? "") >= start && ($0["date"] as? String ?? "") < end
+                    }
+                }
+                payload["start"] = start
+                payload["end"] = end
+                payload["transactions"] = []
+                let limit = Int(request.query["limit"] ?? "100") ?? 100
+                let page: [String: Any] = ["revision": "native-synthetic", "sensitiveUnlocked": true,
+                    "transactions": pageRows.prefix(limit).map { row in
+                        var candidate = row
+                        candidate.removeValue(forKey: "entry")
+                        return candidate
+                    }, "nextCursor": pageRows.count > limit ? "remaining" as Any : NSNull()]
+                return try JSONSerialization.data(withJSONObject: ["bootstrap": payload, "transactionPage": page])
+            }
+            if request.path == "/api/ledger/transactions/detail" {
+                return try JSONEncoder().encode(rows.first { $0.source.line == Int(request.query["line"] ?? "1") }!)
+            }
+            if request.path == "/api/ledger/accounts/detail/page" {
+                let offset = Int(request.query["cursor"] ?? "0") ?? 0
+                let limit = Int(request.query["limit"] ?? "100") ?? 100
+                let end = min(rows.count, offset + limit)
+                let ordered = request.query["order"] == "desc" ? Array(rows.reversed()) : rows
+                let accountRows = try ordered[offset..<end].enumerated().map { index, row -> [String: Any] in
+                    ["date": row.date, "payee": row.payee, "narration": row.narration, "change": 125,
+                     "balance": (request.query["order"] == "desc" ? rows.count - offset - index : offset + index + 1) * 125,
+                     "txn": try JSONSerialization.jsonObject(with: JSONEncoder().encode(row))]
+                }
+                let detail: [String: Any] = ["account": request.query["account"]!, "label": "Synthetic", "group": "Expenses", "active": true,
+                    "currency": request.query["currency"]!, "currentBalance": rows.count * 125,
+                    "openingBalance": 0, "closingBalance": rows.count * 125, "periodChange": rows.count * 125,
+                    "start": request.query["start"]!, "end": request.query["end"]!, "rows": accountRows]
+                let next: Any = end < rows.count ? String(end) as Any : NSNull()
+                let response: [String: Any] = ["revision": "native-synthetic", "sensitiveUnlocked": true,
+                    "rowCount": rows.count, "nextCursor": next, "detail": detail]
+                return try JSONSerialization.data(withJSONObject: response)
+            }
+            if request.path == "/api/ledger/transactions/page" {
+                if successfulEdits {
+                    rows = rows.filter { $0.date >= request.query["start"]! && $0.date < request.query["end"]! }
+                }
+                if request.query["dialect"] == "native-pending-candidates-v1" {
+                    rows = rows.map {
+                        LedgerTransaction(date: $0.date, payee: $0.payee, narration: $0.narration,
+                            metadata: $0.metadata, tags: $0.tags, postings: $0.postings,
+                            pendingReviewFlag: true, source: $0.source)
+                    }
+                }
+                return try JSONSerialization.data(withJSONObject: ["revision": "native-synthetic",
+                    "transactions": JSONSerialization.jsonObject(with: JSONEncoder().encode(rows)),
+                    "nextCursor": NSNull(), "sensitiveUnlocked": true])
+            }
+            throw LocalLedgerError.operationFailed("Synthetic optional operation unavailable")
+        }
+        private static func row(_ line: Int) -> LedgerTransaction {
+            LedgerTransaction(date: "2026-09-23", payee: line == 2 ? "Needle" : "Synthetic", narration: "window only",
+                tags: ["synthetic-event"], postings: [LedgerPosting(account: "Expenses:Food", amount: 125, currency: "CNY")],
+                source: TransactionSource(file: "synthetic.bean", line: line, hash: "row-\(line)"))
+        }
+    }
+
+    private func fixture() async throws -> (LedgerSession, Engine, LocalLedgerRepository) {
+        let suite = "window-session-tests-" + UUID().uuidString
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock {
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let engine = Engine()
+        let catalog = LocalLedgerCatalog(rootDirectory: root.appendingPathComponent("managed"),
+            engine: engine, validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Synthetic window fixture")
+        let session = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+            defaults: defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: suite, lockDirectory: root),
+            widgetCredentialStore: InertWidgetStore(),
+            ledgerNow: { Date(timeIntervalSince1970: 1_790_164_800) })
+        await session.openLocalLedger(descriptor)
+        XCTAssertEqual(session.phase, .ready)
+        return (session, engine, try XCTUnwrap(session.localRepository))
+    }
+
+    private func advance(_ repository: LocalLedgerRepository) async throws {
+        let revision = try await repository.workspace.currentRevision()
+        _ = try await repository.workspace.commit(expectedRevisionID: try XCTUnwrap(revision).id,
+            changes: [.write(Data("; newer synthetic revision".utf8), to: "window-test.bean")]) { _ in }
+    }
+
+    private func assertCleared(_ session: LedgerSession, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertNil(session.localTransactionWindow, file: file, line: line)
+        XCTAssertNil(session.localTransactionWindowError, file: file, line: line)
+        XCTAssertFalse(session.isLocalTransactionWindowLoading, file: file, line: line)
+    }
+
+    private func actionSource(_ line: Int = 1) -> TransactionSource {
+        .init(file: "synthetic.bean", line: line, hash: "row-\(line)")
+    }
+
+    func testDefaultLocalBootstrapKeepsOnlyFirstPageAndReleasesExplicitFullHistory() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.enableSuccessfulEdits()
+        await engine.setRowCount(250)
+        try await advance(repository)
+        await session.refresh()
+        XCTAssertEqual(session.ledger?.transactions.count, 100)
+        XCTAssertNil(session.localTransactionWindow)
+        XCTAssertEqual(session.localBootstrapTransactions.count, 100)
+        XCTAssertEqual(session.ledger?.transactions.first?.source.line, 1)
+        XCTAssertEqual(session.ledger?.transactions.last?.source.line, 100)
+        #if os(iOS)
+        let listLimits = TransactionsView.localWindowLimits
+        #else
+        let listLimits = LocalTransactionWindow.Limits(maxRows: LocalTransactionWindow.listPageRows)
+        #endif
+        await session.ensureLocalTransactionWindow(limits: listLimits)
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.id),
+            session.localBootstrapTransactions.map(\.id),
+            "The first list window must not grow while the user is scrolling the cached page")
+        XCTAssertNotNil(session.localTransactionWindow?.continuation)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, 101)
+        await session.loadPreviousLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.id),
+            session.localBootstrapTransactions.map(\.id))
+        let bootstrapPaths = await engine.bootstrapPaths
+        XCTAssertEqual(bootstrapPaths, ["/api/ledger/bootstrap/page", "/api/ledger/bootstrap/page"])
+        let currentRevision = try await repository.workspace.currentRevision()
+        let revision = try XCTUnwrap(currentRevision?.id)
+        let page = try await repository.bootstrapPage(start: "2026-09-01", end: "2026-10-01",
+            today: "2026-09-23", valuationCurrency: "CNY", expectedRevisionID: revision)
+        XCTAssertNotNil(page.transactionPage.nextCursor)
+        try await session.loadGlobalTransactions()
+        XCTAssertEqual(session.globalTransactions.count, 250)
+        XCTAssertTrue(session.hasCachedGlobalTransactions)
+        await session.refresh()
+        XCTAssertEqual(session.ledger?.transactions.count, 100)
+        XCTAssertTrue(session.globalTransactions.isEmpty)
+        XCTAssertFalse(session.hasCachedGlobalTransactions)
+    }
+
+    func testBootstrapPageCacheSurvivesCompatibleBuildNumber() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let cache = repository.workspace.rootDirectory.appendingPathComponent(".bootstrap-page-presentation.json")
+        var record = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: cache)) as? [String: Any])
+        let version = try XCTUnwrap(record["applicationVersion"] as? String)
+        let release = try XCTUnwrap(version.split(separator: "/").first)
+        record["applicationVersion"] = "\(release)/999999"
+        try JSONSerialization.data(withJSONObject: record).write(to: cache, options: .atomic)
+        let before = await engine.bootstrapPaths.count
+        await session.refresh()
+        let after = await engine.bootstrapPaths.count
+        XCTAssertEqual(after, before, "A compatible build should reuse the validated same-revision page")
+        XCTAssertEqual(session.phase, .ready)
+    }
+
+    func testPreparedActionDoesNotPopulateLegacyArraysAndEditsUnknownExactOriginal() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.enableSuccessfulEdits()
+        let source = actionSource()
+        XCTAssertNil(session.visibleTransaction(matching: source))
+        let rows = session.ledger?.transactions
+        let global = session.globalTransactions
+        let action = try await session.prepareLocalTransactionAction(sources: [source], kind: .edit)
+        XCTAssertEqual(action.originals.map(\.source), [source])
+        XCTAssertEqual(session.ledger?.transactions, rows)
+        XCTAssertEqual(session.globalTransactions, global)
+        XCTAssertNil(session.visibleTransaction(matching: source))
+        let before = try await repository.workspace.currentRevision()
+        let entry = LedgerTransactionEntry(date: "2026-09-24", payee: "Action edited", narration: "Synthetic",
+            postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")])
+        try await session.updateLocalTransaction(action: action, entry: entry)
+        let after = try await repository.workspace.currentRevision()
+        XCTAssertNotEqual(before?.id, after?.id)
+        do {
+            try await session.updateLocalTransaction(action: action, entry: entry)
+            XCTFail("Consumed action replayed")
+        } catch is CancellationError { }
+    }
+
+    func testPreparedDeleteAndTagsUsePinnedWorkspaceCommit() async throws {
+        for kind in [LedgerSession.LocalTransactionActionKind.delete, .addTags] {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            await engine.enableSuccessfulOtherWrites()
+            let sources = kind == .delete ? [actionSource()] : [actionSource(), actionSource(2)]
+            let action = try await session.prepareLocalTransactionAction(sources: sources, kind: kind)
+            let before = try await repository.workspace.currentRevision()
+            if kind == .delete { try await session.deleteLocalTransaction(action: action, reason: "Synthetic") }
+            else { try await session.addLocalTransactionTags(action: action, tags: ["synthetic"]) }
+            let after = try await repository.workspace.currentRevision()
+            XCTAssertNotEqual(before?.id, after?.id)
+            for original in action.originals {
+                XCTAssertNotEqual(session.transactionMutationPhase(for: original), .pending)
+            }
+            do {
+                if kind == .delete { try await session.deleteLocalTransaction(action: action, reason: "Replay") }
+                else { try await session.addLocalTransactionTags(action: action, tags: ["replay"]) }
+                XCTFail("Action replay accepted")
+            } catch is CancellationError { }
+        }
+    }
+
+    func testPreparedActionRevokedByResetPrivacyRangeAndCancellation() async throws {
+        for revocation in ["reset", "privacy", "range", "cancel", "choose"] {
+            let (session, _, repository) = try await fixture()
+            let action = try await session.prepareLocalTransactionAction(sources: [actionSource()], kind: .delete)
+            let before = try await repository.workspace.currentRevision()
+            switch revocation {
+            case "reset": session.resetLocalTransactionWindow()
+            case "privacy": await session.updateActivity(isActive: false, isBackground: true)
+            case "range": await session.applyRange(.month(year: 2026, month: 8))
+            case "cancel": session.cancelLocalTransactionAction(action)
+            default: session.chooseLedger()
+            }
+            do {
+                try await session.deleteLocalTransaction(action: action, reason: "Synthetic")
+                XCTFail("Revoked action accepted: \(revocation)")
+            } catch is CancellationError { }
+            let after = try await repository.workspace.currentRevision()
+            XCTAssertEqual(before?.id, after?.id)
+            session.chooseLedger()
+        }
+    }
+
+    func testPreparedActionCannotBorrowNewerOrdinaryReadAuthority() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let action = try await session.prepareLocalTransactionAction(sources: [actionSource()], kind: .delete)
+        try await advance(repository)
+        _ = try await repository.bootstrap(start: "2026-09-01", end: "2026-10-01", today: "2026-09-23", valuationCurrency: "CNY")
+        let before = try await repository.workspace.currentRevision()
+        do {
+            try await session.deleteLocalTransaction(action: action, reason: "Stale action")
+            XCTFail("Stale action borrowed presentedRevisionID")
+        } catch LocalLedgerWorkspace.WorkspaceError.staleRevision { }
+        let after = try await repository.workspace.currentRevision()
+        XCTAssertEqual(before?.id, after?.id)
+        XCTAssertNil(session.transactionMutationPhase(for: action.originals[0]))
+    }
+
+    func testPreparedActionRejectsWrongKindAndSupersededNonceWithoutOverlay() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let first = try await session.prepareLocalTransactionAction(sources: [actionSource()], kind: .delete)
+        let second = try await session.prepareLocalTransactionAction(sources: [actionSource(2)], kind: .addTags)
+        session.cancelLocalTransactionAction(first) // Must not revoke the newer action.
+        for action in [first, second] {
+            do {
+                try await session.deleteLocalTransaction(action: action, reason: "Wrong authority")
+                XCTFail("Wrong or superseded authority accepted")
+            } catch is CancellationError { }
+            XCTAssertNil(session.transactionMutationPhase(for: action.originals[0]))
+        }
+        // Valid new action reaches the deliberately failing mock write, not cancellation.
+        do {
+            try await session.addLocalTransactionTags(action: second, tags: ["synthetic"])
+            XCTFail("Mock should fail")
+        } catch is CancellationError { XCTFail("Old cancellation revoked newer action") }
+          catch { }
+        if case .failed = session.transactionMutationPhase(for: second.originals[0]) { }
+        else { XCTFail("Expected failed overlay after mock rollback") }
+    }
+
+    func testActionPreparationRejectsInvalidBatchesAndLateHydration() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        for sources in [[], [actionSource(), actionSource()]] as [[TransactionSource]] {
+            do {
+                _ = try await session.prepareLocalTransactionAction(sources: sources, kind: .addTags)
+                XCTFail("Invalid batch accepted")
+            } catch LedgerTransactionMutationError.sourceUnavailable { }
+        }
+        do {
+            _ = try await session.prepareLocalTransactionAction(sources: [actionSource(), actionSource(2)], kind: .edit)
+            XCTFail("Multiple edit originals accepted")
+        } catch LedgerTransactionMutationError.sourceUnavailable { }
+        let entered = expectation(description: "action hydration paused")
+        let gate = Gate(entered)
+        await engine.pause("/api/ledger/transactions/detail", gate: gate)
+        let loading = Task { try await session.prepareLocalTransactionAction(sources: [actionSource()], kind: .delete) }
+        await fulfillment(of: [entered], timeout: 3)
+        session.resetLocalTransactionWindow()
+        await gate.release()
+        do {
+            _ = try await loading.value
+            XCTFail("Late hydration granted authority")
+        } catch is CancellationError { }
+        XCTAssertNil(session.visibleTransaction(matching: actionSource()))
+    }
+
+    func testOverlappingPreparationReportsBusyWithoutRevokingInFlightAuthority() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let entered = expectation(description: "first preparation paused")
+        let gate = Gate(entered)
+        await engine.pause("/api/ledger/transactions/detail", gate: gate)
+        let first = Task { try await session.prepareLocalTransactionAction(sources: [actionSource()], kind: .delete) }
+        await fulfillment(of: [entered], timeout: 3)
+        do {
+            _ = try await session.prepareLocalTransactionAction(sources: [actionSource(2)], kind: .delete)
+            XCTFail("Concurrent hydration accepted")
+        } catch LocalTransactionWindow.WindowError.busy { }
+        await gate.release()
+        let action = try await first.value
+        XCTAssertEqual(action.originals.map(\.source), [actionSource()])
+        do {
+            try await session.deleteLocalTransaction(action: action, reason: "Synthetic")
+            XCTFail("Mock should fail")
+        } catch is CancellationError { XCTFail("Busy preparation revoked original authority") }
+          catch { }
+    }
+
+    func testPreparedBatchHydratesAllOriginalsBeforeAnyOverlayAndRollsBackFailure() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let sources = [actionSource(), actionSource(2), actionSource(3)]
+        let action = try await session.prepareLocalTransactionAction(sources: sources, kind: .addTags)
+        XCTAssertEqual(action.originals.map(\.source), sources)
+        let before = try await repository.workspace.currentRevision()
+        for original in action.originals { XCTAssertNil(session.transactionMutationPhase(for: original)) }
+        do {
+            try await session.addLocalTransactionTags(action: action, tags: ["synthetic"])
+            XCTFail("Mock should fail")
+        } catch { }
+        let after = try await repository.workspace.currentRevision()
+        XCTAssertEqual(before?.id, after?.id)
+        for original in action.originals {
+            if case .failed = session.transactionMutationPhase(for: original) { }
+            else { XCTFail("Expected rolled back batch") }
+        }
+    }
+
+    func testCompleteSummaryDoesNotRequireScrollingOrRetainVisibleRows() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadLocalTransactionWindow(filter: .init(query: "Needle"), limits: .init(maxRows: 1))
+        // One matched row can reach EOF immediately; explicit summary is idempotent.
+        await session.loadLocalTransactionSummary()
+        XCTAssertEqual(session.localTransactionSummary?.matchedCount, 1)
+        XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        XCTAssertNil(session.localTransactionSummary)
+        let visible = session.localTransactionWindow?.transactions
+        await session.loadLocalTransactionSummary()
+        XCTAssertEqual(session.localTransactionSummary?.matchedCount, 3)
+        XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+        XCTAssertEqual(session.localTransactionSummary?.visibleTransactions.count, 0)
+        XCTAssertEqual(session.localTransactionSummary?.days.first?.expense, 375)
+        XCTAssertEqual(session.localTransactionWindow?.transactions, visible)
+        XCTAssertNotNil(session.localTransactionWindow?.continuation)
+        XCTAssertFalse(session.isLocalTransactionSummaryLoading)
+        XCTAssertNil(session.localTransactionSummaryError)
+        session.resetLocalTransactionWindow()
+        XCTAssertNil(session.localTransactionSummary)
+    }
+
+    func testReturningToTransactionsReusesPublishedWindowUntilFilterChanges() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let limits = LocalTransactionWindow.Limits(maxRows: 1)
+        await session.loadLocalTransactionWindow(limits: limits)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindowIndex, 1)
+        let pageRequests = await engine.pageRequests.count
+        await session.ensureLocalTransactionWindow(limits: limits)
+        XCTAssertEqual(session.localTransactionWindowIndex, 1)
+        let reusedPageRequests = await engine.pageRequests.count
+        XCTAssertEqual(reusedPageRequests, pageRequests)
+        await session.ensureLocalTransactionWindow(filter: .init(query: "Needle"), limits: limits)
+        XCTAssertEqual(session.localTransactionWindowIndex, 0)
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.payee), ["Needle"])
+        let filteredPageRequests = await engine.pageRequests.count
+        XCTAssertGreaterThan(filteredPageRequests, pageRequests)
+    }
+
+    func testLateSummaryCannotPublishAfterResetPrivacyRangeOrRevisionChange() async throws {
+        for operation in 0..<4 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+            let entered = expectation(description: "summary awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let loading = Task { await session.loadLocalTransactionSummary() }
+            await fulfillment(of: [entered], timeout: 3)
+            XCTAssertTrue(session.isLocalTransactionSummaryLoading)
+            switch operation {
+            case 0: session.resetLocalTransactionWindow()
+            case 1: await session.updateActivity(isActive: false, isBackground: true)
+            case 2: await session.applyRange(.month(year: 2026, month: 8))
+            default: try await advance(repository)
+            }
+            await gate.release()
+            await loading.value
+            XCTAssertNil(session.localTransactionSummary)
+            XCTAssertFalse(session.isLocalTransactionSummaryLoading)
+            if operation == 3 { XCTAssertNotNil(session.localTransactionSummaryError) }
+        }
+    }
+
+    func testWindowEOFSummarySupersedesLateIndependentScanFailure() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        let entered = expectation(description: "independent scan awaiting")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate, fail: true)
+        let loading = Task { await session.loadLocalTransactionSummary() }
+        await fulfillment(of: [entered], timeout: 3)
+        await session.loadNextLocalTransactionWindow()
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+        XCTAssertFalse(session.isLocalTransactionSummaryLoading)
+        await gate.release()
+        await loading.value
+        XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+        XCTAssertNil(session.localTransactionSummaryError)
+        XCTAssertFalse(session.isLocalTransactionSummaryLoading)
+    }
+
+    func testSummaryFailureLeavesWindowUsableAndCanRetry() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        let visible = session.localTransactionWindow?.transactions
+        let entered = expectation(description: "failed summary")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate, fail: true)
+        let loading = Task { await session.loadLocalTransactionSummary() }
+        await fulfillment(of: [entered], timeout: 3)
+        await session.loadLocalTransactionSummary() // Concurrent duplicate is a no-op.
+        await gate.release()
+        await loading.value
+        XCTAssertNil(session.localTransactionSummary)
+        XCTAssertNotNil(session.localTransactionSummaryError)
+        XCTAssertEqual(session.localTransactionWindow?.transactions, visible)
+        await session.loadLocalTransactionSummary()
+        XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+        XCTAssertNil(session.localTransactionSummaryError)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, 2)
+        XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+    }
+
+    func testPreviousNextReloadExactWindowsAndPreserveCompleteSummary() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadPreviousLocalTransactionWindow()
+        assertCleared(session)
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        await session.loadLocalTransactionSummary()
+        for expected in [2, 3] {
+            await session.loadNextLocalTransactionWindow()
+            XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, expected)
+            XCTAssertEqual(session.localTransactionWindowIndex, expected - 1)
+        }
+        for expected in [2, 1] {
+            await session.loadPreviousLocalTransactionWindow()
+            XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, expected)
+            XCTAssertEqual(session.localTransactionWindowIndex, expected - 1)
+            XCTAssertEqual(session.localTransactionSummary?.fullRangeCount, 3)
+        }
+        await session.loadPreviousLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindowIndex, 0)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, 2)
+        XCTAssertEqual(session.localTransactionWindowIndex, 1)
+        session.resetLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindowIndex, 0)
+    }
+
+    func test292TransactionsTraverseAllThreePagesAndReturn() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(292)
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 100))
+        await session.loadLocalTransactionSummary()
+        for (page, range) in [(0, 1...100), (1, 101...200), (2, 201...292)] {
+            if page > 0 { await session.loadNextLocalTransactionWindow() }
+            XCTAssertEqual(session.localTransactionWindowIndex, page)
+            XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), Array(range))
+            XCTAssertEqual(session.localTransactionWindow?.continuation != nil, page < 2)
+            XCTAssertEqual(session.localTransactionSummary?.matchedCount, 292)
+        }
+        for page in [1, 0, 1, 2] {
+            if page < session.localTransactionWindowIndex { await session.loadPreviousLocalTransactionWindow() }
+            else { await session.loadNextLocalTransactionWindow() }
+            XCTAssertEqual(session.localTransactionWindowIndex, page)
+            XCTAssertEqual(session.localTransactionWindow?.transactions.first?.source.line, page * 100 + 1)
+            XCTAssertEqual(session.localTransactionWindow?.transactions.count, page == 2 ? 92 : 100)
+        }
+    }
+
+    func testPreviousNavigationReplaysEvictedAnchorsWithoutAccumulatingRows() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(40)
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        for _ in 1..<40 { await session.loadNextLocalTransactionWindow() }
+        XCTAssertEqual(session.localTransactionWindowIndex, 39)
+        XCTAssertEqual(session.localTransactionSummary?.matchedCount, 40)
+        for expected in stride(from: 39, through: 1, by: -1) {
+            await session.loadPreviousLocalTransactionWindow()
+            XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [expected])
+            XCTAssertEqual(session.localTransactionWindowIndex, expected - 1)
+            XCTAssertEqual(session.localTransactionSummary?.matchedCount, 40)
+            XCTAssertNil(session.localTransactionWindowError)
+        }
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [2])
+    }
+
+    func testPreviousReplayCannotPublishAfterResetOrNewRevision() async throws {
+        for changedRevision in [false, true] {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+            await session.loadNextLocalTransactionWindow()
+            let entered = expectation(description: "previous awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let loading = Task { await session.loadPreviousLocalTransactionWindow() }
+            await fulfillment(of: [entered], timeout: 3)
+            await session.loadPreviousLocalTransactionWindow() // No duplicate request.
+            if changedRevision { try await advance(repository) }
+            else { session.resetLocalTransactionWindow() }
+            await gate.release()
+            await loading.value
+            XCTAssertNil(session.localTransactionWindow)
+            XCTAssertEqual(session.localTransactionWindowIndex, 0)
+            XCTAssertFalse(session.isLocalTransactionWindowLoading)
+        }
+    }
+
+    func testSameRevisionRefreshAndFailedAdditionSignalWindowReload() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadLocalTransactionWindow()
+        let revision = try await repository.workspace.currentRevision()
+        let before = session.localTransactionReloadID
+        await session.refresh()
+        let refreshed = try await repository.workspace.currentRevision()
+        XCTAssertEqual(revision?.id, refreshed?.id)
+        XCTAssertGreaterThan(session.localTransactionReloadID, before)
+        XCTAssertNil(session.localTransactionWindow)
+        await session.loadLocalTransactionWindow()
+        XCTAssertNotNil(session.localTransactionWindow)
+        let beforeFailure = session.localTransactionReloadID
+        let entry = LedgerTransactionEntry(date: "2026-09-23", payee: "Synthetic", narration: "Fails",
+            postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")])
+        do { try await session.addLocalTransaction(entry); XCTFail("Mock should fail") } catch { }
+        XCTAssertGreaterThan(session.localTransactionReloadID, beforeFailure)
+        await session.loadLocalTransactionWindow()
+        XCTAssertNotNil(session.localTransactionWindow)
+    }
+
+    func testEventExportFullCountAndRevocationOnDismissResetPrivacyOrSwitch() async throws {
+        for operation in 0..<4 {
+            let (session, _, _) = try await fixture()
+            defer { session.chooseLedger() }
+            let export = try await session.prepareLocalEventReportExport("synthetic-event")
+            XCTAssertEqual(export.count, 3)
+            let text = try String(contentsOf: export.url, encoding: .utf8)
+            XCTAssertTrue(text.contains("## 交易清单 (3 笔)"))
+            XCTAssertTrue(text.contains("Needle"))
+            switch operation {
+            case 0: session.discardLocalEventReportExport(export)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            default: session.chooseLedger()
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: export.url.path))
+        }
+    }
+
+    func testNewEventExportRevokesOldAndOldDismissalCannotRevokeReplacement() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let old = try await session.prepareLocalEventReportExport("synthetic-event")
+        let new = try await session.prepareLocalEventReportExport("missing")
+        XCTAssertEqual(new.count, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.url.path))
+        session.discardLocalEventReportExport(old)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: new.url.path))
+        session.discardLocalEventReportExport(new)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: new.url.path))
+    }
+
+    func testLateEventExportCannotPublishAfterResetPrivacyRangeRevisionCancellation() async throws {
+        for operation in 0..<5 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "event export awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let task = Task { try await session.prepareLocalEventReportExport("synthetic-event") }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0: session.resetLocalTransactionWindow()
+            case 1: await session.updateActivity(isActive: false, isBackground: true)
+            case 2: await session.applyRange(.month(year: 2026, month: 8))
+            case 3: try await advance(repository)
+            default: task.cancel()
+            }
+            await gate.release()
+            do { _ = try await task.value; XCTFail("late event export returned") } catch {}
+        }
+    }
+
+    func testShareExportExactSelectionAndPublishedFileRevokedByPrivacyResetAndDismissal() async throws {
+        for operation in 0..<4 {
+            let (session, _, _) = try await fixture()
+            defer { session.chooseLedger() }
+            let row = try await session.localTransactionDetail(source: actionSource(2))
+            let export = try await session.prepareLocalTransactionShare(filter: .init(), selectedIDs: [row.id])
+            XCTAssertEqual(export.count, 1)
+            XCTAssertTrue(try String(contentsOf: export.url, encoding: .utf8).contains("Needle"))
+            switch operation {
+            case 0: session.discardLocalTransactionShare(export)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            default: session.chooseLedger()
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: export.url.path))
+        }
+    }
+
+    func testNewShareRevokesOldFileAndOldDismissalDoesNotRevokeNewOne() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let old = try await session.prepareLocalTransactionShare(filter: .init(), selectedIDs: nil)
+        let new = try await session.prepareLocalTransactionShare(filter: .init(query: "Needle"), selectedIDs: nil)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.url.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: new.url.path))
+        session.discardLocalTransactionShare(old)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: new.url.path))
+        session.discardLocalTransactionShare(new)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: new.url.path))
+    }
+
+    func testLateShareCannotPublishAfterPrivacyRangeResetRevisionOrCancellation() async throws {
+        for operation in 0..<5 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "share awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let loading = Task { try await session.prepareLocalTransactionShare(filter: .init(), selectedIDs: nil) }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0: await session.updateActivity(isActive: false, isBackground: true)
+            case 1: await session.applyRange(.month(year: 2026, month: 8))
+            case 2: session.resetLocalTransactionWindow()
+            case 3: try await advance(repository)
+            default: loading.cancel()
+            }
+            await gate.release()
+            do { _ = try await loading.value; XCTFail("Revoked share published") } catch { }
+        }
+    }
+
+    func testEventTagSummaryCoalescesReadersAndResetRejectsLatePublication() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let original = session.ledger?.transactions
+        let entered = expectation(description: "events awaiting")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate)
+        let first = Task { await session.loadLocalEventTagSummaries() }
+        await fulfillment(of: [entered], timeout: 3)
+        let second = Task { await session.loadLocalEventTagSummaries() }
+        await Task.yield()
+        await gate.release()
+        await first.value; await second.value
+        XCTAssertEqual(session.localEventTagSummaries?.first?.transactionCount, 3)
+        XCTAssertEqual(session.localEventTagSummaries?.first?.totalExpense, 375)
+        let requests = await engine.pageRequests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(session.ledger?.transactions, original)
+        await session.loadLocalEventTagSummaries()
+        let cachedRequests = await engine.pageRequests
+        XCTAssertEqual(cachedRequests.count, 1)
+        session.resetLocalTransactionWindow()
+        XCTAssertNil(session.localEventTagSummaries)
+        let lateEntered = expectation(description: "late events")
+        let lateGate = Gate(lateEntered)
+        await engine.pause(gate: lateGate)
+        let late = Task { await session.loadLocalEventTagSummaries() }
+        await fulfillment(of: [lateEntered], timeout: 3)
+        session.resetLocalTransactionWindow()
+        await lateGate.release(); await late.value
+        XCTAssertNil(session.localEventTagSummaries)
+        XCTAssertFalse(session.isLocalEventTagSummaryLoading)
+    }
+
+    func testEventSummaryOwnedTaskCompletesAfterAllWaitersCancelAndCacheRejectsNewRevision() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let entered = expectation(description: "cancelled event waiter")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate)
+        let waiter = Task { await session.loadLocalEventTagSummaries() }
+        await fulfillment(of: [entered], timeout: 3)
+        waiter.cancel()
+        await gate.release(); await waiter.value
+        XCTAssertFalse(session.isLocalEventTagSummaryLoading)
+        XCTAssertEqual(session.localEventTagSummaries?.first?.transactionCount, 3)
+        try await advance(repository)
+        await session.loadLocalEventTagSummaries()
+        XCTAssertNil(session.localEventTagSummaries)
+        XCTAssertNotNil(session.localEventTagSummaryError)
+    }
+
+    func testForcedEventSummarySuccessCannotBeOverwrittenByOldFailure() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let entered = expectation(description: "old event failure")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate, fail: true)
+        let old = Task { await session.loadLocalEventTagSummaries() }
+        await fulfillment(of: [entered], timeout: 3)
+        await session.loadLocalEventTagSummaries(force: true)
+        XCTAssertEqual(session.localEventTagSummaries?.first?.transactionCount, 3)
+        await gate.release(); await old.value
+        XCTAssertEqual(session.localEventTagSummaries?.first?.transactionCount, 3)
+        XCTAssertNil(session.localEventTagSummaryError)
+        XCTAssertFalse(session.isLocalEventTagSummaryLoading)
+    }
+
+    func testEventWindowsAreBoundedAndIndependentOfCompleteReport() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(205)
+        let original = session.ledger?.transactions
+        let authority = await repository.presentedRevisionID
+        let first = try await session.localEventTagWindow("synthetic-event")
+        XCTAssertEqual(first.transactions.count, 100)
+        XCTAssertFalse(first.isComplete)
+        let report = try await session.localEventTagReport("synthetic-event")
+        XCTAssertEqual(report.summary.transactionCount, 205)
+        let last = try await session.localEventTagWindow("synthetic-event", index: 2)
+        XCTAssertEqual(last.transactions.map(\.source.line), [201, 202, 203, 204, 205])
+        XCTAssertTrue(last.isComplete)
+        let missing = try await session.localEventTagWindow("missing")
+        XCTAssertTrue(missing.transactions.isEmpty)
+        XCTAssertTrue(missing.isComplete)
+        let emptyTag = try await session.localEventTagWindow("")
+        XCTAssertTrue(emptyTag.transactions.isEmpty, "empty tag must not select all rows")
+        do { _ = try await session.localEventTagWindow("synthetic-event", index: 3); XCTFail("invalid page accepted") } catch {}
+        XCTAssertEqual(session.ledger?.transactions, original)
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(after, authority)
+    }
+
+    func testEventWindowRejectsSupersessionResetPrivacyRevisionAndCancellation() async throws {
+        for operation in 0..<5 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "event window awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let old = Task { try await session.localEventTagWindow("synthetic-event") }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0:
+                let replacement = try await session.localEventTagWindow("missing")
+                XCTAssertTrue(replacement.transactions.isEmpty)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            case 3: try await advance(repository)
+            default: old.cancel()
+            }
+            await gate.release()
+            do { _ = try await old.value; XCTFail("late event window returned") } catch {}
+        }
+    }
+
+    func testPendingWindowsKeepCompleteFactsAndPinFilterContinuation() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(205)
+        let original = session.ledger?.transactions
+        let authority = await repository.presentedRevisionID
+        let first = try await session.localPendingWindow()
+        XCTAssertEqual(first.result.totalCount, 205)
+        XCTAssertEqual(first.result.totalMinorUnits, 25_625)
+        XCTAssertEqual(first.result.transactions.count, 100)
+        let next = try XCTUnwrap(first.continuation)
+        do { _ = try await session.localPendingWindow(filter: .missingPayee, continuation: next); XCTFail("wrong filter accepted") } catch {}
+        let second = try await session.localPendingWindow(continuation: next)
+        XCTAssertEqual(second.result.transactions.first?.source.line, 101)
+        let last = try await session.localPendingWindow(continuation: second.continuation)
+        XCTAssertEqual(last.result.transactions.map(\.source.line), [201, 202, 203, 204, 205])
+        XCTAssertNil(last.continuation)
+        let filtered = try await session.localPendingWindow(filter: .missingPayee)
+        XCTAssertEqual(filtered.result.totalCount, 205)
+        XCTAssertTrue(filtered.result.transactions.isEmpty)
+        do { _ = try await session.localPendingWindow(continuation: next); XCTFail("old sequence accepted") } catch {}
+        XCTAssertEqual(session.ledger?.transactions, original)
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(after, authority)
+    }
+
+    func testPendingWindowRejectsSupersessionResetPrivacyRevisionAndCancellation() async throws {
+        for operation in 0..<5 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "pending awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let old = Task { try await session.localPendingWindow() }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0:
+                let new = try await session.localPendingWindow(filter: .missingPayee)
+                XCTAssertTrue(new.result.transactions.isEmpty)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            case 3: try await advance(repository)
+            default: old.cancel()
+            }
+            await gate.release()
+            do { _ = try await old.value; XCTFail("late pending result returned") } catch {}
+        }
+    }
+
+    func testEventReportReturnsCompleteAggregatesWithoutChangingPresentation() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let original = session.ledger?.transactions
+        let authority = await repository.presentedRevisionID
+        await engine.setRowCount(205)
+        let result = try await session.localEventTagReport("synthetic-event")
+        XCTAssertEqual(result.summary.transactionCount, 205)
+        XCTAssertEqual(result.summary.totalExpense, 25_625)
+        XCTAssertEqual(result.categoryBreakdown.first?.amount, 25_625)
+        XCTAssertEqual(result.dailySeries.first?.amount, 25_625)
+        XCTAssertEqual(session.ledger?.transactions, original)
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(after, authority)
+        let requests = await engine.pageRequests
+        XCTAssertEqual(requests.first?.query["start"], session.selectedRange.start)
+        XCTAssertEqual(requests.first?.query["end"], session.selectedRange.queryEndExclusive)
+    }
+
+    func testEventReportRejectsSupersessionResetPrivacyRevisionAndCancellation() async throws {
+        for operation in 0..<5 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "event report awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let old = Task { try await session.localEventTagReport("synthetic-event") }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0:
+                let new = try await session.localEventTagReport("missing")
+                XCTAssertEqual(new.summary.transactionCount, 0)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            case 3: try await advance(repository)
+            default: old.cancel()
+            }
+            await gate.release()
+            do { _ = try await old.value; XCTFail("late event report returned") } catch {}
+        }
+    }
+
+    func testLocalReconciliationReadPinsRevisionAndDoesNotMutateLegacyState() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let original = session.ledger?.transactions
+        let authority = await repository.presentedRevisionID
+        let rows = try await session.localReconciliationRows(start: "2026-09-01", end: "2026-10-01")
+        XCTAssertEqual(rows.map(\.ledgerBalance), [125])
+        XCTAssertEqual(session.ledger?.transactions, original)
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(after, authority)
+    }
+
+    func testLocalReconciliationRejectsResetPrivacyRevisionAndCancellationWhileAwaiting() async throws {
+        for operation in 0..<4 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "reconciliation suspended")
+            let gate = Gate(entered)
+            await engine.pause("/api/ledger/reconciliation/snapshot", gate: gate)
+            let task = Task { try await session.localReconciliationRows(start: "2026-09-01", end: "2026-10-01") }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0: session.resetLocalTransactionWindow()
+            case 1: await session.updateActivity(isActive: false, isBackground: true)
+            case 2: try await advance(repository)
+            default: task.cancel()
+            }
+            await gate.release()
+            do { _ = try await task.value; XCTFail("late reconciliation returned") } catch {}
+        }
+    }
+
+    func testWidgetDayWindowsAndSummaryDoNotChangeMainRangeOrLegacyArrays() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(205)
+        let range = session.selectedRange
+        let ledger = session.ledger?.transactions
+        let presented = await repository.presentedRevisionID
+        let first = try await session.localWidgetDayWindow("2026-09-23")
+        XCTAssertEqual(first.transactions.count, 100)
+        XCTAssertEqual(first.transactions.first?.source.line, 1)
+        XCTAssertFalse(first.isComplete)
+        let summary = try await session.localWidgetDaySummary("2026-09-23")
+        XCTAssertEqual(summary.matchedCount, 205)
+        XCTAssertTrue(summary.visibleTransactions.isEmpty)
+        let last = try await session.localWidgetDayWindow("2026-09-23", index: 2)
+        XCTAssertEqual(last.transactions.map(\.source.line), [201, 202, 203, 204, 205])
+        XCTAssertTrue(last.isComplete)
+        XCTAssertEqual(session.selectedRange, range)
+        XCTAssertEqual(session.ledger?.transactions, ledger)
+        let authority = await repository.presentedRevisionID
+        XCTAssertEqual(authority, presented)
+        let requests = await engine.pageRequests
+        XCTAssertTrue(requests.allSatisfy { $0.query["start"] == "2026-09-23" && $0.query["end"] == "2026-09-24" })
+        do { _ = try await session.localWidgetDayWindow("2026-02-30"); XCTFail("invalid day accepted") } catch {}
+        do { _ = try await session.localWidgetDayWindow("2026-09-23", index: 3); XCTFail("missing page became empty success") } catch {}
+    }
+
+    func testWidgetDayPageAndSummaryRejectLateResetPrivacyRevisionCancellation() async throws {
+        for summary in [false, true] {
+            for operation in 0..<4 {
+                let (session, engine, repository) = try await fixture()
+                defer { session.chooseLedger() }
+                let entered = expectation(description: "widget awaiting")
+                let gate = Gate(entered)
+                await engine.pause(gate: gate)
+                let old = Task {
+                    if summary { _ = try await session.localWidgetDaySummary("2026-09-23") }
+                    else { _ = try await session.localWidgetDayWindow("2026-09-23") }
+                }
+                await fulfillment(of: [entered], timeout: 3)
+                switch operation {
+                case 0: session.resetLocalTransactionWindow()
+                case 1: await session.updateActivity(isActive: false, isBackground: true)
+                case 2: try await advance(repository)
+                default: old.cancel()
+                }
+                await gate.release()
+                do { try await old.value; XCTFail("late widget result returned") } catch {}
+            }
+        }
+    }
+
+    func testAccountPagesAndCompleteTrendAreIndependentAndDoNotSeedLegacyArrays() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let original = session.ledger?.transactions
+        let presented = await repository.presentedRevisionID
+        let first = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", limit: 1)
+        XCTAssertEqual(first.page.rowCount, 3)
+        XCTAssertEqual(first.page.detail.rows.map(\.balance), [125])
+        let trend = try await session.localAccountTrend(account: "Expenses:Food", currency: "CNY")
+        XCTAssertEqual(trend.rowCount, 3); XCTAssertTrue(trend.detail.rows.isEmpty)
+        XCTAssertEqual(trend.points.last?.balance, 375)
+        let next = try XCTUnwrap(first.continuation)
+        do {
+            _ = try await session.localAccountWindow(account: "Expenses:Other", currency: "CNY", continuation: next)
+            XCTFail("cross-account cursor accepted")
+        } catch {}
+        let second = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: next, limit: 1)
+        XCTAssertEqual(second.page.detail.rows.map(\.balance), [250])
+        let last = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: second.continuation, limit: 1)
+        XCTAssertEqual(last.page.detail.rows.map(\.balance), [375]); XCTAssertNil(last.continuation)
+        _ = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", limit: 1)
+        do {
+            _ = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: next)
+            XCTFail("old sequence accepted")
+        } catch {}
+        XCTAssertEqual(session.ledger?.transactions, original)
+        let authority = await repository.presentedRevisionID
+        XCTAssertEqual(authority, presented)
+    }
+
+    func testDescendingAccountWindowsReverseHistoryAndRejectOrderChangedContinuation() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let first = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", limit: 1, order: .desc)
+        XCTAssertEqual(first.page.detail.rows.map(\.balance), [375])
+        let cursor = try XCTUnwrap(first.continuation)
+        do {
+            _ = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: cursor, limit: 1)
+            XCTFail("changed order accepted")
+        } catch {}
+        let second = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: cursor, limit: 1, order: .desc)
+        XCTAssertEqual(second.page.detail.rows.map(\.balance), [250])
+        let third = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: second.continuation, limit: 1, order: .desc)
+        XCTAssertEqual(third.page.detail.rows.map(\.balance), [125]); XCTAssertNil(third.continuation)
+    }
+
+    func testAccountPresentationCacheKeepsFirstPageAndRejectsReset() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        XCTAssertNil(session.cachedLocalAccountDetail(account: "Expenses:Food", currency: "CNY"))
+        let first = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", limit: 1, order: .desc)
+        _ = try await session.localAccountTrend(account: "Expenses:Food", currency: "CNY")
+        XCTAssertEqual(session.cachedLocalAccountDetail(account: "Expenses:Food", currency: "CNY"), first.page.detail)
+        XCTAssertNotNil(session.cachedLocalAccountTrend(account: "Expenses:Food", currency: "CNY"))
+        _ = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY", continuation: first.continuation, limit: 1, order: .desc)
+        XCTAssertEqual(session.cachedLocalAccountDetail(account: "Expenses:Food", currency: "CNY"), first.page.detail)
+        XCTAssertNil(session.cachedLocalAccountDetail(account: "Expenses:Food", currency: "USD"))
+        await session.updateActivity(isActive: false, isBackground: true)
+        XCTAssertNil(session.cachedLocalAccountDetail(account: "Expenses:Food", currency: "CNY"))
+        XCTAssertNil(session.cachedLocalAccountTrend(account: "Expenses:Food", currency: "CNY"))
+        session.chooseLedger()
+        XCTAssertNil(session.cachedLocalAccountDetail(account: "Expenses:Food", currency: "CNY"))
+    }
+
+    func testAccountPageAndTrendRejectLateReadsOnResetPrivacyRevisionAndCancellation() async throws {
+        for trend in [false, true] {
+            for operation in 0..<4 {
+                let (session, engine, repository) = try await fixture()
+                defer { session.chooseLedger() }
+                let entered = expectation(description: "account awaiting")
+                let gate = Gate(entered)
+                await engine.pause("/api/ledger/accounts/detail/page", gate: gate)
+                let old = Task {
+                    if trend { _ = try await session.localAccountTrend(account: "Expenses:Food", currency: "CNY") }
+                    else { _ = try await session.localAccountWindow(account: "Expenses:Food", currency: "CNY") }
+                }
+                await fulfillment(of: [entered], timeout: 3)
+                switch operation {
+                case 0: session.resetLocalTransactionWindow()
+                case 1: await session.updateActivity(isActive: false, isBackground: true)
+                case 2: try await advance(repository)
+                default: old.cancel()
+                }
+                await gate.release()
+                do { try await old.value; XCTFail("late account read returned") } catch {}
+            }
+        }
+    }
+
+    func testGlobalSearchWindowsPreserveFullCountsAndRejectChangedQueryAndOldSequence() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let original = session.ledger?.transactions
+        let global = session.globalTransactions
+        let presented = await repository.presentedRevisionID
+        let first = try await session.localGlobalSearchWindow(query: "", scope: .transactions, filters: .init(), limits: .init(rows: 1))
+        XCTAssertEqual(first.result.matchedCount, 3)
+        XCTAssertEqual(first.result.transactions.map(\.source.line), [1])
+        let next = try XCTUnwrap(first.continuation)
+        do {
+            _ = try await session.localGlobalSearchWindow(query: "Needle", scope: .transactions, filters: .init(), continuation: next)
+            XCTFail("continuation accepted changed query")
+        } catch {}
+        let second = try await session.localGlobalSearchWindow(query: "", scope: .transactions, filters: .init(), continuation: next, limits: .init(rows: 1))
+        XCTAssertEqual(second.result.matchedCount, 3)
+        XCTAssertEqual(second.result.transactions.map(\.source.line), [2])
+        let last = try await session.localGlobalSearchWindow(query: "", scope: .transactions, filters: .init(), continuation: second.continuation, limits: .init(rows: 1))
+        XCTAssertEqual(last.result.transactions.map(\.source.line), [3]); XCTAssertNil(last.continuation)
+        let fresh = try await session.localGlobalSearchWindow(query: "Needle", scope: .transactions, filters: .init())
+        XCTAssertEqual(fresh.result.transactions.map(\.source.line), [2])
+        do {
+            _ = try await session.localGlobalSearchWindow(query: "", scope: .transactions, filters: .init(), continuation: next)
+            XCTFail("old sequence accepted")
+        } catch {}
+        XCTAssertEqual(session.ledger?.transactions, original)
+        XCTAssertEqual(session.globalTransactions, global)
+        let authority = await repository.presentedRevisionID
+        XCTAssertEqual(presented, authority)
+        let requests = await engine.pageRequests
+        XCTAssertTrue(requests.allSatisfy { $0.query["dialect"] == "native-search-candidates-v1" })
+        XCTAssertTrue(requests.allSatisfy { $0.query["start"] == "0001-01-01" && $0.query["end"] == "9999-12-31" })
+    }
+
+    func testGlobalSearchSupersessionResetPrivacyRangeRevisionAndCancellationRejectLateResults() async throws {
+        for operation in 0..<6 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "global search awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let old = Task { try await session.localGlobalSearchWindow(query: "", scope: .transactions, filters: .init()) }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0:
+                let new = try await session.localGlobalSearchWindow(query: "Needle", scope: .transactions, filters: .init())
+                XCTAssertEqual(new.result.matchedCount, 1)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            case 3: await session.applyRange(.month(year: 2026, month: 8))
+            case 4: try await advance(repository)
+            default: old.cancel()
+            }
+            await gate.release()
+            do { _ = try await old.value; XCTFail("Late search returned") } catch {}
+        }
+    }
+
+    func testSelectionFactsScanFullRangeWithoutSeedingLegacyArraysOrWriteAuthority() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let first = try await session.localTransactionDetail(source: actionSource(1))
+        let second = try await session.localTransactionDetail(source: actionSource(2))
+        let originalRows = session.ledger?.transactions
+        let presented = await repository.presentedRevisionID
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        let facts = try await session.localTransactionSelectionFacts(filter: .init(query: "Needle"),
+            selectedIDs: [first.id, second.id])
+        XCTAssertEqual(facts.rangeCount, 3)
+        XCTAssertEqual(facts.matchingCount, 1)
+        XCTAssertEqual(facts.selectedCount, 2)
+        XCTAssertEqual(facts.selectedMatchingCount, 1)
+        XCTAssertEqual(facts.tagSources, [first.source, second.source])
+        var scope = LocalTransactionSelection(revisionID: try XCTUnwrap(session.localTransactionPresentationRevision),
+            start: session.selectedRange.start, end: session.selectedRange.queryEndExclusive)
+        scope.setAll(matching: .init(query: "Needle"), selected: true)
+        scope.set(first, selected: true)
+        let scoped = try await session.localTransactionSelectionFacts(filter: .init(query: "Needle"), selection: scope)
+        XCTAssertEqual(scoped.selectedCount, 2)
+        XCTAssertEqual(scoped.selectedMatchingCount, 1)
+        XCTAssertEqual(scoped.tagSources, facts.tagSources)
+        let stale = LocalTransactionSelection(revisionID: UUID(),
+            start: session.selectedRange.start, end: session.selectedRange.queryEndExclusive)
+        do {
+            _ = try await session.localTransactionSelectionFacts(filter: .init(), selection: stale)
+            XCTFail("A selection from another generation was accepted")
+        } catch LocalLedgerWorkspace.WorkspaceError.staleRevision { }
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [1])
+        XCTAssertEqual(session.ledger?.transactions, originalRows)
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(presented, after)
+    }
+
+    func testSelectionFactsSupersessionResetPrivacyRangeRevisionAndCancellationRejectLateResults() async throws {
+        for operation in 0..<6 {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            let entered = expectation(description: "selection awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let old = Task { try await session.localTransactionSelectionFacts(filter: .init(), selectedIDs: []) }
+            await fulfillment(of: [entered], timeout: 3)
+            switch operation {
+            case 0:
+                let new = try await session.localTransactionSelectionFacts(filter: .init(query: "Needle"), selectedIDs: [])
+                XCTAssertEqual(new.matchingCount, 1)
+            case 1: session.resetLocalTransactionWindow()
+            case 2: await session.updateActivity(isActive: false, isBackground: true)
+            case 3: await session.applyRange(.month(year: 2026, month: 8))
+            case 4: try await advance(repository)
+            default: old.cancel()
+            }
+            await gate.release()
+            do { _ = try await old.value; XCTFail("Late selection facts returned") } catch { }
+        }
+    }
+
+    func testOptInFirstNextSingleWindowEOFAndExplicitResetLeaveLegacyArraysUntouched() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        assertCleared(session)
+        let original = session.ledger?.transactions
+        let global = session.globalTransactions
+        let presented = await repository.presentedRevisionID
+        await session.loadNextLocalTransactionWindow() // Never implicitly selects a first window.
+        let before = await engine.pageRequests
+        XCTAssertTrue(before.isEmpty)
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [1])
+        XCTAssertNil(session.localTransactionWindow?.summary)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [2])
+        XCTAssertNil(session.localTransactionWindow?.summary)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [3])
+        XCTAssertEqual(session.localTransactionWindow?.summary?.fullRangeCount, 3)
+        XCTAssertEqual(session.localTransactionWindow?.summary?.matchedCount, 3)
+        XCTAssertEqual(session.localTransactionWindow?.summary?.visibleTransactions.count, 0)
+        XCTAssertEqual(session.localTransactionWindow?.isComplete, true)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [3])
+        let requests = await engine.pageRequests
+        XCTAssertEqual(requests.count, 1, "Later windows consume the cached candidate page")
+        XCTAssertEqual(requests.first?.query, ["dialect": "native-candidates-v1", "start": session.selectedRange.start,
+            "end": session.selectedRange.queryEndExclusive, "limit": "500"])
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(after, presented)
+        XCTAssertEqual(session.ledger?.transactions, original)
+        XCTAssertEqual(session.globalTransactions, global)
+        session.resetLocalTransactionWindow()
+        assertCleared(session)
+    }
+
+    func testLockSwitchResetAndBackgroundWhileAwaitingCannotPublish() async throws {
+        for action in 0..<4 {
+            let (session, engine, _) = try await fixture()
+            let entered = expectation(description: "page awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let loading = Task { await session.loadLocalTransactionWindow() }
+            await fulfillment(of: [entered], timeout: 3)
+            XCTAssertTrue(session.isLocalTransactionWindowLoading)
+            switch action {
+            case 0: await session.lock()
+            case 1: session.chooseLedger()
+            case 2: session.resetLocalTransactionWindow()
+            default: await session.updateActivity(isActive: false, isBackground: true)
+            }
+            assertCleared(session)
+            await gate.release()
+            await loading.value
+            assertCleared(session)
+            session.chooseLedger()
+        }
+    }
+
+    func testBackgroundClearsCachedPageBeforeLockIntervalAndPreventsReads() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        XCTAssertEqual(session.lockInterval, .fiveMinutes)
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        XCTAssertNotNil(session.localTransactionWindow?.continuation)
+        await session.updateActivity(isActive: false, isBackground: true)
+        XCTAssertEqual(session.phase, .ready, "Privacy revocation must not wait for the lock interval")
+        XCTAssertTrue(session.privacyShielded)
+        assertCleared(session)
+        await session.loadNextLocalTransactionWindow()
+        await session.loadLocalTransactionWindow()
+        assertCleared(session)
+        let requests = await engine.pageRequests
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    func testFilterSupersedesLateSuccessAndFailureWithoutOverwritingNewState() async throws {
+        for failure in [false, true] {
+            let (session, engine, _) = try await fixture()
+            let entered = expectation(description: "old filter awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate, fail: failure)
+            let old = Task { await session.loadLocalTransactionWindow(limits: .init(maxRows: 1)) }
+            await fulfillment(of: [entered], timeout: 3)
+            await session.loadLocalTransactionWindow(filter: .init(query: "Needle"))
+            XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [2])
+            XCTAssertEqual(session.localTransactionWindow?.summary?.matchedCount, 1)
+            await gate.release()
+            await old.value
+            XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [2])
+            XCTAssertNil(session.localTransactionWindowError)
+            XCTAssertFalse(session.isLocalTransactionWindowLoading)
+            let requests = await engine.pageRequests
+            XCTAssertTrue(requests.allSatisfy { $0.query["q"] == nil && $0.query["account"] == nil })
+            session.chooseLedger()
+        }
+    }
+
+    func testRangeAndRequestInvalidationSupersedeAwaitingWindow() async throws {
+        for rangeChange in [false, true] {
+            let (session, engine, _) = try await fixture()
+            let entered = expectation(description: "old request awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate)
+            let old = Task { await session.loadLocalTransactionWindow() }
+            await fulfillment(of: [entered], timeout: 3)
+            if rangeChange { await session.applyRange(session.selectedRange.shifted(by: -1)) }
+            else { await session.refresh() }
+            assertCleared(session)
+            await session.loadLocalTransactionWindow(filter: .init(query: "Needle"))
+            await gate.release()
+            await old.value
+            XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [2])
+            let requests = await engine.pageRequests
+            XCTAssertEqual(requests.last?.query["start"], session.selectedRange.start)
+            XCTAssertNil(session.localTransactionWindowError)
+            session.chooseLedger()
+        }
+    }
+
+    func testConcurrentNextDoesNotOverwriteActiveLoadingOrError() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let entered = expectation(description: "first window awaiting")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate)
+        let first = Task { await session.loadLocalTransactionWindow(limits: .init(maxRows: 1)) }
+        await fulfillment(of: [entered], timeout: 3)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertTrue(session.isLocalTransactionWindowLoading)
+        XCTAssertNil(session.localTransactionWindowError)
+        await gate.release()
+        await first.value
+        async let a: Void = session.loadNextLocalTransactionWindow()
+        async let b: Void = session.loadNextLocalTransactionWindow()
+        _ = await (a, b)
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [2])
+        XCTAssertFalse(session.isLocalTransactionWindowLoading)
+        XCTAssertNil(session.localTransactionWindowError)
+    }
+
+    func testCommitDuringFinalPageAwaitAndBetweenCachedWindowsRejectsPublication() async throws {
+        for cached in [false, true] {
+            let (session, engine, repository) = try await fixture()
+            if cached {
+                await session.loadLocalTransactionWindow(limits: .init(maxRows: 2))
+                XCTAssertNotNil(session.localTransactionWindow)
+                try await advance(repository) // No save notification: owner must query current revision.
+                await session.loadNextLocalTransactionWindow()
+            } else {
+                let entered = expectation(description: "final page awaiting")
+                let gate = Gate(entered)
+                await engine.pause(gate: gate)
+                let loading = Task { await session.loadLocalTransactionWindow() }
+                await fulfillment(of: [entered], timeout: 3)
+                try await advance(repository)
+                await gate.release()
+                await loading.value
+            }
+            XCTAssertNil(session.localTransactionWindow)
+            XCTAssertNotNil(session.localTransactionWindowError)
+            XCTAssertFalse(session.isLocalTransactionWindowLoading)
+            session.chooseLedger()
+        }
+    }
+
+    func testCommitDuringCachedFinalWorkspaceAwaitCannotPublishEOF() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 2))
+        XCTAssertEqual(session.localTransactionWindow?.transactions.count, 2)
+        XCTAssertNil(session.localTransactionWindow?.summary)
+        let original = try await repository.workspace.currentRevision()
+        let entered = expectation(description: "workspace actor held before final freshness lookup")
+        let release = DispatchSemaphore(value: 0)
+        let holding = Task.detached {
+            await repository.workspace.holdForWindowPublicationTest(entered: entered, release: release)
+        }
+        await fulfillment(of: [entered], timeout: 3)
+        let loading = expectation(description: "cached next window started")
+        let observation = session.$isLocalTransactionWindowLoading.filter { $0 }.prefix(1).sink { _ in loading.fulfill() }
+        let next = Task { await session.loadNextLocalTransactionWindow() }
+        await fulfillment(of: [loading], timeout: 3)
+        observation.cancel()
+        // The remaining row is cached. There is no candidate/factory workspace
+        // read on this path; publication must wait for its final currentRevision.
+        XCTAssertTrue(session.isLocalTransactionWindowLoading)
+        XCTAssertEqual(session.localTransactionWindow?.transactions.count, 2)
+        do {
+            // A second workspace handle models an external writer while the
+            // session's workspace actor is held. No production suspension hooks.
+            let writer = LocalLedgerWorkspace(rootDirectory: repository.workspace.rootDirectory)
+            _ = try await writer.commit(expectedRevisionID: try XCTUnwrap(original).id,
+                changes: [.write(Data("; synthetic external commit".utf8), to: "external.bean")]) { _ in }
+        } catch {
+            release.signal()
+            await holding.value
+            await next.value
+            throw error
+        }
+        release.signal()
+        await holding.value
+        await next.value
+        XCTAssertNil(session.localTransactionWindow, "Never publish the stale EOF summary")
+        XCTAssertNotNil(session.localTransactionWindowError)
+        XCTAssertFalse(session.isLocalTransactionWindowLoading)
+        let requests = await engine.pageRequests
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    func testEmptyFilterResultHasCompleteSummaryAndNoImplicitSelection() async throws {
+        let (session, _, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadLocalTransactionWindow(filter: .init(query: "No synthetic match"))
+        XCTAssertEqual(session.localTransactionWindow?.transactions.count, 0)
+        XCTAssertEqual(session.localTransactionWindow?.summary?.matchedCount, 0)
+        XCTAssertEqual(session.localTransactionWindow?.summary?.fullRangeCount, 3)
+        XCTAssertEqual(session.localTransactionWindow?.isComplete, true)
+        session.resetLocalTransactionWindow()
+        await session.loadNextLocalTransactionWindow()
+        assertCleared(session)
+    }
+
+    func testSaveObserverClearsCachedAndAwaitingWindowsOnChangedRevision() async throws {
+        for awaiting in [false, true] {
+            let (session, engine, repository) = try await fixture()
+            await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+            var loading: Task<Void, Never>?
+            var gate: Gate?
+            if awaiting {
+                let entered = expectation(description: "save during page await")
+                let paused = Gate(entered)
+                gate = paused
+                await engine.pause(gate: paused)
+                loading = Task { await session.loadLocalTransactionWindow() }
+                await fulfillment(of: [entered], timeout: 3)
+            }
+            try await advance(repository)
+            let cleared = expectation(description: "save observed")
+            let observation = session.$localOverviewCategoriesError.compactMap { $0 }.prefix(1).sink { _ in cleared.fulfill() }
+            NotificationCenter.default.post(name: LocalLedgerRepository.didSaveNotification, object: repository.descriptor.id)
+            await fulfillment(of: [cleared], timeout: 3)
+            observation.cancel()
+            assertCleared(session)
+            await gate?.release()
+            await loading?.value
+            assertCleared(session)
+            session.chooseLedger()
+        }
+    }
+
+    func testMutationBeginClearsWindowBeforeRepositoryAwait() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        let original = try await session.localTransactionDetail(source: actionSource())
+        let entered = expectation(description: "delete awaiting")
+        let gate = Gate(entered)
+        await engine.pause("/api/ledger/transactions", gate: gate)
+        let mutation = Task { try await session.deleteTransaction(source: original.source, reason: "Synthetic test") }
+        await fulfillment(of: [entered], timeout: 3)
+        assertCleared(session)
+        await session.loadLocalTransactionWindow()
+        assertCleared(session)
+        await gate.release()
+        _ = await mutation.result // Mock write deliberately fails; no mutation semantics changed.
+    }
+
+    func testPinnedCommitRetiresOnlyAfterExactPresentationEvenWhenEditMovesOutsideMonth() async throws {
+        for moved in [false, true] {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            await engine.enableSuccessfulEdits()
+            try await advance(repository)
+            await session.applyRange(.month(year: 2026, month: 9))
+            let original = try XCTUnwrap(session.ledger?.transactions.first)
+            let action = try await session.prepareLocalTransactionAction(sources: [original.source], kind: .edit)
+            let entry = LedgerTransactionEntry(date: moved ? "2026-10-02" : "2026-09-24",
+                payee: "Receipt committed", narration: "Synthetic exact generation",
+                postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")])
+            let entered = expectation(description: "receipt bootstrap suspended")
+            let gate = Gate(entered)
+            await engine.pause("/api/ledger/bootstrap/page", gate: gate)
+            try await session.updateLocalTransaction(action: action, entry: entry)
+            await fulfillment(of: [entered], timeout: 3)
+            XCTAssertEqual(session.transactionMutationPhase(for: original), .confirmed)
+            let committed = try await repository.workspace.currentRevision()
+            XCTAssertNotEqual(session.localTransactionPresentationRevision, committed?.id)
+            let refreshed = expectation(description: "receipt bootstrap published")
+            let observation = session.$ledger.dropFirst().prefix(1).sink { _ in refreshed.fulfill() }
+            await gate.release()
+            await fulfillment(of: [refreshed], timeout: 3)
+            observation.cancel()
+            await session.refresh()
+            XCTAssertEqual(session.localTransactionPresentationRevision, committed?.id)
+            XCTAssertNil(session.transactionMutationPhase(for: original))
+            XCTAssertTrue(session.globalTransactions.isEmpty)
+            XCTAssertFalse(session.hasCachedGlobalTransactions)
+            XCTAssertFalse(session.visibleTransactions.contains { $0.source == original.source })
+            if moved {
+                XCTAssertFalse(session.visibleTransactions.contains { $0.date == entry.date })
+                await session.applyRange(.month(year: 2026, month: 10))
+                let replacement = try XCTUnwrap(session.ledger?.transactions.first)
+                XCTAssertEqual(replacement.payee, entry.payee)
+                let reopened = try await session.prepareLocalTransactionAction(sources: [replacement.source], kind: .edit)
+                session.cancelLocalTransactionAction(reopened)
+            }
+        }
+    }
+
+    func testDelayedLegacyGlobalReadCannotResurrectOriginalAfterReceiptRetirement() async throws {
+        for deleting in [false, true] {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            if deleting { await engine.enableRealisticDelete() } else { await engine.enableSuccessfulEdits() }
+            try await advance(repository)
+            await session.applyRange(.month(year: 2026, month: 9))
+            let original = try XCTUnwrap(session.ledger?.transactions.first)
+            // Prove the test starts with a populated cache, not an always-empty assertion.
+            try await session.loadGlobalTransactions()
+            XCTAssertTrue(session.hasCachedGlobalTransactions)
+            XCTAssertTrue(session.globalTransactions.contains { $0.source == original.source })
+            let action = try await session.prepareLocalTransactionAction(sources: [original.source], kind: deleting ? .delete : .edit)
+            let entered = expectation(description: "old global response")
+            let gate = Gate(entered)
+            await engine.pause("/api/ledger/transactions", gate: gate)
+            let stale = Task { try await session.loadGlobalTransactions(forceRefresh: true) }
+            await fulfillment(of: [entered], timeout: 3)
+            if deleting { try await session.deleteLocalTransaction(action: action, reason: "Synthetic") }
+            else {
+                try await session.updateLocalTransaction(action: action,
+                    entry: .init(date: "2026-10-02", payee: "Moved receipt", narration: "Synthetic",
+                        postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")]))
+            }
+            // The mutation schedules its own refresh. An explicit refresh can
+            // be superseded by that task, so awaiting refresh() alone is not a
+            // publication barrier. Observe actual retirement before releasing R0.
+            if session.transactionMutationPhase(for: original) != nil {
+                let retired = expectation(description: "exact receipt retired")
+                let observation = session.$transactionMutationStates
+                    .filter { $0.isEmpty }.prefix(1).sink { _ in retired.fulfill() }
+                await session.refresh()
+                await fulfillment(of: [retired], timeout: 3)
+                observation.cancel()
+            }
+            XCTAssertNil(session.transactionMutationPhase(for: original))
+            XCTAssertFalse(session.visibleTransactions.contains { $0.source == original.source })
+            XCTAssertTrue(session.globalTransactions.isEmpty)
+            await gate.release()
+            do { try await stale.value; XCTFail("old global response published after retirement") } catch {}
+            XCTAssertFalse(session.hasCachedGlobalTransactions)
+            XCTAssertTrue(session.globalTransactions.isEmpty)
+            XCTAssertFalse(session.ledger?.transactions.contains { $0.source == original.source } ?? true)
+            let current = try await repository.workspace.currentRevision()
+            XCTAssertEqual(session.localTransactionPresentationRevision, current?.id)
+        }
+    }
+
+    func testUnknownNewerGenerationDoesNotRetireReceiptByPageAbsence() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.enableSuccessfulEdits()
+        try await advance(repository)
+        await session.applyRange(.month(year: 2026, month: 9))
+        let original = try XCTUnwrap(session.ledger?.transactions.first)
+        let action = try await session.prepareLocalTransactionAction(sources: [original.source], kind: .edit)
+        let entered = expectation(description: "failed receipt bootstrap")
+        let gate = Gate(entered)
+        await engine.pause("/api/ledger/bootstrap/page", gate: gate, fail: true)
+        try await session.updateLocalTransaction(action: action,
+            entry: .init(date: "2026-10-02", payee: "Moved", narration: "Synthetic",
+                postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")]))
+        await fulfillment(of: [entered], timeout: 3)
+        let committed = try await repository.workspace.currentRevision()
+        try await advance(repository)
+        await gate.release()
+        // The newer generation is valid, but is not the receipt's exact snapshot.
+        // No absence-based claim of inclusion may replace that evidence.
+        await session.refresh()
+        await session.refresh()
+        XCTAssertNotEqual(session.localTransactionPresentationRevision, committed?.id)
+        XCTAssertEqual(session.transactionMutationPhase(for: original), .confirmed)
+    }
+
+    func testLegacyLocalEditEntryPointUsesPinnedReceiptAcrossMonthlyRefresh() async throws {
+        for date in ["2026-09-24", "2026-10-02"] {
+            let (session, engine, repository) = try await fixture()
+            defer { session.chooseLedger() }
+            await engine.enableSuccessfulEdits()
+            try await advance(repository) // Invalidate the initial bootstrap presentation cache.
+            await session.applyRange(.month(year: 2026, month: 9))
+            let original = try await session.localTransactionDetail(source: actionSource())
+            let unrelated = try await session.localTransactionDetail(source: actionSource(2))
+            let before = try await repository.workspace.currentRevision()
+            let entry = LedgerTransactionEntry(date: date, payee: "Committed", narration: "Edited",
+                postings: [.init(account: "Expenses:Food", amount: "1.25", currency: "CNY")])
+            let entered = expectation(description: "update pending")
+            let gate = Gate(entered)
+            await engine.pause("/api/ledger/transactions", gate: gate)
+            let mutation = Task { try await session.updateTransaction(source: original.source, entry: entry) }
+            await fulfillment(of: [entered], timeout: 3)
+            XCTAssertEqual(session.transactionMutationPhase(for: original), .pending)
+            await session.loadLocalTransactionWindow()
+            assertCleared(session)
+            do {
+                _ = try await session.localTransactionDetail(source: unrelated.source)
+                XCTFail("Pending writes must block detail too")
+            } catch is CancellationError { }
+            let refreshing = expectation(description: "committed bootstrap awaiting")
+            let bootstrapGate = Gate(refreshing)
+            await engine.pause("/api/ledger/bootstrap/page", gate: bootstrapGate)
+            await gate.release()
+            try await mutation.value
+            await fulfillment(of: [refreshing], timeout: 3)
+            XCTAssertEqual(session.transactionMutationPhase(for: original), .confirmed)
+            do {
+                try await session.updateTransaction(source: original.source, entry: entry)
+                XCTFail("Confirmed overlays must still block repeat writes")
+            } catch LedgerTransactionMutationError.alreadyInProgress { }
+            let refreshed = expectation(description: "monthly bootstrap published")
+            let observation = session.$ledger.dropFirst().prefix(1).sink { _ in refreshed.fulfill() }
+            await bootstrapGate.release()
+            await fulfillment(of: [refreshed], timeout: 3)
+            observation.cancel()
+            await session.refresh()
+            XCTAssertNil(session.errorMessage)
+            XCTAssertEqual(session.selectedRange, .month(year: 2026, month: 9))
+            let committed = try await repository.workspace.currentRevision()
+            XCTAssertNotEqual(committed?.id, before?.id)
+            let crossRange = date.hasPrefix("2026-10")
+            XCTAssertNil(session.transactionMutationPhase(for: original))
+            await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+            XCTAssertNotNil(session.localTransactionWindow)
+            await session.loadNextLocalTransactionWindow()
+            XCTAssertNotNil(session.localTransactionWindow)
+            XCTAssertNil(session.localTransactionWindowError)
+            let detail = try await session.localTransactionDetail(source: unrelated.source)
+            XCTAssertEqual(detail, unrelated)
+            await session.applyRange(.month(year: 2026, month: crossRange ? 10 : 9))
+            await session.loadLocalTransactionWindow()
+            let native = try XCTUnwrap(session.localTransactionWindow?.transactions.first)
+            XCTAssertEqual(native.source.hash, "committed-row-1")
+            XCTAssertEqual(native.date, date)
+            let editedDetail = try await session.localTransactionDetail(source: native.source)
+            XCTAssertEqual(editedDetail, native)
+        }
+    }
+
+    func testCallerCancellationDoesNotPublishOrPoisonReplacement() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let entered = expectation(description: "cancel awaiting page")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate)
+        let old = Task { await session.loadLocalTransactionWindow() }
+        await fulfillment(of: [entered], timeout: 3)
+        old.cancel()
+        await session.loadLocalTransactionWindow(filter: .init(query: "Needle"))
+        await gate.release()
+        await old.value
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), [2])
+        XCTAssertNil(session.localTransactionWindowError)
+    }
+
+    func testDetailIsCallerOwnedVerifiedOriginalAndNeverSeedsLegacyResolution() async throws {
+        let (session, _, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        let source = TransactionSource(file: "synthetic.bean", line: 1, hash: "row-1")
+        let transactions = session.ledger?.transactions
+        let global = session.globalTransactions
+        let presented = await repository.presentedRevisionID
+        let detail = try await session.localTransactionDetail(source: source)
+        XCTAssertEqual(detail.source, source)
+        XCTAssertEqual(detail.narration, "window only")
+        XCTAssertEqual(session.transactionResolution(for: source), .unloaded)
+        XCTAssertNil(session.visibleTransaction(matching: source))
+        XCTAssertEqual(session.ledger?.transactions, transactions)
+        XCTAssertEqual(session.globalTransactions, global)
+        XCTAssertTrue(session.transactionMutationStates.isEmpty)
+        let after = await repository.presentedRevisionID
+        XCTAssertEqual(after, presented)
+        assertCleared(session)
+    }
+
+    func testDetailLockBackgroundRangeCommitCancellationAndResetRejectLateReturn() async throws {
+        for action in 0..<6 {
+            let (session, engine, repository) = try await fixture()
+            let source = TransactionSource(file: "synthetic.bean", line: 1, hash: "row-1")
+            let entered = expectation(description: "detail awaiting")
+            let gate = Gate(entered)
+            await engine.pause("/api/ledger/transactions/detail", gate: gate)
+            let reading = Task { try await session.localTransactionDetail(source: source) }
+            await fulfillment(of: [entered], timeout: 3)
+            switch action {
+            case 0: await session.lock()
+            case 1: await session.updateActivity(isActive: false, isBackground: true)
+            case 2: await session.applyRange(session.selectedRange.shifted(by: -1))
+            case 3: try await advance(repository)
+            case 4: reading.cancel()
+            default: session.resetLocalTransactionWindow()
+            }
+            await gate.release()
+            do { _ = try await reading.value; XCTFail("Stale detail returned for action \(action)") }
+            catch { }
+            XCTAssertEqual(session.transactionResolution(for: source), .unloaded)
+            assertCleared(session)
+            session.chooseLedger()
+        }
+    }
+}
+
+private extension LocalLedgerWorkspace {
+    // Match the existing session bootstrap tests' bounded synchronous actor gate.
+    func holdForWindowPublicationTest(entered: XCTestExpectation, release: DispatchSemaphore) {
+        entered.fulfill()
+        _ = release.wait(timeout: .now() + 5)
+    }
+}

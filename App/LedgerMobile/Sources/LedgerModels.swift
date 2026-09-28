@@ -478,7 +478,12 @@ struct APIErrorPayload: Decodable {
     let error: String?
 }
 
-struct LedgerBootstrap: Decodable {
+struct LocalBootstrapPage: Decodable, Sendable {
+    let bootstrap: LedgerBootstrap
+    let transactionPage: LedgerTransactionPage
+}
+
+struct LedgerBootstrap: Decodable, Sendable {
     let start: String
     let end: String
     let summary: LedgerSummary
@@ -604,8 +609,21 @@ struct LedgerReconciliationRow: Codable, Equatable, Identifiable, Sendable {
     let ledgerBalance: Int
     let status: String // "pending" | "asserted"
     let lastAssertion: LedgerBalanceAssertion?
+    var statusError: Bool? = nil
+    var snapshotStatus: LedgerAccountStatus? = nil
 
     var isAsserted: Bool { status == "asserted" }
+    var hasSnapshotIssue: Bool { statusError == true }
+}
+
+/// Complete bounded native account rows, not a page of transaction history.
+struct LocalReconciliationSnapshot: Decodable, Sendable {
+    let revision: String
+    let sensitiveUnlocked: Bool
+    let start: String
+    let end: String
+    let monthPrefix: String
+    let rows: [LedgerReconciliationRow]
 }
 
 struct LedgerReconciliationResponse: Codable, Equatable, Sendable {
@@ -778,6 +796,9 @@ struct LedgerTransaction: Codable, Identifiable, Equatable, Sendable {
     let tags: [String]?
     let postings: [LedgerPosting]
     let editableEntry: LedgerTransactionEntry?
+    /// Native pending pages carry only the exact source-entry review condition.
+    /// This never grants edit authority or reconstructs an editable draft.
+    let pendingReviewFlag: Bool?
     let source: TransactionSource
 
     private enum CodingKeys: String, CodingKey {
@@ -788,6 +809,7 @@ struct LedgerTransaction: Codable, Identifiable, Equatable, Sendable {
         case tags
         case postings
         case editableEntry = "entry"
+        case pendingReviewFlag
         case source
     }
 
@@ -799,6 +821,7 @@ struct LedgerTransaction: Codable, Identifiable, Equatable, Sendable {
         tags: [String]? = nil,
         postings: [LedgerPosting],
         editableEntry: LedgerTransactionEntry? = nil,
+        pendingReviewFlag: Bool? = nil,
         source: TransactionSource
     ) {
         self.date = date
@@ -808,6 +831,7 @@ struct LedgerTransaction: Codable, Identifiable, Equatable, Sendable {
         self.tags = tags
         self.postings = postings
         self.editableEntry = editableEntry
+        self.pendingReviewFlag = pendingReviewFlag
         self.source = source
     }
 
@@ -1031,6 +1055,11 @@ enum LedgerTagRules {
 enum TransactionTagSelectionRules {
     static let maximumCount = 200
 
+    /// Equal counts do not imply equal user intent after asynchronous hydration.
+    static func canPresentPreparedBatch(captured: Set<String>, current: Set<String>, isSelecting: Bool) -> Bool {
+        isSelecting && !captured.isEmpty && captured == current
+    }
+
     static func adding(_ candidateIDs: [String], to current: Set<String>) -> Set<String> {
         var updated = current
         for id in candidateIDs where updated.count < maximumCount {
@@ -1068,7 +1097,19 @@ struct LedgerAccount: Decodable, Equatable, Sendable {
     let active: Bool
 }
 
-struct LedgerAccountDetail: Decodable, Equatable {
+/// A partial ascending history window plus complete account balances/count.
+/// Never use detail.rows alone to build a whole-period balance chart.
+enum LedgerAccountPageOrder: String, Sendable { case asc, desc }
+
+struct LedgerAccountPage: Decodable, Sendable {
+    let revision: String
+    let sensitiveUnlocked: Bool
+    let detail: LedgerAccountDetail
+    let rowCount: Int
+    let nextCursor: String?
+}
+
+struct LedgerAccountDetail: Decodable, Equatable, Sendable {
     let account: String
     let label: String
     let alias: String?
@@ -1084,7 +1125,7 @@ struct LedgerAccountDetail: Decodable, Equatable {
     var periodChange: Int? = nil
 }
 
-struct LedgerAccountDetailRow: Decodable, Equatable, Identifiable {
+struct LedgerAccountDetailRow: Decodable, Equatable, Identifiable, Sendable {
     let date: String
     let payee: String
     let narration: String
@@ -1104,7 +1145,7 @@ struct LedgerAccountDetailRow: Decodable, Equatable, Identifiable {
     }
 }
 
-struct LedgerAccountBalanceTrendPoint: Equatable, Identifiable {
+struct LedgerAccountBalanceTrendPoint: Equatable, Identifiable, Sendable {
     let date: String
     let balance: Int
 
@@ -1159,7 +1200,7 @@ extension LedgerAccountDetail {
     }
 
     func balanceTrend(maxPoints: Int) -> [LedgerAccountBalanceTrendPoint] {
-        downsampledBalanceTrend(balanceTrend, maxPoints: maxPoints)
+        Self.downsampledBalanceTrend(balanceTrend, maxPoints: maxPoints)
     }
 
     func balanceTrend(in range: LedgerDateRange, maxPoints: Int) -> [LedgerAccountBalanceTrendPoint] {
@@ -1171,10 +1212,10 @@ extension LedgerAccountDetail {
         if points.last != closingPoint {
             points.append(closingPoint)
         }
-        return downsampledBalanceTrend(points, maxPoints: maxPoints)
+        return Self.downsampledBalanceTrend(points, maxPoints: maxPoints)
     }
 
-    private func downsampledBalanceTrend(
+    static func downsampledBalanceTrend(
         _ points: [LedgerAccountBalanceTrendPoint],
         maxPoints: Int
     ) -> [LedgerAccountBalanceTrendPoint] {
@@ -2141,7 +2182,8 @@ enum PendingTransactionClassifier {
         }
 
         // 2. Needs review flag / metadata
-        let isFlagged = transaction.editableEntry?.flag == "!"
+        let isFlagged = transaction.pendingReviewFlag == true
+            || transaction.editableEntry?.flag == "!"
             || transaction.editableEntry?.needsReview == true
             || transaction.metadata?["needs_review"]?.stringValue?.lowercased() == "true"
             || transaction.metadata?["status"]?.stringValue?.lowercased() == "pending"
@@ -2520,6 +2562,109 @@ enum EventTagCalculator {
                 return e1 > e2
             }
             return $0.totalExpense > $1.totalExpense
+        }
+    }
+}
+
+/// Native-only bounded overview projection. Totals include every positive net
+/// category, while only the top four carry representative transactions for icons.
+/// Count and highest expense cover all rows in the range, not just categories.
+struct LedgerOverviewCategories: Codable, Sendable {
+    let revision: String
+    let start: String
+    let end: String
+    let sensitiveUnlocked: Bool
+    let positiveTotalMinorUnits: Int
+    let transactionCount: Int
+    let highestExpense: HighestExpense?
+    let categories: [Category]
+
+    struct HighestExpense: Codable, Equatable, Sendable {
+        let title: String
+        let minorUnits: Int
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case revision, start, end, sensitiveUnlocked, positiveTotalMinorUnits
+        case transactionCount, highestExpense, categories
+    }
+
+    init(revision: String, start: String, end: String, sensitiveUnlocked: Bool,
+         positiveTotalMinorUnits: Int, transactionCount: Int, highestExpense: HighestExpense?,
+         categories: [Category]) {
+        self.revision = revision
+        self.start = start
+        self.end = end
+        self.sensitiveUnlocked = sensitiveUnlocked
+        self.positiveTotalMinorUnits = positiveTotalMinorUnits
+        self.transactionCount = transactionCount
+        self.highestExpense = highestExpense
+        self.categories = categories
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try values.decode(String.self, forKey: .revision)
+        start = try values.decode(String.self, forKey: .start)
+        end = try values.decode(String.self, forKey: .end)
+        sensitiveUnlocked = try values.decode(Bool.self, forKey: .sensitiveUnlocked)
+        positiveTotalMinorUnits = try values.decode(Int.self, forKey: .positiveTotalMinorUnits)
+        transactionCount = try values.decode(Int.self, forKey: .transactionCount)
+        // decodeIfPresent would incorrectly accept an old/missing contract field
+        // as a successful range with no expenses. Optional.decode requires the key.
+        highestExpense = try values.decode(HighestExpense?.self, forKey: .highestExpense)
+        categories = try values.decode([Category].self, forKey: .categories)
+        guard transactionCount >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .transactionCount, in: values,
+                debugDescription: "Overview transaction count must be nonnegative")
+        }
+        if let highestExpense, highestExpense.minorUnits <= 0 || transactionCount == 0 {
+            throw DecodingError.dataCorruptedError(forKey: .highestExpense, in: values,
+                debugDescription: "Overview highest expense requires a positive amount and nonzero count")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(revision, forKey: .revision)
+        try values.encode(start, forKey: .start)
+        try values.encode(end, forKey: .end)
+        try values.encode(sensitiveUnlocked, forKey: .sensitiveUnlocked)
+        try values.encode(positiveTotalMinorUnits, forKey: .positiveTotalMinorUnits)
+        try values.encode(transactionCount, forKey: .transactionCount)
+        // Successful absence is an explicit JSON null, never an omitted key.
+        try values.encode(highestExpense, forKey: .highestExpense)
+        try values.encode(categories, forKey: .categories)
+    }
+
+    struct Category: Codable, Sendable {
+        let label: String
+        let totalMinorUnits: Int
+        let positiveTransactionCount: Int
+        let representative: LedgerTransaction
+    }
+}
+
+/// Portable adapter for the existing overview count and spending-rhythm views.
+/// nil means unavailable, whereas a successful nil highestExpense means no expense.
+struct OverviewTransactionStats: Equatable, Sendable {
+    let transactionCount: Int
+    let highestExpense: LedgerOverviewCategories.HighestExpense?
+
+    init?(isLocal: Bool, aggregate: LedgerOverviewCategories?, transactions: [LedgerTransaction]) {
+        if isLocal {
+            guard let aggregate else { return nil }
+            transactionCount = aggregate.transactionCount
+            highestExpense = aggregate.highestExpense
+        } else {
+            transactionCount = transactions.count
+            highestExpense = transactions.compactMap { transaction in
+                let presentation = TransactionPresentation(transaction: transaction)
+                guard presentation.kind == .expense, !presentation.isRefund,
+                      presentation.minorUnits > 0 else { return nil }
+                return LedgerOverviewCategories.HighestExpense(title: presentation.title,
+                    minorUnits: presentation.minorUnits)
+            }.max { $0.minorUnits < $1.minorUnits }
         }
     }
 }

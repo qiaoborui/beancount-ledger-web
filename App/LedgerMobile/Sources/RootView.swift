@@ -6,6 +6,8 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if DEBUG
     @State private var testingTagReport: String? = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--open-tag-report=") })?.replacingOccurrences(of: "--open-tag-report=", with: "")
+    @State private var testingPendingInbox = false
+    @State private var testingPaginationReady = false
     @State private var testingEventTags: Bool = ProcessInfo.processInfo.arguments.contains("--open-event-tags")
     @State private var testingTransactionDetail: Bool = ProcessInfo.processInfo.arguments.contains("--open-transaction-detail")
     @State private var testingCreateTransaction: Bool = ProcessInfo.processInfo.arguments.contains("--open-create-transaction")
@@ -77,6 +79,41 @@ struct RootView: View {
             }
         }
         #if DEBUG
+        #if targetEnvironment(simulator)
+        .overlay(alignment: .bottomLeading) {
+            if ProcessInfo.processInfo.arguments.contains("--local-ui-testing"),
+               ProcessInfo.processInfo.arguments.contains("--pagination-ui-testing"), session.phase != .ready {
+                Button("测试分页账本") {
+                    Task {
+                        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Pagination-" + UUID().uuidString)
+                        do {
+                            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                            defer { try? FileManager.default.removeItem(at: directory) }
+                            var text = "2000-01-01 open Assets:Bank:International:DailySpendingAccount CNY\n2000-01-01 open Expenses:Food CNY\n\n"
+                            for index in 1...292 {
+                                text += "\(LedgerDateRange.today()) * \"Pagination \(index)\" \"Synthetic\"\n  Expenses:Food 1 CNY\n  Assets:Bank:International:DailySpendingAccount -1 CNY\n\n"
+                            }
+                            try text.write(to: directory.appendingPathComponent("main.bean"), atomically: true, encoding: .utf8)
+                            await session.importLocalLedger(from: directory, name: "Pagination fixture", entrypoint: "main.bean")
+                            testingPaginationReady = session.phase == .ready
+                        } catch { session.errorMessage = error.localizedDescription }
+                    }
+                }
+                .accessibilityIdentifier("test-import-pagination-ledger")
+            }
+            if testingPaginationReady {
+                Text("Fixture ready").font(.system(size: 1)).foregroundStyle(.clear).accessibilityIdentifier("pagination-fixture-ready")
+            }
+            if ProcessInfo.processInfo.arguments.contains("--local-ui-testing"),
+               ProcessInfo.processInfo.arguments.contains("--pending-ui-testing"), session.phase == .ready {
+                Button("测试待整理入口") { testingPendingInbox = true }
+                    .accessibilityIdentifier("test-open-pending-inbox")
+            }
+        }
+        .sheet(isPresented: $testingPendingInbox) {
+            PendingInboxView().ledgerPrivacyProtectedSheet()
+        }
+        #endif
         .sheet(isPresented: $testingEventTags) {
             EventTagListView()
                 .ledgerPrivacyProtectedSheet()
@@ -172,10 +209,7 @@ struct RootView: View {
     }
 }
 
-/// The startup surface. It is on screen for the whole ledger load, so it is
-/// built to look alive while it waits: the mark breathes, the labels rise into
-/// place in sequence, and the dots pulse. All three are suppressed by Reduce
-/// Motion and by the launch arguments used for UI testing.
+/// Privacy surface shown until authenticated content is ready.
 struct PrivacyCover: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// One flag per line, not one for the pair: separate states let each label
@@ -188,7 +222,7 @@ struct PrivacyCover: View {
 
     var body: some View {
         VStack(spacing: LedgerSpacing.lg) {
-            LedgerBrandMark(size: 48, breathes: true)
+            LedgerBrandMark(size: 48, breathes: false)
             VStack(spacing: LedgerSpacing.xs) {
                 Text("Ledger")
                     .font(.system(size: 20, weight: .semibold))
@@ -200,9 +234,6 @@ struct PrivacyCover: View {
                     .foregroundStyle(LedgerPalette.secondary)
                     .opacity(subtitleRevealed ? 1 : 0)
                     .offset(y: subtitleRevealed ? 0 : 8)
-            }
-            LedgerAmbientMotion(duration: StartupWaitingDots.cycle, autoreverses: false) { phase in
-                StartupWaitingDots(phase: phase)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -225,48 +256,6 @@ struct PrivacyCover: View {
         withAnimation(.easeOut(duration: LedgerMotion.Cover.revealDuration).delay(0.18)) {
             subtitleRevealed = true
         }
-    }
-}
-
-/// Three dots that swell and fade in sequence, so the cover keeps a heartbeat
-/// while the ledger loads. The row is always laid out at its full size and only
-/// the motion is conditional, which keeps the cover from shifting when motion is
-/// off.
-private struct StartupWaitingDots: View {
-    /// The shared driver's 0…1 value, or `nil` when motion is off.
-    var phase: Double?
-
-    /// The row runs one dot behind the next, so the three read as a travelling
-    /// pulse. Each dot lags by a slice of the cycle, which is also what lets the
-    /// row loop cleanly: by the time the first dot comes round again, it is
-    /// exactly where the third one started.
-    static let cycle: TimeInterval = 1.2
-    private static let stagger: TimeInterval = 0.16
-    private static let count = 3
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(0..<Self.count, id: \.self) { index in
-                // With motion off the dots sit level and fully drawn. Laying them
-                // out at the resting value instead would freeze the row at three
-                // different opacities, which reads as a stalled animation.
-                let value = phase.map { Self.pulse(at: $0, lagging: Self.stagger * Double(index)) } ?? 1
-                Circle()
-                    .fill(LedgerPalette.cobalt)
-                    .frame(width: 5, height: 5)
-                    .scaleEffect(0.8 + 0.4 * value)
-                    .opacity(0.3 + 0.7 * value)
-            }
-        }
-        .frame(height: 6)
-        .accessibilityHidden(true)
-    }
-
-    /// Folds the driver's 0…1 into a single swell, offset by the dot's slice.
-    private static func pulse(at phase: Double, lagging lag: Double) -> Double {
-        let wrapped = (phase - lag / cycle).truncatingRemainder(dividingBy: 1)
-        let normalized = wrapped < 0 ? wrapped + 1 : wrapped
-        return 0.5 - 0.5 * cos(2 * .pi * normalized)
     }
 }
 

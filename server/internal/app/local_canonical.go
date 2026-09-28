@@ -13,10 +13,12 @@ import (
 // of the embedded Beancount loader. Decimal quantities cross JSON as strings.
 // Source text is loaded independently for lossless editing and source hashes.
 type LocalCanonicalModel struct {
-	Version     int               `json:"version"`
-	Entries     []BeanEntry       `json:"entries"`
-	Options     map[string]string `json:"options"`
-	Commodities []string          `json:"commodities,omitempty"`
+	// Set only for an exclusively owned streamed model, under its cache mutex.
+	normalizedRoot string
+	Version        int               `json:"version"`
+	Entries        []BeanEntry       `json:"entries"`
+	Options        map[string]string `json:"options"`
+	Commodities    []string          `json:"commodities,omitempty"`
 }
 
 func localCanonicalEntries(cfg Config, source []BeanEntry) ([]BeanEntry, error) {
@@ -24,25 +26,48 @@ func localCanonicalEntries(cfg Config, source []BeanEntry) ([]BeanEntry, error) 
 	if model.Version != 1 {
 		return nil, errors.New("unsupported canonical ledger model version")
 	}
-	bySource := make(map[string]BeanEntry, len(source))
-	for _, entry := range source {
-		bySource[canonicalSourceKey(entry)] = entry
-	}
-	entries := make([]BeanEntry, 0, len(model.Entries))
-	for _, original := range model.Entries {
-		entry := original
-		if entry.File != "" {
-			if filepath.IsAbs(entry.File) {
-				return nil, errors.New("canonical ledger source must be relative")
-			}
-			clean := filepath.Clean(filepath.FromSlash(entry.File))
-			if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-				return nil, errors.New("canonical ledger source escapes workspace")
-			}
-			entry.File = filepath.Join(cfg.LedgerRoot, clean)
+	if cfg.localCanonicalOwned && model.normalizedRoot != "" {
+		if model.normalizedRoot != cfg.LedgerRoot {
+			return nil, errors.New("canonical model belongs to another workspace")
 		}
+		return model.Entries, nil
+	}
+	// Validate before mutating an owned array, so a rejected model cannot leave
+	// partially normalized absolute paths/postings behind for a subsequent call.
+	if cfg.localCanonicalOwned {
+		for _, entry := range model.Entries {
+			if _, err := canonicalAbsoluteSource(cfg.LedgerRoot, entry.File); err != nil {
+				return nil, err
+			}
+			for _, posting := range entry.Postings {
+				if posting.Quantity.Number == "" || posting.Quantity.Currency == "" {
+					return nil, errors.New("canonical ledger contains an unbooked posting")
+				}
+			}
+		}
+	}
+	bySource := make(map[string]int, len(source))
+	for i := range source {
+		bySource[canonicalSourceKey(source[i])] = i
+	}
+	var entries []BeanEntry
+	if cfg.localCanonicalOwned {
+		entries = model.Entries
+	} else {
+		entries = make([]BeanEntry, len(model.Entries))
+	}
+	for index, original := range model.Entries {
+		entry := original
+		var err error
+		entry.File, err = canonicalAbsoluteSource(cfg.LedgerRoot, entry.File)
+		if err != nil {
+			return nil, err
+		}
+
 		entry.Amount = entry.AmountValue.Cents()
-		entry.Postings = append([]parsedPosting(nil), original.Postings...)
+		if !cfg.localCanonicalOwned {
+			entry.Postings = append([]parsedPosting(nil), original.Postings...)
+		}
 		for i := range entry.Postings {
 			posting := &entry.Postings[i]
 			if posting.Quantity.Number == "" || posting.Quantity.Currency == "" {
@@ -57,12 +82,29 @@ func localCanonicalEntries(cfg Config, source []BeanEntry) ([]BeanEntry, error) 
 		// The loader owns the semantic fields. Only the raw locator material is
 		// copied from source, so canonical generated/modified postings survive.
 		entry.RawLines = nil
-		if raw, ok := bySource[canonicalSourceKey(entry)]; ok {
-			entry.RawLines = raw.RawLines
+		if index, ok := bySource[canonicalSourceKey(entry)]; ok {
+			entry.RawLines = source[index].RawLines
 		}
-		entries = append(entries, entry)
+		entries[index] = entry
+	}
+	if cfg.localCanonicalOwned {
+		model.normalizedRoot = cfg.LedgerRoot
 	}
 	return entries, nil
+}
+
+func canonicalAbsoluteSource(root, file string) (string, error) {
+	if file == "" {
+		return "", nil
+	}
+	if filepath.IsAbs(file) {
+		return "", errors.New("canonical ledger source must be relative")
+	}
+	clean := filepath.Clean(filepath.FromSlash(file))
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", errors.New("canonical ledger source escapes workspace")
+	}
+	return filepath.Join(root, clean), nil
 }
 
 func canonicalSourceKey(entry BeanEntry) string {
@@ -106,34 +148,82 @@ func localCanonicalCommodities(entries []BeanEntry, model *LocalCanonicalModel) 
 }
 
 func localCanonicalTransactions(entries, source []BeanEntry) []Transaction {
-	// Canonical Beancount has already expanded pads. Passing pad directives
-	// through the Go raw-source expansion would duplicate or invent postings.
-	transactions := make([]BeanEntry, 0, len(entries))
+	// Canonical Beancount has already expanded pads. Do not run raw-source
+	// expansion, accumulate its unused balances, or create canonical editor
+	// drafts only to replace them with exact source drafts below.
+	bySource := make(map[string]int, len(source))
+	for i := range source {
+		if source[i].Kind == "transaction" {
+			bySource[canonicalSourceKey(source[i])] = i
+		}
+	}
+	txns := make([]Transaction, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Kind == "transaction" {
-			transactions = append(transactions, entry)
+		if entry.Kind != "transaction" {
+			continue
 		}
-	}
-	txns := TransactionsFromBeanEntries(transactions)
-	bySource := make(map[string]BeanEntry, len(source))
-	for _, entry := range source {
-		if entry.Kind == "transaction" {
-			bySource[canonicalSourceKey(entry)] = entry
+		txn := Transaction{
+			Date: entry.Date, Payee: entry.Payee, Narration: entry.Narration,
+			Metadata: entry.Metadata, Tags: entry.Tags, Links: entry.Links,
+			Postings: finalizeParsedPostings(entry.Postings),
+			Source:   TransactionSource{File: entry.File, Line: entry.Line},
 		}
-	}
-	for i, entry := range transactions {
-		txns[i].Entry = nil
-		if raw, ok := bySource[canonicalSourceKey(entry)]; ok {
-			txns[i].Source.Hash = transactionHash(raw.RawLines)
-			txns[i].Entry = EditableLedgerEntryFromBeanTransaction(raw)
+		if index, ok := bySource[canonicalSourceKey(entry)]; ok {
+			raw := source[index]
+			txn.Source.Hash = transactionHash(raw.RawLines)
+			txn.Entry = EditableLedgerEntryFromBeanTransaction(raw)
 		} else {
 			// A generated transaction has no editable transaction block. Give it
 			// a stable identity that cannot resolve to its originating pad line.
-			txns[i].Source.Line = 0
-			txns[i].Source.Hash = "generated:" + transactionHash([]string{canonicalSourceKey(entry), fmt.Sprint(i)})
+			txn.Source.Line = 0
+			txn.Source.Hash = "generated:" + transactionHash([]string{canonicalSourceKey(entry), fmt.Sprint(len(txns))})
 		}
+		txns = append(txns, txn)
 	}
 	return txns
+}
+
+// compactLocalCanonicalSource runs only after raw hashes and editor drafts have
+// been built. Canonical entries already retain their exact RawLines; the only
+// remaining source consumers are the entries endpoint's controls and reversal
+// recovery for transactions whose lossless editor draft was rejected.
+func compactLocalCanonicalSource(source []BeanEntry, txns []Transaction) []BeanEntry {
+	fallback := make(map[string]struct{})
+	for _, txn := range txns {
+		if txn.Entry == nil && txn.Source.Line > 0 {
+			key := canonicalSourceKey(BeanEntry{Kind: "transaction", File: txn.Source.File, Line: txn.Source.Line})
+			fallback[key] = struct{}{}
+		}
+	}
+	keep := func(entry BeanEntry) bool {
+		switch entry.Kind {
+		case "plugin", "include", "pushtag", "poptag", "pushmeta", "popmeta":
+			return true
+		case "transaction":
+			_, needed := fallback[canonicalSourceKey(entry)]
+			return needed
+		default:
+			return false
+		}
+	}
+	count := 0
+	for _, entry := range source {
+		if keep(entry) {
+			count++
+		}
+	}
+	// Do not filter in place: even an empty subslice pins the full parser array.
+	// Keep empty results nonnil so snapshotSourceBeanEntries cannot fall back to
+	// canonical (possibly transformed/generated) entries during reversal.
+	retained := make([]BeanEntry, count)
+	next := 0
+	for _, entry := range source {
+		if keep(entry) {
+			retained[next] = entry
+			next++
+		}
+	}
+	return retained
 }
 
 func snapshotSourceBeanEntries(snapshot *LedgerSnapshot) []BeanEntry {

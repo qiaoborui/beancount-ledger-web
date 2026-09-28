@@ -154,7 +154,7 @@ enum ImportClassificationBatch {
 
     static func run(
         _ entries: [LedgerImportEntry],
-        makeInput: (LedgerImportEntry) -> ImportClassificationRequest?,
+        makeInput: (LedgerImportEntry) async throws -> ImportClassificationRequest?,
         classify: (ImportClassificationRequest) async throws -> ImportClassificationSuggestion,
         canContinue: () -> Bool,
         currentEntry: (String) -> LedgerImportEntry?,
@@ -165,7 +165,10 @@ enum ImportClassificationBatch {
             try Task.checkCancellation()
             guard canContinue() else { return }
             guard isEligible(entry.id), currentEntry(entry.id) == entry else { continue }
-            guard let input = makeInput(entry) else { continue }
+            guard let input = try await makeInput(entry) else { continue }
+            try Task.checkCancellation()
+            guard canContinue() else { return }
+            guard isEligible(entry.id), currentEntry(entry.id) == entry else { continue }
             let result = try await classify(input)
             try Task.checkCancellation()
             guard canContinue() else { return }

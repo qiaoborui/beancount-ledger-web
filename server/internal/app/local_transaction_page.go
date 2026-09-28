@@ -1,0 +1,303 @@
+package app
+
+import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const localTransactionPageBytes = 1 << 20
+const localTransactionPageDefault = 100
+const localTransactionPageMax = 500
+
+// Swift owns candidate filtering and Unicode/presentation semantics.
+const localNativeCandidatesDialect = "native-candidates-v1"
+
+// Global search consumes every metadata key/value using Swift formatting. It
+// must not reuse the list dialect, whose type-only projection loses matches.
+const localNativeSearchCandidatesDialect = "native-search-candidates-v1"
+
+// Pending classification needs source editor flag evidence, but never a draft.
+const localNativePendingCandidatesDialect = "native-pending-candidates-v1"
+
+// Process-scoped MAC makes cursors opaque: restarting the app requires a fresh
+// first page, and clients cannot substitute a source revision or filter set.
+var localCursorKey = func() []byte {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		panic("cannot initialize local cursor signing")
+	}
+	return key
+}()
+
+type localTransactionCursor struct {
+	Scope  string `json:"scope"`
+	Offset int    `json:"offset"`
+}
+
+type localTransactionPage struct {
+	Revision          string        `json:"revision"`
+	Transactions      []Transaction `json:"transactions"`
+	NextCursor        string        `json:"nextCursor,omitempty"`
+	SensitiveUnlocked bool          `json:"sensitiveUnlocked"`
+}
+
+func signLocalCursor(value localTransactionCursor) string {
+	data, _ := json.Marshal(value)
+	mac := hmac.New(sha256.New, localCursorKey)
+	mac.Write(data)
+	return base64.RawURLEncoding.EncodeToString(data) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func decodeLocalCursor(raw string) (localTransactionCursor, error) {
+	var value localTransactionCursor
+	if len(raw) > 1024 {
+		return value, errors.New("invalid transaction cursor")
+	}
+	parts := strings.Split(raw, ".")
+	if len(parts) != 2 {
+		return value, errors.New("invalid transaction cursor")
+	}
+	data, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return value, errors.New("invalid transaction cursor")
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return value, errors.New("invalid transaction cursor")
+	}
+	mac := hmac.New(sha256.New, localCursorKey)
+	mac.Write(data)
+	if !hmac.Equal(signature, mac.Sum(nil)) || json.Unmarshal(data, &value) != nil || value.Offset < 0 {
+		return value, errors.New("invalid transaction cursor")
+	}
+	return value, nil
+}
+
+// Native-only additive route. Existing HTTP transaction contracts stay intact.
+// Select rows before serialization; never build an all-history response to slice.
+func localTransactionPageResponse(cfg Config, snapshot *LedgerSnapshot, query map[string]string) (int, json.RawMessage, error) {
+	return localTransactionPageProjection(cfg, snapshot, query, false)
+}
+
+// History evidence streams only the metadata required by the existing native
+// classifier. It shares row/byte limits and cursor freshness with normal pages.
+func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query map[string]string, evidence bool) (int, json.RawMessage, error) {
+	candidates := false
+	searchCandidates := false
+	pendingCandidates := false
+	if dialect, exists := query["dialect"]; exists {
+		if evidence {
+			return 400, nil, errors.New("dialect is not valid on history-page")
+		}
+		switch dialect {
+		case localNativeCandidatesDialect, localNativeSearchCandidatesDialect, localNativePendingCandidatesDialect:
+			// Presence, including an empty value, is an error: silently accepting
+			// a filter could make a caller mistake raw candidates for matches.
+			for _, key := range []string{"q", "account", "tag", "tags", "kind"} {
+				if _, exists := query[key]; exists {
+					return 400, nil, fmt.Errorf("%s is not valid on native candidate pages", key)
+				}
+			}
+			candidates = true
+			searchCandidates = dialect == localNativeSearchCandidatesDialect
+			pendingCandidates = dialect == localNativePendingCandidatesDialect
+		default:
+			return 400, nil, errors.New("unsupported transaction page dialect")
+		}
+	}
+	start, end := query["start"], query["end"]
+	if start == "" {
+		start = "0001-01-01"
+	}
+	if end == "" {
+		end = "9999-12-31"
+	}
+	for _, date := range []string{start, end} {
+		if _, err := time.Parse("2006-01-02", date); err != nil {
+			return 400, nil, errors.New("invalid transaction page date")
+		}
+	}
+	if start >= end {
+		return 400, nil, errors.New("invalid transaction page range")
+	}
+	limit := localTransactionPageDefault
+	if raw := query["limit"]; raw != "" {
+		var err error
+		limit, err = strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > localTransactionPageMax {
+			return 400, nil, errors.New("transaction page limit must be 1..500")
+		}
+	}
+	switch query["kind"] {
+	case "", "all", "expense", "income", "transfer":
+	default:
+		return 400, nil, errors.New("invalid transaction kind")
+	}
+	filter, err := ParseTransactionQuery(query["q"])
+	if err != nil {
+		return 400, nil, err
+	}
+	effectiveStart, effectiveEnd := transactionQueryEffectiveRange(start, end, filter)
+	modelRevision := fmt.Sprintf("%s:%d", snapshot.Version, snapshot.localReadModelID)
+	scopeBytes, _ := json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, modelRevision, effectiveStart, effectiveEnd, query["q"], query["account"], query["tag"], query["kind"], strconv.FormatBool(evidence)})
+	if candidates {
+		scopeBytes, _ = json.Marshal([]string{cfg.LedgerRoot, cfg.localEntrypoint, modelRevision, query["dialect"], start, end})
+	}
+	scope := fmt.Sprintf("%x", sha256.Sum256(scopeBytes))
+	offset := 0
+	if raw := query["cursor"]; raw != "" {
+		cursor, err := decodeLocalCursor(raw)
+		if err != nil {
+			return 400, nil, err
+		}
+		if cursor.Scope != scope {
+			return http.StatusConflict, nil, errors.New("transaction cursor is stale; restart from first page")
+		}
+		offset = cursor.Offset
+	}
+	txns := snapshotTransactionsDesc(snapshot)
+	if offset > txns.Len() {
+		return 400, nil, errors.New("invalid transaction cursor position")
+	}
+	page := localTransactionPage{Revision: modelRevision, Transactions: make([]Transaction, 0, limit), SensitiveUnlocked: true}
+	// Reserve enough for revision/cursor/envelope fields; exact final size checked.
+	used := 4096
+	for index := offset; index < txns.Len(); index++ {
+		txn := txns.At(index)
+		if txn.Date < effectiveStart || txn.Date >= effectiveEnd || (filter != nil && !filter.Matches(txn)) {
+			continue
+		}
+		if !candidates {
+			if account := query["account"]; account != "" && !transactionHasAccountPrefix(txn, account) {
+				continue
+			}
+			if tag := query["tag"]; tag != "" && !queryStringSliceContains(txn.Tags, tag) {
+				continue
+			}
+			if kind := query["kind"]; kind != "" && kind != "all" && dashboardTransactionType(txn) != kind {
+				continue
+			}
+		}
+		if len(page.Transactions) == limit {
+			page.NextCursor = signLocalCursor(localTransactionCursor{scope, index})
+			break
+		}
+		// Listing projection deliberately omits rich editor drafts and metadata.
+		// These remain in the model for filtering and legacy/detail requests.
+		txn.PendingReviewFlag = nil
+		if pendingCandidates {
+			flagged := txn.Entry != nil && (txn.Entry.Flag == "!" || txn.Entry.NeedsReview)
+			txn.PendingReviewFlag = &flagged
+		}
+		txn.Entry = nil
+		if evidence {
+			metadata := make(map[string]MetadataValue, 3)
+			for _, key := range []string{"method", "cardLast4", "source"} {
+				if value, ok := txn.Metadata[key]; ok {
+					metadata[key] = value
+				}
+			}
+			txn.Metadata = metadata
+		} else if pendingCandidates {
+			metadata := make(map[string]MetadataValue, 3)
+			for _, key := range []string{"type", "needs_review", "status"} {
+				if value, ok := txn.Metadata[key].(string); ok {
+					if len(value) > localTransactionPageBytes {
+						return 413, nil, errors.New("pending evidence exceeds page byte budget")
+					}
+					metadata[key] = value
+				}
+			}
+			txn.Metadata = metadata
+		} else if searchCandidates {
+			// Preserve exact metadata and scalar types, without mutating the shared
+			// model. The encoded row/page budget below includes all metadata.
+		} else if candidates {
+			// Only Swift TransactionPresentation's stringValue evidence. Never retain
+			// arbitrary metadata or stringify numeric/object values. The row byte cap
+			// includes this field; oversize evidence fails rather than truncating it.
+			if value, ok := txn.Metadata["type"].(string); ok {
+				if len(value) > localTransactionPageBytes {
+					return 413, nil, errors.New("native presentation evidence exceeds page byte budget")
+				}
+				txn.Metadata = map[string]MetadataValue{"type": value}
+			} else {
+				txn.Metadata = nil
+			}
+		} else {
+			txn.Metadata = nil
+		}
+		if txn.Postings == nil {
+			txn.Postings = []Posting{}
+		}
+		if filepath.IsAbs(txn.Source.File) {
+			relative, err := filepath.Rel(cfg.LedgerRoot, txn.Source.File)
+			if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				return 500, nil, errors.New("transaction source is outside workspace")
+			}
+			txn.Source.File = filepath.ToSlash(relative)
+		}
+		encoded, err := json.Marshal(txn)
+		if err != nil {
+			return 500, nil, errors.New("cannot encode transaction row")
+		}
+		if used+len(encoded)+1 > localTransactionPageBytes {
+			if len(page.Transactions) == 0 {
+				return http.StatusRequestEntityTooLarge, nil, errors.New("single transaction summary exceeds page byte budget")
+			}
+			page.NextCursor = signLocalCursor(localTransactionCursor{scope, index})
+			break
+		}
+		used += len(encoded) + 1
+		page.Transactions = append(page.Transactions, txn)
+	}
+	encoded, err := json.Marshal(page)
+	if err != nil || len(encoded) > localTransactionPageBytes {
+		return 500, nil, errors.New("transaction page exceeds byte budget")
+	}
+	return http.StatusOK, encoded, nil
+}
+
+// Details carry rich metadata and editor draft only when requested by an exact
+// source locator. A changed hash must never resolve to the new row accidentally.
+func localTransactionDetailResponse(cfg Config, snapshot *LedgerSnapshot, query map[string]string) (int, json.RawMessage, error) {
+	line, err := strconv.Atoi(query["line"])
+	file := query["file"]
+	hash := query["hash"]
+	if err != nil || line < 0 || hash == "" || file == "" || filepath.IsAbs(file) || strings.Contains(file, "\\") {
+		return 400, nil, errors.New("invalid transaction locator")
+	}
+	clean := filepath.Clean(filepath.FromSlash(file))
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return 400, nil, errors.New("invalid transaction locator")
+	}
+	full := filepath.Join(cfg.LedgerRoot, clean)
+	for _, txn := range snapshot.Transactions {
+		if txn.Source.File != full || txn.Source.Line != line || txn.Source.Hash != hash {
+			continue
+		}
+		txn.Source.File = filepath.ToSlash(clean)
+		if txn.Postings == nil {
+			txn.Postings = []Posting{}
+		}
+		raw, err := json.Marshal(txn)
+		if err != nil {
+			return 500, nil, errors.New("cannot encode transaction detail")
+		}
+		if len(raw) > localTransactionPageBytes {
+			return 413, nil, errors.New("transaction detail exceeds byte budget")
+		}
+		return 200, raw, nil
+	}
+	return 409, nil, errors.New("transaction source changed; reopen from the current page")
+}

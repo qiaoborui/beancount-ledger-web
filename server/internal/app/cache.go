@@ -3,12 +3,14 @@ package app
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"iter"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -18,15 +20,19 @@ type LedgerVersion struct {
 	FileCount   int     `json:"fileCount"`
 }
 
+var localSnapshotSequence atomic.Uint64
+
 type LedgerSnapshot struct {
+	// Process-local identity binds cursors to this exact transformed model.
+	localReadModelID uint64
 	LedgerVersion
 	BeanEntries       []BeanEntry       `json:"-"`
 	SourceBeanEntries []BeanEntry       `json:"-"`
 	BeanErrors        []BeanParseError  `json:"-"`
 	OptionsMap        map[string]string `json:"-"`
 	Transactions      []Transaction     `json:"transactions"`
-	transactionsAsc   []Transaction
-	transactionsDesc  []Transaction
+	transactionsAsc   []int
+	transactionsDesc  []int
 	RawBalances       map[string]map[string]int `json:"-"`
 	PriceIndex        PriceIndex                `json:"-"`
 	AccountMap        map[string]Account        `json:"-"`
@@ -64,10 +70,16 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	if err := ensureLedgerReady(c.cfg); err != nil {
 		return nil, err
 	}
-	version, err := c.currentVersion(false)
+	version, err := c.currentVersion(c.cfg.localCanonicalOwned)
 	if err != nil {
 		return nil, err
 	}
+	// An owned canonical model is immutable for one exact source generation.
+	// Never rebuild changed source using already-booked postings from its past.
+	if c.cfg.localCanonicalOwned && version.Version != c.cfg.localCanonicalVersion {
+		return nil, ErrLocalModelUnavailable
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.snapshot != nil && c.snapshot.Version == version.Version {
@@ -101,11 +113,15 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	}
 	c.metrics.observeOperation(operationBeanCompile, parseResult, parseStarted)
 	entries := compiled.Entries
-	txns := TransactionsFromBeanEntries(entries)
-	options := OptionsMapFromBeanEntries(entries)
+	var txns []Transaction
+	var options map[string]string
 	if c.cfg.localTransport && c.cfg.localCanonical != nil {
 		txns = localCanonicalTransactions(entries, sourceEntries)
+		sourceEntries = compactLocalCanonicalSource(sourceEntries, txns)
 		options = copyStringMap(c.cfg.localCanonical.Options)
+	} else {
+		txns = TransactionsFromBeanEntries(entries)
+		options = OptionsMapFromBeanEntries(entries)
 	}
 	accounts := AccountsFromBeanEntries(entries)
 	prices := PricesFromBeanEntries(entries)
@@ -188,27 +204,60 @@ func (c *LedgerCache) currentVersion(forceRefresh bool) (LedgerVersion, error) {
 	return version, nil
 }
 
-func sortedTransactionViews(txns []Transaction) ([]Transaction, []Transaction) {
-	asc := append([]Transaction(nil), txns...)
+// transactionOrder keeps only revision-local indices into the primary immutable
+// transaction model. Iteration copies one row header, never an entire ledger.
+type transactionOrder struct {
+	transactions []Transaction
+	indices      []int
+}
+
+func (o transactionOrder) Len() int                 { return len(o.indices) }
+func (o transactionOrder) At(index int) Transaction { return o.transactions[o.indices[index]] }
+func (o transactionOrder) All() iter.Seq[Transaction] {
+	return func(yield func(Transaction) bool) {
+		for _, index := range o.indices {
+			if !yield(o.transactions[index]) {
+				return
+			}
+		}
+	}
+}
+
+func sortedTransactionIndices(txns []Transaction) ([]int, []int) {
+	asc, desc := make([]int, len(txns)), make([]int, len(txns))
+	for i := range txns {
+		asc[i], desc[i] = i, i
+	}
+	// Preserve the existing independent sort orders, including ascending source
+	// lines within a day in BOTH directions. Reversing asc would change that.
 	sort.Slice(asc, func(i, j int) bool {
-		if asc[i].Date == asc[j].Date {
-			return asc[i].Source.Line < asc[j].Source.Line
+		a, b := txns[asc[i]], txns[asc[j]]
+		if a.Date == b.Date {
+			return a.Source.Line < b.Source.Line
 		}
-		return asc[i].Date < asc[j].Date
+		return a.Date < b.Date
 	})
-	desc := append([]Transaction(nil), txns...)
 	sort.Slice(desc, func(i, j int) bool {
-		if desc[i].Date == desc[j].Date {
-			return desc[i].Source.Line < desc[j].Source.Line
+		a, b := txns[desc[i]], txns[desc[j]]
+		if a.Date == b.Date {
+			return a.Source.Line < b.Source.Line
 		}
-		return desc[i].Date > desc[j].Date
+		return a.Date > b.Date
 	})
 	return asc, desc
+}
+
+func sortedTransactionViews(txns []Transaction) (transactionOrder, transactionOrder) {
+	asc, desc := sortedTransactionIndices(txns)
+	return transactionOrder{txns, asc}, transactionOrder{txns, desc}
 }
 
 func prepareLedgerSnapshot(snapshot *LedgerSnapshot) {
 	if snapshot == nil {
 		return
+	}
+	if snapshot.localReadModelID == 0 {
+		snapshot.localReadModelID = localSnapshotSequence.Add(1)
 	}
 	if snapshot.RawBalances == nil {
 		snapshot.RawBalances = CurrentBalances(snapshot.Transactions)
@@ -226,7 +275,7 @@ func prepareLedgerSnapshot(snapshot *LedgerSnapshot) {
 		snapshot.AccountBalances = AccountBalanceRowsWithPriceIndex(snapshot.RawBalances, snapshot.PriceIndex, "")
 	}
 	if snapshot.transactionsAsc == nil || snapshot.transactionsDesc == nil {
-		snapshot.transactionsAsc, snapshot.transactionsDesc = sortedTransactionViews(snapshot.Transactions)
+		snapshot.transactionsAsc, snapshot.transactionsDesc = sortedTransactionIndices(snapshot.Transactions)
 	}
 }
 
@@ -251,17 +300,17 @@ func snapshotAccountMap(snapshot *LedgerSnapshot) map[string]Account {
 	return accountByName(snapshot.Accounts)
 }
 
-func snapshotTransactionsAsc(snapshot *LedgerSnapshot) []Transaction {
+func snapshotTransactionsAsc(snapshot *LedgerSnapshot) transactionOrder {
 	if snapshot.transactionsAsc != nil {
-		return snapshot.transactionsAsc
+		return transactionOrder{snapshot.Transactions, snapshot.transactionsAsc}
 	}
 	asc, _ := sortedTransactionViews(snapshot.Transactions)
 	return asc
 }
 
-func snapshotTransactionsDesc(snapshot *LedgerSnapshot) []Transaction {
+func snapshotTransactionsDesc(snapshot *LedgerSnapshot) transactionOrder {
 	if snapshot.transactionsDesc != nil {
-		return snapshot.transactionsDesc
+		return transactionOrder{snapshot.Transactions, snapshot.transactionsDesc}
 	}
 	_, desc := sortedTransactionViews(snapshot.Transactions)
 	return desc
@@ -277,7 +326,7 @@ func ledgerVersion(cfg Config) (LedgerVersion, error) {
 	var stats []fileStat
 	var err error
 	if cfg.localTransport {
-		_, stats, err = localLedgerSource(cfg)
+		_, stats, err = walkLocalLedgerSource(cfg, false)
 	} else {
 		stats, err = ledgerVersionFiles(mainBeanPath(cfg), cfg.LedgerRoot, map[string]bool{})
 	}

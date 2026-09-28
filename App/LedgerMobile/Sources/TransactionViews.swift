@@ -54,56 +54,6 @@ enum TransactionDateHeaderFormatter {
     }
 }
 
-struct TransactionRow: View {
-    let transaction: LedgerTransaction
-    var accountLabels: [String: String] = [:]
-
-    private var presentation: TransactionPresentation {
-        TransactionPresentation(transaction: transaction)
-    }
-
-    private var categoryVisual: TransactionVisualCategory {
-        TransactionVisualCategory.resolve(
-            transaction: transaction,
-            presentation: presentation,
-            accountLabels: accountLabels
-        )
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(categoryVisual.color.opacity(0.14))
-                    .frame(width: 38, height: 38)
-                Image(systemName: categoryVisual.iconName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(categoryVisual.color)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(presentation.title)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(LedgerPalette.ink)
-                    .lineLimit(1)
-                TransactionContextLine(transaction: transaction, accountLabels: accountLabels)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            AmountLabel(
-                minorUnits: presentation.minorUnits,
-                currency: presentation.currency,
-                prefix: amountPrefix(presentation.kind),
-                font: .system(size: 15.5, weight: .semibold, design: .rounded),
-                color: amountColor(presentation.kind)
-            )
-            .lineLimit(1)
-        }
-        .padding(.vertical, LedgerLayout.rowVerticalInset)
-        .contentShape(Rectangle())
-    }
-}
-
 extension View {
     func ledgerTransactionActions(_ transaction: LedgerTransaction) -> some View {
         modifier(LedgerTransactionActions(transaction: transaction))
@@ -133,18 +83,26 @@ private struct LedgerTransactionActions: ViewModifier {
     let transaction: LedgerTransaction
     @State private var action: Action?
     @State private var confirmationFeedback = 0
+    @State private var preparation: Task<Void, Never>?
+    @State private var preparationID: UUID?
+    @State private var preparationError: String?
+    @State private var localAuthority: LedgerSession.LocalTransactionAction?
 
     private enum Kind { case edit, tags, delete, share }
     private struct Action: Identifiable {
         let id = UUID()
         let kind: Kind
         let transaction: LedgerTransaction
+        var authority: LedgerSession.LocalTransactionAction? = nil
     }
 
     private var resolved: LedgerTransaction? {
-        guard session.phase == .ready, !session.privacyShielded,
-              case let .visible(current) = session.transactionResolution(for: transaction.source) else { return nil }
-        return current
+        guard session.phase == .ready, !session.privacyShielded else { return nil }
+        switch session.transactionResolution(for: transaction.source) {
+        case .visible(let current): return current
+        case .unloaded: return session.isLocal ? transaction : nil
+        case .unavailable: return nil
+        }
     }
 
     private func canWrite(_ transaction: LedgerTransaction) -> Bool {
@@ -159,7 +117,7 @@ private struct LedgerTransactionActions: ViewModifier {
                     .disabled(resolved == nil)
                     .accessibilityIdentifier("transaction-context-share")
                 Button("编辑", systemImage: "pencil") { present(.edit) }
-                    .disabled(resolved.map { !canWrite($0) || $0.editableEntry == nil } ?? true)
+                    .disabled(resolved.map { !canWrite($0) || (!session.isLocal && $0.editableEntry == nil) } ?? true)
                     .accessibilityIdentifier("transaction-context-edit")
                 Button("复制摘要", systemImage: "doc.on.doc", action: copySummary)
                     .disabled(resolved == nil)
@@ -172,8 +130,26 @@ private struct LedgerTransactionActions: ViewModifier {
                     .disabled(resolved.map { !canWrite($0) } ?? true)
                     .accessibilityIdentifier("transaction-context-delete")
             }
-            .sheet(item: $action) { action in
+            .overlay(alignment: .trailing) {
+                if preparationID != nil { ProgressView().accessibilityLabel("正在读取交易") }
+            }
+            .alert("无法读取交易", isPresented: Binding(
+                get: { preparationError != nil }, set: { if !$0 { preparationError = nil } }
+            )) { Button("好", role: .cancel) { preparationError = nil } }
+            message: { Text(preparationError ?? "") }
+            .sheet(item: $action, onDismiss: cancelPreparation) { action in
                 actionSheet(action).ledgerPrivacyProtectedSheet()
+            }
+            .onDisappear {
+                // A presenter can disappear during full-screen sheet adaptation.
+                // Presented authority belongs to the sheet, not presenter visibility.
+                if action == nil { cancelPreparation() }
+            }
+            .onChange(of: session.privacyShielded) { _, hidden in
+                if hidden { action = nil; cancelPreparation() }
+            }
+            .onChange(of: session.phase) { _, phase in
+                if phase != .ready { action = nil; cancelPreparation() }
             }
             .sensoryFeedback(.success, trigger: confirmationFeedback)
     }
@@ -194,26 +170,96 @@ private struct LedgerTransactionActions: ViewModifier {
                 accounts: session.ledger?.accounts ?? [],
                 commodities: session.ledger?.commodities ?? []
             ) { entry in
-                try await session.updateTransaction(source: action.transaction.source, entry: entry)
+                if let authority = action.authority {
+                    do { try await session.updateLocalTransaction(action: authority, entry: entry) }
+                    catch { endFailedAction(error); throw error }
+                } else {
+                    try await session.updateTransaction(source: action.transaction.source, entry: entry)
+                }
                 confirmationFeedback &+= 1
             }
         case .tags:
             TransactionTagEditorSheet(selectedCount: 1) { tags in
-                try await session.addTransactionTags(sources: [action.transaction.source], tags: tags)
+                if let authority = action.authority {
+                    do { try await session.addLocalTransactionTags(action: authority, tags: tags) }
+                    catch { endFailedAction(error); throw error }
+                } else {
+                    try await session.addTransactionTags(sources: [action.transaction.source], tags: tags)
+                }
                 confirmationFeedback &+= 1
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         case .delete:
-            TransactionDeleteSheet(transaction: action.transaction) { confirmationFeedback &+= 1 }
+            TransactionDeleteSheet(transaction: action.transaction, localAction: action.authority,
+                onFailed: { error in
+                    if action.authority != nil { endFailedAction(error) }
+                }, onDeleted: { confirmationFeedback &+= 1 })
         }
     }
 
+    private func endFailedAction(_ error: Error) {
+        // A submitted nonce is consumed even after rollback. Never offer a retry
+        // that silently borrows authority for a potentially newer original.
+        action = nil
+        cancelPreparation()
+        preparationError = error.localizedDescription + " 请重新打开交易操作，核对最新内容后再试。"
+    }
+
+    private func cancelPreparation() {
+        preparationID = nil
+        preparation?.cancel()
+        preparation = nil
+        if let localAuthority { session.cancelLocalTransactionAction(localAuthority) }
+        localAuthority = nil
+    }
+
     private func present(_ kind: Kind) {
-        guard let current = resolved else { return }
+        guard preparationID == nil, let current = resolved else { return }
         if kind != .share && !canWrite(current) { return }
-        if case .edit = kind, current.editableEntry == nil { return }
-        action = Action(kind: kind, transaction: current)
+        guard session.isLocal else {
+            if case .edit = kind, current.editableEntry == nil { return }
+            action = Action(kind: kind, transaction: current)
+            return
+        }
+        cancelPreparation()
+        let id = UUID()
+        preparationID = id
+        preparation = Task { @MainActor in
+            do {
+                let detail: LedgerTransaction
+                let authority: LedgerSession.LocalTransactionAction?
+                if kind == .share {
+                    detail = try await session.localTransactionDetail(source: current.source)
+                    authority = nil
+                } else {
+                    let actionKind: LedgerSession.LocalTransactionActionKind
+                    switch kind {
+                    case .edit: actionKind = .edit
+                    case .tags: actionKind = .addTags
+                    case .delete: actionKind = .delete
+                    case .share: return
+                    }
+                    let prepared = try await session.prepareLocalTransactionAction(
+                        sources: [current.source], kind: actionKind)
+                    authority = prepared
+                    detail = prepared.originals[0]
+                }
+                guard !Task.isCancelled, preparationID == id else {
+                    if let authority { session.cancelLocalTransactionAction(authority) }
+                    return
+                }
+                if kind == .edit, detail.editableEntry == nil {
+                    if let authority { session.cancelLocalTransactionAction(authority) }
+                    throw LedgerTransactionMutationError.sourceUnavailable
+                }
+                localAuthority = authority
+                action = Action(kind: kind, transaction: detail, authority: authority)
+            } catch {
+                if !Task.isCancelled, preparationID == id { preparationError = error.localizedDescription }
+            }
+            if preparationID == id { preparationID = nil; preparation = nil }
+        }
     }
 
     private func copySummary() {
@@ -229,59 +275,36 @@ private struct LedgerTransactionActions: ViewModifier {
     }
 }
 
-struct CookieTransactionFilterBar: View {
-    let filteredCount: Int
+struct TransactionFilterBar: View {
     @Binding var kindFilter: TransactionKindFilter
 
     var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 4) {
-                ForEach(TransactionKindFilter.allCases) { filter in
-                    let isSelected = kindFilter == filter
-                    Button {
-                        LedgerFeedback.selection()
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                            kindFilter = filter
-                        }
-                    } label: {
-                        Text(filter.title)
-                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected ? Color.white : LedgerPalette.ink)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                isSelected ? LedgerPalette.cobalt : Color(uiColor: .tertiarySystemFill),
-                                in: Capsule()
-                            )
-                    }
-                    .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
-                    .accessibilityLabel("按\(filter.title)筛选")
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                }
+        Picker("交易类型", selection: $kindFilter) {
+            ForEach(TransactionKindFilter.allCases) { filter in
+                Text(filter.title).tag(filter)
             }
-
-            Spacer()
-
-            Text("\(filteredCount) 笔")
-                .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
-                .foregroundStyle(LedgerPalette.secondary)
         }
-        .padding(.vertical, 2)
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("transaction-kind-filter")
     }
 }
 
-
 struct TransactionsView: View {
+    static let localWindowLimits = LocalTransactionWindow.Limits(maxRows: LocalTransactionWindow.listPageRows)
+
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var filters = LedgerTransactionFilter()
     @State private var filterPresented = false
+    @State private var storagePresented = false
     @State private var creatingTransaction = false
     @State private var duplicateTarget: LedgerTransaction?
     @State private var editingTarget: LedgerTransaction?
     @State private var deletionTarget: LedgerTransaction?
     @State private var isSelecting = false
     @State private var selectedTransactionIDs: Set<String> = []
+    @State private var localSelection: LocalTransactionSelection?
+    @State private var localSelectionFacts: LocalTransactionSelectionScan.Result?
     @State private var batchSharePresented = false
     @State private var singleShareTarget: LedgerTransaction?
     @State private var tagEditorPresented = false
@@ -290,6 +313,61 @@ struct TransactionsView: View {
     @State private var actionMessageStyle: LedgerStatusStyle = .failure
     @State private var confirmationFeedback = 0
     @State private var selectionFeedback = 0
+    @State private var localAction: LedgerSession.LocalTransactionAction?
+    @State private var actionTask: Task<Void, Never>?
+    @State private var actionRequestID: UUID?
+    @State private var preparingTags = false
+    @State private var exportTask: Task<Void, Never>?
+    @State private var exportRequestID: UUID?
+    @State private var preparingLegacyShare = false
+    @State private var fileExport: LocalTransactionShareExport?
+    @State private var fileExportOwner: LocalTransactionShareExport?
+
+    private struct WindowRequestKey: Equatable {
+        let revision: UUID?
+        let reload: Int
+        let range: LedgerDateRange
+        let filter: LedgerTransactionFilter
+        let readable: Bool
+    }
+
+    private var windowRequestKey: WindowRequestKey {
+        .init(revision: session.localTransactionPresentationRevision, reload: session.localTransactionReloadID, range: session.selectedRange,
+              filter: filters, readable: session.isLocal && session.phase == .ready && !session.privacyShielded
+                && !session.isRangeLoading && !session.isValuationCurrencyLoading
+                && !session.transactionMutationStates.values.contains(.pending))
+    }
+
+    private struct SelectionReadKey: Equatable {
+        let selection: LocalTransactionSelection?
+        let filter: LedgerTransactionFilter
+        let readable: Bool
+    }
+
+    private var selectionReadKey: SelectionReadKey {
+        .init(selection: isSelecting && session.isLocal ? localSelection : nil,
+              filter: filters, readable: windowRequestKey.readable)
+    }
+
+    private var currentLocalSelection: LocalTransactionSelection? {
+        guard let localSelection,
+              localSelection.revisionID == session.localTransactionPresentationRevision,
+              localSelection.start == session.selectedRange.start,
+              localSelection.end == session.selectedRange.queryEndExclusive else { return nil }
+        return localSelection
+    }
+
+    private var displayedTransactions: [LedgerTransaction] {
+        if session.isLocal {
+            return (session.localTransactionWindow?.transactions ?? session.localBootstrapTransactions)
+                .filter(filters.matches)
+        }
+        return filteredTransactions
+    }
+
+    private var displayedCount: Int? {
+        session.isLocal ? session.localTransactionSummary?.matchedCount : filteredTransactions.count
+    }
 
     private var transactions: [LedgerTransaction] {
         session.visibleTransactions
@@ -300,12 +378,14 @@ struct TransactionsView: View {
     }
 
     private var availableAccounts: [String] {
-        Array(Set(transactions.flatMap { $0.postings.map(\.account) }))
+        if session.isLocal { return session.localTransactionSummary?.availableAccounts ?? [] }
+        return Array(Set(transactions.flatMap { $0.postings.map(\.account) }))
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     private var availableTags: [String] {
-        Array(Set(transactions.flatMap { $0.tags ?? [] }.filter { !$0.isEmpty }))
+        if session.isLocal { return session.localTransactionSummary?.availableTags ?? [] }
+        return Array(Set(transactions.flatMap { $0.tags ?? [] }.filter { !$0.isEmpty }))
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
@@ -318,20 +398,41 @@ struct TransactionsView: View {
     var isRoot = true
 
     private var groupedTransactions: [(date: String, transactions: [LedgerTransaction])] {
-        Dictionary(grouping: filteredTransactions, by: \.date)
+        Dictionary(grouping: displayedTransactions, by: \.date)
             .map { (date: $0.key, transactions: $0.value) }
             .sorted { $0.date > $1.date }
     }
 
     private var selectedTransactions: [LedgerTransaction] {
-        filteredTransactions.filter { selectedTransactionIDs.contains($0.id) }
+        if session.isLocal {
+            guard let selection = currentLocalSelection else { return [] }
+            return session.visibleGlobalTransactions.filter { filters.matches($0) && selection.contains($0) }
+        }
+        return filteredTransactions.filter { selectedTransactionIDs.contains($0.id) }
+    }
+
+    private var selectedCount: Int {
+        session.isLocal
+            ? (localSelectionFacts?.selectedCount ?? currentLocalSelection?.explicitSelectedCount ?? 0)
+            : selectedTransactionIDs.count
     }
 
     private var allVisibleSelected: Bool {
-        !filteredTransactions.isEmpty && filteredTransactions.allSatisfy { selectedTransactionIDs.contains($0.id) }
+        if session.isLocal { return localSelectionFacts?.allMatchingSelected ?? false }
+        return !filteredTransactions.isEmpty && filteredTransactions.allSatisfy { selectedTransactionIDs.contains($0.id) }
     }
 
     private func toggleAllVisible() {
+        if session.isLocal {
+            guard var selection = currentLocalSelection,
+                  selection.explicitSelectedCount != nil || localSelectionFacts != nil,
+                  (session.localTransactionSummary?.matchedCount ?? 0) > 0 else { return }
+            selection.setAll(matching: filters, selected: !allVisibleSelected)
+            localSelection = selection
+            localSelectionFacts = nil
+            selectionFeedback &+= 1
+            return
+        }
         if allVisibleSelected {
             selectedTransactionIDs.removeAll()
         } else {
@@ -342,10 +443,57 @@ struct TransactionsView: View {
 
     private func toggleSelection(_ transaction: LedgerTransaction) {
         LedgerFeedback.selection()
+        if session.isLocal {
+            guard var selection = currentLocalSelection else { return }
+            selection.toggle(transaction)
+            localSelection = selection
+            localSelectionFacts = nil
+            return
+        }
         if selectedTransactionIDs.contains(transaction.id) {
             selectedTransactionIDs.remove(transaction.id)
         } else {
             selectedTransactionIDs.insert(transaction.id)
+        }
+    }
+
+    private func beginSelection(with transaction: LedgerTransaction? = nil) {
+        if session.isLocal {
+            guard let revision = session.localTransactionPresentationRevision else {
+                actionMessageStyle = .failure
+                actionMessage = "账本版本尚未就绪，请刷新后重试。"
+                return
+            }
+            var selection = LocalTransactionSelection(revisionID: revision,
+                start: session.selectedRange.start, end: session.selectedRange.queryEndExclusive)
+            if let transaction { selection.set(transaction, selected: true) }
+            localSelection = selection
+            localSelectionFacts = nil
+        } else {
+            selectedTransactionIDs = Set(transaction.map { [$0.id] } ?? [])
+        }
+        isSelecting = true
+    }
+
+    private func endSelection() {
+        isSelecting = false
+        localSelection = nil
+        localSelectionFacts = nil
+        selectedTransactionIDs.removeAll()
+    }
+
+    private func loadSelectionFacts(_ key: SelectionReadKey) async {
+        localSelectionFacts = nil
+        guard key.readable, let selection = key.selection, selection.hasDecisions,
+              currentLocalSelection == selection else { return }
+        do {
+            let facts = try await session.localTransactionSelectionFacts(filter: key.filter, selection: selection)
+            guard !Task.isCancelled, selectionReadKey == key else { return }
+            localSelectionFacts = facts
+        } catch {
+            guard !Task.isCancelled, selectionReadKey == key else { return }
+            actionMessageStyle = .failure
+            actionMessage = error.localizedDescription
         }
     }
 
@@ -364,13 +512,14 @@ struct TransactionsView: View {
         return max(0, total)
     }
 
-    var body: some View {
-        List {
+    private var transactionList: some View {
+        let labels = accountLabels
+        let dayExpenses = Dictionary(uniqueKeysWithValues:
+            (session.localTransactionSummary?.days ?? []).map { ($0.date, $0.expense) })
+        return List {
             Section {
-                CookieTransactionFilterBar(
-                    filteredCount: filteredTransactions.count,
-                    kindFilter: $filters.kind
-                )
+                TransactionFilterBar(kindFilter: $filters.kind)
+                    .id("transaction-list-top")
             }
             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
             .listRowBackground(Color.clear)
@@ -389,7 +538,21 @@ struct TransactionsView: View {
                     StatusBanner(message: actionMessage, style: actionMessageStyle) { self.actionMessage = nil }
                 }
             }
-            if filteredTransactions.isEmpty {
+            if session.isLocal {
+                if let error = session.localTransactionWindowError {
+                    Section {
+                        StatusBanner(message: error, onDismiss: {})
+                        Button("重新读取流水") { Task { await loadWindow() } }
+                    }
+                }
+                if let error = session.localTransactionSummaryError {
+                    Section {
+                        StatusBanner(message: error, onDismiss: {})
+                        Button("重新统计完整范围") { Task { await session.loadLocalTransactionSummary() } }
+                    }
+                }
+            }
+            if displayedTransactions.isEmpty && (!session.isLocal || session.localTransactionWindow?.isComplete == true) {
                 ContentUnavailableView(
                     filters.query.isEmpty && activeStructuredFilterCount == 0 ? "所选范围暂无流水" : "没有匹配的交易",
                     systemImage: "list.bullet.rectangle",
@@ -399,7 +562,7 @@ struct TransactionsView: View {
             ForEach(groupedTransactions, id: \.date) { group in
                 Section {
                     ForEach(group.transactions) { transaction in
-                        transactionRow(for: transaction)
+                        transactionRow(for: transaction, accountLabels: labels)
                     }
                 } header: {
                     HStack(alignment: .firstTextBaseline) {
@@ -407,7 +570,9 @@ struct TransactionsView: View {
                             .font(.system(.footnote, design: .rounded, weight: .semibold))
                             .foregroundStyle(LedgerPalette.ink)
                         Spacer()
-                        let dayExpense = groupExpense(for: group.transactions)
+                        let dayExpense = session.isLocal
+                            ? (dayExpenses[group.date] ?? 0)
+                            : groupExpense(for: group.transactions)
                         if dayExpense > 0 {
                             HStack(spacing: 3) {
                                 Text("支出")
@@ -426,7 +591,7 @@ struct TransactionsView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
-            if !filteredTransactions.isEmpty {
+            if !session.isLocal && !filteredTransactions.isEmpty {
                 Section {
                     Text("\(filteredTransactions.count) / \(transactions.count) 笔")
                         .font(.footnote.monospacedDigit())
@@ -435,10 +600,58 @@ struct TransactionsView: View {
                 .listRowBackground(Color.clear)
             }
         }
+    }
+
+    private var pageNavigation: some View {
+        HStack(spacing: 16) {
+            Button { Task { await session.loadPreviousLocalTransactionWindow() } } label: {
+                Image(systemName: "chevron.left").frame(width: 44, height: 44)
+            }
+            .disabled(session.localTransactionWindowIndex == 0 || session.isLocalTransactionWindowLoading)
+            .accessibilityLabel("上一页")
+            .accessibilityIdentifier("transaction-window-previous")
+            Spacer(minLength: 0)
+            VStack(spacing: 2) {
+                Text("第 \(session.localTransactionWindowIndex + 1) 页")
+                    .font(.subheadline.monospacedDigit())
+                if let displayedCount {
+                    Text("共 \(displayedCount) 笔 · 本页 \(displayedTransactions.count) 笔")
+                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            }
+            .lineLimit(1)
+            Spacer(minLength: 0)
+            Button { Task { await session.loadNextLocalTransactionWindow() } } label: {
+                Image(systemName: "chevron.right").frame(width: 44, height: 44)
+            }
+            .disabled(session.localTransactionWindow?.continuation == nil || session.isLocalTransactionWindowLoading)
+            .accessibilityLabel("下一页")
+            .accessibilityIdentifier("transaction-window-next")
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .background(.bar)
+    }
+
+    private var navigationContent: some View {
+        ScrollViewReader { proxy in
+            transactionList
+                .onChange(of: session.localTransactionWindowIndex) { _, _ in
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        proxy.scrollTo("transaction-list-top", anchor: .top)
+                    }
+                }
+        }
         .ledgerReadingList()
-        .ledgerNavigation("流水", isRoot: isRoot, showsTimeRange: true)
+        .ledgerNavigation("流水", isRoot: isRoot, showsTimeRange: true, showsSync: false)
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
+        .task(id: windowRequestKey) {
+            if windowRequestKey.readable { await loadWindow(reuseCurrent: true) }
+        }
         .toolbar {
             if session.isLocal {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -452,11 +665,12 @@ struct TransactionsView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 if isSelecting {
                     Button("完成") {
-                        isSelecting = false
-                        selectedTransactionIDs.removeAll()
+                        endSelection()
                     }
                     .fontWeight(.semibold)
                     .accessibilityLabel("完成多选")
+                } else if actionRequestID != nil {
+                    ProgressView().accessibilityLabel("准备交易操作")
                 } else {
                     Menu {
                         Button {
@@ -469,12 +683,18 @@ struct TransactionsView: View {
                         }
 
                         Button {
-                            selectedTransactionIDs.removeAll()
-                            isSelecting = true
+                            beginSelection()
                         } label: {
                             Label("多选流水", systemImage: "checkmark.circle")
                         }
                         .accessibilityIdentifier("transaction-tag-selection")
+
+                        if session.isLocal {
+                            Button("存储与同步", systemImage: "internaldrive") { storagePresented = true }
+                                .accessibilityIdentifier("transaction-storage")
+                        } else {
+                            Button("刷新账本", systemImage: "arrow.clockwise") { Task { await session.refresh() } }
+                        }
 
                         Button {
                             eventTagListPresented = true
@@ -489,6 +709,13 @@ struct TransactionsView: View {
                 }
             }
         }
+    }
+
+    private var presentedContent: some View {
+        navigationContent
+            .sheet(isPresented: $storagePresented) {
+                LedgerStorageSheet().ledgerPrivacyProtectedSheet()
+            }
             .sheet(isPresented: $creatingTransaction) {
                 TransactionEditorView(accounts: session.ledger?.accounts ?? [], commodities: session.ledger?.commodities ?? []) { entry in
                     try await session.addLocalTransaction(entry)
@@ -517,13 +744,19 @@ struct TransactionsView: View {
                 )
                 .ledgerPrivacyProtectedSheet()
             }
-            .sheet(item: $editingTarget) { transaction in
+            .sheet(item: $editingTarget, onDismiss: revokeListAction) { transaction in
                 TransactionEditorView(
                     transaction: transaction,
                     accounts: session.ledger?.accounts ?? [],
                     commodities: session.ledger?.commodities ?? [],
                     onSave: { entry in
-                        try await session.updateTransaction(source: transaction.source, entry: entry)
+                        if session.isLocal {
+                            guard let localAction else { throw CancellationError() }
+                            do { try await session.updateLocalTransaction(action: localAction, entry: entry) }
+                            catch { failListAction(error); throw error }
+                        } else {
+                            try await session.updateTransaction(source: transaction.source, entry: entry)
+                        }
                         actionMessage = "交易修改已保存"
                         actionMessageStyle = .confirmed
                         confirmationFeedback &+= 1
@@ -531,8 +764,9 @@ struct TransactionsView: View {
                 )
                 .ledgerPrivacyProtectedSheet()
             }
-            .sheet(item: $deletionTarget) { transaction in
-                TransactionDeleteSheet(transaction: transaction) {
+            .sheet(item: $deletionTarget, onDismiss: revokeListAction) { transaction in
+                TransactionDeleteSheet(transaction: transaction, localAction: localAction,
+                    onFailed: { error in if localAction != nil { failListAction(error) } }) {
                     actionMessage = "交易已从账本删除"
                     actionMessageStyle = .confirmed
                     confirmationFeedback &+= 1
@@ -547,7 +781,10 @@ struct TransactionsView: View {
                     accounts: availableAccounts,
                     availableTags: availableTags,
                     onDone: { filterPresented = false },
-                    onOpenEventReports: { eventTagListPresented = true }
+                    onOpenEventReports: { eventTagListPresented = true },
+                    facetsReady: !session.isLocal || session.localTransactionSummary != nil,
+                    facetsError: session.isLocal ? session.localTransactionSummaryError : nil,
+                    onRetryFacets: { Task { await session.loadLocalTransactionSummary() } }
                 )
                 .ledgerPrivacyProtectedSheet()
             }
@@ -555,9 +792,9 @@ struct TransactionsView: View {
                 EventTagListView()
                     .ledgerPrivacyProtectedSheet()
             }
-            .sheet(isPresented: $tagEditorPresented) {
+            .sheet(isPresented: $tagEditorPresented, onDismiss: revokeListAction) {
                 TransactionTagEditorSheet(
-                    selectedCount: selectedTransactionIDs.count,
+                    selectedCount: localAction?.originals.count ?? selectedCount,
                     onApply: { tags in
                         try await applyTags(tags)
                     }
@@ -575,6 +812,11 @@ struct TransactionsView: View {
                 .environmentObject(session)
                 .ledgerPrivacyProtectedSheet()
             }
+            .sheet(item: $fileExport, onDismiss: cancelFileExport) { export in
+                TransactionTextExportSheet(export: export)
+                    .environmentObject(session)
+                    .ledgerPrivacyProtectedSheet()
+            }
             .sheet(item: $singleShareTarget) { tx in
                 TransactionShareSheet(
                     transactions: [tx],
@@ -584,21 +826,53 @@ struct TransactionsView: View {
                 .environmentObject(session)
                 .ledgerPrivacyProtectedSheet()
             }
+    }
+
+    var body: some View {
+        presentedContent
+            .task(id: selectionReadKey) { await loadSelectionFacts(selectionReadKey) }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if isSelecting {
-                    TransactionBatchActionBar(
-                        selectedCount: selectedTransactionIDs.count,
-                        totalCount: filteredTransactions.count,
-                        allSelected: allVisibleSelected,
-                        onToggleAll: toggleAllVisible,
-                        onAddTags: handleAddTags,
-                        onShare: handleShare
-                    )
+                VStack(spacing: 0) {
+                    if session.isLocal, session.localTransactionWindow != nil {
+                        pageNavigation
+                    }
+                    if isSelecting {
+                        TransactionBatchActionBar(
+                            selectedCount: selectedCount,
+                            totalCount: session.isLocal ? (session.localTransactionSummary?.matchedCount ?? 0) : filteredTransactions.count,
+                            allSelected: allVisibleSelected,
+                            allSelectedTitle: session.isLocal ? "取消当前" : "清空",
+                            isCounting: session.isLocal && currentLocalSelection?.hasDecisions == true
+                                && currentLocalSelection?.explicitSelectedCount == nil && localSelectionFacts == nil,
+                            canToggleAll: !session.isLocal || (session.localTransactionSummary != nil
+                                && (currentLocalSelection?.explicitSelectedCount != nil || localSelectionFacts != nil)),
+                            onToggleAll: toggleAllVisible,
+                            onAddTags: handleAddTags,
+                            onShare: handleShare,
+                            onExport: session.isLocal ? { prepareFileExport() } : nil,
+                            isExporting: exportRequestID != nil || preparingLegacyShare
+                        )
+                    }
                 }
             }
-            .onChange(of: transactions.map(\.id)) { _, ids in
-                selectedTransactionIDs.formIntersection(ids)
+            .onChange(of: session.isLocal ? [] : transactions.map(\.id)) { _, ids in
+                if !session.isLocal { selectedTransactionIDs.formIntersection(ids) }
             }
+            .onChange(of: session.localTransactionPresentationRevision) { _, _ in
+                if session.isLocal && isSelecting {
+                    endSelection()
+                    actionMessageStyle = .failure
+                    actionMessage = "账本已更新，多选已清空，请重新选择。"
+                }
+            }
+            .onChange(of: session.selectedRange) { _, _ in
+                if session.isLocal && isSelecting {
+                    endSelection()
+                    actionMessageStyle = .failure
+                    actionMessage = "时间范围已更改，多选已清空，请重新选择。"
+                }
+            }
+            .onChange(of: selectionReadKey) { _, _ in localSelectionFacts = nil }
             .onChange(of: session.pendingTransactionFilter) { _, newFilter in
                 if let newFilter {
                     filters = newFilter
@@ -611,14 +885,49 @@ struct TransactionsView: View {
                     session.pendingTransactionFilter = nil
                 }
             }
+        .onChange(of: windowRequestKey) { _, _ in
+            cancelFileExport()
+            if preparingTags { revokeListAction() }
+        }
+        .onChange(of: selectedTransactionIDs) { _, _ in
+            cancelFileExport()
+            if preparingTags { revokeListAction() }
+        }
+        .onChange(of: localSelection) { _, _ in
+            cancelFileExport()
+            if preparingTags { revokeListAction() }
+        }
+        .onChange(of: isSelecting) { _, selected in
+            if !selected { cancelFileExport() }
+            if !selected && preparingTags { revokeListAction() }
+        }
+        .onDisappear {
+            if editingTarget == nil && deletionTarget == nil && !tagEditorPresented { revokeListAction() }
+            if fileExport == nil { cancelFileExport() }
+        }
+        .onChange(of: session.privacyShielded) { _, hidden in
+            if hidden {
+                clearListActionPresentation()
+                if session.isLocal { endSelection() }
+            }
+        }
+        .onChange(of: session.phase) { _, phase in
+            if phase != .ready {
+                clearListActionPresentation()
+                if session.isLocal { endSelection() }
+            }
+        }
         .sensoryFeedback(.success, trigger: confirmationFeedback)
         .sensoryFeedback(.selection, trigger: selectionFeedback)
     }
 
     @ViewBuilder
-    private func transactionRow(for transaction: LedgerTransaction) -> some View {
+    private func transactionRow(for transaction: LedgerTransaction,
+                                accountLabels: [String: String]) -> some View {
         if isSelecting {
-            let isSelected = selectedTransactionIDs.contains(transaction.id)
+            let isSelected = session.isLocal
+                ? (currentLocalSelection?.contains(transaction) ?? false)
+                : selectedTransactionIDs.contains(transaction.id)
             Button {
                 toggleSelection(transaction)
             } label: {
@@ -635,7 +944,7 @@ struct TransactionsView: View {
             NavigationLink {
                 TransactionDetailView(transaction: transaction)
             } label: {
-                TransactionCard(
+                TransactionRow(
                     transaction: transaction,
                     accountLabels: accountLabels,
                     mutationPhase: session.transactionMutationPhase(for: transaction)
@@ -665,17 +974,18 @@ struct TransactionsView: View {
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(role: .destructive) {
-                    deletionTarget = transaction
+                    if session.isLocal { prepareListAction([transaction], kind: .delete) }
+                    else { deletionTarget = transaction }
                 } label: {
                     Label("删除", systemImage: "trash")
                 }
                 .disabled(transaction.source.hash?.isEmpty != false
                     || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
 
-                if session.isLocal && transaction.editableEntry != nil {
+                if session.isLocal {
                     Button {
                         LedgerFeedback.light()
-                        editingTarget = transaction
+                        prepareListAction([transaction], kind: .edit)
                     } label: {
                         Label("编辑", systemImage: "pencil")
                     }
@@ -685,8 +995,7 @@ struct TransactionsView: View {
                 }
 
                 Button {
-                    isSelecting = true
-                    selectedTransactionIDs = [transaction.id]
+                    beginSelection(with: transaction)
                 } label: {
                     Label("多选", systemImage: "checklist")
                 }
@@ -695,12 +1004,117 @@ struct TransactionsView: View {
         }
     }
 
+    private func loadWindow(reuseCurrent: Bool = false) async {
+        guard session.isLocal, session.phase == .ready, !session.privacyShielded else { return }
+        if reuseCurrent {
+            await session.ensureLocalTransactionWindow(filter: filters, limits: Self.localWindowLimits)
+        } else {
+            await session.loadLocalTransactionWindow(filter: filters, limits: Self.localWindowLimits)
+        }
+        guard !Task.isCancelled else { return }
+        await session.loadLocalTransactionSummary()
+    }
+
+    private func revokeListAction() {
+        preparingTags = false
+        actionRequestID = nil
+        actionTask?.cancel()
+        actionTask = nil
+        if let localAction { session.cancelLocalTransactionAction(localAction) }
+        localAction = nil
+    }
+
+    private func clearListActionPresentation() {
+        editingTarget = nil
+        deletionTarget = nil
+        tagEditorPresented = false
+        revokeListAction()
+    }
+
+    private func failListAction(_ error: Error) {
+        clearListActionPresentation()
+        actionMessageStyle = .failure
+        actionMessage = error.localizedDescription + " 请重新打开交易操作，核对最新内容后再试。"
+    }
+
+    private func prepareListAction(_ rows: [LedgerTransaction], kind: LedgerSession.LocalTransactionActionKind) {
+        guard actionRequestID == nil, !rows.isEmpty else { return }
+        revokeListAction()
+        let id = UUID()
+        let selection = selectedTransactionIDs
+        preparingTags = kind == .addTags
+        actionRequestID = id
+        actionTask = Task { @MainActor in
+            do {
+                let prepared = try await session.prepareLocalTransactionAction(sources: rows.map(\.source), kind: kind)
+                guard !Task.isCancelled, actionRequestID == id,
+                      kind != .addTags || TransactionTagSelectionRules.canPresentPreparedBatch(
+                        captured: selection, current: selectedTransactionIDs, isSelecting: isSelecting) else {
+                    session.cancelLocalTransactionAction(prepared)
+                    return
+                }
+                if kind == .edit, prepared.originals[0].editableEntry == nil {
+                    session.cancelLocalTransactionAction(prepared)
+                    throw LedgerTransactionMutationError.sourceUnavailable
+                }
+                localAction = prepared
+                switch kind {
+                case .edit: editingTarget = prepared.originals[0]
+                case .delete: deletionTarget = prepared.originals[0]
+                case .addTags: tagEditorPresented = true
+                }
+            } catch {
+                if !Task.isCancelled, actionRequestID == id {
+                    actionMessageStyle = .failure
+                    actionMessage = error.localizedDescription
+                }
+            }
+            if actionRequestID == id { preparingTags = false; actionRequestID = nil; actionTask = nil }
+        }
+    }
+
     private func isTagEligible(_ transaction: LedgerTransaction) -> Bool {
         transaction.source.hash?.isEmpty == false
             && session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites != true
     }
 
+    private func prepareLocalSelectedTags() {
+        guard actionRequestID == nil, isSelecting, selectedCount > 0,
+              let selection = currentLocalSelection else { return }
+        revokeListAction()
+        let id = UUID(), key = windowRequestKey
+        preparingTags = true
+        actionRequestID = id
+        actionTask = Task { @MainActor in
+            defer {
+                if actionRequestID == id { preparingTags = false; actionRequestID = nil; actionTask = nil }
+            }
+            @MainActor func stillCurrent() -> Bool {
+                !Task.isCancelled && actionRequestID == id && windowRequestKey == key
+                    && isSelecting && currentLocalSelection == selection
+            }
+            do {
+                let facts = try await session.localTransactionSelectionFacts(filter: key.filter, selection: selection)
+                guard stillCurrent() else { return }
+                let sources = try facts.sourcesForTagPreparation()
+                let prepared = try await session.prepareLocalTransactionAction(sources: sources, kind: .addTags)
+                guard stillCurrent() else {
+                    session.cancelLocalTransactionAction(prepared)
+                    return
+                }
+                localAction = prepared
+                tagEditorPresented = true
+            } catch {
+                if stillCurrent() {
+                    actionMessageStyle = .failure
+                    actionMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
     private func handleAddTags() {
+        if session.isLocal { prepareLocalSelectedTags(); return }
         let eligible = selectedTransactions.filter(isTagEligible)
         if eligible.isEmpty {
             actionMessageStyle = .failure
@@ -715,21 +1129,82 @@ struct TransactionsView: View {
         tagEditorPresented = true
     }
 
+    private func cancelFileExport() {
+        exportRequestID = nil
+        exportTask?.cancel()
+        exportTask = nil
+        if let fileExportOwner { session.discardLocalTransactionShare(fileExportOwner) }
+        fileExportOwner = nil
+        fileExport = nil
+    }
+
+    private func prepareFileExport() {
+        guard session.isLocal, isSelecting, selectedCount > 0, exportRequestID == nil,
+              let selection = currentLocalSelection else { return }
+        cancelFileExport()
+        let id = UUID(), key = windowRequestKey
+        exportRequestID = id
+        exportTask = Task { @MainActor in
+            do {
+                let export = try await session.prepareLocalTransactionShare(filter: key.filter, selection: selection)
+                guard !Task.isCancelled, exportRequestID == id, windowRequestKey == key,
+                      isSelecting, currentLocalSelection == selection else {
+                    session.discardLocalTransactionShare(export)
+                    return
+                }
+                fileExportOwner = export
+                fileExport = export
+            } catch {
+                if !Task.isCancelled, exportRequestID == id {
+                    actionMessageStyle = .failure
+                    actionMessage = error.localizedDescription
+                }
+            }
+            if exportRequestID == id { exportRequestID = nil; exportTask = nil }
+        }
+    }
+
     private func handleShare() {
-        guard !selectedTransactionIDs.isEmpty else { return }
+        guard selectedCount > 0 else { return }
         LedgerFeedback.light()
+        if session.isLocal {
+            guard let selection = currentLocalSelection, !preparingLegacyShare else { return }
+            preparingLegacyShare = true
+            let key = windowRequestKey
+            Task { @MainActor in
+                defer { preparingLegacyShare = false }
+                do {
+                    try await session.loadGlobalTransactions()
+                    guard isSelecting, currentLocalSelection == selection, windowRequestKey == key else { return }
+                    batchSharePresented = true
+                } catch {
+                    guard isSelecting, currentLocalSelection == selection, windowRequestKey == key else { return }
+                    actionMessageStyle = .failure
+                    actionMessage = error.localizedDescription
+                }
+            }
+            return
+        }
         batchSharePresented = true
     }
 
     private func applyTags(_ tags: [String]) async throws {
-        let selected = transactions.filter { selectedTransactionIDs.contains($0.id) && isTagEligible($0) }
-        guard !selected.isEmpty else { throw LedgerTagValidationError.empty }
-        try await session.addTransactionTags(sources: selected.map(\.source), tags: tags)
-        selectedTransactionIDs.removeAll()
-        isSelecting = false
+        let appliedCount: Int
+        if session.isLocal {
+            guard let localAction else { throw CancellationError() }
+            appliedCount = localAction.originals.count
+            do { try await session.addLocalTransactionTags(action: localAction, tags: tags) }
+            catch { failListAction(error); throw error }
+        } else {
+            let selected = transactions.filter { selectedTransactionIDs.contains($0.id) && isTagEligible($0) }
+            guard !selected.isEmpty else { throw LedgerTagValidationError.empty }
+            appliedCount = selected.count
+            try await session.addTransactionTags(sources: selected.map(\.source), tags: tags)
+        }
+        endSelection()
         confirmationFeedback &+= 1
         actionMessageStyle = .confirmed
-        actionMessage = "已验证，并为 \(selected.count) 条交易添加标签。"
+        actionMessage = "已验证，并为 \(appliedCount) 条交易添加标签。"
     }
 }
 
@@ -741,9 +1216,43 @@ struct WidgetDayTransactionsView: View {
     @State private var payload: LedgerBootstrap?
     @State private var loading = true
     @State private var errorMessage: String?
+    @State private var window: LocalTransactionWindow.Window?
+    @State private var summary: LocalTransactionScan.Result?
+    @State private var summaryError: String?
+    @State private var page = 0
+    @State private var displayedPage = 0
+    @State private var reload = 0
+    @State private var active = false
+    @State private var summaryLoading = false
+    private struct Request: Equatable {
+        let day: String
+        let revision: UUID?
+        let invalidation: Int
+        let readable: Bool
+        let active: Bool
+        let reload: Int
+        var page: Int
+    }
+    private var readable: Bool {
+        session.phase == .ready && !session.privacyShielded && !session.isRangeLoading
+            && !session.isValuationCurrencyLoading && !session.transactionMutationStates.values.contains(.pending)
+    }
+    private var request: Request {
+        .init(day: day, revision: session.localTransactionPresentationRevision,
+            invalidation: session.localGlobalSearchInvalidation, readable: readable, active: active, reload: reload, page: page)
+    }
+    private var summaryRequest: Request { var key = request; key.page = 0; return key }
+    @State private var completedSummary: Request?
+    @State private var completedWindow: Request?
+    private var windowMatchesScope: Bool {
+        guard let completedWindow else { return false }
+        return completedWindow.day == request.day && completedWindow.revision == request.revision
+            && completedWindow.invalidation == request.invalidation && readable
+    }
 
     private var transactions: [LedgerTransaction] {
-        (payload?.transactions ?? []).filter {
+        if session.isLocal { return windowMatchesScope ? (window?.transactions ?? []) : [] }
+        return (payload?.transactions ?? []).filter {
             $0.date == day && LedgerTransactionFilter(kind: .expense).matches($0)
         }
     }
@@ -753,12 +1262,18 @@ struct WidgetDayTransactionsView: View {
             if let errorMessage {
                 Section {
                     Text(errorMessage).foregroundStyle(.secondary)
-                    Button("重试") { Task { await load() } }
+                    Button("重试") {
+                        if session.isLocal { reload += 1 } else { Task { await load() } }
+                    }
                 }
             }
-            if loading && payload == nil {
+            if session.isLocal, let summaryError {
+                Text("支出汇总读取失败：" + summaryError).foregroundStyle(.secondary)
+                Button("重试汇总") { reload += 1 }
+            }
+            if loading && transactions.isEmpty {
                 ProgressView("正在读取当天支出")
-            } else if transactions.isEmpty && errorMessage == nil {
+            } else if transactions.isEmpty && errorMessage == nil && (!session.isLocal || (window != nil && windowMatchesScope)) {
                 ContentUnavailableView("当天暂无支出", systemImage: "calendar", description: Text(day))
             }
             Section {
@@ -766,15 +1281,34 @@ struct WidgetDayTransactionsView: View {
                     NavigationLink {
                         TransactionDetailView(transaction: transaction, snapshotOnly: true)
                     } label: {
-                        TransactionCard(
+                        TransactionRow(
                             transaction: transaction,
-                            accountLabels: TransactionCategoryPresentation.accountLabels(payload?.accounts ?? [])
+                            accountLabels: TransactionCategoryPresentation.accountLabels(session.isLocal ? (session.ledger?.accounts ?? []) : (payload?.accounts ?? []))
                         )
                     }
                     .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
+                    .disabled(session.isLocal && loading)
                 }
             } header: {
-                if !transactions.isEmpty { Text("全部支出 · \(transactions.count) 笔") }
+                if session.isLocal {
+                    if completedSummary == summaryRequest, let summary { Text("全部支出 · \(summary.matchedCount) 笔") }
+                    else if summaryLoading { Text("正在统计全部支出…") }
+                } else if !transactions.isEmpty { Text("全部支出 · \(transactions.count) 笔") }
+            }
+            if session.isLocal, windowMatchesScope, let window {
+                HStack {
+                    Button("上一页") {
+                        let target = max(0, displayedPage - 1)
+                        if page == target { reload += 1 } else { page = target }
+                    }.disabled(displayedPage == 0 || loading)
+                    Spacer()
+                    Text("第 \(displayedPage + 1) 页").font(.caption).accessibilityIdentifier("widget-day-page")
+                    Spacer()
+                    Button("下一页") {
+                        let target = displayedPage + 1
+                        if page == target { reload += 1 } else { page = target }
+                    }.disabled(window.isComplete || loading)
+                }
             }
         }
         .ledgerReadingList()
@@ -786,8 +1320,51 @@ struct WidgetDayTransactionsView: View {
             }
             ToolbarItem(placement: .topBarLeading) { PrivacyToolbarButton() }
         }
-        .task { await load() }
-        .refreshable { await load() }
+        .task(id: request) {
+            if session.isLocal { await loadLocalWindow() }
+            else { await load() }
+        }
+        .task(id: summaryRequest) { if session.isLocal { await loadLocalSummary() } }
+        .onAppear { active = true }
+        .onDisappear { active = false }
+        .onChange(of: readable) { _, allowed in
+            if session.isLocal && !allowed { window = nil; completedWindow = nil; summary = nil; completedSummary = nil }
+        }
+        .onChange(of: session.localTransactionPresentationRevision) { _, _ in page = 0; displayedPage = 0 }
+        .onChange(of: day) { _, _ in page = 0; displayedPage = 0 }
+        .refreshable {
+            if session.isLocal { page = 0; reload += 1 } else { await load() }
+        }
+    }
+
+    private func loadLocalWindow() async {
+        guard active, readable else { return }
+        let key = request
+        loading = true; errorMessage = nil
+        defer { if key == request { loading = false } }
+        do {
+            let result = try await session.localWidgetDayWindow(day, index: key.page)
+            guard !Task.isCancelled, key == request, readable else { return }
+            window = result; completedWindow = key; displayedPage = key.page
+        } catch {
+            if !Task.isCancelled, key == request { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func loadLocalSummary() async {
+        guard active, readable else { return }
+        let key = summaryRequest
+        summaryLoading = true; summaryError = nil
+        defer { if key == summaryRequest { summaryLoading = false } }
+        do {
+            let result = try await session.localWidgetDaySummary(day)
+            guard !Task.isCancelled, key == summaryRequest, readable else { return }
+            summary = result; completedSummary = key
+        } catch {
+            if !Task.isCancelled, key == summaryRequest {
+                summary = nil; completedSummary = nil; summaryError = error.localizedDescription
+            }
+        }
     }
 
     @MainActor
@@ -871,6 +1448,13 @@ private struct TransactionFilterSheet: View {
     let availableTags: [String]
     let onDone: () -> Void
     var onOpenEventReports: (() -> Void)? = nil
+    var facetsReady = true
+    var facetsError: String? = nil
+    var onRetryFacets: (() -> Void)? = nil
+
+    private var pickerAccounts: [String] {
+        Array(Set(accounts).union(account.map { [$0] } ?? [])).sorted()
+    }
 
     @State private var tagQuery = ""
 
@@ -887,6 +1471,14 @@ private struct TransactionFilterSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !facetsReady {
+                    Section {
+                        if let facetsError {
+                            StatusBanner(message: facetsError, onDismiss: {})
+                            Button("重新读取筛选项") { onRetryFacets?() }
+                        } else { ProgressView("正在读取完整范围筛选项") }
+                    }
+                }
                 Section("交易类型") {
                     Picker("交易类型", selection: $kind) {
                         ForEach(TransactionKindFilter.allCases) { filter in
@@ -900,7 +1492,7 @@ private struct TransactionFilterSheet: View {
                 Section("账户") {
                     Picker("账户", selection: $account) {
                         Text("全部账户").tag(Optional<String>.none)
-                        ForEach(accounts, id: \.self) { value in
+                        ForEach(pickerAccounts, id: \.self) { value in
                             Text(value).tag(Optional(value))
                         }
                     }
@@ -915,7 +1507,9 @@ private struct TransactionFilterSheet: View {
                             .autocorrectionDisabled()
                     }
 
-                    if availableTags.isEmpty, tags.isEmpty {
+                    if !facetsReady && availableTags.isEmpty && tags.isEmpty {
+                        Text("完整标签列表尚未读取").foregroundStyle(LedgerPalette.secondary)
+                    } else if availableTags.isEmpty, tags.isEmpty {
                         Text("当前范围没有标签")
                             .foregroundStyle(LedgerPalette.secondary)
                     } else if displayedTags.isEmpty {
@@ -1033,7 +1627,7 @@ struct TransactionContextLine: View {
     }
 }
 
-private struct TransactionCard: View {
+struct TransactionRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let transaction: LedgerTransaction
     let accountLabels: [String: String]
@@ -1146,7 +1740,7 @@ private struct TransactionSelectableCard: View {
     let accountLabels: [String: String]
 
     var body: some View {
-        TransactionCard(transaction: transaction, accountLabels: accountLabels, selectionState: selected)
+        TransactionRow(transaction: transaction, accountLabels: accountLabels, selectionState: selected)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityLabel("\(selected ? "已选择" : "未选择")，\(transaction.payee)")
@@ -1157,19 +1751,25 @@ private struct TransactionBatchActionBar: View {
     let selectedCount: Int
     let totalCount: Int
     let allSelected: Bool
+    var allSelectedTitle = "清空"
+    var isCounting = false
+    var canToggleAll = true
     let onToggleAll: () -> Void
     let onAddTags: () -> Void
     let onShare: () -> Void
+    var onExport: (() -> Void)? = nil
+    var isExporting = false
 
     var body: some View {
         HStack(spacing: LedgerSpacing.sm) {
-            Button(allSelected ? "清空" : "全选") { onToggleAll() }
+            Button(allSelected ? allSelectedTitle : "全选") { onToggleAll() }
                 .font(.system(.caption, design: .default, weight: .semibold))
                 .foregroundStyle(LedgerPalette.cobalt)
                 .frame(minWidth: 44, minHeight: 40)
+                .disabled(!canToggleAll || totalCount == 0)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("已选 \(selectedCount) 笔")
+                Text(isCounting ? "正在统计已选" : "已选 \(selectedCount) 笔")
                     .font(.system(.caption, design: .default, weight: .semibold).monospacedDigit())
                     .foregroundStyle(LedgerPalette.ink)
                 Text("当前可选 \(totalCount) 笔")
@@ -1182,7 +1782,7 @@ private struct TransactionBatchActionBar: View {
                 HStack(spacing: 3) {
                     Image(systemName: "tag")
                         .font(.system(size: 11, weight: .semibold))
-                    Text("添加标签")
+                    Text("标签")
                 }
             }
             .font(.system(.footnote, design: .default, weight: .semibold))
@@ -1192,15 +1792,19 @@ private struct TransactionBatchActionBar: View {
             .background(LedgerPalette.cobalt.opacity(selectedCount > 0 ? 0.12 : 0.06))
             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
             .disabled(selectedCount == 0)
+            .accessibilityLabel("添加标签")
             .accessibilityIdentifier("transaction-bulk-tag-trigger")
 
-            Button(action: onShare) {
+            Menu {
+                Button("合并分享（长图与文字）", action: onShare)
+                if let onExport { Button("导出完整文字文件", action: onExport).disabled(isExporting) }
+            } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "square.and.arrow.up")
                         .font(.system(size: 11, weight: .semibold))
-                    Text("合并分享")
+                    if isExporting { ProgressView().tint(.white) } else { Text("分享") }
                 }
-            }
+            } primaryAction: { onShare() }
             .font(.system(.footnote, design: .default, weight: .semibold))
             .foregroundStyle(LedgerPalette.onBrand)
             .padding(.horizontal, 12)
@@ -1208,8 +1812,11 @@ private struct TransactionBatchActionBar: View {
             .background(selectedCount > 0 ? LedgerPalette.cobalt : LedgerPalette.secondary.opacity(0.35))
             .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
             .disabled(selectedCount == 0)
+            .accessibilityLabel("合并分享")
             .accessibilityIdentifier("transaction-batch-share")
         }
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
         .buttonStyle(PressScaleButtonStyle())
         .padding(.horizontal, LedgerSpacing.lg)
         .padding(.vertical, LedgerSpacing.sm)
@@ -1320,296 +1927,118 @@ struct TransactionMoneyFlowLeg: Identifiable, Sendable {
 struct TransactionMoneyFlow: Sendable {
     let fromLegs: [TransactionMoneyFlowLeg]
     let toLegs: [TransactionMoneyFlowLeg]
-    let totalAmount: Int
-    let currency: String
-    let isDirect1to1: Bool
 
     static func build(
         transaction: LedgerTransaction,
         accountLabels: [String: String],
         defaultCurrency: String
     ) -> TransactionMoneyFlow {
-        let p = TransactionPresentation(transaction: transaction)
-        let mainCurr = p.currency.isEmpty ? defaultCurrency : p.currency
-
         var outflows: [TransactionMoneyFlowLeg] = []
         var inflows: [TransactionMoneyFlowLeg] = []
-
-        for (i, posting) in transaction.postings.enumerated() {
-            let acct = posting.account
-            let label = accountLabels[acct] ?? acct.split(separator: ":").last.map(String.init) ?? acct
-            let visual = TransactionVisualCategory.resolve(account: acct, label: label)
-            let curr = posting.currency ?? mainCurr
-            let amt = abs(posting.amount)
+        for (index, posting) in transaction.postings.enumerated() where posting.amount != 0 {
+            let alias = accountLabels[posting.account].flatMap { $0 == posting.account ? nil : $0 }
+            let label = alias ?? posting.account.split(separator: ":").last.map(String.init) ?? posting.account
+            let visual = TransactionVisualCategory.resolve(account: posting.account, label: label)
             let leg = TransactionMoneyFlowLeg(
-                id: "\(acct)-\(i)",
-                account: acct,
-                label: label,
-                iconName: visual.iconName,
-                iconColor: visual.color,
-                amount: amt,
-                currency: curr
-            )
-
-            if p.isRefund {
-                if posting.amount < 0 {
-                    outflows.append(leg)
-                } else {
-                    inflows.append(leg)
-                }
-            } else if p.kind == .income {
-                if posting.amount < 0 {
-                    outflows.append(leg)
-                } else {
-                    inflows.append(leg)
-                }
-            } else {
-                if posting.amount < 0 {
-                    outflows.append(leg)
-                } else {
-                    inflows.append(leg)
-                }
-            }
+                id: "\(posting.account)-\(index)", account: posting.account, label: label,
+                iconName: visual.iconName, iconColor: visual.color,
+                amount: posting.amount, currency: posting.currency ?? defaultCurrency)
+            if posting.amount < 0 { outflows.append(leg) }
+            else { inflows.append(leg) }
         }
-
-        if outflows.isEmpty && !inflows.isEmpty {
-            outflows = [inflows.removeFirst()]
-        } else if inflows.isEmpty && !outflows.isEmpty {
-            inflows = [outflows.removeFirst()]
-        }
-
-        let total = outflows.reduce(0) { $0 + $1.amount }
-        let is1to1 = outflows.count == 1 && inflows.count == 1
-
-        return TransactionMoneyFlow(
-            fromLegs: outflows,
-            toLegs: inflows,
-            totalAmount: total > 0 ? total : p.minorUnits,
-            currency: mainCurr,
-            isDirect1to1: is1to1
-        )
+        return TransactionMoneyFlow(fromLegs: outflows, toLegs: inflows)
     }
 }
 
+/// Stable columns for both simple and split transactions. Each leg keeps its
+/// own currency; unrelated currencies must never be added into a flow total.
 struct TransactionMoneyFlowView: View {
     let flow: TransactionMoneyFlow
     var compact: Bool = false
+    @State private var selectedLeg: TransactionMoneyFlowLeg?
 
     var body: some View {
-        if flow.fromLegs.isEmpty && flow.toLegs.isEmpty {
-            EmptyView()
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.triangle.swap")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.cobalt)
-                    Text("资金流向")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    Spacer()
-                }
-
-                if flow.isDirect1to1, let from = flow.fromLegs.first, let to = flow.toLegs.first {
-                    direct1to1Flow(from: from, to: to)
-                } else {
-                    multiLegFlow
-                }
-            }
-            .padding(compact ? 10 : 12)
-            .background(Color(uiColor: .tertiarySystemGroupedBackground).opacity(0.8))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-    }
-
-    private func direct1to1Flow(from: TransactionMoneyFlowLeg, to: TransactionMoneyFlowLeg) -> some View {
-        // ViewThatFits tries the horizontal layout first; if either account name is
-        // too long to fit, it automatically falls back to the vertical stacked layout.
-        ViewThatFits(in: .horizontal) {
-            horizontalFlow(from: from, to: to)
-            verticalFlow(from: from, to: to)
-        }
-    }
-
-    private func horizontalFlow(from: TransactionMoneyFlowLeg, to: TransactionMoneyFlowLeg) -> some View {
-        HStack(spacing: 6) {
-            legBox(leg: from, title: "流出 / 来源", alignment: .leading)
-
-            VStack(spacing: 3) {
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(LedgerPalette.cobalt)
-
-                Text(MoneyText.format(minorUnits: flow.totalAmount, currency: flow.currency))
-                    .font(.system(size: 10.5, weight: .semibold, design: .rounded).monospacedDigit())
+        if !flow.fromLegs.isEmpty || !flow.toLegs.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("资金流向")
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(LedgerPalette.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                HStack(alignment: .top, spacing: 12) {
+                    column("来源", legs: flow.fromLegs)
+                    Image(systemName: "arrow.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .padding(.top, 45)
+                        .accessibilityHidden(true)
+                    column("去向", legs: flow.toLegs)
+                }
             }
-            .frame(width: 68)
-
-            legBox(leg: to, title: "流入 / 去向", alignment: .trailing)
+            .padding(compact ? 12 : 16)
+            .background(LedgerPalette.canvas.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
+            .accessibilityIdentifier("transaction-money-flow")
+            .sheet(item: $selectedLeg) { leg in
+                NavigationStack {
+                    Form {
+                        Section("账户") {
+                            Text(leg.label)
+                            Text(leg.account).font(.footnote.monospaced()).textSelection(.enabled)
+                        }
+                        Section("本笔金额") {
+                            AmountLabel(minorUnits: leg.amount, currency: leg.currency)
+                        }
+                    }
+                    .navigationTitle("资金分录")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { selectedLeg = nil }
+                    } }
+                }
+                .presentationDetents([.medium, .large])
+                .ledgerPrivacyProtectedSheet()
+            }
         }
     }
 
-    private func verticalFlow(from: TransactionMoneyFlowLeg, to: TransactionMoneyFlowLeg) -> some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                iconBadge(leg: from)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("流出 / 来源")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    Text(from.label)
-                        .font(.system(size: 13, weight: .semibold))
+    private func column(_ title: String, legs: [TransactionMoneyFlowLeg]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(legs) { leg in
+                VStack(alignment: .leading, spacing: 6) {
+                    Image(systemName: leg.iconName)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(leg.iconColor)
+                        .frame(width: 32, height: 32)
+                        .background(leg.iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                    Text(leg.label)
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(LedgerPalette.ink)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(shortAccount(from.account))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(LedgerPalette.secondary)
                         .lineLimit(1)
-                }
-                Spacer()
-            }
-
-            HStack {
-                Rectangle().fill(LedgerPalette.line.opacity(0.6)).frame(height: 0.5)
-                VStack(spacing: 2) {
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(LedgerPalette.cobalt)
-                    Text(MoneyText.format(minorUnits: flow.totalAmount, currency: flow.currency))
-                        .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(LedgerPalette.secondary)
+                        .truncationMode(.middle)
+                    Text(leg.account)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    AmountLabel(minorUnits: leg.amount, currency: leg.currency,
+                        font: .system(.subheadline, design: .rounded, weight: .semibold),
+                        color: LedgerPalette.ink)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
-                .padding(.horizontal, 6)
-                Rectangle().fill(LedgerPalette.line.opacity(0.6)).frame(height: 0.5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .contentShape(Rectangle())
+                .onTapGesture { if !compact { selectedLeg = leg } }
+                .accessibilityAddTraits(compact ? [] : .isButton)
+                .accessibilityHint(compact ? "" : "查看账户全称与金额")
             }
-
-            HStack(spacing: 8) {
-                iconBadge(leg: to)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("流入 / 去向")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(LedgerPalette.secondary)
-                    Text(to.label)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.ink)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(shortAccount(to.account))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
+            if legs.isEmpty {
+                Text("无对应分录").font(.caption).foregroundStyle(.secondary)
             }
         }
-    }
-
-    private func legBox(leg: TransactionMoneyFlowLeg, title: String, alignment: HorizontalAlignment) -> some View {
-        VStack(alignment: alignment, spacing: 3) {
-            Text(title)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(LedgerPalette.secondary)
-
-            HStack(spacing: 6) {
-                if alignment == .leading {
-                    iconBadge(leg: leg)
-                }
-
-                VStack(alignment: alignment, spacing: 1) {
-                    Text(leg.label)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.ink)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                    Text(shortAccount(leg.account))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-
-                if alignment == .trailing {
-                    iconBadge(leg: leg)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
-    }
-
-    private func iconBadge(leg: TransactionMoneyFlowLeg) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(leg.iconColor.opacity(0.15))
-                .frame(width: 28, height: 28)
-            Image(systemName: leg.iconName)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(leg.iconColor)
-        }
-    }
-
-    private func shortAccount(_ acct: String) -> String {
-        let parts = acct.split(separator: ":")
-        if parts.count >= 2 {
-            return parts.suffix(2).joined(separator: ":")
-        }
-        return acct
-    }
-
-    private var multiLegFlow: some View {
-        VStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("资金来源")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(LedgerPalette.secondary)
-                ForEach(flow.fromLegs) { leg in
-                    legRow(leg: leg, isOutflow: true)
-                }
-            }
-
-            HStack {
-                Rectangle().fill(LedgerPalette.line.opacity(0.6)).frame(height: 0.5)
-                Image(systemName: "arrow.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(LedgerPalette.cobalt)
-                    .padding(.horizontal, 4)
-                Rectangle().fill(LedgerPalette.line.opacity(0.6)).frame(height: 0.5)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("资金去向")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(LedgerPalette.secondary)
-                ForEach(flow.toLegs) { leg in
-                    legRow(leg: leg, isOutflow: false)
-                }
-            }
-        }
-    }
-
-    private func legRow(leg: TransactionMoneyFlowLeg, isOutflow: Bool) -> some View {
-        HStack(spacing: 8) {
-            iconBadge(leg: leg)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(leg.label)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(LedgerPalette.ink)
-                    .lineLimit(1)
-                Text(shortAccount(leg.account))
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(LedgerPalette.secondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Text((isOutflow ? "-" : "+") + MoneyText.format(minorUnits: leg.amount, currency: leg.currency))
-                .font(.system(size: 12.5, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(isOutflow ? LedgerPalette.expense : LedgerPalette.income)
-        }
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1628,6 +2057,11 @@ struct TransactionDetailView: View {
     @State private var sourceUnavailable = false
     @State private var sharePresented = false
     @State private var selectedEventTag: String?
+    @State private var detailTask: Task<Void, Never>?
+    @State private var detailRequestID: UUID?
+    @State private var localAction: LedgerSession.LocalTransactionAction?
+    @State private var detailError: String?
+    @State private var localEditCompleted = false
     private let snapshotOnly: Bool
 
     init(transaction: LedgerTransaction, snapshotOnly: Bool = false) {
@@ -1813,6 +2247,8 @@ struct TransactionDetailView: View {
                                         Text(accountLabel(posting.account))
                                             .font(.system(size: 14, weight: .medium))
                                             .foregroundStyle(LedgerPalette.ink)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
                                         if accountLabel(posting.account) != posting.account {
                                             Text(posting.account)
                                                 .font(.system(size: 11, design: .monospaced))
@@ -1904,7 +2340,7 @@ struct TransactionDetailView: View {
                         // Edit
                         Button {
                             LedgerFeedback.light()
-                            editorPresented = true
+                            prepareAction(.edit)
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "pencil")
@@ -1918,8 +2354,8 @@ struct TransactionDetailView: View {
                         .buttonStyle(PressScaleButtonStyle())
                         .disabled(
                             transaction.source.hash?.isEmpty != false
-                                || transaction.editableEntry == nil
-                                || sourceUnavailable
+                                || (!session.isLocal && transaction.editableEntry == nil)
+                                || sourceUnavailable || detailRequestID != nil
                                 || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true
                         )
                     }
@@ -1962,20 +2398,20 @@ struct TransactionDetailView: View {
             }
             if !snapshotOnly {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(role: .destructive) { deletionPresented = true } label: {
+                    Button(role: .destructive) { prepareAction(.delete) } label: {
                         Label("删除交易", systemImage: "trash")
                     }
-                    .disabled(transaction.source.hash?.isEmpty != false || sourceUnavailable
+                    .disabled(transaction.source.hash?.isEmpty != false || sourceUnavailable || detailRequestID != nil
                         || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true)
                     .accessibilityIdentifier("transaction-delete")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("编辑") { editorPresented = true }
+                    Button("编辑") { prepareAction(.edit) }
                         .fontWeight(.semibold)
                         .disabled(
                             transaction.source.hash?.isEmpty != false
-                                || transaction.editableEntry == nil
-                                || sourceUnavailable
+                                || (!session.isLocal && transaction.editableEntry == nil)
+                                || sourceUnavailable || detailRequestID != nil
                                 || session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites == true
                         )
                         .accessibilityIdentifier("transaction-edit")
@@ -1991,8 +2427,10 @@ struct TransactionDetailView: View {
             .environmentObject(session)
             .ledgerPrivacyProtectedSheet()
         }
-        .sheet(isPresented: $deletionPresented) {
-            TransactionDeleteSheet(transaction: transaction) { dismiss() }
+        .sheet(isPresented: $deletionPresented, onDismiss: revokeAction) {
+            TransactionDeleteSheet(transaction: transaction, localAction: localAction,
+                onFailed: { error in if localAction != nil { finishFailedAction(error) } },
+                onDeleted: { dismiss() })
                 .ledgerPrivacyProtectedSheet()
         }
         .sheet(isPresented: $duplicatePresented) {
@@ -2014,14 +2452,27 @@ struct TransactionDetailView: View {
             )
             .ledgerPrivacyProtectedSheet()
         }
-        .sheet(isPresented: $editorPresented) {
+        .sheet(isPresented: $editorPresented, onDismiss: revokeAction) {
             TransactionEditorView(
                 transaction: transaction,
                 accounts: session.ledger?.accounts ?? [],
                 commodities: session.ledger?.commodities ?? [],
                 onSave: { entry in
                     let sourceFile = transaction.source.file
-                    try await session.updateTransaction(source: transaction.source, entry: entry)
+                    if session.isLocal {
+                        guard let localAction else { throw CancellationError() }
+                        do { try await session.updateLocalTransaction(action: localAction, entry: entry) }
+                        catch { finishFailedAction(error); throw error }
+                        // The original source is consumed. Never hydrate or offer
+                        // another action against its optimistic projection while
+                        // range-independent replacement resolution is unavailable.
+                        localEditCompleted = true
+                        editorPresented = false
+                        dismiss()
+                        return
+                    } else {
+                        try await session.updateTransaction(source: transaction.source, entry: entry)
+                    }
                     confirmedEntry = entry
                     confirmedSourceFile = sourceFile
                     transaction = transaction.projecting(entry: entry)
@@ -2055,7 +2506,88 @@ struct TransactionDetailView: View {
         .onChange(of: session.transactionMutationStates) { _, _ in
             synchronizeTransaction(with: session.ledger)
         }
+        .task { await hydrateDetail() }
+        .onDisappear {
+            if !editorPresented && !deletionPresented { cancelDetail(); revokeAction() }
+        }
+        .onChange(of: session.privacyShielded) { _, hidden in
+            if hidden { editorPresented = false; deletionPresented = false; cancelDetail(); revokeAction() }
+        }
+        .onChange(of: session.phase) { _, phase in
+            if phase != .ready { editorPresented = false; deletionPresented = false; cancelDetail(); revokeAction() }
+        }
+        .alert("交易操作未完成", isPresented: Binding(
+            get: { detailError != nil }, set: { if !$0 { detailError = nil } }
+        )) { Button("好", role: .cancel) { detailError = nil } }
+        message: { Text(detailError ?? "") }
         .sensoryFeedback(.success, trigger: confirmationFeedback)
+    }
+
+    private func revokeAction() {
+        if let localAction { session.cancelLocalTransactionAction(localAction) }
+        localAction = nil
+    }
+
+    private func cancelDetail() {
+        detailRequestID = nil
+        detailTask?.cancel()
+        detailTask = nil
+    }
+
+    private func finishFailedAction(_ error: Error) {
+        editorPresented = false
+        deletionPresented = false
+        revokeAction()
+        detailError = error.localizedDescription + " 请重新打开交易操作，核对最新内容后再试。"
+    }
+
+    private func hydrateDetail() async {
+        guard session.isLocal, !localEditCompleted, detailRequestID == nil,
+              session.transactionMutationPhase(for: transaction)?.blocksFurtherWrites != true else { return }
+        let id = UUID()
+        detailRequestID = id
+        defer { if detailRequestID == id { detailRequestID = nil } }
+        do {
+            let detail = try await session.localTransactionDetail(source: transaction.source)
+            guard !Task.isCancelled, detailRequestID == id else { return }
+            transaction = detail
+            sourceUnavailable = false
+        } catch {
+            if !Task.isCancelled, detailRequestID == id {
+                detailError = error.localizedDescription
+            }
+        }
+    }
+
+    private func prepareAction(_ kind: LedgerSession.LocalTransactionActionKind) {
+        guard !snapshotOnly, detailRequestID == nil else { return }
+        guard session.isLocal else {
+            if kind == .edit { editorPresented = true } else { deletionPresented = true }
+            return
+        }
+        revokeAction()
+        let id = UUID()
+        detailRequestID = id
+        detailTask = Task { @MainActor in
+            do {
+                let prepared = try await session.prepareLocalTransactionAction(sources: [transaction.source], kind: kind)
+                guard !Task.isCancelled, detailRequestID == id else {
+                    session.cancelLocalTransactionAction(prepared)
+                    return
+                }
+                let detail = prepared.originals[0]
+                if kind == .edit, detail.editableEntry == nil {
+                    session.cancelLocalTransactionAction(prepared)
+                    throw LedgerTransactionMutationError.sourceUnavailable
+                }
+                transaction = detail
+                localAction = prepared
+                if kind == .edit { editorPresented = true } else { deletionPresented = true }
+            } catch {
+                if !Task.isCancelled, detailRequestID == id { detailError = error.localizedDescription }
+            }
+            if detailRequestID == id { detailRequestID = nil; detailTask = nil }
+        }
     }
 
     private func receiptInfoRow(title: String, value: String) -> some View {
@@ -2104,6 +2636,9 @@ struct TransactionDetailView: View {
                 return
             }
         }
+        // An evicted/not-yet-loaded local row needs explicit detail hydration,
+        // not a false deletion conclusion from the session's current arrays.
+        if case .unloaded = session.transactionResolution(for: transaction.source) { return }
         sourceUnavailable = true
     }
 }
@@ -2112,6 +2647,8 @@ private struct TransactionDeleteSheet: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dismiss) private var dismiss
     let transaction: LedgerTransaction
+    var localAction: LedgerSession.LocalTransactionAction? = nil
+    var onFailed: ((Error) -> Void)? = nil
     let onDeleted: () -> Void
     @State private var reason = ""
     @State private var isDeleting = false
@@ -2141,15 +2678,18 @@ private struct TransactionDeleteSheet: View {
                         errorMessage = nil
                         Task {
                             do {
-                                try await session.deleteTransaction(
-                                    source: transaction.source,
-                                    reason: reason.trimmingCharacters(in: .whitespacesAndNewlines)
-                                )
+                                let trimmedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if let localAction {
+                                    try await session.deleteLocalTransaction(action: localAction, reason: trimmedReason)
+                                } else {
+                                    try await session.deleteTransaction(source: transaction.source, reason: trimmedReason)
+                                }
                                 dismiss()
                                 onDeleted()
                             } catch {
                                 errorMessage = error.localizedDescription
                                 failureFeedback &+= 1
+                                onFailed?(error)
                             }
                             isDeleting = false
                         }
@@ -3981,6 +4521,7 @@ struct TransactionEditorView: View {
     let accounts: [LedgerAccount]
     let commodities: [String]
     let onSave: (LedgerTransactionEntry) async throws -> Void
+    private var requiresAdvancedEditor = false
 
     @State private var mode: EditorMode
     @State private var date: Date
@@ -4002,6 +4543,7 @@ struct TransactionEditorView: View {
         accounts: [LedgerAccount],
         commodities: [String],
         initialMode: EditorMode? = nil,
+        requiresAdvancedEditor: Bool = false,
         onSave: @escaping (LedgerTransactionEntry) async throws -> Void
     ) {
         let baseline = transaction.editableEntry
@@ -4009,9 +4551,10 @@ struct TransactionEditorView: View {
         self.accounts = accounts
         self.commodities = commodities
         self.onSave = onSave
+        self.requiresAdvancedEditor = requiresAdvancedEditor
 
         let hasComplexCostOrPrice = baseline?.postings.contains(where: { $0.costKind != nil || $0.priceKind != nil }) ?? false
-        _mode = State(initialValue: initialMode ?? (hasComplexCostOrPrice ? .advanced : .fast))
+        _mode = State(initialValue: requiresAdvancedEditor ? .advanced : (initialMode ?? (hasComplexCostOrPrice ? .advanced : .fast)))
 
         _date = State(initialValue: Self.parseDate(baseline?.date ?? transaction.date) ?? Date())
         _payee = State(initialValue: baseline?.payee ?? transaction.payee)
@@ -4282,13 +4825,13 @@ struct TransactionEditorView: View {
                         }
                     }
                     .font(.system(size: 15, weight: .medium))
-                    .disabled(saving)
+                    .disabled(saving || requiresAdvancedEditor)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         Task { await save() }
                     } label: {
-                        if saving { ProgressView("正在验证并保存") } else { Text(transaction == nil ? "预览" : "保存修改") }
+                        if saving { ProgressView() } else { Text(transaction == nil ? "预览" : "保存") }
                     }
                     .disabled(saving)
                     .accessibilityLabel(saving ? "正在验证并保存" : (transaction == nil ? "预览" : "保存修改"))

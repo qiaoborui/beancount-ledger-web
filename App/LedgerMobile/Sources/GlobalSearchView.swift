@@ -25,6 +25,28 @@ struct GlobalSearchView: View {
     @State private var revision = 0
     @State private var limit = 50
     @State private var filtersPresented = false
+    @State private var localWindow: LedgerSession.LocalSearchWindow?
+    @State private var localTags: [String]?
+    @State private var localPageIndex = 0
+    @State private var localSearchID: UUID?
+    @State private var localSearching = false
+    @State private var viewActive = false
+    @State private var localSearchCompleted = false
+    @State private var completedSearchRequest: SearchRequest?
+    @State private var documentError: String?
+    @State private var documentsLoaded = false
+
+    private var localReadable: Bool {
+        session.isLocal && session.phase == .ready && !session.privacyShielded
+            && !session.isRangeLoading && !session.isValuationCurrencyLoading
+            && !session.transactionMutationStates.values.contains(.pending)
+    }
+    private var searchRequest: SearchRequest {
+        .init(query: query, scope: session.globalSearchScope, filters: session.globalSearchFilters,
+              revision: revision, localRevision: session.localTransactionPresentationRevision,
+              reload: session.localTransactionReloadID, readable: localReadable, page: localPageIndex,
+              invalidation: session.localGlobalSearchInvalidation, active: viewActive)
+    }
 
     private var hasSearch: Bool {
         !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -32,21 +54,25 @@ struct GlobalSearchView: View {
     }
 
     private var allTags: [String] {
-        Set(session.visibleGlobalTransactions.flatMap { $0.tags ?? [] }).sorted()
+        session.isLocal ? (localTags ?? []) : Set(session.visibleGlobalTransactions.flatMap { $0.tags ?? [] }).sorted()
     }
 
     var body: some View {
         VStack(spacing: 0) {
             searchHeader
             List {
-                if loading && hasSearch {
+                if (loading || localSearching) && hasSearch {
                     ProgressView("正在搜索…").accessibilityIdentifier("global-search-loading")
                 }
                 if let errorMessage {
                     Section {
                         Text(errorMessage).foregroundStyle(.secondary)
-                        Button("重新加载") { Task { await load() } }
+                        Button("重新加载") { Task { await load(forceRefresh: true) } }
                     }
+                }
+                if let documentError {
+                    Text(documentError).foregroundStyle(.secondary)
+                    Button("重新加载文件") { Task { await load() } }
                 }
                 if !hasSearch {
                     if !session.recentGlobalSearches.isEmpty {
@@ -71,7 +97,9 @@ struct GlobalSearchView: View {
                                                description: Text("查找流水、账户、标签和文件"))
                             .listRowSeparator(.hidden)
                     }
-                } else if results.isEmpty && !loading {
+                } else if results.isEmpty && !loading && !localSearching && errorMessage == nil && documentError == nil
+                            && (!session.isLocal || (localSearchCompleted &&
+                                ((session.globalSearchScope != .all && session.globalSearchScope != .documents) || documentsLoaded))) {
                     ContentUnavailableView {
                         Label("没有符合条件的结果", systemImage: "magnifyingglass")
                     } description: {
@@ -105,20 +133,39 @@ struct GlobalSearchView: View {
                         Section("标签") {
                             ForEach(results.tags, id: \.self) { tag in
                                 NavigationLink {
-                                    List(session.visibleGlobalTransactions.filter { ($0.tags ?? []).contains(tag) && session.globalSearchFilters.includes($0) }) { transaction in
-                                        transactionLink(transaction)
+                                    if session.isLocal {
+                                        LocalSearchTagTransactionsView(tag: tag, filters: session.globalSearchFilters)
+                                            .onAppear(perform: recordResultOpen)
+                                    } else {
+                                        List(session.visibleGlobalTransactions.filter { ($0.tags ?? []).contains(tag) && session.globalSearchFilters.includes($0) }) { transaction in
+                                            transactionLink(transaction)
+                                        }
+                                        .navigationTitle("#" + tag)
+                                        .onAppear(perform: recordResultOpen)
+                                        .toolbar(.visible, for: .navigationBar)
                                     }
-                                    .navigationTitle("#" + tag)
-                                    .onAppear(perform: recordResultOpen)
-                                    .toolbar(.visible, for: .navigationBar)
                                 } label: { Label(tag, systemImage: "number") }
+                                .accessibilityIdentifier("global-search-tag-" + tag)
+                                .disabled(session.isLocal && localSearching)
                             }
                         }
                     }
                     if !results.transactions.isEmpty {
-                        Section("流水 · \(results.transactions.count)") {
-                            ForEach(results.transactions.prefix(limit)) { transaction in transactionLink(transaction) }
-                            if results.transactions.count > limit {
+                        Section("流水 · \(localWindow?.result.matchedCount ?? results.transactions.count)") {
+                            ForEach(results.transactions.prefix(session.isLocal ? 100 : limit)) { transaction in
+                                transactionLink(transaction).disabled(session.isLocal && localSearching)
+                            }
+                            if session.isLocal {
+                                HStack {
+                                    Button("上一页") { localPageIndex -= 1 }
+                                        .disabled(localPageIndex == 0 || localSearching)
+                                    Spacer()
+                                    Text("第 \(localPageIndex + 1) 页").font(.caption).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Button("下一页") { localPageIndex += 1 }
+                                        .disabled(localWindow?.continuation == nil || localSearching)
+                                }
+                            } else if results.transactions.count > limit {
                                 Button("显示更多流水") { limit += 50 }
                             }
                         }
@@ -152,9 +199,28 @@ struct GlobalSearchView: View {
         .scrollContentBackground(.hidden)
         .background(LedgerPalette.canvas)
         .scrollDismissesKeyboard(.interactively)
-        .task { await load() }
+        .task(id: DocumentRequest(readable: session.isLocal ? localReadable : true,
+            revision: session.localTransactionPresentationRevision, invalidation: session.localGlobalSearchInvalidation)) {
+            if !session.isLocal || localReadable { await load() }
+        }
         .refreshable { await load(forceRefresh: true) }
-        .task(id: SearchRequest(query: query, scope: session.globalSearchScope, filters: session.globalSearchFilters, revision: revision)) { await search() }
+        .task(id: searchRequest) { await search() }
+        .onAppear { viewActive = true }
+        .onDisappear { viewActive = false }
+        .onChange(of: documents) { _, _ in
+            if session.isLocal && localReadable { updateLocalAuxiliaryResults() }
+        }
+        .onChange(of: query) { _, _ in localPageIndex = 0 }
+        .onChange(of: session.globalSearchFilters) { _, _ in localPageIndex = 0 }
+        .onChange(of: session.localTransactionPresentationRevision) { _, _ in localPageIndex = 0 }
+        .onChange(of: localReadable) { _, readable in
+            if session.isLocal && !readable {
+                clearLocalSearch()
+                if session.privacyShielded || session.phase != .ready {
+                    activeLoadID = nil; documents = []; documentError = nil; documentsLoaded = false; loading = false
+                }
+            }
+        }
         .sheet(isPresented: $filtersPresented) {
             GlobalSearchFilterSheet(filters: session.globalSearchFilters, scope: session.globalSearchScope,
                                     accounts: session.ledger?.accounts ?? [], tags: allTags) { filters in
@@ -163,6 +229,7 @@ struct GlobalSearchView: View {
             .ledgerPrivacyProtectedSheet()
         }
         .onChange(of: session.globalSearchScope) { _, scope in
+            localPageIndex = 0
             if scope == .accounts {
                 session.globalSearchFilters.tag = nil
                 session.globalSearchFilters.startDate = nil
@@ -189,33 +256,58 @@ struct GlobalSearchView: View {
         // Let the latest appearance take over instead of skipping it behind a busy flag.
         let loadID = UUID()
         activeLoadID = loadID
-        loading = !session.hasCachedGlobalTransactions
-        errorMessage = nil
+        let documentContext = DocumentRequest(readable: session.isLocal ? localReadable : true,
+            revision: session.localTransactionPresentationRevision, invalidation: session.localGlobalSearchInvalidation)
+        documentsLoaded = false
+        loading = session.isLocal || !session.hasCachedGlobalTransactions
+        if !session.isLocal { errorMessage = nil }
+        documentError = nil
         defer {
             if activeLoadID == loadID {
                 loading = false
                 activeLoadID = nil
-                revision += 1
+                if !session.isLocal { revision += 1 }
             }
         }
-        do { try await session.loadGlobalTransactions(forceRefresh: forceRefresh) }
-        catch is CancellationError { return }
-        catch { if activeLoadID == loadID { errorMessage = "流水加载失败：" + error.localizedDescription } }
+        if !session.isLocal {
+            do { try await session.loadGlobalTransactions(forceRefresh: forceRefresh) }
+            catch is CancellationError { return }
+            catch { if activeLoadID == loadID { errorMessage = "流水加载失败：" + error.localizedDescription } }
+        } else if forceRefresh {
+            localPageIndex = 0
+            revision += 1
+        }
         guard activeLoadID == loadID, !Task.isCancelled else { return }
         do {
             let loadedDocuments = try await session.importDocuments()
             guard activeLoadID == loadID, !Task.isCancelled else { return }
+            if session.isLocal {
+                guard localReadable, documentContext == DocumentRequest(readable: localReadable,
+                    revision: session.localTransactionPresentationRevision, invalidation: session.localGlobalSearchInvalidation) else { return }
+            }
             documents = loadedDocuments
+            documentsLoaded = true
         }
-        catch is CancellationError { return }
+        catch is CancellationError {
+            if session.isLocal, !Task.isCancelled, activeLoadID == loadID, localReadable {
+                documentError = "文件读取已中断，请重新加载文件。"
+            }
+            return
+        }
         catch {
             if activeLoadID == loadID {
-                errorMessage = [errorMessage, "导入文件加载失败：" + error.localizedDescription].compactMap { $0 }.joined(separator: "\n")
+                if session.isLocal {
+                    documents = []
+                    documentError = "导入文件加载失败：" + error.localizedDescription
+                } else {
+                    errorMessage = [errorMessage, "导入文件加载失败：" + error.localizedDescription].compactMap { $0 }.joined(separator: "\n")
+                }
             }
         }
     }
 
     private func search() async {
+        if session.isLocal { await searchLocal(); return }
         do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
         let query = query
         let transactions = session.visibleGlobalTransactions
@@ -229,6 +321,85 @@ struct GlobalSearchView: View {
         guard !Task.isCancelled else { return }
         results = result
         limit = 50
+    }
+
+    private func clearLocalSearch() {
+        localSearchID = nil
+        localSearching = false
+        localWindow = nil
+        localTags = nil
+        localSearchCompleted = false
+        completedSearchRequest = nil
+        results = LedgerSearchResults()
+    }
+
+    private func updateLocalAuxiliaryResults() {
+        let auxiliary = LedgerGlobalSearch.search(query, transactions: [], accounts: session.ledger?.accounts ?? [],
+            documents: documents, scope: session.globalSearchScope, filters: session.globalSearchFilters)
+        results.accounts = auxiliary.accounts
+        results.documents = auxiliary.documents
+        results.destinations = auxiliary.destinations
+    }
+
+    private func searchLocal() async {
+        guard viewActive else { return }
+        guard localReadable else { clearLocalSearch(); return }
+        localSearchCompleted = false
+        updateLocalAuxiliaryResults()
+        let id = UUID(), request = searchRequest
+        localSearchID = id
+        localSearching = true
+        defer { if localSearchID == id { localSearching = false } }
+        do {
+            try await Task.sleep(for: .milliseconds(180))
+            var previous = completedSearchRequest
+            previous?.page = request.page
+            let advance = previous == request && completedSearchRequest?.page == request.page - 1
+                && localWindow?.continuation != nil
+            var window: LedgerSession.LocalSearchWindow
+            if advance, let continuation = localWindow?.continuation {
+                window = try await session.localGlobalSearchWindow(query: request.query, scope: request.scope,
+                    filters: request.filters, continuation: continuation)
+            } else {
+                window = try await session.localGlobalSearchWindow(query: request.query, scope: request.scope, filters: request.filters)
+            }
+            // Forward uses one scan and the current continuation. Backward or
+            // invalidated anchors replay without retaining old transaction windows.
+            if request.page > 0 && !advance {
+                for index in 0..<request.page {
+                    guard let continuation = window.continuation else {
+                        if !Task.isCancelled, localSearchID == id, request == searchRequest { localPageIndex = index }
+                        return
+                    }
+                    window = try await session.localGlobalSearchWindow(query: request.query, scope: request.scope,
+                        filters: request.filters, continuation: continuation)
+                }
+            }
+            guard !Task.isCancelled, localSearchID == id, request == searchRequest, localReadable else { return }
+            var combined = LedgerGlobalSearch.search(request.query, transactions: [],
+                accounts: session.ledger?.accounts ?? [], documents: documents, scope: request.scope, filters: request.filters)
+            combined.transactions = window.result.transactions
+            combined.tags = window.result.tags
+            results = combined
+            localWindow = window
+            localTags = window.result.availableTags
+            localSearchCompleted = true
+            completedSearchRequest = request
+            errorMessage = nil
+        } catch is CancellationError {
+            if !Task.isCancelled, localSearchID == id, request == searchRequest, viewActive {
+                errorMessage = "搜索已中断，请重新加载。"
+            }
+        }
+        catch {
+            if !Task.isCancelled, localSearchID == id, request == searchRequest {
+                localWindow = nil
+                results.transactions = []
+                results.tags = []
+                localTags = nil
+                errorMessage = "搜索失败：" + error.localizedDescription
+            }
+        }
     }
 
     private func recordResultOpen() { session.recordGlobalSearch(query) }
@@ -251,6 +422,7 @@ struct GlobalSearchView: View {
                 .accessibilityLabel("筛选")
                 .accessibilityValue(session.globalSearchFilters.isEmpty ? "全部日期" : "\(session.globalSearchFilters.count) 项条件")
                 .accessibilityIdentifier("global-search-filters")
+                .disabled(session.isLocal && localTags == nil)
             }
             if usesNativeSearchTab {
                 Picker("搜索范围", selection: $session.globalSearchScope) {
@@ -292,11 +464,117 @@ struct GlobalSearchView: View {
             .accessibilityLabel("移除筛选：" + title)
     }
 
+    private struct DocumentRequest: Equatable {
+        let readable: Bool
+        let revision: UUID?
+        let invalidation: Int
+    }
     private struct SearchRequest: Equatable {
         let query: String
         let scope: LedgerGlobalSearchScope
         let filters: LedgerGlobalSearchFilters
         let revision: Int
+        let localRevision: UUID?
+        let reload: Int
+        let readable: Bool
+        var page: Int
+        let invalidation: Int
+        let active: Bool
+    }
+}
+
+private struct LocalSearchTagTransactionsView: View {
+    @EnvironmentObject private var session: LedgerSession
+    let tag: String
+    let filters: LedgerGlobalSearchFilters
+    @State private var window: LedgerSession.LocalSearchWindow?
+    @State private var pageIndex = 0
+    @State private var loading = false
+    @State private var errorMessage: String?
+    @State private var reload = 0
+    @State private var viewActive = false
+    private var readable: Bool {
+        session.phase == .ready && !session.privacyShielded && !session.isRangeLoading
+            && !session.isValuationCurrencyLoading && !session.transactionMutationStates.values.contains(.pending)
+    }
+    private struct RequestKey: Equatable {
+        let revision: UUID?
+        let invalidation: Int
+        let readable: Bool
+        let page: Int
+        let reload: Int
+        let tag: String
+        let filters: LedgerGlobalSearchFilters
+        let active: Bool
+    }
+    private var key: RequestKey {
+        .init(revision: session.localTransactionPresentationRevision, invalidation: session.localGlobalSearchInvalidation,
+            readable: readable, page: pageIndex, reload: reload, tag: tag, filters: filters, active: viewActive)
+    }
+    var body: some View {
+        List {
+            if loading { ProgressView("正在读取标签流水…") }
+            if let errorMessage {
+                Text(errorMessage).foregroundStyle(.secondary)
+                Button("重试") { reload += 1 }
+            }
+            if let window {
+                Section("流水 · \(window.result.matchedCount)") {
+                    ForEach(window.result.transactions) { transaction in
+                        NavigationLink {
+                            TransactionDetailView(transaction: transaction)
+                        } label: {
+                            TransactionRow(transaction: transaction,
+                                accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? []))
+                        }
+                        .ledgerTransactionActions(transaction)
+                        .disabled(loading)
+                    }
+                    HStack {
+                        Button("上一页") { pageIndex -= 1 }.disabled(pageIndex == 0 || loading)
+                        Spacer()
+                        Text("第 \(pageIndex + 1) 页").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("下一页") { pageIndex += 1 }.disabled(window.continuation == nil || loading)
+                    }
+                }
+            }
+        }
+        .navigationTitle("#" + tag)
+        .toolbar(.visible, for: .navigationBar)
+        .task(id: key) { await load() }
+        .onAppear { viewActive = true }
+        .onDisappear { viewActive = false }
+        .onChange(of: readable) { _, allowed in if !allowed { window = nil; errorMessage = nil } }
+        .onChange(of: session.localTransactionPresentationRevision) { _, _ in pageIndex = 0 }
+    }
+    private func load() async {
+        guard viewActive else { return }
+        guard readable else { window = nil; loading = false; return }
+        errorMessage = nil
+        let captured = key
+        loading = true
+        defer { if captured == key { loading = false } }
+        do {
+            var narrowed = filters
+            narrowed.tag = tag
+            var result = try await session.localGlobalSearchWindow(query: "", scope: .transactions, filters: narrowed)
+            if captured.page > 0 {
+                for index in 0..<captured.page {
+                    guard let continuation = result.continuation else {
+                        if !Task.isCancelled, captured == key { pageIndex = index }
+                        return
+                    }
+                    result = try await session.localGlobalSearchWindow(query: "", scope: .transactions,
+                        filters: narrowed, continuation: continuation)
+                }
+            }
+            guard !Task.isCancelled, captured == key, readable else { return }
+            window = result
+        } catch is CancellationError {
+            if !Task.isCancelled, captured == key { errorMessage = "读取已中断，请重试。" }
+        }
+        catch { if !Task.isCancelled, captured == key { errorMessage = error.localizedDescription } }
     }
 }
 

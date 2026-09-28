@@ -6,10 +6,10 @@ import XCTest
 final class LocalOnlySessionTests: XCTestCase {
     private struct Engine: LocalLedgerEngine {
         func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
-            if request.path == "/api/ledger/bootstrap" {
-                return Data("""
+            if request.path == "/api/ledger/bootstrap/page" {
+                return try SyntheticBootstrapPage.response(Data("""
                 {"start":"2026-09-01","end":"2026-10-01","summary":{"currency":"CNY","income":0,"expense":0,"net":0},"accountBalances":[],"transactions":[],"accounts":[],"valuationCurrency":"CNY","sensitiveUnlocked":true}
-                """.utf8)
+                """.utf8), request: request)
             }
             return Data("{}".utf8)
         }

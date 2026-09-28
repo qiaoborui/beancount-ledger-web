@@ -82,10 +82,30 @@ struct ReconciliationView: View {
     @State private var errorFeedback = 0
     @State private var successMessage: String?
     @State private var isRefreshing = false
+    @State private var localRows: [LedgerReconciliationRow]?
+    @State private var localError: String?
+    @State private var completedLocalReadKey: String?
+    @State private var localReadID = UUID()
+    @State private var localReadLoading = false
+    private var localReadable: Bool {
+        session.isLocal && session.phase == .ready && !session.privacyShielded && !session.isRangeLoading
+            && !session.isValuationCurrencyLoading && !session.transactionMutationStates.values.contains(.pending)
+    }
+    private var localReadKey: String {
+        "\(session.localTransactionPresentationRevision?.uuidString ?? "")/\(session.localGlobalSearchInvalidation)/\(session.selectedRange.start)/\(session.selectedRange.end)/\(localReadable)"
+    }
+
+    private var localRowsCurrent: Bool {
+        localReadable && !localReadLoading && completedLocalReadKey == localReadKey && localRows != nil
+    }
+    private func status(for row: LedgerReconciliationRow) -> LedgerAccountStatus? {
+        session.isLocal ? row.snapshotStatus : session.accountStatus(for: row.account)
+    }
 
     var isRoot = false
 
     private var allRows: [LedgerReconciliationRow] {
+        if session.isLocal { return localRowsCurrent ? (localRows ?? []) : [] }
         if let rows = session.ledger?.reconciliationRows, !rows.isEmpty {
             return rows
         }
@@ -122,16 +142,18 @@ struct ReconciliationView: View {
             }
 
             // Status filter
-            let status = session.accountStatus(for: row.account)
+            let rowStatus = status(for: row)
+            let statusIsError = rowStatus?.hasIssue == true
+            let statusIsAsserted = row.status == "asserted" || rowStatus?.isReconciled == true
             switch selectedStatus {
             case .all:
                 break
             case .pending:
-                if status?.isReconciled == true { return false }
+                if rowStatus?.isReconciled == true { return false }
             case .error:
-                if status?.hasIssue != true { return false }
+                if !statusIsError { return false }
             case .asserted:
-                if row.status != "asserted" && status?.isReconciled != true { return false }
+                if !statusIsAsserted { return false }
             }
 
             // Search filter
@@ -153,10 +175,11 @@ struct ReconciliationView: View {
         var pending = 0
         var error = 0
         for row in allRows {
-            let st = session.accountStatus(for: row.account)
-            if st?.hasIssue == true {
+            let rowStatus = status(for: row)
+            let statusError = rowStatus?.hasIssue == true
+            if statusError {
                 error += 1
-            } else if row.status == "asserted" || st?.isReconciled == true {
+            } else if row.status == "asserted" || rowStatus?.isReconciled == true {
                 asserted += 1
             } else {
                 pending += 1
@@ -169,10 +192,12 @@ struct ReconciliationView: View {
         ScrollView {
             LazyVStack(spacing: 16) {
                 // Summary Metrics Hero Card
-                ReconciliationSummaryHero(
-                    metrics: summaryMetrics,
-                    currency: session.ledger?.valuationCurrency ?? "CNY"
-                )
+                if !session.isLocal || localRowsCurrent {
+                    ReconciliationSummaryHero(
+                        metrics: summaryMetrics,
+                        currency: session.ledger?.valuationCurrency ?? "CNY"
+                    )
+                }
 
                 // Category & Status Filters
                 VStack(spacing: 10) {
@@ -247,7 +272,7 @@ struct ReconciliationView: View {
                     }
                 }
 
-                if let successMessage {
+                if let successMessage, !session.isLocal || localReadable {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(LedgerPalette.income)
@@ -263,7 +288,12 @@ struct ReconciliationView: View {
                 }
 
                 // Account Cards
-                if filteredRows.isEmpty {
+                if localReadable, let localError {
+                    Text("对账读取失败：" + localError).foregroundStyle(.secondary)
+                    Button("重试") { Task { await loadLocalRows() } }
+                } else if session.isLocal && !localRowsCurrent {
+                    ProgressView("正在读取对账账户…")
+                } else if filteredRows.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "checkmark.shield")
                             .font(.system(size: 36))
@@ -280,7 +310,7 @@ struct ReconciliationView: View {
                             let isExpanded = expandedAccountID == row.account
                             ReconciliationCard(
                                 row: row,
-                                accountStatus: session.accountStatus(for: row.account),
+                                accountStatus: status(for: row),
                                 isExpanded: isExpanded,
                                 onToggleExpand: {
                                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -288,6 +318,7 @@ struct ReconciliationView: View {
                                     }
                                 },
                                 onReconcileSuccess: { message in
+                                    guard !session.isLocal || localReadable else { return }
                                     successFeedback += 1
                                     withAnimation {
                                         successMessage = message
@@ -333,6 +364,30 @@ struct ReconciliationView: View {
         }
         .sensoryFeedback(.success, trigger: successFeedback)
         .sensoryFeedback(.error, trigger: errorFeedback)
+        .task(id: localReadKey) { await loadLocalRows() }
+        .onChange(of: localReadable) { _, allowed in
+            if session.isLocal && !allowed {
+                localReadID = UUID(); localRows = nil; completedLocalReadKey = nil
+                localError = nil; localReadLoading = false; successMessage = nil
+            }
+        }
+    }
+
+    private func loadLocalRows() async {
+        guard localReadable else {
+            localReadID = UUID(); localRows = nil; completedLocalReadKey = nil
+            localError = nil; localReadLoading = false; return
+        }
+        let key = localReadKey
+        let id = UUID(); localReadID = id; localReadLoading = true; localRows = nil; localError = nil
+        defer { if localReadID == id { localReadLoading = false } }
+        do {
+            let rows = try await session.localReconciliationRows(start: session.selectedRange.start, end: session.selectedRange.queryEndExclusive)
+            guard !Task.isCancelled, localReadID == id, key == localReadKey, localReadable else { return }
+            localRows = rows; completedLocalReadKey = key; localError = nil
+        } catch {
+            if !Task.isCancelled, localReadID == id, key == localReadKey { localError = error.localizedDescription; localRows = nil }
+        }
     }
 }
 
@@ -776,6 +831,7 @@ struct ReconciliationCard: View {
                 .padding(14)
             }
         }
+        .accessibilityIdentifier("reconciliation-card-" + row.account)
         .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -822,6 +878,18 @@ struct SingleAccountReconciliationSheet: View {
     let label: String?
     let currency: String?
 
+    @State private var localRow: LedgerReconciliationRow?
+    @State private var completedKey: String?
+    @State private var readID = UUID()
+    @State private var readError: String?
+    @State private var reload = 0
+    private var readable: Bool {
+        session.phase == .ready && !session.privacyShielded && !session.isRangeLoading
+            && !session.isValuationCurrencyLoading && !session.transactionMutationStates.values.contains(.pending)
+    }
+    private var readKey: String {
+        "\(account)/\(session.localTransactionPresentationRevision?.uuidString ?? "")/\(session.localGlobalSearchInvalidation)/\(session.selectedRange.start)/\(session.selectedRange.end)/\(readable)/\(reload)"
+    }
     private var resolvedRow: LedgerReconciliationRow {
         if let existing = session.reconciliationRow(for: account) {
             return existing
@@ -842,15 +910,20 @@ struct SingleAccountReconciliationSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    ReconciliationCard(
-                        row: resolvedRow,
-                        accountStatus: session.accountStatus(for: account),
-                        isExpanded: true,
-                        onToggleExpand: {},
-                        onReconcileSuccess: { _ in
-                            dismiss()
+                    if session.isLocal {
+                        if readable, completedKey == readKey, let localRow {
+                            ReconciliationCard(row: localRow, accountStatus: localRow.snapshotStatus,
+                                isExpanded: true, onToggleExpand: {}, onReconcileSuccess: { _ in dismiss() })
+                        } else if readable, let readError {
+                            Text(readError).foregroundStyle(.secondary)
+                            Button("重试") { reload += 1 }
+                        } else {
+                            ProgressView("正在读取账户对账快照…")
                         }
-                    )
+                    } else {
+                        ReconciliationCard(row: resolvedRow, accountStatus: session.accountStatus(for: account),
+                            isExpanded: true, onToggleExpand: {}, onReconcileSuccess: { _ in dismiss() })
+                    }
                 }
                 .padding(16)
             }
@@ -864,5 +937,24 @@ struct SingleAccountReconciliationSheet: View {
             }
         }
         .ledgerPrivacyProtectedSheet()
+        .task(id: readKey) { if session.isLocal { await loadSnapshot() } }
+        .onChange(of: readable) { _, allowed in
+            if session.isLocal && !allowed { readID = UUID(); localRow = nil; completedKey = nil; readError = nil }
+        }
+    }
+    private func loadSnapshot() async {
+        let id = UUID(), key = readKey
+        readID = id; localRow = nil; completedKey = nil; readError = nil
+        guard readable else { return }
+        do {
+            let rows = try await session.localReconciliationRows(start: session.selectedRange.start, end: session.selectedRange.queryEndExclusive)
+            guard !Task.isCancelled, readID == id, key == readKey, readable else { return }
+            guard let row = rows.first(where: { $0.account == account }) else {
+                readError = "当前账本中没有可对账的此账户。"; return
+            }
+            localRow = row; completedKey = key
+        } catch {
+            if !Task.isCancelled, readID == id, key == readKey, readable { readError = error.localizedDescription }
+        }
     }
 }

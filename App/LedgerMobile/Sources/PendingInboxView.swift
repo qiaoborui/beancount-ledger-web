@@ -11,6 +11,14 @@ struct PendingInboxView: View {
         case missingPayee = "缺商户"
 
         var id: String { rawValue }
+        var filter: LedgerPendingFilter {
+            switch self {
+            case .all: return .all
+            case .uncategorized: return .uncategorized
+            case .needsReview: return .needsReview
+            case .missingPayee: return .missingPayee
+            }
+        }
     }
 
     @State private var selectedTab: FilterTab = .all
@@ -20,9 +28,47 @@ struct PendingInboxView: View {
     @State private var actionMessage: String?
     @State private var actionFeedback = 0
     @State private var updating = false
+    @State private var localWindow: LedgerSession.LocalPendingWindow?
+    @State private var completedRequest: ReadRequest?
+    @State private var loading = false
+    @State private var loadError: String?
+    @State private var page = 0
+    @State private var displayedPage = 0
+    @State private var reload = 0
+    @State private var active = false
+    @State private var localAction: LedgerSession.LocalTransactionAction?
+    @State private var actionTask: Task<Void, Never>?
+    @State private var actionID: UUID?
+    @State private var actionStyle: LedgerStatusStyle = .confirmed
+    @State private var feedbackGeneration = UUID()
+    private enum PendingAction { case category, payee, full, verify }
+    private struct ReadRequest: Equatable {
+        let revision: UUID?
+        let invalidation: Int
+        let range: LedgerDateRange
+        let filter: LedgerPendingFilter
+        let readable: Bool
+        let active: Bool
+        let reload: Int
+        var page: Int
+    }
+    private var request: ReadRequest {
+        .init(revision: session.localTransactionPresentationRevision, invalidation: session.localGlobalSearchInvalidation,
+            range: session.selectedRange, filter: selectedTab.filter,
+            readable: session.phase == .ready && !session.privacyShielded && !session.isRangeLoading
+                && !session.isValuationCurrencyLoading && !session.transactionMutationStates.values.contains(.pending),
+            active: active, reload: reload, page: page)
+    }
+    private var windowCurrent: Bool {
+        guard let completedRequest else { return false }
+        return completedRequest.revision == request.revision && completedRequest.invalidation == request.invalidation
+            && completedRequest.range == request.range && completedRequest.filter == request.filter && request.readable
+    }
+    private var totalCount: Int { session.isLocal ? (windowCurrent ? localWindow?.result.totalCount ?? 0 : 0) : pendingItems.count }
+    private var filteredCount: Int { session.isLocal ? (localWindow?.result.counts[selectedTab.filter] ?? 0) : filteredItems.count }
 
     private var allTransactions: [LedgerTransaction] {
-        session.visibleTransactions
+        session.isLocal ? (windowCurrent ? localWindow?.result.transactions ?? [] : []) : session.visibleTransactions
     }
 
     private var pendingItems: [(transaction: LedgerTransaction, reasons: [PendingTransactionReason])] {
@@ -53,13 +99,15 @@ struct PendingInboxView: View {
     }
 
     private var availableExpenseAccounts: [String] {
+        if session.isLocal { return localWindow?.result.expenseAccounts ?? [] }
         let accounts = session.ledger?.accounts.map(\.account).filter { $0.hasPrefix("Expenses:") } ?? []
         let transactionAccounts = allTransactions.flatMap { $0.postings.map(\.account) }.filter { $0.hasPrefix("Expenses:") }
         return Array(Set(accounts + transactionAccounts)).sorted()
     }
 
     private var totalPendingMinorUnits: Int {
-        pendingItems.reduce(0) { sum, item in
+        if session.isLocal { return localWindow?.result.totalMinorUnits ?? 0 }
+        return pendingItems.reduce(0) { sum, item in
             let p = TransactionPresentation(transaction: item.transaction)
             return sum + p.minorUnits
         }
@@ -68,15 +116,21 @@ struct PendingInboxView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if let actionMessage {
-                    StatusBanner(message: actionMessage, style: .confirmed) {
+                if let actionMessage, !session.isLocal || request.readable {
+                    StatusBanner(message: actionMessage, style: actionStyle) {
                         self.actionMessage = nil
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                 }
 
-                if pendingItems.isEmpty {
+                if session.isLocal, let loadError {
+                    Text(loadError).foregroundStyle(.secondary)
+                    Button("重新读取待整理账单") { reload += 1 }
+                }
+                if session.isLocal && !windowCurrent {
+                    if loading { ProgressView("正在统计全部待整理账单…") }
+                } else if totalCount == 0 {
                     allCleanState
                 } else {
                     inboxContent
@@ -90,8 +144,9 @@ struct PendingInboxView: View {
                     Button("关闭") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    if !pendingItems.isEmpty {
-                        Text("\(pendingItems.count) 笔待办")
+                    if totalCount > 0 {
+                        Text("\(totalCount) 笔待办")
+                            .accessibilityIdentifier("pending-inbox-total")
                             .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
                             .foregroundStyle(Color.orange)
                             .padding(.horizontal, 9)
@@ -100,7 +155,7 @@ struct PendingInboxView: View {
                     }
                 }
             }
-            .sheet(item: $editingCategoryTarget) { tx in
+            .sheet(item: $editingCategoryTarget, onDismiss: revokeAction) { tx in
                 QuickCategoryPickerSheet(
                     transaction: tx,
                     availableAccounts: availableExpenseAccounts,
@@ -110,25 +165,39 @@ struct PendingInboxView: View {
                 }
                 .ledgerPrivacyProtectedSheet()
             }
-            .sheet(item: $editingPayeeTarget) { tx in
+            .sheet(item: $editingPayeeTarget, onDismiss: revokeAction) { tx in
                 QuickPayeeEditorSheet(transaction: tx) { newPayee, newNarration in
                     await updatePayee(for: tx, payee: newPayee, narration: newNarration)
                 }
                 .ledgerPrivacyProtectedSheet()
             }
-            .sheet(item: $fullEditorTarget) { tx in
+            .sheet(item: $fullEditorTarget, onDismiss: revokeAction) { tx in
                 TransactionEditorView(
                     transaction: tx,
                     accounts: session.ledger?.accounts ?? [],
                     commodities: session.ledger?.commodities ?? [],
+                    initialMode: session.isLocal ? .advanced : nil,
+                    requiresAdvancedEditor: session.isLocal,
                     onSave: { entry in
-                        try await session.updateTransaction(source: tx.source, entry: entry)
-                        actionMessage = "交易修改已保存"
-                        actionFeedback &+= 1
-                        LedgerFeedback.success()
+                        let token = feedbackGeneration
+                        try await save(entry, original: tx)
+                        publishFeedback("交易修改已保存", style: .confirmed, token: token)
                     }
                 )
                 .ledgerPrivacyProtectedSheet()
+            }
+            .task(id: request) { if session.isLocal { await loadWindow() } }
+            .onAppear { active = true }
+            .onDisappear {
+                active = false
+                if editingCategoryTarget == nil && editingPayeeTarget == nil && fullEditorTarget == nil { revokeAction() }
+            }
+            .onChange(of: selectedTab) { _, _ in page = 0; displayedPage = 0 }
+            .onChange(of: session.localTransactionPresentationRevision) { _, _ in page = 0; displayedPage = 0 }
+            .onChange(of: session.privacyShielded) { _, hidden in if hidden { clearActions() } }
+            .onChange(of: session.phase) { _, phase in if phase != .ready { clearActions() } }
+            .overlay(alignment: .top) {
+                if actionID != nil { ProgressView("正在读取原始交易…").padding().background(.regularMaterial) }
             }
         }
     }
@@ -143,7 +212,7 @@ struct PendingInboxView: View {
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(LedgerPalette.secondary)
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text("\(pendingItems.count)")
+                            Text("\(totalCount)")
                                 .font(.system(size: 28, weight: .bold, design: .rounded))
                                 .foregroundStyle(LedgerPalette.ink)
                             Text("笔待确认 / 未分类")
@@ -156,7 +225,7 @@ struct PendingInboxView: View {
                         Text("涉及金额")
                             .font(.system(size: 12))
                             .foregroundStyle(LedgerPalette.secondary)
-                        Text(MoneyText.format(minorUnits: totalPendingMinorUnits, currency: "CNY"))
+                        AmountLabel(minorUnits: totalPendingMinorUnits, currency: "CNY")
                             .font(.system(size: 17, weight: .bold, design: .rounded))
                             .foregroundStyle(LedgerPalette.expense)
                     }
@@ -185,7 +254,7 @@ struct PendingInboxView: View {
                         .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
                     }
                     Spacer()
-                    Text("\(filteredItems.count) 笔")
+                    Text("\(filteredCount) 笔")
                         .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
                         .foregroundStyle(LedgerPalette.secondary)
                 }
@@ -219,17 +288,33 @@ struct PendingInboxView: View {
                         PendingTransactionCard(
                             transaction: item.transaction,
                             reasons: item.reasons,
-                            onChangeCategory: { editingCategoryTarget = item.transaction },
-                            onEditPayee: { editingPayeeTarget = item.transaction },
-                            onMarkVerified: { await markVerified(for: item.transaction) },
-                            onFullEdit: { fullEditorTarget = item.transaction }
+                            onChangeCategory: { prepare(item.transaction, action: .category) },
+                            onEditPayee: { prepare(item.transaction, action: .payee) },
+                            onMarkVerified: { prepare(item.transaction, action: .verify) },
+                            onFullEdit: { prepare(item.transaction, action: .full) }
                         )
+                        .disabled(updating || actionID != nil || (session.isLocal && loading))
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                     }
                 }
                 .listStyle(.plain)
+            }
+            if session.isLocal, windowCurrent, let localWindow {
+                HStack {
+                    Button("上一页") {
+                        let target = max(0, displayedPage - 1)
+                        if page == target { reload += 1 } else { page = target }
+                    }.disabled(displayedPage == 0 || loading || updating || actionID != nil)
+                    Spacer()
+                    Text("第 \(displayedPage + 1) 页").font(.caption).accessibilityIdentifier("pending-inbox-page")
+                    Spacer()
+                    Button("下一页") {
+                        let target = displayedPage + 1
+                        if page == target { reload += 1 } else { page = target }
+                    }.disabled(localWindow.continuation == nil || loading || updating || actionID != nil)
+                }.padding()
             }
         }
     }
@@ -275,9 +360,106 @@ struct PendingInboxView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func updateCategory(for tx: LedgerTransaction, to newAccount: String) async {
-        guard !updating else { return }
+    private func loadWindow() async {
+        guard active, request.readable else { return }
+        let key = request
+        loading = true; loadError = nil
+        defer { if key == request { loading = false } }
+        do {
+            var previous = completedRequest; previous?.page = key.page
+            let forward = previous == key && completedRequest?.page == key.page - 1 && localWindow?.continuation != nil
+            var result = try await session.localPendingWindow(filter: key.filter, continuation: forward ? localWindow?.continuation : nil)
+            if key.page > 0 && !forward {
+                for index in 0..<key.page {
+                    guard let next = result.continuation else {
+                        if !Task.isCancelled, key == request { page = index }
+                        return
+                    }
+                    result = try await session.localPendingWindow(filter: key.filter, continuation: next)
+                }
+            }
+            guard !Task.isCancelled, key == request, request.readable else { return }
+            localWindow = result; completedRequest = key; displayedPage = key.page
+        } catch {
+            if !Task.isCancelled, key == request { loadError = error.localizedDescription }
+        }
+    }
+
+    private func revokeAction() {
+        actionID = nil
+        actionTask?.cancel(); actionTask = nil
+        if let localAction { session.cancelLocalTransactionAction(localAction) }
+        localAction = nil
+    }
+    private func clearActions() {
+        feedbackGeneration = UUID()
+        actionMessage = nil; loadError = nil
+        editingCategoryTarget = nil; editingPayeeTarget = nil; fullEditorTarget = nil
+        revokeAction()
+    }
+    private func prepare(_ row: LedgerTransaction, action: PendingAction) {
+        guard !updating, actionID == nil else { return }
+        guard session.isLocal else {
+            switch action {
+            case .category: editingCategoryTarget = row
+            case .payee: editingPayeeTarget = row
+            case .full: fullEditorTarget = row
+            case .verify: Task { await markVerified(for: row) }
+            }
+            return
+        }
+        revokeAction()
+        let id = UUID(), key = request
+        actionID = id
+        actionTask = Task { @MainActor in
+            defer { if actionID == id { actionID = nil; actionTask = nil } }
+            do {
+                let prepared = try await session.prepareLocalTransactionAction(sources: [row.source], kind: .edit)
+                guard !Task.isCancelled, actionID == id, key == request else {
+                    session.cancelLocalTransactionAction(prepared); return
+                }
+                guard let original = prepared.originals.first, original.editableEntry != nil else {
+                    session.cancelLocalTransactionAction(prepared)
+                    throw LedgerTransactionMutationError.sourceUnavailable
+                }
+                localAction = prepared
+                switch action {
+                case .category: editingCategoryTarget = original
+                case .payee: editingPayeeTarget = original
+                case .full: fullEditorTarget = original
+                case .verify: await markVerified(for: original)
+                }
+            } catch {
+                if !Task.isCancelled, actionID == id {
+                    actionStyle = .failure; actionMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func publishFeedback(_ message: String, style: LedgerStatusStyle, token: UUID) {
+        guard !session.isLocal || (token == feedbackGeneration && request.readable) else { return }
+        actionStyle = style; actionMessage = message
+        if style == .confirmed { actionFeedback &+= 1; LedgerFeedback.success() }
+    }
+
+    private func save(_ entry: LedgerTransactionEntry, original: LedgerTransaction) async throws {
+        guard session.isLocal else { try await session.updateTransaction(source: original.source, entry: entry); return }
+        guard let localAction, localAction.originals.first?.source == original.source else { throw CancellationError() }
+        let token = feedbackGeneration
+        defer { self.localAction = nil; reload += 1 }
+        do { try await session.updateLocalTransaction(action: localAction, entry: entry) }
+        catch {
+            fullEditorTarget = nil; editingPayeeTarget = nil; editingCategoryTarget = nil
+            publishFeedback(error.localizedDescription + " 请重新打开交易操作后再试。", style: .failure, token: token)
+            throw error
+        }
+    }
+
+    private func updateCategory(for tx: LedgerTransaction, to newAccount: String) async -> Bool {
+        guard !updating else { return false }
         updating = true
+        let token = feedbackGeneration
         defer { updating = false }
         do {
             let unknownAcc = tx.postings.first(where: {
@@ -285,41 +467,40 @@ struct PendingInboxView: View {
                     || $0.account.lowercased().contains("待分类")
                     || $0.account.lowercased().contains("uncategorized")
             })?.account ?? ""
-
-            let entry = tx.entryReplacingAccount(from: unknownAcc, to: newAccount)
-            try await session.updateTransaction(source: tx.source, entry: entry)
-            actionMessage = "已分类为：\(newAccount.split(separator: ":").last ?? "")"
-            LedgerFeedback.success()
+            try await save(tx.entryReplacingAccount(from: unknownAcc, to: newAccount), original: tx)
+            publishFeedback("已分类为：\(newAccount.split(separator: ":").last ?? "")", style: .confirmed, token: token)
+            return true
         } catch {
-            actionMessage = "更新失败：\(error.localizedDescription)"
+            publishFeedback("更新失败：\(error.localizedDescription)", style: .failure, token: token)
+            return !session.isLocal
         }
     }
 
-    private func updatePayee(for tx: LedgerTransaction, payee: String, narration: String?) async {
-        guard !updating else { return }
+    private func updatePayee(for tx: LedgerTransaction, payee: String, narration: String?) async -> Bool {
+        guard !updating else { return false }
         updating = true
+        let token = feedbackGeneration
         defer { updating = false }
         do {
-            let entry = tx.entryUpdatingPayee(payee, narration: narration)
-            try await session.updateTransaction(source: tx.source, entry: entry)
-            actionMessage = "商户已更新为：\(payee)"
-            LedgerFeedback.success()
+            try await save(tx.entryUpdatingPayee(payee, narration: narration), original: tx)
+            publishFeedback("商户已更新为：\(payee)", style: .confirmed, token: token)
+            return true
         } catch {
-            actionMessage = "更新失败：\(error.localizedDescription)"
+            publishFeedback("更新失败：\(error.localizedDescription)", style: .failure, token: token)
+            return !session.isLocal
         }
     }
 
     private func markVerified(for tx: LedgerTransaction) async {
         guard !updating else { return }
         updating = true
+        let token = feedbackGeneration
         defer { updating = false }
         do {
-            let entry = tx.entryMarkingVerified()
-            try await session.updateTransaction(source: tx.source, entry: entry)
-            actionMessage = "已标记为已核对"
-            LedgerFeedback.success()
+            try await save(tx.entryMarkingVerified(), original: tx)
+            publishFeedback("已标记为已核对", style: .confirmed, token: token)
         } catch {
-            actionMessage = "核对失败：\(error.localizedDescription)"
+            publishFeedback("核对失败：\(error.localizedDescription)", style: .failure, token: token)
         }
     }
 }
@@ -415,6 +596,8 @@ private struct PendingTransactionCard: View {
                     .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
                 }
                 .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
+
+                .accessibilityIdentifier("pending-edit-payee-" + transaction.id)
 
                 let isFlagged = reasons.contains {
                     if case .needsReviewFlag = $0 { return true }
@@ -529,9 +712,17 @@ struct QuickCategoryPickerSheet: View {
     let transaction: LedgerTransaction
     let availableAccounts: [String]
     let accountLabels: [String: String]
-    let onSelect: (String) async -> Void
+    let onSelect: (String) async -> Bool
 
     @State private var searchQuery = ""
+    @State private var submitting = false
+
+    private func submit(_ account: String) async {
+        guard !submitting else { return }
+        submitting = true
+        defer { submitting = false }
+        if await onSelect(account) { dismiss() }
+    }
 
     private struct FrequentCategory: Identifiable {
         let account: String
@@ -577,8 +768,7 @@ struct QuickCategoryPickerSheet: View {
                             ForEach(presets) { cat in
                                 Button {
                                     Task {
-                                        await onSelect(cat.account)
-                                        dismiss()
+                                        await submit(cat.account)
                                     }
                                 } label: {
                                     VStack(spacing: 6) {
@@ -617,8 +807,7 @@ struct QuickCategoryPickerSheet: View {
                     ForEach(filteredAccounts, id: \.self) { account in
                         Button {
                             Task {
-                                await onSelect(account)
-                                dismiss()
+                                await submit(account)
                             }
                         } label: {
                             HStack {
@@ -644,15 +833,17 @@ struct QuickCategoryPickerSheet: View {
                         .foregroundStyle(LedgerPalette.secondary)
                 }
             }
+            .disabled(submitting)
             .searchable(text: $searchQuery, prompt: "搜索分类或账户名称")
             .navigationTitle("选择分类")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { dismiss() }.disabled(submitting)
                 }
             }
         }
+        .interactiveDismissDisabled(submitting)
     }
 }
 
@@ -661,12 +852,13 @@ struct QuickCategoryPickerSheet: View {
 struct QuickPayeeEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     let transaction: LedgerTransaction
-    let onSave: (String, String?) async -> Void
+    let onSave: (String, String?) async -> Bool
 
     @State private var payee: String
     @State private var narration: String
+    @State private var submitting = false
 
-    init(transaction: LedgerTransaction, onSave: @escaping (String, String?) async -> Void) {
+    init(transaction: LedgerTransaction, onSave: @escaping (String, String?) async -> Bool) {
         self.transaction = transaction
         self.onSave = onSave
         _payee = State(initialValue: transaction.payee)
@@ -678,6 +870,7 @@ struct QuickPayeeEditorSheet: View {
             Form {
                 Section {
                     TextField("商户 / 收款方名称", text: $payee)
+                        .accessibilityIdentifier("pending-payee-input")
                         .font(.system(size: 16))
                 } header: {
                     Text("商户名称 (Payee)")
@@ -692,23 +885,27 @@ struct QuickPayeeEditorSheet: View {
                     Text("交易备注 (Narration)")
                 }
             }
+            .disabled(submitting)
             .navigationTitle("补全商户与备注")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { dismiss() }.disabled(submitting)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("保存") {
                         Task {
-                            await onSave(payee, narration.isEmpty ? nil : narration)
-                            dismiss()
+                            guard !submitting else { return }
+                            submitting = true
+                            defer { submitting = false }
+                            if await onSave(payee, narration.isEmpty ? nil : narration) { dismiss() }
                         }
                     }
                     .font(.system(size: 15, weight: .semibold))
-                    .disabled(payee.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(submitting || payee.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
+        .interactiveDismissDisabled(submitting)
     }
 }

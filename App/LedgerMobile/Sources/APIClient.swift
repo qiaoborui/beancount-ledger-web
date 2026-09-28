@@ -355,6 +355,9 @@ protocol LedgerRepository: AnyObject, Sendable {
         valuationCurrency: String
     ) async throws -> LedgerHomeReport
     func globalTransactions() async throws -> LedgerGlobalTransactions
+    func transactionPage(start: String, end: String, query: String, cursor: String?, limit: Int, account: String?, tag: String?, kind: String?) async throws -> LedgerTransactionPage
+    func transactionDetail(source: TransactionSource) async throws -> LedgerTransaction
+    func classificationHistoryPage(cursor: String?) async throws -> LedgerTransactionPage
     func importDocuments() async throws -> [LedgerImportDocument]
     func importProviders() async throws -> [LedgerImportProviderInfo]
     func previewImport(
@@ -389,6 +392,18 @@ protocol LedgerRepository: AnyObject, Sendable {
 }
 
 extension LedgerRepository {
+    func classificationHistoryPage(cursor: String?) async throws -> LedgerTransactionPage {
+        throw LedgerRepositoryError.capabilityUnavailable("bounded classification history")
+    }
+
+    func transactionPage(start: String, end: String, query: String, cursor: String?, limit: Int,
+                         account: String?, tag: String?, kind: String?) async throws -> LedgerTransactionPage {
+        throw LedgerRepositoryError.capabilityUnavailable("native transaction pagination")
+    }
+    func transactionDetail(source: TransactionSource) async throws -> LedgerTransaction {
+        throw LedgerRepositoryError.capabilityUnavailable("native transaction detail")
+    }
+
     func addAccount(input: LedgerAccountInput) async throws {
         throw LedgerRepositoryError.capabilityUnavailable("add account")
     }

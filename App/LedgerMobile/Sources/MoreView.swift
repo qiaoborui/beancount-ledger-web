@@ -136,10 +136,20 @@ private struct MoreDestinationButton: View {
     }
 
     var body: some View {
-        Button {
-            session.primaryDestinationID = destination.rawValue
-        } label: {
-            MoreNavigationRow(icon: destination.systemImage, color: destinationColor, title: destination.title, detail: detail)
+        Group {
+            if destination == .assets || destination == .incomeExpense || destination == .investments {
+                NavigationLink {
+                    LedgerDestinationView(destination: destination, isRoot: false)
+                } label: {
+                    MoreNavigationRow(icon: destination.systemImage, color: destinationColor, title: destination.title, detail: detail)
+                }
+            } else {
+                Button {
+                    session.primaryDestinationID = destination.rawValue
+                } label: {
+                    MoreNavigationRow(icon: destination.systemImage, color: destinationColor, title: destination.title, detail: detail)
+                }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(accessibilityIdentifier ?? "more-\(destination.rawValue)")

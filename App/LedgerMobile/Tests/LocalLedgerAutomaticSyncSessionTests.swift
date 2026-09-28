@@ -69,6 +69,15 @@ final class LocalLedgerAutomaticSyncSessionTests: XCTestCase {
             switch request.path {
             case "/api/ledger/version": return Data("{}".utf8)
             case "/api/ledger/bootstrap": return Data(LedgerModelsTests.bootstrapJSON.utf8)
+            case "/api/ledger/bootstrap/page":
+                var bootstrap = try JSONSerialization.jsonObject(with: Data(LedgerModelsTests.bootstrapJSON.utf8)) as! [String: Any]
+                bootstrap["start"] = request.query["start"]
+                bootstrap["end"] = request.query["end"]
+                bootstrap["transactions"] = []
+                return try JSONSerialization.data(withJSONObject: [
+                    "bootstrap": bootstrap,
+                    "transactionPage": ["revision": "sync-fixture", "transactions": [], "sensitiveUnlocked": true]
+                ])
             case "/api/ledger/imports/documents": return Data(#"{"documents":[]}"#.utf8)
             case "/api/ledger/home-report":
                 if let gate = reportGate { reportGate = nil; await gate.suspend() }

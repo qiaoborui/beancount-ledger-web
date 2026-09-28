@@ -411,6 +411,25 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(clawbackPres.minorUnits, 2000)
     }
 
+    #if os(iOS)
+    func testMoneyFlowPreservesPostingCurrenciesSignsAndAccountSides() {
+        let transaction = LedgerTransaction(date: "2026-09-01", payee: "Exchange", narration: "",
+            postings: [LedgerPosting(account: "Assets:USD", amount: -10000, currency: "USD"),
+                       LedgerPosting(account: "Assets:CNY", amount: 70000, currency: "CNY"),
+                       LedgerPosting(account: "Expenses:Fee", amount: 0, currency: "CNY")],
+            source: TransactionSource(file: "test.bean", line: 1, hash: nil, gitSHA: nil))
+        let flow = TransactionMoneyFlow.build(transaction: transaction,
+            accountLabels: ["Assets:USD": "Assets:USD", "Assets:CNY": "人民币账户"], defaultCurrency: "CNY")
+        XCTAssertEqual(flow.fromLegs.map(\.account), ["Assets:USD"])
+        XCTAssertEqual(flow.fromLegs.map(\.currency), ["USD"])
+        XCTAssertEqual(flow.fromLegs.map(\.amount), [-10000])
+        XCTAssertEqual(flow.fromLegs.map(\.label), ["USD"])
+        XCTAssertEqual(flow.toLegs.map(\.currency), ["CNY"])
+        XCTAssertEqual(flow.toLegs.map(\.amount), [70000])
+        XCTAssertEqual(flow.toLegs.map(\.label), ["人民币账户"])
+    }
+    #endif
+
     func testTransactionCategoryUsesLabelsForExpenseIncomeAndRefund() {
         XCTAssertEqual(categoryLabel([("Expenses:Food:Dining", 8500)], labels: ["Expenses:Food:Dining": "餐饮"]), "餐饮")
         XCTAssertEqual(categoryLabel([("Expenses:Food:Dining", -8500)], labels: ["Expenses:Food:Dining": "餐饮"]), "餐饮")
@@ -481,6 +500,19 @@ final class LedgerModelsTests: XCTestCase {
                 tags: ["dining"]
             ).matches(expense)
         )
+    }
+
+    func testPreparedTagBatchRequiresUnchangedSelectionAndActiveSelectionMode() {
+        XCTAssertTrue(TransactionTagSelectionRules.canPresentPreparedBatch(
+            captured: ["a", "b"], current: ["b", "a"], isSelecting: true))
+        XCTAssertFalse(TransactionTagSelectionRules.canPresentPreparedBatch(
+            captured: ["a", "b"], current: ["a", "c"], isSelecting: true))
+        XCTAssertFalse(TransactionTagSelectionRules.canPresentPreparedBatch(
+            captured: ["a", "b"], current: ["a"], isSelecting: true))
+        XCTAssertFalse(TransactionTagSelectionRules.canPresentPreparedBatch(
+            captured: ["a", "b"], current: ["a", "b"], isSelecting: false))
+        XCTAssertFalse(TransactionTagSelectionRules.canPresentPreparedBatch(
+            captured: [], current: [], isSelecting: true))
     }
 
     func testBulkTagSelectionKeepsExistingSelectionsWithinTwoHundredLimit() {
@@ -751,6 +783,16 @@ final class LedgerModelsTests: XCTestCase {
         let verified = uncategorizedTx.entryMarkingVerified()
         XCTAssertNil(verified.flag)
         XCTAssertFalse(verified.tags.contains("待确认"))
+    }
+
+    func testPendingNativeEvidenceMatchesSourceEntryFlagWithoutDraft() {
+        for flag in [false, true] {
+            let tx = LedgerTransaction(date: "2026-09-24", payee: "Synthetic", narration: "Known",
+                postings: [.init(account: "Expenses:Food", amount: 100, currency: "CNY")],
+                pendingReviewFlag: flag, source: .init(file: "fixture.bean", line: 1))
+            XCTAssertEqual(tx.pendingReasons, flag ? [.needsReviewFlag] : [])
+            XCTAssertNil(tx.editableEntry)
+        }
     }
 
     func testEventTagCalculatorAggregatesSpendAndDailyRhythm() {

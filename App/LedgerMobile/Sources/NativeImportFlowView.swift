@@ -223,13 +223,12 @@ struct NativeImportFlowView: View {
         do {
             let classifier = try classificationSettings.classifier()
             let settingsRevision = classificationSettings.revision
-            try await session.loadGlobalTransactions(forceRefresh: true)
             try Task.checkCancellation()
             guard session.currentLocalLedgerDescriptor?.id == ledgerID, !session.privacyShielded else { return }
             let accounts = session.ledger?.accounts ?? []
-            let history = session.visibleGlobalTransactions
             let entries = reviewedEntries
-            try await BookkeepingPipeline.classifyImports(entries, accounts: accounts, history: history,
+            try await BookkeepingPipeline.classifyImports(entries, accounts: accounts,
+                evidence: { try await session.classificationEvidence(for: $0) },
                 provider: classifier, canContinue: {
                 preview?.importID == importID && session.currentLocalLedgerDescriptor?.id == ledgerID
                     && !session.privacyShielded && session.phase == .ready
@@ -740,11 +739,13 @@ struct NativeImportFlowView: View {
                     else { confirmationPresented = true }
                 }
             } label: {
-                HStack {
-                    if isCommitting { ProgressView().tint(.white) }
-                    Text(commitButtonTitle).foregroundStyle(.white)
-                }
-                .frame(maxWidth: .infinity)
+                Text(commitButtonTitle)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .opacity(isCommitting ? 0 : 1)
+                    .frame(maxWidth: .infinity)
+                    .overlay { if isCommitting { ProgressView().tint(.white) } }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)

@@ -27,8 +27,11 @@ enum LocalLedgerWidgetPublisher {
         let today = LedgerDateRange.today(now: now)
         let weekStart = LedgerWidgetDates.weekStart(today)
         let year = Int(today.prefix(4)) ?? 2026
-        let ledger = try await repository.bootstrap(start: month.start, end: month.queryEndExclusive,
-            today: today, valuationCurrency: valuationCurrency)
+        // Widget snapshots use the complete accounting catalog and reports,
+        // never the transaction list. Keep this read bounded to a first page.
+        let page = try await repository.bootstrapPage(start: month.start, end: month.queryEndExclusive,
+            today: today, valuationCurrency: valuationCurrency, limit: 1, expectedRevisionID: revision.id)
+        let ledger = page.bootstrap
         try Task.checkCancellation()
         let report = try await repository.homeReport(start: month.start, end: month.queryEndExclusive,
             valuationCurrency: valuationCurrency)
