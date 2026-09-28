@@ -1,18 +1,27 @@
 # 20260928-ios-terminal-overview
 
-Status: completed. Updated: 2026-09-28T14:43:52+08:00.
+Status: completed. Updated: 2026-09-28T15:18:06+08:00.
 
-## Delivered scope
-Native SwiftUI terminal overview and reusable light/dark colors, amounts, rules, and page chrome. One title/date/status row; no local-only sync indicator; configured Git opens existing storage details. Overview contains net balance, income/expense, spending matrix, and recent transactions, with no quick-entry dock or repeated period row. Shared date controls retain draft/apply/cancel and have 44 pt targets. Financial calculations, local aggregation, privacy masking, and manual write confirmation reuse existing code.
+## Goal and accepted scope
+Implement the approved terminal overview in native SwiftUI, with light/dark themes, then correct the oversized first implementation to match the reference proportions. Keep one compact title/date/sync row, plain date selection, no local-only status text, and existing financial/privacy/manual-confirmation behavior. This increment includes overview, shared visual primitives/date controls, and compact navigation; analysis and other content screens remain for later work.
 
-Branch: `codex/ios-terminal-overview`. Code revision: `febe8ab07d3425ce21d696d42947c2b4801deba6`. PR: https://github.com/qiaoborui/beancount-ledger-web/pull/498 (open, not merged; no merge conflicts when checked). Code, screenshots, and this note are committed/pushed through the branch workflow. CI was running at the initial PR check; native acceptance is based on the local simulator results below.
+Branch: `codex/ios-terminal-overview`. Code revision covered: `584f5a0e8d00d5a58a31b8bd539625cff00b3752`. PR: https://github.com/qiaoborui/beancount-ledger-web/pull/498. Code and screenshots are committed; the checkpoint and code are being published together. No merge or release is authorized/performed. Check the PR for current remote CI state.
 
-## Validation
-Xcode simulator build passed. `LedgerModelsTests` and `LocalSyncPresentationTests`: 40 passed. `LedgerSessionTests/testRangeSteppingEditsOnlyDraftUntilConfirmation` and `testInjectedLedgerClockKeepsCalendarRangesStable`: 2 passed. `TerminalOverviewUITests` covers date cancel/apply and detail return, largest accessibility text/reachability, and amounts/percentage privacy; all passed on iPhone 13 mini (375 pt), with date/detail also rerun successfully in dark mode. iPhone 17 Pro checks also passed for date/detail, large text, and `LocalSyncToolbarUITests` local-only/configured Git behavior. Initial date-label assertion failure was corrected and rerun green. Architecture/security specialists found no new issues. `git diff --check` passed.
+## Completed
+Reference CSS dimensions are documented in `docs/design/ios-terminal/README.md`. Overview now has a square summary, 28 pt medium net, separate income/expense ratio bars, a 13 pt table containing every positive category, and independent recent-transaction dates. Currency symbols are omitted where the unit is established; mixed-currency rows and VoiceOver retain currency context.
 
-Light/dark, date-sheet, privacy, and accessibility images were exported from safe-preview UI tests and visually inspected: `docs/design/ios-terminal/README.md`. Local sync tests used UUID isolation and an in-memory Git transport. No real ledger was accessed. No full-app UI sweep, physical-device, signing, or IPA delivery claim.
+Compact chrome uses a 56 pt header with plain 13 pt date and 18 pt status glyph, plus a flat 60 pt tab strip. Native TabView stacks and configurable destinations remain; search is reachable in More. Non-root overview has an explicit back button. Regular-width navigation retains native sidebar controls. Local Git status comes from the existing storage presentation; tapping status opens details without starting synchronization. Server preview mode retains an explicitly labeled refresh action and does not pretend to have Git status.
+
+Content scales with Dynamic Type; accessibility category rows and section headings stack, and ratio/date columns grow. Amounts, proportions, and bars respect privacy masking. Images include light, dark, local Git synced, date sheet, hidden amounts, and largest text.
+
+## Verification
+Xcode simulator builds passed. During this correction, 34 `LedgerModelsTests` passed, including sign/precision behavior for currency-free formatting. Nine unique UI scenarios passed across the 375 pt light/dark runs: four overview scenarios, local Git sync/details, custom tab add/reorder and non-root overview back, overflow navigation persistence, search return to More, and search state across tabs/detail. Final five-scenario overview/local-sync run passed on the final source. The final build was also installed and visually inspected on the main larger iPhone simulator.
+
+Initial failures exposed stale analysis-title assertions and small-screen first-ledger/keyboard test setup; the harness now waits for onboarding dismissal, follows the existing initial-navigation retry convention, and submits the repository field before scrolling. All affected scenarios were rerun successfully. Architecture review found and resolved non-root back navigation and content text-scaling issues; final review had no new blocking findings. `git diff --check` passed.
+
+No real ledger was read or mutated; safe preview data and UUID-isolated local fixtures with in-memory Git transport were used. No full-app UI sweep, iPad runtime, physical-device, signing, or IPA acceptance claim.
 
 ## Files and next step
-Changed: `App/LedgerMobile/Sources/OverviewView.swift`, `TerminalDesignSystem.swift`, `DesignSystem.swift`, `TimeRangePicker.swift`; `App/LedgerMobile/Package.swift`; three UI-test files; design evidence and this handoff.
+Changed sources: `OverviewView.swift`, `TerminalDesignSystem.swift`, `RootView.swift`, `MoreView.swift`, `DesignSystem.swift`, `MoneyText.swift` under `App/LedgerMobile/Sources/`. Related unit/UI selectors and navigation tests are updated. Evidence: `docs/design/ios-terminal/`.
 
-This first increment is complete. Next product increment: migrate income/expense and asset analysis to the same terminal components, then remaining pages and navigation. Those screens and the existing tab bar are outside this PR. Review the native screenshots/PR before merging; no merge or release was performed.
+The requested correction is complete. Next step is visual review of the updated screenshots/PR; remaining content-page migration is separate work. There are no remaining local implementation tasks for this increment.
