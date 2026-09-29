@@ -2,6 +2,57 @@ import XCTest
 
 @MainActor
 final class LocalOnlySurfaceUITests: XCTestCase {
+    func testLocalPrivacySwitchPersistsAndUpdatesLockControls() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--local-ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
+        app.launch()
+        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        app.buttons["local-ledger-create"].tap()
+        app.buttons["local-ledger-confirm-create"].tap()
+        XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 40))
+        func openSettings() {
+            app.tabBars.buttons["更多"].tap()
+            let settings = app.buttons["more-settings"]
+            for _ in 0..<5 where !settings.isHittable { app.swipeUp() }
+            settings.tap()
+        }
+        openSettings()
+        let toggle = app.switches["settings-local-authentication"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "1")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let off = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "0"), object: toggle)
+        XCTAssertEqual(XCTWaiter.wait(for: [off], timeout: 5), .completed)
+        XCTAssertFalse(app.buttons["立即锁定"].exists)
+        let cover = app.switches["settings-local-privacy-cover"]
+        XCTAssertEqual(cover.value as? String, "1", "Disabling authentication must not disable the cover")
+        cover.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(cover.value as? String, "0")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "local-privacy-protection-disabled"
+        shot.lifetime = .keepAlways
+        add(shot)
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 20))
+        openSettings()
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "0")
+        XCTAssertEqual(cover.value as? String, "0")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertTrue(app.buttons["立即锁定"].waitForExistence(timeout: 5))
+        XCTAssertEqual(cover.value as? String, "0", "Enabling authentication must not enable the cover")
+        cover.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(toggle.value as? String, "1")
+        XCTAssertEqual(cover.value as? String, "1")
+        #else
+        throw XCTSkip("Uses isolated simulator authentication")
+        #endif
+    }
+
     func testSmartClassificationSettingsAreOptInForEachLocalLedger() throws {
         #if targetEnvironment(simulator)
         let app = XCUIApplication()
