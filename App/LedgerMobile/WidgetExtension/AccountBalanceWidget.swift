@@ -123,199 +123,42 @@ struct AccountBalanceWidgetView: View {
     let entry: AccountBalanceEntry
     var familyOverride: WidgetFamily?
 
-    init(entry: AccountBalanceEntry, familyOverride: WidgetFamily? = nil) {
-        self.entry = entry
-        self.familyOverride = familyOverride
-    }
-
     var body: some View {
-        if let account = entry.account, let snapshot = entry.snapshot {
-            Group {
-                if (familyOverride ?? family) == .systemMedium {
-                    medium(account, updatedAt: snapshot.updatedAt)
-                } else {
-                    small(account, updatedAt: snapshot.updatedAt)
-                }
+        Group {
+            if !redactionReasons.isEmpty {
+                LedgerWidgetPrivacyView(title: "账户余额")
+            } else if let account = entry.account, let snapshot = entry.snapshot {
+                content(account, updated: snapshot.updatedAt)
+            } else {
+                LedgerWidgetUnavailableView(
+                    title: entry.snapshot == nil ? "等待账户数据" : "选择一个账户",
+                    detail: entry.snapshot == nil ? "打开 Ledger 并刷新一次" : "长按小组件并选择编辑小组件",
+                    symbol: "building.columns")
             }
-            .widgetURL(LedgerWidgetNavigation.account(account, isRedacted: !redactionReasons.isEmpty))
-            .containerBackground(for: .widget) { LedgerWidgetColors.panel }
-        } else if entry.snapshot == nil {
-            LedgerWidgetUnavailableView(
-                title: "等待账户数据",
-                detail: "打开 Ledger 并刷新一次",
-                symbol: "building.columns"
-            )
-            .widgetURL(URL(string: "ledger://accounts"))
-        } else {
-            LedgerWidgetUnavailableView(
-                title: "选择一个账户",
-                detail: "长按小组件并选择编辑小组件",
-                symbol: "slider.horizontal.3"
-            )
-            .widgetURL(URL(string: "ledger://accounts"))
         }
+        .widgetURL(entry.account.flatMap { LedgerWidgetNavigation.account($0, isRedacted: !redactionReasons.isEmpty) } ?? URL(string: "ledger://accounts"))
+        .containerBackground(for: .widget) { LedgerWidgetColors.panel }
     }
 
-    private func small(_ account: LedgerWidgetAccountSnapshot, updatedAt: Date) -> some View {
+    private func content(_ account: LedgerWidgetAccountSnapshot, updated: Date) -> some View {
+        let medium = (familyOverride ?? family) == .systemMedium
         let style = LedgerWidgetVisualHelper.account(for: account)
-        return VStack(alignment: .leading, spacing: 0) {
-            LedgerWidgetHeader(
-                title: account.label,
-                detail: account.isLiability ? "待还账单 · \(account.currency)" : "\(style.groupLabel) · \(account.currency)",
-                systemName: style.icon,
-                tint: style.tint
-            )
-            Spacer(minLength: 8)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(account.isLiability ? "待还余额" : "当前余额")
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(LedgerWidgetColors.secondary)
-                Text(primaryAmount(account, narrow: true))
-                    .font(.system(size: 25, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(account.isLiability ? LedgerWidgetColors.expense : LedgerWidgetColors.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.65)
-                    .privacySensitive()
-            }
-            if let valuation = secondaryValuation(account, narrow: true) {
-                Text("估值 \(valuation)")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(LedgerWidgetColors.secondary)
-                    .lineLimit(1)
-                    .padding(.top, 3)
-                    .privacySensitive()
-            }
-            Spacer(minLength: 4)
-            HStack(spacing: 4) {
-                Text(style.groupLabel)
-                    .font(.system(size: 8.5, weight: .medium))
-                    .foregroundStyle(LedgerWidgetColors.secondary)
-                Text("·")
-                    .foregroundStyle(LedgerWidgetColors.secondary)
-                Text(LedgerWidgetText.updated(updatedAt, now: entry.date))
-                    .font(.system(size: 8.5, weight: .medium))
-                    .foregroundStyle(LedgerWidgetColors.secondary)
-            }
-            .lineLimit(1)
-        }
-    }
-
-    private func medium(_ account: LedgerWidgetAccountSnapshot, updatedAt: Date) -> some View {
-        let style = LedgerWidgetVisualHelper.account(for: account)
-        return HStack(spacing: 12) {
-            // Left Hero Section
-            VStack(alignment: .leading, spacing: 0) {
-                LedgerWidgetHeader(
-                    title: account.label,
-                    detail: account.isLiability ? "负债账户" : "资产账户",
-                    systemName: style.icon,
-                    tint: style.tint
-                )
-                Spacer(minLength: 6)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(account.isLiability ? "当前待还款" : "可用资产余额")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(LedgerWidgetColors.secondary)
-                    Text(primaryAmount(account, narrow: false))
-                        .font(.system(size: 27, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(account.isLiability ? LedgerWidgetColors.expense : LedgerWidgetColors.ink)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .privacySensitive()
-                }
-                Spacer(minLength: 4)
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(account.isLiability ? LedgerWidgetColors.expense : LedgerWidgetColors.success)
-                        .frame(width: 5, height: 5)
-                    Text(account.isLiability ? "按期对账" : "账面在册")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(LedgerWidgetColors.secondary)
-                    Text("·")
-                        .foregroundStyle(LedgerWidgetColors.secondary)
-                    Text(LedgerWidgetText.updated(updatedAt, now: entry.date))
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(LedgerWidgetColors.secondary)
-                }
-                .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Right Tactile Context Card
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("账户概况")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(LedgerWidgetColors.ink)
-                    Spacer(minLength: 0)
-                    Text(account.currency)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(LedgerWidgetColors.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(LedgerWidgetColors.raised)
-                        .clipShape(Capsule())
-                }
-
-                if let valuation = secondaryValuation(account, narrow: false) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("统一估值 (\(account.valuationCurrency))")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(LedgerWidgetColors.secondary)
-                        Text(valuation)
-                            .font(.system(size: 13.5, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(LedgerWidgetColors.ink)
-                            .lineLimit(1)
-                            .privacySensitive()
-                    }
-                    .padding(.top, 1)
-                }
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("类别属性")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(LedgerWidgetColors.secondary)
-                    Text(style.groupLabel)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(LedgerWidgetColors.ink)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 0)
-
-                HStack(spacing: 2) {
-                    Text("查看账本明细")
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 8, weight: .bold))
-                }
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(LedgerWidgetColors.secondary)
-            }
-            .frame(width: 116, alignment: .leading)
-            .widgetSubcard(cornerRadius: 10, padding: 8)
-        }
-    }
-
-    private func primaryAmount(_ account: LedgerWidgetAccountSnapshot, narrow: Bool) -> String {
         let amount = account.isLiability ? MoneyText.magnitude(account.balance) : account.balance
-        return narrow
-            ? MoneyText.formatWidget(minorUnits: amount, currency: account.currency)
-            : MoneyText.formatCompact(minorUnits: amount, currency: account.currency)
-    }
-
-    private func secondaryValuation(_ account: LedgerWidgetAccountSnapshot, narrow: Bool) -> String? {
-        guard let valuation = account.valuation,
-              account.currency != account.valuationCurrency else {
-            return nil
-        }
-        let amount = account.isLiability ? MoneyText.magnitude(valuation) : valuation
-        return narrow
-            ? MoneyText.formatWidget(minorUnits: amount, currency: account.valuationCurrency)
-            : MoneyText.formatCompact(minorUnits: amount, currency: account.valuationCurrency)
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(account.label).font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(LedgerWidgetColors.ink).lineLimit(2)
+            Spacer(minLength: 0)
+            Text("\(account.isLiability ? "待还余额" : "资产余额") · \(account.currency)")
+                .font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
+            LedgerWidgetAmount(amount: amount, currency: account.currency, size: medium ? 29 : 23)
+            if let valuation = account.valuation, account.currency != account.valuationCurrency {
+                Text("估值 " + MoneyText.format(minorUnits: account.isLiability ? MoneyText.magnitude(valuation) : valuation, currency: account.valuationCurrency))
+                    .font(.system(size: 10, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.6)
+                    .foregroundStyle(LedgerWidgetColors.secondary)
+            }
+            Spacer(minLength: 0)
+            LedgerWidgetFooter(label: style.groupLabel, date: updated, now: entry.date)
+        }.privacySensitive()
     }
 }
 

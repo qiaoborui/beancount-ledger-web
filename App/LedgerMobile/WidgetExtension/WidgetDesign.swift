@@ -3,15 +3,21 @@ import UIKit
 import WidgetKit
 
 enum LedgerWidgetColors {
-    static let canvas = Color.dynamic(light: 0xF2F4F7, dark: 0x0C0E14)
-    static let panel = Color.dynamic(light: 0xFFFFFF, dark: 0x161A22)
-    static let raised = Color.dynamic(light: 0xF0F3F7, dark: 0x202632)
+    static let canvas = Color.dynamic(light: 0xF5F6F4, dark: 0x181D21)
+    static let panel = Color.dynamic(light: 0xF5F6F4, dark: 0x181D21)
+    static let raised = Color.dynamic(light: 0xE9EDE8, dark: 0x222A30)
     static let tag = Color.dynamic(light: 0xEAEEF4, dark: 0x1E2430)
-    static let ink = Color.dynamic(light: 0x0F172A, dark: 0xF1F5F9)
-    static let secondary = Color.dynamic(light: 0x64748B, dark: 0x94A3B8)
-    static let line = Color.dynamic(light: 0xE2E8F0, dark: 0x2A3241)
-    static let cobalt = Color.dynamic(light: 0x0F172A, dark: 0xF1F5F9)
-    static let chartLine = Color.dynamic(light: 0x334155, dark: 0x94A3B8)
+    static let ink = Color.dynamic(light: 0x202B2E, dark: 0xE1E7E6)
+    static let secondary = Color.dynamic(light: 0x536266, dark: 0xA2AFAF)
+    static let line = Color.dynamic(light: 0xCBD3CF, dark: 0x354047)
+    static let cobalt = Color.dynamic(light: 0x202B2E, dark: 0xE1E7E6)
+    static let chartLine = Color.dynamic(light: 0x855300, dark: 0xE5B55F)
+    static let accent = chartLine
+    static let heat1 = Color.dynamic(light: 0xD9D5C8, dark: 0x383A35)
+    static let heat2 = Color.dynamic(light: 0xB9A47D, dark: 0x6A5B40)
+    static let heat3 = Color.dynamic(light: 0x967037, dark: 0xAA8248)
+    static let heat4 = Color.dynamic(light: 0x714500, dark: 0xE5B55F)
+    static let heatInk = Color.dynamic(light: 0xFFFFFF, dark: 0x202B2E)
     static let expense = Color.dynamic(light: 0xC0392B, dark: 0xF87171)
     static let expenseSoft = Color.dynamic(light: 0xFEE2E2, dark: 0x381E1E)
     static let success = Color.dynamic(light: 0x15803D, dark: 0x4ADE80)
@@ -69,28 +75,12 @@ struct LedgerWidgetHeader: View {
     var badgeText: String? = nil
 
     var body: some View {
-        HStack(spacing: 8) {
-            LedgerWidgetBrandMark(systemName: systemName, tint: tint)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(LedgerWidgetColors.ink)
-                    .lineLimit(1)
-                Text(detail)
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(LedgerWidgetColors.secondary)
-                    .lineLimit(1)
-            }
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(title).font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(LedgerWidgetColors.ink).lineLimit(1)
             Spacer(minLength: 0)
-            if let badgeText {
-                Text(badgeText)
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(LedgerWidgetColors.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(LedgerWidgetColors.raised)
-                    .clipShape(Capsule())
-            }
+            Text(detail).font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(LedgerWidgetColors.secondary).lineLimit(1)
         }
     }
 }
@@ -250,11 +240,10 @@ enum LedgerWidgetText {
     }
 
     static func updated(_ date: Date, now: Date = Date()) -> String {
-        guard date < now.addingTimeInterval(-60) else { return "刚刚更新" }
-        let formatter = RelativeDateTimeFormatter()
+        let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: now) + "更新"
+        formatter.dateFormat = Calendar.current.isDate(date, inSameDayAs: now) ? "HH:mm" : "MM/dd HH:mm"
+        return formatter.string(from: date) + " 更新"
     }
 
     static func checked(_ date: Date, now: Date = Date()) -> String {
@@ -372,4 +361,66 @@ extension LedgerWidgetSnapshot {
         result.insights = snapshot.insights
         return result
     }()
+}
+
+// Shared typography and explicit privacy states for the terminal widget family.
+struct LedgerWidgetAmount: View {
+    let amount: Int
+    let currency: String
+    var size: CGFloat = 23
+    var body: some View {
+        Text(MoneyText.format(minorUnits: amount, currency: currency))
+            .font(.system(size: size, weight: .semibold, design: .monospaced))
+            .monospacedDigit().foregroundStyle(LedgerWidgetColors.ink)
+            .lineLimit(1).minimumScaleFactor(0.4).allowsTightening(true)
+            .privacySensitive()
+    }
+}
+
+struct LedgerWidgetFooter: View {
+    let label: String
+    let date: Date?
+    let now: Date
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(label).lineLimit(1)
+            Spacer(minLength: 0)
+            Text(date.map { LedgerWidgetText.updated($0, now: now) } ?? "尚未更新").lineLimit(1)
+        }
+        .font(.system(size: 9)).foregroundStyle(LedgerWidgetColors.secondary)
+    }
+}
+
+struct LedgerWidgetPrivacyView: View {
+    var title: String = "Ledger"
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 12, weight: .semibold))
+            Spacer(minLength: 0)
+            Image(systemName: "lock.fill").font(.system(size: 15))
+            Text("内容已隐藏").font(.system(size: 12, weight: .medium))
+            Text("打开账本查看").font(.system(size: 10))
+                .foregroundStyle(LedgerWidgetColors.secondary)
+            Spacer(minLength: 0)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+            .foregroundStyle(LedgerWidgetColors.ink).unredacted()
+    }
+}
+
+enum LedgerWidgetHeat {
+    // Fixed minor-unit thresholds retain comparable intensity across dates.
+    static func level(_ amount: Int) -> Int {
+        if amount <= 0 { return 0 }
+        if amount <= 5_000 { return 1 }
+        if amount <= 10_000 { return 2 }
+        if amount <= 20_000 { return 3 }
+        return 4
+    }
+    static func color(_ amount: Int) -> Color {
+        let level = level(amount)
+        return [LedgerWidgetColors.raised, LedgerWidgetColors.heat1, LedgerWidgetColors.heat2, LedgerWidgetColors.heat3, LedgerWidgetColors.heat4][level]
+    }
+    static func shortDate(_ raw: String) -> String {
+        String(raw.suffix(5)).replacingOccurrences(of: "-", with: "/")
+    }
 }
