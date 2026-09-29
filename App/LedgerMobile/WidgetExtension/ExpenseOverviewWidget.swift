@@ -60,260 +60,96 @@ struct ExpenseOverviewWidget: Widget {
 
 struct ExpenseOverviewWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.redactionReasons) private var redactionReasons
     let entry: ExpenseOverviewEntry
     var familyOverride: WidgetFamily?
 
-    init(entry: ExpenseOverviewEntry, familyOverride: WidgetFamily? = nil) {
-        self.entry = entry
-        self.familyOverride = familyOverride
-    }
-
     var body: some View {
-        if let snapshot = entry.snapshot, let expense = entry.period.currentExpense(in: snapshot, now: entry.date) {
-            let updatedAt = entry.period == .month ? snapshot.updatedAt : snapshot.insights?.date ?? snapshot.updatedAt
-            Group {
-                if (familyOverride ?? family) == .systemMedium {
-                    medium(expense, updatedAt: updatedAt)
-                } else {
-                    small(expense, updatedAt: updatedAt)
-                }
+        Group {
+            if !redactionReasons.isEmpty {
+                LedgerWidgetPrivacyView(title: "支出概览")
+            } else if let snapshot = entry.snapshot,
+                      let expense = entry.period.currentExpense(in: snapshot, now: entry.date) {
+                let updated = entry.period == .month ? snapshot.updatedAt : snapshot.insights?.date ?? snapshot.updatedAt
+                content(expense, updated: updated)
+            } else {
+                LedgerWidgetUnavailableView(title: "等待消费数据", detail: "打开 Ledger 并刷新一次")
             }
-            .widgetURL(URL(string: "ledger://overview"))
-            .privacySensitive()
-            .containerBackground(for: .widget) { LedgerWidgetColors.panel }
-        } else {
-            LedgerWidgetUnavailableView(
-                title: "等待消费数据",
-                detail: "打开 Ledger 并刷新一次"
-            )
-            .widgetURL(URL(string: "ledger://overview"))
         }
+        .widgetURL(URL(string: "ledger://overview"))
+        .containerBackground(for: .widget) { LedgerWidgetColors.panel }
     }
 
-    private func small(_ expense: LedgerWidgetExpenseSnapshot, updatedAt: Date) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            LedgerWidgetHeader(
-                title: entry.period.title,
-                detail: periodDetail(expense),
-                systemName: "chart.bar.xaxis",
-                tint: LedgerWidgetColors.cobalt
-            )
-            Spacer(minLength: 8)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(MoneyText.formatWidget(minorUnits: expense.amount, currency: expense.currency))
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(LedgerWidgetColors.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.65)
-                    .privacySensitive()
-                HStack(spacing: 5) {
-                    comparisonLabel(expense.yearOverYearPercentage)
-                    Text("·")
-                        .foregroundStyle(LedgerWidgetColors.secondary)
-                    Text("\(expense.transactionCount) 笔")
-                        .font(.system(size: 9.5, weight: .medium))
-                        .foregroundStyle(LedgerWidgetColors.secondary)
-                }
-            }
-            Spacer(minLength: 6)
-            if !expense.dailySeries.isEmpty {
-                Chart(expense.dailySeries) { point in
-                    AreaMark(
-                        x: .value("日期", point.date),
-                        y: .value("支出", point.amount)
-                    )
-                    .interpolationMethod(.catmullRom)
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [LedgerWidgetColors.chartLine.opacity(0.18), LedgerWidgetColors.chartLine.opacity(0.01)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    LineMark(
-                        x: .value("日期", point.date),
-                        y: .value("支出", point.amount)
-                    )
-                    .interpolationMethod(.catmullRom)
-                    .foregroundStyle(LedgerWidgetColors.chartLine)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-                }
-                .chartXAxis(.hidden)
-                .chartYAxis(.hidden)
-                .frame(height: 22)
-                .privacySensitive()
-            }
-            Spacer(minLength: 4)
-            Text(LedgerWidgetText.updated(updatedAt, now: entry.date))
-                .font(.system(size: 8.5, weight: .medium))
-                .foregroundStyle(LedgerWidgetColors.secondary)
-        }
-    }
-
-    private func medium(_ expense: LedgerWidgetExpenseSnapshot, updatedAt: Date) -> some View {
-        HStack(spacing: 12) {
-            // Left Metric & Trend Section
-            VStack(alignment: .leading, spacing: 0) {
-                LedgerWidgetHeader(
-                    title: entry.period.title,
-                    detail: periodDetail(expense),
-                    systemName: "chart.bar.xaxis",
-                    tint: LedgerWidgetColors.cobalt
-                )
-                Spacer(minLength: 6)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(MoneyText.formatCompact(minorUnits: expense.amount, currency: expense.currency))
-                        .font(.system(size: 25, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(LedgerWidgetColors.ink)
-                        .lineLimit(1)
-                        .privacySensitive()
-                    HStack(spacing: 5) {
-                        comparisonLabel(expense.yearOverYearPercentage)
-                        Text("·")
-                            .foregroundStyle(LedgerWidgetColors.secondary)
-                        Text("\(expense.transactionCount) 笔支出")
-                            .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(LedgerWidgetColors.secondary)
-                    }
-                }
-                if !expense.dailySeries.isEmpty {
-                    Chart(expense.dailySeries) { point in
-                        AreaMark(
-                            x: .value("日期", point.date),
-                            y: .value("支出", point.amount)
-                        )
-                        .interpolationMethod(.catmullRom)
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [LedgerWidgetColors.chartLine.opacity(0.18), LedgerWidgetColors.chartLine.opacity(0.01)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        LineMark(
-                            x: .value("日期", point.date),
-                            y: .value("支出", point.amount)
-                        )
-                        .interpolationMethod(.catmullRom)
-                        .foregroundStyle(LedgerWidgetColors.chartLine)
-                        .lineStyle(StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
-                    }
-                    .chartXAxis(.hidden)
-                    .chartYAxis(.hidden)
-                    .frame(height: 28)
-                    .padding(.top, 4)
-                    .privacySensitive()
-                }
-                Spacer(minLength: 2)
-                Text(LedgerWidgetText.updated(updatedAt, now: entry.date))
-                    .font(.system(size: 8.5, weight: .medium))
-                    .foregroundStyle(LedgerWidgetColors.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Right Category Breakdown Card
-            VStack(alignment: .leading, spacing: 7) {
-                Text("主要支出分类")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(LedgerWidgetColors.secondary)
-                if expense.categories.isEmpty {
-                    VStack {
-                        Spacer()
-                        Text("暂无分类数据")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(LedgerWidgetColors.secondary)
-                        Spacer()
-                    }
-                } else {
-                    ForEach(Array(expense.categories.prefix(3))) { category in
-                        expenseCategory(category, total: expense.amount, currency: expense.currency)
-                    }
-                }
+    private func content(_ expense: LedgerWidgetExpenseSnapshot, updated: Date) -> some View {
+        let medium = (familyOverride ?? family) == .systemMedium
+        return VStack(alignment: .leading, spacing: 8) {
+            LedgerWidgetHeader(title: "支出", detail: periodDetail(expense))
+            if medium {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        LedgerWidgetAmount(amount: expense.amount, currency: expense.currency)
+                        comparison(expense.yearOverYearPercentage)
+                        Spacer(minLength: 0)
+                        Text(expense.transactionCount == 0 ? "暂无支出" : "\(expense.transactionCount) 笔 · 分类占比 →")
+                            .font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    Rectangle().fill(LedgerWidgetColors.line).frame(width: 1)
+                    categories(expense).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxHeight: .infinity)
+            } else {
+                LedgerWidgetAmount(amount: expense.amount, currency: expense.currency)
+                comparison(expense.yearOverYearPercentage)
                 Spacer(minLength: 0)
+                HStack(spacing: 8) {
+                    Rectangle().fill(LedgerWidgetColors.accent).frame(width: 16, height: 2)
+                    Text(expense.transactionCount == 0 ? "暂无支出" : "\(expense.transactionCount) 笔支出")
+                        .font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
+                }
             }
-            .frame(width: 130, alignment: .leading)
-            .widgetSubcard(cornerRadius: 10, padding: 8)
-        }
+            LedgerWidgetFooter(label: expense.currency, date: updated, now: entry.date)
+        }.privacySensitive()
     }
 
-    @ViewBuilder
-    private func comparisonLabel(_ percentage: Double?) -> some View {
-        if let percentage {
-            let isFavorable = percentage <= 0
-            HStack(spacing: 2) {
-                Image(systemName: isFavorable ? "arrow.down.right" : "arrow.up.right")
-                    .font(.system(size: 8, weight: .bold))
-                Text("同比 \(LedgerWidgetText.percentage(abs(percentage)))")
-            }
-            .font(.system(size: 9.5, weight: .semibold))
-            .foregroundStyle(isFavorable ? LedgerWidgetColors.success : LedgerWidgetColors.expense)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1.5)
-            .background(isFavorable ? LedgerWidgetColors.successSoft : LedgerWidgetColors.expenseSoft)
-            .clipShape(Capsule())
-        } else {
-            Text("同比 --")
-                .font(.system(size: 9.5, weight: .medium))
-                .foregroundStyle(LedgerWidgetColors.secondary)
-        }
+    private func comparison(_ percentage: Double?) -> some View {
+        Text(percentage.map { "\($0 < 0 ? "↓" : "↑") \(LedgerWidgetText.percentage(abs($0))) · 同比" } ?? "暂无同期数据")
+            .font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
+            .lineLimit(1).minimumScaleFactor(0.8)
     }
 
     private func periodDetail(_ expense: LedgerWidgetExpenseSnapshot) -> String {
         switch entry.period {
         case .month: expense.periodTitle
         case .year: String(expense.start.prefix(4)) + "年"
-        case .week: String(expense.start.suffix(5)).replacingOccurrences(of: "-", with: "/") + " 起"
+        case .week: LedgerWidgetHeat.shortDate(expense.start) + " 起"
         }
     }
 
-    private func expenseCategory(
-        _ category: LedgerWidgetExpenseCategory,
-        total: Int,
-        currency: String
-    ) -> some View {
-        let style = LedgerWidgetVisualHelper.category(for: category.account.isEmpty ? category.label : category.account)
-        let fraction = categoryFraction(category.amount, total: total)
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 5) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(LedgerWidgetColors.raised)
-                    Image(systemName: style.icon)
-                        .font(.system(size: 8.5, weight: .medium))
-                        .foregroundStyle(LedgerWidgetColors.ink)
-                }
-                .frame(width: 16, height: 16)
-
-                Text(category.label)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(LedgerWidgetColors.ink)
-                    .lineLimit(1)
-
-                Spacer(minLength: 2)
-
-                Text(MoneyText.formatWidget(minorUnits: category.amount, currency: currency))
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(LedgerWidgetColors.secondary)
-                    .privacySensitive()
-            }
-            GeometryReader { geometry in
-                Capsule()
-                    .fill(LedgerWidgetColors.raised)
-                    .overlay(alignment: .leading) {
-                        Capsule()
-                            .fill(LedgerWidgetColors.ink.opacity(0.72))
-                            .frame(width: geometry.size.width * fraction)
+    private func categories(_ expense: LedgerWidgetExpenseSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if expense.categories.isEmpty {
+                Text("暂无分类数据").font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
+            } else {
+                ForEach(Array(expense.categories.prefix(3).enumerated()), id: \.element.id) { index, category in
+                    let fraction = expense.amount > 0 ? min(max(Double(category.amount) / Double(expense.amount), 0), 1) : 0
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(String(format: "%02d", index + 1))
+                            .font(.system(size: 10, design: .monospaced)).foregroundStyle(LedgerWidgetColors.accent)
+                        VStack(spacing: 4) {
+                            HStack(spacing: 3) {
+                                Text(category.label).lineLimit(1)
+                                Spacer(minLength: 0)
+                                Text(LedgerWidgetText.percentage(fraction)).monospacedDigit()
+                            }.font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.ink)
+                            GeometryReader { bounds in
+                                Rectangle().fill(LedgerWidgetColors.line)
+                                    .overlay(alignment: .leading) {
+                                        Rectangle().fill(LedgerWidgetColors.accent).frame(width: bounds.size.width * fraction)
+                                    }
+                            }.frame(height: 2)
+                        }
                     }
+                }
             }
-            .frame(height: 3.5)
         }
-    }
-
-    private func categoryFraction(_ value: Int, total: Int) -> CGFloat {
-        guard total > 0 else { return 0 }
-        return min(max(CGFloat(value) / CGFloat(total), 0), 1)
     }
 }

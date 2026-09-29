@@ -398,6 +398,57 @@ final class LedgerWidgetVisualTests: XCTestCase {
         )
     }
 
+    func testRenderTerminalLongAndEmptyStates() throws {
+        let base = LedgerWidgetSnapshot.placeholder
+        let expense = base.expense
+        func snapshot(amount: Int, count: Int, label: String) -> LedgerWidgetSnapshot {
+            LedgerWidgetSnapshot(updatedAt: base.updatedAt,
+                expense: .init(periodTitle: expense.periodTitle, start: expense.start, end: expense.end,
+                    currency: expense.currency, amount: amount, transactionCount: count,
+                    yearOverYearPercentage: nil, categories: [], dailySeries: []),
+                accounts: [.init(account: "Assets:Cash", label: label, group: "cash", currency: "CNY",
+                    balance: amount, valuationCurrency: "CNY", valuation: nil)])
+        }
+        for (name, value) in [
+            ("long", snapshot(amount: 8_264_200_001, count: 1234, label: "招商银行深圳分行家庭共同支出备用金账户")),
+            ("empty", snapshot(amount: 0, count: 0, label: "日常账户"))
+        ] {
+            try render(ExpenseOverviewWidgetView(entry: .init(date: base.updatedAt, snapshot: value), familyOverride: .systemSmall),
+                size: CGSize(width: 158, height: 158), name: "terminal-overview-\(name)")
+            try render(AccountBalanceWidgetView(entry: .init(date: base.updatedAt, snapshot: value, selectedAccountID: value.accounts[0].id), familyOverride: .systemSmall),
+                size: CGSize(width: 158, height: 158), name: "terminal-account-\(name)")
+        }
+    }
+
+    func testTerminalHeatUsesStableAmountThresholds() {
+        XCTAssertEqual([-1, 0, 1, 5_000, 5_001, 10_000, 10_001, 20_000, 20_001].map(LedgerWidgetHeat.level),
+                       [0, 0, 1, 1, 2, 2, 3, 3, 4])
+    }
+
+    func testRenderTerminalFamiliesAndPrivacy() throws {
+        let snapshot = LedgerWidgetSnapshot.placeholder
+        let now = snapshot.updatedAt
+        let history = ExpenseCalendarEntry(date: now, snapshot: snapshot)
+        for scheme in [ColorScheme.light, .dark] {
+            let suffix = scheme == .light ? "light" : "dark"
+            for (family, size, name) in [
+                (WidgetFamily.systemSmall, CGSize(width: 158, height: 158), "small"),
+                (.systemMedium, CGSize(width: 338, height: 158), "medium")
+            ] {
+                try render(AccountBalanceWidgetView(entry: .init(date: now, snapshot: snapshot, selectedAccountID: snapshot.accounts.first?.id), familyOverride: family), size: size, name: "terminal-account-\(name)-\(suffix)", colorScheme: scheme)
+            }
+            for (family, size, name) in [
+                (WidgetFamily.systemMedium, CGSize(width: 338, height: 158), "medium"),
+                (.systemLarge, CGSize(width: 338, height: 354), "large")
+            ] {
+                try render(ExpenseCalendarWidgetView(entry: history, familyOverride: family), size: size, name: "terminal-calendar-\(name)-\(suffix)", colorScheme: scheme)
+                try render(ImportStatusWidgetView(entry: .init(date: now, snapshot: snapshot), familyOverride: family), size: size, name: "terminal-import-\(name)-\(suffix)", colorScheme: scheme)
+            }
+            try render(ExpenseHeatmapWidgetView(entry: history).redacted(reason: .privacy), size: CGSize(width: 338, height: 158), name: "terminal-private-heatmap-\(suffix)", colorScheme: scheme)
+            try render(ExpenseCalendarWidgetView(entry: history, familyOverride: .systemLarge).redacted(reason: .privacy), size: CGSize(width: 338, height: 354), name: "terminal-private-calendar-\(suffix)", colorScheme: scheme)
+        }
+    }
+
     private func render<V: View>(
         _ view: V,
         size: CGSize,

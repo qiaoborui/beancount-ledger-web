@@ -16,69 +16,49 @@ struct ExpenseLockScreenWidget: Widget {
 }
 
 struct ExpenseLockScreenWidgetView: View {
-  @Environment(\.widgetFamily) private var family
-  let entry: ExpenseOverviewEntry
-  var familyOverride: WidgetFamily?
-
-  var body: some View {
-    Group {
-      if let snapshot = entry.snapshot,
-        let expense = entry.period.currentExpense(in: snapshot, now: entry.date)
-      {
-        content(
-          expense,
-          updatedAt: entry.period == .month
-            ? snapshot.updatedAt : snapshot.insights?.date ?? snapshot.updatedAt
-        )
-        .privacySensitive()
-      } else {
-        Label("打开 Ledger 刷新", systemImage: "arrow.clockwise")
-          .font(.caption2).minimumScaleFactor(0.6)
-      }
+    @Environment(\.widgetFamily) private var family
+    @Environment(\.redactionReasons) private var redactionReasons
+    let entry: ExpenseOverviewEntry
+    var familyOverride: WidgetFamily?
+    var body: some View {
+        Group {
+            if !redactionReasons.isEmpty {
+                Label("已隐藏", systemImage: "lock.fill").font(.system(size: 11)).unredacted()
+            } else if let snapshot = entry.snapshot,
+                      let expense = entry.period.currentExpense(in: snapshot, now: entry.date) {
+                content(expense, updated: entry.period == .month ? snapshot.updatedAt : snapshot.insights?.date ?? snapshot.updatedAt)
+                    .privacySensitive()
+            } else {
+                Text("打开 Ledger 刷新").font(.system(size: 10)).lineLimit(2)
+            }
+        }.widgetURL(URL(string: "ledger://overview"))
+            .containerBackground(for: .widget) { Color.clear }
     }
-    .widgetURL(URL(string: "ledger://overview"))
-    .containerBackground(for: .widget) { Color.clear }
-  }
-
-  @ViewBuilder
-  private func content(_ expense: LedgerWidgetExpenseSnapshot, updatedAt: Date) -> some View {
-    let amount = MoneyText.formatCompact(minorUnits: expense.amount, currency: expense.currency)
-    switch familyOverride ?? family {
-    case .accessoryInline:
-      Text("\(entry.period.title) \(amount)")
-    case .accessoryCircular:
-      ZStack {
-        AccessoryWidgetBackground()
-        VStack(spacing: 1.5) {
-          Image(systemName: "chart.bar.xaxis")
-            .font(.system(size: 9, weight: .semibold))
-          Text(amount)
-            .font(.system(size: 14, weight: .semibold, design: .rounded))
-            .monospacedDigit()
-            .lineLimit(1)
-            .minimumScaleFactor(0.45)
-          Text(entry.period.title.replacingOccurrences(of: "消费", with: ""))
-            .font(.system(size: 8, weight: .medium))
+    @ViewBuilder private func content(_ expense: LedgerWidgetExpenseSnapshot, updated: Date) -> some View {
+        let amount = MoneyText.format(minorUnits: expense.amount, currency: expense.currency)
+        switch familyOverride ?? family {
+        case .accessoryInline:
+            Text("\(entry.period.title) \(amount)").font(.system(size: 11, design: .monospaced))
+        case .accessoryCircular:
+            VStack(spacing: 3) {
+                Text(entry.period.title.replacingOccurrences(of: "消费", with: ""))
+                    .font(.system(size: 10))
+                Text(MoneyText.formatWidget(minorUnits: expense.amount, currency: expense.currency))
+                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                    .lineLimit(1).minimumScaleFactor(0.5)
+                Text("约").font(.system(size: 8))
+            }.accessibilityElement(children: .ignore).accessibilityLabel("\(entry.period.title) \(amount)")
+        default:
+            HStack(spacing: 8) {
+                Rectangle().frame(width: 2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.period.title).font(.system(size: 10))
+                    Text(amount).font(.system(size: 22, weight: .semibold, design: .monospaced))
+                        .lineLimit(1).minimumScaleFactor(0.4)
+                    Text("\(expense.transactionCount)笔 · \(LedgerWidgetText.updated(updated, now: entry.date))")
+                        .font(.system(size: 9)).lineLimit(1).minimumScaleFactor(0.7)
+                }
+            }
         }
-        .padding(3)
-      }
-    default:
-      VStack(alignment: .leading, spacing: 2) {
-        Label(entry.period.title, systemImage: "chart.bar.xaxis")
-          .font(.system(size: 10, weight: .medium))
-        Text(amount)
-          .font(.system(size: 21, weight: .semibold, design: .rounded))
-          .monospacedDigit()
-          .lineLimit(1)
-          .minimumScaleFactor(0.6)
-        HStack(spacing: 4) {
-          Text("\(expense.transactionCount) 笔")
-          Text("·")
-          Text(LedgerWidgetText.updated(updatedAt, now: entry.date))
-        }
-        .font(.system(size: 9, weight: .medium))
-        .lineLimit(1)
-      }
     }
-  }
 }
