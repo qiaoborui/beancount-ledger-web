@@ -29,24 +29,47 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings-compact-tabs")
             }
             Section {
-                Label("使用设备密码或生物识别解锁", systemImage: "lock.shield")
-
-                Picker(selection: lockIntervalBinding) {
-                    ForEach(LedgerLockInterval.allCases) { interval in
-                        Text(interval.title).tag(interval)
+                if session.isLocal {
+                    Toggle(isOn: Binding(
+                        get: { session.localPrivacyProtectionEnabled },
+                        set: { enabled in Task { await session.setLocalPrivacyProtectionEnabled(enabled) } }
+                    )) {
+                        Label("\(session.biometricTitle) 保护", systemImage: session.biometricSystemImage)
                     }
-                } label: {
-                    Label("自动锁定", systemImage: "timer")
+                    .disabled(session.isBiometricSettingBusy || session.isAuthenticationBusy)
+                    .accessibilityIdentifier("settings-local-authentication")
+                    Toggle(isOn: Binding(
+                        get: { session.localPrivacyCoverEnabled },
+                        set: { session.setLocalPrivacyCoverEnabled($0) }
+                    )) {
+                        Label("隐私遮罩", systemImage: "rectangle.on.rectangle.slash")
+                    }
+                    .disabled(session.isBiometricSettingBusy || session.isAuthenticationBusy)
+                    .accessibilityIdentifier("settings-local-privacy-cover")
+                } else {
+                    Label("使用设备密码或生物识别解锁", systemImage: "lock.shield")
                 }
-                Button {
-                    Task { await session.lock() }
-                } label: {
-                    Label("立即锁定", systemImage: "lock.fill")
+
+                if session.localPrivacyProtectionEnabled {
+                    Picker(selection: lockIntervalBinding) {
+                        ForEach(LedgerLockInterval.allCases) { interval in
+                            Text(interval.title).tag(interval)
+                        }
+                    } label: {
+                        Label("自动锁定", systemImage: "timer")
+                    }
+                    Button {
+                        Task { await session.lock() }
+                    } label: {
+                        Label("立即锁定", systemImage: "lock.fill")
+                    }
                 }
             } header: {
                 Text("隐私与安全")
             } footer: {
-                Text("本地账本由这台设备保护。离开 App 后按设定时间锁定，切换应用时始终隐藏账本。")
+                Text(session.isLocal
+                    ? "身份验证控制打开账本时的验证；隐私遮罩控制切换应用时是否遮住账本。两个开关互不影响，仅用于当前账本。"
+                    : "打开账本需要验证身份，切换应用时隐藏账本。")
             }
             if session.isLocal {
                 if let ledgerID = session.currentLocalLedgerDescriptor?.id {

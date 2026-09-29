@@ -174,6 +174,8 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var privacyCoverArmed = false
     @Published private(set) var isAuthenticationBusy = false
     @Published private(set) var isBiometricSettingBusy = false
+    @Published private var localAuthenticationDisabledLedgers: Set<String> = []
+    @Published private var localPrivacyCoverPreferences: [String: Bool] = [:]
     @Published private(set) var isWidgetRefreshBusy = false
     @Published private(set) var lockInterval: LedgerLockInterval = .fiveMinutes
     @Published private(set) var importIndexProgress: LedgerImportIndexProgress?
@@ -401,6 +403,8 @@ final class LedgerSession: ObservableObject {
     private static let storageModeKey = "ledger.mobile.storage-mode"
     private static let locallyLockedOriginsKey = "ledger.mobile.locally-locked-origins"
     private static let lockIntervalsKey = "ledger.mobile.lock-intervals"
+    private static let localPrivacyCoverKey = "ledger.mobile.local-privacy-cover"
+    private static let localAuthenticationDisabledKey = "ledger.mobile.local-authentication-disabled"
     private static let valuationCurrenciesKey = "ledger.mobile.valuation-currencies"
     private static let backgroundDatesKey = "ledger.mobile.background-dates"
     private static let gmailOAuthStatesKey = "ledger.mobile.gmail-oauth-states"
@@ -429,6 +433,17 @@ final class LedgerSession: ObservableObject {
         selectedRange = initialRange
         draftRange = initialRange
         self.defaults = defaults
+        let disabledAuthentication = Set(defaults.stringArray(forKey: Self.localAuthenticationDisabledKey) ?? [])
+        localAuthenticationDisabledLedgers = disabledAuthentication
+        // Preserve the behavior of installed versions that coupled the two settings.
+        if let saved = defaults.dictionary(forKey: Self.localPrivacyCoverKey) as? [String: Bool] {
+            localPrivacyCoverPreferences = saved
+        } else {
+            let migratedCover = Dictionary(uniqueKeysWithValues:
+                disabledAuthentication.map { ($0, false) })
+            localPrivacyCoverPreferences = migratedCover
+            defaults.set(migratedCover, forKey: Self.localPrivacyCoverKey)
+        }
         self.localOnly = localOnly
         self.automaticLocalSyncServicesEnabled = automaticLocalSyncServicesEnabled
         self.localCatalog = localCatalog ?? (api == nil && repositoryFactory == nil ? try? LocalLedgerCatalog.appManaged() : nil)
@@ -534,6 +549,55 @@ final class LedgerSession: ObservableObject {
 
     var biometricKind: LedgerBiometricKind {
         biometricStore.biometricKind
+    }
+
+    var localPrivacyProtectionEnabled: Bool {
+        guard case let .local(id) = location else { return true }
+        return requiresLocalAuthentication(for: id)
+    }
+
+    var localPrivacyCoverEnabled: Bool {
+        guard case let .local(id) = location else { return true }
+        return localPrivacyCoverPreferences[id.uuidString] ?? true
+    }
+
+    func setLocalPrivacyCoverEnabled(_ enabled: Bool) {
+        guard case let .local(id) = location, phase == .ready,
+              !isAuthenticationBusy, !isBiometricSettingBusy else { return }
+        localPrivacyCoverPreferences[id.uuidString] = enabled
+        defaults.set(localPrivacyCoverPreferences, forKey: Self.localPrivacyCoverKey)
+        if !enabled {
+            privacyShielded = false
+        }
+    }
+
+    private func requiresLocalAuthentication(for id: UUID) -> Bool {
+        !localAuthenticationDisabledLedgers.contains(id.uuidString)
+    }
+
+    func setLocalPrivacyProtectionEnabled(_ enabled: Bool) async {
+        guard case let .local(id) = location, let contextURL, phase == .ready,
+              enabled != localPrivacyProtectionEnabled, !isBiometricSettingBusy,
+              !isAuthenticationBusy, !isLocalOperationBusy else { return }
+        isBiometricSettingBusy = true
+        defer { isBiometricSettingBusy = false }
+        let epoch = sessionEpoch, expectedLocation = location
+        errorMessage = nil
+        do {
+            // Authenticate the settings change even when ordinary entry is disabled.
+            try await authenticateLocalLedger(epoch: epoch, location: expectedLocation)
+            try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
+            guard phase == .ready else { return }
+            if enabled { localAuthenticationDisabledLedgers.remove(id.uuidString) }
+            else { localAuthenticationDisabledLedgers.insert(id.uuidString) }
+            defaults.set(localAuthenticationDisabledLedgers.sorted(), forKey: Self.localAuthenticationDisabledKey)
+            setLocallyLocked(false, for: contextURL)
+            clearBackgroundDate(for: contextURL)
+            privacyShielded = false
+            amountsVisible = true
+        } catch {
+            if location == expectedLocation { errorMessage = error.localizedDescription }
+        }
     }
 
     var biometricTitle: String {
@@ -694,7 +758,9 @@ final class LedgerSession: ObservableObject {
         let expectedLocation = location
         defer { isLocalOperationBusy = false }
         do {
-            try await authenticateLocalLedger(epoch: epoch, location: expectedLocation)
+            if requiresLocalAuthentication(for: descriptor.id) {
+                try await authenticateLocalLedger(epoch: epoch, location: expectedLocation)
+            }
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
             try await activateLocalLedger(descriptor)
         } catch is CancellationError { } catch { errorMessage = error.localizedDescription }
@@ -831,7 +897,9 @@ final class LedgerSession: ObservableObject {
             systemAuthenticationInProgress = false
         }
         do {
-            try await authenticateLocalLedger(epoch: epoch, location: expectedLocation)
+            if localPrivacyProtectionEnabled {
+                try await authenticateLocalLedger(epoch: epoch, location: expectedLocation)
+            }
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
             if restoreRetainedLocalLedger() { return }
             await refreshLocalLedgers()
@@ -2890,7 +2958,7 @@ final class LedgerSession: ObservableObject {
             // System authentication (Face ID / Touch ID / device passcode) briefly deactivates
             // the scene while the sheet is presented. Skip shielding during that transient
             // inactive period so the privacy cover does not flash in and back out on unlock.
-            if (privacyCoverArmed || isBackground) && !systemAuthenticationInProgress {
+            if localPrivacyCoverEnabled && (privacyCoverArmed || isBackground) && !systemAuthenticationInProgress {
                 privacyShielded = true
                 privacyCoverArmed = true
                 amountsVisible = false
@@ -2898,7 +2966,7 @@ final class LedgerSession: ObservableObject {
             guard isBackground, let contextURL else { return }
             automaticUnlockAttempted = false
             recordBackgroundDate(for: contextURL)
-            if lockInterval == .immediately {
+            if localPrivacyProtectionEnabled && lockInterval == .immediately {
                 lockLocally(for: contextURL)
             }
             return
@@ -2924,7 +2992,7 @@ final class LedgerSession: ObservableObject {
     }
 
     func presentsPrivacyCover(sceneIsActive: Bool) -> Bool {
-        privacyCoverArmed && (!sceneIsActive || privacyShielded)
+        localPrivacyCoverEnabled && privacyCoverArmed && (!sceneIsActive || privacyShielded)
     }
 
     func toggleAmounts() {
@@ -4733,6 +4801,7 @@ final class LedgerSession: ObservableObject {
     }
 
     private func shouldLockAfterBackground(for contextURL: URL, now: Date? = nil) -> Bool {
+        if isLocal && !localPrivacyProtectionEnabled { return false }
         let dates = defaults.dictionary(forKey: Self.backgroundDatesKey) as? [String: Double]
         guard let timestamp = dates?[contextURL.absoluteString] else { return false }
         let elapsed = max(0, (now ?? ledgerNow()).timeIntervalSince1970 - timestamp)
@@ -4741,6 +4810,7 @@ final class LedgerSession: ObservableObject {
 
     private func lockLocally(for contextURL: URL) {
         guard self.contextURL == contextURL else { return }
+        guard localPrivacyProtectionEnabled else { return }
         if case .locked = phase { return }
         _ = invalidateSession()
         stopImportIndexTracking()

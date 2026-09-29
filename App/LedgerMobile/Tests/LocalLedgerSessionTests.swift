@@ -268,6 +268,151 @@ final class LocalLedgerSessionTests: XCTestCase {
         first.chooseLedger()
     }
 
+    func testLocalPrivacySwitchPersistsAcrossColdLaunchAndRestoresProtection() async throws {
+        let fixture = try fixture()
+        let catalog = LocalLedgerCatalog(rootDirectory: fixture.root.appendingPathComponent("managed"),
+            engine: ResumeEngine(), validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Privacy switch")
+        func session(_ auth: Authenticator) -> LedgerSession {
+            LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: auth,
+                defaults: fixture.defaults,
+                widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+                widgetCredentialStore: InertWidgetStore())
+        }
+        let firstAuth = Authenticator()
+        let first = session(firstAuth)
+        await first.openLocalLedger(descriptor)
+        XCTAssertTrue(first.localPrivacyProtectionEnabled)
+        first.setLocalPrivacyCoverEnabled(false)
+        await first.setLocalPrivacyProtectionEnabled(false)
+        XCTAssertEqual(firstAuth.calls, 2, "Disabling protection requires a fresh authentication")
+        XCTAssertFalse(first.localPrivacyProtectionEnabled)
+
+        let coldAuth = Authenticator()
+        let cold = session(coldAuth)
+        defer { cold.chooseLedger(); first.chooseLedger() }
+        await cold.start()
+        XCTAssertEqual(cold.phase, .ready)
+        XCTAssertEqual(coldAuth.calls, 0)
+        XCTAssertTrue(cold.amountsVisible)
+        cold.setLockInterval(.immediately)
+        await cold.updateActivity(isActive: false, isBackground: true)
+        XCTAssertEqual(cold.phase, .ready)
+        XCTAssertFalse(cold.privacyShielded)
+        XCTAssertFalse(cold.presentsPrivacyCover(sceneIsActive: false))
+        XCTAssertTrue(cold.amountsVisible)
+        await cold.updateActivity(isActive: true, isBackground: false)
+        await cold.automaticallyUnlockIfNeeded()
+        XCTAssertEqual(coldAuth.calls, 0)
+
+        await cold.setLocalPrivacyProtectionEnabled(true)
+        XCTAssertFalse(cold.localPrivacyCoverEnabled)
+        cold.setLocalPrivacyCoverEnabled(true)
+        XCTAssertTrue(cold.localPrivacyProtectionEnabled)
+        XCTAssertEqual(coldAuth.calls, 1)
+        await cold.updateActivity(isActive: false, isBackground: true)
+        XCTAssertEqual(cold.phase, .locked(authenticated: true))
+        XCTAssertTrue(cold.presentsPrivacyCover(sceneIsActive: false))
+        await cold.updateActivity(isActive: true, isBackground: false)
+        await cold.automaticallyUnlockIfNeeded()
+        XCTAssertEqual(coldAuth.calls, 2)
+        XCTAssertEqual(cold.phase, .ready)
+    }
+
+    func testPrivacyCoverAndAuthenticationAreIndependent() async throws {
+        for authentication in [true, false] {
+            for cover in [true, false] {
+                let fixture = try await openedResumeFixture()
+                let session = fixture.session
+                session.setLocalPrivacyCoverEnabled(cover)
+                await session.setLocalPrivacyProtectionEnabled(authentication)
+                XCTAssertEqual(session.localPrivacyCoverEnabled, cover)
+                XCTAssertEqual(session.localPrivacyProtectionEnabled, authentication)
+                session.setLockInterval(.immediately)
+                await session.updateActivity(isActive: false, isBackground: true)
+                XCTAssertEqual(session.presentsPrivacyCover(sceneIsActive: false), cover)
+                XCTAssertEqual(session.phase, authentication ? .locked(authenticated: true) : .ready)
+                await session.updateActivity(isActive: true, isBackground: false)
+                await session.automaticallyUnlockIfNeeded()
+                XCTAssertEqual(session.phase, .ready)
+                XCTAssertFalse(session.presentsPrivacyCover(sceneIsActive: true))
+                session.chooseLedger()
+            }
+        }
+    }
+
+    func testPrivacyCoverIsLedgerScopedAndMigratesPreviousOptOut() async throws {
+        let fixture = try fixture()
+        let catalog = LocalLedgerCatalog(rootDirectory: fixture.root.appendingPathComponent("managed"),
+            engine: ResumeEngine(), validator: { _, _ in })
+        let first = try await catalog.create(name: "Previous opt out")
+        let second = try await catalog.create(name: "Protected")
+        fixture.defaults.set([first.id.uuidString], forKey: "ledger.mobile.local-authentication-disabled")
+        func makeSession() -> LedgerSession {
+            LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+                defaults: fixture.defaults,
+                widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+                widgetCredentialStore: InertWidgetStore())
+        }
+        let session = makeSession()
+        await session.openLocalLedger(first)
+        XCTAssertFalse(session.localPrivacyCoverEnabled)
+        session.setLocalPrivacyCoverEnabled(true)
+        XCTAssertFalse(session.localPrivacyProtectionEnabled)
+        await session.openLocalLedger(second)
+        XCTAssertTrue(session.localPrivacyCoverEnabled)
+        session.setLocalPrivacyCoverEnabled(false)
+        XCTAssertTrue(session.localPrivacyProtectionEnabled)
+        session.chooseLedger()
+        let reopened = makeSession()
+        await reopened.openLocalLedger(first)
+        XCTAssertTrue(reopened.localPrivacyCoverEnabled)
+        XCTAssertFalse(reopened.localPrivacyProtectionEnabled)
+        await reopened.openLocalLedger(second)
+        XCTAssertFalse(reopened.localPrivacyCoverEnabled)
+        XCTAssertTrue(reopened.localPrivacyProtectionEnabled)
+        reopened.chooseLedger()
+    }
+
+    func testLocalPrivacySwitchRejectsFailedAuthenticationAndIsLedgerScoped() async throws {
+        let fixture = try await openedResumeFixture()
+        defer { fixture.session.chooseLedger() }
+        let session = fixture.session
+        fixture.authenticator.rejects = true
+        await session.setLocalPrivacyProtectionEnabled(false)
+        XCTAssertTrue(session.localPrivacyProtectionEnabled)
+        fixture.authenticator.rejects = false
+        await session.setLocalPrivacyProtectionEnabled(false)
+        XCTAssertFalse(session.localPrivacyProtectionEnabled)
+        let descriptors = try await fixture.catalog.list()
+        let original = try XCTUnwrap(descriptors.first)
+        let other = try await fixture.catalog.create(name: "Still protected")
+        let calls = fixture.authenticator.calls
+        await session.openLocalLedger(other)
+        XCTAssertTrue(session.localPrivacyProtectionEnabled)
+        XCTAssertEqual(fixture.authenticator.calls, calls + 1)
+        await session.openLocalLedger(original)
+        XCTAssertFalse(session.localPrivacyProtectionEnabled)
+        XCTAssertEqual(fixture.authenticator.calls, calls + 1)
+    }
+
+    func testPrivacySettingAuthenticationCannotCompleteAfterLedgerSwitch() async throws {
+        let fixture = try await openedResumeFixture()
+        let entered = expectation(description: "setting authentication")
+        let gate = Gate(entered)
+        fixture.authenticator.gate = gate
+        let change = Task { await fixture.session.setLocalPrivacyProtectionEnabled(false) }
+        await fulfillment(of: [entered], timeout: 3)
+        fixture.session.chooseLedger()
+        await gate.release()
+        await change.value
+        fixture.authenticator.gate = nil
+        let descriptors = try await fixture.catalog.list()
+        await fixture.session.openLocalLedger(try XCTUnwrap(descriptors.first))
+        XCTAssertTrue(fixture.session.localPrivacyProtectionEnabled)
+        fixture.session.chooseLedger()
+    }
+
     func testInactiveColdStartupWaitsForForegroundAndFailedAuthenticationAllowsManualRetry() async throws {
         for (rejects, available) in [(false, true), (true, true), (true, false)] {
             let fixture = try fixture()
