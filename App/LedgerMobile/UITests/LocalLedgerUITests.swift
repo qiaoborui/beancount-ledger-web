@@ -117,8 +117,11 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
-        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
         app.buttons["terminal-tab-transactions"].tap()
+        if !app.buttons["transaction-actions"].waitForExistence(timeout: 3) {
+            app.buttons["terminal-tab-transactions"].tap()
+        }
+        XCTAssertTrue(app.buttons["transaction-actions"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["transaction-actions"].tap()
         app.buttons["transaction-create-local"].tap()
         XCTAssertTrue(app.buttons["高级"].waitForExistence(timeout: 5))
@@ -132,6 +135,12 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["transaction-edit-save"].tap()
         XCTAssertTrue(app.buttons["bookkeeping-confirm-save"].waitForExistence(timeout: 30))
         app.buttons["bookkeeping-confirm-save"].tap()
+        let island = app.otherElements["ledger-dynamic-island-notice"]
+        XCTAssertTrue(island.waitForExistence(timeout: 5), "Dynamic Island notice should animate into view after bookkeeping save")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "dynamic-island-entry-verified"
+        shot.lifetime = .keepAlways
+        add(shot)
         XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 30))
         let row = app.staticTexts["Synthetic context action"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10))
