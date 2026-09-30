@@ -79,7 +79,7 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
     }
 
     func isCompactOverflow(in destinations: [LedgerDestination]) -> Bool {
-        self != .settings && self != .search && !destinations.contains(self)
+        self != .settings && !destinations.contains(self)
     }
 
     func compactSelection(in destinations: [LedgerDestination]) -> LedgerDestination {

@@ -63,7 +63,7 @@ final class LocalOnlySurfaceUITests: XCTestCase {
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 40))
-        app.buttons["terminal-tab-settings"].tap()
+        app.tabBars.buttons["更多"].tap()
         app.buttons["more-settings"].tap()
         let settings = app.buttons["settings-classification"]
         for _ in 0..<4 where !settings.isHittable { app.swipeUp() }
@@ -103,7 +103,7 @@ final class LocalOnlySurfaceUITests: XCTestCase {
         syncStatus.tap()
         XCTAssertTrue(app.navigationBars["存储与同步"].waitForExistence(timeout: 5))
         app.buttons["完成"].tap()
-        app.buttons["terminal-tab-settings"].tap()
+        app.tabBars.buttons["更多"].tap()
         app.buttons["more-settings"].tap()
         XCTAssertTrue(app.buttons["settings-local-files"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["local-storage-settings"].exists)

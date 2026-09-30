@@ -40,7 +40,7 @@ struct LedgerIslandPillView: View {
             // 2. 中间：极简主视觉 (大金额 + 简洁次级商户/路径)
             VStack(alignment: .leading, spacing: 2) {
                 Text(notice.amountText)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .font(.system(size: 17, weight: .bold, design: .monospaced))
                     .foregroundStyle(amountColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -70,7 +70,7 @@ struct LedgerIslandPillView: View {
                 )
         )
         // 极细腻的高级阴影，增加悬浮在屏幕上方的纵深
-        .shadow(color: Color.black.opacity(0.55), radius: 18, x: 0, y: 8)
+
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("ledger-dynamic-island-notice")
         .accessibilityLabel("\(notice.title), \(notice.amountText)")

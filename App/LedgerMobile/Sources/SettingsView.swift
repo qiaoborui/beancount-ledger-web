@@ -9,7 +9,7 @@ struct SettingsView: View {
     var isRoot = true
 
     var body: some View {
-        Form {
+        List {
             if let error = session.errorMessage {
                 Section { StatusBanner(message: error, onDismiss: session.dismissError) }
             }
@@ -133,7 +133,7 @@ struct SettingsView: View {
                     .accessibilityIdentifier("settings-app-version")
             }
         }
-        .formStyle(.grouped)
+        .listStyle(.plain)
         .font(.subheadline)
         .ledgerNavigation("设置", isRoot: isRoot)
         .sheet(isPresented: $compactTabConfigurationPresented) {
@@ -358,6 +358,7 @@ private struct CompactTabConfigurationView: View {
             .scrollContentBackground(.hidden)
             .background(LedgerPalette.canvas)
             .navigationTitle("底部标签栏")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
 
             .toolbar {

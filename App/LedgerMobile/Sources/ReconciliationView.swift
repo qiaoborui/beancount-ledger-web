@@ -219,10 +219,10 @@ struct ReconciliationView: View {
                                         .padding(.vertical, 6.5)
                                         .background {
                                             if isSelected {
-                                                Capsule().fill(LedgerPalette.cobalt)
+                                                RoundedRectangle(cornerRadius: LedgerRadius.sm).fill(LedgerPalette.cobalt)
                                             } else {
-                                                Capsule().fill(LedgerPalette.panel)
-                                                    .overlay(Capsule().stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
+                                                RoundedRectangle(cornerRadius: LedgerRadius.sm).fill(LedgerPalette.panel)
+                                                    .overlay(RoundedRectangle(cornerRadius: LedgerRadius.sm).stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
                                             }
                                         }
                                 }
@@ -259,9 +259,9 @@ struct ReconciliationView: View {
                                     .padding(.vertical, 4.5)
                                     .background {
                                         if isSelected {
-                                            Capsule().fill(LedgerPalette.cobalt.opacity(0.12))
+                                            RoundedRectangle(cornerRadius: LedgerRadius.sm).fill(LedgerPalette.cobalt.opacity(0.12))
                                         } else {
-                                            Capsule().fill(Color.clear)
+                                            RoundedRectangle(cornerRadius: LedgerRadius.sm).fill(Color.clear)
                                         }
                                     }
                                 }
@@ -282,7 +282,7 @@ struct ReconciliationView: View {
                         Spacer()
                     }
                     .padding(14)
-                    .background(LedgerPalette.income.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                    .background(LedgerPalette.income.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     .padding(.horizontal, 16)
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -338,6 +338,7 @@ struct ReconciliationView: View {
         }
         .background(LedgerPalette.canvas.ignoresSafeArea())
         .navigationTitle("账户对账")
+        .terminalNativeChrome()
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "搜索账户名或路径")
         .toolbar {
@@ -411,10 +412,10 @@ private struct ReconciliationSummaryHero: View {
                         .foregroundStyle(LedgerPalette.secondary)
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         Text("\(Int(progressRatio * 100))")
-                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .font(.system(size: 32, weight: .bold, design: .monospaced))
                             .foregroundStyle(progressRatio >= 0.8 ? LedgerPalette.income : LedgerPalette.ink)
                         Text("%")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .font(.system(size: 18, weight: .bold, design: .monospaced))
                             .foregroundStyle(LedgerPalette.secondary)
                         Text("已核平")
                             .font(.system(size: 13, weight: .medium))
@@ -446,10 +447,10 @@ private struct ReconciliationSummaryHero: View {
             // Progress Bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule()
+                    RoundedRectangle(cornerRadius: LedgerRadius.sm)
                         .fill(LedgerPalette.line.opacity(0.8))
                         .frame(height: 6)
-                    Capsule()
+                    RoundedRectangle(cornerRadius: LedgerRadius.sm)
                         .fill(progressRatio >= 0.8 ? LedgerPalette.income : LedgerPalette.cobalt)
                         .frame(width: max(6, geo.size.width * progressRatio), height: 6)
                 }
@@ -468,7 +469,7 @@ private struct ReconciliationSummaryHero: View {
                             .foregroundStyle(LedgerPalette.secondary)
                     }
                     Text("\(metrics.asserted) 个")
-                        .font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit())
+                        .font(.system(size: 15, weight: .semibold, design: .monospaced).monospacedDigit())
                         .foregroundStyle(LedgerPalette.ink)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -481,7 +482,7 @@ private struct ReconciliationSummaryHero: View {
                             .foregroundStyle(LedgerPalette.secondary)
                     }
                     Text("\(metrics.pending) 个")
-                        .font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit())
+                        .font(.system(size: 15, weight: .semibold, design: .monospaced).monospacedDigit())
                         .foregroundStyle(LedgerPalette.ink)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -495,7 +496,7 @@ private struct ReconciliationSummaryHero: View {
                                 .foregroundStyle(LedgerPalette.secondary)
                         }
                         Text("\(metrics.error) 个")
-                            .font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit())
+                            .font(.system(size: 15, weight: .semibold, design: .monospaced).monospacedDigit())
                             .foregroundStyle(LedgerPalette.expense)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -581,7 +582,7 @@ struct ReconciliationCard: View {
             Button(action: onToggleExpand) {
                 HStack(spacing: 12) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                             .fill(accountIcon.color.opacity(0.14))
                             .frame(width: 40, height: 40)
                         Image(systemName: accountIcon.name)
@@ -605,7 +606,7 @@ struct ReconciliationCard: View {
                             .foregroundStyle(statusBadge.color)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(statusBadge.color.opacity(0.12), in: Capsule())
+                            .background(statusBadge.color.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                             .fixedSize()
                         }
 
@@ -618,7 +619,7 @@ struct ReconciliationCard: View {
 
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(MoneyText.format(minorUnits: row.ledgerBalance, currency: currency))
-                            .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                            .font(.system(size: 15, weight: .bold, design: .monospaced).monospacedDigit())
                             .foregroundStyle(LedgerPalette.ink)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
@@ -682,12 +683,12 @@ struct ReconciliationCard: View {
 
                         HStack(spacing: 8) {
                             Text(MoneyText.currencySymbol(for: currency))
-                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .font(.system(size: 20, weight: .bold, design: .monospaced))
                                 .foregroundStyle(LedgerPalette.secondary)
 
                             TextField("输入银行/钱包当前实际金额", text: $actualAmount)
                                 .keyboardType(.decimalPad)
-                                .font(.system(size: 20, weight: .bold, design: .rounded).monospacedDigit())
+                                .font(.system(size: 20, weight: .bold, design: .monospaced).monospacedDigit())
                                 .foregroundStyle(LedgerPalette.ink)
                                 .onAppear {
                                     if actualAmount.isEmpty {
@@ -707,7 +708,7 @@ struct ReconciliationCard: View {
                             }
                         }
                         .padding(12)
-                        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+                        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
 
                     // Balance Date Input
@@ -746,7 +747,7 @@ struct ReconciliationCard: View {
                             }
                             .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(LedgerPalette.income.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                            .background(LedgerPalette.income.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                         } else {
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack(spacing: 8) {
@@ -754,7 +755,7 @@ struct ReconciliationCard: View {
                                         .font(.system(size: 16))
                                         .foregroundStyle(LedgerPalette.expense)
                                     Text("存在差额：\(diff > 0 ? "+" : "")\(MoneyText.format(minorUnits: diff, currency: currency))")
-                                        .font(.system(size: 13.5, weight: .bold, design: .rounded))
+                                        .font(.system(size: 13.5, weight: .bold, design: .monospaced))
                                         .foregroundStyle(LedgerPalette.expense)
                                 }
 
@@ -789,11 +790,11 @@ struct ReconciliationCard: View {
                                         .padding(.top, 2)
                                 }
                                 .padding(10)
-                                .background(LedgerPalette.canvas, in: RoundedRectangle(cornerRadius: 8))
+                                .background(LedgerPalette.canvas, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                             }
                             .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(LedgerPalette.gold.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                            .background(LedgerPalette.gold.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                         }
                     }
 
@@ -822,7 +823,7 @@ struct ReconciliationCard: View {
                         .padding(.vertical, 12)
                         .background(
                             (diffCents == nil || isSubmitting) ? LedgerPalette.secondary.opacity(0.5) : LedgerPalette.cobalt,
-                            in: RoundedRectangle(cornerRadius: 12)
+                            in: RoundedRectangle(cornerRadius: LedgerRadius.sm)
                         )
                     }
                     .disabled(diffCents == nil || isSubmitting)
@@ -832,9 +833,9 @@ struct ReconciliationCard: View {
             }
         }
         .accessibilityIdentifier("reconciliation-card-" + row.account)
-        .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5)
         )
     }
@@ -929,6 +930,7 @@ struct SingleAccountReconciliationSheet: View {
             }
             .background(LedgerPalette.canvas.ignoresSafeArea())
             .navigationTitle("校对余额")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

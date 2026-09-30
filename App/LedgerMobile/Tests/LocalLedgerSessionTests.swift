@@ -226,6 +226,57 @@ final class LocalLedgerSessionTests: XCTestCase {
         }
     }
 
+    private final class StartupScanCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var scans = 0
+        var value: Int { lock.withLock { scans } }
+        func increment() { lock.withLock { scans += 1 } }
+    }
+
+    private final class StartupFileManager: FileManager, @unchecked Sendable {
+        let counter: StartupScanCounter
+        init(counter: StartupScanCounter) { self.counter = counter; super.init() }
+        override func contentsOfDirectory(at url: URL, includingPropertiesForKeys keys: [URLResourceKey]?,
+            options mask: FileManager.DirectoryEnumerationOptions = []) throws -> [URL] {
+            if url.lastPathComponent == "workspace" { counter.increment() }
+            return try super.contentsOfDirectory(at: url, includingPropertiesForKeys: keys, options: mask)
+        }
+    }
+
+    func testCombinedStartupCacheValidatesTwiceAndRejectsChangedScopeAndUnsafeTree() async throws {
+        let fixture = try await openedResumeFixture()
+        defer { fixture.session.chooseLedger() }
+        let descriptors = try await fixture.catalog.list()
+        let original = fixture.catalog.repository(for: try XCTUnwrap(descriptors.first))
+        let counter = StartupScanCounter()
+        let workspace = LocalLedgerWorkspace(rootDirectory: original.workspace.rootDirectory,
+            fileManager: StartupFileManager(counter: counter))
+        let cold = LocalLedgerRepository(descriptor: original.descriptor, workspace: workspace,
+            engine: ResumeEngine(), validator: { _, _ in })
+        let range = fixture.session.selectedRange
+        let currency = try XCTUnwrap(fixture.session.ledger?.valuationCurrency)
+        let today = LedgerDateRange.today(now: Date())
+        let restored = try await cold.cachedStartupPresentation(start: range.start, end: range.queryEndExclusive,
+            today: today, valuationCurrency: currency)
+        XCTAssertNotNil(restored)
+        XCTAssertEqual(restored?.categories?.positiveTotalMinorUnits, fixture.session.localOverviewCategories?.positiveTotalMinorUnits)
+        XCTAssertEqual(restored?.categories?.categories.map(\.label), fixture.session.localOverviewCategories?.categories.map(\.label))
+        XCTAssertEqual(counter.value, 2, "One shared snapshot traversal plus one publication recheck")
+        let differentDay = try await cold.cachedStartupPresentation(start: range.start, end: range.queryEndExclusive,
+            today: "2000-01-01", valuationCurrency: currency)
+        XCTAssertNil(differentDay, "Do not reuse a prior day's financial projection")
+        let outside = original.workspace.rootDirectory.appendingPathComponent("outside.bean")
+        try Data("; outside".utf8).write(to: outside)
+        try await workspace.withCurrentSnapshot { _, root in
+            try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("unsafe.bean"), withDestinationURL: outside)
+        }
+        do {
+            _ = try await cold.cachedStartupPresentation(start: range.start, end: range.queryEndExclusive,
+                today: today, valuationCurrency: currency)
+            XCTFail("Cached startup must still reject unsafe snapshot paths")
+        } catch { }
+    }
+
     func testColdRelaunchRestoresValidatedPresentationAfterAuthenticationWithoutRebuilding() async throws {
         let fixture = try fixture()
         let firstEngine = ResumeEngine()
@@ -450,6 +501,27 @@ final class LocalLedgerSessionTests: XCTestCase {
             XCTAssertEqual(session.phase, .ready)
             session.chooseLedger()
         }
+    }
+
+    func testCancelledRefreshKeepsOverviewAndDoesNotShowError() async throws {
+        let fixture = try await openedResumeFixture()
+        let session = fixture.session
+        defer { session.chooseLedger() }
+        let count = try XCTUnwrap(session.localOverviewCategories).categories.count
+        let transactions = session.ledger?.transactions
+        let refresh = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            await session.refresh()
+        }
+        await refresh.value
+        XCTAssertNil(session.errorMessage)
+        XCTAssertNil(session.localOverviewCategoriesError)
+        XCTAssertEqual(session.localOverviewCategories?.categories.count, count)
+        XCTAssertEqual(session.ledger?.transactions, transactions)
+        XCTAssertFalse(session.isLocalOverviewCategoriesLoading)
+        await session.refresh()
+        XCTAssertNil(session.errorMessage)
+        XCTAssertEqual(session.localOverviewCategories?.categories.count, count)
     }
 
     func testOverviewAggregateFailureDoesNotTruncateBoundedBootstrap() async throws {

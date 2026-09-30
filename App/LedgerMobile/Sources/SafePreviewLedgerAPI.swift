@@ -59,7 +59,11 @@ extension LedgerSession {
 @MainActor
 private final class LocalUITestAuthenticator: LocalLedgerAuthenticating {
     let isAvailable = true
-    func authenticate() async throws { }
+    func authenticate() async throws {
+        if let raw = ProcessInfo.processInfo.environment["LEDGER_TEST_UNLOCK_DELAY"], let delay = Double(raw) {
+            try await Task.sleep(for: .seconds(delay))
+        }
+    }
 }
 
 /// Deterministic Git exchange for toolbar UI tests. This transport has no network

@@ -76,7 +76,7 @@ struct AddAccountView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 if let errorMessage {
                     Section {
                         StatusBanner(message: errorMessage) {
@@ -111,7 +111,7 @@ struct AddAccountView: View {
                     if let preset = selectedPreset, !isCustom {
                         HStack(spacing: LedgerSpacing.md) {
                             ZStack {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                     .fill(LedgerPalette.cobalt.opacity(0.12))
                                     .frame(width: 44, height: 44)
                                 Image(systemName: preset.icon)
@@ -137,7 +137,7 @@ struct AddAccountView: View {
                     } else {
                         HStack(spacing: LedgerSpacing.md) {
                             ZStack {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                     .fill(LedgerPalette.panel)
                                     .frame(width: 44, height: 44)
                                 Image(systemName: "pencil.and.outline")
@@ -212,7 +212,7 @@ struct AddAccountView: View {
                         TextField("0.00", text: $openingBalance)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
-                            .font(.system(.body, design: .rounded).monospacedDigit())
+                            .font(.system(.body, design: .monospaced).monospacedDigit())
                     }
 
                     // 开户日期模式
@@ -271,7 +271,7 @@ struct AddAccountView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .padding(8)
-                            .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 8))
+                            .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
 
                             HStack {
                                 Text("中文别名 (alias):")
@@ -295,6 +295,7 @@ struct AddAccountView: View {
                 }
             }
             .navigationTitle("新建账户")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

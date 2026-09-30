@@ -174,6 +174,7 @@ struct LedgerLibraryView: View {
                 if session.isLocalOperationBusy { Section { ProgressView("正在打开账本") } }
             }
             .navigationTitle("账本")
+            .terminalNativeChrome()
             .disabled(session.isLocalOperationBusy)
             .task { await session.refreshLocalLedgers() }
             .sheet(isPresented: $showingWizard) { OnboardingWizardView() }
@@ -214,7 +215,7 @@ private struct LocalLedgerSetupView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 if !importing {
                     Section {
                         Button {
@@ -263,6 +264,7 @@ private struct LocalLedgerSetupView: View {
                 }
             }
             .navigationTitle(importing ? "导入本地账本" : "新建本地账本")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(session.isLocalOperationBusy) }
@@ -280,7 +282,7 @@ private struct LocalLedgerSetupView: View {
                     .accessibilityIdentifier("local-ledger-confirm-create")
                 }
             }
-            .overlay { if session.isLocalOperationBusy { ProgressView("正在校验账本").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
+            .overlay { if session.isLocalOperationBusy { ProgressView("正在校验账本").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: LedgerRadius.sm)) } }
             .interactiveDismissDisabled(session.isLocalOperationBusy)
             .fileImporter(isPresented: $selectingFolder, allowedContentTypes: [.folder]) { result in
                 switch result {
@@ -328,6 +330,7 @@ struct LocalLedgerFilesView: View {
             } footer: { Text("导出当前已保存的完整文件夹，可存入 Files、iCloud Drive 或交给其他工具管理。") }
         }
         .navigationTitle("本地文件")
+        .terminalNativeChrome()
         .task {
             do { files = try await session.localRepository?.files() ?? [] }
             catch { self.error = error.localizedDescription }
@@ -354,6 +357,7 @@ private struct LocalLedgerFileEditor: View {
                 .disabled(draft == nil || saving)
         }
         .navigationTitle(path)
+        .terminalNativeChrome()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -417,7 +421,7 @@ struct EditLedgerSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 if let error {
                     Section {
                         StatusBanner(message: error) { self.error = nil }
@@ -461,6 +465,7 @@ struct EditLedgerSheet: View {
                 }
             }
             .navigationTitle("编辑账本")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -487,7 +492,7 @@ struct EditLedgerSheet: View {
                 if saving {
                     ProgressView("正在保存修改")
                         .padding()
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                 }
             }
             .interactiveDismissDisabled(saving)

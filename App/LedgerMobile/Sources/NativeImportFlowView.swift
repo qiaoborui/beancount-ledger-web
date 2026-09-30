@@ -137,6 +137,7 @@ struct NativeImportFlowView: View {
                 Text(exitConfirmationDetail)
             }
             .navigationTitle(currentTitle)
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
 
             .toolbar {
@@ -398,14 +399,14 @@ struct NativeImportFlowView: View {
     }
 
     private var preparationView: some View {
-        Form {
+        List {
             if let errorMessage {
                 Section { StatusBanner(message: errorMessage) { self.errorMessage = nil } }
             }
             Section("账单文件") {
                 HStack(spacing: 12) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                             .fill(LedgerPalette.cobalt.opacity(0.12))
                             .frame(width: 38, height: 38)
                         Image(systemName: file.isZIP ? "doc.zipper" : "doc.text")
@@ -527,7 +528,7 @@ struct NativeImportFlowView: View {
             } label: {
                 HStack(spacing: 12) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                             .fill(LedgerPalette.cobalt.opacity(0.12))
                             .frame(width: 36, height: 36)
                         Image(systemName: "checkmark.seal.fill")
@@ -1282,7 +1283,7 @@ private struct ImportEntryEditor: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section("交易信息") {
                     TextField("商家", text: $payee)
                         .textContentType(.organizationName)
@@ -1323,7 +1324,7 @@ private struct ImportEntryEditor: View {
                                         .padding(.vertical, 5)
                                         .background(fundingAccount == candidate.value ? LedgerPalette.cobalt.opacity(0.15) : Color.secondary.opacity(0.1))
                                         .foregroundStyle(fundingAccount == candidate.value ? LedgerPalette.cobalt : LedgerPalette.ink)
-                                        .clipShape(Capsule())
+                                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -1357,7 +1358,7 @@ private struct ImportEntryEditor: View {
                                         .padding(.vertical, 5)
                                         .background(categoryAccount == candidate.value ? LedgerPalette.cobalt.opacity(0.15) : Color.secondary.opacity(0.1))
                                         .foregroundStyle(categoryAccount == candidate.value ? LedgerPalette.cobalt : LedgerPalette.ink)
-                                        .clipShape(Capsule())
+                                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -1423,7 +1424,7 @@ private struct ImportEntryEditor: View {
                                         .padding(.vertical, 5)
                                         .background(tagsText.contains(tag.value) ? LedgerPalette.olive.opacity(0.15) : Color.secondary.opacity(0.1))
                                         .foregroundStyle(tagsText.contains(tag.value) ? LedgerPalette.olive : LedgerPalette.ink)
-                                        .clipShape(Capsule())
+                                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -1445,6 +1446,7 @@ private struct ImportEntryEditor: View {
             .accessibilityIdentifier("import-edit-content")
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("编辑交易")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

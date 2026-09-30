@@ -4,7 +4,7 @@ struct GlobalSearchPage: View {
     @EnvironmentObject private var session: LedgerSession
     var body: some View {
         GlobalSearchView(query: $session.globalSearchQuery)
-            .searchable(text: $session.globalSearchQuery, prompt: "搜索整个账本")
+            .searchable(text: $session.globalSearchQuery, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索整个账本")
             .searchScopes($session.globalSearchScope, activation: .onSearchPresentation) {
                 ForEach(LedgerGlobalSearchScope.allCases) { scope in Text(scope.title).tag(scope) }
             }
@@ -141,6 +141,7 @@ struct GlobalSearchView: View {
                                             transactionLink(transaction)
                                         }
                                         .navigationTitle("#" + tag)
+                                        .terminalNativeChrome()
                                         .onAppear(perform: recordResultOpen)
                                         .toolbar(.visible, for: .navigationBar)
                                     }
@@ -194,6 +195,7 @@ struct GlobalSearchView: View {
             .scrollContentBackground(.hidden)
         }
         .navigationTitle("搜索")
+        .terminalNativeChrome()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(usesNativeSearchTab ? .hidden : .automatic, for: .navigationBar)
         .scrollContentBackground(.hidden)
@@ -541,6 +543,7 @@ private struct LocalSearchTagTransactionsView: View {
             }
         }
         .navigationTitle("#" + tag)
+        .terminalNativeChrome()
         .toolbar(.visible, for: .navigationBar)
         .task(id: key) { await load() }
         .onAppear { viewActive = true }
@@ -602,7 +605,7 @@ private struct GlobalSearchFilterSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 if scope != .documents {
                     Section("账户") {
                         Picker("账户", selection: $draft.account) {
@@ -645,6 +648,7 @@ private struct GlobalSearchFilterSheet: View {
                 }
             }
             .navigationTitle("筛选搜索结果")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }

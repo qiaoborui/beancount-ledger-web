@@ -101,6 +101,7 @@ struct NaturalLanguageBookkeepingView: View {
             }
             .background(LedgerPalette.canvas.ignoresSafeArea())
             .navigationTitle("用一句话记账")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -120,9 +121,8 @@ struct NaturalLanguageBookkeepingView: View {
                     }
                 }
             }
-            .sheet(item: $preview) { prepared in
+            .fullScreenCover(item: $preview) { prepared in
                 BookkeepingPreviewView(preview: prepared) { _ in
-                    dismiss()
                     onSaved?()
                 }
             }
@@ -209,9 +209,9 @@ struct NaturalLanguageBookkeepingView: View {
             }
             .padding(LedgerSpacing.md)
             .background(LedgerPalette.panel)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                     .stroke(LedgerPalette.cobalt.opacity(0.2), lineWidth: 1)
             )
         }
@@ -292,7 +292,7 @@ struct NaturalLanguageBookkeepingView: View {
                         if busy {
                             ProgressView()
                                 .controlSize(.small)
-                                .tint(.white)
+                                .tint(LedgerPalette.onBrand)
                             Text("解析中…")
                                 .font(.system(size: 13, weight: .semibold))
                         } else {
@@ -302,7 +302,7 @@ struct NaturalLanguageBookkeepingView: View {
                                 .font(.system(size: 13, weight: .semibold))
                         }
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(LedgerPalette.onBrand)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(
@@ -310,11 +310,8 @@ struct NaturalLanguageBookkeepingView: View {
                         ? LedgerPalette.secondary.opacity(0.35)
                         : LedgerPalette.cobalt
                     )
-                    .clipShape(Capsule())
-                    .shadow(
-                        color: (input.isEmpty || !settings.canParse) ? .clear : LedgerPalette.cobalt.opacity(0.28),
-                        radius: 4, x: 0, y: 2
-                    )
+                    .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
+
                 }
                 .disabled(busy || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !settings.canParse)
                 .accessibilityIdentifier("bookkeeping-parse")
@@ -323,12 +320,12 @@ struct NaturalLanguageBookkeepingView: View {
             .padding(.bottom, LedgerSpacing.sm)
         }
         .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(inputFocused ? LedgerPalette.cobalt.opacity(0.5) : LedgerPalette.cardBorder, lineWidth: inputFocused ? 1.5 : 1)
         )
-        .shadow(color: Color.black.opacity(0.03), radius: 6, x: 0, y: 2)
+
     }
 
     // MARK: - Inspiration Prompts Carousel
@@ -352,7 +349,7 @@ struct NaturalLanguageBookkeepingView: View {
                                 .font(.system(size: 22))
                                 .frame(width: 36, height: 36)
                                 .background(prompt.tint.opacity(0.12))
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(prompt.title)
@@ -372,9 +369,9 @@ struct NaturalLanguageBookkeepingView: View {
                         }
                         .padding(12)
                         .background(LedgerPalette.panel)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                 .stroke(LedgerPalette.cardBorder, lineWidth: 1)
                         )
                     }
@@ -409,9 +406,9 @@ struct NaturalLanguageBookkeepingView: View {
         }
         .padding(10)
         .background(LedgerPalette.gold.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(LedgerPalette.gold.opacity(0.25), lineWidth: 1)
         )
     }
@@ -491,13 +488,13 @@ struct NaturalLanguageBookkeepingView: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 1) {
                         Text(mainAmount.isNegative ? "-" : "+")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .font(.system(size: 16, weight: .bold, design: .monospaced))
                             .foregroundStyle(mainAmount.isNegative ? LedgerPalette.expense : LedgerPalette.income)
                         Text(mainAmount.currencySymbol)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
                             .foregroundStyle(mainAmount.isNegative ? LedgerPalette.expense : LedgerPalette.income)
                         Text(mainAmount.text)
-                            .font(.system(size: 22, weight: .bold, design: .rounded).monospacedDigit())
+                            .font(.system(size: 22, weight: .bold, design: .monospaced).monospacedDigit())
                             .foregroundStyle(mainAmount.isNegative ? LedgerPalette.expense : LedgerPalette.income)
                     }
 
@@ -518,7 +515,7 @@ struct NaturalLanguageBookkeepingView: View {
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                         .background(LedgerPalette.raised)
-                        .clipShape(Capsule())
+                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
                     .buttonStyle(.plain)
                 }
@@ -538,12 +535,12 @@ struct NaturalLanguageBookkeepingView: View {
             }
         }
         .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(LedgerPalette.cardBorder, lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 3)
+
     }
 
     // MARK: - 2-Posting Layout (Category ← Funding)
@@ -576,7 +573,7 @@ struct NaturalLanguageBookkeepingView: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(LedgerPalette.raised)
-                .clipShape(Capsule())
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                 Rectangle()
                     .fill(LedgerPalette.line.opacity(0.6))
                     .frame(height: 1)
@@ -645,7 +642,7 @@ struct NaturalLanguageBookkeepingView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(LedgerPalette.raised)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
@@ -682,9 +679,9 @@ struct NaturalLanguageBookkeepingView: View {
                                 .padding(.vertical, 5)
                                 .background(isSelected ? LedgerPalette.cobalt : LedgerPalette.raised)
                                 .foregroundStyle(isSelected ? .white : LedgerPalette.ink)
-                                .clipShape(Capsule())
+                                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                                 .overlay(
-                                    Capsule().stroke(isSelected ? LedgerPalette.cobalt : LedgerPalette.cardBorder, lineWidth: 1)
+                                    RoundedRectangle(cornerRadius: LedgerRadius.sm).stroke(isSelected ? LedgerPalette.cobalt : LedgerPalette.cardBorder, lineWidth: 1)
                                 )
                             }
                             .buttonStyle(PressScaleButtonStyle())
@@ -715,7 +712,7 @@ struct NaturalLanguageBookkeepingView: View {
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
                             .background((isNegative ? LedgerPalette.expense : LedgerPalette.income).opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
 
                         Image(systemName: visual.iconName)
                             .font(.system(size: 12))
@@ -746,7 +743,7 @@ struct NaturalLanguageBookkeepingView: View {
 
                         TextField("金额", text: postingBinding.amount)
                             .keyboardType(.numbersAndPunctuation)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced).monospacedDigit())
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
 
@@ -784,7 +781,7 @@ struct NaturalLanguageBookkeepingView: View {
                                             .padding(.vertical, 3)
                                             .background(isSelected ? LedgerPalette.cobalt : LedgerPalette.raised)
                                             .foregroundStyle(isSelected ? .white : LedgerPalette.ink)
-                                            .clipShape(Capsule())
+                                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                                     }
                                     .buttonStyle(PressScaleButtonStyle())
                                 }
@@ -794,7 +791,7 @@ struct NaturalLanguageBookkeepingView: View {
                 }
                 .padding(8)
                 .background(LedgerPalette.raised.opacity(0.45))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
             }
 
             Button {
@@ -834,7 +831,7 @@ struct NaturalLanguageBookkeepingView: View {
             } label: {
                 HStack(spacing: 8) {
                     if busy {
-                        ProgressView().controlSize(.small).tint(.white)
+                        ProgressView().controlSize(.small).tint(LedgerPalette.onBrand)
                         Text("正在校验与写入…")
                     } else {
                         Image(systemName: "checkmark.circle.fill")
@@ -843,11 +840,11 @@ struct NaturalLanguageBookkeepingView: View {
                     }
                 }
                 .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(LedgerPalette.onBrand)
                 .frame(maxWidth: .infinity, minHeight: 50)
                 .background(canPrepare ? LedgerPalette.cobalt : LedgerPalette.secondary.opacity(0.4))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(color: canPrepare ? LedgerPalette.cobalt.opacity(0.3) : .clear, radius: 6, x: 0, y: 3)
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+
             }
             .disabled(busy || !canPrepare)
             .accessibilityIdentifier("bookkeeping-prepare")
@@ -858,7 +855,7 @@ struct NaturalLanguageBookkeepingView: View {
         .background(
             LedgerPalette.canvas
                 .opacity(0.96)
-                .background(.ultraThinMaterial)
+                .background(TerminalPalette.page)
                 .ignoresSafeArea()
         )
         .overlay(alignment: .top) {
@@ -896,6 +893,7 @@ struct NaturalLanguageBookkeepingView: View {
                 .padding()
             }
             .navigationTitle("调整日期")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -910,7 +908,7 @@ struct NaturalLanguageBookkeepingView: View {
 
     private var editDetailsSheet: some View {
         NavigationStack {
-            Form {
+            List {
                 if records.indices.contains(editingRecordIndex) {
                     Section("商户与用途") {
                         TextField("商户 / 交易对方（选填）", text: $records[editingRecordIndex].payee)
@@ -919,6 +917,7 @@ struct NaturalLanguageBookkeepingView: View {
                 }
             }
             .navigationTitle("修改交易信息")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

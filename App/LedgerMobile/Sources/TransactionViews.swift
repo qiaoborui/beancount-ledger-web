@@ -525,7 +525,7 @@ struct TransactionsView: View {
                     }
                     .foregroundStyle(TerminalPalette.secondary).padding(.horizontal, 12)
                     .frame(minHeight: 44).background(TerminalPalette.panel)
-                    .overlay { RoundedRectangle(cornerRadius: 4).stroke(TerminalPalette.line) }
+                    .overlay { RoundedRectangle(cornerRadius: LedgerRadius.sm).stroke(TerminalPalette.line) }
                     TransactionFilterBar(kindFilter: $filters.kind)
                     HStack {
                         Text((filters.account.flatMap { labels[$0] ?? $0 } ?? "全部账户") + " · " + (displayedCount.map { "\($0) 笔" } ?? "统计中"))
@@ -622,9 +622,12 @@ struct TransactionsView: View {
             .accessibilityIdentifier("transaction-window-next")
         }
         .buttonStyle(.borderless)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 4)
-        .background(.bar)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 2)
+        .frame(maxWidth: 360)
+        .background(.thinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(TerminalPalette.line.opacity(0.7), lineWidth: 1))
+        .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
     }
 
     private var navigationContent: some View {
@@ -641,7 +644,7 @@ struct TransactionsView: View {
         .listStyle(.plain)
         .listSectionSpacing(0)
         .tint(TerminalPalette.accent)
-        .terminalPageChrome("流水", isRoot: isRoot, actions: AnyView(transactionActions))
+        .terminalPageChrome("流水", isRoot: isRoot, showsTimeRange: true, actions: AnyView(transactionActions))
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
         .task(id: windowRequestKey) {
@@ -803,7 +806,7 @@ struct TransactionsView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     if session.isLocal, session.localTransactionWindow != nil {
-                        pageNavigation
+                        pageNavigation.padding(.horizontal, 16).padding(.vertical, 6)
                     }
                     if isSelecting {
                         TransactionBatchActionBar(
@@ -1290,6 +1293,7 @@ struct WidgetDayTransactionsView: View {
         }
         .ledgerReadingList()
         .navigationTitle("\(day) 支出")
+        .terminalNativeChrome()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -1410,7 +1414,7 @@ private struct TransactionFilterChips: View {
             .padding(.horizontal, 10)
             .frame(minHeight: 32)
             .background(LedgerPalette.tag)
-            .clipShape(Capsule())
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
         }
         .buttonStyle(PressScaleButtonStyle())
         .accessibilityLabel("移除筛选：\(title)")
@@ -1447,7 +1451,7 @@ private struct TransactionFilterSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 if !facetsReady {
                     Section {
                         if let facetsError {
@@ -1558,6 +1562,7 @@ private struct TransactionFilterSheet: View {
             .scrollContentBackground(.hidden)
             .background(LedgerPalette.canvas)
             .navigationTitle("筛选交易")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -1644,7 +1649,7 @@ struct TransactionRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                     .fill(categoryVisual.color.opacity(0.14))
                     .frame(width: 38, height: 38)
                 Image(systemName: categoryVisual.iconName)
@@ -1663,7 +1668,7 @@ struct TransactionRow: View {
                         minorUnits: presentation.minorUnits,
                         currency: presentation.currency,
                         prefix: amountPrefix(presentation.kind),
-                        font: .system(size: 15.5, weight: .semibold, design: .rounded),
+                        font: .system(size: 15.5, weight: .semibold, design: .monospaced),
                         color: amountColor(presentation.kind)
                     )
                     .lineLimit(1)
@@ -1847,6 +1852,7 @@ private struct TransactionTagEditorSheet: View {
             .padding(LedgerSpacing.lg)
             .background(LedgerPalette.canvas)
             .navigationTitle(selectedCount == 1 ? "添加标签" : "批量添加标签")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1932,6 +1938,7 @@ struct TransactionMoneyFlow: Sendable {
 struct TransactionMoneyFlowView: View {
     let flow: TransactionMoneyFlow
     var compact: Bool = false
+    var isShareReceipt: Bool = false
     @State private var selectedLeg: TransactionMoneyFlowLeg?
 
     var body: some View {
@@ -1951,11 +1958,11 @@ struct TransactionMoneyFlowView: View {
                 }
             }
             .padding(compact ? 12 : 16)
-            .background(LedgerPalette.canvas.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
+            .background(LedgerPalette.canvas.opacity(0.65), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
             .accessibilityIdentifier("transaction-money-flow")
             .sheet(item: $selectedLeg) { leg in
                 NavigationStack {
-                    Form {
+                    List {
                         Section("账户") {
                             Text(leg.label)
                             Text(leg.account).font(.footnote.monospaced()).textSelection(.enabled)
@@ -1965,6 +1972,7 @@ struct TransactionMoneyFlowView: View {
                         }
                     }
                     .navigationTitle("资金分录")
+                    .terminalNativeChrome()
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .confirmationAction) {
                         Button("完成") { selectedLeg = nil }
@@ -1987,7 +1995,7 @@ struct TransactionMoneyFlowView: View {
                         .font(.body.weight(.medium))
                         .foregroundStyle(leg.iconColor)
                         .frame(width: 32, height: 32)
-                        .background(leg.iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                        .background(leg.iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     Text(leg.label)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(LedgerPalette.ink)
@@ -1998,11 +2006,20 @@ struct TransactionMoneyFlowView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    AmountLabel(minorUnits: leg.amount, currency: leg.currency,
-                        font: .system(.subheadline, design: .rounded, weight: .semibold),
-                        color: LedgerPalette.ink)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    Group {
+                        if isShareReceipt {
+                            // ImageRenderer has no LedgerSession environment. Explicit exports
+                            // use the same standalone amount presentation as the receipt header.
+                            ShareAmountText(minorUnits: leg.amount, currency: leg.currency,
+                                font: .system(.subheadline, design: .monospaced, weight: .semibold))
+                        } else {
+                            AmountLabel(minorUnits: leg.amount, currency: leg.currency,
+                                font: .system(.subheadline, design: .monospaced, weight: .semibold),
+                                color: LedgerPalette.ink)
+                        }
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)
@@ -2082,7 +2099,7 @@ struct TransactionDetailView: View {
                     }
                     .padding(12)
                     .background(Color.orange.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                 }
 
                 // Cookie Receipt Voucher Card
@@ -2090,7 +2107,7 @@ struct TransactionDetailView: View {
                     // Category & Kind Header
                     HStack(spacing: 10) {
                         ZStack {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                 .fill(categoryVisual.color.opacity(0.14))
                                 .frame(width: 42, height: 42)
                             Image(systemName: categoryVisual.iconName)
@@ -2114,7 +2131,7 @@ struct TransactionDetailView: View {
                             .foregroundStyle(amountColor(presentation.kind))
                             .padding(.horizontal, 9)
                             .padding(.vertical, 4)
-                            .background(amountColor(presentation.kind).opacity(0.12), in: Capsule())
+                            .background(amountColor(presentation.kind).opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
 
                     // Hero Amount
@@ -2123,7 +2140,7 @@ struct TransactionDetailView: View {
                             minorUnits: presentation.minorUnits,
                             currency: presentation.currency,
                             prefix: amountPrefix(presentation.kind),
-                            font: .system(size: 36, weight: .bold, design: .rounded),
+                            font: .system(size: 28, weight: .medium, design: .monospaced),
                             color: amountColor(presentation.kind)
                         )
                         .lineLimit(1)
@@ -2184,7 +2201,7 @@ struct TransactionDetailView: View {
                                             .foregroundStyle(LedgerPalette.cobalt)
                                             .padding(.horizontal, 7)
                                             .padding(.vertical, 3)
-                                            .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                                            .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                                         }
                                         .buttonStyle(PressScaleButtonStyle(pressedScale: 0.96))
                                     }
@@ -2211,7 +2228,7 @@ struct TransactionDetailView: View {
                         .foregroundStyle(LedgerPalette.success)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(LedgerPalette.success.opacity(0.12), in: Capsule())
+                        .background(LedgerPalette.success.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
 
                     VStack(spacing: 0) {
@@ -2237,7 +2254,7 @@ struct TransactionDetailView: View {
                                     AmountLabel(
                                         minorUnits: posting.amount,
                                         currency: posting.currency ?? presentation.currency,
-                                        font: .system(size: 14.5, weight: .semibold, design: .rounded),
+                                        font: .system(size: 14.5, weight: .semibold, design: .monospaced),
                                         color: posting.amount >= 0 ? LedgerPalette.ink : LedgerPalette.expense
                                     )
                                     Image(systemName: "chevron.right")
@@ -2293,7 +2310,7 @@ struct TransactionDetailView: View {
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(LedgerPalette.cobalt)
                                 .frame(width: 46, height: 46)
-                                .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle())
                         .accessibilityLabel("分享记账凭证")
@@ -2310,7 +2327,7 @@ struct TransactionDetailView: View {
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(LedgerPalette.cobalt)
                             .frame(maxWidth: .infinity, minHeight: 46)
-                            .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle())
 
@@ -2326,7 +2343,7 @@ struct TransactionDetailView: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color.white)
                             .frame(maxWidth: .infinity, minHeight: 46)
-                            .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle())
                         .disabled(
@@ -2361,6 +2378,7 @@ struct TransactionDetailView: View {
             }
         }
         .navigationTitle("交易详情")
+        .terminalNativeChrome()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
@@ -2634,7 +2652,7 @@ private struct TransactionDeleteSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     TransactionRow(transaction: transaction)
                 } header: {
@@ -2681,6 +2699,7 @@ private struct TransactionDeleteSheet: View {
             }
             .disabled(isDeleting)
             .navigationTitle("删除交易")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -2968,11 +2987,11 @@ struct CookieKeypadView: View {
             action()
         } label: {
             Text(label)
-                .font(.system(size: 22, weight: .medium, design: .rounded))
+                .font(.system(size: 22, weight: .medium, design: .monospaced))
                 .foregroundStyle(LedgerPalette.ink)
                 .frame(maxWidth: .infinity, minHeight: 48)
                 .background(LedgerPalette.panel)
-                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         }
         .buttonStyle(PressScaleButtonStyle())
         .accessibilityIdentifier("keypad-\(label)")
@@ -2984,11 +3003,11 @@ struct CookieKeypadView: View {
             action()
         } label: {
             Text(op)
-                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .font(.system(size: 22, weight: .semibold, design: .monospaced))
                 .foregroundStyle(LedgerPalette.cobalt)
                 .frame(maxWidth: .infinity, minHeight: 48)
                 .background(Color(uiColor: .tertiarySystemFill))
-                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         }
         .buttonStyle(PressScaleButtonStyle())
         .accessibilityIdentifier("keypad-op-\(op)")
@@ -3004,7 +3023,7 @@ struct CookieKeypadView: View {
                 .foregroundStyle(LedgerPalette.ink)
                 .frame(maxWidth: .infinity, minHeight: 48)
                 .background(Color(uiColor: .tertiarySystemFill))
-                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         }
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.4).onEnded { _ in
@@ -3024,14 +3043,14 @@ struct CookieKeypadView: View {
                         .tint(.white)
                 } else {
                     Text(actionTitle)
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        .font(.system(size: 18, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Color.white)
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 48)
             .background(actionColor)
-            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .shadow(color: actionColor.opacity(0.35), radius: 4, x: 0, y: 2)
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+
         }
         .disabled(saving)
         .buttonStyle(PressScaleButtonStyle())
@@ -3231,9 +3250,9 @@ struct CookieFastTransactionEditorBody: View {
                         .padding(.horizontal, LedgerSpacing.md)
                         .padding(.vertical, 6)
                         .background(LedgerPalette.panel)
-                        .clipShape(Capsule())
+                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                         .overlay(
-                            Capsule().stroke(LedgerPalette.cobalt.opacity(0.35), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: LedgerRadius.sm).stroke(LedgerPalette.cobalt.opacity(0.35), lineWidth: 1)
                         )
                     }
                     .buttonStyle(.plain)
@@ -3299,6 +3318,7 @@ struct CookieFastTransactionEditorBody: View {
                 }
             }
             .navigationTitle(transaction == nil ? "记一笔" : "编辑交易")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -3342,10 +3362,10 @@ struct CookieFastTransactionEditorBody: View {
                 datePickerSheet
             }
             .sensoryFeedback(.error, trigger: failureFeedback)
-            .sheet(isPresented: $naturalLanguagePresented) {
+            .fullScreenCover(isPresented: $naturalLanguagePresented) {
                 NaturalLanguageBookkeepingView { dismiss() }
             }
-            .sheet(item: $preparedBookkeeping) { preview in
+            .fullScreenCover(item: $preparedBookkeeping) { preview in
                 BookkeepingPreviewView(preview: preview) { _ in dismiss() }
             }
             .onAppear {
@@ -3384,7 +3404,7 @@ struct CookieFastTransactionEditorBody: View {
                             .foregroundStyle(LedgerPalette.secondary)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 4)
-                            .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+                            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
                     .buttonStyle(.plain)
                 }
@@ -3411,11 +3431,11 @@ struct CookieFastTransactionEditorBody: View {
                                 .padding(.vertical, 8)
                                 .background {
                                     if kind == entryKind {
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                             .fill(entryKind.themeColor)
-                                            .shadow(color: entryKind.themeColor.opacity(0.3), radius: 4, x: 0, y: 2)
+
                                     } else {
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                             .fill(LedgerPalette.panel)
                                     }
                                 }
@@ -3424,7 +3444,7 @@ struct CookieFastTransactionEditorBody: View {
                     }
                 }
                 .padding(4)
-                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
             }
         }
     }
@@ -3434,7 +3454,7 @@ struct CookieFastTransactionEditorBody: View {
             // Interactive Currency Picker
             HStack(alignment: .center, spacing: 2) {
                 Text(currencySymbol)
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.system(size: 28, weight: .bold, design: .monospaced))
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(kind.themeColor.opacity(0.55))
@@ -3464,7 +3484,7 @@ struct CookieFastTransactionEditorBody: View {
             .accessibilityLabel("选择货币，当前\(selectedCurrency)")
 
             Text(calculator.displayText)
-                .font(.system(size: 38, weight: .bold, design: .rounded).monospacedDigit())
+                .font(.system(size: 38, weight: .bold, design: .monospaced).monospacedDigit())
                 .foregroundStyle(LedgerPalette.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
@@ -3473,18 +3493,18 @@ struct CookieFastTransactionEditorBody: View {
 
             if isSplitMode && splitPostings.indices.contains(activePostingIndex) {
                 Text("分录 \(activePostingIndex + 1)/\(splitPostings.count)")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(LedgerPalette.secondary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+                    .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
             } else if calculator.isCalculationPending, let res = calculator.evaluatedResult {
                 Text(verbatim: "= \(res)")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 16, weight: .semibold, design: .monospaced).monospacedDigit())
                     .foregroundStyle(LedgerPalette.secondary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(LedgerPalette.panel, in: Capsule())
+                    .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
             }
         }
         .padding(.vertical, 4)
@@ -3511,11 +3531,11 @@ struct CookieFastTransactionEditorBody: View {
                         .foregroundStyle(LedgerPalette.success)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(LedgerPalette.success.opacity(0.12), in: Capsule())
+                        .background(LedgerPalette.success.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     } else {
                         HStack(spacing: 6) {
                             Text("差额: \(formattedDecimal(-sum))")
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(Color.orange)
                             Button("配平") {
                                 autoBalanceSplit()
@@ -3524,7 +3544,7 @@ struct CookieFastTransactionEditorBody: View {
                             .foregroundStyle(Color.white)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
-                            .background(Color.orange, in: Capsule())
+                            .background(Color.orange, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                         }
                     }
                 }
@@ -3545,7 +3565,7 @@ struct CookieFastTransactionEditorBody: View {
                         } label: {
                             HStack(spacing: 8) {
                                 ZStack {
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                         .fill(visual.color.opacity(0.15))
                                         .frame(width: 32, height: 32)
                                     Image(systemName: visual.iconName)
@@ -3579,16 +3599,16 @@ struct CookieFastTransactionEditorBody: View {
                             selectPosting(index: index)
                         } label: {
                             Text(posting.amount.isEmpty ? "0.00" : posting.amount)
-                                .font(.system(size: 15, weight: isSelected ? .bold : .semibold, design: .rounded).monospacedDigit())
+                                .font(.system(size: 15, weight: isSelected ? .bold : .semibold, design: .monospaced).monospacedDigit())
                                 .foregroundStyle(isPositive ? LedgerPalette.ink : LedgerPalette.expense)
                                 .padding(.horizontal, 9)
                                 .padding(.vertical, 5)
                                 .background(
                                     isSelected ? kind.themeColor.opacity(0.14) : Color(uiColor: .tertiarySystemFill).opacity(0.4),
-                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                 )
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                         .stroke(isSelected ? kind.themeColor : Color.clear, lineWidth: 1.5)
                                 )
                         }
@@ -3610,10 +3630,10 @@ struct CookieFastTransactionEditorBody: View {
                     .padding(10)
                     .background(
                         isSelected ? LedgerPalette.panel : Color(uiColor: .secondarySystemGroupedBackground),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                             .stroke(isSelected ? kind.themeColor.opacity(0.4) : LedgerPalette.cardBorder, lineWidth: 0.8)
                     )
                     .padding(.horizontal, LedgerSpacing.lg)
@@ -3632,7 +3652,7 @@ struct CookieFastTransactionEditorBody: View {
                     .foregroundStyle(LedgerPalette.cobalt)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .background(LedgerPalette.cobalt.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(LedgerPalette.cobalt.opacity(0.08), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                 }
                 .buttonStyle(PressScaleButtonStyle(pressedScale: 0.97))
                 .padding(.horizontal, LedgerSpacing.lg)
@@ -3754,10 +3774,10 @@ struct CookieFastTransactionEditorBody: View {
                     } label: {
                         VStack(spacing: 6) {
                             ZStack {
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                     .fill(isSelected ? cat.color : cat.color.opacity(0.12))
                                     .frame(width: 48, height: 48)
-                                    .shadow(color: isSelected ? cat.color.opacity(0.35) : .clear, radius: 6, x: 0, y: 3)
+
 
                                 Image(systemName: cat.icon)
                                     .font(.system(size: 20, weight: .semibold))
@@ -3784,10 +3804,10 @@ struct CookieFastTransactionEditorBody: View {
                 } label: {
                     VStack(spacing: 6) {
                         ZStack {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                 .fill(isCustomActive ? kind.themeColor : Color(uiColor: .tertiarySystemFill))
                                 .frame(width: 48, height: 48)
-                                .shadow(color: isCustomActive ? kind.themeColor.opacity(0.35) : .clear, radius: 6, x: 0, y: 3)
+
 
                             Image(systemName: isCustomActive ? "tag.fill" : "ellipsis")
                                 .font(.system(size: 18, weight: .semibold))
@@ -3845,7 +3865,7 @@ struct CookieFastTransactionEditorBody: View {
                         .foregroundStyle(LedgerPalette.secondary)
                 }
                 .padding(14)
-                .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
             }
             .buttonStyle(PressScaleButtonStyle())
 
@@ -3875,7 +3895,7 @@ struct CookieFastTransactionEditorBody: View {
                         .foregroundStyle(LedgerPalette.secondary)
                 }
                 .padding(14)
-                .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
             }
             .buttonStyle(PressScaleButtonStyle())
         }
@@ -3906,8 +3926,8 @@ struct CookieFastTransactionEditorBody: View {
                         .foregroundStyle(LedgerPalette.ink)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 6)
-                        .background(LedgerPalette.panel, in: Capsule())
-                        .overlay(Capsule().stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
+                        .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
+                        .overlay(RoundedRectangle(cornerRadius: LedgerRadius.sm).stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
                     }
                     .buttonStyle(PressScaleButtonStyle())
                     .accessibilityLabel("选择分类，当前\(currentCategoryDisplayName)")
@@ -3933,8 +3953,8 @@ struct CookieFastTransactionEditorBody: View {
                         .foregroundStyle(LedgerPalette.ink)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 6)
-                        .background(LedgerPalette.panel, in: Capsule())
-                        .overlay(Capsule().stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
+                        .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
+                        .overlay(RoundedRectangle(cornerRadius: LedgerRadius.sm).stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
                     }
                     .buttonStyle(PressScaleButtonStyle())
                     .accessibilityLabel(kind == .expense ? "选择付款账户，当前\(accountDisplayName(assetAccount))" : "选择收款账户，当前\(accountDisplayName(assetAccount))")
@@ -3955,8 +3975,8 @@ struct CookieFastTransactionEditorBody: View {
                     .foregroundStyle(LedgerPalette.secondary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
-                    .background(LedgerPalette.panel, in: Capsule())
-                    .overlay(Capsule().stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
+                    .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
+                    .overlay(RoundedRectangle(cornerRadius: LedgerRadius.sm).stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5))
                 }
                 .buttonStyle(PressScaleButtonStyle())
                 .accessibilityLabel("选择日期，当前\(dateChipLabel)")
@@ -3979,7 +3999,7 @@ struct CookieFastTransactionEditorBody: View {
                     .foregroundStyle(isSplitMode ? Color.white : LedgerPalette.cobalt)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
-                    .background(isSplitMode ? LedgerPalette.cobalt : LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                    .background(isSplitMode ? LedgerPalette.cobalt : LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                 }
                 .buttonStyle(PressScaleButtonStyle())
                 .accessibilityLabel(isSplitMode ? "关闭分录拆分" : "开启分录拆分")
@@ -4013,9 +4033,9 @@ struct CookieFastTransactionEditorBody: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                         .stroke(focusedField == .payee ? LedgerPalette.cobalt : LedgerPalette.cardBorder.opacity(0.6), lineWidth: focusedField == .payee ? 1.5 : 0.5)
                 )
 
@@ -4042,9 +4062,9 @@ struct CookieFastTransactionEditorBody: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                         .stroke(focusedField == .narration ? LedgerPalette.cobalt : LedgerPalette.cardBorder.opacity(0.6), lineWidth: focusedField == .narration ? 1.5 : 0.5)
                 )
             }
@@ -4157,13 +4177,14 @@ struct CookieFastTransactionEditorBody: View {
                 DatePicker("选择日期", selection: $date, displayedComponents: .date)
                     .datePickerStyle(.graphical)
                     .padding()
-                    .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 16))
+                    .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     .padding(.horizontal)
 
                 Spacer()
             }
             .background(LedgerPalette.canvas)
             .navigationTitle("记账日期")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -4186,7 +4207,7 @@ struct CookieFastTransactionEditorBody: View {
                 .foregroundStyle(isSameDay ? Color.white : LedgerPalette.ink)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(isSameDay ? LedgerPalette.cobalt : LedgerPalette.panel, in: Capsule())
+                .background(isSameDay ? LedgerPalette.cobalt : LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
         }
         .buttonStyle(PressScaleButtonStyle())
     }
@@ -4655,17 +4676,17 @@ struct TransactionEditorView: View {
                 advancedFormView
             }
         }
-        .sheet(isPresented: $naturalLanguagePresented) {
+        .fullScreenCover(isPresented: $naturalLanguagePresented) {
             NaturalLanguageBookkeepingView { dismiss() }
         }
-        .sheet(item: $preparedBookkeeping) { preview in
+        .fullScreenCover(item: $preparedBookkeeping) { preview in
             BookkeepingPreviewView(preview: preview) { _ in dismiss() }
         }
     }
 
     private var advancedFormView: some View {
         NavigationStack {
-            Form {
+            List {
                 if transaction == nil {
                     Section {
                         Button {
@@ -4788,6 +4809,7 @@ struct TransactionEditorView: View {
             .disabled(saving)
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(transaction == nil ? "记一笔 (高级)" : "编辑交易 (高级)")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -4848,6 +4870,7 @@ struct TransactionEditorView: View {
                     }
                 }
                 .navigationTitle("交易预览")
+                .terminalNativeChrome()
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("返回编辑") { newEntryPreview = nil }.disabled(saving) }
                     ToolbarItem(placement: .confirmationAction) {
@@ -4977,12 +5000,12 @@ struct TransactionEditorView: View {
             }
         } label: {
             Text(title)
-                .font(.system(size: 12, weight: isSelected ? .semibold : .medium, design: .rounded))
+                .font(.system(size: 12, weight: isSelected ? .semibold : .medium, design: .monospaced))
                 .foregroundStyle(isSelected ? Color(uiColor: .systemBackground) : Color.primary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(isSelected ? Color.primary : Color(uiColor: .tertiarySystemFill))
-                .clipShape(Capsule())
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
         }
         .buttonStyle(.plain)
     }

@@ -92,7 +92,7 @@ private struct LedgerTimeRangeSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 // 1. Preset Selector & Status
                 Section {
                     Picker("周期", selection: Binding(
@@ -159,6 +159,7 @@ private struct LedgerTimeRangeSheet: View {
             .background(TerminalPalette.page)
             .tint(TerminalPalette.accent)
             .navigationTitle("时间范围")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -187,7 +188,7 @@ private struct LedgerTimeRangeSheet: View {
                             .font(.system(size: 13, weight: .semibold))
                             .frame(width: 44, height: 44)
                             .background(Color(uiColor: .tertiarySystemFill))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
                     .buttonStyle(.plain)
 
@@ -207,7 +208,7 @@ private struct LedgerTimeRangeSheet: View {
                             .font(.system(size: 13, weight: .semibold))
                             .frame(width: 44, height: 44)
                             .background(Color(uiColor: .tertiarySystemFill))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
                     .buttonStyle(.plain)
                 }
@@ -227,7 +228,7 @@ private struct LedgerTimeRangeSheet: View {
                                 .foregroundStyle(isSelected ? TerminalPalette.onAccent : TerminalPalette.ink)
                                 .frame(maxWidth: .infinity, minHeight: 44)
                                 .background(isSelected ? TerminalPalette.accent : TerminalPalette.panel)
-                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle(pressedScale: 0.94, enablesHaptic: false))
                     }
@@ -253,7 +254,7 @@ private struct LedgerTimeRangeSheet: View {
                             .font(.system(size: 13, weight: .semibold))
                             .frame(width: 44, height: 44)
                             .background(Color(uiColor: .tertiarySystemFill))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
                     .buttonStyle(.plain)
 
@@ -273,7 +274,7 @@ private struct LedgerTimeRangeSheet: View {
                             .font(.system(size: 13, weight: .semibold))
                             .frame(width: 44, height: 44)
                             .background(Color(uiColor: .tertiarySystemFill))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
                     .buttonStyle(.plain)
                 }
@@ -298,7 +299,7 @@ private struct LedgerTimeRangeSheet: View {
                             .foregroundStyle(isSelected ? TerminalPalette.onAccent : TerminalPalette.ink)
                             .frame(maxWidth: .infinity, minHeight: 52)
                             .background(isSelected ? TerminalPalette.accent : TerminalPalette.panel)
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle(pressedScale: 0.94, enablesHaptic: false))
                     }
@@ -328,7 +329,7 @@ private struct LedgerTimeRangeSheet: View {
                             .foregroundStyle(isSelected ? TerminalPalette.onAccent : TerminalPalette.ink)
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .background(isSelected ? TerminalPalette.accent : TerminalPalette.panel)
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                     }
                     .buttonStyle(PressScaleButtonStyle(pressedScale: 0.94, enablesHaptic: false))
                 }
@@ -357,7 +358,7 @@ private struct LedgerTimeRangeSheet: View {
                             .padding(.vertical, 7)
                             .frame(minHeight: 44)
                             .background(Color(uiColor: .tertiarySystemFill))
-                            .clipShape(Capsule())
+                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
                     .buttonStyle(.plain)
                 }
@@ -389,7 +390,7 @@ private struct LedgerTimeRangeSheet: View {
                 .padding(.vertical, 7)
                 .frame(minHeight: 44)
                 .background(Color(uiColor: .tertiarySystemFill))
-                .clipShape(Capsule())
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
         }
         .buttonStyle(.plain)
     }

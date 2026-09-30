@@ -68,6 +68,29 @@ final class LocalLedgerWidgetPublisherTests: XCTestCase {
 
     private var now: Date { ISO8601DateFormatter().date(from: "2026-08-31T06:00:00Z")! }
 
+    func testWidgetRefreshPreservesColdStartupCache() async throws {
+        let fixture = try await fixture()
+        let repository = fixture.repository
+        let current = try await repository.workspace.currentRevision()
+        let revision = try XCTUnwrap(current)
+        let month = LedgerDateRange.current(.month, now: now)
+        let today = LedgerDateRange.today(now: now)
+        _ = try await repository.bootstrapPage(start: month.start, end: month.queryEndExclusive,
+            today: today, valuationCurrency: "CNY", expectedRevisionID: revision.id)
+
+        _ = try await LocalLedgerWidgetPublisher.prepare(repository: repository,
+            valuationCurrency: "CNY", now: now)
+        let cold = LocalLedgerRepository(descriptor: repository.descriptor,
+            workspace: repository.workspace, engine: fixture.engine, validator: { _, _ in })
+        let requestsBeforeRestore = await fixture.engine.requests.count
+        let restored = try await cold.cachedStartupPresentation(start: month.start,
+            end: month.queryEndExclusive, today: today, valuationCurrency: "CNY")
+        XCTAssertNotNil(restored, "A one-row widget refresh must not evict the hundred-row launch projection")
+        let requestsAfterRestore = await fixture.engine.requests.count
+        XCTAssertEqual(requestsBeforeRestore, requestsAfterRestore,
+            "Cold startup should restore the validated cache without invoking the ledger engine")
+    }
+
     @MainActor
     func testPublishesAllPeriodsBalancesAndImportsFromLocalRepository() async throws {
         let fixture = try await fixture()

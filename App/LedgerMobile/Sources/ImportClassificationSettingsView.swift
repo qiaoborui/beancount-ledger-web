@@ -9,7 +9,7 @@ struct ImportClassificationSettingsView: View {
     @State private var consentPresented = false
 
     var body: some View {
-        Form {
+        List {
             if let error { Section { StatusBanner(message: error) { self.error = nil } } }
             Section {
                 Toggle("为此账本启用智能分类", isOn: Binding(
@@ -52,6 +52,7 @@ struct ImportClassificationSettingsView: View {
         }
         .font(.subheadline)
         .navigationTitle("智能分类")
+        .terminalNativeChrome()
         .navigationBarTitleDisplayMode(.inline)
         .privacySensitive()
         .alert("启用在线智能分类？", isPresented: $consentPresented) {

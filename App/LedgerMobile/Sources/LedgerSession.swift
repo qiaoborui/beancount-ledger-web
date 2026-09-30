@@ -1755,7 +1755,7 @@ final class LedgerSession: ObservableObject {
 
     private func refreshWithResult() async -> Bool {
         guard phase == .ready, let contextURL, !isRangeLoading, !isValuationCurrencyLoading else { return false }
-        let generation = invalidateRequests()
+        let generation = invalidateRequests(preservingOverviewCategories: true)
         defer { if generation == requestGeneration { localTransactionReloadID &+= 1 } }
         do {
             try await loadLedger(from: contextURL, generation: generation)
@@ -1763,7 +1763,8 @@ final class LedgerSession: ObservableObject {
             errorMessage = nil
             return true
         } catch {
-            guard generation == requestGeneration else { return false }
+            guard generation == requestGeneration, !Task.isCancelled,
+                  !(error is CancellationError), (error as? URLError)?.code != .cancelled else { return false }
             errorMessage = error.localizedDescription
             handleBootstrapSessionError(error, contextURL: contextURL)
             return false
@@ -3307,7 +3308,15 @@ final class LedgerSession: ObservableObject {
         let today = LedgerDateRange.today(now: ledgerNow())
         let payload: LedgerBootstrap
         let presentationRevision: UUID?
-        if let local {
+        var restoredStartup: LocalLedgerRepository.CachedStartupPresentation?
+        if let local, deferLocalDerivedRefreshes {
+            restoredStartup = try await local.cachedStartupPresentation(start: targetRange.start,
+                end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency)
+        }
+        if let restoredStartup {
+            payload = restoredStartup.page.bootstrap.replacingTransactions(with: restoredStartup.page.transactionPage.transactions)
+            presentationRevision = restoredStartup.revisionID
+        } else if let local {
             guard let revision = try await local.workspace.currentRevision() else {
                 throw LocalLedgerError.operationFailed("账本版本尚未就绪")
             }
@@ -3357,7 +3366,11 @@ final class LedgerSession: ObservableObject {
         if local == nil {
             reconcileTransactionMutations(in: payload.transactions, start: targetRange.start, end: targetRange.queryEndExclusive)
         }
-        if let local, let revisionID = presentationRevision {
+        if let restoredStartup {
+            invalidateOverviewCategories()
+            localOverviewCategories = restoredStartup.categories
+            overviewCategoriesRevisionID = restoredStartup.categories == nil ? nil : restoredStartup.revisionID
+        } else if let local, let revisionID = presentationRevision {
             let matches = overviewCategoriesRevisionID == revisionID
                 && localOverviewCategories?.start == targetRange.start
                 && localOverviewCategories?.end == targetRange.queryEndExclusive
@@ -4707,7 +4720,7 @@ final class LedgerSession: ObservableObject {
             localOverviewCategories = result
             overviewCategoriesRevisionID = revisionID
         } catch {
-            guard isCurrent(), !Task.isCancelled else { return }
+            guard isCurrent(), !Task.isCancelled, !(error is CancellationError) else { return }
             if case LocalLedgerWorkspace.WorkspaceError.staleRevision = error {
                 localOverviewCategories = nil
                 overviewCategoriesRevisionID = nil
@@ -4717,12 +4730,20 @@ final class LedgerSession: ObservableObject {
     }
 
     @discardableResult
-    private func invalidateRequests() -> Int {
+    private func invalidateRequests(preservingOverviewCategories: Bool = false) -> Int {
         analysisCache.removeAll()
         accountDetailCache.removeAll()
         accountTrendCache.removeAll()
         resetLocalTransactionWindow()
-        invalidateOverviewCategories()
+        if preservingOverviewCategories {
+            // A refresh replaces the current snapshot only after a successful read.
+            // Supersede pending category reads without blanking the same-context UI.
+            overviewCategoriesGeneration &+= 1
+            localOverviewCategoriesError = nil
+            isLocalOverviewCategoriesLoading = false
+        } else {
+            invalidateOverviewCategories()
+        }
         requestGeneration &+= 1
         return requestGeneration
     }

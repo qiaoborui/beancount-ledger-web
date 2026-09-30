@@ -35,6 +35,14 @@ struct CategoriesManagementView: View {
     var body: some View {
         List {
             Section {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(TerminalPalette.secondary)
+                    TextField("搜索分类名称或路径", text: $searchText)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .accessibilityIdentifier("category-search")
+                }.frame(minHeight: 44)
+            }.listRowBackground(Color.clear)
+            Section {
                 Picker("分类类型", selection: $selectedKind) {
                     ForEach(CategoryKind.allCases) { kind in
                         Text(kind.title).tag(kind)
@@ -67,7 +75,7 @@ struct CategoriesManagementView: View {
                                             .foregroundStyle(LedgerPalette.gold)
                                             .padding(.horizontal, 6)
                                             .padding(.vertical, 2)
-                                            .background(LedgerPalette.gold.opacity(0.12), in: Capsule())
+                                            .background(LedgerPalette.gold.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                                     }
                                 }
                                 Text(acct.account)
@@ -81,18 +89,12 @@ struct CategoriesManagementView: View {
             }
         }
         .ledgerReadingList()
-        .ledgerNavigation("分类管理")
-        .ledgerSearch(text: $searchText, prompt: "搜索分类名称或路径")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showingAddCategory = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("新建分类")
-            }
-        }
+        .terminalPageChrome("分类管理", isRoot: false, actions: AnyView(
+            Button { showingAddCategory = true } label: {
+                Image(systemName: "plus").font(.system(size: 16)).frame(width: 44, height: 44)
+                    .foregroundStyle(TerminalPalette.accent)
+            }.accessibilityLabel("新建分类")
+        ))
         .sheet(isPresented: $showingAddCategory) {
             AddCategoryView(initialKind: selectedKind)
                 .ledgerPrivacyProtectedSheet()

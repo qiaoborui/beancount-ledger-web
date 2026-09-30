@@ -16,7 +16,7 @@ final class TerminalReportsUITests: XCTestCase {
         income.tap()
         XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["收入"].isSelected)
-        app.buttons["terminal-tab-settings"].tap()
+        app.tabBars.buttons["更多"].tap()
         if app.buttons["返回上一页"].exists { app.buttons["返回上一页"].tap() }
         openReport(app, id: "more-analysis-assets")
         XCTAssertTrue(app.staticTexts["01 / 净资产历史"].waitForExistence(timeout: 15), app.debugDescription)
@@ -28,7 +28,7 @@ final class TerminalReportsUITests: XCTestCase {
 
     func testTransactionSearchSelectionAndDetail() {
         let app = launch()
-        app.buttons["terminal-tab-transactions"].tap()
+        app.tabBars.buttons["流水"].tap()
         let search = app.textFields["transaction-quick-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 10), app.debugDescription)
         assertHeader(app)
@@ -54,7 +54,7 @@ final class TerminalReportsUITests: XCTestCase {
 
     func testReportPrivacyHidesChartsAndRatios() {
         let app = launch()
-        app.buttons["terminal-tab-accounts"].tap()
+        app.tabBars.buttons["账户"].tap()
         let hide = app.buttons["隐藏金额"]
         XCTAssertTrue(hide.waitForExistence(timeout: 5))
         hide.tap()
@@ -80,7 +80,7 @@ final class TerminalReportsUITests: XCTestCase {
     }
 
     private func openReport(_ app: XCUIApplication, id: String) {
-        app.buttons["terminal-tab-settings"].tap()
+        app.tabBars.buttons["更多"].tap()
         let button = app.buttons[id]
         for _ in 0..<5 where !button.isHittable { app.swipeUp() }
         XCTAssertTrue(button.isHittable, app.debugDescription)
@@ -101,7 +101,7 @@ final class TerminalReportsUITests: XCTestCase {
         app.launchArguments = ["--safe-preview", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN",
             "-UIPreferredContentSizeCategoryName", category]
         app.launch()
-        XCTAssertTrue(app.buttons["terminal-tab-settings"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 15))
         return app
     }
     private func capture(_ name: String) {

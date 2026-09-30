@@ -24,7 +24,7 @@ struct BookkeepingSettingsView: View {
     ]
 
     var body: some View {
-        Form {
+        List {
             Section("快速预设") {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: LedgerSpacing.sm) {
@@ -45,9 +45,9 @@ struct BookkeepingSettingsView: View {
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
                                 .background(baseURL == preset.baseURL ? LedgerPalette.cobalt.opacity(0.12) : LedgerPalette.canvas)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
+                                    RoundedRectangle(cornerRadius: LedgerRadius.sm)
                                         .stroke(baseURL == preset.baseURL ? LedgerPalette.cobalt : LedgerPalette.cardBorder, lineWidth: 1)
                                 )
                             }
@@ -129,6 +129,7 @@ struct BookkeepingSettingsView: View {
             }
         }
         .navigationTitle("语义解析设置")
+        .terminalNativeChrome()
         .onAppear {
             baseURL = settings.configuration.baseURL
             model = settings.configuration.model

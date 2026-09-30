@@ -11,7 +11,7 @@ struct ShareAmountText: View {
     let minorUnits: Int
     let currency: String
     var prefix: String = ""
-    var font: Font = .system(size: 14, weight: .semibold, design: .rounded)
+    var font: Font = .system(size: 14, weight: .semibold, design: .monospaced)
     var color: Color = LedgerPalette.ink
 
     var body: some View {
@@ -75,7 +75,7 @@ struct SingleTransactionReceiptCard: View {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(LedgerPalette.cobalt)
                 Text("LEDGER")
-                    .font(.system(size: 13, weight: .black, design: .rounded))
+                    .font(.system(size: 13, weight: .black, design: .monospaced))
                     .tracking(1.5)
                     .foregroundStyle(LedgerPalette.ink)
                 Text("· 记账凭证")
@@ -87,13 +87,13 @@ struct SingleTransactionReceiptCard: View {
                     .foregroundStyle(amountColor)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(amountColor.opacity(0.12), in: Capsule())
+                    .background(amountColor.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
             }
 
             // Hero Amount & Payee
             VStack(spacing: 6) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                         .fill(categoryVisual.color.opacity(0.15))
                         .frame(width: 48, height: 48)
                     Image(systemName: categoryVisual.iconName)
@@ -106,7 +106,7 @@ struct SingleTransactionReceiptCard: View {
                     minorUnits: presentation.minorUnits,
                     currency: presentation.currency,
                     prefix: amountPrefix,
-                    font: .system(size: 34, weight: .bold, design: .rounded),
+                    font: .system(size: 34, weight: .bold, design: .monospaced),
                     color: amountColor
                 )
                 .lineLimit(1)
@@ -135,7 +135,7 @@ struct SingleTransactionReceiptCard: View {
                 accountLabels: accountLabels,
                 defaultCurrency: presentation.currency
             )
-            TransactionMoneyFlowView(flow: moneyFlow, compact: true)
+            TransactionMoneyFlowView(flow: moneyFlow, compact: true, isShareReceipt: true)
 
             ReceiptDashedLine()
                 .frame(height: 1)
@@ -167,7 +167,7 @@ struct SingleTransactionReceiptCard: View {
                                     .foregroundStyle(LedgerPalette.cobalt)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
-                                    .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                                    .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                             }
                         }
                     }
@@ -197,17 +197,12 @@ struct SingleTransactionReceiptCard: View {
         .padding(20)
         .frame(width: 340)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .fill(colorScheme == .dark ? Color(uiColor: .secondarySystemBackground) : Color.white)
-                .shadow(
-                    color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
-                    radius: 12,
-                    x: 0,
-                    y: 4
-                )
+
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(LedgerPalette.line.opacity(0.4), lineWidth: 0.5)
         }
     }
@@ -269,17 +264,12 @@ struct CombinedTransactionStatementCard: View {
         .padding(20)
         .frame(width: 360)
         .background {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .fill(colorScheme == .dark ? Color(uiColor: .secondarySystemBackground) : Color.white)
-                .shadow(
-                    color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.08),
-                    radius: 16,
-                    x: 0,
-                    y: 6
-                )
+
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(LedgerPalette.line.opacity(0.4), lineWidth: 0.75)
         }
     }
@@ -294,7 +284,7 @@ struct CombinedTransactionStatementCard: View {
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(LedgerPalette.cobalt)
                     Text("LEDGER")
-                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .font(.system(size: 13, weight: .black, design: .monospaced))
                         .tracking(1.8)
                         .foregroundStyle(LedgerPalette.ink)
                     Text("·")
@@ -308,11 +298,11 @@ struct CombinedTransactionStatementCard: View {
                 Spacer()
 
                 Text("共 \(sortedTransactions.count) 笔")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced).monospacedDigit())
                     .foregroundStyle(LedgerPalette.cobalt)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 3.5)
-                    .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                    .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
             }
 
             HStack(spacing: 5) {
@@ -342,11 +332,11 @@ struct CombinedTransactionStatementCard: View {
                     // Date section header
                     HStack(spacing: 6) {
                         Text(TransactionDateHeaderFormatter.format(date))
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
                             .foregroundStyle(LedgerPalette.ink)
                         Spacer()
                         Text("\(txs.count) 笔")
-                            .font(.system(size: 10.5, weight: .medium, design: .rounded).monospacedDigit())
+                            .font(.system(size: 10.5, weight: .medium, design: .monospaced).monospacedDigit())
                             .foregroundStyle(LedgerPalette.secondary)
                     }
                     .padding(.horizontal, 2)
@@ -366,11 +356,11 @@ struct CombinedTransactionStatementCard: View {
                         }
                     }
                     .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                             .fill(colorScheme == .dark ? Color.white.opacity(0.04) : Color(uiColor: .systemGray6).opacity(0.55))
                     )
                     .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                             .stroke(LedgerPalette.line.opacity(0.3), lineWidth: 0.5)
                     }
                 }
@@ -419,7 +409,7 @@ struct CombinedTransactionStatementCard: View {
         return HStack(spacing: 12) {
             // Category Icon
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                     .fill(visual.color.opacity(0.13))
                     .frame(width: 36, height: 36)
                 Image(systemName: visual.iconName)
@@ -444,7 +434,7 @@ struct CombinedTransactionStatementCard: View {
                             .foregroundStyle(LedgerPalette.cobalt)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
-                            .background(LedgerPalette.cobalt.opacity(0.08), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            .background(LedgerPalette.cobalt.opacity(0.08), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                     }
                 }
                 .font(.system(size: 11.5))
@@ -459,7 +449,7 @@ struct CombinedTransactionStatementCard: View {
                     minorUnits: p.minorUnits,
                     currency: p.currency,
                     prefix: sign,
-                    font: .system(size: 15.5, weight: .bold, design: .rounded),
+                    font: .system(size: 15.5, weight: .bold, design: .monospaced),
                     color: color
                 )
                 .lineLimit(1)
@@ -503,7 +493,7 @@ struct CombinedTransactionStatementCard: View {
             Spacer()
 
             Text("Beancount Ledger")
-                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(LedgerPalette.secondary.opacity(0.8))
         }
     }
@@ -569,7 +559,7 @@ struct TransactionShareSheet: View {
                         .foregroundStyle(Color.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 7)
-                        .background(LedgerPalette.cobalt, in: Capsule())
+                        .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                         .transition(.move(edge: .top).combined(with: .opacity))
                         .padding(.bottom, 6)
                 }
@@ -584,6 +574,7 @@ struct TransactionShareSheet: View {
             }
             .background(LedgerPalette.canvas)
             .navigationTitle(sheetTitle)
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -635,7 +626,7 @@ struct TransactionShareSheet: View {
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(LedgerPalette.ink)
                         .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                     }
                     .buttonStyle(PressScaleButtonStyle())
 
@@ -655,7 +646,7 @@ struct TransactionShareSheet: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color.white)
                             .frame(maxWidth: .infinity, minHeight: 46)
-                            .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle())
                     } else {
@@ -670,7 +661,7 @@ struct TransactionShareSheet: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color.white)
                             .frame(maxWidth: .infinity, minHeight: 46)
-                            .background(LedgerPalette.cobalt.opacity(0.8), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(LedgerPalette.cobalt.opacity(0.8), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         }
                         .disabled(true)
                     }
@@ -694,9 +685,9 @@ struct TransactionShareSheet: View {
                         .textSelection(.enabled)
                         .padding(16)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                 .stroke(LedgerPalette.line.opacity(0.4), lineWidth: 0.5)
                         }
                 }
@@ -717,7 +708,7 @@ struct TransactionShareSheet: View {
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(LedgerPalette.ink)
                         .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                     }
                     .buttonStyle(PressScaleButtonStyle())
 
@@ -730,7 +721,7 @@ struct TransactionShareSheet: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Color.white)
                         .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                     }
                     .buttonStyle(PressScaleButtonStyle())
                 }
@@ -830,7 +821,7 @@ struct TransactionTextExportSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     Label("完整文字文件已准备", systemImage: "doc.text")
                     Text("共 \(export.count) 笔，包含当前筛选范围内的全部已选交易，不限于本页。")
@@ -847,6 +838,7 @@ struct TransactionTextExportSheet: View {
                 }
             }
             .navigationTitle("导出流水文字")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
