@@ -67,7 +67,7 @@ targets:
         BGTaskSchedulerPermittedIdentifiers:
           - com.qiaoborui.ledger.mobile.local-sync
           - com.qiaoborui.ledger.mobile.refresh
-        UILaunchScreen: {}
+        UILaunchStoryboardName: LaunchScreen
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:

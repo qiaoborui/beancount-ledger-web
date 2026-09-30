@@ -210,7 +210,7 @@ struct ImportHistoryView: View {
                         Button { Task { await reviewSharedItem(item) } } label: {
                             HStack(spacing: 10) {
                                 ZStack {
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                         .fill(LedgerPalette.cobalt.opacity(0.12))
                                         .frame(width: 32, height: 32)
                                     Image(systemName: "doc.badge.arrow.up")
@@ -279,24 +279,15 @@ struct ImportHistoryView: View {
             VStack(spacing: 12) {
                 HStack(spacing: 12) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                             .fill(
-                                LinearGradient(
-                                    colors: [LedgerPalette.cobalt, LedgerPalette.cobaltLight],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
+                                LedgerPalette.cobalt
                             )
                             .frame(width: 44, height: 44)
-                            .shadow(
-                                color: LedgerPalette.cobalt.opacity(0.28),
-                                radius: 6,
-                                x: 0,
-                                y: 3
-                            )
+
                         Image(systemName: "arrow.up.doc.fill")
                             .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(LedgerPalette.onBrand)
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
@@ -328,23 +319,14 @@ struct ImportHistoryView: View {
                     .foregroundStyle(LedgerPalette.onBrand)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background(
-                        LinearGradient(
-                            colors: [LedgerPalette.cobalt, LedgerPalette.cobalt.opacity(0.92)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
+                        LedgerPalette.cobalt
                     )
                     .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous)
                             .strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5)
                     }
-                    .shadow(
-                        color: LedgerPalette.cobalt.opacity(0.24),
-                        radius: 5,
-                        x: 0,
-                        y: 2.5
-                    )
+
                 }
                 .disabled(isReadingFile)
                 .buttonStyle(PressScaleButtonStyle(pressedScale: 0.96))
@@ -1076,7 +1058,7 @@ private struct FormatBadge: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 3.5)
         .background(Color(uiColor: .tertiarySystemFill))
-        .clipShape(Capsule())
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
     }
 }
 
@@ -1086,7 +1068,7 @@ private struct ImportChannelRow: View {
     var body: some View {
         HStack(spacing: LedgerSpacing.md) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                     .fill(Color(uiColor: .tertiarySystemFill))
                     .frame(width: 34, height: 34)
                 Image(systemName: status.provider.systemImage)
@@ -1116,7 +1098,7 @@ private struct ImportChannelRow: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(statusColor.opacity(0.1))
-            .clipShape(Capsule())
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
@@ -1152,7 +1134,7 @@ private struct ImportDocumentRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: LedgerSpacing.md) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                     .fill(Color(uiColor: .tertiarySystemFill))
                     .frame(width: 36, height: 36)
                 Image(systemName: provider?.systemImage ?? "doc.text")

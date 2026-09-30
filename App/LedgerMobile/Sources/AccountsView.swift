@@ -199,7 +199,7 @@ struct AccountsView: View {
         .listSectionSpacing(8)
         .tint(TerminalPalette.accent)
         .accessibilityIdentifier("accounts-list")
-        .terminalPageChrome("账户", isRoot: isRoot, actions: AnyView(
+        .terminalPageChrome("账户", isRoot: isRoot, showsTimeRange: true, actions: AnyView(
             Menu {
                 Button("新建账户") { showingAddAccount = true }
                     .accessibilityIdentifier("accounts-add-button")
@@ -379,20 +379,12 @@ struct AccountDetailView: View {
             }
         }
         .background(LedgerPalette.canvas)
-        .navigationTitle(detail?.label ?? account.split(separator: ":").last.map(String.init) ?? account)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) { LedgerTimeRangeButton() }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showingReconcileSheet = true
-                } label: {
-                    Image(systemName: "checkmark.seal")
-                }
-                .accessibilityLabel("校对余额")
-            }
-        }
-        .toolbar(.visible, for: .navigationBar)
+        .terminalPageChrome(detail?.label ?? "账户详情", compactTitle: "账户详情", isRoot: false, showsTimeRange: true, actions: AnyView(
+            Button { showingReconcileSheet = true } label: {
+                Image(systemName: "checkmark.seal").font(.system(size: 16))
+                    .foregroundStyle(TerminalPalette.accent).frame(width: 44, height: 44)
+            }.accessibilityLabel("校对余额")
+        ))
         .sheet(isPresented: $showingReconcileSheet, onDismiss: {
             reloadToken += 1
         }) {
@@ -680,13 +672,13 @@ private struct AccountDetailHero: View {
                         .padding(.horizontal, 8)
                         .frame(minHeight: 26)
                         .background(LedgerPalette.raised)
-                        .clipShape(Capsule())
+                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                 }
             }
 
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(detail.account.hasPrefix("Liabilities:") ? "\(range.metricScope)期末待还" : "\(range.metricScope)期末余额")
+                    Text(detail.account.hasPrefix("Liabilities:") ? "期末待还" : "期末余额")
                         .font(.system(.caption2, design: .default, weight: .semibold))
                         .foregroundStyle(LedgerPalette.secondary)
                     AmountLabel(
@@ -713,7 +705,7 @@ private struct AccountDetailHero: View {
                         .foregroundStyle(LedgerPalette.cobalt)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                        .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
                     .buttonStyle(PressScaleButtonStyle())
                     .accessibilityLabel("校对余额")
@@ -758,6 +750,7 @@ private struct AccountDetailHero: View {
                         .foregroundStyle(LedgerPalette.olive)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Text(detail.label).terminalFont(size: 14, weight: .semibold)
                 Text(detail.account)
                     .font(.system(.caption2, design: .default, weight: .medium).monospaced())
                     .foregroundStyle(LedgerPalette.secondary)
@@ -802,9 +795,7 @@ private struct AccountBalanceTrendPanel: View {
                             .font(.system(.body, design: .default, weight: .semibold))
                             .tracking(-0.15)
                             .foregroundStyle(LedgerPalette.ink)
-                        Text(rangeLabel)
-                            .font(.system(.caption2, design: .default, weight: .medium).monospacedDigit())
-                            .foregroundStyle(LedgerPalette.secondary)
+                        Text("所选期间 · 原币余额").terminalFont(size: 11).foregroundStyle(TerminalPalette.secondary)
                     }
                     Spacer()
                     if let periodChange {

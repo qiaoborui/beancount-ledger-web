@@ -1,0 +1,4 @@
+Query chain:
+ →Find: Target Application 'com.qiaoborui.ledger.mobile'
+  ↪︎Find: Descendants matching type ScrollView
+    ↪︎Find: Elements matching predicate '"bql-workbench" IN identifiers'

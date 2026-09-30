@@ -83,6 +83,8 @@ struct TerminalPageChrome: ViewModifier {
     let title: String
     let compactTitle: String?
     var actions: AnyView? = nil
+    var showsTimeRange = false
+    var showsSync = true
 
     func body(content: Content) -> some View {
         content
@@ -100,8 +102,8 @@ struct TerminalPageChrome: ViewModifier {
                 if horizontalSizeClass == .regular {
                     ToolbarItem(placement: .topBarTrailing) {
                         HStack(spacing: 8) {
-                            TerminalDateRangeButton()
-                            if !session.isLocal || session.localGitConfiguration != nil { TerminalSyncButton() }
+                            if showsTimeRange { TerminalDateRangeButton() }
+                            if showsSync && (!session.isLocal || session.localGitConfiguration != nil) { TerminalSyncButton() }
                             actions
                         }
                     }
@@ -123,8 +125,8 @@ struct TerminalPageChrome: ViewModifier {
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(TerminalPalette.accent)
                             Spacer(minLength: 4)
-                            TerminalDateRangeButton().fixedSize(horizontal: true, vertical: false)
-                            if !session.isLocal || session.localGitConfiguration != nil {
+                            if showsTimeRange { TerminalDateRangeButton().fixedSize(horizontal: true, vertical: false) }
+                            if showsSync && (!session.isLocal || session.localGitConfiguration != nil) {
                                 TerminalSyncButton()
                             }
                             actions
@@ -210,8 +212,8 @@ private struct TerminalBackGestureBridge: UIViewControllerRepresentable {
 }
 
 extension View {
-    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, actions: AnyView? = nil) -> some View {
-        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions))
+    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, showsTimeRange: Bool = false, showsSync: Bool = true, actions: AnyView? = nil) -> some View {
+        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions, showsTimeRange: showsTimeRange, showsSync: showsSync))
     }
 }
 
@@ -329,4 +331,25 @@ struct TerminalSectionLabel: View {
         Text(text.uppercased()).terminalFont(size: 11, weight: .semibold, design: .monospaced)
             .tracking(0.7).foregroundStyle(TerminalPalette.secondary).textCase(nil)
     }
+}
+
+/// Native editor and sheet chrome retains system navigation and all existing
+/// confirmation/cancellation toolbar actions. Reading pages use PageChrome.
+struct TerminalNativeChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .scrollContentBackground(.hidden)
+            .background(TerminalPalette.page)
+            .tint(TerminalPalette.accent)
+            .toolbarBackground(TerminalPalette.page, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(nil, for: .navigationBar)
+            .listStyle(.plain)
+            .listSectionSpacing(8)
+            .font(.subheadline)
+    }
+}
+
+extension View {
+    func terminalNativeChrome() -> some View { modifier(TerminalNativeChrome()) }
 }

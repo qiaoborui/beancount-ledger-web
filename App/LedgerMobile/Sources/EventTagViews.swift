@@ -69,6 +69,7 @@ struct EventTagListView: View {
             .background(LedgerPalette.canvas)
             .task(id: readKey) { if session.isLocal { await session.loadLocalEventTagSummaries() } }
             .navigationTitle("事件与项目核算")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -105,14 +106,14 @@ struct EventTagListView: View {
                             .padding(.vertical, 6)
                             .background(
                                 isSelected ? LedgerPalette.cobalt : Color(uiColor: .tertiarySystemFill),
-                                in: Capsule()
+                                in: RoundedRectangle(cornerRadius: LedgerRadius.sm)
                             )
                     }
                     .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
                 }
                 Spacer()
                 Text("\(filteredSummaries.count) 个标签")
-                    .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                    .font(.system(size: 12, weight: .medium, design: .monospaced).monospacedDigit())
                     .foregroundStyle(LedgerPalette.secondary)
             }
             .padding(.horizontal, 16)
@@ -179,14 +180,14 @@ private struct EventTagSummaryCard: View {
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(LedgerPalette.cobalt)
                     Text("\(summary.transactionCount) 笔")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundStyle(LedgerPalette.secondary)
                 }
                 Spacer()
                 AmountLabel(
                     minorUnits: summary.netSpend,
                     currency: summary.currency,
-                    font: .system(size: 18, weight: .bold, design: .rounded),
+                    font: .system(size: 18, weight: .bold, design: .monospaced),
                     color: LedgerPalette.expense
                 )
             }
@@ -197,7 +198,7 @@ private struct EventTagSummaryCard: View {
                         Image(systemName: "calendar")
                             .font(.system(size: 11))
                         Text(start == end ? start : "\(start) ~ \(end)")
-                            .font(.system(size: 12, design: .rounded))
+                            .font(.system(size: 12, design: .monospaced))
                         Text("(\(summary.daysCount)天)")
                             .font(.system(size: 11))
                     }
@@ -208,16 +209,16 @@ private struct EventTagSummaryCard: View {
 
                 if summary.daysCount > 1 && summary.netSpend > 0 {
                     Text("日均 \(MoneyText.format(minorUnits: summary.dailyAverage, currency: summary.currency))")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundStyle(LedgerPalette.secondary)
                 }
             }
         }
         .padding(14)
         .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
         )
     }
@@ -358,6 +359,7 @@ struct EventTagReportView: View {
         }
         .background(LedgerPalette.canvas)
         .navigationTitle("#\(tag)")
+        .terminalNativeChrome()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -398,6 +400,7 @@ struct EventTagReportView: View {
                 }
                 .padding()
                 .navigationTitle("事件文件导出")
+                .terminalNativeChrome()
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { export = nil } } }
             }
             .ledgerPrivacyProtectedSheet()
@@ -492,11 +495,11 @@ struct EventTagReportView: View {
                 Spacer()
                 Text("\(completeCount) 笔流水")
                     .accessibilityIdentifier("event-report-count")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(LedgerPalette.cobalt)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 4)
-                    .background(LedgerPalette.cobalt.opacity(0.12), in: Capsule())
+                    .background(LedgerPalette.cobalt.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
             }
 
             VStack(spacing: 4) {
@@ -506,7 +509,7 @@ struct EventTagReportView: View {
                 AmountLabel(
                     minorUnits: report.netSpend,
                     currency: report.currency,
-                    font: .system(size: 32, weight: .bold, design: .rounded),
+                    font: .system(size: 32, weight: .bold, design: .monospaced),
                     color: LedgerPalette.expense
                 )
             }
@@ -541,7 +544,7 @@ struct EventTagReportView: View {
                     Image(systemName: "clock")
                         .font(.system(size: 11))
                     Text(s == e ? s : "\(s) 至 \(e)")
-                        .font(.system(size: 12, design: .rounded))
+                        .font(.system(size: 12, design: .monospaced))
                     Text("· 共 \(report.daysCount) 天")
                         .font(.system(size: 12))
                 }
@@ -551,9 +554,9 @@ struct EventTagReportView: View {
         }
         .padding(16)
         .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
         )
     }
@@ -564,7 +567,7 @@ struct EventTagReportView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(LedgerPalette.secondary)
             Text(value)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .foregroundStyle(color)
         }
         .frame(maxWidth: .infinity)
@@ -591,19 +594,19 @@ struct EventTagReportView: View {
                                 .foregroundStyle(LedgerPalette.ink)
                             Spacer()
                             Text(String(format: "%.1f%%", cat.percentage * 100))
-                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(LedgerPalette.secondary)
                             Text(MoneyText.format(minorUnits: cat.amount, currency: report.currency))
-                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                .font(.system(size: 14, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(LedgerPalette.ink)
                         }
 
                         GeometryReader { proxy in
                             ZStack(alignment: .leading) {
-                                Capsule()
+                                RoundedRectangle(cornerRadius: LedgerRadius.sm)
                                     .fill(Color(uiColor: .tertiarySystemFill))
                                     .frame(height: 6)
-                                Capsule()
+                                RoundedRectangle(cornerRadius: LedgerRadius.sm)
                                     .fill(LedgerPalette.cobalt)
                                     .frame(width: max(4, proxy.size.width * CGFloat(cat.percentage)), height: 6)
                             }
@@ -615,9 +618,9 @@ struct EventTagReportView: View {
         }
         .padding(16)
         .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
         )
     }
@@ -632,7 +635,7 @@ struct EventTagReportView: View {
                 if let selectedDate = selectedDailyDate,
                    let point = report.dailySeries.first(where: { $0.date == selectedDate }) {
                     Text("\(formatShortDate(selectedDate)) · \(MoneyText.format(minorUnits: point.amount, currency: report.currency))")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(LedgerPalette.cobalt)
                 } else {
                     Text("共 \(report.dailySeries.count) 天有消费")
@@ -675,7 +678,7 @@ struct EventTagReportView: View {
                     AxisValueLabel {
                         if let dateStr = value.as(String.self) {
                             Text(formatShortDate(dateStr))
-                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
                                 .foregroundStyle(LedgerPalette.secondary)
                         }
                     }
@@ -702,9 +705,9 @@ struct EventTagReportView: View {
         }
         .padding(16)
         .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
         )
     }
@@ -771,9 +774,9 @@ struct EventTagReportView: View {
                             }
                         }
                         .background(LedgerPalette.panel)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                 .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
                         )
                     }
@@ -815,7 +818,7 @@ struct EventReportShareSheet: View {
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .frame(height: 46)
-                            .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle())
 
@@ -830,7 +833,7 @@ struct EventReportShareSheet: View {
                             .foregroundStyle(LedgerPalette.ink)
                             .frame(maxWidth: .infinity)
                             .frame(height: 44)
-                            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle())
                     }
@@ -840,6 +843,7 @@ struct EventReportShareSheet: View {
             }
             .background(LedgerPalette.canvas)
             .navigationTitle("事件核算单导出")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -931,7 +935,7 @@ struct EventReportShareCard: View {
                     AmountLabel(
                         minorUnits: report.netSpend,
                         currency: report.currency,
-                        font: .system(size: 32, weight: .bold, design: .rounded),
+                        font: .system(size: 32, weight: .bold, design: .monospaced),
                         color: LedgerPalette.expense
                     )
                 }
@@ -940,7 +944,7 @@ struct EventReportShareCard: View {
                 // Date & Days
                 if let s = report.startDate, let e = report.endDate {
                     Text(s == e ? s : "\(s) 至 \(e) · 共 \(report.daysCount) 天 · 日均 \(MoneyText.format(minorUnits: report.dailyAverage, currency: report.currency))")
-                        .font(.system(size: 11, design: .rounded))
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(LedgerPalette.secondary)
                 }
             }
@@ -966,10 +970,10 @@ struct EventReportShareCard: View {
                                 .foregroundStyle(LedgerPalette.ink)
                             Spacer()
                             Text(String(format: "%.1f%%", cat.percentage * 100))
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(LedgerPalette.secondary)
                             Text(MoneyText.format(minorUnits: cat.amount, currency: report.currency))
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(LedgerPalette.ink)
                         }
                     }
@@ -1011,7 +1015,7 @@ struct EventReportShareCard: View {
                             minorUnits: p.minorUnits,
                             currency: p.currency,
                             prefix: amountPrefix(p.kind),
-                            font: .system(size: 13, weight: .semibold, design: .rounded),
+                            font: .system(size: 13, weight: .semibold, design: .monospaced),
                             color: amountColor(p.kind)
                         )
                     }
@@ -1043,11 +1047,11 @@ struct EventReportShareCard: View {
             }
             .background(Color(uiColor: .secondarySystemGroupedBackground))
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(LedgerPalette.cardBorder, lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.04), radius: 10, x: 0, y: 4)
+
     }
 }

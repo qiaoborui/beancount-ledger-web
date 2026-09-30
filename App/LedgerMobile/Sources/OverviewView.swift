@@ -3,8 +3,7 @@ import SwiftUI
 struct OverviewView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ScaledMetric(relativeTo: .body) private var ratioLabelWidth: CGFloat = 32
-    @ScaledMetric(relativeTo: .body) private var ratioValueWidth: CGFloat = 40
+    @State private var comparisonDetails: OverviewComparisonDetails?
     @ScaledMetric(relativeTo: .body) private var shareWidth: CGFloat = 48
     var isRoot = true
 
@@ -32,56 +31,121 @@ struct OverviewView: View {
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .terminalPageChrome("财务概览", compactTitle: "概览", isRoot: isRoot)
-        .refreshable { await session.refresh() }
+        .terminalPageChrome("财务概览", compactTitle: "概览", isRoot: isRoot, showsTimeRange: true)
+        .refreshable {
+            // Native refresh controls may cancel their action as the view updates.
+            // Let the requested refresh finish; session generations still reject
+            // results after a lock, ledger switch, or newer request.
+            await Task { await session.refresh() }.value
+        }
+        .sheet(item: $comparisonDetails) { details in
+            NavigationStack {
+                List {
+                    Section("当前期间") {
+                        Text("\(details.comparisons.monthOverMonth.currentRange.start) 至 \(details.comparisons.monthOverMonth.currentRange.end)")
+                    }
+                    comparisonSection("环比", value: details.comparisons.monthOverMonth, currency: details.currency)
+                    comparisonSection("同比", value: details.comparisons.yearOverYear, currency: details.currency)
+                    Section("计算口径") {
+                        Text("变化金额 = 本期 − 基期；变化率 = 变化金额 ÷ 基期绝对值。基期为零时不计算变化率。结余 = 收入 − 支出，转账不计收支。")
+                    }
+                }
+                .navigationTitle("\(details.title) · 比较口径")
+                .terminalNativeChrome()
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { comparisonDetails = nil } } }
+            }
+            .ledgerPrivacyProtectedSheet()
+        }
     }
 
     private func summary(_ ledger: LedgerBootstrap) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("净结余").terminalFont(size: 13).foregroundStyle(TerminalPalette.secondary)
-                .padding(.bottom, 8)
-            TerminalAmount(minorUnits: ledger.summary.net, currency: ledger.summary.currency,
-                color: TerminalPalette.accent, size: 28)
-                .tracking(-1)
-                .accessibilityIdentifier("overview-monthly-net")
-            TerminalRule().padding(.vertical, 16)
-            VStack(spacing: 12) {
-                metric("收入", amount: ledger.summary.income, currency: ledger.summary.currency, prefix: "+")
-                metric("支出", amount: ledger.summary.expense, currency: ledger.summary.currency, prefix: "−")
-            }
-            VStack(spacing: 8) {
-                ratio("收入", amount: ledger.summary.income, maximum: max(ledger.summary.income, ledger.summary.expense), color: TerminalPalette.accent)
-                ratio("支出", amount: ledger.summary.expense, maximum: max(ledger.summary.income, ledger.summary.expense), color: TerminalPalette.secondary)
-            }.padding(.top, 16)
-        }
-        .padding(.vertical, 16).padding(.horizontal, 12)
-        .background(TerminalPalette.panel)
-        .overlay(Rectangle().stroke(TerminalPalette.line, lineWidth: 1))
-    }
-
-    private func metric(_ title: String, amount: Int, currency: String, prefix: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(title).terminalFont(size: 13).foregroundStyle(TerminalPalette.secondary)
-            Spacer(minLength: 0)
-            TerminalAmount(minorUnits: amount, currency: currency, size: 16, prefix: amount >= 0 ? prefix : "")
-        }
-    }
-
-    private func ratio(_ title: String, amount: Int, maximum: Int, color: Color) -> some View {
-        let fraction = maximum > 0 ? min(1, max(0, Double(amount) / Double(maximum))) : 0
-        return HStack(spacing: 8) {
-            Text(title).frame(width: ratioLabelWidth, alignment: .leading)
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Rectangle().fill(TerminalPalette.line)
-                    if session.amountsVisible {
-                        Rectangle().fill(color).frame(width: geometry.size.width * fraction)
+        VStack(alignment: .leading, spacing: 16) {
+            Button {
+                showComparison("净结余", comparisons: netComparisons(ledger.comparisons), currency: ledger.summary.currency)
+            } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Text("净结余")
+                        Image(systemName: "info.circle").font(.system(size: 11))
+                    }.terminalFont(size: 13).foregroundStyle(TerminalPalette.secondary)
+                    let layout = dynamicTypeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                        : AnyLayout(HStackLayout(alignment: .bottom, spacing: 8))
+                    layout {
+                        TerminalAmount(minorUnits: ledger.summary.net, currency: ledger.summary.currency,
+                            color: TerminalPalette.accent, size: 28, showsCurrency: false)
+                            .tracking(-1).accessibilityIdentifier("overview-monthly-net")
+                        if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
+                        comparisonLabels(netComparisons(ledger.comparisons))
                     }
-                }
-            }.frame(height: 4).accessibilityHidden(true)
-            Text(session.amountsVisible ? String(format: "%.0f%%", fraction * 100) : "—")
-                .frame(width: ratioValueWidth, alignment: .trailing)
+                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+            TerminalRule()
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+                : AnyLayout(HStackLayout(alignment: .top, spacing: 20))
+            layout {
+                metric("收入", amount: ledger.summary.income, currency: ledger.summary.currency,
+                    prefix: "+", comparisons: ledger.comparisons?.income)
+                metric("支出", amount: ledger.summary.expense, currency: ledger.summary.currency,
+                    prefix: "−", comparisons: ledger.comparisons?.expense)
+            }
+        }.padding(.vertical, 4)
+    }
+
+    private func metric(_ title: String, amount: Int, currency: String, prefix: String,
+                        comparisons: LedgerMetricPeriodComparisons?) -> some View {
+        Button { showComparison(title, comparisons: comparisons, currency: currency) } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).terminalFont(size: 13).foregroundStyle(TerminalPalette.secondary)
+                TerminalAmount(minorUnits: amount, currency: currency, size: 19,
+                    prefix: amount >= 0 ? prefix : "", showsCurrency: false)
+                comparisonLabels(comparisons)
+            }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+    }
+
+    private func comparisonLabels(_ comparisons: LedgerMetricPeriodComparisons?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("环比  " + changeText(comparisons?.monthOverMonth))
+            Text("同比  " + changeText(comparisons?.yearOverYear))
         }.terminalFont(size: 11, design: .monospaced).foregroundStyle(TerminalPalette.secondary)
+    }
+
+    private func changeText(_ comparison: LedgerPeriodComparison?) -> String {
+        guard session.amountsVisible else { return "••••" }
+        guard let comparison, comparison.delta != nil else { return "暂无数据" }
+        guard let percentage = comparison.percentage else { return "基期为零" }
+        return String(format: "%+.1f%%", percentage * 100)
+    }
+
+    private func showComparison(_ title: String, comparisons: LedgerMetricPeriodComparisons?, currency: String) {
+        guard let comparisons else { return }
+        comparisonDetails = .init(title: title, comparisons: comparisons, currency: currency)
+    }
+
+    private func comparisonSection(_ title: String, value: LedgerPeriodComparison, currency: String) -> some View {
+        Section(title) {
+            Text("对比 \(value.baselineRange.start) 至 \(value.baselineRange.end)")
+            if let current = value.current { LabeledContent("本期") { TerminalAmount(minorUnits: current, currency: currency) } }
+            if let baseline = value.baseline { LabeledContent("基期") { TerminalAmount(minorUnits: baseline, currency: currency) } }
+            if let delta = value.delta { LabeledContent("变化金额") { TerminalAmount(minorUnits: delta, currency: currency, prefix: delta > 0 ? "+" : "") } }
+            LabeledContent("变化率", value: changeText(value))
+        }
+    }
+
+    private func netComparisons(_ comparisons: LedgerPeriodComparisons?) -> LedgerMetricPeriodComparisons? {
+        guard let comparisons else { return nil }
+        func net(_ income: LedgerPeriodComparison, _ expense: LedgerPeriodComparison) -> LedgerPeriodComparison {
+            let current = income.current.flatMap { i in expense.current.map { i - $0 } }
+            let baseline = income.baseline.flatMap { i in expense.baseline.map { i - $0 } }
+            let delta = current.flatMap { c in baseline.map { c - $0 } }
+            let percentage = delta.flatMap { d in baseline.flatMap { $0 == 0 ? nil : Double(d) / abs(Double($0)) } }
+            return .init(currentRange: income.currentRange, baselineRange: income.baselineRange,
+                current: current, baseline: baseline, delta: delta, percentage: percentage)
+        }
+        return .init(monthOverMonth: net(comparisons.income.monthOverMonth, comparisons.expense.monthOverMonth),
+            yearOverYear: net(comparisons.income.yearOverYear, comparisons.expense.yearOverYear))
     }
 
     private func sectionTitle(_ title: String, action: String, destination: LedgerDestination? = nil) -> some View {
@@ -109,7 +173,9 @@ struct OverviewView: View {
             TerminalRule()
             if categories.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(session.localOverviewCategoriesError ?? "所选范围暂无支出")
+                    Text(session.localOverviewCategoriesError
+                        ?? (session.isLocal && session.localOverviewCategories == nil
+                            ? "正在读取支出排行…" : "所选范围暂无支出"))
                         .terminalFont(size: 13).foregroundStyle(TerminalPalette.secondary)
                     if session.localOverviewCategoriesError != nil {
                         Button("重试") { Task { await session.refresh() } }
@@ -301,4 +367,11 @@ struct TerminalTransactionRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }
+}
+
+private struct OverviewComparisonDetails: Identifiable {
+    var id: String { title }
+    let title: String
+    let comparisons: LedgerMetricPeriodComparisons
+    let currency: String
 }

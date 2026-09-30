@@ -98,6 +98,7 @@ struct InstitutionPickerSheet: View {
             }
             .searchable(text: $searchText, prompt: "搜索银行、钱包、拼音或代码 (如 CMB)")
             .navigationTitle("选择机构与银行")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -115,7 +116,7 @@ struct InstitutionPickerSheet: View {
         } label: {
             HStack(spacing: LedgerSpacing.md) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                         .fill(groupColor(item.group).opacity(0.12))
                         .frame(width: 36, height: 36)
                     Image(systemName: item.icon)
@@ -140,7 +141,7 @@ struct InstitutionPickerSheet: View {
                         .foregroundStyle(LedgerPalette.cobalt)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                        .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                 }
 
                 Image(systemName: "chevron.right")

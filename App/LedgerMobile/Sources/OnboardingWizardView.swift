@@ -133,6 +133,7 @@ struct OnboardingWizardView: View {
             }
             .background(LedgerPalette.canvas.ignoresSafeArea())
             .navigationTitle(navigationTitleForCurrentStep)
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -179,7 +180,7 @@ struct OnboardingWizardView: View {
                                 .foregroundStyle(LedgerPalette.ink)
                         }
                         .padding(LedgerSpacing.xxl)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
                 }
             }
@@ -190,7 +191,7 @@ struct OnboardingWizardView: View {
     private var progressBar: some View {
         HStack(spacing: 8) {
             ForEach(Step.allCases, id: \.self) { step in
-                Capsule()
+                RoundedRectangle(cornerRadius: LedgerRadius.sm)
                     .fill(step.rawValue <= currentStep.rawValue ? LedgerPalette.cobalt : LedgerPalette.line)
                     .frame(height: 4)
             }
@@ -213,11 +214,7 @@ struct OnboardingWizardView: View {
                 // 图标 Hero
                 ZStack {
                     Circle()
-                        .fill(LinearGradient(
-                            colors: [Color.blue.opacity(0.15), Color.indigo.opacity(0.2)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ))
+                        .fill(LedgerPalette.cobalt)
                         .frame(width: 96, height: 96)
                     Image(systemName: "book.pages.fill")
                         .font(.system(size: 44))
@@ -267,7 +264,7 @@ struct OnboardingWizardView: View {
     private func featureCard(icon: String, color: Color, title: String, desc: String) -> some View {
         HStack(alignment: .top, spacing: LedgerSpacing.md) {
             ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                     .fill(color.opacity(0.12))
                     .frame(width: 42, height: 42)
                 Image(systemName: icon)
@@ -389,7 +386,7 @@ struct OnboardingWizardView: View {
                             .lineSpacing(2)
                     }
                     .padding(8)
-                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     .padding(.horizontal, LedgerSpacing.md)
                 }
 
@@ -458,7 +455,7 @@ struct OnboardingWizardView: View {
                         .foregroundStyle(draft.wrappedValue.isSelected ? LedgerPalette.cobalt : LedgerPalette.secondary)
 
                     ZStack {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                             .fill(categoryThemeColor(draft.wrappedValue.category).opacity(0.12))
                             .frame(width: 32, height: 32)
                         Image(systemName: draft.wrappedValue.icon)
@@ -488,7 +485,7 @@ struct OnboardingWizardView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(LedgerPalette.canvas, in: RoundedRectangle(cornerRadius: 8))
+                .background(LedgerPalette.canvas, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
             }
         }
         .padding(LedgerSpacing.md)
@@ -583,7 +580,7 @@ struct OnboardingWizardView: View {
                     .padding(.top, 2)
 
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                         .fill((draft.wrappedValue.kind == .income ? LedgerPalette.income : Color.orange).opacity(0.12))
                         .frame(width: 34, height: 34)
                     Image(systemName: draft.wrappedValue.icon)
@@ -808,7 +805,7 @@ struct OnboardingWizardView: View {
                 } label: {
                     Text(currentStep == .summary ? "立即开启记账" : "下一步")
                         .font(.body.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(LedgerPalette.onBrand)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: LedgerRadius.md))
@@ -870,7 +867,7 @@ struct OnboardingWizardView: View {
     // MARK: - 添加自定义账户弹窗
     private var addCustomAccountSheet: some View {
         NavigationStack {
-            Form {
+            List {
                 Section("账户名称") {
                     TextField("例如：招行二类卡、现金钱包", text: $customAccountName)
                 }
@@ -884,6 +881,7 @@ struct OnboardingWizardView: View {
                 }
             }
             .navigationTitle("添加账户")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

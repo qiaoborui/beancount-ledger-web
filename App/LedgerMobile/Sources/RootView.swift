@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct RootView: View {
+    @State private var showsLaunchAnimation = true
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -20,23 +21,28 @@ struct RootView: View {
         ZStack {
             LedgerPalette.canvas.ignoresSafeArea()
 
-            switch session.phase {
-            case .configuration:
-                LedgerLibraryView()
-            case .checking:
-                // A search deep link can arrive before authentication finishes. Keep native
-                // search controllers unmounted until the ready shell has a stable lifetime.
-                // The local ledger's startup cover is layered below rather than living here,
-                // so it can animate away when the first authenticated frame arrives.
-                Group {
-                    if !session.isLocal { ProgressView("正在连接账本") }
+            Group {
+                switch session.phase {
+                case .configuration:
+                    LedgerLibraryView()
+                case .checking:
+                    // A search deep link can arrive before authentication finishes. Keep native
+                    // search controllers unmounted until the ready shell has a stable lifetime.
+                    // The local ledger's startup cover is layered below rather than living here,
+                    // so it can animate away when the first authenticated frame arrives.
+                    Group {
+                        if !session.isLocal { ProgressView("正在连接账本") }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case let .locked(authenticated):
+                    LoginView(authenticated: authenticated)
+                case .ready:
+                    MainTabView()
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case let .locked(authenticated):
-                LoginView(authenticated: authenticated)
-            case .ready:
-                MainTabView()
+
             }
+            .accessibilityHidden(showsLaunchAnimation || coverVisible)
+            .allowsHitTesting(!showsLaunchAnimation && !coverVisible)
 
             // The cover gets its own animation scope so only its own presence
             // animates. Animating `session.phase` instead cross-fades the cover,
@@ -47,12 +53,23 @@ struct RootView: View {
                     PrivacyCover()
                         .transition(coverTransition)
                 }
+                // Mount the privacy shield before launch fades, avoiding a flash
+                // of the ledger chooser or protected content during loading.
+                if showsLaunchAnimation {
+                    LedgerLaunchView(contentReady: session.phase != .checking && !coverVisible) {
+                        showsLaunchAnimation = false
+                    }
+                }
             }
             .zIndex(1)
             .animation(
-                reduceMotion ? nil : .easeOut(duration: LedgerMotion.Cover.exitDuration),
+                showsLaunchAnimation || reduceMotion ? nil : .easeOut(duration: LedgerLaunchTiming.exitDuration),
                 value: coverVisible
             )
+
+            // 灵动岛全屏入账浮层容器 (无论用户在哪个 Tab 页面记账/导入，均自顶部灵动岛优雅弹下)
+            LedgerIslandOverlayContainer(currentNotice: $session.pendingIslandNotice)
+                .zIndex(2)
         }
         .tint(LedgerPalette.cobalt)
         // Remote startup cross-fades its connecting surface into the shell. The
@@ -211,51 +228,15 @@ struct RootView: View {
 
 /// Privacy surface shown until authenticated content is ready.
 struct PrivacyCover: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// One flag per line, not one for the pair: separate states let each label
-    /// carry its own delay, which is what makes the entrance read as a sequence
-    /// rather than two lines arriving at once.
-    @State private var titleRevealed = false
-    @State private var subtitleRevealed = false
-
-    private var animates: Bool { !reduceMotion && LedgerMotion.allowsAmbientMotion }
-
     var body: some View {
-        VStack(spacing: LedgerSpacing.lg) {
-            LedgerBrandMark(size: 48, breathes: false)
-            VStack(spacing: LedgerSpacing.xs) {
-                Text("Ledger")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.ink)
-                    .opacity(titleRevealed ? 1 : 0)
-                    .offset(y: titleRevealed ? 0 : 8)
-                Text("敏感数据已隐藏")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(LedgerPalette.secondary)
-                    .opacity(subtitleRevealed ? 1 : 0)
-                    .offset(y: subtitleRevealed ? 0 : 8)
-            }
+        ZStack {
+            TerminalPalette.page.ignoresSafeArea()
+            LedgerLaunchBrand()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(LedgerPalette.canvas)
-        .ignoresSafeArea()
-        .accessibilityElement(children: .combine)
-        .onAppear(perform: reveal)
-    }
-
-    /// The mark is on screen from the first frame, so only the text animates in.
-    private func reveal() {
-        guard animates else {
-            titleRevealed = true
-            subtitleRevealed = true
-            return
-        }
-        withAnimation(.easeOut(duration: LedgerMotion.Cover.revealDuration).delay(0.10)) {
-            titleRevealed = true
-        }
-        withAnimation(.easeOut(duration: LedgerMotion.Cover.revealDuration).delay(0.18)) {
-            subtitleRevealed = true
-        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("敏感数据已隐藏")
+        .accessibilityIdentifier("ledger-privacy-cover")
     }
 }
 
@@ -265,7 +246,7 @@ struct ServerConfigurationView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     HStack(spacing: 16) {
                         LedgerBrandMark(size: 52)
@@ -302,6 +283,7 @@ struct ServerConfigurationView: View {
                 }
             }
             .navigationTitle("欢迎使用 Ledger")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
         }
@@ -315,7 +297,7 @@ private struct LoginView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     Label(session.isLocal ? session.localLedgerName : session.serverURL?.host ?? "Ledger", systemImage: "lock.shield")
                         .font(.headline)
@@ -370,6 +352,7 @@ private struct LoginView: View {
                 }
             }
             .navigationTitle(authenticated ? "账本已锁定" : "登录 Ledger")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
         }
@@ -410,11 +393,10 @@ private struct MainTabView: View {
             if horizontalSizeClass == .regular {
                 LedgerRegularShell(selection: selection)
             } else {
-                VStack(spacing: 0) {
+                if #available(iOS 26.0, *) {
+                    nativeTabs.tabBarMinimizeBehavior(.onScrollDown)
+                } else {
                     compactTabs
-                    TerminalTabBar(destinations: session.compactTabDestinations + [.settings], selection: compactSelection)
-                        .frame(height: 60)
-                        .background(TerminalPalette.page.ignoresSafeArea(edges: .bottom))
                 }
             }
         }
@@ -430,24 +412,33 @@ private struct MainTabView: View {
         }
     }
 
+    @available(iOS 26.0, *)
+    private var nativeTabs: some View {
+        TabView(selection: compactSelection) {
+            ForEach(session.compactTabDestinations) { destination in
+                Tab(destination == .transactions ? "流水" : destination.compactTitle,
+                    systemImage: destination.systemImage, value: destination) {
+                    NavigationStack { LedgerDestinationView(destination: destination, isRoot: true) }
+                }
+            }
+            Tab("更多", systemImage: "ellipsis", value: LedgerDestination.settings) {
+                NavigationStack { MoreView(overflowDestination: $moreDestination) }
+            }
+        }
+    }
+
     private var compactTabs: some View {
         TabView(selection: compactSelection) {
             ForEach(session.compactTabDestinations) { destination in
                 NavigationStack {
                     LedgerDestinationView(destination: destination, isRoot: true)
                 }
-                .toolbar(.hidden, for: .tabBar)
-                .tabItem { Label(destination.compactTitle, systemImage: destination.systemImage) }
+                .tabItem { Label(destination == .transactions ? "流水" : destination.compactTitle, systemImage: destination.systemImage) }
                 .tag(destination)
             }
             NavigationStack { MoreView(overflowDestination: $moreDestination) }
-                .toolbar(.hidden, for: .tabBar)
                 .tabItem { Label("更多", systemImage: "ellipsis") }
                 .tag(LedgerDestination.settings)
-            NavigationStack { GlobalSearchPage() }
-                .toolbar(.hidden, for: .tabBar)
-                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
-                .tag(LedgerDestination.search)
         }
     }
 }
@@ -501,6 +492,7 @@ private struct LedgerRegularShell: View {
             .listStyle(.sidebar)
             .accessibilityIdentifier("ledger-sidebar")
             .navigationTitle("Ledger")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
         } detail: {

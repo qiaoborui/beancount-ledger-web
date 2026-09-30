@@ -23,7 +23,7 @@ struct LocalLedgerStorageView: View {
     }
 
     var body: some View {
-        Form {
+        List {
             Section {
                 LabeledContent("账本", value: session.localLedgerName)
                 LabeledContent("存储提供方", value: session.localGitConfiguration == nil ? "本机目录" : "Git 工作区")
@@ -80,6 +80,7 @@ struct LocalLedgerStorageView: View {
         }
         .disabled(busy || session.isStorageSyncBusy)
         .navigationTitle("存储与同步")
+        .terminalNativeChrome()
         .navigationBarTitleDisplayMode(.inline)
         .task {
             if let config = session.localGitConfiguration {
@@ -181,7 +182,7 @@ struct GitLedgerSetupView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section("账本") {
                     TextField("名称", text: $name)
                     TextField("入口文件", text: $entrypoint).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -203,6 +204,7 @@ struct GitLedgerSetupView: View {
                 if session.isLocalOperationBusy { Section { ProgressView("正在下载并校验工作区") } }
             }
             .navigationTitle("添加 Git 账本")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

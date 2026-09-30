@@ -1,26 +1,28 @@
 import SwiftUI
 import UIKit
 
+// Legacy view names share the approved terminal tokens while their public API
+// remains stable for editor, import, authentication and local-ledger surfaces.
 enum LedgerPalette {
-    static let canvas = Color(uiColor: .systemGroupedBackground)
-    static let panel = Color(uiColor: .secondarySystemGroupedBackground)
-    static let raised = Color(uiColor: .tertiarySystemGroupedBackground)
-    static let tag = Color.dynamic(light: 0xEEF2F6, dark: 0x1E2530)
-    static let ink = Color.primary
-    static let warm = Color.dynamic(light: 0x1F242B, dark: 0xD1D7E0)
-    static let olive = Color.dynamic(light: 0x475569, dark: 0x94A3B8)
-    static let secondary = Color.secondary
-    static let line = Color(uiColor: .separator)
-    static let lineStrong = Color.dynamic(light: 0xC5CED6, dark: 0x3E4754)
-    static let cobalt = Color.dynamic(light: 0x0055D4, dark: 0x2E82F2)
-    static let cobaltLight = Color.dynamic(light: 0x3B82F6, dark: 0x60A5FA)
-    static let income = Color.dynamic(light: 0x107C41, dark: 0x30D158)
-    static let expense = Color.dynamic(light: 0xD93829, dark: 0xFF6961)
-    static let gold = Color.dynamic(light: 0xB45309, dark: 0xFBBF24)
-    static let risk = Color.dynamic(light: 0xDC2626, dark: 0xFF453A)
-    static let success = Color.dynamic(light: 0x16A34A, dark: 0x34D399)
-    static let onBrand = Color(red: 0.985, green: 0.99, blue: 1)
-    static let cardBorder = Color.dynamic(light: 0xE2E8F0, dark: 0x2A3240)
+    static let canvas = TerminalPalette.page
+    static let panel = TerminalPalette.panel
+    static let raised = TerminalPalette.panel
+    static let tag = TerminalPalette.panel
+    static let ink = TerminalPalette.ink
+    static let warm = TerminalPalette.ink
+    static let olive = TerminalPalette.secondary
+    static let secondary = TerminalPalette.secondary
+    static let line = TerminalPalette.line
+    static let lineStrong = TerminalPalette.secondary
+    static let cobalt = TerminalPalette.accent
+    static let cobaltLight = TerminalPalette.accent
+    static let income = TerminalPalette.positive
+    static let expense = TerminalPalette.negative
+    static let gold = TerminalPalette.accent
+    static let risk = TerminalPalette.negative
+    static let success = TerminalPalette.positive
+    static let onBrand = TerminalPalette.onAccent
+    static let cardBorder = TerminalPalette.line
 }
 
 enum LedgerSpacing {
@@ -33,11 +35,11 @@ enum LedgerSpacing {
 }
 
 enum LedgerRadius {
-    static let xs: CGFloat = 6
-    static let sm: CGFloat = 10
-    static let md: CGFloat = 14
-    static let lg: CGFloat = 20
-    static let pill: CGFloat = 999
+    static let xs: CGFloat = 2
+    static let sm: CGFloat = 2
+    static let md: CGFloat = 2
+    static let lg: CGFloat = 2
+    static let pill: CGFloat = 2
 }
 
 enum LedgerLayout {
@@ -158,23 +160,9 @@ private struct LedgerNavigation: ViewModifier {
     let showsSync: Bool
 
     func body(content: Content) -> some View {
-        content
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar(.visible, for: .navigationBar)
-            .toolbar {
-                if showsTimeRange {
-                    ToolbarItem(placement: .topBarLeading) {
-                        LedgerTimeRangeButton()
-                    }
-                }
-                if showsSync {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        LedgerSyncToolbarButton()
-                    }
-                }
-            }
+        content.terminalPageChrome(title, isRoot: isRoot, showsTimeRange: showsTimeRange, showsSync: showsSync)
     }
+
 }
 
 extension View {
@@ -182,10 +170,10 @@ extension View {
         modifier(LedgerNavigation(title: title, isRoot: isRoot, showsTimeRange: showsTimeRange, showsSync: showsSync))
     }
 
-    /// Reading surfaces share modern Apple grouped card layout with native feel.
+    /// Reading surfaces use compact ruled lists in the shared terminal palette.
     func ledgerReadingList() -> some View {
-        listStyle(.insetGrouped)
-            .listSectionSpacing(12)
+        listStyle(.plain)
+            .listSectionSpacing(8)
             .contentMargins(.top, LedgerLayout.pageTopInset, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .background(LedgerPalette.canvas)
@@ -203,21 +191,12 @@ private struct LedgerSearch: ViewModifier {
 }
 
 private struct LedgerFloatingActionSurface: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *), !reduceTransparency {
-            content
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28))
-                .padding(.horizontal, LedgerSpacing.md)
-                .padding(.vertical, LedgerSpacing.sm)
-        } else {
-            content
-                .background(LedgerPalette.raised, in: RoundedRectangle(cornerRadius: 24))
-                .padding(.horizontal, LedgerSpacing.md)
-                .padding(.vertical, LedgerSpacing.sm)
-        }
+        content
+            .background(TerminalPalette.page)
+            .overlay(alignment: .top) { TerminalRule() }
+            .padding(.horizontal, LedgerSpacing.md)
+            .padding(.vertical, LedgerSpacing.sm)
     }
 }
 
@@ -351,44 +330,12 @@ struct LedgerCardModifier: ViewModifier {
 }
 
 struct LedgerTactileCardModifier: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
-    var cornerRadius: CGFloat = LedgerRadius.lg
-    var padding: CGFloat = LedgerSpacing.lg
-
+    var cornerRadius: CGFloat = 2
+    var padding: CGFloat = 14
     func body(content: Content) -> some View {
-        content
-            .padding(padding)
-            .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(LedgerPalette.panel)
-                    .shadow(
-                        color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.045),
-                        radius: 8,
-                        x: 0,
-                        y: 3
-                    )
-                    .shadow(
-                        color: Color.black.opacity(colorScheme == .dark ? 0.18 : 0.015),
-                        radius: 1.5,
-                        x: 0,
-                        y: 1
-                    )
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(colorScheme == .dark ? 0.16 : 0.65),
-                                LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.4 : 0.6),
-                                Color.black.opacity(colorScheme == .dark ? 0.2 : 0.03)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 0.5
-                    )
-            }
+        content.padding(min(padding, 14))
+            .background(TerminalPalette.page)
+            .overlay { Rectangle().stroke(TerminalPalette.line, lineWidth: 1) }
     }
 }
 
@@ -436,7 +383,7 @@ struct AmountLabel: View {
 
     var body: some View {
         amountText
-            .font(font.monospacedDigit())
+            .font(font.monospacedDigit()).fontDesign(.monospaced)
             .foregroundStyle(color)
             .contentTransition(.opacity)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: session.amountsVisible)
@@ -569,30 +516,12 @@ enum LedgerFeedback {
 }
 
 struct LedgerFrostedCardModifier: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
-    var cornerRadius: CGFloat = 16
+    var cornerRadius: CGFloat = 2
     var padding: CGFloat = 14
-
     func body(content: Content) -> some View {
-        content
-            .padding(padding)
-            .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(LedgerPalette.panel)
-                    .shadow(
-                        color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.035),
-                        radius: 10,
-                        x: 0,
-                        y: 3
-                    )
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(
-                        LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
-                        lineWidth: 0.5
-                    )
-            }
+        content.padding(min(padding, 14))
+            .background(TerminalPalette.page)
+            .overlay { Rectangle().stroke(TerminalPalette.line, lineWidth: 1) }
     }
 }
 
@@ -640,12 +569,7 @@ struct TactilePillButtonStyle: ButtonStyle {
             .background {
                 RoundedRectangle(cornerRadius: LedgerRadius.pill, style: .continuous)
                     .fill(backgroundColor)
-                    .shadow(
-                        color: backgroundColor.opacity(configuration.isPressed ? 0.15 : 0.28),
-                        radius: configuration.isPressed ? 2 : 5,
-                        x: 0,
-                        y: configuration.isPressed ? 1 : 2.5
-                    )
+
             }
             .overlay {
                 RoundedRectangle(cornerRadius: LedgerRadius.pill, style: .continuous)

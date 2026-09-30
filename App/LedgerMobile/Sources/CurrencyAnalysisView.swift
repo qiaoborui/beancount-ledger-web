@@ -271,7 +271,7 @@ private struct CurrencyRateBadge: View {
             .padding(.horizontal, 9)
             .frame(minHeight: 26)
             .background(background)
-            .clipShape(Capsule())
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
     }
 
     private var label: String {

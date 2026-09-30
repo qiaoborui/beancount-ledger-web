@@ -138,6 +138,7 @@ struct PendingInboxView: View {
             }
             .background(LedgerPalette.canvas)
             .navigationTitle("待整理账单")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -147,11 +148,11 @@ struct PendingInboxView: View {
                     if totalCount > 0 {
                         Text("\(totalCount) 笔待办")
                             .accessibilityIdentifier("pending-inbox-total")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                            .font(.system(size: 13, weight: .semibold, design: .monospaced).monospacedDigit())
                             .foregroundStyle(Color.orange)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 4)
-                            .background(Color.orange.opacity(0.12), in: Capsule())
+                            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
                 }
             }
@@ -197,7 +198,7 @@ struct PendingInboxView: View {
             .onChange(of: session.privacyShielded) { _, hidden in if hidden { clearActions() } }
             .onChange(of: session.phase) { _, phase in if phase != .ready { clearActions() } }
             .overlay(alignment: .top) {
-                if actionID != nil { ProgressView("正在读取原始交易…").padding().background(.regularMaterial) }
+                if actionID != nil { ProgressView("正在读取原始交易…").padding().background(TerminalPalette.panel) }
             }
         }
     }
@@ -213,7 +214,7 @@ struct PendingInboxView: View {
                             .foregroundStyle(LedgerPalette.secondary)
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text("\(totalCount)")
-                                .font(.system(size: 28, weight: .bold, design: .rounded))
+                                .font(.system(size: 28, weight: .bold, design: .monospaced))
                                 .foregroundStyle(LedgerPalette.ink)
                             Text("笔待确认 / 未分类")
                                 .font(.system(size: 14, weight: .medium))
@@ -226,7 +227,7 @@ struct PendingInboxView: View {
                             .font(.system(size: 12))
                             .foregroundStyle(LedgerPalette.secondary)
                         AmountLabel(minorUnits: totalPendingMinorUnits, currency: "CNY")
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .font(.system(size: 17, weight: .bold, design: .monospaced))
                             .foregroundStyle(LedgerPalette.expense)
                     }
                 }
@@ -248,22 +249,22 @@ struct PendingInboxView: View {
                                 .padding(.vertical, 6)
                                 .background(
                                     isSelected ? Color.orange : Color(uiColor: .tertiarySystemFill),
-                                    in: Capsule()
+                                    in: RoundedRectangle(cornerRadius: LedgerRadius.sm)
                                 )
                         }
                         .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
                     }
                     Spacer()
                     Text("\(filteredCount) 笔")
-                        .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                        .font(.system(size: 12, weight: .medium, design: .monospaced).monospacedDigit())
                         .foregroundStyle(LedgerPalette.secondary)
                 }
             }
             .padding(16)
             .background(LedgerPalette.panel)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                     .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
             )
             .padding(.horizontal, 16)
@@ -350,7 +351,7 @@ struct PendingInboxView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 28)
                     .padding(.vertical, 12)
-                    .background(LedgerPalette.cobalt, in: Capsule())
+                    .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
             }
             .buttonStyle(PressScaleButtonStyle())
             .padding(.top, 12)
@@ -524,14 +525,14 @@ private struct PendingTransactionCard: View {
             // Header: Date & Amount
             HStack(alignment: .firstTextBaseline) {
                 Text(transaction.date)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
                     .foregroundStyle(LedgerPalette.secondary)
                 Spacer()
                 AmountLabel(
                     minorUnits: presentation.minorUnits,
                     currency: presentation.currency,
                     prefix: amountPrefix(presentation.kind),
-                    font: .system(size: 17, weight: .bold, design: .rounded),
+                    font: .system(size: 17, weight: .bold, design: .monospaced),
                     color: amountColor(presentation.kind)
                 )
             }
@@ -560,7 +561,7 @@ private struct PendingTransactionCard: View {
                     .foregroundStyle(badgeColor(reason))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
-                    .background(badgeColor(reason).opacity(0.12), in: Capsule())
+                    .background(badgeColor(reason).opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                 }
             }
 
@@ -579,7 +580,7 @@ private struct PendingTransactionCard: View {
                     .foregroundStyle(LedgerPalette.cobalt)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(LedgerPalette.cobalt.opacity(0.1), in: Capsule())
+                    .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                 }
                 .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
 
@@ -593,7 +594,7 @@ private struct PendingTransactionCard: View {
                     .foregroundStyle(LedgerPalette.ink)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+                    .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                 }
                 .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
 
@@ -617,7 +618,7 @@ private struct PendingTransactionCard: View {
                         .foregroundStyle(Color.green)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Color.green.opacity(0.12), in: Capsule())
+                        .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                     }
                     .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
                 }
@@ -636,9 +637,9 @@ private struct PendingTransactionCard: View {
         }
         .padding(14)
         .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
         )
     }
@@ -773,7 +774,7 @@ struct QuickCategoryPickerSheet: View {
                                 } label: {
                                     VStack(spacing: 6) {
                                         ZStack {
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                                 .fill(cat.color.opacity(0.14))
                                                 .frame(width: 44, height: 44)
                                             Image(systemName: cat.icon)
@@ -788,7 +789,7 @@ struct QuickCategoryPickerSheet: View {
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 8)
                                     .background(LedgerPalette.panel)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                                 }
                                 .buttonStyle(PressScaleButtonStyle(pressedScale: 0.96))
                             }
@@ -836,6 +837,7 @@ struct QuickCategoryPickerSheet: View {
             .disabled(submitting)
             .searchable(text: $searchQuery, prompt: "搜索分类或账户名称")
             .navigationTitle("选择分类")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -867,7 +869,7 @@ struct QuickPayeeEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     TextField("商户 / 收款方名称", text: $payee)
                         .accessibilityIdentifier("pending-payee-input")
@@ -887,6 +889,7 @@ struct QuickPayeeEditorSheet: View {
             }
             .disabled(submitting)
             .navigationTitle("补全商户与备注")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

@@ -1,0 +1,189 @@
+Application, 0x1152dfe80, pid: 68700, label: 'Ledger' <App element pid: 68700>
+  Window (Main), 0x1152def80, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4402775040.4>
+    Other, 0x1152df0c0, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4467137984.5>
+    Other, 0x1152df200, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4467568128.6>
+      Other, 0x1152df340, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4469802880.7>
+        Other, 0x1152df480, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4402774016.8>
+          Other, 0x1152df5c0, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4993009056.9>
+            Other, 0x1152df700, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4476588032.10>
+              Other, 0x1152df840, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4476596224.11>
+                Other, 0x1152df980, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4467149440.13>
+                  Other, 0x1152dfac0, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4402598912.15>
+                    Other, 0x1152dfc00, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4993008416.18>
+                      Other, 0x1152dfd40, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4993008576.21>
+                        Other, 0x115308000, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4479175168.25>
+                          NavigationBar, 0x115308140, {{0.0, 62.0}, {402.0, 54.0}}, identifier: '财务概览' <AX element pid: 68700, elementOrHash.elementID: 4475603968.33>
+                            Other, 0x115308280, {{20.0, 66.0}, {63.7, 36.0}} <AX element pid: 68700, elementOrHash.elementID: 4478455552.45>
+                              Other, 0x1153083c0, {{20.0, 66.0}, {63.7, 36.0}} <AX element pid: 68700, elementOrHash.elementID: 4993009536.58>
+                                Button, 0x115308500, {{20.0, 66.0}, {63.7, 36.0}}, identifier: 'navigation-time-range', label: '选择时间范围，当前为2026年8月', value: 2026-08-01 至 2026-... <AX element pid: 68700, elementOrHash.elementID: 4993009856.64>
+                                  Image, 0x115308640, {{28.0, 76.3}, {17.0, 15.3}}, identifier: 'calendar', label: 'Calendar' <AX element pid: 68700, elementOrHash.elementID: 4993009376.69>
+                                  StaticText, 0x115308780, {{52.0, 75.0}, {25.7, 18.0}}, label: '8月' <AX element pid: 68700, elementOrHash.elementID: 4993009696.70>
+                            StaticText, 0x1153088c0, {{167.0, 73.7}, {67.7, 20.7}}, label: '财务概览' <AX element pid: 68700, elementOrHash.elementID: 4467240320.46>
+                            Other, 0x115308a00, {{334.0, 66.0}, {48.0, 36.0}} <AX element pid: 68700, elementOrHash.elementID: 4478458112.47>
+                              Other, 0x115308b40, {{334.0, 66.0}, {48.0, 36.0}} <AX element pid: 68700, elementOrHash.elementID: 4993008736.59>
+                                Button, 0x115308c80, {{334.0, 66.0}, {48.0, 36.0}}, identifier: 'ledger-sync-status', label: '刷新账本' <AX element pid: 68700, elementOrHash.elementID: 4993008896.65>
+                          Other, 0x115308dc0, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4467228672.34>
+                            Other, 0x115308f00, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4467240768.48>
+                              Other, 0x115309040, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4402889600.60>
+                                Other, 0x115309180, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4993010176.66>
+                                  CollectionView, 0x1153092c0, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4403970048.71>
+                                    Other, 0x115309400, {{-16.0, -1624.0}, {434.0, 1959.7}} <AX element pid: 68700, elementOrHash.elementID: 4972504064.73>
+                                    Other, 0x115309540, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4467233600.74>
+                                      Other, 0x115309680, {{0.0, 0.0}, {402.0, 156.0}} <AX element pid: 68700, elementOrHash.elementID: 4467242112.88>
+                                      Other, 0x1153097c0, {{0.0, 741.0}, {402.0, 133.0}} <AX element pid: 68700, elementOrHash.elementID: 4467294656.89>
+                                    Other, 0x115309900, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4467233152.75>
+                                      Other, 0x115309a40, {{0.0, 741.0}, {402.0, 133.0}} <AX element pid: 68700, elementOrHash.elementID: 4966390656.90>
+                                    Cell, 0x115309b80, {{16.0, 124.0}, {370.0, 211.7}} <AX element pid: 68700, elementOrHash.elementID: 4478459392.76>
+                                      Other, 0x115309cc0, {{16.0, 124.0}, {370.0, 211.7}} <AX element pid: 68700, elementOrHash.elementID: 4968918016.91>
+                                        Other, 0x115309e00, {{16.0, 124.0}, {370.0, 211.7}} <AX element pid: 68700, elementOrHash.elementID: 4467269952.106>
+                                          Other, 0x115309f40, {{16.0, 124.0}, {370.0, 211.7}} <AX element pid: 68700, elementOrHash.elementID: 4402891392.117>
+                                            Other, 0x11530a080, {{16.0, 124.0}, {370.0, 211.7}} <AX element pid: 68700, elementOrHash.elementID: 4993021216.128>
+                                      Other, 0x11530a1c0, {{16.0, 124.0}, {370.0, 211.7}} <AX element pid: 68700, elementOrHash.elementID: 4467268608.92>
+                                        Other, 0x11530a300, {{16.0, 124.0}, {370.0, 211.7}} <AX element pid: 68700, elementOrHash.elementID: 4402390016.107>
+                                          Other, 0x11530a440, {{16.0, 124.0}, {370.0, 211.7}} <AX element pid: 68700, elementOrHash.elementID: 4993012736.118>
+                                            Image, 0x11530a580, {{33.3, 143.3}, {11.0, 10.3}}, identifier: 'calendar', label: 'Calendar' <AX element pid: 68700, elementOrHash.elementID: 4993010496.129>
+                                            StaticText, 0x11530a6c0, {{50.7, 141.0}, {49.7, 15.0}}, label: '月度概览' <AX element pid: 68700, elementOrHash.elementID: 4993010336.130>
+                                            StaticText, 0x11530a800, {{318.7, 142.5}, {44.3, 12.0}}, label: '10 笔流水' <AX element pid: 68700, elementOrHash.elementID: 4993010976.131>
+                                            StaticText, 0x11530a940, {{32.0, 169.0}, {57.3, 14.0}}, label: '月度净结余' <AX element pid: 68700, elementOrHash.elementID: 4993010656.132>
+                                            StaticText, 0x11530aa80, {{32.0, 186.0}, {140.3, 30.0}}, identifier: 'overview-monthly-net', label: '¥44,948.20' <AX element pid: 68700, elementOrHash.elementID: 4993011136.133>
+                                            Image, 0x11530abc0, {{39.0, 231.0}, {6.3, 6.3}}, identifier: 'arrow.up.right', label: 'Up-Right Diagonal Arrow' <AX element pid: 68700, elementOrHash.elementID: 4993010816.134>
+                                            StaticText, 0x11530ad00, {{48.3, 228.0}, {62.3, 12.0}}, label: '+17.1% 同比' <AX element pid: 68700, elementOrHash.elementID: 4993011456.135>
+                                            StaticText, 0x11530ae40, {{130.7, 228.0}, {55.0, 12.0}}, label: '储蓄率 89%' <AX element pid: 68700, elementOrHash.elementID: 4993011296.136>
+                                            StaticText, 0x11530af80, {{41.0, 268.3}, {33.0, 13.3}}, label: '总收入' <AX element pid: 68700, elementOrHash.elementID: 4993011776.137>
+                                            StaticText, 0x11530b0c0, {{224.2, 268.3}, {33.0, 13.3}}, label: '总支出' <AX element pid: 68700, elementOrHash.elementID: 4993012576.138>
+                                            StaticText, 0x11530b200, {{32.0, 284.7}, {91.0, 18.7}}, label: '¥50,500.00' <AX element pid: 68700, elementOrHash.elementID: 4993011616.139>
+                                            StaticText, 0x11530b340, {{215.2, 284.7}, {81.0, 18.7}}, label: '¥5,551.80' <AX element pid: 68700, elementOrHash.elementID: 4993012416.140>
+                                            StaticText, 0x11530b480, {{32.0, 306.3}, {62.0, 13.3}}, label: '环比 ↑4.8%' <AX element pid: 68700, elementOrHash.elementID: 4993012096.141>
+                                            StaticText, 0x11530b5c0, {{215.2, 306.3}, {69.3, 13.3}}, label: '环比 ↓11.6%' <AX element pid: 68700, elementOrHash.elementID: 4993012896.142>
+                                    Other, 0x11530b700, {{-16.0, 347.7}, {434.0, 74.0}} <AX element pid: 68700, elementOrHash.elementID: 4972504576.77>
+                                    Cell, 0x11530b840, {{16.0, 347.7}, {370.0, 74.0}} <AX element pid: 68700, elementOrHash.elementID: 4478460672.78>
+                                      Other, 0x11530b980, {{16.0, 347.7}, {370.0, 74.0}} <AX element pid: 68700, elementOrHash.elementID: 4971038720.93>
+                                        Other, 0x11530bac0, {{16.0, 347.7}, {370.0, 74.0}} <AX element pid: 68700, elementOrHash.elementID: 4467271744.108>
+                                          Other, 0x11530bc00, {{16.0, 347.7}, {370.0, 74.0}} <AX element pid: 68700, elementOrHash.elementID: 4402892288.119>
+                                            Other, 0x11530bd40, {{16.0, 347.7}, {370.0, 74.0}} <AX element pid: 68700, elementOrHash.elementID: 4993021376.143>
+                                      Other, 0x11530be80, {{16.0, 347.7}, {370.0, 74.0}} <AX element pid: 68700, elementOrHash.elementID: 4467269504.94>
+                                        Other, 0x11530c000, {{16.0, 347.7}, {370.0, 74.0}} <AX element pid: 68700, elementOrHash.elementID: 4402391552.109>
+                                          Other, 0x11530c140, {{16.0, 347.7}, {370.0, 74.0}} <AX element pid: 68700, elementOrHash.elementID: 4993015136.120>
+                                            Button, 0x11530c280, {{39.3, 351.7}, {46.0, 66.0}}, label: '记账' <AX element pid: 68700, elementOrHash.elementID: 4993013376.144>
+                                              Image, 0x11530c3c0, {{55.7, 368.0}, {13.3, 13.3}}, identifier: 'plus', label: 'Add' <AX element pid: 68700, elementOrHash.elementID: 4993013056.182>
+                                              StaticText, 0x11530c500, {{50.8, 403.7}, {23.0, 14.0}}, label: '记账' <AX element pid: 68700, elementOrHash.elementID: 4993013216.183>
+                                            Button, 0x11530c640, {{131.7, 351.7}, {46.0, 66.0}}, label: '导入' <AX element pid: 68700, elementOrHash.elementID: 4993014016.145>
+                                              Image, 0x11530c780, {{148.0, 366.3}, {13.7, 17.0}}, identifier: 'arrow.down.doc', label: 'Next Page' <AX element pid: 68700, elementOrHash.elementID: 4993013696.184>
+                                              StaticText, 0x11530c8c0, {{143.2, 403.7}, {23.0, 14.0}}, label: '导入' <AX element pid: 68700, elementOrHash.elementID: 4993013856.185>
+                                            Button, 0x11530ca00, {{224.3, 351.7}, {46.0, 66.0}}, label: '趋势' <AX element pid: 68700, elementOrHash.elementID: 4993014496.146>
+                                              Image, 0x11530cb40, {{238.7, 367.3}, {17.3, 15.0}}, identifier: 'chart.xyaxis.line', label: 'Xy Axis With A Trend Line' <AX element pid: 68700, elementOrHash.elementID: 4993014176.186>
+                                              StaticText, 0x11530cc80, {{235.8, 403.7}, {23.0, 14.0}}, label: '趋势' <AX element pid: 68700, elementOrHash.elementID: 4993014336.187>
+                                            Button, 0x11530cdc0, {{316.7, 351.7}, {46.0, 66.0}}, label: '资产' <AX element pid: 68700, elementOrHash.elementID: 4993014976.147>
+                                              Image, 0x11530cf00, {{330.7, 366.0}, {18.0, 17.3}}, identifier: 'building.columns', label: 'Building With Columns' <AX element pid: 68700, elementOrHash.elementID: 4993014656.188>
+                                              StaticText, 0x11530d040, {{328.2, 403.7}, {23.0, 14.0}}, label: '资产' <AX element pid: 68700, elementOrHash.elementID: 4993014816.189>
+                                    Other, 0x11530d180, {{-16.0, 433.7}, {434.0, 290.0}} <AX element pid: 68700, elementOrHash.elementID: 4972505088.79>
+                                    Cell, 0x11530d2c0, {{16.0, 433.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4478465792.80>
+                                      Other, 0x11530d400, {{16.0, 433.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4972499968.95>
+                                      Other, 0x11530d540, {{16.0, 433.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4467275776.96>
+                                        Other, 0x11530d680, {{16.0, 433.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4972873216.110>
+                                          Other, 0x11530d7c0, {{16.0, 433.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4993015616.121>
+                                            StaticText, 0x11530d900, {{32.0, 443.7}, {77.7, 15.7}}, label: '当月支出排行' <AX element pid: 68700, elementOrHash.elementID: 4993015456.148>
+                                            StaticText, 0x11530da40, {{325.3, 444.8}, {44.7, 13.3}}, label: 'Top 分类' <AX element pid: 68700, elementOrHash.elementID: 4993015296.149>
+                                    Cell, 0x11530db80, {{16.0, 469.3}, {370.0, 254.3}} <AX element pid: 68700, elementOrHash.elementID: 4478461952.81>
+                                      Other, 0x11530dcc0, {{16.0, 469.3}, {370.0, 254.3}} <AX element pid: 68700, elementOrHash.elementID: 4971041792.97>
+                                        Other, 0x11530de00, {{16.0, 469.3}, {370.0, 254.3}} <AX element pid: 68700, elementOrHash.elementID: 4467273536.111>
+                                          Other, 0x11530df40, {{16.0, 469.3}, {370.0, 254.3}} <AX element pid: 68700, elementOrHash.elementID: 4402893184.122>
+                                            Other, 0x11530e080, {{16.0, 469.3}, {370.0, 254.3}} <AX element pid: 68700, elementOrHash.elementID: 4993021536.150>
+                                      Other, 0x11530e1c0, {{16.0, 469.3}, {370.0, 254.3}} <AX element pid: 68700, elementOrHash.elementID: 4467270400.98>
+                                        Other, 0x11530e300, {{16.0, 469.3}, {370.0, 254.3}} <AX element pid: 68700, elementOrHash.elementID: 4402393088.112>
+                                          Other, 0x11530e440, {{16.0, 469.3}, {370.0, 254.3}} <AX element pid: 68700, elementOrHash.elementID: 4993018976.123>
+                                            StaticText, 0x11530e580, {{299.3, 484.5}, {71.7, 16.3}}, label: '¥3,800.00' <AX element pid: 68700, elementOrHash.elementID: 4993016256.151>
+                                            Image, 0x11530e6c0, {{37.7, 493.0}, {14.7, 13.0}}, identifier: 'house.fill', label: 'Home' <AX element pid: 68700, elementOrHash.elementID: 4993015936.152>
+                                            StaticText, 0x11530e800, {{68.0, 491.7}, {92.7, 15.7}}, label: 'Housing › Rent' <AX element pid: 68700, elementOrHash.elementID: 4993015776.153>
+                                            StaticText, 0x11530e940, {{165.7, 493.2}, {18.7, 12.7}}, label: '1 笔' <AX element pid: 68700, elementOrHash.elementID: 4993016096.154>
+                                            StaticText, 0x11530ea80, {{337.0, 501.8}, {34.0, 12.7}}, label: '68.4%' <AX element pid: 68700, elementOrHash.elementID: 4993016416.155>
+                                            Image, 0x11530ebc0, {{40.7, 554.0}, {8.7, 14.3}}, identifier: 'fork.knife', label: 'Food' <AX element pid: 68700, elementOrHash.elementID: 4993016576.156>
+                                            StaticText, 0x11530ed00, {{68.0, 553.5}, {26.0, 15.7}}, label: '食材' <AX element pid: 68700, elementOrHash.elementID: 4993016736.157>
+                                            StaticText, 0x11530ee40, {{312.7, 546.3}, {58.3, 16.3}}, label: '¥611.80' <AX element pid: 68700, elementOrHash.elementID: 4993017056.158>
+                                            StaticText, 0x11530ef80, {{99.0, 555.0}, {20.0, 12.7}}, label: '2 笔' <AX element pid: 68700, elementOrHash.elementID: 4993016896.159>
+                                            StaticText, 0x11530f0c0, {{337.0, 563.7}, {34.0, 12.7}}, label: '11.0%' <AX element pid: 68700, elementOrHash.elementID: 4993017216.160>
+                                            StaticText, 0x11530f200, {{312.7, 608.2}, {58.3, 16.3}}, label: '¥576.00' <AX element pid: 68700, elementOrHash.elementID: 4993017856.161>
+                                            Image, 0x11530f340, {{38.0, 617.3}, {14.3, 11.3}}, identifier: 'car.fill', label: 'Car' <AX element pid: 68700, elementOrHash.elementID: 4993017376.162>
+                                            StaticText, 0x11530f480, {{68.0, 615.3}, {111.3, 15.7}}, label: 'Transport › Public' <AX element pid: 68700, elementOrHash.elementID: 4993017536.163>
+                                            StaticText, 0x11530f5c0, {{184.3, 616.8}, {18.7, 12.7}}, label: '1 笔' <AX element pid: 68700, elementOrHash.elementID: 4993017696.164>
+                                            StaticText, 0x11530f700, {{337.0, 625.5}, {34.0, 12.7}}, label: '10.4%' <AX element pid: 68700, elementOrHash.elementID: 4993018016.165>
+                                            StaticText, 0x11530f840, {{312.7, 670.0}, {58.3, 16.3}}, label: '¥328.00' <AX element pid: 68700, elementOrHash.elementID: 4993018656.166>
+                                            Image, 0x11530f980, {{38.0, 679.7}, {14.0, 11.0}}, identifier: 'book.fill', label: 'Bookmark' <AX element pid: 68700, elementOrHash.elementID: 4993018176.167>
+                                            StaticText, 0x11530fac0, {{68.0, 677.2}, {26.0, 15.7}}, label: '图书' <AX element pid: 68700, elementOrHash.elementID: 4993018336.168>
+                                            StaticText, 0x11530fc00, {{99.0, 678.7}, {18.7, 12.7}}, label: '1 笔' <AX element pid: 68700, elementOrHash.elementID: 4993018496.169>
+                                            StaticText, 0x11530fd40, {{344.3, 687.3}, {26.7, 12.7}}, label: '5.9%' <AX element pid: 68700, elementOrHash.elementID: 4993018816.170>
+                                    Other, 0x11530fe80, {{-16.0, 735.7}, {434.0, 117.0}} <AX element pid: 68700, elementOrHash.elementID: 4972505600.82>
+                                    Cell, 0x115310000, {{16.0, 735.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4973543424.83>
+                                      Other, 0x115310140, {{16.0, 735.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4972501504.99>
+                                      Other, 0x115310280, {{16.0, 735.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4467276224.100>
+                                        Other, 0x1153103c0, {{16.0, 735.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4972874752.113>
+                                          Other, 0x115310500, {{16.0, 735.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4993019136.124>
+                                            StaticText, 0x115310640, {{16.0, 735.7}, {370.0, 35.7}}, label: '消费节奏' <AX element pid: 68700, elementOrHash.elementID: 4993019296.171>
+                                    Cell, 0x115310780, {{16.0, 771.3}, {370.0, 81.3}} <AX element pid: 68700, elementOrHash.elementID: 4478463232.84>
+                                      Other, 0x1153108c0, {{16.0, 771.3}, {370.0, 81.3}} <AX element pid: 68700, elementOrHash.elementID: 4971051008.101>
+                                        Other, 0x115310a00, {{16.0, 771.3}, {370.0, 81.3}} <AX element pid: 68700, elementOrHash.elementID: 4467274880.114>
+                                          Other, 0x115310b40, {{16.0, 771.3}, {370.0, 81.3}} <AX element pid: 68700, elementOrHash.elementID: 4402894080.125>
+                                            Other, 0x115310c80, {{16.0, 771.3}, {370.0, 81.3}} <AX element pid: 68700, elementOrHash.elementID: 4993021696.172>
+                                      Other, 0x115310dc0, {{16.0, 771.3}, {370.0, 81.3}} <AX element pid: 68700, elementOrHash.elementID: 4467272192.102>
+                                        Other, 0x115310f00, {{16.0, 771.3}, {370.0, 81.3}} <AX element pid: 68700, elementOrHash.elementID: 4402394624.115>
+                                          Other, 0x115311040, {{16.0, 771.3}, {370.0, 81.3}} <AX element pid: 68700, elementOrHash.elementID: 4993020736.126>
+                                            Image, 0x115311180, {{32.0, 787.3}, {12.0, 12.0}}, identifier: 'sun.max', label: 'Brightness Higher' <AX element pid: 68700, elementOrHash.elementID: 4993019616.173>
+                                            StaticText, 0x1153112c0, {{49.0, 786.7}, {44.0, 13.3}}, label: '日均支出' <AX element pid: 68700, elementOrHash.elementID: 4993019456.174>
+                                            Image, 0x115311400, {{216.3, 787.3}, {9.3, 12.0}}, identifier: 'flame', label: 'Flame' <AX element pid: 68700, elementOrHash.elementID: 4993020096.175>
+                                            StaticText, 0x115311540, {{230.6, 786.7}, {44.0, 13.3}}, label: '单笔最高' <AX element pid: 68700, elementOrHash.elementID: 4993020256.176>
+                                            StaticText, 0x115311680, {{31.0, 803.3}, {68.0, 19.3}}, label: '¥179.09' <AX element pid: 68700, elementOrHash.elementID: 4993019776.177>
+                                            StaticText, 0x1153117c0, {{215.2, 803.3}, {83.0, 19.3}}, label: '¥3,800.00' <AX element pid: 68700, elementOrHash.elementID: 4993020416.178>
+                                            StaticText, 0x115311900, {{31.0, 825.7}, {47.0, 12.0}}, label: '已过 31 天' <AX element pid: 68700, elementOrHash.elementID: 4993019936.179>
+                                            StaticText, 0x115311a40, {{215.2, 825.7}, {40.0, 12.0}}, label: '房屋租金' <AX element pid: 68700, elementOrHash.elementID: 4993020576.180>
+                                    Other, 0x115311b80, {{-16.0, 864.7}, {434.0, 2195.7}} <AX element pid: 68700, elementOrHash.elementID: 4972506112.85>
+                                    Cell, 0x115311cc0, {{16.0, 864.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4973544704.86>
+                                      Other, 0x115311e00, {{16.0, 864.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4972503040.103>
+                                      Other, 0x115311f40, {{16.0, 864.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4467276672.104>
+                                        Other, 0x115312080, {{16.0, 864.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4972876288.116>
+                                          Other, 0x1153121c0, {{16.0, 864.7}, {370.0, 35.7}} <AX element pid: 68700, elementOrHash.elementID: 4993020896.127>
+                                            StaticText, 0x115312300, {{16.0, 864.7}, {370.0, 35.7}}, label: '最近流水' <AX element pid: 68700, elementOrHash.elementID: 4993021056.181>
+                                    Other, 0x115312440, {{369.0, 116.0}, {30.0, 675.0}}, label: 'Vertical scroll bar, 2 pages', value: 0% <AX element pid: 68700, elementOrHash.elementID: 4968910336.87>
+                                      Other, 0x115312580, {{396.0, 781.0}, {3.0, 7.0}} <AX element pid: 68700, elementOrHash.elementID: 4467261888.105>
+                                    Other, 0x1153126c0, {{369.0, 116.0}, {30.0, 675.0}}, label: 'Vertical scroll bar, 2 pages', value: 0% <AX element pid: 68700, elementOrHash.elementID: 4968910336.87>
+                                      Other, 0x115312800, {{396.0, 781.0}, {3.0, 7.0}} <AX element pid: 68700, elementOrHash.elementID: 4467261888.105>
+                          Toolbar, 0x115312940, {{0.0, 0.0}, {402.0, 874.0}}, identifier: 'Toolbar', label: 'Toolbar' <AX element pid: 68700, elementOrHash.elementID: 4479175680.35>
+                            Other, 0x115312a80, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4479180288.49>
+              Other, 0x115312bc0, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4402890496.12>
+                Other, 0x115312d00, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68700, elementOrHash.elementID: 4467136640.14>
+                  Other, 0x115312e40, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68700, elementOrHash.elementID: 4467137088.16>
+                    TabBar, 0x115312f80, {{0.0, 791.0}, {402.0, 83.0}}, label: 'Tab Bar' <AX element pid: 68700, elementOrHash.elementID: 4475601664.19>
+                      Other, 0x1153130c0, {{21.0, 791.0}, {290.0, 62.0}} <AX element pid: 68700, elementOrHash.elementID: 4476589056.22>
+                        Other, 0x115313200, {{21.0, 791.0}, {76.0, 54.0}} <AX element pid: 68700, elementOrHash.elementID: 4467153920.26>
+                        Other, 0x115313340, {{21.0, 791.0}, {290.0, 62.0}} <AX element pid: 68700, elementOrHash.elementID: 4403761536.27>
+                          Button, 0x115313480, {{25.0, 795.0}, {76.0, 54.0}}, label: '概览', Selected <AX element pid: 68700, elementOrHash.elementID: 4402780160.36>
+                            Image, 0x1153135c0, {{46.3, 801.0}, {33.3, 28.0}}, identifier: 'house.fill', label: 'home' <AX element pid: 68700, elementOrHash.elementID: 4469808640.50>
+                          Button, 0x115313700, {{93.7, 795.0}, {76.0, 54.0}}, label: '交易' <AX element pid: 68700, elementOrHash.elementID: 4402782208.37>
+                            Image, 0x115313840, {{117.0, 804.3}, {29.3, 21.0}}, identifier: 'list.bullet', label: 'List' <AX element pid: 68700, elementOrHash.elementID: 4469809920.51>
+                          Button, 0x115313980, {{162.3, 795.0}, {76.0, 54.0}}, label: '账户' <AX element pid: 68700, elementOrHash.elementID: 4402784256.38>
+                            Image, 0x115313ac0, {{187.7, 800.7}, {25.3, 28.7}}, identifier: 'book.closed.fill', label: 'Closed book, filled' <AX element pid: 68700, elementOrHash.elementID: 4469811200.52>
+                          Button, 0x115313c00, {{231.0, 795.0}, {76.0, 54.0}}, label: '更多' <AX element pid: 68700, elementOrHash.elementID: 4402786304.39>
+                            Image, 0x115313d40, {{256.7, 810.7}, {25.0, 8.7}}, identifier: 'ellipsis', label: 'More' <AX element pid: 68700, elementOrHash.elementID: 4469812480.53>
+                        Other, 0x115313e80, {{21.0, 791.0}, {290.0, 62.0}} <AX element pid: 68700, elementOrHash.elementID: 4403617216.28>
+                        Other, 0x115314000, {{25.0, 795.0}, {76.0, 54.0}} <AX element pid: 68700, elementOrHash.elementID: 4469807360.29>
+                          Other, 0x115314140, {{25.0, 795.0}, {76.0, 54.0}} <AX element pid: 68700, elementOrHash.elementID: 4467132160.40>
+                            Other, 0x115314280, {{25.0, 795.0}, {76.0, 54.0}} <AX element pid: 68700, elementOrHash.elementID: 4467130816.54>
+                            Other, 0x1153143c0, {{25.0, 795.0}, {76.0, 54.0}} <AX element pid: 68700, elementOrHash.elementID: 4476590592.55>
+                              Other, 0x115314500, {{25.0, 795.0}, {76.0, 54.0}} <AX element pid: 68700, elementOrHash.elementID: 4467133504.61>
+                                Other, 0x115314640, {{25.0, 795.0}, {76.0, 54.0}} <AX element pid: 68700, elementOrHash.elementID: 4467133952.67>
+                                  Other, 0x115314780, {{25.0, 795.0}, {76.0, 54.0}} <AX element pid: 68700, elementOrHash.elementID: 4467134400.72>
+                                Other, 0x1153148c0, {{25.0, 795.0}, {76.0, 54.0}} <AX element pid: 68700, elementOrHash.elementID: 4467132608.68>
+                              Other, 0x115314a00, {{25.0, 795.0}, {76.0, 54.0}} <AX element pid: 68700, elementOrHash.elementID: 4467133056.62>
+                      Other, 0x115314b40, {{319.0, 791.0}, {62.0, 62.0}} <AX element pid: 68700, elementOrHash.elementID: 4476598272.23>
+                        Other, 0x115314c80, {{319.0, 791.0}, {62.0, 62.0}} <AX element pid: 68700, elementOrHash.elementID: 4476599296.30>
+                          Other, 0x115314dc0, {{319.0, 791.0}, {62.0, 62.0}} <AX element pid: 68700, elementOrHash.elementID: 4467141120.41>
+                            Button, 0x115314f00, {{319.0, 791.0}, {62.0, 62.0}}, label: 'Search' <AX element pid: 68700, elementOrHash.elementID: 4402779136.56>
+                              Image, 0x115315040, {{336.0, 808.7}, {28.0, 26.7}}, identifier: 'magnifyingglass', label: 'Search' <AX element pid: 68700, elementOrHash.elementID: 4469808000.63>
+                          Other, 0x115315180, {{319.0, 791.0}, {62.0, 62.0}} <AX element pid: 68700, elementOrHash.elementID: 4467142016.42>
+                  Other, 0x1153152c0, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68700, elementOrHash.elementID: 4476593664.17>
+                    Other, 0x115315400, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68700, elementOrHash.elementID: 4972879360.20>
+                      Other, 0x115315540, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68700, elementOrHash.elementID: 4467153024.24>
+                        Other, 0x115315680, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68700, elementOrHash.elementID: 4467155264.31>
+                          Other, 0x1153157c0, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68700, elementOrHash.elementID: 4476965376.43>
+                            Other, 0x115315900, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68700, elementOrHash.elementID: 4467156160.57>
+                        Other, 0x115315a40, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68700, elementOrHash.elementID: 4476973568.32>
+                          Other, 0x115315b80, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68700, elementOrHash.elementID: 4467149888.44>

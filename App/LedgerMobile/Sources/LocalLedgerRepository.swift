@@ -72,8 +72,7 @@ actor LocalLedgerRepository: LedgerRepository {
         try Task.checkCancellation()
         let query = ["start": start, "end": end, "today": today,
             "valuationCurrency": valuationCurrency, "limit": String(limit)]
-        let cache = BootstrapPresentationCache(ledgerID: descriptor.id, entrypoint: descriptor.entrypoint,
-            url: workspace.rootDirectory.appendingPathComponent(".bootstrap-page-presentation.json"))
+        let cache = bootstrapPageCache(limit: limit)
         if let restored = try await workspace.withCurrentSnapshot({ revision, _ in
             revision.id == expectedRevisionID ? cache.loadPage(revisionID: revision.id, query: query) : nil
         }) {
@@ -96,6 +95,51 @@ actor LocalLedgerRepository: LedgerRepository {
         if let data = try? response.resultData() { cache.save(data, revisionID: expectedRevisionID, query: query) }
         presentedRevisionID = expectedRevisionID
         return result
+    }
+
+    private func bootstrapPageCache(limit: Int) -> BootstrapPresentationCache {
+        // Widget one-row pages must not evict the app's validated startup page.
+        let suffix = limit == LocalTransactionWindow.listPageRows ? "" : "-\(limit)"
+        return BootstrapPresentationCache(ledgerID: descriptor.id, entrypoint: descriptor.entrypoint,
+            url: workspace.rootDirectory.appendingPathComponent(".bootstrap-page-presentation\(suffix).json"))
+    }
+
+    struct CachedStartupPresentation: Sendable {
+        let revisionID: UUID
+        let page: LocalBootstrapPage
+        let categories: LedgerOverviewCategories?
+    }
+
+    /// Read both cold-start projections under one validated snapshot, then recheck
+    /// publication once. Never mix revisions or skip the workspace path checks.
+    func cachedStartupPresentation(start: String, end: String, today: String,
+        valuationCurrency: String, limit: Int = LocalTransactionWindow.listPageRows) async throws -> CachedStartupPresentation? {
+        guard (1...500).contains(limit), LedgerWidgetLink.isValidDay(start),
+              LedgerWidgetLink.isValidDay(end), LedgerWidgetLink.isValidDay(today), start < end else {
+            throw LocalLedgerError.invalidConfiguration("启动分页参数无效")
+        }
+        try Task.checkCancellation()
+        let query = ["start": start, "end": end, "today": today,
+            "valuationCurrency": valuationCurrency, "limit": String(limit)]
+        let pageCache = bootstrapPageCache(limit: limit)
+        let categoriesCache = overviewCache
+        let restored = try await workspace.withCurrentSnapshot { revision, _ -> CachedStartupPresentation? in
+            guard let page = pageCache.loadPage(revisionID: revision.id, query: query) else { return nil }
+            try Self.validateBootstrapPage(page, start: start, end: end, limit: limit)
+            var categories = categoriesCache.loadOverview(revisionID: revision.id, query: ["start": start, "end": end])
+            if let cached = categories {
+                do { try Self.validateOverviewCategories(cached, start: start, end: end) }
+                catch { categories = nil } // Rebuild a damaged secondary projection after first paint.
+            }
+            return CachedStartupPresentation(revisionID: revision.id, page: page, categories: categories)
+        }
+        try Task.checkCancellation()
+        guard let restored else { return nil }
+        let current = try await workspace.currentRevision()
+        try Task.checkCancellation()
+        guard current?.id == restored.revisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
+        presentedRevisionID = restored.revisionID
+        return restored
     }
 
     private static func validateBootstrapPage(_ result: LocalBootstrapPage,

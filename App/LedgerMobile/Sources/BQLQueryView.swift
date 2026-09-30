@@ -214,7 +214,7 @@ private struct BQLWorkbench: View {
                         .padding(.horizontal, LedgerSpacing.sm)
                         .frame(minHeight: 24)
                         .background(LedgerPalette.tag)
-                        .clipShape(Capsule())
+                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                 }
             }
             .padding(LedgerSpacing.md)

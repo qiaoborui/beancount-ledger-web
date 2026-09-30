@@ -13,7 +13,7 @@ struct BeanTransactionImportView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     HStack(spacing: LedgerSpacing.md) {
                         Image(systemName: "doc.text.fill")
@@ -69,6 +69,7 @@ struct BeanTransactionImportView: View {
                 }
             }
             .navigationTitle("导入 Beancount 交易")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

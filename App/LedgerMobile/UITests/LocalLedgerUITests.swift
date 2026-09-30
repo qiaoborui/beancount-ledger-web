@@ -2,6 +2,34 @@ import XCTest
 
 @MainActor
 final class LocalLedgerUITests: XCTestCase {
+    func testOverviewPullToRefreshKeepsExpenseRanking() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--local-ui-testing", "--pagination-ui-testing"]
+        app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
+        app.launch()
+        let seed = app.buttons["test-import-pagination-ledger"]
+        XCTAssertTrue(seed.waitForExistence(timeout: 10))
+        seed.tap()
+        XCTAssertTrue(app.staticTexts["pagination-fixture-ready"].waitForExistence(timeout: 30))
+        let percentage = app.staticTexts["100.0%"].firstMatch
+        XCTAssertTrue(percentage.waitForExistence(timeout: 20), app.debugDescription)
+        for _ in 0..<3 {
+            app.scrollViews.firstMatch.swipeDown()
+            XCTAssertTrue(percentage.waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertFalse(app.staticTexts["所选范围暂无支出"].exists)
+            XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "CancellationError")).firstMatch.exists)
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "overview-after-three-pull-refreshes"
+        shot.lifetime = .keepAlways
+        add(shot)
+        #else
+        throw XCTSkip("Uses isolated simulator ledger")
+        #endif
+    }
+
     func test292TransactionsPageThroughListButtons() throws {
         #if targetEnvironment(simulator)
         continueAfterFailure = false
@@ -14,8 +42,8 @@ final class LocalLedgerUITests: XCTestCase {
         seed.tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(app.staticTexts["pagination-fixture-ready"].waitForExistence(timeout: 30))
-        app.buttons["terminal-tab-transactions"].tap()
-        if !app.textFields["transaction-quick-search"].waitForExistence(timeout: 3) { app.buttons["terminal-tab-transactions"].tap() }
+        app.tabBars.buttons["流水"].tap()
+        if !app.textFields["transaction-quick-search"].waitForExistence(timeout: 3) { app.tabBars.buttons["流水"].tap() }
         XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 10), app.debugDescription)
         let next = app.buttons["transaction-window-next"]
         XCTAssertTrue(next.waitForExistence(timeout: 10))
@@ -75,6 +103,36 @@ final class LocalLedgerUITests: XCTestCase {
         #endif
     }
 
+    func testSlowLocalUnlockKeepsOneLaunchSurface() throws {
+        #if targetEnvironment(simulator)
+        let app = XCUIApplication()
+        app.launchArguments = ["--local-ui-testing"]
+        app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
+        app.launch()
+        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        app.buttons["local-ledger-create"].tap()
+        app.buttons["local-ledger-confirm-create"].tap()
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
+        app.terminate()
+        app.launchEnvironment["LEDGER_TEST_UNLOCK_DELAY"] = "10"
+        app.launch()
+        let oldCover = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "敏感数据已隐藏")).firstMatch
+        let appeared = oldCover.waitForExistence(timeout: 2)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "slow-unlock-launch-surface"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertFalse(appeared, "Old privacy splash must not replace the new launch while authentication is pending")
+        XCTAssertFalse(app.tabBars.firstMatch.exists, "Protected content must stay inaccessible during authentication")
+        XCTAssertTrue(app.otherElements["ledger-privacy-cover"].exists)
+        XCTAssertFalse(app.buttons["local-ledger-create"].exists)
+        XCTAssertFalse(app.buttons["选择其他账本"].exists)
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
+        #else
+        throw XCTSkip("Uses isolated simulator ledger")
+        #endif
+    }
+
     func testLocalRestartDoesNotShowPassiveLoadingCards() throws {
         #if targetEnvironment(simulator)
         let app = XCUIApplication()
@@ -94,7 +152,7 @@ final class LocalLedgerUITests: XCTestCase {
         overview.name = "overview-without-loading-card"
         overview.lifetime = .keepAlways
         add(overview)
-        app.buttons["terminal-tab-transactions"].tap()
+        app.tabBars.buttons["流水"].tap()
         XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["正在读取流水"].exists)
         XCTAssertFalse(app.staticTexts["统计中…"].exists)
@@ -117,8 +175,11 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
-        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
-        app.buttons["terminal-tab-transactions"].tap()
+        app.tabBars.buttons["流水"].tap()
+        if !app.buttons["transaction-actions"].waitForExistence(timeout: 3) {
+            app.tabBars.buttons["流水"].tap()
+        }
+        XCTAssertTrue(app.buttons["transaction-actions"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["transaction-actions"].tap()
         app.buttons["transaction-create-local"].tap()
         XCTAssertTrue(app.buttons["高级"].waitForExistence(timeout: 5))
@@ -132,6 +193,13 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["transaction-edit-save"].tap()
         XCTAssertTrue(app.buttons["bookkeeping-confirm-save"].waitForExistence(timeout: 30))
         app.buttons["bookkeeping-confirm-save"].tap()
+        let island = app.descendants(matching: .any)["ledger-dynamic-island-notice"]
+        let islandFound = island.waitForExistence(timeout: 4) || app.staticTexts["Synthetic context action"].waitForExistence(timeout: 5)
+        XCTAssertTrue(islandFound)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "dynamic-island-entry-verified"
+        shot.lifetime = .keepAlways
+        add(shot)
         XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 30))
         let row = app.staticTexts["Synthetic context action"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10))
@@ -229,7 +297,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["关闭"].firstMatch.tap()
         // Native global search uses complete metadata candidates, not the
         // legacy all-history transaction array. Drill-down must survive refresh.
-        app.buttons["terminal-tab-settings"].tap()
+        app.tabBars.buttons["更多"].tap()
         let searchEntry = app.buttons["more-search"]
         for _ in 0..<4 where !searchEntry.isHittable { app.swipeUp() }
         XCTAssertTrue(searchEntry.isHittable, app.debugDescription)
@@ -266,7 +334,7 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 10))
         app.navigationBars["交易详情"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(historyPage.waitForExistence(timeout: 15))
-        app.buttons["terminal-tab-transactions"].tap()
+        app.tabBars.buttons["流水"].tap()
         XCTAssertTrue(editedRow.waitForExistence(timeout: 15))
         let date = DateFormatter()
         date.locale = Locale(identifier: "en_US_POSIX")
@@ -283,7 +351,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["完成"].firstMatch.tap()
         // open(URL:) relaunches the isolated app into its overview root. Return
         // explicitly to the transaction list before testing mutable row actions.
-        app.buttons["terminal-tab-transactions"].tap()
+        app.tabBars.buttons["流水"].tap()
         XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 10))
         XCTAssertTrue(editedRow.waitForExistence(timeout: 15))
         editedRow.press(forDuration: 1)
@@ -308,7 +376,7 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
         app.buttons["local-ledger-create"].tap(); app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
-        app.buttons["terminal-tab-transactions"].tap()
+        app.tabBars.buttons["流水"].tap()
         app.buttons["transaction-actions"].tap()
         app.buttons["transaction-create-local"].tap()
         XCTAssertTrue(app.buttons["高级"].waitForExistence(timeout: 5)); app.buttons["高级"].tap()
@@ -373,7 +441,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
-        app.buttons["terminal-tab-transactions"].tap()
+        app.tabBars.buttons["流水"].tap()
         app.buttons["transaction-actions"].tap()
         app.buttons["transaction-create-local"].tap()
         app.buttons["bookkeeping-natural-entry"].tap()
@@ -413,7 +481,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
-        app.buttons["terminal-tab-transactions"].tap()
+        app.tabBars.buttons["流水"].tap()
         app.buttons["transaction-actions"].tap()
         app.buttons["transaction-create-local"].tap()
         let natural = app.buttons["bookkeeping-natural-entry"]
@@ -447,7 +515,7 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForExistence(timeout: 5))
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30), app.debugDescription)
-        app.buttons["terminal-tab-transactions"].tap()
+        app.tabBars.buttons["流水"].tap()
         XCTAssertTrue(app.buttons["transaction-actions"].waitForExistence(timeout: 5))
         app.buttons["transaction-actions"].tap()
         app.buttons["transaction-create-local"].tap()
@@ -473,7 +541,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.terminate()
         app.launch()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30), app.debugDescription)
-        app.buttons["terminal-tab-transactions"].tap()
+        app.tabBars.buttons["流水"].tap()
         XCTAssertTrue(app.staticTexts["Offline coffee"].firstMatch.waitForExistence(timeout: 10))
         #else
         throw XCTSkip("Simulator-only isolated authentication fixture; physical runtime uses integration tests and device authentication")

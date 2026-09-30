@@ -24,7 +24,7 @@ struct TerminalReportSection<Content: View>: View {
     }
 }
 
-private struct TerminalReportMetric: View {
+struct TerminalReportMetric: View {
     let title: String
     let amount: Int?
     let currency: String
@@ -47,7 +47,7 @@ private struct TerminalReportMetric: View {
     }
 }
 
-private struct TerminalReportGrid<Content: View>: View {
+struct TerminalReportGrid<Content: View>: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ViewBuilder let content: Content
     var body: some View {
@@ -499,5 +499,85 @@ struct TerminalAssetsReport: View {
             }.foregroundStyle(TerminalPalette.secondary)
         }.padding(.vertical, 12).contentShape(Rectangle())
             .overlay(alignment: .bottom) { TerminalRule() }
+    }
+}
+
+struct TerminalInvestmentsReport: View {
+    @EnvironmentObject private var session: LedgerSession
+    let data: LedgerInvestmentSummary
+
+    private var totalCost: Int? {
+        guard !data.holdings.isEmpty, data.holdings.allSatisfy({ $0.totalCostValueCny != nil }) else { return nil }
+        return data.holdings.reduce(0) { $0 + ($1.totalCostValueCny ?? 0) }
+    }
+    private var unrealized: Int? {
+        guard let totalCost, data.holdings.allSatisfy({ $0.totalMarketValueCny != nil }) else { return nil }
+        return data.totalMarketValueCny - totalCost
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            TerminalReportGrid {
+                TerminalReportMetric(title: "持仓市值", amount: data.totalMarketValueCny, currency: "CNY", note: "当前估值 / CNY")
+                TerminalReportMetric(title: "持仓成本", amount: totalCost, currency: "CNY", note: "缺失成本时不估算")
+                TerminalReportMetric(title: "浮动收益", amount: unrealized, currency: "CNY", note: "市值减持仓成本")
+                TerminalReportMetric(title: "已实现收益", amount: data.realizedPnlCny, currency: "CNY", note: "所选期间 / CNY")
+            }
+            TerminalReportSection(title: "01 / 当前持仓", detail: "\(data.holdings.count) 个品种") {
+                if data.holdings.isEmpty {
+                    Text("暂无投资持仓").terminalFont(size: 13).padding(.vertical, 24)
+                }
+                ForEach(data.holdings) { holding in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(holding.commodityName.isEmpty ? holding.commodity : holding.commodityName)
+                                .terminalFont(size: 14, weight: .medium)
+                            Spacer()
+                            if let market = holding.totalMarketValueCny {
+                                TerminalAmount(minorUnits: market, currency: "CNY", size: 14)
+                            } else {
+                                Text("缺少估值").terminalFont(size: 12).foregroundStyle(TerminalPalette.accent)
+                            }
+                        }
+                        Text(holding.commodity + " · " + (session.amountsVisible ? holding.totalQuantity.formatted() : "••••") + " · \(holding.accountCount) 个账户")
+                            .terminalFont(size: 11, design: .monospaced).foregroundStyle(TerminalPalette.secondary)
+                        if let cost = holding.totalCostValueCny {
+                            HStack {
+                                Text("成本").terminalFont(size: 11).foregroundStyle(TerminalPalette.secondary)
+                                TerminalAmount(minorUnits: cost, currency: "CNY", size: 12)
+                                Spacer()
+                                if let market = holding.totalMarketValueCny {
+                                    Text("浮动").terminalFont(size: 11).foregroundStyle(TerminalPalette.secondary)
+                                    TerminalAmount(minorUnits: market - cost, currency: "CNY", color: market >= cost ? TerminalPalette.positive : TerminalPalette.negative, size: 12)
+                                }
+                            }
+                        } else {
+                            Text("成本缺失").terminalFont(size: 11).foregroundStyle(TerminalPalette.secondary)
+                        }
+                    }.padding(.vertical, 12)
+                    TerminalRule()
+                }
+            }
+            TerminalReportSection(title: "02 / 账户持仓", detail: "\(data.positions.count) 项") {
+                ForEach(data.positions) { position in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(position.accountLabel.isEmpty ? position.account : position.accountLabel)
+                            .terminalFont(size: 13, weight: .medium)
+                        HStack {
+                            Text(position.commodity + " · " + (session.amountsVisible ? position.quantity.formatted() : "••••"))
+                                .terminalFont(size: 11, design: .monospaced).foregroundStyle(TerminalPalette.secondary)
+                            Spacer()
+                            if let market = position.marketValueCny {
+                                TerminalAmount(minorUnits: market, currency: "CNY", size: 13)
+                            } else {
+                                Text("缺少估值").terminalFont(size: 11).foregroundStyle(TerminalPalette.accent)
+                            }
+                        }
+                    }.padding(.vertical, 12)
+                    TerminalRule()
+                }
+                if data.positions.isEmpty { Text("暂无账户持仓明细").terminalFont(size: 13).padding(.vertical, 24) }
+            }
+        }.foregroundStyle(TerminalPalette.ink)
     }
 }

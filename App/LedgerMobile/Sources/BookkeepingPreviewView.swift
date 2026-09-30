@@ -88,6 +88,7 @@ struct BookkeepingPreviewView: View {
                 }
             }
             .navigationTitle("确认账本改动")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -157,9 +158,17 @@ struct BookkeepingPreviewView: View {
                 throw BookkeepingError.expiredPreview
             }
             let result = try await repository.commitPrepared(preview)
-            await session.refresh()
+            if let count = result?.count, count > 0 {
+                session.triggerIslandNotice(LedgerIslandNotice.fromImport(count: count, provider: "快速记账"))
+            } else {
+                session.triggerIslandNotice(LedgerIslandNotice.fromImport(count: 1, provider: "快速记账"))
+            }
             onSaved(result)
             dismiss()
+            // Let the full-screen bookkeeping flow close immediately after the
+            // durable write. Refreshing the ledger is independent UI work and
+            // must not keep the confirmation spinner on screen.
+            Task { await session.refresh() }
         } catch {
             self.error = error.localizedDescription
         }
@@ -208,6 +217,6 @@ private struct DiffCodeBlock: View {
             isAdded ? LedgerPalette.income.opacity(0.08) :
             (isRemoved ? LedgerPalette.expense.opacity(0.08) : Color.clear)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
     }
 }

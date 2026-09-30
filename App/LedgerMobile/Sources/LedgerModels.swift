@@ -79,7 +79,7 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
     }
 
     func isCompactOverflow(in destinations: [LedgerDestination]) -> Bool {
-        self != .settings && self != .search && !destinations.contains(self)
+        self != .settings && !destinations.contains(self)
     }
 
     func compactSelection(in destinations: [LedgerDestination]) -> LedgerDestination {
@@ -785,6 +785,126 @@ enum LedgerMetadataValue: Codable, Equatable, Sendable {
     var stringValue: String? {
         if case let .string(val) = self { return val }
         return nil
+    }
+}
+
+// MARK: - Dynamic Island Notice
+
+enum LedgerIslandNoticeType: Equatable, Sendable {
+    case expense
+    case income
+    case transfer
+    case batchImport(count: Int)
+}
+
+struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
+    let id: UUID
+    let type: LedgerIslandNoticeType
+    let title: String
+    let subtitle: String?
+    let amountText: String
+    let iconName: String
+    let iconColorHex: UInt
+
+    init(
+        id: UUID = UUID(),
+        type: LedgerIslandNoticeType,
+        title: String,
+        subtitle: String? = nil,
+        amountText: String,
+        iconName: String,
+        iconColorHex: UInt
+    ) {
+        self.id = id
+        self.type = type
+        self.title = title
+        self.subtitle = subtitle
+        self.amountText = amountText
+        self.iconName = iconName
+        self.iconColorHex = iconColorHex
+    }
+
+    static func from(entry: LedgerTransactionEntry, accountLabels: [String: String] = [:]) -> LedgerIslandNotice {
+        let isIncome = entry.postings.contains { $0.account.hasPrefix("Income:") }
+        let isTransfer = entry.postings.allSatisfy { $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:") }
+
+        let primaryCategory = entry.postings.first(where: {
+            !$0.account.hasPrefix("Assets:") && !$0.account.hasPrefix("Liabilities:")
+        })?.account ?? (entry.postings.first?.account ?? "")
+
+        let titleText: String = {
+            if !entry.payee.isEmpty { return entry.payee }
+            if !entry.narration.isEmpty { return entry.narration }
+            return "日常记账"
+        }()
+
+        let mainPosting = entry.postings.first(where: {
+            if isIncome { return $0.account.hasPrefix("Income:") }
+            if isTransfer { return true }
+            return $0.account.hasPrefix("Expenses:")
+        }) ?? entry.postings.first
+
+        let rawAmount = mainPosting?.amount.trimmingCharacters(in: .whitespacesAndNewlines) ?? "0"
+        let currency = mainPosting?.currency.isEmpty == false ? (mainPosting?.currency ?? "CNY") : "CNY"
+        let cleanAmount = rawAmount.replacingOccurrences(of: "-", with: "")
+
+        let formattedAmount: String = {
+            if let decimal = Decimal(string: cleanAmount) {
+                let formatter = NumberFormatter()
+                formatter.numberStyle = .currency
+                formatter.currencySymbol = currency == "CNY" ? "¥" : currency == "USD" ? "$" : "\(currency) "
+                formatter.maximumFractionDigits = 2
+                formatter.minimumFractionDigits = 2
+                return formatter.string(from: decimal as NSDecimalNumber) ?? "\(currency) \(cleanAmount)"
+            }
+            return "\(currency) \(cleanAmount)"
+        }()
+
+        if isTransfer {
+            let fromAccount = entry.postings.first(where: { $0.amount.hasPrefix("-") })?.account
+            let toAccount = entry.postings.first(where: { !$0.amount.hasPrefix("-") })?.account
+            let fromLabel = fromAccount.map { accountLabels[$0] ?? ($0.components(separatedBy: ":").last ?? $0) } ?? "转出"
+            let toLabel = toAccount.map { accountLabels[$0] ?? ($0.components(separatedBy: ":").last ?? $0) } ?? "转入"
+
+            return LedgerIslandNotice(
+                type: .transfer,
+                title: "\(fromLabel) ➔ \(toLabel)",
+                subtitle: "资金划转",
+                amountText: formattedAmount,
+                iconName: "arrow.left.arrow.right",
+                iconColorHex: 0x0055D4
+            )
+        } else if isIncome {
+            return LedgerIslandNotice(
+                type: .income,
+                title: titleText,
+                subtitle: "收入入账",
+                amountText: "+\(formattedAmount)",
+                iconName: "banknote.fill",
+                iconColorHex: 0x107C41
+            )
+        } else {
+            return LedgerIslandNotice(
+                type: .expense,
+                title: titleText,
+                subtitle: "支出已记录",
+                amountText: "-\(formattedAmount)",
+                iconName: "fork.knife",
+                iconColorHex: 0xF59E0B
+            )
+        }
+    }
+
+    static func fromImport(count: Int, provider: String? = nil) -> LedgerIslandNotice {
+        let providerName = provider?.isEmpty == false ? provider! : "账单文件"
+        return LedgerIslandNotice(
+            type: .batchImport(count: count),
+            title: "\(providerName)导入",
+            subtitle: "已归档至账本",
+            amountText: "\(count) 笔已归档",
+            iconName: "tray.and.arrow.down.fill",
+            iconColorHex: 0x16A34A
+        )
     }
 }
 

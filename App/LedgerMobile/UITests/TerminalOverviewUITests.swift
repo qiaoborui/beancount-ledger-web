@@ -65,11 +65,11 @@ final class TerminalOverviewUITests: XCTestCase {
     func testPrivacyMasksOverviewAmountsAndCategoryPercentages() {
         let app = launch()
         XCTAssertTrue(app.buttons["navigation-time-range"].waitForExistence(timeout: 15))
-        app.buttons["terminal-tab-accounts"].tap()
+        app.tabBars.buttons["账户"].tap()
         let hide = app.buttons["隐藏金额"]
         XCTAssertTrue(hide.waitForExistence(timeout: 5))
         hide.tap()
-        app.buttons["terminal-tab-overview"].tap()
+        app.tabBars.buttons["概览"].tap()
         let net = app.staticTexts["overview-monthly-net"]
         XCTAssertTrue(net.waitForExistence(timeout: 5))
         XCTAssertEqual(net.label, "金额已隐藏")
@@ -82,14 +82,49 @@ final class TerminalOverviewUITests: XCTestCase {
         let app = launch()
         XCTAssertTrue(app.buttons["navigation-time-range"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.tabBars.firstMatch.exists)
-        app.buttons["terminal-tab-settings"].tap()
+        app.tabBars.buttons["更多"].tap()
         let search = app.buttons["more-search"]
         for _ in 0..<4 where !search.isHittable { app.swipeUp() }
         XCTAssertTrue(search.isHittable)
         search.tap()
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
-        app.buttons["terminal-tab-overview"].tap()
+        app.tabBars.buttons["概览"].tap()
         XCTAssertTrue(app.buttons["navigation-time-range"].waitForExistence(timeout: 5))
+    }
+
+    func testNativeTabsScrollAndSearchNavigation() {
+        let app = launch()
+        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertEqual(app.tabBars.buttons.count, 4)
+        capture("native-tabs-expanded")
+        app.swipeUp()
+        app.swipeUp()
+        capture("native-tabs-scrolled")
+        app.swipeDown()
+        app.swipeDown()
+        XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["更多"].tap()
+        XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["navigation-time-range"].exists)
+        app.buttons["more-header-search"].tap()
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.tabBars.buttons.count, 4)
+        capture("native-tabs-search")
+    }
+
+    func testLatestOverviewComparisonsAndManagementDateScope() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["navigation-time-range"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "环比")).firstMatch.exists)
+        capture("terminal-latest-overview")
+        app.buttons.containing(.staticText, identifier: "overview-monthly-net").firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["净结余 · 比较口径"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["变化金额"].firstMatch.exists)
+        app.buttons["完成"].tap()
+        app.tabBars.buttons["更多"].tap()
+        XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["navigation-time-range"].exists)
+        capture("terminal-more-no-date")
     }
 
     private func launch(category: String = "UICTContentSizeCategoryL") -> XCUIApplication {

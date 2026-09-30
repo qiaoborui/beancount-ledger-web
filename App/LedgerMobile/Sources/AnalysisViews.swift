@@ -94,7 +94,7 @@ struct LedgerAnalysisView: View {
             }
         }
         .background(TerminalPalette.page)
-        .terminalPageChrome(kind.title, isRoot: isRoot)
+        .terminalPageChrome(kind.title, isRoot: isRoot, showsTimeRange: true)
         .task(id: requestKey) {
             await load(replacingContent: resource == nil)
         }
@@ -114,7 +114,7 @@ struct LedgerAnalysisView: View {
                 case let .incomeExpense(data):
                     TerminalIncomeExpenseReport(data: data)
                 case let .investments(data):
-                    InvestmentsAnalysisContent(data: data)
+                    TerminalInvestmentsReport(data: data)
                 }
             }
             .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
@@ -409,7 +409,7 @@ private struct AssetsHeroCard: View {
                     AmountLabel(
                         minorUnits: netWorth,
                         currency: currency,
-                        font: .system(size: 30, weight: .bold, design: .rounded),
+                        font: .system(size: 30, weight: .bold, design: .monospaced),
                         color: netWorth >= 0 ? LedgerPalette.ink : LedgerPalette.expense
                     )
                 }
@@ -423,14 +423,14 @@ private struct AssetsHeroCard: View {
                                 .fill(debtRatioColor(debtRatio))
                                 .frame(width: 6, height: 6)
                             Text("负债率 \(debtRatio.formatted(.percent.precision(.fractionLength(1))))")
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(debtRatioColor(debtRatio))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(debtRatioColor(debtRatio).opacity(0.12), in: Capsule())
+                        .background(debtRatioColor(debtRatio).opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
 
                         Text(debtRatioLevel(debtRatio))
                             .font(.system(size: 10))
@@ -456,7 +456,7 @@ private struct AssetsHeroCard: View {
                             AmountLabel(
                                 minorUnits: assets,
                                 currency: currency,
-                                font: .system(size: 13, weight: .bold, design: .rounded),
+                                font: .system(size: 13, weight: .bold, design: .monospaced),
                                 color: LedgerPalette.ink
                             )
                         }
@@ -472,7 +472,7 @@ private struct AssetsHeroCard: View {
                         AmountLabel(
                             minorUnits: liabilities,
                             currency: currency,
-                            font: .system(size: 13, weight: .bold, design: .rounded),
+                            font: .system(size: 13, weight: .bold, design: .monospaced),
                             color: LedgerPalette.expense
                         )
                         Image(systemName: "creditcard.fill")
@@ -488,19 +488,19 @@ private struct AssetsHeroCard: View {
                     let liabilityWidth = geo.size.width - assetWidth
 
                     HStack(spacing: 3) {
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                             .fill(LinearGradient(colors: [LedgerPalette.cobalt, Color(red: 0.20, green: 0.65, blue: 1.0)], startPoint: .leading, endPoint: .trailing))
                             .frame(width: assetWidth)
 
                         if liabilities > 0 {
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                 .fill(LinearGradient(colors: [Color(red: 0.95, green: 0.45, blue: 0.35), LedgerPalette.expense], startPoint: .leading, endPoint: .trailing))
                                 .frame(width: liabilityWidth)
                         }
                     }
                 }
                 .frame(height: 8)
-                .clipShape(Capsule())
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
             }
             .padding(.vertical, 4)
 
@@ -528,17 +528,12 @@ private struct AssetsHeroCard: View {
         }
         .padding(16)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .fill(LedgerPalette.panel)
-                .shadow(
-                    color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04),
-                    radius: 8,
-                    x: 0,
-                    y: 2
-                )
+
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(
                     LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
                     lineWidth: 0.5
@@ -576,13 +571,13 @@ private struct WindowMetricBadge: View {
             if let ratio {
                 let isPositive = ratio >= 0
                 Text((isPositive ? "+" : "") + ratio.formatted(.percent.precision(.fractionLength(1))))
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundStyle(isPositive ? LedgerPalette.income : LedgerPalette.expense)
             } else if let amount {
                 AmountLabel(
                     minorUnits: amount,
                     currency: currency,
-                    font: .system(size: 13, weight: .bold, design: .rounded),
+                    font: .system(size: 13, weight: .bold, design: .monospaced),
                     color: amount >= 0 ? LedgerPalette.income : LedgerPalette.expense,
                     showSign: true
                 )
@@ -600,7 +595,7 @@ private struct WindowMetricBadge: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
-        .background(Color(uiColor: .tertiarySystemFill).opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Color(uiColor: .tertiarySystemFill).opacity(0.4), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
     }
 }
 
@@ -657,7 +652,7 @@ private struct AssetAllocationDonutCard: View {
                         AmountLabel(
                             minorUnits: totalAssets,
                             currency: currency,
-                            font: .system(size: 18, weight: .bold, design: .rounded),
+                            font: .system(size: 18, weight: .bold, design: .monospaced),
                             color: LedgerPalette.ink
                         )
                         .lineLimit(1)
@@ -691,14 +686,14 @@ private struct AssetAllocationDonutCard: View {
                                     .lineLimit(1)
                                 Spacer()
                                 Text(String(format: "%.1f%%", slice.percentage * 100))
-                                    .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced).monospacedDigit())
                                     .foregroundStyle(LedgerPalette.secondary)
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 6)
                             .background(
                                 selectedID == slice.id ? slice.color.opacity(0.12) : Color(uiColor: .tertiarySystemFill).opacity(0.4),
-                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                             )
                         }
                         .buttonStyle(.plain)
@@ -709,17 +704,12 @@ private struct AssetAllocationDonutCard: View {
         }
         .padding(16)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .fill(LedgerPalette.panel)
-                .shadow(
-                    color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04),
-                    radius: 8,
-                    x: 0,
-                    y: 2
-                )
+
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(
                     LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
                     lineWidth: 0.5
@@ -769,7 +759,7 @@ private struct AssetAccountsRankingCard: View {
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundStyle(visual.color)
                                     .frame(width: 32, height: 32)
-                                    .background(visual.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .background(visual.color.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
 
                                 // Name & Progress
                                 VStack(alignment: .leading, spacing: 4) {
@@ -782,7 +772,7 @@ private struct AssetAccountsRankingCard: View {
                                         AmountLabel(
                                             minorUnits: item.amount,
                                             currency: currency,
-                                            font: .system(size: 13, weight: .bold, design: .rounded),
+                                            font: .system(size: 13, weight: .bold, design: .monospaced),
                                             color: LedgerPalette.ink
                                         )
                                     }
@@ -791,9 +781,9 @@ private struct AssetAccountsRankingCard: View {
                                     HStack(spacing: 8) {
                                         GeometryReader { geo in
                                             ZStack(alignment: .leading) {
-                                                Capsule()
+                                                RoundedRectangle(cornerRadius: LedgerRadius.sm)
                                                     .fill(Color(uiColor: .tertiarySystemFill))
-                                                Capsule()
+                                                RoundedRectangle(cornerRadius: LedgerRadius.sm)
                                                     .fill(visual.color)
                                                     .frame(width: max(geo.size.width * CGFloat(item.ratio), 4))
                                             }
@@ -801,7 +791,7 @@ private struct AssetAccountsRankingCard: View {
                                         .frame(height: 4)
 
                                         Text(String(format: "%.1f%%", item.ratio * 100))
-                                            .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
+                                            .font(.system(size: 10, weight: .semibold, design: .monospaced).monospacedDigit())
                                             .foregroundStyle(LedgerPalette.secondary)
                                             .frame(width: 38, alignment: .trailing)
 
@@ -812,7 +802,7 @@ private struct AssetAccountsRankingCard: View {
                                 }
                             }
                             .padding(10)
-                            .background(Color(uiColor: .tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(Color(uiColor: .tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle(pressedScale: 0.98))
                     }
@@ -821,17 +811,12 @@ private struct AssetAccountsRankingCard: View {
         }
         .padding(16)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .fill(LedgerPalette.panel)
-                .shadow(
-                    color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04),
-                    radius: 8,
-                    x: 0,
-                    y: 2
-                )
+
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(
                     LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
                     lineWidth: 0.5
@@ -884,7 +869,7 @@ private struct LiabilitiesBreakdownCard: View {
                     Spacer()
                 }
                 .padding(14)
-                .background(Color(red: 0.12, green: 0.68, blue: 0.36).opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Color(red: 0.12, green: 0.68, blue: 0.36).opacity(0.08), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
             } else {
                 VStack(spacing: 8) {
                     ForEach(accounts) { item in
@@ -899,7 +884,7 @@ private struct LiabilitiesBreakdownCard: View {
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundStyle(LedgerPalette.expense)
                                     .frame(width: 32, height: 32)
-                                    .background(LedgerPalette.expense.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .background(LedgerPalette.expense.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
 
                                 // Label & details
                                 VStack(alignment: .leading, spacing: 3) {
@@ -919,7 +904,7 @@ private struct LiabilitiesBreakdownCard: View {
                                     AmountLabel(
                                         minorUnits: item.amount,
                                         currency: currency,
-                                        font: .system(size: 13, weight: .bold, design: .rounded),
+                                        font: .system(size: 13, weight: .bold, design: .monospaced),
                                         color: LedgerPalette.expense
                                     )
                                     Text(String(format: "占负债 %.1f%%", item.ratio * 100))
@@ -932,7 +917,7 @@ private struct LiabilitiesBreakdownCard: View {
                                     .foregroundStyle(LedgerPalette.secondary.opacity(0.5))
                             }
                             .padding(10)
-                            .background(Color(uiColor: .tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(Color(uiColor: .tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                         }
                         .buttonStyle(PressScaleButtonStyle(pressedScale: 0.98))
                     }
@@ -941,17 +926,12 @@ private struct LiabilitiesBreakdownCard: View {
         }
         .padding(16)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .fill(LedgerPalette.panel)
-                .shadow(
-                    color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04),
-                    radius: 8,
-                    x: 0,
-                    y: 2
-                )
+
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(
                     LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
                     lineWidth: 0.5
@@ -1077,7 +1057,7 @@ private struct IncomeExpenseAnalysisContent: View {
                                     Spacer()
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Text(MoneyText.format(minorUnits: summary.netSpend, currency: summary.currency))
-                                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                                            .font(.system(size: 14, weight: .bold, design: .monospaced))
                                             .foregroundStyle(LedgerPalette.expense)
                                         Text("\(summary.transactionCount) 笔")
                                             .font(.system(size: 11))
@@ -1090,7 +1070,7 @@ private struct IncomeExpenseAnalysisContent: View {
                                 }
                                 .padding(12)
                                 .background(Color(uiColor: .tertiarySystemGroupedBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                             }
                             .buttonStyle(PressScaleButtonStyle(pressedScale: 0.98))
                         }
@@ -1098,9 +1078,9 @@ private struct IncomeExpenseAnalysisContent: View {
                 }
                 .padding(16)
                 .background(LedgerPalette.panel)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                         .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
                 )
             }
@@ -2026,7 +2006,7 @@ struct CookieCategoryDonutCard: View {
                                     isSelected
                                         ? (tab == .expense ? LedgerPalette.expense : LedgerPalette.income)
                                         : Color(uiColor: .tertiarySystemFill),
-                                    in: Capsule()
+                                    in: RoundedRectangle(cornerRadius: LedgerRadius.sm)
                                 )
                         }
                         .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
@@ -2074,7 +2054,7 @@ struct CookieCategoryDonutCard: View {
                         AmountLabel(
                             minorUnits: activeTotal,
                             currency: currency,
-                            font: .system(size: 18, weight: .bold, design: .rounded),
+                            font: .system(size: 18, weight: .bold, design: .monospaced),
                             color: LedgerPalette.ink
                         )
                         .lineLimit(1)
@@ -2108,14 +2088,14 @@ struct CookieCategoryDonutCard: View {
                                     .lineLimit(1)
                                 Spacer()
                                 Text(String(format: "%.1f%%", slice.percentage * 100))
-                                    .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced).monospacedDigit())
                                     .foregroundStyle(LedgerPalette.secondary)
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 5)
                             .background(
                                 selectedSliceID == slice.id ? slice.color.opacity(0.12) : Color(uiColor: .tertiarySystemFill).opacity(0.4),
-                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                             )
                         }
                         .buttonStyle(.plain)
@@ -2136,7 +2116,7 @@ struct CookieCategoryDonutCard: View {
                         .foregroundStyle(slice.color)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(slice.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .background(slice.color.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 6)
@@ -2145,17 +2125,12 @@ struct CookieCategoryDonutCard: View {
         }
         .padding(16)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .fill(LedgerPalette.panel)
-                .shadow(
-                    color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04),
-                    radius: 8,
-                    x: 0,
-                    y: 2
-                )
+
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(
                     LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
                     lineWidth: 0.5
@@ -2204,17 +2179,17 @@ struct CookieRankedCategoryPanel: View {
                             HStack(spacing: 10) {
                                 // Rank number badge
                                 ZStack {
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                         .fill(rankBadgeBackground(index))
                                         .frame(width: 20, height: 20)
                                     Text("\(index + 1)")
-                                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
                                         .foregroundStyle(rankTextColor(index))
                                 }
 
                                 // Squircle icon
                                 ZStack {
-                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                                         .fill(visual.color.opacity(0.14))
                                         .frame(width: 34, height: 34)
                                     Image(systemName: visual.iconName)
@@ -2240,11 +2215,11 @@ struct CookieRankedCategoryPanel: View {
                                     AmountLabel(
                                         minorUnits: item.amount,
                                         currency: currency,
-                                        font: .system(size: 14.5, weight: .semibold, design: .rounded),
+                                        font: .system(size: 14.5, weight: .semibold, design: .monospaced),
                                         color: LedgerPalette.ink
                                     )
                                     Text(String(format: "%.1f%%", pct * 100))
-                                        .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
+                                        .font(.system(size: 11, weight: .medium, design: .monospaced).monospacedDigit())
                                         .foregroundStyle(LedgerPalette.secondary)
                                 }
 
@@ -2256,10 +2231,10 @@ struct CookieRankedCategoryPanel: View {
                             // Proportional progress track
                             GeometryReader { geo in
                                 ZStack(alignment: .leading) {
-                                    Capsule()
+                                    RoundedRectangle(cornerRadius: LedgerRadius.sm)
                                         .fill(Color(uiColor: .tertiarySystemFill))
                                         .frame(height: 4)
-                                    Capsule()
+                                    RoundedRectangle(cornerRadius: LedgerRadius.sm)
                                         .fill(visual.color)
                                         .frame(
                                             width: max(4, min(geo.size.width, geo.size.width * CGFloat(pct))),
@@ -2283,17 +2258,12 @@ struct CookieRankedCategoryPanel: View {
         }
         .padding(16)
         .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .fill(LedgerPalette.panel)
-                .shadow(
-                    color: Color.black.opacity(colorScheme == .dark ? 0.25 : 0.04),
-                    radius: 8,
-                    x: 0,
-                    y: 2
-                )
+
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
                 .stroke(
                     LedgerPalette.cardBorder.opacity(colorScheme == .dark ? 0.35 : 0.5),
                     lineWidth: 0.5

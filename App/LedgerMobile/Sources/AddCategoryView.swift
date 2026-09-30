@@ -56,7 +56,7 @@ struct AddCategoryView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 if let errorMessage {
                     Section {
                         StatusBanner(message: errorMessage) {
@@ -127,7 +127,7 @@ struct AddCategoryView: View {
                                         }
                                         .padding(.vertical, 4)
                                         .padding(.horizontal, 6)
-                                        .background(isSelected ? LedgerPalette.cobalt.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                                        .background(isSelected ? LedgerPalette.cobalt.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -155,7 +155,7 @@ struct AddCategoryView: View {
                                     }
                                     .padding(.vertical, 4)
                                     .padding(.horizontal, 6)
-                                    .background(isCustom ? LedgerPalette.cobalt.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                                    .background(isCustom ? LedgerPalette.cobalt.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -204,7 +204,7 @@ struct AddCategoryView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .padding(8)
-                            .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: 8))
+                            .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
 
                             HStack {
                                 Text("分类中文名 (alias):")
@@ -228,6 +228,7 @@ struct AddCategoryView: View {
                 }
             }
             .navigationTitle("新建分类")
+            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

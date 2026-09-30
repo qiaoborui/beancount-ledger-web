@@ -7,6 +7,7 @@ struct LedgerMobileApp: App {
     #endif
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var session: LedgerSession
+    @State private var didStartSession = false
 
     init() {
         let session = LedgerSession.appSession()
@@ -30,6 +31,7 @@ struct LedgerMobileApp: App {
                         isBackground: scenePhase == .background
                     )
                     await session.start()
+                    didStartSession = true
                 }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     // System authentication briefly makes the scene inactive. Its task must
@@ -39,7 +41,12 @@ struct LedgerMobileApp: App {
                             isActive: phase == .active,
                             isBackground: phase == .background
                         )
-                        await session.automaticallyUnlockIfNeeded()
+                        // The initial active callback runs alongside the startup task.
+                        // `start()` owns cold-launch authentication; only later foreground
+                        // transitions need a second automatic-unlock attempt.
+                        if didStartSession {
+                            await session.automaticallyUnlockIfNeeded()
+                        }
                         #if os(iOS)
                         if phase == .background {
                             await session.flushBackgroundLocalSyncIfNeeded()
