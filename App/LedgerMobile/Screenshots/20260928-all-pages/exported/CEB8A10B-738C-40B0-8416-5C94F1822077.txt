@@ -1,0 +1,281 @@
+Application, 0x1152cbd40, pid: 68147, label: 'Ledger' <App element pid: 68147>
+  Window (Main), 0x1152c8c80, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4373414912.4>
+    Other, 0x1152c8dc0, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4425195840.5>
+    Other, 0x1152ca6c0, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4425625088.6>
+      Other, 0x1152ca800, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4427319168.7>
+        Other, 0x1152ca940, {{-402.0, -874.0}, {1206.0, 2622.0}} <AX element pid: 68147, elementOrHash.elementID: 4997963264.328>
+        Other, 0x1152caa80, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4373413888.8>
+          Other, 0x1152ca580, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4454075200.9>
+            Other, 0x1152c8f00, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4442917376.10>
+              Other, 0x1152c8000, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4442927104.11>
+                Other, 0x1152c8140, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4425365952.190>
+                  Other, 0x1152c8280, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4373245184.191>
+                    Other, 0x1152c83c0, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4955125344.192>
+                      Other, 0x1152c8500, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4955124864.193>
+                        Other, 0x1152c8640, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4936412160.194>
+                          NavigationBar, 0x1152c8780, {{0.0, 62.0}, {402.0, 54.0}}, identifier: '导入' <AX element pid: 68147, elementOrHash.elementID: 4429049856.195>
+                            Button, 0x1152c88c0, {{16.0, 62.0}, {44.0, 44.0}}, identifier: 'BackButton', label: '更多' <AX element pid: 68147, elementOrHash.elementID: 5026713216.360>
+                            StaticText, 0x1152c8a00, {{184.0, 73.7}, {34.0, 20.7}}, label: '导入' <AX element pid: 68147, elementOrHash.elementID: 4425361472.361>
+                            Other, 0x1152c6440, {{334.0, 66.0}, {48.0, 36.0}} <AX element pid: 68147, elementOrHash.elementID: 4995505664.362>
+                              Other, 0x1152c6800, {{334.0, 66.0}, {48.0, 36.0}} <AX element pid: 68147, elementOrHash.elementID: 5011748128.381>
+                                Button, 0x1152c6940, {{334.0, 66.0}, {48.0, 36.0}}, identifier: 'ledger-sync-status', label: '刷新账本' <AX element pid: 68147, elementOrHash.elementID: 5011747968.395>
+                          Other, 0x1152c6080, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4425368896.196>
+                            Other, 0x1152c6bc0, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4425376064.200>
+                              Other, 0x1152c4000, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4373551232.382>
+                                Other, 0x1152c4140, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 5011748448.396>
+                                  CollectionView, 0x1152c4280, {{0.0, 0.0}, {402.0, 874.0}}, identifier: 'import-history-content' <AX element pid: 68147, elementOrHash.elementID: 4374620672.405>
+                                    Other, 0x1152c43c0, {{-16.0, -1624.0}, {434.0, 1982.7}} <AX element pid: 68147, elementOrHash.elementID: 4999063552.417>
+                                    Other, 0x1152c4500, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4425450816.418>
+                                      Other, 0x1152c4640, {{0.0, 0.0}, {402.0, 156.0}} <AX element pid: 68147, elementOrHash.elementID: 4425460672.441>
+                                      Other, 0x1152c4780, {{0.0, 741.0}, {402.0, 133.0}} <AX element pid: 68147, elementOrHash.elementID: 4425461120.442>
+                                    Other, 0x1152c48c0, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4425449920.419>
+                                      Other, 0x1152c4a00, {{0.0, 741.0}, {402.0, 133.0}} <AX element pid: 68147, elementOrHash.elementID: 4997961984.443>
+                                    Cell, 0x1152c4b40, {{16.0, 124.0}, {370.0, 189.0}} <AX element pid: 68147, elementOrHash.elementID: 4995508224.420>
+                                      Other, 0x1152c6300, {{16.0, 124.0}, {370.0, 189.0}} <AX element pid: 68147, elementOrHash.elementID: 4445649408.444>
+                                        Other, 0x1152bbd40, {{16.0, 124.0}, {370.0, 189.0}} <AX element pid: 68147, elementOrHash.elementID: 4425454848.470>
+                                      Other, 0x1152bb5c0, {{16.0, 124.0}, {370.0, 189.0}} <AX element pid: 68147, elementOrHash.elementID: 4425454400.445>
+                                        Other, 0x1152bb340, {{16.0, 124.0}, {370.0, 189.0}} <AX element pid: 68147, elementOrHash.elementID: 4990675456.471>
+                                          Other, 0x1152babc0, {{16.0, 124.0}, {370.0, 189.0}} <AX element pid: 68147, elementOrHash.elementID: 5028184704.486>
+                                            Image, 0x1152bb480, {{45.7, 158.3}, {17.0, 21.3}}, identifier: 'arrow.up.doc.fill', label: 'Previous Page' <AX element pid: 68147, elementOrHash.elementID: 4454084160.497>
+                                            StaticText, 0x1152baa80, {{88.0, 152.3}, {89.3, 18.0}}, label: '智能账单导入' <AX element pid: 68147, elementOrHash.elementID: 4454076640.498>
+                                            StaticText, 0x1152bb200, {{88.0, 172.3}, {175.0, 13.3}}, label: '自动识别渠道、解析交易与去重预览' <AX element pid: 68147, elementOrHash.elementID: 4454085760.499>
+                                            Button, 0x1152bb700, {{32.0, 203.0}, {338.0, 44.0}}, identifier: 'import-select-file', label: '选择账单文件' <AX element pid: 68147, elementOrHash.elementID: 4444658560.500>
+                                              Image, 0x1152cc000, {{144.7, 217.3}, {15.3, 15.3}}, identifier: 'plus.circle.fill', label: 'Add' <AX element pid: 68147, elementOrHash.elementID: 4454086080.516>
+                                              StaticText, 0x1152cc140, {{169.3, 216.0}, {89.3, 18.0}}, label: '选择账单文件' <AX element pid: 68147, elementOrHash.elementID: 4444660000.517>
+                                            StaticText, 0x1152cc280, {{60.3, 268.5}, {53.7, 12.0}}, label: '支付宝 CSV' <AX element pid: 68147, elementOrHash.elementID: 5028184064.501>
+                                            StaticText, 0x1152cc3c0, {{142.0, 262.5}, {39.7, 24.0}}, label: '微信支付 XLSX' <AX element pid: 68147, elementOrHash.elementID: 5028184224.502>
+                                            StaticText, 0x1152cc500, {{209.7, 268.5}, {62.7, 12.0}}, label: '银行流水 PDF' <AX element pid: 68147, elementOrHash.elementID: 5028184384.503>
+                                            StaticText, 0x1152cc640, {{300.3, 268.5}, {49.3, 12.0}}, label: '压缩包 ZIP' <AX element pid: 68147, elementOrHash.elementID: 5028184544.504>
+                                    Cell, 0x1152cc780, {{16.0, 313.0}, {370.0, 45.7}} <AX element pid: 68147, elementOrHash.elementID: 5007998976.421>
+                                      Other, 0x1152cc8c0, {{16.0, 313.0}, {370.0, 45.7}} <AX element pid: 68147, elementOrHash.elementID: 4999057408.446>
+                                      Other, 0x1152cca00, {{16.0, 313.0}, {370.0, 45.7}} <AX element pid: 68147, elementOrHash.elementID: 4425458432.447>
+                                        Other, 0x1152ccb40, {{16.0, 313.0}, {370.0, 45.7}} <AX element pid: 68147, elementOrHash.elementID: 4999448064.472>
+                                          Other, 0x1152ccc80, {{16.0, 313.0}, {370.0, 45.7}} <AX element pid: 68147, elementOrHash.elementID: 5028184864.487>
+                                            StaticText, 0x1152ccdc0, {{16.0, 313.0}, {370.0, 45.7}}, label: '支持 CSV、Excel、PDF、邮件和 ZIP，最大 10MB。预览并确认后写入账本。' <AX element pid: 68147, elementOrHash.elementID: 5028185024.505>
+                                    Other, 0x1152ccf00, {{-16.0, 370.7}, {434.0, 144.0}} <AX element pid: 68147, elementOrHash.elementID: 4999064064.422>
+                                    Cell, 0x1152cd040, {{16.0, 370.7}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 5008000256.423>
+                                      Other, 0x1152cd180, {{16.0, 370.7}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 4999058432.448>
+                                      Other, 0x1152cd2c0, {{16.0, 370.7}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 4425458880.449>
+                                        Other, 0x1152cd400, {{16.0, 370.7}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 4999449600.473>
+                                          Other, 0x1152cd540, {{16.0, 370.7}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 5028185184.488>
+                                            StaticText, 0x1152cd680, {{16.0, 370.7}, {370.0, 40.3}}, label: '待导入' <AX element pid: 68147, elementOrHash.elementID: 5028185344.506>
+                                    Cell, 0x1152cd7c0, {{16.0, 411.0}, {370.0, 74.0}} <AX element pid: 68147, elementOrHash.elementID: 4995509504.424>
+                                      Other, 0x1152cd900, {{16.0, 411.0}, {370.0, 74.0}} <AX element pid: 68147, elementOrHash.elementID: 4999053824.450>
+                                        Other, 0x1152cda40, {{16.0, 411.0}, {370.0, 74.0}} <AX element pid: 68147, elementOrHash.elementID: 4425455744.474>
+                                      Other, 0x1152cdb80, {{16.0, 411.0}, {370.0, 74.0}} <AX element pid: 68147, elementOrHash.elementID: 4425455296.451>
+                                        Other, 0x1152cdcc0, {{16.0, 411.0}, {370.0, 74.0}} <AX element pid: 68147, elementOrHash.elementID: 4990678528.475>
+                                          Other, 0x1152cde00, {{16.0, 411.0}, {370.0, 74.0}} <AX element pid: 68147, elementOrHash.elementID: 5028186144.489>
+                                            Button, 0x1152cdf40, {{32.0, 426.0}, {286.0, 44.0}}, identifier: 'shared-import-review-shared-preview.csv', label: 'shared-preview.csv' <AX element pid: 68147, elementOrHash.elementID: 5028185824.507>
+                                              Image, 0x1152ce080, {{37.7, 439.0}, {16.7, 18.3}}, identifier: 'doc.badge.arrow.up', label: 'Document With An Upward Arrow Badge' <AX element pid: 68147, elementOrHash.elementID: 5028185664.518>
+                                              StaticText, 0x1152ce1c0, {{74.0, 439.0}, {137.7, 18.0}}, label: 'shared-preview.csv' <AX element pid: 68147, elementOrHash.elementID: 5028185504.519>
+                                            Button, 0x1152ce300, {{338.7, 437.3}, {19.0, 21.3}}, identifier: 'trash', label: '移除待导入文件' <AX element pid: 68147, elementOrHash.elementID: 5028185984.508>
+                                    Cell, 0x1152ce440, {{16.0, 485.0}, {370.0, 29.7}} <AX element pid: 68147, elementOrHash.elementID: 5008001536.425>
+                                      Other, 0x1152ce580, {{16.0, 485.0}, {370.0, 29.7}} <AX element pid: 68147, elementOrHash.elementID: 4999059968.452>
+                                      Other, 0x1152ce6c0, {{16.0, 485.0}, {370.0, 29.7}} <AX element pid: 68147, elementOrHash.elementID: 4425459328.453>
+                                        Other, 0x1152ce800, {{16.0, 485.0}, {370.0, 29.7}} <AX element pid: 68147, elementOrHash.elementID: 4999451136.476>
+                                          Other, 0x1152ce940, {{16.0, 485.0}, {370.0, 29.7}} <AX element pid: 68147, elementOrHash.elementID: 5028186304.490>
+                                            StaticText, 0x1152cea80, {{16.0, 485.0}, {370.0, 29.7}}, label: '从其他 App 分享的账单，核对后导入。' <AX element pid: 68147, elementOrHash.elementID: 5028186464.509>
+                                    Other, 0x1152cebc0, {{-16.0, 526.7}, {434.0, 148.3}} <AX element pid: 68147, elementOrHash.elementID: 4999064576.426>
+                                    Cell, 0x1152ced00, {{16.0, 526.7}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 5008002816.427>
+                                      Other, 0x1152cee40, {{16.0, 526.7}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 4999060992.454>
+                                      Other, 0x1152cef80, {{16.0, 526.7}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 4425459776.455>
+                                        Other, 0x1152cf0c0, {{16.0, 526.7}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 4999452672.477>
+                                          Other, 0x1152cf200, {{16.0, 526.7}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 5028186624.491>
+                                            StaticText, 0x1152cf340, {{16.0, 526.7}, {370.0, 40.3}}, label: '渠道覆盖' <AX element pid: 68147, elementOrHash.elementID: 5028186784.510>
+                                    Cell, 0x1152cf480, {{16.0, 567.0}, {370.0, 78.3}} <AX element pid: 68147, elementOrHash.elementID: 4995510784.428>
+                                      Other, 0x1152cf5c0, {{16.0, 567.0}, {370.0, 78.3}} <AX element pid: 68147, elementOrHash.elementID: 4999054848.456>
+                                        Other, 0x1152cf700, {{16.0, 567.0}, {370.0, 78.3}} <AX element pid: 68147, elementOrHash.elementID: 4425457088.478>
+                                      Other, 0x1152cf840, {{16.0, 567.0}, {370.0, 78.3}} <AX element pid: 68147, elementOrHash.elementID: 4425456640.457>
+                                        Other, 0x1152cf980, {{16.0, 567.0}, {370.0, 78.3}} <AX element pid: 68147, elementOrHash.elementID: 4935083008.479>
+                                          Other, 0x1152cfac0, {{16.0, 567.0}, {370.0, 78.3}} <AX element pid: 68147, elementOrHash.elementID: 5028187904.492>
+                                            Button, 0x1152cfc00, {{16.0, 567.0}, {370.0, 78.3}}, identifier: 'import-channel-coverage', label: '4 个渠道建议更新, 已归档 4 个渠道 · 3 个渠道暂无记录' <AX element pid: 68147, elementOrHash.elementID: 5028187744.511>
+                                              StaticText, 0x1152cfd40, {{32.0, 588.0}, {193.0, 36.3}}, identifier: 'import-channel-coverage', label: '4 个渠道建议更新, 已归档 4 个渠道 · 3 个渠道暂无记录' <AX element pid: 68147, elementOrHash.elementID: 5028187264.520>
+                                                StaticText, 0x1152cfe80, {{32.0, 588.0}, {117.7, 18.0}}, label: '4 个渠道建议更新' <AX element pid: 68147, elementOrHash.elementID: 5028187104.536>
+                                                StaticText, 0x1152d0000, {{32.0, 610.0}, {193.0, 14.3}}, label: '已归档 4 个渠道 · 3 个渠道暂无记录' <AX element pid: 68147, elementOrHash.elementID: 5028186944.537>
+                                              Button, 0x1152d0140, {{359.7, 599.0}, {10.3, 14.3}} <AX element pid: 68147, elementOrHash.elementID: 5028187584.521>
+                                                Image, 0x1152d0280, {{359.7, 599.0}, {10.3, 14.3}}, identifier: 'collapsed' <AX element pid: 68147, elementOrHash.elementID: 5028187424.538>
+                                    Cell, 0x1152d03c0, {{16.0, 645.3}, {370.0, 29.7}} <AX element pid: 68147, elementOrHash.elementID: 5008007936.429>
+                                      Other, 0x1152d0500, {{16.0, 645.3}, {370.0, 29.7}} <AX element pid: 68147, elementOrHash.elementID: 5010035200.458>
+                                      Other, 0x1152d0640, {{16.0, 645.3}, {370.0, 29.7}} <AX element pid: 68147, elementOrHash.elementID: 4425463360.459>
+                                        Other, 0x1152d0780, {{16.0, 645.3}, {370.0, 29.7}} <AX element pid: 68147, elementOrHash.elementID: 4999458816.480>
+                                          Other, 0x1152d08c0, {{16.0, 645.3}, {370.0, 29.7}} <AX element pid: 68147, elementOrHash.elementID: 5028188064.493>
+                                            StaticText, 0x1152d0a00, {{16.0, 645.3}, {370.0, 29.7}}, label: '检查于 11:48' <AX element pid: 68147, elementOrHash.elementID: 5028188224.512>
+                                    Other, 0x1152d0b40, {{-16.0, 687.0}, {434.0, 2173.0}} <AX element pid: 68147, elementOrHash.elementID: 4999065088.430>
+                                    Cell, 0x1152d0c80, {{16.0, 687.0}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 5008004096.431>
+                                      Other, 0x1152d0dc0, {{16.0, 687.0}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 4999062528.460>
+                                      Other, 0x1152d0f00, {{16.0, 687.0}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 4425460224.461>
+                                        Other, 0x1152d1040, {{16.0, 687.0}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 4999454208.481>
+                                          Other, 0x1152d1180, {{16.0, 687.0}, {370.0, 40.3}} <AX element pid: 68147, elementOrHash.elementID: 5028188384.494>
+                                            StaticText, 0x1152d12c0, {{16.0, 687.0}, {370.0, 40.3}}, label: '归档记录 · 5' <AX element pid: 68147, elementOrHash.elementID: 5028188544.513>
+                                    Cell, 0x1152d1400, {{16.0, 727.3}, {370.0, 112.0}} <AX element pid: 68147, elementOrHash.elementID: 5008005376.432>
+                                      Other, 0x1152d1540, {{16.0, 727.3}, {370.0, 112.0}} <AX element pid: 68147, elementOrHash.elementID: 4936408576.462>
+                                        Other, 0x1152d1680, {{16.0, 727.3}, {370.0, 112.0}} <AX element pid: 68147, elementOrHash.elementID: 4425462016.482>
+                                      Other, 0x1152d17c0, {{16.0, 727.3}, {370.0, 112.0}} <AX element pid: 68147, elementOrHash.elementID: 4425461568.463>
+                                        Other, 0x1152d1900, {{16.0, 727.3}, {370.0, 112.0}} <AX element pid: 68147, elementOrHash.elementID: 4999455744.483>
+                                          Other, 0x1152d1a40, {{16.0, 727.3}, {370.0, 112.0}} <AX element pid: 68147, elementOrHash.elementID: 5028189984.495>
+                                            StaticText, 0x1152d1b80, {{16.0, 727.3}, {370.0, 112.0}}, identifier: 'import-document-transactions/2026/documents/imports/ccb-credit-2026-08.eml', label: '建设银行信用卡, 覆盖 2026/08/01 至 2026/08/31, ccb-credit-2026-08.eml, 2026/09/01 16:00, ·, 212 KB' <AX element pid: 68147, elementOrHash.elementID: 5028189824.514>
+                                              StaticText, 0x1152d1cc0, {{80.0, 748.3}, {104.3, 18.0}}, label: '建设银行信用卡' <AX element pid: 68147, elementOrHash.elementID: 5028188704.522>
+                                              StaticText, 0x1152d1e00, {{192.3, 751.3}, {113.7, 30.3}}, label: '覆盖 2026/08/01 至 2026/08/31' <AX element pid: 68147, elementOrHash.elementID: 5028189024.523>
+                                              Image, 0x1152d1f40, {{40.7, 759.7}, {18.7, 13.7}}, identifier: 'creditcard.fill', label: 'Card' <AX element pid: 68147, elementOrHash.elementID: 5028188864.524>
+                                              StaticText, 0x1152d2080, {{80.0, 785.7}, {138.7, 14.3}}, label: 'ccb-credit-2026-08.eml' <AX element pid: 68147, elementOrHash.elementID: 5028189184.525>
+                                              StaticText, 0x1152d21c0, {{80.0, 804.0}, {105.0, 14.3}}, label: '2026/09/01 16:00' <AX element pid: 68147, elementOrHash.elementID: 5028189344.526>
+                                              StaticText, 0x1152d2300, {{193.0, 804.0}, {6.0, 14.3}}, label: '·' <AX element pid: 68147, elementOrHash.elementID: 5028189504.527>
+                                              StaticText, 0x1152d2440, {{207.0, 804.0}, {42.0, 14.3}}, label: '212 KB' <AX element pid: 68147, elementOrHash.elementID: 5028189664.528>
+                                    Cell, 0x1152d2580, {{16.0, 839.3}, {370.0, 96.7}} <AX element pid: 68147, elementOrHash.elementID: 5008006656.433>
+                                      Other, 0x1152d26c0, {{16.0, 839.3}, {370.0, 96.7}} <AX element pid: 68147, elementOrHash.elementID: 5010032640.464>
+                                        Other, 0x1152d2800, {{16.0, 839.3}, {370.0, 96.7}} <AX element pid: 68147, elementOrHash.elementID: 4425462912.484>
+                                      Other, 0x1152d2940, {{16.0, 839.3}, {370.0, 96.7}} <AX element pid: 68147, elementOrHash.elementID: 4425462464.465>
+                                        Other, 0x1152d2a80, {{16.0, 839.3}, {370.0, 96.7}} <AX element pid: 68147, elementOrHash.elementID: 4999457280.485>
+                                          Other, 0x1152d2bc0, {{16.0, 839.3}, {370.0, 96.7}} <AX element pid: 68147, elementOrHash.elementID: 5028191424.496>
+                                            StaticText, 0x1152d2d00, {{16.0, 839.3}, {370.0, 96.7}}, identifier: 'import-document-transactions/2026/documents/imports/alipay-2026-08.csv', label: '支付宝, 覆盖 2026/08/01 至 2026/08/28, alipay-2026-08.csv, 2026/08/29 16:00, ·, 184 KB' <AX element pid: 68147, elementOrHash.elementID: 5028191264.515>
+                                              StaticText, 0x1152d2e40, {{80.0, 860.3}, {44.7, 18.0}}, label: '支付宝' <AX element pid: 68147, elementOrHash.elementID: 5028190144.529>
+                                              StaticText, 0x1152d2f80, {{132.7, 863.3}, {181.7, 14.3}}, label: '覆盖 2026/08/01 至 2026/08/28' <AX element pid: 68147, elementOrHash.elementID: 5028190464.530>
+                                              Image, 0x1152d30c0, {{40.7, 871.7}, {18.7, 13.7}}, identifier: 'creditcard', label: 'Card' <AX element pid: 68147, elementOrHash.elementID: 5028190304.531>
+                                              StaticText, 0x1152d3200, {{80.0, 882.3}, {111.3, 14.3}}, label: 'alipay-2026-08.csv' <AX element pid: 68147, elementOrHash.elementID: 5028190624.532>
+                                              StaticText, 0x1152d3340, {{80.0, 900.7}, {105.0, 14.3}}, label: '2026/08/29 16:00' <AX element pid: 68147, elementOrHash.elementID: 5028190784.533>
+                                              StaticText, 0x1152d3480, {{193.0, 900.7}, {6.0, 14.3}}, label: '·' <AX element pid: 68147, elementOrHash.elementID: 5028190944.534>
+                                              StaticText, 0x1152d35c0, {{207.0, 900.7}, {42.0, 14.3}}, label: '184 KB' <AX element pid: 68147, elementOrHash.elementID: 5028191104.535>
+                                    Other, 0x1152d3700, {{80.0, 838.3}, {290.0, 1.0}} <AX element pid: 68147, elementOrHash.elementID: 5010036224.434>
+                                    Other, 0x1152d3840, {{369.0, 116.0}, {30.0, 675.0}}, label: 'Vertical scroll bar, 2 pages', value: 0% <AX element pid: 68147, elementOrHash.elementID: 4996218368.435>
+                                      Other, 0x1152d3980, {{396.0, 781.0}, {3.0, 7.0}} <AX element pid: 68147, elementOrHash.elementID: 4425453952.466>
+                                    Other, 0x1152d3ac0, {{369.0, 116.0}, {30.0, 675.0}}, label: 'Vertical scroll bar, 2 pages', value: 0% <AX element pid: 68147, elementOrHash.elementID: 4996218368.435>
+                                      Other, 0x1152d3c00, {{396.0, 781.0}, {3.0, 7.0}} <AX element pid: 68147, elementOrHash.elementID: 4425453952.466>
+                          Toolbar, 0x1152d3d40, {{0.0, 0.0}, {402.0, 874.0}}, identifier: 'Toolbar', label: 'Toolbar' <AX element pid: 68147, elementOrHash.elementID: 4936412672.197>
+                            Other, 0x1152d3e80, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4936413696.201>
+              Other, 0x1152d4000, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4373546752.12>
+                Other, 0x1152d4140, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68147, elementOrHash.elementID: 4425194496.14>
+                  Other, 0x1152d4280, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4425194944.16>
+                    TabBar, 0x1152d43c0, {{0.0, 791.0}, {402.0, 83.0}}, label: 'Tab Bar' <AX element pid: 68147, elementOrHash.elementID: 4429038336.19>
+                      Other, 0x1152d4500, {{21.0, 791.0}, {290.0, 62.0}} <AX element pid: 68147, elementOrHash.elementID: 4442919936.22>
+                        Other, 0x1152d4640, {{21.0, 791.0}, {76.0, 54.0}} <AX element pid: 68147, elementOrHash.elementID: 4425210880.26>
+                        Other, 0x1152d4780, {{21.0, 791.0}, {290.0, 62.0}} <AX element pid: 68147, elementOrHash.elementID: 4425187328.27>
+                          Button, 0x1152d48c0, {{25.0, 795.0}, {76.0, 54.0}}, identifier: 'house', label: '概览' <AX element pid: 68147, elementOrHash.elementID: 4373420032.36>
+                            Image, 0x1152d4a00, {{46.3, 801.0}, {33.3, 28.0}}, identifier: 'house.fill', label: 'home' <AX element pid: 68147, elementOrHash.elementID: 4427324928.50>
+                          Button, 0x1152d4b40, {{93.7, 795.0}, {76.0, 54.0}}, identifier: 'list.bullet', label: '交易' <AX element pid: 68147, elementOrHash.elementID: 4373422080.37>
+                            Image, 0x1152d4c80, {{117.0, 804.3}, {29.3, 21.0}}, identifier: 'list.bullet', label: 'List' <AX element pid: 68147, elementOrHash.elementID: 4427326208.51>
+                          Button, 0x1152d4dc0, {{162.3, 795.0}, {76.0, 54.0}}, identifier: 'book.closed', label: '账户' <AX element pid: 68147, elementOrHash.elementID: 4373424128.38>
+                            Image, 0x1152d4f00, {{187.7, 800.7}, {25.3, 28.7}}, identifier: 'book.closed.fill', label: 'Closed book, filled' <AX element pid: 68147, elementOrHash.elementID: 4427327488.52>
+                          Button, 0x1152d5040, {{231.0, 795.0}, {76.0, 54.0}}, identifier: 'ellipsis', label: '更多', Selected <AX element pid: 68147, elementOrHash.elementID: 4373426176.39>
+                            Image, 0x1152d5180, {{256.7, 810.7}, {25.0, 8.7}}, identifier: 'ellipsis', label: 'More' <AX element pid: 68147, elementOrHash.elementID: 4427328768.53>
+                        Other, 0x1152d52c0, {{21.0, 791.0}, {290.0, 62.0}} <AX element pid: 68147, elementOrHash.elementID: 4425187776.28>
+                        Other, 0x1152d5400, {{231.0, 795.0}, {76.0, 54.0}} <AX element pid: 68147, elementOrHash.elementID: 4427323648.29>
+                          Other, 0x1152d5540, {{231.0, 795.0}, {76.0, 54.0}} <AX element pid: 68147, elementOrHash.elementID: 4425190016.40>
+                            Other, 0x1152d5680, {{231.0, 795.0}, {76.0, 54.0}} <AX element pid: 68147, elementOrHash.elementID: 4425188224.54>
+                            Other, 0x1152d57c0, {{231.0, 795.0}, {76.0, 54.0}} <AX element pid: 68147, elementOrHash.elementID: 4442921472.55>
+                              Other, 0x1152d5900, {{231.0, 795.0}, {76.0, 54.0}} <AX element pid: 68147, elementOrHash.elementID: 4425191360.61>
+                                Other, 0x1152d5a40, {{231.0, 795.0}, {76.0, 54.0}} <AX element pid: 68147, elementOrHash.elementID: 4425191808.67>
+                                  Other, 0x1152d5b80, {{231.0, 795.0}, {76.0, 54.0}} <AX element pid: 68147, elementOrHash.elementID: 4425192256.72>
+                                Other, 0x1152d5cc0, {{231.0, 795.0}, {76.0, 54.0}} <AX element pid: 68147, elementOrHash.elementID: 4425190464.68>
+                              Other, 0x1152d5e00, {{231.0, 795.0}, {76.0, 54.0}} <AX element pid: 68147, elementOrHash.elementID: 4425190912.62>
+                      Other, 0x1152d5f40, {{319.0, 791.0}, {62.0, 62.0}} <AX element pid: 68147, elementOrHash.elementID: 4442929664.23>
+                        Other, 0x1152d6080, {{319.0, 791.0}, {62.0, 62.0}} <AX element pid: 68147, elementOrHash.elementID: 4442930688.30>
+                          Other, 0x1152d61c0, {{319.0, 791.0}, {62.0, 62.0}} <AX element pid: 68147, elementOrHash.elementID: 4425199424.41>
+                            Button, 0x1152d6300, {{319.0, 791.0}, {62.0, 62.0}}, identifier: 'magnifyingglass', label: 'Search' <AX element pid: 68147, elementOrHash.elementID: 4373419008.56>
+                              Image, 0x1152d6440, {{336.0, 808.7}, {28.0, 26.7}}, identifier: 'magnifyingglass', label: 'Search' <AX element pid: 68147, elementOrHash.elementID: 4427324288.63>
+                          Other, 0x1152d6580, {{319.0, 791.0}, {62.0, 62.0}} <AX element pid: 68147, elementOrHash.elementID: 4425199872.42>
+                  Other, 0x1152d66c0, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68147, elementOrHash.elementID: 4442924544.17>
+                    Other, 0x1152d6800, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68147, elementOrHash.elementID: 4935081472.20>
+                      Other, 0x1152d6940, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68147, elementOrHash.elementID: 4425209984.24>
+                        Other, 0x1152d6a80, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68147, elementOrHash.elementID: 4425207744.31>
+                          Other, 0x1152d6bc0, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68147, elementOrHash.elementID: 4443378688.43>
+                            Other, 0x1152d6d00, {{0.0, 791.0}, {402.0, 83.0}} <AX element pid: 68147, elementOrHash.elementID: 4425208192.57>
+    Other, 0x1152d6e40, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4933199360.325>
+      Other, 0x1152d6f80, {{-402.0, -874.0}, {1206.0, 2622.0}} <AX element pid: 68147, elementOrHash.elementID: 4997962624.326>
+      Other, 0x1152d70c0, {{0.0, 62.0}, {402.0, 812.0}} <AX element pid: 68147, elementOrHash.elementID: 4997963904.327>
+        Other, 0x1152d7200, {{0.0, 62.0}, {402.0, 812.0}} <AX element pid: 68147, elementOrHash.elementID: 4425463808.329>
+          Other, 0x1152d7340, {{0.0, 62.0}, {402.0, 812.0}} <AX element pid: 68147, elementOrHash.elementID: 4445347840.330>
+            Other, 0x1152d7480, {{0.0, 62.0}, {402.0, 812.0}} <AX element pid: 68147, elementOrHash.elementID: 5011746688.331>
+              Other, 0x1152d75c0, {{0.0, 62.0}, {402.0, 812.0}} <AX element pid: 68147, elementOrHash.elementID: 5010041856.332>
+                NavigationBar, 0x1152d7700, {{0.0, 78.0}, {402.0, 54.0}}, identifier: '核对交易' <AX element pid: 68147, elementOrHash.elementID: 4988742912.333>
+                  Other, 0x1152d7840, {{20.0, 82.0}, {58.0, 36.0}} <AX element pid: 68147, elementOrHash.elementID: 5011780096.568>
+                    Other, 0x1152d7980, {{20.0, 82.0}, {58.0, 36.0}} <AX element pid: 68147, elementOrHash.elementID: 5029705152.569>
+                      Button, 0x1152d7ac0, {{20.0, 82.0}, {58.0, 36.0}}, label: '返回' <AX element pid: 68147, elementOrHash.elementID: 5029695232.570>
+                  StaticText, 0x1152d7c00, {{167.0, 89.7}, {67.7, 20.7}}, label: '核对交易' <AX element pid: 68147, elementOrHash.elementID: 4425506240.337>
+                Other, 0x1152d7d40, {{0.0, 62.0}, {402.0, 812.0}} <AX element pid: 68147, elementOrHash.elementID: 4425500416.334>
+                  Other, 0x1152d7e80, {{0.0, 62.0}, {402.0, 812.0}} <AX element pid: 68147, elementOrHash.elementID: 4425507136.338>
+                    Other, 0x1152d8000, {{0.0, 62.0}, {402.0, 812.0}} <AX element pid: 68147, elementOrHash.elementID: 4373553920.341>
+                      Other, 0x1152d8140, {{0.0, 62.0}, {402.0, 812.0}} <AX element pid: 68147, elementOrHash.elementID: 5011747648.343>
+                        CollectionView, 0x1152d8280, {{0.0, 62.0}, {402.0, 812.0}}, identifier: 'native-import-preview' <AX element pid: 68147, elementOrHash.elementID: 5011004416.571>
+                          Other, 0x1152d83c0, {{-16.0, -228.3}, {434.0, 322.0}} <AX element pid: 68147, elementOrHash.elementID: 5031710208.581>
+                          Cell, 0x1152d8500, {{16.0, 33.3}, {370.0, 60.3}} <AX element pid: 68147, elementOrHash.elementID: 5031304704.686>
+                            Other, 0x1152d8640, {{16.0, 33.3}, {370.0, 60.3}} <AX element pid: 68147, elementOrHash.elementID: 5011132416.696>
+                              Other, 0x1152d8780, {{16.0, 33.3}, {370.0, 60.3}} <AX element pid: 68147, elementOrHash.elementID: 4425535872.706>
+                            Other, 0x1152d88c0, {{16.0, 33.3}, {370.0, 60.3}} <AX element pid: 68147, elementOrHash.elementID: 4425539456.697>
+                              Other, 0x1152d8a00, {{16.0, 33.3}, {370.0, 60.3}} <AX element pid: 68147, elementOrHash.elementID: 5028029440.707>
+                                Other, 0x1152d8b40, {{16.0, 33.3}, {370.0, 60.3}} <AX element pid: 68147, elementOrHash.elementID: 5033017824.712>
+                                  StaticText, 0x1152d8c80, {{16.0, 33.3}, {370.0, 60.3}}, label: '展开交易可选择标签操作对象，也可全选。核对并确认后保存标签修改。' <AX element pid: 68147, elementOrHash.elementID: 5033018144.717>
+                          Other, 0x1152d8dc0, {{0.0, 62.0}, {402.0, 812.0}} <AX element pid: 68147, elementOrHash.elementID: 4425453504.576>
+                            Other, 0x1152d8f00, {{0.0, 62.0}, {402.0, 110.0}} <AX element pid: 68147, elementOrHash.elementID: 4425597376.589>
+                          Other, 0x1152d9040, {{0.0, 62.0}, {402.0, 812.0}} <AX element pid: 68147, elementOrHash.elementID: 4425508480.577>
+                            Other, 0x1152d9180, {{0.0, 62.0}, {402.0, 110.0}} <AX element pid: 68147, elementOrHash.elementID: 5025657984.824>
+                          Other, 0x1152d92c0, {{-16.0, 105.7}, {434.0, 2229.7}} <AX element pid: 68147, elementOrHash.elementID: 5031710720.583>
+                          Cell, 0x1152d9400, {{16.0, 105.7}, {370.0, 64.0}} <AX element pid: 68147, elementOrHash.elementID: 5031300864.584>
+                            Other, 0x1152d9540, {{16.0, 105.7}, {370.0, 64.0}} <AX element pid: 68147, elementOrHash.elementID: 5031707648.596>
+                            Other, 0x1152d9680, {{16.0, 105.7}, {370.0, 64.0}} <AX element pid: 68147, elementOrHash.elementID: 4425596928.597>
+                              Other, 0x1152d97c0, {{16.0, 105.7}, {370.0, 64.0}} <AX element pid: 68147, elementOrHash.elementID: 5028026368.609>
+                                Other, 0x1152d9900, {{16.0, 105.7}, {370.0, 64.0}} <AX element pid: 68147, elementOrHash.elementID: 5011745408.617>
+                                  StaticText, 0x1152d9a40, {{32.0, 127.5}, {147.3, 20.3}}, label: '交易明细 · 已选 2/2' <AX element pid: 68147, elementOrHash.elementID: 5011737888.623>
+                                  Button, 0x1152d9b80, {{302.3, 127.7}, {67.7, 20.3}}, label: '取消全选' <AX element pid: 68147, elementOrHash.elementID: 5011736448.624>
+                          Cell, 0x1152d9cc0, {{16.0, 169.7}, {370.0, 453.0}} <AX element pid: 68147, elementOrHash.elementID: 5031298304.585>
+                            Other, 0x1152d9e00, {{16.0, 169.7}, {370.0, 453.0}} <AX element pid: 68147, elementOrHash.elementID: 5011131904.598>
+                              Other, 0x1152d9f40, {{16.0, 169.7}, {370.0, 453.0}} <AX element pid: 68147, elementOrHash.elementID: 4425600960.610>
+                            Other, 0x1152da080, {{16.0, 169.7}, {370.0, 453.0}} <AX element pid: 68147, elementOrHash.elementID: 4425600512.599>
+                              Other, 0x1152da1c0, {{16.0, 169.7}, {370.0, 453.0}} <AX element pid: 68147, elementOrHash.elementID: 5028023296.611>
+                                Other, 0x1152da300, {{16.0, 169.7}, {370.0, 453.0}} <AX element pid: 68147, elementOrHash.elementID: 5011735168.618>
+                                  Button, 0x1152da440, {{76.0, 169.7}, {242.0, 68.7}}, identifier: 'import-entry-safe-import-1', label: '城市书房, 2026-08-28 · 年度阅读计划, 图书, 日常账户, #dining #learning, ¥328.00' <AX element pid: 68147, elementOrHash.elementID: 5011734848.625>
+                                    StaticText, 0x1152da580, {{76.0, 177.7}, {59.7, 18.0}}, label: '城市书房' <AX element pid: 68147, elementOrHash.elementID: 5011738528.639>
+                                    StaticText, 0x1152da6c0, {{76.0, 198.7}, {144.0, 14.3}}, label: '2026-08-28 · 年度阅读计划' <AX element pid: 68147, elementOrHash.elementID: 5011735488.640>
+                                    StaticText, 0x1152da800, {{229.3, 195.0}, {62.7, 18.0}}, label: '¥328.00' <AX element pid: 68147, elementOrHash.elementID: 5011738048.641>
+                                    Image, 0x1152da940, {{304.3, 201.3}, {9.7, 5.7}}, identifier: 'chevron.up', label: 'Go Up' <AX element pid: 68147, elementOrHash.elementID: 5011735968.642>
+                                    StaticText, 0x1152daa80, {{76.0, 216.0}, {24.0, 14.3}}, label: '图书' <AX element pid: 68147, elementOrHash.elementID: 5011735648.643>
+                                    Image, 0x1152dabc0, {{106.0, 220.0}, {7.7, 6.3}}, identifier: 'arrow.left', label: 'Left' <AX element pid: 68147, elementOrHash.elementID: 5011735808.644>
+                                    StaticText, 0x1152dad00, {{119.7, 216.0}, {36.0, 14.3}}, label: '日常账户' <AX element pid: 68147, elementOrHash.elementID: 5011737408.645>
+                                    StaticText, 0x1152dae40, {{173.0, 216.5}, {48.3, 13.3}}, label: '#dining #learning' <AX element pid: 68147, elementOrHash.elementID: 5011740928.646>
+                                  Button, 0x1152daf80, {{326.0, 182.0}, {44.0, 44.0}}, identifier: 'import-entry-edit-safe-import-1', label: '编辑 城市书房' <AX element pid: 68147, elementOrHash.elementID: 5011735008.626>
+                                  Button, 0x1152db0c0, {{35.7, 193.7}, {20.3, 20.3}}, identifier: 'import-entry-toggle-safe-import-1', label: '排除 城市书房', Selected <AX element pid: 68147, elementOrHash.elementID: 5011736608.627>
+                                  Button, 0x1152db200, {{76.0, 238.3}, {174.0, 44.0}}, identifier: 'import-entry-tag-toggle-safe-import-1', label: '取消选择 城市书房 的标签操作' <AX element pid: 68147, elementOrHash.elementID: 5011750048.662>
+                                    StaticText, 0x1152db340, {{76.0, 238.3}, {174.0, 44.0}}, label: '已选为标签操作对象' <AX element pid: 68147, elementOrHash.elementID: 5011749568.677>
+                                    Image, 0x1152db480, {{77.0, 249.7}, {21.3, 21.3}}, identifier: 'tag.fill', label: 'Tag' <AX element pid: 68147, elementOrHash.elementID: 5011749248.678>
+                                  StaticText, 0x1152db5c0, {{76.0, 294.3}, {48.0, 14.3}}, label: '分类账户' <AX element pid: 68147, elementOrHash.elementID: 5011749728.663>
+                                  StaticText, 0x1152db700, {{76.0, 310.7}, {222.7, 18.0}}, label: 'Expenses:Education:Books' <AX element pid: 68147, elementOrHash.elementID: 5011749888.664>
+                                  StaticText, 0x1152db840, {{76.0, 340.7}, {48.0, 14.3}}, label: '资金账户' <AX element pid: 68147, elementOrHash.elementID: 5011750208.665>
+                                  StaticText, 0x1152db980, {{76.0, 357.0}, {157.7, 18.0}}, label: 'Assets:Bank:Daily' <AX element pid: 68147, elementOrHash.elementID: 5011746368.666>
+                                  StaticText, 0x1152dbac0, {{76.0, 387.0}, {69.0, 14.3}}, label: '328.00 CNY' <AX element pid: 68147, elementOrHash.elementID: 5011740608.667>
+                                  StaticText, 0x1152dbc00, {{76.0, 403.3}, {222.7, 18.0}}, label: 'Expenses:Education:Books' <AX element pid: 68147, elementOrHash.elementID: 5011743488.668>
+                                  StaticText, 0x1152dbd40, {{76.0, 433.3}, {74.7, 14.3}}, label: '-328.00 CNY' <AX element pid: 68147, elementOrHash.elementID: 5011744608.669>
+                                  StaticText, 0x1152dbe80, {{76.0, 449.7}, {157.7, 18.0}}, label: 'Assets:Bank:Daily' <AX element pid: 68147, elementOrHash.elementID: 5011750368.670>
+                                  StaticText, 0x1152dc000, {{76.0, 479.7}, {48.0, 14.3}}, label: '支付方式' <AX element pid: 68147, elementOrHash.elementID: 5011750688.671>
+                                  StaticText, 0x1152dc140, {{76.0, 496.0}, {30.0, 18.0}}, label: '零钱' <AX element pid: 68147, elementOrHash.elementID: 5011748608.672>
+                                  StaticText, 0x1152dc280, {{76.0, 526.0}, {36.0, 14.3}}, label: '订单号' <AX element pid: 68147, elementOrHash.elementID: 5011748768.673>
+                                  StaticText, 0x1152dc3c0, {{76.0, 542.3}, {111.3, 18.0}}, label: 'safe-order-1' <AX element pid: 68147, elementOrHash.elementID: 5029706112.674>
+                                  StaticText, 0x1152dc500, {{76.0, 572.3}, {24.0, 14.3}}, label: '标签' <AX element pid: 68147, elementOrHash.elementID: 4955119584.675>
+                                  StaticText, 0x1152dc640, {{76.0, 588.7}, {232.0, 18.0}}, label: '#dining #learning #travel' <AX element pid: 68147, elementOrHash.elementID: 4955119744.676>
+                          Cell, 0x1152dc780, {{16.0, 622.7}, {370.0, 68.7}} <AX element pid: 68147, elementOrHash.elementID: 5031299584.586>
+                            Other, 0x1152dc8c0, {{16.0, 622.7}, {370.0, 68.7}} <AX element pid: 68147, elementOrHash.elementID: 4936403456.600>
+                              Other, 0x1152dca00, {{16.0, 622.7}, {370.0, 68.7}} <AX element pid: 68147, elementOrHash.elementID: 4425599616.612>
+                            Other, 0x1152dcb40, {{16.0, 622.7}, {370.0, 68.7}} <AX element pid: 68147, elementOrHash.elementID: 4425599168.601>
+                              Other, 0x1152dcc80, {{16.0, 622.7}, {370.0, 68.7}} <AX element pid: 68147, elementOrHash.elementID: 5028024832.613>
+                                Other, 0x1152dcdc0, {{16.0, 622.7}, {370.0, 68.7}} <AX element pid: 68147, elementOrHash.elementID: 5033020224.825>
+                                  Button, 0x1152dcf00, {{76.0, 622.7}, {242.0, 68.7}}, identifier: 'import-entry-safe-import-2', label: '青禾市场, 2026-08-30 · 周末食材, 食材, 信用卡, ¥186.80' <AX element pid: 68147, elementOrHash.elementID: 5033020064.826>
+                                    StaticText, 0x1152dd040, {{76.0, 630.7}, {59.7, 18.0}}, label: '青禾市场' <AX element pid: 68147, elementOrHash.elementID: 5011736928.647>
+                                    StaticText, 0x1152dd180, {{76.0, 651.7}, {132.0, 14.3}}, label: '2026-08-30 · 周末食材' <AX element pid: 68147, elementOrHash.elementID: 5011737568.648>
+                                    StaticText, 0x1152dd2c0, {{229.3, 648.0}, {62.7, 18.0}}, label: '¥186.80' <AX element pid: 68147, elementOrHash.elementID: 5011737248.649>
+                                    Image, 0x1152dd400, {{304.3, 654.3}, {9.7, 5.7}}, identifier: 'chevron.down', label: 'Go Down' <AX element pid: 68147, elementOrHash.elementID: 5011737088.650>
+                                    StaticText, 0x1152dd540, {{76.0, 669.0}, {24.0, 14.3}}, label: '食材' <AX element pid: 68147, elementOrHash.elementID: 5011735328.651>
+                                    Image, 0x1152dd680, {{106.0, 673.0}, {7.7, 6.3}}, identifier: 'arrow.left', label: 'Left' <AX element pid: 68147, elementOrHash.elementID: 5011734528.652>
+                                    StaticText, 0x1152dd7c0, {{119.7, 669.0}, {36.0, 14.3}}, label: '信用卡' <AX element pid: 68147, elementOrHash.elementID: 5011736768.653>
+                                  Button, 0x1152dd900, {{326.0, 635.0}, {44.0, 44.0}}, identifier: 'import-entry-edit-safe-import-2', label: '编辑 青禾市场' <AX element pid: 68147, elementOrHash.elementID: 5011740768.629>
+                                  Button, 0x1152dda40, {{35.7, 646.7}, {20.3, 20.3}}, identifier: 'import-entry-toggle-safe-import-2', label: '排除 青禾市场', Selected <AX element pid: 68147, elementOrHash.elementID: 5011745568.630>
+                          Other, 0x1152ddb80, {{116.0, 621.7}, {254.0, 1.0}} <AX element pid: 68147, elementOrHash.elementID: 5031709696.580>
+                          Other, 0x1152ddcc0, {{369.0, 132.0}, {30.0, 579.3}}, label: 'Vertical scroll bar, 2 pages', value: 100% <AX element pid: 68147, elementOrHash.elementID: 4999058944.588>
+                            Other, 0x1152dde00, {{396.0, 359.3}, {3.0, 349.0}} <AX element pid: 68147, elementOrHash.elementID: 4425427008.602>
+                          Other, 0x1152ddf40, {{369.0, 132.0}, {30.0, 579.3}}, label: 'Vertical scroll bar, 2 pages', value: 100% <AX element pid: 68147, elementOrHash.elementID: 4999058944.588>
+                            Other, 0x1152de080, {{396.0, 359.3}, {3.0, 349.0}} <AX element pid: 68147, elementOrHash.elementID: 4425427008.602>
+                        StaticText, 0x1152de1c0, {{28.0, 731.3}, {121.0, 18.0}}, label: '准备写入 2 条交易' <AX element pid: 68147, elementOrHash.elementID: 5029696352.572>
+                        StaticText, 0x1152de300, {{28.0, 751.3}, {222.7, 14.3}}, label: '微信支付 · 2026-08-01 至 2026-08-30' <AX element pid: 68147, elementOrHash.elementID: 5029695872.573>
+                        Button, 0x1152de440, {{28.0, 773.7}, {346.0, 50.3}}, identifier: 'import-commit', label: '写入 2 条交易', value: 可以提交 <AX element pid: 68147, elementOrHash.elementID: 5029695552.574>
+                Toolbar, 0x1152de580, {{0.0, 62.0}, {402.0, 812.0}}, identifier: 'Toolbar', label: 'Toolbar' <AX element pid: 68147, elementOrHash.elementID: 5010042368.335>
+                  Other, 0x1152de6c0, {{0.0, 62.0}, {402.0, 812.0}} <AX element pid: 68147, elementOrHash.elementID: 5010042880.339>
+  Window, 0x1152de800, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 5008013056.718>
+    Other, 0x1152de940, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 5034609664.720>
+      Other, 0x1152dea80, {{0.0, 0.0}, {402.0, 874.0}} <AX element pid: 68147, elementOrHash.elementID: 4425502656.722>

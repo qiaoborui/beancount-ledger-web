@@ -53,6 +53,10 @@ struct RootView: View {
                 reduceMotion ? nil : .easeOut(duration: LedgerMotion.Cover.exitDuration),
                 value: coverVisible
             )
+
+            // 灵动岛全屏入账浮层容器 (无论用户在哪个 Tab 页面记账/导入，均自顶部灵动岛优雅弹下)
+            LedgerIslandOverlayContainer(currentNotice: $session.pendingIslandNotice)
+                .zIndex(2)
         }
         .tint(LedgerPalette.cobalt)
         // Remote startup cross-fades its connecting surface into the shell. The

@@ -1,0 +1,35 @@
+Failed to tap "bookkeeping-confirm-save" Button: No matches found for Elements matching predicate '"bookkeeping-confirm-save" IN identifiers' from input {(
+    Button, label: '极速',
+    Button, identifier: 'transaction-edit-cancel', label: '取消',
+    Button, identifier: 'transaction-edit-save', label: '预览',
+    Button, identifier: 'house', label: '概览',
+    Button, identifier: 'list.bullet', label: '交易', Selected,
+    Button, identifier: 'book.closed', label: '账户',
+    Button, identifier: 'ellipsis', label: '更多',
+    Button, identifier: 'transaction-create-local', label: '记一笔',
+    Button, identifier: 'magnifyingglass', label: 'Search',
+    Button, identifier: 'navigation-time-range', label: '选择时间范围，当前为2026年9月', value: 2026-09-01 至 2026-...,
+    Button, identifier: 'transaction-actions', label: '流水操作',
+    Button,
+    Button, identifier: 'transaction-window-previous', label: '上一页', Disabled,
+    Button, identifier: 'transaction-window-next', label: '下一页', Disabled,
+    Button, identifier: 'bookkeeping-natural-entry', label: '用一句话记账, 输入日常口语描述，自动拆分多账户分录与金额',
+    Button, identifier: 'xmark', label: '关闭提示',
+    Button, label: '今天',
+    Button, label: '昨天',
+    Button, label: '前天',
+    Button, label: '账户, Expenses:Food',
+    Button, label: 'Date Picker', value: Sep 28, 2026,
+    Button, label: '全部', Selected,
+    Button, label: '支出',
+    Button, label: '收入',
+    Button, label: '转账'
+)}
+Possibly caused by runtime issues:
+Automation type mismatch: computed Button from legacy attributes vs PopUpButton from modern attribute. Input attributes and values: {
+    "XC_kAXXCAttributeAutomationType" = 14;
+    "XC_kAXXCAttributeElementBaseType" = NSObject;
+    "XC_kAXXCAttributeElementType" = "SwiftUI.AccessibilityNode";
+    "XC_kAXXCAttributeTraits" = 1108101562369;
+}
+See test report attachments for more detail.

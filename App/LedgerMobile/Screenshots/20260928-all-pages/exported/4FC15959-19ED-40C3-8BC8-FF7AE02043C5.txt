@@ -1,0 +1,74 @@
+Failed to tap "transaction-edit-cancel" Button: No matches found for Elements matching predicate '"transaction-edit-cancel" IN identifiers' from input {(
+    Button, label: '取消',
+    Button, label: '高级',
+    Button, label: '支出',
+    Button, label: '收入',
+    Button, label: '转账',
+    Button, label: '选择货币，当前CNY',
+    Button, identifier: 'CookieFastCategoryButton', label: '选择分类，当前学习提升',
+    Button, identifier: 'CookieFastAccountButton', label: '选择付款账户，当前信用卡',
+    Button, identifier: 'CookieFastDateButton', label: '选择日期，当前8月28日',
+    Button, identifier: 'CookieFastSplitButton', label: '开启分录拆分',
+    Button, identifier: 'xmark.circle.fill', label: 'Close',
+    Button, identifier: 'xmark.circle.fill', label: 'Close',
+    Button, identifier: 'keypad-7', label: '7',
+    Button, identifier: 'keypad-8', label: '8',
+    Button, identifier: 'keypad-9', label: '9',
+    Button, identifier: 'keypad-delete', label: 'Backspace',
+    Button, identifier: 'keypad-4', label: '4',
+    Button, identifier: 'keypad-5', label: '5',
+    Button, identifier: 'keypad-6', label: '6',
+    Button, identifier: 'keypad-op-+', label: '+',
+    Button, identifier: 'keypad-1', label: '1',
+    Button, identifier: 'keypad-2', label: '2',
+    Button, identifier: 'keypad-3', label: '3',
+    Button, identifier: 'keypad-op--', label: '-',
+    Button, identifier: 'keypad-.', label: '.',
+    Button, identifier: 'keypad-0', label: '0',
+    Button, identifier: 'keypad-=', label: '=',
+    Button, identifier: 'fast-entry-save-button', label: '完成',
+    Button, label: '概览',
+    Button, label: '交易', Selected,
+    Button, label: '账户',
+    Button, label: '更多',
+    Button,
+    Button, identifier: 'BackButton', label: '流水',
+    Button, identifier: 'transaction-share', label: '分享凭证',
+    Button, identifier: 'transaction-delete', label: '删除交易',
+    Button, label: 'Search',
+    Button,
+    Button, label: '餐饮',
+    Button, label: '交通',
+    Button, label: '购物',
+    Button, label: '居家日常',
+    Button, label: '数码电子',
+    Button, label: '休闲娱乐',
+    Button, label: '医疗健康',
+    Button, label: '学习提升',
+    Button, label: '其它支出',
+    Button, label: '更多分类',
+    Button, identifier: 'transaction-edit', label: '编辑',
+    Button, identifier: 'transaction-money-flow', label: '信用卡, Liabilities:CreditCard, -¥328.00',
+    Button, identifier: 'transaction-money-flow', label: '图书, Expenses:Education:Books, ¥328.00',
+    Button, label: '#learning',
+    Button, label: '图书, Expenses:Education:Books, ¥328.00',
+    Button, label: '信用卡, Liabilities:CreditCard, -¥328.00',
+    Button, label: '账本源码来源',
+    Button, identifier: 'square.and.arrow.up', label: '分享记账凭证',
+    Button, label: '再记一笔',
+    Button, label: '编辑交易'
+)}
+Possibly caused by runtime issues:
+Automation type mismatch: computed Button from legacy attributes vs DisclosureTriangle from modern attribute. Input attributes and values: {
+    "XC_kAXXCAttributeAutomationType" = 13;
+    "XC_kAXXCAttributeElementBaseType" = NSObject;
+    "XC_kAXXCAttributeElementType" = "SwiftUI.AccessibilityNode";
+    "XC_kAXXCAttributeTraits" = 8589934593;
+}
+Automation type mismatch: computed Button from legacy attributes vs PopUpButton from modern attribute. Input attributes and values: {
+    "XC_kAXXCAttributeAutomationType" = 14;
+    "XC_kAXXCAttributeElementBaseType" = NSObject;
+    "XC_kAXXCAttributeElementType" = "SwiftUI.AccessibilityNode";
+    "XC_kAXXCAttributeTraits" = 1108101562369;
+}
+See test report attachments for more detail.

@@ -1,0 +1,5 @@
+Query chain:
+ →Find: Target Application 'com.qiaoborui.ledger.mobile'
+  ↪︎Find: Descendants matching type StaticText
+    ↪︎Find: Elements matching predicate '"环比" IN identifiers'
+      ↪︎Find: First Match

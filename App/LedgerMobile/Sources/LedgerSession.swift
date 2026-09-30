@@ -182,6 +182,11 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var gmailOAuthResult: LedgerGmailOAuthResult?
     @Published private(set) var transactionMutationStates: [String: LedgerTransactionMutationPhase] = [:]
     @Published private(set) var widgetRefreshStatus: LedgerWidgetRefreshStatus
+    @Published var pendingIslandNotice: LedgerIslandNotice?
+
+    func triggerIslandNotice(_ notice: LedgerIslandNotice) {
+        pendingIslandNotice = notice
+    }
 
     private let repositoryFactory: LedgerRepositoryFactory
     private let localCatalog: LocalLedgerCatalog?
@@ -1356,6 +1361,8 @@ final class LedgerSession: ObservableObject {
         defer { if epoch == sessionEpoch { localTransactionReloadID &+= 1 } }
         try await localRepository.addTransaction(entry: entry)
         guard epoch == sessionEpoch else { throw CancellationError() }
+        let accountLabels = TransactionCategoryPresentation.accountLabels(ledger?.accounts ?? [])
+        triggerIslandNotice(LedgerIslandNotice.from(entry: entry, accountLabels: accountLabels))
         await refresh()
     }
 
@@ -2022,7 +2029,7 @@ final class LedgerSession: ObservableObject {
         preview: LedgerImportPreview,
         entries: [LedgerImportEntry]
     ) async throws -> LedgerImportCommitResult {
-        try await performSensitiveRequest { repository in
+        let result = try await performSensitiveRequest { repository in
             try await repository.commitImport(
                 request: LedgerImportCommitRequest(
                     importID: preview.importID,
@@ -2031,6 +2038,8 @@ final class LedgerSession: ObservableObject {
                 )
             )
         }
+        triggerIslandNotice(LedgerIslandNotice.fromImport(count: entries.count, provider: preview.provider))
+        return result
     }
 
     func updateTransaction(

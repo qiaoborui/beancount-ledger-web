@@ -1,0 +1,4 @@
+Query chain:
+ →Find: Target Application 'com.qiaoborui.ledger.mobile'
+  ↪︎Find: Descendants matching type TextField
+    ↪︎Find: Elements matching predicate '"transaction-edit-payee" IN identifiers'

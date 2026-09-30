@@ -1,0 +1,5 @@
+Query chain:
+ →Find: Target Application 'com.qiaoborui.ledger.mobile'
+  ↪︎Find: Descendants matching type TabBar
+    ↪︎Find: Descendants matching type Button
+      ↪︎Find: Elements matching predicate '"资产" IN identifiers'

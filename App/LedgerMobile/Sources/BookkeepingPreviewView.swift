@@ -157,6 +157,11 @@ struct BookkeepingPreviewView: View {
                 throw BookkeepingError.expiredPreview
             }
             let result = try await repository.commitPrepared(preview)
+            if let count = result?.count, count > 0 {
+                session.triggerIslandNotice(LedgerIslandNotice.fromImport(count: count, provider: "快速记账"))
+            } else {
+                session.triggerIslandNotice(LedgerIslandNotice.fromImport(count: 1, provider: "快速记账"))
+            }
             await session.refresh()
             onSaved(result)
             dismiss()
