@@ -71,7 +71,9 @@ struct LedgerIslandPillView: View {
         )
         // 极细腻的高级阴影，增加悬浮在屏幕上方的纵深
         .shadow(color: Color.black.opacity(0.55), radius: 18, x: 0, y: 8)
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("ledger-dynamic-island-notice")
+        .accessibilityLabel("\(notice.title), \(notice.amountText)")
         .onAppear {
             playAnimationSequence()
         }
