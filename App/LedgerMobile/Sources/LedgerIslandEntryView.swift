@@ -192,6 +192,16 @@ struct LedgerIslandOverlayContainer: View {
     @Binding var currentNotice: LedgerIslandNotice?
 
     var body: some View {
+        #if os(iOS)
+        Color.clear
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .onChange(of: currentNotice, initial: true) { _, newNotice in
+                LedgerIslandWindowManager.shared.present(newNotice) {
+                    currentNotice = nil
+                }
+            }
+        #else
         VStack(spacing: 0) {
             if let notice = currentNotice {
                 LedgerIslandPillView(notice: notice) {
@@ -210,5 +220,90 @@ struct LedgerIslandOverlayContainer: View {
         .ignoresSafeArea(.all, edges: .top)
         .allowsHitTesting(currentNotice != nil)
         .animation(.spring(response: 0.4, dampingFraction: 0.75), value: currentNotice != nil)
+        #endif
     }
 }
+
+#if os(iOS)
+import UIKit
+
+/// 穿透触控的 UIWindow，将灵动岛抬升至 statusBar / alert 层级之上，
+/// 确保它绝不会被任何 modal sheet、formSheet 或 fullScreenCover 弹窗遮挡。
+final class LedgerIslandPassthroughWindow: UIWindow {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let hitView = super.hitTest(point, with: event) else { return nil }
+        // 只有当点击落在具体灵动岛药丸及其子控件内时才捕获，否则全部穿透透传给下层弹窗或主界面
+        return (hitView === self || hitView === rootViewController?.view) ? nil : hitView
+    }
+}
+
+@MainActor
+final class LedgerIslandWindowManager {
+    static let shared = LedgerIslandWindowManager()
+
+    private var overlayWindow: LedgerIslandPassthroughWindow?
+    private var dismissHandler: (() -> Void)?
+
+    private init() {}
+
+    func present(_ notice: LedgerIslandNotice?, onDismiss: @escaping () -> Void) {
+        guard let notice else {
+            destroyWindow()
+            return
+        }
+
+        self.dismissHandler = onDismiss
+
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive })
+            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
+            return
+        }
+
+        if overlayWindow == nil || overlayWindow?.windowScene != scene {
+            let window = LedgerIslandPassthroughWindow(windowScene: scene)
+            // 将层级设置在 statusBar / alert 级别，保证压在所有 Modal Sheet 之上
+            window.windowLevel = .statusBar + 100
+            window.backgroundColor = .clear
+            window.isOpaque = false
+            window.clipsToBounds = false
+            self.overlayWindow = window
+        }
+
+        let hosting = UIHostingController(rootView: windowContent(for: notice))
+        hosting.view.backgroundColor = .clear
+        hosting.view.isOpaque = false
+        hosting.view.clipsToBounds = false
+
+        overlayWindow?.rootViewController = hosting
+        overlayWindow?.isHidden = false
+    }
+
+    private func windowContent(for notice: LedgerIslandNotice) -> some View {
+        VStack(spacing: 0) {
+            LedgerIslandPillView(notice: notice) { [weak self] in
+                self?.dismissHandler?()
+                self?.destroyWindow()
+            }
+            .id(notice.id)
+            .transition(.asymmetric(
+                insertion: .opacity.combined(with: .scale(scale: 0.8)),
+                removal: .opacity.combined(with: .scale(scale: 0.6))
+            ))
+
+            Spacer()
+        }
+        .padding(.top, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .ignoresSafeArea(.all, edges: .top)
+    }
+
+    private func destroyWindow() {
+        overlayWindow?.isHidden = true
+        overlayWindow?.rootViewController = nil
+        overlayWindow = nil
+    }
+}
+#endif
+
