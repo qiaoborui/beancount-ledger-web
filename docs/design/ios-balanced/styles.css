@@ -1,0 +1,1499 @@
+/* ==========================================================================
+   Balanced — Beancount Ledger Web, iOS
+   Design language: the double-entry equation as the interface's spine.
+   ========================================================================== */
+
+:root {
+  --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --measure: 393px;
+
+  /* device chrome is theme-independent */
+  --bezel: #0b0a09;
+  --bezel-edge: rgba(255, 255, 255, 0.14);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 40px 24px 96px;
+  background: #e8e5df;
+  font-family: var(--font-sans);
+  color: #14100c;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ---------- gallery chrome ------------------------------------------------ */
+
+.gallery-head {
+  max-width: 1180px;
+  margin: 0 auto 36px;
+}
+
+.gallery-head h1 {
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 10px;
+}
+
+.gallery-head p {
+  margin: 0 0 6px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #57504a;
+  max-width: 62ch;
+}
+
+.gallery-head .rule-set {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  font-size: 12.5px;
+  color: #57504a;
+}
+
+.gallery-head .rule-set b {
+  font-weight: 600;
+  color: #14100c;
+}
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: 1180px;
+  margin: 0 auto 32px;
+  padding: 10px;
+  background: rgba(232, 229, 223, 0.86);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(20, 16, 12, 0.1);
+}
+
+.toolbar button {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 14px;
+  min-height: 36px;
+  border: 1px solid rgba(20, 16, 12, 0.18);
+  border-radius: 2px;
+  background: transparent;
+  color: #14100c;
+  cursor: pointer;
+}
+
+.toolbar button[aria-pressed='true'] {
+  background: #14100c;
+  color: #fbfaf8;
+  border-color: #14100c;
+}
+
+.toolbar button:focus-visible {
+  outline: 2px solid #14100c;
+  outline-offset: 2px;
+}
+
+.toolbar .spacer {
+  flex: 1;
+}
+
+.toolbar .hint {
+  font-size: 12.5px;
+  color: #57504a;
+}
+
+.section {
+  max-width: 1180px;
+  margin: 0 auto 12px;
+  padding-top: 34px;
+  border-top: 1px solid rgba(20, 16, 12, 0.14);
+}
+
+.section > h2 {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 4px;
+}
+
+.section > p {
+  margin: 0 0 26px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #57504a;
+  max-width: 68ch;
+}
+
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 40px 44px;
+  align-items: flex-start;
+}
+
+figure.screen {
+  margin: 0;
+  width: var(--measure);
+}
+
+figure.screen > figcaption {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #3d3831;
+  margin-bottom: 10px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+figure.screen > figcaption span {
+  font-weight: 400;
+  color: #6f675a;
+}
+
+/* ---------- the phone ----------------------------------------------------- */
+
+.phone {
+  width: var(--measure);
+  height: 852px;
+  background: var(--bg);
+  color: var(--ink);
+  border-radius: 46px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 0 0 9px var(--bezel),
+    0 0 0 10px rgba(255, 255, 255, 0.08),
+    0 30px 60px -18px rgba(20, 16, 12, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  isolation: isolate;
+}
+
+.phone[data-theme='light'] {
+  --bg: #fbfaf8;
+  --sunken: #f1efe9;
+  --ink: #14100c;
+  --ink-2: #453e36;
+  --ink-3: #6f675a;
+  --rule: #e2ded4;
+  --rule-strong: #c8c2b4;
+
+  /* the boundary that makes a control exist: the checkbox, the button,
+     the field underline, the segmented group. Meets 3:1 against --bg
+     and --sunken in both themes. Decorative hairlines use --rule /
+     --rule-strong and are deliberately far quieter. */
+  --edge: #88837a;
+  --in: #0d5346;
+  --out: #96401f;
+  --press: rgba(20, 16, 12, 0.05);
+}
+
+.phone[data-theme='dark'] {
+  --bg: #121110;
+  --sunken: #1b1918;
+  --ink: #f6f3ee;
+  --ink-2: #c4bcb0;
+  --ink-3: #9a9086;
+  --rule: #2b2825;
+  --rule-strong: #423c36;
+  --edge: #78746e;
+  --in: #4fbfab;
+  --out: #cf7a52;
+  --press: rgba(246, 243, 238, 0.07);
+}
+
+/* every numeric readout is tabular */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* ---------- status bar ---------------------------------------------------- */
+
+.statusbar {
+  flex: none;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 30px 0 36px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+.statusbar .indicators {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusbar svg {
+  display: block;
+}
+
+/* ---------- app bar ------------------------------------------------------- */
+
+.appbar {
+  flex: none;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 16px 10px;
+}
+
+.appbar .title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.appbar .back {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  margin-left: -6px;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+}
+
+/* a back control that carries a word instead of a chevron */
+.appbar .back.text {
+  width: auto;
+  padding: 0 6px 0 2px;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.appbar .actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: -6px;
+}
+
+/* the period control: a hairline underline, no capsule, no chevron plate */
+.period {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 0 2px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.period .caret {
+  color: var(--ink-3);
+}
+
+.iconbtn {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.iconbtn:focus-visible,
+.period:focus-visible,
+.seg button:focus-visible,
+.tab:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -4px;
+}
+
+/* sync marks the one place colour is allowed outside an opposed pair */
+.iconbtn .dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+/* ---------- scroll body --------------------------------------------------- */
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  padding-bottom: 18px;
+}
+
+.scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Review aid: release every frame to its full content height so a whole page
+   can be read at once. The device viewport is the real deliverable; this is
+   only for inspecting the prototype. */
+body[data-length='full'] .phone {
+  height: auto;
+  max-height: none;
+}
+
+body[data-length='full'] .phone .scroll {
+  overflow: visible;
+  flex: none;
+}
+
+body[data-length='full'] figcaption::after {
+  content: ' · 全长预览';
+  color: var(--ink-3);
+}
+
+.pad {
+  padding: 0 20px;
+}
+
+/* ---------- the settle block --------------------------------------------- */
+
+/*
+  The signature device. A double-entry equation is *read*, not summarised:
+  rows, a rule, then the total the rows produce. It replaces the
+  "big number + small label" hero everywhere a balance is reported.
+*/
+
+.settle {
+  background: var(--sunken);
+  padding: 20px 20px 18px;
+}
+
+.settle-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.settle-head .lede {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+.settle-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  font-size: 15px;
+}
+
+.settle-row dt {
+  color: var(--ink-2);
+  margin: 0;
+}
+
+.settle-row dd {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 450;
+}
+
+.settle-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ink);
+}
+
+.settle-total dt {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.settle-total dd {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+}
+
+.settle-total dd .cur {
+  font-size: 0.62em;
+  font-weight: 450;
+  letter-spacing: 0;
+  color: var(--ink-3);
+  margin-right: 1px;
+}
+
+/* the only colour pairs in the system: --in against --out, never alone */
+.v-in {
+  color: var(--in);
+}
+
+.v-out {
+  color: var(--out);
+}
+
+/* ---------- retained band ------------------------------------------------- */
+
+.band {
+  padding: 18px 20px 20px;
+  border-top: 1px solid var(--rule);
+}
+
+.band-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.band-head b {
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.band-head b small {
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0;
+  color: var(--ink-3);
+  margin-left: 5px;
+}
+
+.bar {
+  display: flex;
+  height: 10px;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+}
+
+.bar .kept {
+  background: var(--ink);
+}
+
+.bar .spent {
+  background: var(--out);
+}
+
+.band-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.band-foot span {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.band-foot .k {
+  width: 26px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+.band-foot .v {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.key::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  background: var(--c, var(--ink));
+}
+
+.key.k-out::before {
+  background: var(--out);
+}
+
+.key.k-in::before {
+  background: var(--in);
+}
+
+/* ---------- section head -------------------------------------------------- */
+
+.sechead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 26px 20px 10px;
+}
+
+.sechead h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+}
+
+.sechead .aside {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.sechead .aside a,
+.link {
+  color: var(--ink-2);
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule-strong);
+  padding-bottom: 1px;
+}
+
+.headline {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin: -2px 0 12px;
+}
+
+/* ---------- tables -------------------------------------------------------- */
+
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+}
+
+.tbl caption {
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  padding: 0 20px 8px;
+}
+
+.tbl th {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-3);
+  text-align: right;
+  padding: 0 20px 8px 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.tbl th:first-child {
+  text-align: left;
+  padding-left: 20px;
+}
+
+.tbl td {
+  padding: 11px 20px;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: baseline;
+}
+
+.tbl tr:last-child td {
+  border-bottom: 0;
+}
+
+.tbl .cat {
+  padding-left: 20px;
+}
+
+.tbl .amt {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  white-space: nowrap;
+  padding-right: 8px;
+}
+
+.tbl .share {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+  width: 62px;
+  padding-right: 20px;
+}
+
+/* a share column doubles as a proportion readout, not a bar chart */
+.tbl .cat .path {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  /* account paths are long single tokens; let them break rather than push
+     the table past the frame */
+  overflow-wrap: anywhere;
+}
+
+/* ---------- transaction rows ---------------------------------------------- */
+
+.daysep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 20px 6px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.daysep::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+
+.daysep b {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.txn {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 20px;
+  min-height: 56px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.txn:last-child {
+  border-bottom: 0;
+}
+
+.txn .body {
+  flex: 1;
+  min-width: 0;
+}
+
+.txn .who {
+  font-size: 15.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.txn .note {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.txn .val {
+  flex: none;
+  text-align: right;
+  min-width: 104px;
+}
+
+.txn .val .amt {
+  display: block;
+  font-size: 15.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.txn .val .cat {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 3px;
+  white-space: nowrap;
+}
+
+/* a transfer is a movement, not a cost: it is drawn, not coloured */
+.flow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+/* ---------- metrics ------------------------------------------------------- */
+
+.metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--rule);
+}
+
+.metric {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.metric:nth-child(odd) {
+  border-right: 1px solid var(--rule);
+}
+
+.metric dt {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin: 0 0 7px;
+}
+
+.metric dd {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric .sub {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 7px;
+  font-variant-numeric: normal;
+}
+
+/* ---------- charts -------------------------------------------------------- */
+
+.chart {
+  padding: 4px 20px 8px;
+}
+
+.chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.chart-foot {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  padding: 10px 20px 6px;
+}
+
+.chart-note {
+  padding: 0 20px 4px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+/* disclosure row: charts expose their numbers */
+.disclose {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 20px;
+  min-height: 44px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--rule);
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.disclose:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -4px;
+}
+
+.disclose .chev {
+  transition: transform 0.18s ease;
+}
+
+.disclose[aria-expanded='true'] .chev {
+  transform: rotate(90deg);
+}
+
+/* ---------- account rows -------------------------------------------------- */
+
+.acct {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 15px 20px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.acct .name {
+  flex: 1;
+  min-width: 0;
+  font-size: 15.5px;
+  font-weight: 500;
+}
+
+.acct .name em {
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-left: 5px;
+}
+
+.acct .sub {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-top: 4px;
+  font-family: var(--font-mono);
+}
+
+.acct .bal {
+  font-size: 15.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.acct.child {
+  padding-left: 34px;
+  background: var(--sunken);
+}
+
+.acct.child .name {
+  font-size: 14.5px;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+/* ---------- segmented control --------------------------------------------- */
+
+.seg {
+  display: flex;
+  gap: 22px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--rule);
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.seg::-webkit-scrollbar {
+  display: none;
+}
+
+.seg button {
+  flex: none;
+  position: relative;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 14.5px;
+  color: var(--ink-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.seg button[aria-selected='true'] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.seg button[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--ink);
+}
+
+.seg button .n {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- search -------------------------------------------------------- */
+
+.search {
+  margin: 4px 20px 14px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 40px;
+  padding: 0 12px;
+  background: var(--sunken);
+  color: var(--ink-3);
+  font-size: 14.5px;
+}
+
+/* ---------- list rows (More) ---------------------------------------------- */
+
+.group {
+  padding: 24px 20px 6px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 20px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.row .body {
+  flex: 1;
+  min-width: 0;
+}
+
+.row .label {
+  font-size: 15.5px;
+  letter-spacing: -0.005em;
+}
+
+.row .hint {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-top: 3px;
+}
+
+.row .value {
+  font-size: 14px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.row .chev {
+  flex: none;
+  color: var(--edge);
+}
+
+/* ---------- tab bar ------------------------------------------------------- */
+
+.tabbar {
+  flex: none;
+  height: 62px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--rule);
+  padding-bottom: 0;
+  background: var(--bg);
+}
+
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 6px 0 8px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.tab[aria-current='page'] {
+  color: var(--ink);
+}
+
+.tab[aria-current='page'] .icon {
+  position: relative;
+}
+
+.tab .icon {
+  display: grid;
+  place-items: center;
+  height: 20px;
+}
+
+/* the current destination is marked by a rule under the glyph, matching
+   the underline used by segmented controls and the period control */
+.tab[aria-current='page'] .icon::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  translate: -50% 0;
+  bottom: -7px;
+  width: 16px;
+  height: 2px;
+  background: var(--ink);
+}
+
+.homebar {
+  flex: none;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+
+.homebar::after {
+  content: '';
+  width: 134px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--ink);
+  opacity: 0.3;
+}
+
+/* ---------- sheets and overlays ------------------------------------------- */
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 16, 12, 0.42);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  z-index: 5;
+}
+
+.phone[data-theme='dark'] .scrim {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.sheet {
+  background: var(--bg);
+  border-top: 1px solid var(--rule);
+  padding: 10px 0 22px;
+  max-height: 78%;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.sheet::-webkit-scrollbar {
+  display: none;
+}
+
+.sheet .grabber {
+  width: 38px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rule-strong);
+  margin: 0 auto 12px;
+}
+
+.sheet h2 {
+  margin: 0;
+  padding: 0 20px 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sheet .sheet-sub {
+  padding: 0 20px 14px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.opt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  min-height: 48px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 15px;
+  color: var(--ink-2);
+}
+
+.opt .mark {
+  flex: none;
+  width: 14px;
+  color: var(--ink);
+}
+
+.opt[aria-selected='true'] {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.range {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 20px 16px;
+}
+
+.range .field {
+  flex: 1;
+  border-bottom: 1px solid var(--edge);
+  padding-bottom: 8px;
+}
+
+.range .field .k {
+  display: block;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-bottom: 5px;
+}
+
+.range .field .v {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.range .to {
+  color: var(--ink-3);
+  font-size: 12.5px;
+  padding-top: 20px;
+}
+
+.sheet-actions {
+  display: flex;
+  gap: 10px;
+  padding: 16px 20px 0;
+}
+
+.btn {
+  flex: 1;
+  min-height: 46px;
+  border: 1px solid var(--edge);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn.primary {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+/* ---------- bookkeeping draft --------------------------------------------- */
+
+.field-row {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.field-row .k {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
+
+.field-row .v {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.field-row .v.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.7;
+}
+
+.seg-inline {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--edge);
+  width: fit-content;
+}
+
+.seg-inline button {
+  font: inherit;
+  font-size: 13.5px;
+  padding: 7px 16px;
+  min-height: 36px;
+  border: 0;
+  border-right: 1px solid var(--edge);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.seg-inline button:last-child {
+  border-right: 0;
+}
+
+.seg-inline button[aria-selected='true'] {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+/* the source preview: the only place monospace carries real weight,
+   because it is literally the file that will be written */
+.source {
+  margin: 16px 20px 0;
+  padding: 14px 16px;
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--ink-2);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.source b {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.confirm {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 16px 20px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+/* ---------- import review ------------------------------------------------- */
+
+.imp {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--rule);
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.imp .box {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--edge);
+  position: relative;
+  top: 2px;
+}
+
+.imp[data-state='on'] .box {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.imp .who {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.imp .meta {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.imp .cat {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-top: 5px;
+  display: block;
+}
+
+.imp .amt {
+  font-size: 15px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.imp[data-state='off'] .who,
+.imp[data-state='off'] .amt {
+  color: var(--ink-3);
+}
+
+.warn {
+  margin: 0;
+  padding: 12px 20px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  background: var(--sunken);
+  border-bottom: 1px solid var(--rule);
+}
+
+/* ---------- empty and error states ---------------------------------------- */
+
+.empty {
+  padding: 44px 20px;
+  text-align: left;
+}
+
+.empty h4 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.empty p {
+  margin: 0 0 18px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+  max-width: 30ch;
+}
+
+.note {
+  padding: 12px 20px 20px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* ---------- motion -------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+}
+
+/* the one orchestrated moment: the settle block's total resolves on load */
+@keyframes settle-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.settle-total dd {
+  animation: settle-in 0.42s cubic-bezier(0.2, 0.7, 0.3, 1) 0.12s both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settle-total dd {
+    animation: none;
+  }
+}
+
+/* ---------- dark gallery shell -------------------------------------------- */
+
+body[data-gallery='dark'] {
+  background: #1c1a18;
+  color: #f6f3ee;
+}
+
+body[data-gallery='dark'] .gallery-head p,
+body[data-gallery='dark'] .gallery-head .rule-set,
+body[data-gallery='dark'] .section > p,
+body[data-gallery='dark'] .toolbar .hint {
+  color: #a29a90;
+}
+
+body[data-gallery='dark'] .gallery-head .rule-set b,
+body[data-gallery='dark'] .toolbar button {
+  color: #f6f3ee;
+}
+
+body[data-gallery='dark'] .section {
+  border-top-color: rgba(246, 243, 238, 0.16);
+}
+
+body[data-gallery='dark'] .toolbar {
+  background: rgba(28, 26, 24, 0.86);
+  border-bottom-color: rgba(246, 243, 238, 0.14);
+}
+
+body[data-gallery='dark'] .toolbar button {
+  border-color: rgba(246, 243, 238, 0.24);
+}
+
+body[data-gallery='dark'] .toolbar button[aria-pressed='true'] {
+  background: #f6f3ee;
+  color: #1c1a18;
+  border-color: #f6f3ee;
+}
+
+body[data-gallery='dark'] figure.screen > figcaption {
+  color: #d6cfc6;
+}
+
+body[data-gallery='dark'] figure.screen > figcaption span {
+  color: #9a9086;
+}

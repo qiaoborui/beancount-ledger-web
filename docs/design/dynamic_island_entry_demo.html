@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beancount 原生设计 · 全场景灵动岛核准入账 (支出/转账/导入/收入)</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      background-color: #06070a;
+      color: #f3f4f6;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .wrapper {
+      display: flex;
+      flex-direction: row;
+      gap: 50px;
+      align-items: center;
+      justify-content: center;
+      max-width: 1080px;
+      width: 100%;
+    }
+
+    /* iPhone 比例机身 */
+    .iphone-case {
+      width: 393px;
+      height: 820px;
+      background: #000000;
+      border-radius: 56px;
+      position: relative;
+      box-shadow: 
+        0 0 0 1px rgba(255, 255, 255, 0.12),
+        0 0 0 4px #23262d,
+        0 35px 90px -15px rgba(0, 0, 0, 0.95);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #stageCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* 控制面板 */
+    .dashboard {
+      width: 380px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      background: rgba(255, 255, 255, 0.03);
+      padding: 28px;
+      border-radius: 28px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(40px);
+    }
+
+    .title {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .sub {
+      font-size: 13px;
+      line-height: 1.6;
+      color: #8e95a5;
+    }
+
+    .btn-col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .action-btn {
+      appearance: none;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.05);
+      color: #fff;
+      padding: 14px 18px;
+      border-radius: 16px;
+      font-size: 13.5px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .action-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      transform: translateY(-2px);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .action-btn:active {
+      transform: scale(0.98);
+    }
+
+    .action-btn.spotlight {
+      background: #ffffff;
+      color: #000000;
+      border: none;
+      box-shadow: 0 4px 20px rgba(255, 255, 255, 0.25);
+    }
+
+    .tag {
+      font-size: 13px;
+      font-feature-settings: "tnum";
+      font-weight: 700;
+      opacity: 0.85;
+    }
+
+    .spec-card {
+      background: rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 18px;
+      padding: 16px;
+      font-size: 12px;
+      color: #8e95a5;
+      line-height: 1.8;
+    }
+
+    .spec-card strong {
+      color: #fff;
+    }
+
+    @media (max-width: 860px) {
+      .wrapper {
+        flex-direction: column;
+      }
+      .dashboard {
+        width: 393px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="wrapper">
+    <!-- iPhone Device Frame -->
+    <div class="iphone-case">
+      <canvas id="stageCanvas" width="393" height="820"></canvas>
+    </div>
+
+    <!-- Controls -->
+    <div class="dashboard">
+      <div class="title">
+        转账 & 批量导入的灵动岛设计
+      </div>
+      <p class="sub">
+        完美兼容 Beancount 四大核心财务行为（支出、转账、导入归档、收入），统一采用<strong>极简字数、原生 SF Symbol 动效与纯黑微胶囊</strong>。
+      </p>
+
+      <div class="btn-col">
+        <button class="action-btn spotlight" onclick="playTransfer()">
+          <span>⇄ 账户资金转账 / 还款</span>
+          <span class="tag" style="color: #60a5fa;">¥3,000.00</span>
+        </button>
+
+        <button class="action-btn" onclick="playImport()">
+          <span>⚡️ 账单文件解析导入</span>
+          <span class="tag" style="color: #34d399;">+12 笔归档</span>
+        </button>
+
+        <button class="action-btn" onclick="playDining()">
+          <span>🍴 咖啡美食支出</span>
+          <span class="tag">-¥38.00</span>
+        </button>
+
+        <button class="action-btn" onclick="playSalary()">
+          <span>💵 薪资报销收入</span>
+          <span class="tag" style="color: #30d158;">+¥8,500.00</span>
+        </button>
+      </div>
+
+      <div class="spec-card">
+        <strong>💡 细节设计：</strong><br>
+        ✦ <strong>转账 (Transfer)</strong>：<br>
+        &nbsp;&nbsp;• 图标：<code>arrow.left.arrow.right</code>（经典钴蓝 <code>#0055D4</code>），带轻微水平对向微弹动效。<br>
+        &nbsp;&nbsp;• 视觉：不带正负号，显示清晰划转金额，下方直接显示 <code>招行 ➔ 零钱通</code>。<br>
+        ✦ <strong>导入 (Import Batch)</strong>：<br>
+        &nbsp;&nbsp;• 图标：<code>tray.and.arrow.down.fill</code>（导入绿），伴随数字翻滚（如从 0 跳动翻滚至 <code>12 笔</code>）。<br>
+        &nbsp;&nbsp;• 状态：对勾换为极速闭合环，下方显示 <code>微信/支付宝账单</code>。
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("stageCanvas");
+    const ctx = canvas.getContext("2d");
+
+    const dpr = window.devicePixelRatio || 2;
+    const W = 393;
+    const H = 820;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.scale(dpr, dpr);
+
+    // Spring 物理弹簧动力学
+    class Spring {
+      constructor(val = 0, stiffness = 260, damping = 24) {
+        this.val = val;
+        this.target = val;
+        this.vel = 0;
+        this.stiffness = stiffness;
+        this.damping = damping;
+      }
+      update(dt) {
+        const force = -this.stiffness * (this.val - this.target);
+        const damper = -this.damping * this.vel;
+        this.vel += (force + damper) * dt;
+        this.val += this.vel * dt;
+        return this.val;
+      }
+      setTarget(target) {
+        this.target = target;
+      }
+      snapTo(v) {
+        this.val = v;
+        this.target = v;
+        this.vel = 0;
+      }
+    }
+
+    function drawSquircle(c, x, y, width, height, r) {
+      c.beginPath();
+      c.roundRect(x, y, width, height, r);
+    }
+
+    // 灵动岛核心状态 (紧凑默认 124x36)
+    // 纵向尺寸：宽 218pt, 高 70pt, 圆角 35pt
+    const island = {
+      cx: 196.5,
+      cy: 28,
+      w: new Spring(124, 280, 24),
+      h: new Spring(36, 260, 22),
+      r: new Spring(18, 260, 22),
+      contentAlpha: new Spring(0, 320, 24),
+      
+      // 分类图标弹性动画
+      iconScale: new Spring(0, 240, 18),
+      iconOffset: new Spring(0, 260, 18),
+      
+      // 对勾动画
+      ringProgress: new Spring(0, 200, 18),
+      checkProgress: new Spring(0, 240, 18),
+      
+      // 导入数字滚动计数 (0 -> 12)
+      countDisplay: 0,
+      targetCount: 0,
+      
+      type: "expense", // 'expense', 'income', 'transfer', 'import'
+      title: "",
+      amount: "",
+      iconSymbol: "fork.knife",
+      iconColor: "#f59e0b",
+      ringColor: "#007aff",
+      timer: null
+    };
+
+    // 账单列表展示
+    const transactions = [
+      { id: 1, title: "Apple 订阅", category: "数字娱乐", symbol: "popcorn.fill", color: "#a855f7", amount: "-¥21.00", isIncome: false, isTransfer: false, y: new Spring(0) },
+      { id: 2, title: "Ole 精品超市", category: "美食餐饮", symbol: "fork.knife", color: "#f59e0b", amount: "-¥164.20", isIncome: false, isTransfer: false, y: new Spring(0) },
+      { id: 3, title: "零钱通转账", category: "招商卡 ➔ 零钱通", symbol: "arrow.left.arrow.right", color: "#0055d4", amount: "¥1,000.00", isIncome: false, isTransfer: true, y: new Spring(0) }
+    ];
+
+    function triggerIslandAction({ type, title, amount, iconSymbol, iconColor, ringColor, countTarget = 0 }) {
+      if (island.timer) clearTimeout(island.timer);
+
+      island.type = type;
+      island.title = title;
+      island.amount = amount;
+      island.iconSymbol = iconSymbol;
+      island.iconColor = iconColor;
+      island.ringColor = ringColor;
+      island.targetCount = countTarget;
+      island.countDisplay = 0;
+
+      // 展开胶囊
+      island.w.setTarget(224);
+      island.h.setTarget(70);
+      island.r.setTarget(35);
+      island.contentAlpha.setTarget(1);
+
+      // 图标动画
+      island.iconScale.snapTo(0.2);
+      island.iconScale.setTarget(1);
+
+      // 如果是转账，触发左右微弹
+      if (type === "transfer") {
+        island.iconOffset.snapTo(-6);
+        island.iconOffset.setTarget(0);
+      }
+
+      // 如果是导入，触发计数器增长
+      if (type === "import") {
+        let cur = 0;
+        const interval = setInterval(() => {
+          cur += 2;
+          if (cur >= countTarget) {
+            island.countDisplay = countTarget;
+            clearInterval(interval);
+          } else {
+            island.countDisplay = cur;
+          }
+        }, 30);
+      }
+
+      // 对勾序列
+      island.ringProgress.snapTo(0);
+      island.checkProgress.snapTo(0);
+      setTimeout(() => {
+        island.ringProgress.setTarget(1);
+      }, 70);
+      setTimeout(() => {
+        island.checkProgress.setTarget(1);
+      }, 200);
+
+      // 列表弹性下移插入新条目
+      setTimeout(() => {
+        const newTx = {
+          id: Date.now(),
+          title: title,
+          category: type === "transfer" ? "资金划转" : type === "import" ? "批量已归档" : "日常账目",
+          symbol: iconSymbol,
+          color: iconColor,
+          amount: type === "import" ? `+${countTarget} 笔` : amount,
+          isIncome: type === "income",
+          isTransfer: type === "transfer",
+          y: new Spring(-35, 240, 20)
+        };
+        newTx.y.setTarget(0);
+        transactions.unshift(newTx);
+        if (transactions.length > 5) transactions.pop();
+      }, 280);
+
+      // 收缩收起
+      island.timer = setTimeout(() => {
+        island.w.setTarget(124);
+        island.h.setTarget(36);
+        island.r.setTarget(18);
+        island.contentAlpha.setTarget(0);
+        island.iconScale.setTarget(0);
+        island.ringProgress.setTarget(0);
+        island.checkProgress.setTarget(0);
+      }, 2400);
+    }
+
+    // 1. 转账 (Transfer)
+    function playTransfer() {
+      triggerIslandAction({
+        type: "transfer",
+        title: "招行 ➔ 零钱通",
+        amount: "¥3,000.00",
+        iconSymbol: "arrow.left.arrow.right",
+        iconColor: "#2e82f2", // LedgerPalette.cobalt
+        ringColor: "#2e82f2"
+      });
+    }
+
+    // 2. 导入 (Batch Import)
+    function playImport() {
+      triggerIslandAction({
+        type: "import",
+        title: "微信/支付宝账单",
+        amount: "12 笔",
+        countTarget: 12,
+        iconSymbol: "tray.and.arrow.down.fill",
+        iconColor: "#34d399", // LedgerPalette.success
+        ringColor: "#34d399"
+      });
+    }
+
+    // 3. 消费 (Dining)
+    function playDining() {
+      triggerIslandAction({
+        type: "expense",
+        title: "星巴克咖啡",
+        amount: "-¥38.00",
+        iconSymbol: "fork.knife",
+        iconColor: "#f59e0b",
+        ringColor: "#007aff"
+      });
+    }
+
+    // 4. 收入 (Salary)
+    function playSalary() {
+      triggerIslandAction({
+        type: "income",
+        title: "工资薪资到账",
+        amount: "+¥8,500.00",
+        iconSymbol: "banknote.fill",
+        iconColor: "#30d158",
+        ringColor: "#30d158"
+      });
+    }
+
+    // 绘制循环
+    let last = performance.now();
+    function animate(now) {
+      const dt = Math.min((now - last) / 1000, 0.04);
+      last = now;
+
+      ctx.clearRect(0, 0, W, H);
+
+      // 1. 背景
+      drawBackground();
+
+      // 2. 账单列表
+      drawTransactions(dt);
+
+      // 3. 全场景灵动岛微胶囊
+      drawUnifiedDynamicIsland(dt);
+
+      // 4. 状态栏
+      drawStatusBar();
+
+      requestAnimationFrame(animate);
+    }
+
+    function drawBackground() {
+      ctx.fillStyle = "#090b10";
+      ctx.fillRect(0, 0, W, H);
+
+      // 顶部净资产/结余卡片
+      ctx.save();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.04)";
+      drawSquircle(ctx, 20, 114, 353, 140, 24);
+      ctx.fill();
+
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+      ctx.font = "500 13px -apple-system";
+      ctx.fillText("本月支出", 40, 150);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "700 34px -apple-system";
+      ctx.letterSpacing = "-0.5px";
+      ctx.fillText("¥ 5,820.40", 40, 196);
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+      ctx.font = "500 12px -apple-system";
+      ctx.fillText("预算剩余 ¥ 9,179.60", 40, 228);
+
+      // 列表标题
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "700 19px -apple-system";
+      ctx.fillText("近期流水", 24, 304);
+      ctx.restore();
+    }
+
+    function drawTransactions(dt) {
+      const startY = 328;
+      const h = 68;
+
+      transactions.forEach((tx, idx) => {
+        const offY = tx.y.update(dt);
+        const y = startY + idx * (h + 8) + offY;
+
+        ctx.save();
+        ctx.fillStyle = "rgba(255, 255, 255, 0.035)";
+        drawSquircle(ctx, 20, y, 353, h, 18);
+        ctx.fill();
+
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+
+        // 原生分类小圆标
+        ctx.fillStyle = tx.color + "25";
+        ctx.beginPath();
+        ctx.arc(46, y + h/2, 17, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 字符/符号
+        ctx.fillStyle = tx.color;
+        ctx.font = "700 12px -apple-system";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        let iconTxt = "🍴";
+        if (tx.symbol === "car.fill") iconTxt = "🚗";
+        if (tx.symbol === "banknote.fill") iconTxt = "💵";
+        if (tx.symbol === "arrow.left.arrow.right") iconTxt = "⇄";
+        if (tx.symbol === "tray.and.arrow.down.fill") iconTxt = "📥";
+        if (tx.symbol === "popcorn.fill") iconTxt = "🍿";
+        ctx.fillText(iconTxt, 46, y + h/2);
+
+        // 标题与分类
+        ctx.textAlign = "left";
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "600 15px -apple-system";
+        ctx.fillText(tx.title, 76, y + 29);
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+        ctx.font = "400 12px -apple-system";
+        ctx.fillText(tx.category, 76, y + 49);
+
+        // 金额
+        ctx.textAlign = "right";
+        ctx.font = "700 16px -apple-system";
+        ctx.fillStyle = tx.isIncome ? "#30d158" : tx.isTransfer ? "#60a5fa" : "#ffffff";
+        ctx.fillText(tx.amount, 353, y + 39);
+        ctx.restore();
+      });
+    }
+
+    function drawUnifiedDynamicIsland(dt) {
+      const w = island.w.update(dt);
+      const h = island.h.update(dt);
+      const r = island.r.update(dt);
+      const alpha = island.contentAlpha.update(dt);
+      const iconS = island.iconScale.update(dt);
+      const iconOffX = island.iconOffset.update(dt);
+      const ringP = island.ringProgress.update(dt);
+      const checkP = island.checkProgress.update(dt);
+
+      const x = island.cx - w / 2;
+      const y = island.cy - 18 + 10;
+
+      ctx.save();
+
+      // 纯黑主体
+      ctx.fillStyle = "#000000";
+      drawSquircle(ctx, x, y, w, h, r);
+      ctx.fill();
+
+      // 精细反光微缘
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.14 * Math.max(0.2, alpha)})`;
+      ctx.lineWidth = 0.6;
+      ctx.stroke();
+
+      // 展开内容
+      if (alpha > 0.05) {
+        ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+
+        // 1. 左侧：图标徽章 (转账带左右弹动，导入带下沉弹动)
+        const iconCx = x + 34 + iconOffX;
+        const iconCy = y + h / 2;
+        const is = Math.max(0.1, iconS);
+
+        ctx.save();
+        ctx.translate(iconCx, iconCy);
+        ctx.scale(is, is);
+
+        // 圆形磨砂底色
+        ctx.fillStyle = island.iconColor + "28";
+        ctx.beginPath();
+        ctx.arc(0, 0, 19, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = island.iconColor + "55";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // SF Symbol 渲染
+        ctx.font = "16px -apple-system";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        let sym = "🍴";
+        if (island.iconSymbol === "arrow.left.arrow.right") sym = "⇄";
+        else if (island.iconSymbol === "tray.and.arrow.down.fill") sym = "📥";
+        else if (island.iconSymbol === "banknote.fill") sym = "💵";
+        else if (island.iconSymbol === "car.fill") sym = "🚗";
+        ctx.fillText(sym, 0, 1);
+        ctx.restore();
+
+        // 2. 中间信息区 (大金额 + 简洁次级)
+        const textX = x + 63;
+
+        // 首要大字：如果是导入，展示动态跳动笔数；如果是转账，展示划转金额
+        ctx.textAlign = "left";
+        ctx.fillStyle = island.type === "income" ? "#30d158" : island.type === "transfer" ? "#60a5fa" : "#ffffff";
+        ctx.font = "700 18px -apple-system";
+        ctx.letterSpacing = "-0.4px";
+
+        let mainText = island.amount;
+        if (island.type === "import") {
+          mainText = `${island.countDisplay} 笔已导入`;
+        }
+        ctx.fillText(mainText, textX, y + 31);
+
+        // 次级字 (商户名或划转账户路径)
+        ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+        ctx.font = "600 12px -apple-system";
+        ctx.fillText(island.title, textX, y + 49);
+
+        // 3. 右侧：Apple 经典核准对勾环
+        const ringCenterX = x + w - 28;
+        const ringCenterY = y + h / 2;
+        const ringRadius = 11;
+
+        // 底环
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.arc(ringCenterX, ringCenterY, ringRadius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 动态进度环
+        if (ringP > 0.01) {
+          ctx.strokeStyle = island.ringColor;
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          ctx.arc(ringCenterX, ringCenterY, ringRadius, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * Math.min(1, ringP)));
+          ctx.stroke();
+        }
+
+        // 精巧白色核准勾
+        if (checkP > 0.05) {
+          const cp = Math.min(1, checkP);
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 2;
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          
+          const p1 = { x: ringCenterX - 4.5, y: ringCenterY - 0.5 };
+          const p2 = { x: ringCenterX - 1.2, y: ringCenterY + 2.8 };
+          const p3 = { x: ringCenterX + 5, y: ringCenterY - 3.8 };
+
+          ctx.moveTo(p1.x, p1.y);
+          if (cp < 0.4) {
+            const t = cp / 0.4;
+            ctx.lineTo(p1.x + (p2.x - p1.x) * t, p1.y + (p2.y - p1.y) * t);
+          } else {
+            ctx.lineTo(p2.x, p2.y);
+            const t = (cp - 0.4) / 0.6;
+            ctx.lineTo(p2.x + (p3.x - p2.x) * t, p2.y + (p3.y - p2.y) * t);
+          }
+          ctx.stroke();
+        }
+      }
+
+      ctx.restore();
+    }
+
+    function drawStatusBar() {
+      ctx.save();
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "600 14px -apple-system";
+      ctx.fillText("9:41", 38, 33);
+
+      ctx.textAlign = "right";
+      ctx.font = "600 12px -apple-system";
+      ctx.fillText("5G 􀛨", 355, 33);
+      ctx.restore();
+    }
+
+    // 启动渲染
+    requestAnimationFrame(animate);
+
+    // 默认触发演示转账
+    setTimeout(() => {
+      playTransfer();
+    }, 500);
+  </script>
+</body>
+</html>
