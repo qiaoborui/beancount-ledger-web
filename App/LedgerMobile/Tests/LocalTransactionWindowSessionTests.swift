@@ -951,8 +951,25 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         let after = await repository.presentedRevisionID
         XCTAssertEqual(after, authority)
         let requests = await engine.pageRequests
-        XCTAssertEqual(requests.first?.query["start"], session.selectedRange.start)
-        XCTAssertEqual(requests.first?.query["end"], session.selectedRange.queryEndExclusive)
+        XCTAssertEqual(requests.first?.query["start"], "0001-01-01")
+        XCTAssertEqual(requests.first?.query["end"], "9999-12-31")
+    }
+
+    func testEventReadsSpanAllHistoryRegardlessOfSelectedRange() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(205)
+        // A tag whose history predates the selected month must still be complete.
+        let before = await engine.pageRequests.count
+        let report = try await session.localEventTagReport("synthetic-event")
+        XCTAssertEqual(report.summary.transactionCount, 205)
+        _ = try await session.localEventTagWindow("synthetic-event")
+        await session.loadLocalEventTagSummaries(force: true)
+        let eventRequests = await engine.pageRequests.dropFirst(before)
+        XCTAssertFalse(eventRequests.isEmpty)
+        XCTAssertTrue(eventRequests.allSatisfy {
+            $0.query["start"] == "0001-01-01" && $0.query["end"] == "9999-12-31"
+        }, "event reads must not be clipped to the selected range")
     }
 
     func testEventReportRejectsSupersessionResetPrivacyRevisionAndCancellation() async throws {

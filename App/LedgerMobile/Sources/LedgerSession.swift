@@ -276,6 +276,10 @@ final class LedgerSession: ObservableObject {
     private var eventExportTask: Task<LocalEventReportExport, Error>?
     private var eventExportID: UUID?
     private var eventExport: LocalEventReportExport?
+    /// Events and projects are independent accounting units, not a slice of the
+    /// selected browsing range. Their reads deliberately span all history; only
+    /// the surrounding analysis pages honour `selectedRange`.
+    private static let allHistoryEventRange = (start: "0001-01-01", end: "9999-12-31")
 
     private var widgetWindowTask: Task<LocalTransactionWindow.Window, Error>?
     private var widgetWindowRequestID: UUID?
@@ -4074,6 +4078,7 @@ final class LedgerSession: ObservableObject {
 
     /// Report history remains independent of complete aggregates. Keep only a
     /// bounded window; replay earlier pages instead of collecting every tagged row.
+    /// Reads all history so a tag spanning several months is never clipped.
     func localEventTagWindow(_ tag: String, index: Int = 0) async throws -> LocalTransactionWindow.Window {
         guard (0..<10_000).contains(index) else { throw LocalLedgerError.invalidConfiguration("事件分页无效") }
         let context = try localReadContext()
@@ -4082,8 +4087,8 @@ final class LedgerSession: ObservableObject {
         let id = UUID(); eventWindowID = id
         let task = Task { @MainActor [self] in
             try validateLocalRead(context)
-            let reader = try await repository.makeTransactionWindow(start: context.range.start,
-                end: context.range.queryEndExclusive, filter: .init(tags: [tag]),
+            let reader = try await repository.makeTransactionWindow(start: Self.allHistoryEventRange.start,
+                end: Self.allHistoryEventRange.end, filter: .init(tags: [tag]),
                 expectedRevisionID: context.revisionID, limits: .init(maxRows: 100))
             do {
                 var window = try await reader.nextWindow()
@@ -4115,6 +4120,7 @@ final class LedgerSession: ObservableObject {
 
     /// Complete report aggregates are caller-owned and independent of the
     /// paginated transaction list. Never hydrate an all-history report array.
+    /// The aggregate itself is all-history, so an event is never under-counted.
     func localEventTagReport(_ tag: String) async throws -> LocalEventTagReportScan.Result {
         let context = try localReadContext()
         guard let repository = localRepository else { throw CancellationError() }
@@ -4124,8 +4130,8 @@ final class LedgerSession: ObservableObject {
         let id = UUID(); eventReportID = id
         let task = Task { @MainActor [self] in
             try validateLocalRead(context)
-            return try await repository.eventTagReport(tag: tag, start: context.range.start,
-                end: context.range.queryEndExclusive, accountLabels: labels, expectedRevisionID: context.revisionID)
+            return try await repository.eventTagReport(tag: tag, start: Self.allHistoryEventRange.start,
+                end: Self.allHistoryEventRange.end, accountLabels: labels, expectedRevisionID: context.revisionID)
         }
         eventReportTask = task
         defer { if eventReportID == id { eventReportTask = nil; eventReportID = nil } }
@@ -4139,8 +4145,8 @@ final class LedgerSession: ObservableObject {
         return result
     }
 
-    /// Range-complete bounded summaries shared by the event list and analysis
-    /// card. A second visible consumer joins, rather than superseding, the scan.
+    /// All-history bounded summaries shared by the event list and analysis card.
+    /// A second visible consumer joins, rather than superseding, the scan.
     func loadLocalEventTagSummaries(force: Bool = false) async {
         guard isLocal, !Task.isCancelled else { return }
         do {
@@ -4174,8 +4180,8 @@ final class LedgerSession: ObservableObject {
                 }
                 do {
                     try validateLocalRead(context)
-                    let result = try await repository.eventTagSummaries(start: context.range.start,
-                        end: context.range.queryEndExclusive, expectedRevisionID: context.revisionID)
+                    let result = try await repository.eventTagSummaries(start: Self.allHistoryEventRange.start,
+                        end: Self.allHistoryEventRange.end, expectedRevisionID: context.revisionID)
                     try validateLocalRead(context)
                     guard eventTagSummaryID == id else { return }
                     let current = try await repository.workspace.currentRevision()
@@ -4451,7 +4457,7 @@ final class LedgerSession: ObservableObject {
         let id = UUID(); eventExportID = id
         let task = Task { @MainActor [self] in
             try await LocalEventReportExport.prepare(repository: repository, tag: tag,
-                start: context.range.start, end: context.range.queryEndExclusive,
+                start: Self.allHistoryEventRange.start, end: Self.allHistoryEventRange.end,
                 expectedRevisionID: context.revisionID, accountLabels: labels,
                 parentDirectory: FileManager.default.temporaryDirectory.resolvingSymlinksInPath(),
                 adopt: { self.eventExport = $0 }) {
