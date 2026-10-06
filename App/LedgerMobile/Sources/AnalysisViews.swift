@@ -93,8 +93,8 @@ struct LedgerAnalysisView: View {
                 }
             }
         }
-        .background(TerminalPalette.page)
-        .terminalPageChrome(kind.title, isRoot: isRoot, showsTimeRange: true)
+        .background(BalancedPalette.page)
+        .terminalPageChrome(kind.title, isRoot: isRoot, showsTimeRange: true, balanced: true)
         .task(id: requestKey) {
             await load(replacingContent: resource == nil)
         }
@@ -117,8 +117,8 @@ struct LedgerAnalysisView: View {
                     TerminalInvestmentsReport(data: data)
                 }
             }
-            .padding(.horizontal, horizontalSizeClass == .regular ? 0 : LedgerSpacing.lg)
-            .padding(.top, 12)
+            .padding(.horizontal, horizontalSizeClass == .regular ? 0 : 20)
+            .padding(.top, 0)
             .padding(.bottom, 24)
             .ledgerAdaptivePageWidth()
         }
@@ -1553,8 +1553,7 @@ private struct AnalysisMetricGrid: View {
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous).stroke(LedgerPalette.line, lineWidth: 1) }
+        .overlay { Rectangle().stroke(BalancedPalette.rule, lineWidth: 1) }
     }
 }
 
@@ -1602,7 +1601,7 @@ private struct AnalysisMetricCell: View {
             }
             .padding(LedgerSpacing.lg)
             .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
-            .background(LedgerPalette.panel)
+            .background(BalancedPalette.sunken)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleButtonStyle(pressedScale: onTap == nil ? 1.0 : 0.98))
@@ -1623,8 +1622,7 @@ private struct AnalysisChartPanel<Content: View>: View {
         }
         .padding(LedgerSpacing.lg)
         .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous).stroke(LedgerPalette.line, lineWidth: 1) }
+        .overlay { Rectangle().stroke(BalancedPalette.rule, lineWidth: 1) }
     }
 }
 
@@ -1640,9 +1638,8 @@ private struct AnalysisListPanel<Content: View>: View {
             Divider().overlay(LedgerPalette.line)
             VStack(spacing: 0) { content }
         }
-        .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous).stroke(LedgerPalette.line, lineWidth: 1) }
+        .background(BalancedPalette.page)
+        .overlay { Rectangle().stroke(BalancedPalette.rule, lineWidth: 1) }
     }
 }
 

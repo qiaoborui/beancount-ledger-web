@@ -296,6 +296,102 @@ struct TransactionFilterBar: View {
     }
 }
 
+private struct BalancedTransactionFilterBar: View {
+    @Binding var kindFilter: TransactionKindFilter
+    let counts: [TransactionKindFilter: Int]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(TransactionKindFilter.allCases) { filter in
+                Button { kindFilter = filter } label: {
+                    HStack(spacing: 4) {
+                        Text(filter.title).balancedFont(size: 13, weight: kindFilter == filter ? .medium : .regular)
+                        Text("\(counts[filter, default: 0])")
+                            .balancedFont(size: 11).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                    }
+                    .foregroundStyle(kindFilter == filter ? BalancedPalette.ink : BalancedPalette.meta)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .overlay(alignment: .bottom) {
+                        if kindFilter == filter { BalancedPalette.ink.frame(height: 2) }
+                    }
+                }.buttonStyle(.plain).accessibilityAddTraits(kindFilter == filter ? .isSelected : [])
+            }
+        }
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+        .accessibilityIdentifier("transaction-kind-filter")
+    }
+}
+
+private struct BalancedTransactionDayHeader: View {
+    let date: String
+    let summary: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(date).balancedFont(size: 12.5, weight: .medium).monospacedDigit()
+            Rectangle().fill(BalancedPalette.rule).frame(height: 1)
+            if !summary.isEmpty {
+                Text(summary).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+            }
+        }
+        .foregroundStyle(BalancedPalette.meta)
+        .padding(.top, 18)
+        .padding(.bottom, 4)
+        .textCase(nil)
+    }
+}
+
+private struct BalancedLedgerTransactionRow: View {
+    @EnvironmentObject private var session: LedgerSession
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let transaction: LedgerTransaction
+    let accountLabels: [String: String]
+    let accountCurrency: String
+
+    private var presentation: TransactionPresentation { TransactionPresentation(transaction: transaction) }
+    private var visual: TransactionVisualCategory {
+        TransactionVisualCategory.resolve(transaction: transaction, presentation: presentation, accountLabels: accountLabels)
+    }
+
+    private var transferPath: String? {
+        guard presentation.kind == .transfer else { return nil }
+        let accounts = transaction.postings.map { accountLabels[$0.account] ?? $0.account }
+        guard accounts.count >= 2 else { return nil }
+        return accounts[0] + " → " + accounts[1]
+    }
+
+    var body: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        layout {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(presentation.title).balancedFont(size: 15.5, weight: .medium)
+                    .foregroundStyle(BalancedPalette.ink).lineLimit(2)
+                Text(transferPath ?? presentation.subtitle)
+                    .balancedFont(size: 12.5)
+                    .foregroundStyle(BalancedPalette.meta)
+                    .lineLimit(2)
+                    .fontDesign(transferPath == nil ? .default : .monospaced)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .trailing, spacing: 4) {
+                BalancedAmount(
+                    minorUnits: presentation.minorUnits,
+                    currency: presentation.currency,
+                    size: 14.5,
+                    color: presentation.kind == .income ? BalancedPalette.income : BalancedPalette.ink,
+                    prefix: presentation.kind == .expense ? "−" : presentation.kind == .income ? "+" : "",
+                    showsCurrency: presentation.currency != accountCurrency
+                )
+                Text(visual.categoryLabel).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            }
+        }
+        .padding(.vertical, 11)
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+        .contentShape(Rectangle())
+    }
+}
+
 struct TransactionsView: View {
     static let localWindowLimits = LocalTransactionWindow.Limits(maxRows: LocalTransactionWindow.listPageRows)
 
@@ -402,12 +498,50 @@ struct TransactionsView: View {
             + (filters.tags.isEmpty ? 0 : 1)
     }
 
+    private var balancedKindCounts: [TransactionKindFilter: Int] {
+        var counts = Dictionary(uniqueKeysWithValues: TransactionKindFilter.allCases.map { ($0, 0) })
+        for transaction in displayedTransactions {
+            counts[.all, default: 0] += 1
+            switch TransactionPresentation(transaction: transaction).kind {
+            case .expense: counts[.expense, default: 0] += 1
+            case .income: counts[.income, default: 0] += 1
+            case .transfer: counts[.transfer, default: 0] += 1
+            }
+        }
+        return counts
+    }
+
     var isRoot = true
 
     private var groupedTransactions: [(date: String, transactions: [LedgerTransaction])] {
         Dictionary(grouping: displayedTransactions, by: \.date)
             .map { (date: $0.key, transactions: $0.value) }
             .sorted { $0.date > $1.date }
+    }
+
+    private func balancedDate(_ raw: String) -> String {
+        guard let date = LedgerDateRange.parse(raw) else { return raw }
+        let components = LedgerDateRange.calendar.dateComponents([.month, .day, .weekday], from: date)
+        guard let month = components.month, let day = components.day, let weekday = components.weekday else { return raw }
+        let weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+        return String(format: "%02d/%02d %@", month, day, weekdays[max(0, min(6, weekday - 1))])
+    }
+
+    private func balancedDaySummary(_ transactions: [LedgerTransaction]) -> String {
+        var income = 0
+        var expense = 0
+        var transfers = false
+        for transaction in transactions {
+            let presentation = TransactionPresentation(transaction: transaction)
+            switch presentation.kind {
+            case .income: income += abs(presentation.minorUnits)
+            case .expense: expense += abs(presentation.minorUnits)
+            case .transfer: transfers = true
+            }
+        }
+        if income > 0 { return "收入 \(MoneyText.format(minorUnits: income, currency: session.ledger?.summary.currency ?? "CNY"))" }
+        if expense > 0 { return "支出 \(MoneyText.format(minorUnits: expense, currency: session.ledger?.summary.currency ?? "CNY"))" }
+        return transfers ? "转账，不计收支" : ""
     }
 
     private var selectedTransactions: [LedgerTransaction] {
@@ -516,26 +650,26 @@ struct TransactionsView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").font(.system(size: 16))
                         TextField("商户、备注或标签", text: $filters.query)
-                            .terminalFont(size: 16).autocorrectionDisabled()
+                            .balancedFont(size: 15).autocorrectionDisabled()
                             .accessibilityIdentifier("transaction-quick-search")
                         if !filters.query.isEmpty {
                             Button { filters.query = "" } label: { Image(systemName: "xmark.circle") }
                                 .frame(width: 44, height: 44).accessibilityLabel("清除流水搜索")
                         }
                     }
-                    .foregroundStyle(TerminalPalette.secondary).padding(.horizontal, 12)
-                    .frame(minHeight: 44).background(TerminalPalette.panel)
-                    .overlay { RoundedRectangle(cornerRadius: LedgerRadius.sm).stroke(TerminalPalette.line) }
-                    TransactionFilterBar(kindFilter: $filters.kind)
+                    .foregroundStyle(BalancedPalette.secondary).padding(.horizontal, 12)
+                    .frame(minHeight: 44).background(BalancedPalette.sunken)
+                    .overlay { Rectangle().stroke(BalancedPalette.rule) }
+                    BalancedTransactionFilterBar(kindFilter: $filters.kind, counts: balancedKindCounts)
                     HStack {
                         Text((filters.account.flatMap { labels[$0] ?? $0 } ?? "全部账户") + " · " + (displayedCount.map { "\($0) 笔" } ?? "统计中"))
-                            .terminalFont(size: 12).foregroundStyle(TerminalPalette.secondary)
+                            .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                         Spacer(minLength: 8)
                         Button("筛选", systemImage: "line.3.horizontal.decrease") { filterPresented = true }
-                            .terminalFont(size: 12).foregroundStyle(TerminalPalette.accent).frame(minHeight: 44)
+                            .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.ink).frame(minHeight: 44)
                     }
                 }
-                .padding(.top, 10)
+                .padding(.top, 8)
                 .id("transaction-list-top")
             }
             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
@@ -581,8 +715,11 @@ struct TransactionsView: View {
                     ForEach(group.transactions) { transaction in
                         transactionRow(for: transaction, accountLabels: labels)
                     }
+                } header: {
+                    BalancedTransactionDayHeader(date: balancedDate(group.date), summary: balancedDaySummary(group.transactions))
                 }
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                .listRowBackground(BalancedPalette.page)
             }
             if !session.isLocal && !filteredTransactions.isEmpty {
                 Section {
@@ -644,7 +781,7 @@ struct TransactionsView: View {
         .listStyle(.plain)
         .listSectionSpacing(0)
         .tint(TerminalPalette.accent)
-        .terminalPageChrome("流水", isRoot: isRoot, showsTimeRange: true, actions: AnyView(transactionActions))
+        .terminalPageChrome("流水", isRoot: isRoot, showsTimeRange: true, actions: AnyView(transactionActions), balanced: true)
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
         .task(id: windowRequestKey) {

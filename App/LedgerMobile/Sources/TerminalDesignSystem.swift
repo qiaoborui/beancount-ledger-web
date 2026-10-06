@@ -56,15 +56,16 @@ struct TerminalRule: View {
 }
 
 struct TerminalDateRangeButton: View {
+    var balanced = false
     @EnvironmentObject private var session: LedgerSession
 
     var body: some View {
         Button { session.presentRangePicker() } label: {
             HStack(spacing: 5) {
-                Text(session.selectedRange.preset == .custom ? "自定义" : session.selectedRange.displayTitle).font(.system(size: 13, weight: .regular, design: .monospaced))
+                Text(session.selectedRange.preset == .custom ? "自定义" : session.selectedRange.displayTitle).font(.system(size: 13, weight: .regular, design: balanced ? .default : .monospaced))
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
             }
-            .foregroundStyle(TerminalPalette.accent)
+            .foregroundStyle(balanced ? BalancedPalette.ink : TerminalPalette.accent)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
@@ -85,11 +86,12 @@ struct TerminalPageChrome: ViewModifier {
     var actions: AnyView? = nil
     var showsTimeRange = false
     var showsSync = true
+    var balanced = false
 
     func body(content: Content) -> some View {
         content
             .scrollContentBackground(.hidden)
-            .background(TerminalPalette.page)
+            .background(balanced ? BalancedPalette.page : TerminalPalette.page)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .background {
@@ -102,8 +104,8 @@ struct TerminalPageChrome: ViewModifier {
                 if horizontalSizeClass == .regular {
                     ToolbarItem(placement: .topBarTrailing) {
                         HStack(spacing: 8) {
-                            if showsTimeRange { TerminalDateRangeButton() }
-                            if showsSync && (!session.isLocal || session.localGitConfiguration != nil) { TerminalSyncButton() }
+                            if showsTimeRange { TerminalDateRangeButton(balanced: balanced) }
+                            if showsSync && (!session.isLocal || session.localGitConfiguration != nil) { TerminalSyncButton(balanced: balanced) }
                             actions
                         }
                     }
@@ -117,24 +119,24 @@ struct TerminalPageChrome: ViewModifier {
                                 Button { dismiss() } label: {
                                     Image(systemName: "chevron.left").font(.system(size: 18))
                                         .frame(width: 44, height: 44)
-                                }.buttonStyle(.plain).foregroundStyle(TerminalPalette.accent)
+                                }.buttonStyle(.plain).foregroundStyle(balanced ? BalancedPalette.ink : TerminalPalette.accent)
                                     .accessibilityLabel("返回上一页")
                             }
                             Text(compactTitle ?? title)
                                 .accessibilityLabel(title)
                                 .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(TerminalPalette.accent)
+                                .foregroundStyle(balanced ? BalancedPalette.ink : TerminalPalette.accent)
                             Spacer(minLength: 4)
-                            if showsTimeRange { TerminalDateRangeButton().fixedSize(horizontal: true, vertical: false) }
+                            if showsTimeRange { TerminalDateRangeButton(balanced: balanced).fixedSize(horizontal: true, vertical: false) }
                             if showsSync && (!session.isLocal || session.localGitConfiguration != nil) {
-                                TerminalSyncButton()
+                                TerminalSyncButton(balanced: balanced)
                             }
                             actions
                         }
                         .padding(.horizontal, 12)
-                        .frame(height: 55)
-                        TerminalRule()
-                    }.background(TerminalPalette.page)
+                        .frame(height: balanced ? 52 : 55)
+                        Rectangle().fill(balanced ? BalancedPalette.rule : TerminalPalette.line).frame(height: 1)
+                    }.background(balanced ? BalancedPalette.page : TerminalPalette.page)
                 }
             }
     }
@@ -212,14 +214,15 @@ private struct TerminalBackGestureBridge: UIViewControllerRepresentable {
 }
 
 extension View {
-    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, showsTimeRange: Bool = false, showsSync: Bool = true, actions: AnyView? = nil) -> some View {
-        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions, showsTimeRange: showsTimeRange, showsSync: showsSync))
+    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, showsTimeRange: Bool = false, showsSync: Bool = true, actions: AnyView? = nil, balanced: Bool = false) -> some View {
+        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions, showsTimeRange: showsTimeRange, showsSync: showsSync, balanced: balanced))
     }
 }
 
 
 /// The icon reports real repository state; opening details never initiates a sync.
 private struct TerminalSyncButton: View {
+    var balanced = false
     @EnvironmentObject private var session: LedgerSession
     @State private var detailsPresented = false
 
@@ -244,7 +247,7 @@ private struct TerminalSyncButton: View {
             Button { detailsPresented = true } label: {
                 Image(systemName: symbol)
                     .font(.system(size: 18, weight: .regular))
-                    .foregroundStyle(presentation.indicator == .attention ? TerminalPalette.negative : TerminalPalette.accent)
+                    .foregroundStyle(balanced ? BalancedPalette.ink : (presentation.indicator == .attention ? TerminalPalette.negative : TerminalPalette.accent))
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
@@ -260,7 +263,7 @@ private struct TerminalSyncButton: View {
             Button { Task { await session.refresh() } } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 18, weight: .regular))
-                    .foregroundStyle(TerminalPalette.accent)
+                    .foregroundStyle(balanced ? BalancedPalette.ink : TerminalPalette.accent)
                     .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)

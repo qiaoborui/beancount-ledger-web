@@ -33,6 +33,8 @@ struct MoreView: View {
                 MoreDestinationButton(destination: .query, detail: "查询与历史", accessibilityIdentifier: "more-query")
             } header: { TerminalSectionLabel(text: remaining.isEmpty ? "02 / 账本工具" : "03 / 账本工具") }
         }
+        .scrollContentBackground(.hidden)
+        .background(BalancedPalette.page)
         .listStyle(.plain)
         .listSectionSpacing(8)
         .tint(TerminalPalette.accent)
@@ -42,7 +44,7 @@ struct MoreView: View {
             actions: AnyView(Button { session.primaryDestinationID = LedgerDestination.search.rawValue } label: {
                 Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
                     .foregroundStyle(TerminalPalette.accent).frame(width: 44, height: 44)
-            }.buttonStyle(.plain).accessibilityLabel("搜索账本").accessibilityIdentifier("more-header-search")))
+            }.buttonStyle(.plain).accessibilityLabel("搜索账本").accessibilityIdentifier("more-header-search")), balanced: true)
         .navigationDestination(item: $overflowDestination) { destination in
             LedgerDestinationView(destination: destination)
         }
@@ -96,17 +98,15 @@ private struct MoreNavigationRow: View {
     let detail: String
     var body: some View {
         HStack(spacing: 12) {
-            if !dynamicTypeSize.isAccessibilitySize {
-                Text(index).terminalFont(size: 11, design: .monospaced).foregroundStyle(TerminalPalette.accent).frame(width: 22, alignment: .leading)
-                Image(systemName: icon).font(.system(size: 15, weight: .medium)).foregroundStyle(TerminalPalette.accent).frame(width: 22)
-            }
+            if !dynamicTypeSize.isAccessibilitySize { EmptyView() }
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).terminalFont(size: 15, weight: .medium).foregroundStyle(TerminalPalette.ink)
-                Text(detail).terminalFont(size: 12).foregroundStyle(TerminalPalette.secondary)
+                Text(title).balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                Text(detail).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
             }.frame(maxWidth: .infinity, alignment: .leading)
 
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
         .contentShape(Rectangle())
     }
 }
