@@ -111,7 +111,7 @@ struct AccountsView: View {
             .listRowSeparator(.hidden)
 
             Section {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: dynamicTypeSize.isAccessibilitySize ? 3 : 5), spacing: 12) {
+                HStack(spacing: 22) {
                     ForEach(AccountFilterCategory.allCases) { filter in
                         let count = filter == .all
                             ? allSections.reduce(0) { $0 + $1.rows.count }
@@ -121,16 +121,18 @@ struct AccountsView: View {
                             withAnimation(.easeOut(duration: 0.18)) { selectedFilter = filter }
                         } label: {
                             VStack(spacing: 6) {
-                                Text(filter.rawValue).terminalFont(size: 13, weight: selectedFilter == filter ? .semibold : .regular).lineLimit(1).minimumScaleFactor(0.6)
-                                Text("\(count)").terminalFont(size: 10, design: .monospaced).foregroundStyle(TerminalPalette.secondary)
-                                Rectangle().fill(selectedFilter == filter ? TerminalPalette.accent : .clear).frame(height: 2)
+                                Text(filter.rawValue).balancedFont(size: 13, weight: selectedFilter == filter ? .medium : .regular).lineLimit(1)
+                                Text("\(count)").balancedFont(size: 11).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                                Rectangle().fill(selectedFilter == filter ? BalancedPalette.ink : .clear).frame(height: 2)
                             }
-                            .foregroundStyle(selectedFilter == filter ? TerminalPalette.accent : TerminalPalette.secondary)
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(selectedFilter == filter ? BalancedPalette.ink : BalancedPalette.meta)
+                            .frame(minHeight: 44)
                         }.buttonStyle(.plain)
                         .accessibilityAddTraits(selectedFilter == filter ? .isSelected : [])
                     }
-                }.padding(.top, 2)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
             }
             .listRowBackground(Color.clear).listRowSeparator(.hidden)
 
@@ -138,9 +140,9 @@ struct AccountsView: View {
                 ForEach(sections) { section in
                     DisclosureGroup(isExpanded: expandedBinding(for: section.id)) {
                         ForEach(section.rows) { row in
-                            NavigationLink { AccountDetailView(account: row.account, currency: row.nativeCurrency) } label: {
-                                AccountRowView(row: row)
-                            }
+                            let detail = AccountDetailView(account: row.account, currency: row.nativeCurrency)
+                            let rowView = AccountRowView(row: row)
+                            NavigationLink(destination: detail) { rowView }
                             .listRowBackground(Color.clear)
                             .accessibilityIdentifier("account-link-" + row.account + "-" + row.nativeCurrency)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -195,6 +197,8 @@ struct AccountsView: View {
                 ContentUnavailableView("暂无账户", systemImage: "building.columns", description: Text("当前筛选分类下暂无账户。"))
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(BalancedPalette.page)
         .listStyle(.plain)
         .listSectionSpacing(8)
         .tint(TerminalPalette.accent)
@@ -207,7 +211,7 @@ struct AccountsView: View {
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 16)).foregroundStyle(TerminalPalette.accent).frame(width: 44, height: 44)
             }.accessibilityLabel("账户操作")
-        ))
+        ), balanced: true)
         .navigationDestination(item: $session.externalAccount) { account in
             AccountDetailView(account: account.account, currency: account.currency)
         }
