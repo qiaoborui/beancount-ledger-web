@@ -498,9 +498,9 @@ struct TransactionsView: View {
             + (filters.tags.isEmpty ? 0 : 1)
     }
 
-    private var balancedKindCounts: [TransactionKindFilter: Int] {
+    private func balancedKindCounts(for transactions: [LedgerTransaction]) -> [TransactionKindFilter: Int] {
         var counts = Dictionary(uniqueKeysWithValues: TransactionKindFilter.allCases.map { ($0, 0) })
-        for transaction in displayedTransactions {
+        for transaction in transactions {
             counts[.all, default: 0] += 1
             switch TransactionPresentation(transaction: transaction).kind {
             case .expense: counts[.expense, default: 0] += 1
@@ -513,11 +513,6 @@ struct TransactionsView: View {
 
     var isRoot = true
 
-    private var groupedTransactions: [(date: String, transactions: [LedgerTransaction])] {
-        Dictionary(grouping: displayedTransactions, by: \.date)
-            .map { (date: $0.key, transactions: $0.value) }
-            .sorted { $0.date > $1.date }
-    }
 
     private func balancedDate(_ raw: String) -> String {
         guard let date = LedgerDateRange.parse(raw) else { return raw }
@@ -644,6 +639,12 @@ struct TransactionsView: View {
 
     private var transactionList: some View {
         let labels = accountLabels
+        let displayed = displayedTransactions
+        let filtered = filteredTransactions
+        let grouped = Dictionary(grouping: displayed, by: \.date)
+            .map { (date: $0.key, transactions: $0.value) }
+            .sorted { $0.date > $1.date }
+        let kindCounts = balancedKindCounts(for: displayed)
         return List {
             Section {
                 VStack(spacing: 12) {
@@ -660,7 +661,7 @@ struct TransactionsView: View {
                     .foregroundStyle(BalancedPalette.secondary).padding(.horizontal, 12)
                     .frame(minHeight: 44).background(BalancedPalette.sunken)
                     .overlay { Rectangle().stroke(BalancedPalette.rule) }
-                    BalancedTransactionFilterBar(kindFilter: $filters.kind, counts: balancedKindCounts)
+                    BalancedTransactionFilterBar(kindFilter: $filters.kind, counts: kindCounts)
                     HStack {
                         Text((filters.account.flatMap { labels[$0] ?? $0 } ?? "全部账户") + " · " + (displayedCount.map { "\($0) 笔" } ?? "统计中"))
                             .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
@@ -703,14 +704,14 @@ struct TransactionsView: View {
                     }
                 }
             }
-            if displayedTransactions.isEmpty && (!session.isLocal || session.localTransactionWindow?.isComplete == true) {
+            if displayed.isEmpty && (!session.isLocal || session.localTransactionWindow?.isComplete == true) {
                 ContentUnavailableView(
                     filters.query.isEmpty && activeStructuredFilterCount == 0 ? "所选范围暂无流水" : "没有匹配的交易",
                     systemImage: "list.bullet.rectangle",
                     description: Text("调整时间范围或搜索条件。")
                 )
             }
-            ForEach(groupedTransactions, id: \.date) { group in
+            ForEach(grouped, id: \.date) { group in
                 Section {
                     ForEach(group.transactions) { transaction in
                         transactionRow(for: transaction, accountLabels: labels)
@@ -721,9 +722,9 @@ struct TransactionsView: View {
                 .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 .listRowBackground(BalancedPalette.page)
             }
-            if !session.isLocal && !filteredTransactions.isEmpty {
+            if !session.isLocal && !filtered.isEmpty {
                 Section {
-                    Text("\(filteredTransactions.count) / \(transactions.count) 笔")
+                    Text("\(filtered.count) / \(transactions.count) 笔")
                         .font(.footnote.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
