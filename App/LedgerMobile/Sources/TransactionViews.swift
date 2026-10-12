@@ -1043,9 +1043,8 @@ struct TransactionsView: View {
                 HStack(spacing: 8) {
                     Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                         .foregroundStyle(TerminalPalette.accent)
-                    TerminalTransactionRow(transaction: transaction, accountLabels: accountLabels,
-                        accountCurrency: session.ledger?.valuationCurrency ?? "CNY",
-                        showsYear: session.selectedRange.start.prefix(4) != session.selectedRange.end.prefix(4))
+                    BalancedLedgerTransactionRow(transaction: transaction, accountLabels: accountLabels,
+                        accountCurrency: session.ledger?.valuationCurrency ?? "CNY")
                 }
             }
             .buttonStyle(.plain)
@@ -1058,9 +1057,8 @@ struct TransactionsView: View {
                 TransactionDetailView(transaction: transaction)
             } label: {
                 VStack(alignment: .leading, spacing: 0) {
-                    TerminalTransactionRow(transaction: transaction, accountLabels: accountLabels,
-                        accountCurrency: session.ledger?.valuationCurrency ?? "CNY",
-                        showsYear: session.selectedRange.start.prefix(4) != session.selectedRange.end.prefix(4))
+                    BalancedLedgerTransactionRow(transaction: transaction, accountLabels: accountLabels,
+                        accountCurrency: session.ledger?.valuationCurrency ?? "CNY")
                     if let phase = session.transactionMutationPhase(for: transaction) {
                         TransactionMutationBadge(phase: phase)
                     }

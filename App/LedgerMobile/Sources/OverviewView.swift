@@ -1,32 +1,5 @@
 import SwiftUI
 
-private enum BalancedPalette {
-    static let page = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x121110) : UIColor(hex: 0xFBFAF8) })
-    static let sunken = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x1B1918) : UIColor(hex: 0xF1EFE9) })
-    static let ink = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0xF6F3EE) : UIColor(hex: 0x14100C) })
-    static let secondary = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0xC4BCB0) : UIColor(hex: 0x453E36) })
-    static let meta = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x9A9086) : UIColor(hex: 0x6F675A) })
-    static let rule = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x2B2825) : UIColor(hex: 0xE2DED4) })
-    static let income = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x4FBFAB) : UIColor(hex: 0x0D5346) })
-    static let expense = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0xCF7A52) : UIColor(hex: 0x96401F) })
-}
-
-private struct BalancedAmount: View {
-    @EnvironmentObject private var session: LedgerSession
-    let minorUnits: Int
-    let currency: String
-    var size: CGFloat = 15
-    var color: Color = BalancedPalette.ink
-    var prefix = ""
-    var showsCurrency = false
-    var body: some View {
-        Text(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: showsCurrency) : "••••••")
-            .font(.system(size: size, weight: .medium)).monospacedDigit().foregroundStyle(color)
-            .lineLimit(1).minimumScaleFactor(0.45)
-            .accessibilityLabel(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency) : "金额已隐藏")
-    }
-}
-
 struct OverviewView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -208,7 +181,7 @@ private struct BalancedTransactionRow: View {
         let visual = TransactionVisualCategory.resolve(transaction: transaction, presentation: p, accountLabels: accountLabels)
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) { Text(p.title).font(.system(size: 15, weight: .medium)).foregroundStyle(BalancedPalette.ink).lineLimit(2); Text(p.subtitle).font(.system(size: 12)).foregroundStyle(BalancedPalette.meta).lineLimit(2) }.frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .trailing, spacing: 4) { BalancedAmount(minorUnits: p.minorUnits, currency: p.currency, size: 14, prefix: p.kind == .expense ? "−" : p.kind == .income ? "+" : "", color: p.kind == .income ? BalancedPalette.income : BalancedPalette.ink, showsCurrency: p.currency != accountCurrency); Text(visual.categoryLabel).font(.system(size: 12)).foregroundStyle(BalancedPalette.meta) }
+            VStack(alignment: .trailing, spacing: 4) { BalancedAmount(minorUnits: p.minorUnits, currency: p.currency, size: 14, color: p.kind == .income ? BalancedPalette.income : BalancedPalette.ink, prefix: p.kind == .expense ? "−" : p.kind == .income ? "+" : "", showsCurrency: p.currency != accountCurrency); Text(visual.categoryLabel).font(.system(size: 12)).foregroundStyle(BalancedPalette.meta) }
         }.padding(.vertical, 12).overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }.contentShape(Rectangle())
     }
 }

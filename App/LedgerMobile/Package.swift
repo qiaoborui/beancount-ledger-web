@@ -31,6 +31,7 @@ let package = Package(
                 "NativeImportFlowView.swift",
                 "OverviewView.swift",
                 "TerminalDesignSystem.swift",
+                "BalancedDesignSystem.swift",
                 "RootView.swift",
                 "SafePreviewLedgerAPI.swift",
                 "SettingsView.swift",
