@@ -130,6 +130,7 @@ struct NativeImportFlowView: View {
             ), presenting: pendingExit) { action in
                 Button(commitOutcomeNeedsReconciliation ? "离开核对" : "放弃修改", role: .destructive) {
                     pendingExit = nil
+                    discardDraft()
                     performExit(action)
                 }
                 Button("继续编辑", role: .cancel) { pendingExit = nil }
@@ -196,7 +197,10 @@ struct NativeImportFlowView: View {
         .sensoryFeedback(.success, trigger: editSaveFeedback)
         .sensoryFeedback(.error, trigger: failureFeedback)
         .ledgerPrivacyProtectedSheet()
+        .task { restoreDraftIfAvailable() }
         .task(id: classificationTaskID) { await classifyPreview() }
+        .onChange(of: providerOverride) { _, _ in persistDraft() }
+        .onChange(of: alipayFundRounding) { _, _ in persistDraft() }
     }
 
     private var classificationTaskID: String {
@@ -243,6 +247,7 @@ struct NativeImportFlowView: View {
             }, unsupported: { entry in
                 classificationCompletedIDs.insert(entry.id)
                 classificationManualReasons[entry.id] = "这笔交易包含复杂分录或缺少可用账户，请打开编辑核对。"
+                persistDraft()
             }, accept: { job, result, updated in
                 let entry = job.entry
                 guard let index = reviewedEntries.firstIndex(where: { $0.id == entry.id }) else { return }
@@ -251,6 +256,7 @@ struct NativeImportFlowView: View {
                 classificationCompletedIDs.insert(entry.id)
                 classificationOriginals[entry.id] = entry
                 reviewedEntries[index] = updated
+                persistDraft()
             })
         } catch is CancellationError {
             return
@@ -259,6 +265,57 @@ struct NativeImportFlowView: View {
             classificationError = (error as? ImportClassificationError)?.localizedDescription
                 ?? "智能分类暂时不可用，已完成的建议保留，你可以继续核对或重试。"
         }
+    }
+
+    private var importDraftStore: LedgerImportDraftStore { .shared }
+
+    private func restoreDraftIfAvailable() {
+        guard !startsWithPreview, preview == nil,
+              let ledgerID = session.currentLocalLedgerDescriptor?.id,
+              let draft = importDraftStore.load(ledgerID: ledgerID),
+              draft.fileID == file.id else { return }
+        providerOverride = draft.providerOverride
+        alipayFundRounding = draft.alipayFundRounding
+        preview = draft.preview
+        reviewedEntries = draft.reviewedEntries
+        includedEntryIDs = draft.includedEntryIDs
+        classificationResults = draft.classificationResults
+        classificationOriginals = draft.classificationOriginals
+        manuallyReviewedIDs = draft.manuallyReviewedIDs
+        classificationCompletedIDs = draft.classificationCompletedIDs
+        classificationAcceptedFields = draft.classificationAcceptedFields
+        classificationManualReasons = draft.classificationManualReasons
+        classificationEvidence = draft.classificationEvidence
+        onlyClassificationReview = draft.onlyClassificationReview
+    }
+
+    private func persistDraft() {
+        guard commitResult == nil,
+              let ledgerID = session.currentLocalLedgerDescriptor?.id,
+              !file.data.isEmpty else { return }
+        let draft = LedgerImportDraft(
+            ledgerID: ledgerID,
+            file: file,
+            providerOverride: providerOverride,
+            alipayFundRounding: alipayFundRounding,
+            preview: preview,
+            reviewedEntries: reviewedEntries,
+            includedEntryIDs: includedEntryIDs,
+            classificationResults: classificationResults,
+            classificationOriginals: classificationOriginals,
+            manuallyReviewedIDs: manuallyReviewedIDs,
+            classificationCompletedIDs: classificationCompletedIDs,
+            classificationAcceptedFields: classificationAcceptedFields,
+            classificationManualReasons: classificationManualReasons,
+            classificationEvidence: classificationEvidence,
+            onlyClassificationReview: onlyClassificationReview
+        )
+        try? importDraftStore.save(draft)
+    }
+
+    private func discardDraft() {
+        guard let ledgerID = session.currentLocalLedgerDescriptor?.id else { return }
+        importDraftStore.remove(ledgerID: ledgerID)
     }
 
     @ViewBuilder
@@ -354,6 +411,7 @@ struct NativeImportFlowView: View {
         }
         reviewedEntries[index] = updated
         acceptClassificationField(field, entryID: entry.id)
+        persistDraft()
     }
 
     private func applyClassificationTag(_ tag: String, to entry: LedgerImportEntry) {
@@ -364,12 +422,14 @@ struct NativeImportFlowView: View {
         reviewedEntries[index] = entry.applyingTags(checked)
         manuallyReviewedIDs.insert(entry.id)
         if classificationNeedsReview.isEmpty { onlyClassificationReview = false }
+        persistDraft()
     }
 
     private func acceptClassificationField(_ field: String, entryID: String) {
         classificationAcceptedFields[entryID, default: []].insert(field)
         manuallyReviewedIDs.insert(entryID)
         if classificationNeedsReview.isEmpty { onlyClassificationReview = false }
+        persistDraft()
     }
 
     private func requestExit(_ action: ImportExitAction) {
@@ -384,6 +444,7 @@ struct NativeImportFlowView: View {
         if action == .close {
             dismiss()
         } else {
+            discardDraft()
             preview = nil
             reviewedEntries = []
             includedEntryIDs = []
@@ -656,6 +717,7 @@ struct NativeImportFlowView: View {
                     } else {
                         includedEntryIDs = Set(reviewedEntries.map(\.id))
                     }
+                    persistDraft()
                 }
                 .frame(minHeight: 44)
                 .textCase(nil)
@@ -919,6 +981,7 @@ struct NativeImportFlowView: View {
         let name = updated.payee.trimmingCharacters(in: .whitespacesAndNewlines)
         editedEntryStatus = "\(name.isEmpty ? "这条交易" : "“\(name)”")的修改已保存到本次预览"
         editSaveFeedback &+= 1
+        persistDraft()
     }
 
     private var selectedProviderDetail: String {
@@ -988,6 +1051,7 @@ struct NativeImportFlowView: View {
         } else {
             includedEntryIDs.insert(id)
         }
+        persistDraft()
     }
 
     private func toggleTagSelection(_ id: String) {
@@ -1027,6 +1091,7 @@ struct NativeImportFlowView: View {
             bulkTagInput = ""
             errorMessage = nil
             bulkTagInputFocused = false
+            persistDraft()
         } catch {
             errorMessage = error.localizedDescription
             failureFeedback &+= 1
@@ -1057,6 +1122,7 @@ struct NativeImportFlowView: View {
             commitWasReconciled = false
             editedEntryStatus = nil
             resetClassification()
+            persistDraft()
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--safe-preview"),
                ProcessInfo.processInfo.arguments.contains("--safe-classification-review"),
@@ -1135,6 +1201,7 @@ struct NativeImportFlowView: View {
             let result = try await session.commitImport(preview: preview, entries: entries)
             guard !Task.isCancelled else { return }
             commitResult = result
+            discardDraft()
             session.startImportIndexTracking(
                 result: result,
                 providerLabel: providerLabel(preview.provider),

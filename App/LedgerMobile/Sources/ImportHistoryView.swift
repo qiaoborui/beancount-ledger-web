@@ -135,6 +135,7 @@ struct ImportHistoryView: View {
         }
         .onChange(of: session.sharedImportRevision) { _, _ in Task { await loadSharedInbox() } }
         .task {
+            restoreImportDraftIfAvailable()
             await loadSharedInbox()
             await refreshAll(replacingContent: true)
             presentDebugImportFlowIfNeeded()
@@ -145,6 +146,7 @@ struct ImportHistoryView: View {
                 return
             }
             Task {
+                restoreImportDraftIfAvailable()
                 await loadSharedInbox()
             }
         }
@@ -243,6 +245,13 @@ struct ImportHistoryView: View {
                 Text("从其他 App 分享的账单，核对后导入。")
             }
         }
+    }
+
+    private func restoreImportDraftIfAvailable() {
+        guard activeImportFile == nil,
+              let ledgerID = session.currentLocalLedgerDescriptor?.id,
+              let draft = LedgerImportDraftStore.shared.load(ledgerID: ledgerID) else { return }
+        activeImportFile = draft.selectedFile
     }
 
     private func loadSharedInbox() async {
