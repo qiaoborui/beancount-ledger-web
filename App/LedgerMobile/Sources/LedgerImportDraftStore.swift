@@ -162,11 +162,21 @@ struct LedgerImportDraftStore {
     func save(_ draft: LedgerImportDraft) throws {
         guard draft.fileData.count <= LedgerImportFileValidator.maximumBytes else { return }
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let metadataURL = metadataURL(for: draft.ledgerID)
+        var shouldWriteSource = true
+        if let existingData = try? Data(contentsOf: metadataURL),
+           let existing = try? JSONDecoder().decode(LedgerImportDraft.self, from: existingData),
+           existing.fileID == draft.fileID,
+           fileManager.fileExists(atPath: sourceURL(for: draft.ledgerID).path) {
+            shouldWriteSource = false
+        }
         var metadataDraft = draft
         metadataDraft.fileData = Data()
         let metadata = try JSONEncoder().encode(metadataDraft)
-        try metadata.write(to: metadataURL(for: draft.ledgerID), options: [.atomic, .completeFileProtection])
-        try draft.fileData.write(to: sourceURL(for: draft.ledgerID), options: [.atomic, .completeFileProtection])
+        try metadata.write(to: metadataURL, options: [.atomic, .completeFileProtection])
+        if shouldWriteSource {
+            try draft.fileData.write(to: sourceURL(for: draft.ledgerID), options: [.atomic, .completeFileProtection])
+        }
     }
 
     func remove(ledgerID: UUID) {
