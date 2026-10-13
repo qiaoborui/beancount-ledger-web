@@ -16,6 +16,7 @@ actor LocalLedgerRepository: LedgerRepository {
     private(set) var presentedRevisionID: UUID?
     private var importRevisionIDs: [String: UUID] = [:]
     private var importPreviewDates: [String: Date] = [:]
+    private let importAuthorizationURL: URL
     private var lastRuntimeMaintenance: Date?
     private struct PreparedOperation: Sendable {
         let preview: PreparedBookkeepingChange
@@ -34,6 +35,10 @@ actor LocalLedgerRepository: LedgerRepository {
         self.storage = DeviceLocalStorage(workspace: workspace)
         self.engine = engine
         self.validator = validator
+        importAuthorizationURL = Self.importAuthorizationURL(for: descriptor.id)
+        let restored = Self.loadImportAuthorizations(from: importAuthorizationURL)
+        importRevisionIDs = restored.revisions
+        importPreviewDates = restored.dates
     }
 
     init(descriptor: LocalLedgerDescriptor, storage: any LogicalLocalStorage,
@@ -44,6 +49,59 @@ actor LocalLedgerRepository: LedgerRepository {
         self.workspace = storage.workspace
         self.engine = engine
         self.validator = validator
+        importAuthorizationURL = Self.importAuthorizationURL(for: descriptor.id)
+        let restored = Self.loadImportAuthorizations(from: importAuthorizationURL)
+        importRevisionIDs = restored.revisions
+        importPreviewDates = restored.dates
+    }
+
+    private struct PersistedImportAuthorization: Codable {
+        let revisionID: UUID
+        let createdAt: Date
+    }
+
+    private static func importAuthorizationURL(for ledgerID: UUID) -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base
+            .appendingPathComponent("LedgerMobile/ImportAuthorizations", isDirectory: true)
+            .appendingPathComponent(ledgerID.uuidString + ".json")
+    }
+
+    private static func loadImportAuthorizations(from url: URL) -> (revisions: [String: UUID], dates: [String: Date]) {
+        guard let data = try? Data(contentsOf: url),
+              let persisted = try? JSONDecoder().decode([String: PersistedImportAuthorization].self, from: data) else {
+            return ([:], [:])
+        }
+        let now = Date()
+        var revisions: [String: UUID] = [:]
+        var dates: [String: Date] = [:]
+        for (importID, authorization) in persisted
+            where now.timeIntervalSince(authorization.createdAt) < LocalLedgerWorkspace.importPreviewRetention {
+            revisions[importID] = authorization.revisionID
+            dates[importID] = authorization.createdAt
+        }
+        return (revisions, dates)
+    }
+
+    private func persistImportAuthorizations() {
+        var persisted: [String: PersistedImportAuthorization] = [:]
+        let now = Date()
+        for (importID, revisionID) in importRevisionIDs {
+            guard let createdAt = importPreviewDates[importID],
+                  now.timeIntervalSince(createdAt) < LocalLedgerWorkspace.importPreviewRetention else { continue }
+            persisted[importID] = PersistedImportAuthorization(revisionID: revisionID, createdAt: createdAt)
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: importAuthorizationURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try JSONEncoder().encode(persisted)
+            try data.write(to: importAuthorizationURL, options: [.atomic, .completeFileProtection])
+        } catch {
+            // The in-memory authorization remains valid for the current process.
+        }
     }
 
     func storageStatus() async throws -> LocalStorageSyncStatus { try await storage.status() }
@@ -680,6 +738,7 @@ actor LocalLedgerRepository: LedgerRepository {
         presentedRevisionID = revision
         importRevisionIDs[result.importID] = revision
         importPreviewDates[result.importID] = Date()
+        persistImportAuthorizations()
         return result
     }
     func commitImport(request: LedgerImportCommitRequest) async throws -> LedgerImportCommitResult {
@@ -688,12 +747,14 @@ actor LocalLedgerRepository: LedgerRepository {
               Date().timeIntervalSince(created) < LocalLedgerWorkspace.importPreviewRetention else {
             importRevisionIDs.removeValue(forKey: request.importID)
             importPreviewDates.removeValue(forKey: request.importID)
+            persistImportAuthorizations()
             throw LocalLedgerError.previewRequired
         }
         let result: LedgerImportCommitResult = try await mutate("/api/ledger/imports/commit", method: "POST",
             body: json(request), expected: expected, consumingImportID: request.importID)
         importRevisionIDs.removeValue(forKey: request.importID)
         importPreviewDates.removeValue(forKey: request.importID)
+        persistImportAuthorizations()
         return result
     }
     /// Complete account snapshot with independent wire/count limits. Does not

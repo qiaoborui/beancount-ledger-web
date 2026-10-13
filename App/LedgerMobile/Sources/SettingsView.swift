@@ -134,6 +134,7 @@ struct SettingsView: View {
             }
         }
         .listStyle(.plain)
+        .listSectionSeparator(.hidden, edges: .top)
         .font(.subheadline)
         .ledgerNavigation("设置", isRoot: isRoot)
         .sheet(isPresented: $compactTabConfigurationPresented) {
