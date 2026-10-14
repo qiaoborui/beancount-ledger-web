@@ -747,27 +747,38 @@ struct EventTagReportView: View {
 
 // MARK: - Event Report Status Components
 
-/// One terminal-styled loading state. A plain inline `ProgressView` sits above
-/// the scroll content and shifts layout as it appears, disappears and duplicates;
-/// this keeps a single stable panel while a read is in flight.
+/// Text action shared by the status rows: Balanced `.link` (ink-2 text over a
+/// 1px strong rule), never an accent-coloured button.
+private struct EventReportLink: View {
+    let title: String
+    let perform: () -> Void
+
+    var body: some View {
+        Button(action: perform) {
+            Text(title).balancedFont(size: 13, weight: .medium).foregroundStyle(BalancedPalette.secondary)
+                .padding(.bottom, 2)
+                .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// One stable loading row. A plain inline `ProgressView` sat above the scroll
+/// content and shifted layout as it appeared, disappeared and duplicated.
 struct EventReportLoadingPanel: View {
     let title: String
 
     var body: some View {
         HStack(spacing: 10) {
-            ProgressView().controlSize(.small).tint(LedgerPalette.cobalt)
-            Text(title)
-                .font(.system(size: 13))
-                .foregroundStyle(LedgerPalette.secondary)
+            ProgressView().controlSize(.small).tint(BalancedPalette.meta)
+            Text(title).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
             Spacer(minLength: 0)
         }
-        .padding(16)
-        .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
-        )
+        .padding(.vertical, 14)
+        .frame(minHeight: 44)
+        .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(title)
     }
@@ -780,26 +791,17 @@ struct EventReportInlineNotice: View {
     var perform: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(text)
-                .font(.system(size: 12))
-                .foregroundStyle(LedgerPalette.secondary)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(text).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            if let action, let perform {
-                Button(action, action: perform)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(LedgerPalette.cobalt)
-            }
+            if let action, let perform { EventReportLink(title: action, perform: perform) }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+        .padding(.vertical, 6)
     }
 }
 
-/// Terminal-styled error panel replacing bare secondary text plus a button.
+/// Error row: title, detail and a retry link. No status colour or card.
 struct EventReportErrorPanel: View {
     let title: String
     let detail: String
@@ -807,31 +809,15 @@ struct EventReportErrorPanel: View {
     let perform: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 13))
-                    .foregroundStyle(LedgerPalette.risk)
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.ink)
-            }
-            Text(detail)
-                .font(.system(size: 12))
-                .foregroundStyle(LedgerPalette.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).balancedFont(size: 15, weight: .semibold).foregroundStyle(BalancedPalette.ink)
+            Text(detail).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(action, action: perform)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(LedgerPalette.cobalt)
+            EventReportLink(title: action, perform: perform)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
-        )
+        .padding(.top, 14)
+        .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
     }
 }
 
