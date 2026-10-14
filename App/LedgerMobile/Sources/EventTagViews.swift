@@ -66,14 +66,15 @@ struct EventTagListView: View {
                     content
                 }
             }
-            .background(LedgerPalette.canvas)
+            .scrollContentBackground(.hidden)
+            .background(BalancedPalette.page)
             .task(id: readKey) { if session.isLocal { await session.loadLocalEventTagSummaries() } }
             .navigationTitle("事件与项目核算")
-            .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
+            .tint(BalancedPalette.ink)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
+                    Button("关闭") { dismiss() }.balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
                 }
             }
             .navigationDestination(isPresented: Binding(
@@ -89,51 +90,42 @@ struct EventTagListView: View {
 
     private var content: some View {
         VStack(spacing: 0) {
-            // Sort Toolbar
-            HStack(spacing: 6) {
+            // `.mark` sort strip — chroma stays off; selection is weight + underline.
+            HStack(spacing: 18) {
                 ForEach(SortOrder.allCases) { order in
-                    let isSelected = sortOrder == order
                     Button {
                         LedgerFeedback.selection()
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                            sortOrder = order
-                        }
+                        withAnimation(.easeOut(duration: 0.18)) { sortOrder = order }
                     } label: {
-                        Text(order.rawValue)
-                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected ? Color.white : LedgerPalette.ink)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                isSelected ? LedgerPalette.cobalt : Color(uiColor: .tertiarySystemFill),
-                                in: RoundedRectangle(cornerRadius: LedgerRadius.sm)
-                            )
+                        BalancedMark(title: order.rawValue, selected: sortOrder == order, size: 13)
                     }
-                    .buttonStyle(PressScaleButtonStyle(pressedScale: 0.95))
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(sortOrder == order ? .isSelected : [])
                 }
                 Spacer()
                 Text("\(filteredSummaries.count) 个标签")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced).monospacedDigit())
-                    .foregroundStyle(LedgerPalette.secondary)
+                    .balancedFont(size: 12).monospacedDigit().foregroundStyle(BalancedPalette.meta)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
 
             List {
                 ForEach(filteredSummaries) { summary in
                     Button {
                         selectedTag = summary.tag
                     } label: {
-                        EventTagSummaryCard(summary: summary)
+                        EventTagSummaryRow(summary: summary)
                     }
+                    .buttonStyle(.plain)
                     .accessibilityIdentifier("event-tag-summary-" + summary.tag)
-                    .buttonStyle(PressScaleButtonStyle(pressedScale: 0.98))
-                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
             }
             .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .searchable(text: $searchQuery, prompt: "搜索标签名称")
         }
     }
@@ -141,86 +133,54 @@ struct EventTagListView: View {
     private var emptyState: some View {
         VStack(spacing: 16) {
             Spacer()
-            ZStack {
-                Circle()
-                    .fill(LedgerPalette.cobalt.opacity(0.1))
-                    .frame(width: 80, height: 80)
-                Image(systemName: "tag.fill")
-                    .font(.system(size: 36))
-                    .foregroundStyle(LedgerPalette.cobalt)
-            }
-
+            Image(systemName: "tag").font(.system(size: 32, weight: .light)).foregroundStyle(BalancedPalette.meta)
             VStack(spacing: 6) {
-                Text("暂无事件或标签")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(LedgerPalette.ink)
+                Text("暂无事件或标签").balancedFont(size: 16, weight: .medium).foregroundStyle(BalancedPalette.ink)
                 Text("为交易添加标签（如 #2026-日本旅行、#装修、#搬家），即可在这里生成独立项目核算与报表。")
-                    .font(.system(size: 14))
-                    .foregroundStyle(LedgerPalette.secondary)
+                    .balancedFont(size: 13.5)
+                    .foregroundStyle(BalancedPalette.meta)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             }
-
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-// MARK: - Event Tag Summary Card
+// MARK: - Event Tag Summary Row
 
-private struct EventTagSummaryCard: View {
+/// `.row`: `#tag` + count, amount in `--out` (spend), a meta line below with
+/// the date span and daily average. No card, no border, no chroma on the tag.
+private struct EventTagSummaryRow: View {
     let summary: EventTagSummary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
                 HStack(spacing: 6) {
-                    Text("#" + summary.tag)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(LedgerPalette.cobalt)
-                    Text("\(summary.transactionCount) 笔")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(LedgerPalette.secondary)
+                    Text("#" + summary.tag).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                    Text("\(summary.transactionCount) 笔").balancedFont(size: 12).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                 }
                 Spacer()
-                AmountLabel(
-                    minorUnits: summary.netSpend,
-                    currency: summary.currency,
-                    font: .system(size: 18, weight: .bold, design: .monospaced),
-                    color: LedgerPalette.expense
-                )
+                BalancedAmount(minorUnits: summary.netSpend, currency: summary.currency, size: 15, color: BalancedPalette.expense, showsCurrency: true, currencyScale: 0.78)
             }
 
             HStack {
                 if let start = summary.startDate, let end = summary.endDate {
-                    HStack(spacing: 4) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 11))
-                        Text(start == end ? start : "\(start) ~ \(end)")
-                            .font(.system(size: 12, design: .monospaced))
-                        Text("(\(summary.daysCount)天)")
-                            .font(.system(size: 11))
-                    }
-                    .foregroundStyle(LedgerPalette.secondary)
+                    Text((start == end ? start : "\(start) ~ \(end)") + " · \(summary.daysCount)天")
+                        .balancedFont(size: 12).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                 }
-
                 Spacer()
-
                 if summary.daysCount > 1 && summary.netSpend > 0 {
-                    Text("日均 \(MoneyText.format(minorUnits: summary.dailyAverage, currency: summary.currency))")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(LedgerPalette.secondary)
+                    Text("日均 " + MoneyText.format(minorUnits: summary.dailyAverage, currency: summary.currency))
+                        .balancedFont(size: 12).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                 }
             }
         }
-        .padding(14)
-        .background(LedgerPalette.panel)
-        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(LedgerPalette.cardBorder, lineWidth: 0.8)
-        )
+        .padding(.vertical, 11)
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+        .contentShape(Rectangle())
     }
 }
 

@@ -36,68 +36,137 @@ struct CategoriesManagementView: View {
         List {
             Section {
                 HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(TerminalPalette.secondary)
+                    Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundStyle(BalancedPalette.meta)
                     TextField("搜索分类名称或路径", text: $searchText)
+                        .balancedFont(size: 15)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("category-search")
-                }.frame(minHeight: 44)
-            }.listRowBackground(Color.clear)
-            Section {
-                Picker("分类类型", selection: $selectedKind) {
-                    ForEach(CategoryKind.allCases) { kind in
-                        Text(kind.title).tag(kind)
-                    }
                 }
-                .pickerStyle(.segmented)
+                .frame(minHeight: 40)
+                .padding(.horizontal, 12)
+                .background(BalancedPalette.sunken)
             }
+            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 2, trailing: 20))
             .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 4, trailing: 16))
+            .listRowSeparator(.hidden)
+
+            Section {
+                CategoryKindSeg(selected: $selectedKind)
+            }
+            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 0, trailing: 20))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
+            Section {
+                Text(searchText.isEmpty
+                    ? "共 \(matchingAccounts.count) 个\(selectedKind.title)分类，按一级科目分组。加号新增，左滑可停用。"
+                    : "未找到匹配的分类。")
+                    .balancedFont(size: 12.5)
+                    .foregroundStyle(BalancedPalette.meta)
+            }
+            .listRowInsets(EdgeInsets(top: 2, leading: 20, bottom: 0, trailing: 20))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
 
             if groupedAccounts.isEmpty {
-                ContentUnavailableView(
-                    "暂无分类",
-                    systemImage: "tag.slash",
-                    description: Text(searchText.isEmpty ? "点击右上角 + 添加新分类。" : "未找到匹配的分类。")
-                )
+                Section {
+                    VStack(spacing: 6) {
+                        Image(systemName: "tag.slash").font(.system(size: 22)).foregroundStyle(BalancedPalette.meta)
+                        Text("暂无分类").balancedFont(size: 16, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                        Text(searchText.isEmpty ? "点击右上角 + 添加新分类。" : "未找到匹配的分类。")
+                            .balancedFont(size: 13.5)
+                            .foregroundStyle(BalancedPalette.meta)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 56)
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             } else {
                 ForEach(groupedAccounts, id: \.section) { group in
-                    Section(header: Text(group.section)) {
+                    Section {
+                        // A row, not a `header:` closure: native section headers
+                        // in a plain list keep their own system inset instead of
+                        // the 20pt column every row uses, so the label would sit
+                        // a few points left of the rows beneath it. Rendering it
+                        // as a row with the same `listRowInsets` guarantees the
+                        // same left edge by construction.
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text(group.section)
+                                .balancedFont(size: 12.5, weight: .medium)
+                                .tracking(0.375)
+                                .foregroundStyle(BalancedPalette.meta)
+                            Spacer()
+                            Text("\(group.rows.count)")
+                                .balancedFont(size: 12.5)
+                                .foregroundStyle(BalancedPalette.meta)
+                        }
+                        .frame(minHeight: 28, alignment: .bottom)
+                        .listRowInsets(EdgeInsets(top: 20, leading: 20, bottom: 6, trailing: 20))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+
                         ForEach(group.rows, id: \.account) { acct in
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text(acct.label)
-                                        .font(.body.weight(.medium))
-                                        .foregroundStyle(LedgerPalette.ink)
-                                    Spacer()
-                                    if !acct.active {
-                                        Text("已停用")
-                                            .font(.caption2)
-                                            .foregroundStyle(LedgerPalette.gold)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(LedgerPalette.gold.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
-                                    }
+                                        .balancedFont(size: 15, weight: .text)
+                                        .foregroundStyle(acct.active ? BalancedPalette.ink : BalancedPalette.meta)
+                                    Text(acct.account).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
                                 }
-                                Text(acct.account)
-                                    .font(.caption2.monospaced())
-                                    .foregroundStyle(LedgerPalette.secondary)
+                                Spacer(minLength: 8)
+                                if !acct.active {
+                                    BalancedTag(text: "已停用", kind: .neutral)
+                                } else {
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(BalancedPalette.edge)
+                                }
                             }
-                            .padding(.vertical, 3)
+                            .frame(minHeight: 44)
+                            .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                         }
                     }
                 }
             }
         }
         .ledgerReadingList()
+        .scrollContentBackground(.hidden)
+        .background(BalancedPalette.page)
         .terminalPageChrome("分类管理", isRoot: false, actions: AnyView(
             Button { showingAddCategory = true } label: {
                 Image(systemName: "plus").font(.system(size: 16)).frame(width: 44, height: 44)
-                    .foregroundStyle(TerminalPalette.accent)
+                    .foregroundStyle(BalancedPalette.ink)
             }.accessibilityLabel("新建分类")
         ))
         .sheet(isPresented: $showingAddCategory) {
             AddCategoryView(initialKind: selectedKind)
                 .ledgerPrivacyProtectedSheet()
         }
+    }
+}
+
+/// `.seg` — a full-width two-item mark with a shared `--rule` baseline.
+struct CategoryKindSeg: View {
+    @Binding var selected: CategoryKind
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(CategoryKind.allCases) { kind in
+                Button {
+                    LedgerFeedback.selection()
+                    selected = kind
+                } label: {
+                    BalancedMark(title: kind.title, selected: selected == kind, size: 14)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected == kind ? .isSelected : [])
+            }
+        }
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
     }
 }

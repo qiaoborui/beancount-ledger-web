@@ -46,6 +46,78 @@ final class ImportHistoryTests: XCTestCase {
         XCTAssertEqual(LedgerImportHistory.coverageText(newer), "覆盖 2026/08/01 至 2026/08/25")
     }
 
+    func testImportDraftStoreRoundTripsMetadataAndProtectedSourceFile() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = LedgerImportDraftStore(directory: directory)
+        let ledgerID = UUID()
+        let file = LedgerImportSelectedFile(name: "statement.csv", data: Data("date,payee\n2026-08-01,Coffee\n".utf8))
+        let savedAt = try XCTUnwrap(day("2026-08-31"))
+        let draft = LedgerImportDraft(
+            savedAt: savedAt,
+            ledgerID: ledgerID,
+            file: file,
+            providerOverride: "alipay",
+            alipayFundRounding: true,
+            preview: nil,
+            reviewedEntries: [],
+            includedEntryIDs: [],
+            classificationResults: [:],
+            classificationOriginals: [:],
+            manuallyReviewedIDs: [],
+            classificationCompletedIDs: [],
+            classificationAcceptedFields: [:],
+            classificationManualReasons: [:],
+            classificationEvidence: [:],
+            onlyClassificationReview: false
+        )
+
+        try store.save(draft)
+
+        let restored = try XCTUnwrap(store.load(ledgerID: ledgerID, now: savedAt.addingTimeInterval(60)))
+        XCTAssertEqual(restored.ledgerID, ledgerID)
+        XCTAssertEqual(restored.selectedFile, file)
+        XCTAssertEqual(restored.providerOverride, "alipay")
+        XCTAssertTrue(restored.alipayFundRounding)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(ledgerID.uuidString + ".json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(ledgerID.uuidString + ".source").path))
+    }
+
+    func testImportDraftStoreExpiresAndRemovesBothFiles() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = LedgerImportDraftStore(directory: directory)
+        let ledgerID = UUID()
+        let savedAt = try XCTUnwrap(day("2026-08-01"))
+        let draft = LedgerImportDraft(
+            savedAt: savedAt,
+            ledgerID: ledgerID,
+            file: LedgerImportSelectedFile(name: "statement.csv", data: Data("rows".utf8)),
+            providerOverride: nil,
+            alipayFundRounding: false,
+            preview: nil,
+            reviewedEntries: [],
+            includedEntryIDs: [],
+            classificationResults: [:],
+            classificationOriginals: [:],
+            manuallyReviewedIDs: [],
+            classificationCompletedIDs: [],
+            classificationAcceptedFields: [:],
+            classificationManualReasons: [:],
+            classificationEvidence: [:],
+            onlyClassificationReview: false
+        )
+        try store.save(draft)
+
+        XCTAssertNil(store.load(ledgerID: ledgerID, now: savedAt.addingTimeInterval(LedgerImportDraftStore.retention + 1)))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(ledgerID.uuidString + ".json").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(ledgerID.uuidString + ".source").path))
+    }
+
+    private func temporaryDirectory() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("LedgerImportDraftTests-\(UUID().uuidString)", isDirectory: true)
+    }
+
     private func document(
         provider: String,
         start: String,

@@ -215,6 +215,40 @@ def _check_export_entry(entry):
             budget = _check_export_value(value.value, budget)
 
 
+# The stream must depend only on source bytes so that it can be reused for
+# any copy of the same tree (a validated stage and the generation it becomes).
+# input_hash serves Beancount's pickle cache, which the app never uses.
+_LOCATION_DEPENDENT_OPTIONS = frozenset({"input_hash"})
+_PATH_OPTIONS = frozenset({"filename", "include"})
+
+
+def _exported_options(root, options):
+    """The public option map is string-valued, matching the existing API.
+
+    List options retain its last-declaration behavior.
+    """
+    values = {}
+    for key, value in options.items():
+        if key in _LOCATION_DEPENDENT_OPTIONS:
+            continue
+        if isinstance(value, list) and value and all(isinstance(item, str) for item in value):
+            value = value[-1]
+        if not isinstance(value, str):
+            continue
+        values[key] = _relative_option_path(root, value) if key in _PATH_OPTIONS else value
+    return values
+
+
+def _relative_option_path(root, value):
+    path = Path(value)
+    if path.is_absolute():
+        try:
+            return path.resolve().relative_to(root).as_posix()
+        except (OSError, ValueError):
+            return path.name
+    return value
+
+
 def _write_canonical_stream(root, entries, options, output):
     """One bounded record at a time; never serialize an all-entry array.
 
@@ -240,14 +274,14 @@ def _write_canonical_stream(root, entries, options, output):
         with stream_file as stream:
             def emit(record, *, hashed=True):
                 nonlocal total
+                # The worst-case bound (every character escaped) is checked
+                # before encoding, so a single C-accelerated encode cannot
+                # build an over-budget string; chunked iterencode runs the
+                # pure-Python encoder and dominated export time.
                 _check_export_value(record, STREAM_RECORD_LIMIT)
-                encoded = bytearray()
-                for chunk in encoder.iterencode(record):
-                    raw = chunk.encode("utf-8")
-                    if len(encoded) + len(raw) + 1 > STREAM_RECORD_LIMIT:
-                        raise ValueError("Canonical export record exceeds byte budget")
-                    encoded.extend(raw)
-                encoded.append(10)
+                encoded = encoder.encode(record).encode("utf-8") + b"\n"
+                if len(encoded) > STREAM_RECORD_LIMIT:
+                    raise ValueError("Canonical export record exceeds byte budget")
                 if total + len(encoded) > STREAM_TOTAL_LIMIT:
                     raise ValueError("Canonical export exceeds total byte budget")
                 stream.write(encoded)
@@ -258,11 +292,8 @@ def _write_canonical_stream(root, entries, options, output):
             emit({"type": "header", "version": 1})
             # Catalog records are separate so even many options do not require
             # a second aggregate dictionary or a huge header.
-            for key, value in options.items():
-                if isinstance(value, str):
-                    emit({"type": "option", "key": key, "value": value})
-                elif isinstance(value, list) and value and all(isinstance(item, str) for item in value):
-                    emit({"type": "option", "key": key, "value": value[-1]})
+            for key, value in _exported_options(root, options).items():
+                emit({"type": "option", "key": key, "value": value})
             for currency in sorted(set(options.get("commodities", ())) | set(options.get("operating_currency", ()))):
                 emit({"type": "commodity", "value": currency})
             for entry in entries:
@@ -326,14 +357,7 @@ def _validate_json(workspace, entry_file, *, export_canonical, stream_output=Non
         if not result and stream_output is not None:
             payload["stream"] = _write_canonical_stream(root, entries, options, stream_output)
         if not result and export_canonical:
-            # The public option map is string-valued, matching the existing
-            # API. List options retain its last-declaration behavior.
-            option_values = {}
-            for key, value in options.items():
-                if isinstance(value, str):
-                    option_values[key] = value
-                elif isinstance(value, list) and value and all(isinstance(item, str) for item in value):
-                    option_values[key] = value[-1]
+            option_values = _exported_options(root, options)
             payload["canonical"] = {"version": 1,
                                     "entries": [_canonical_entry(root, item) for item in entries],
                                     "commodities": sorted(set(options.get("commodities", ())) |

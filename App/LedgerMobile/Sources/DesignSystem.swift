@@ -13,7 +13,7 @@ enum LedgerPalette {
     static let olive = TerminalPalette.secondary
     static let secondary = TerminalPalette.secondary
     static let line = TerminalPalette.line
-    static let lineStrong = TerminalPalette.secondary
+    static let lineStrong = BalancedPalette.ruleStrong
     static let cobalt = TerminalPalette.accent
     static let cobaltLight = TerminalPalette.accent
     static let income = TerminalPalette.positive
@@ -22,7 +22,8 @@ enum LedgerPalette {
     static let risk = TerminalPalette.negative
     static let success = TerminalPalette.positive
     static let onBrand = TerminalPalette.onAccent
-    static let cardBorder = TerminalPalette.line
+    /// Balanced reserves a border for *controls* only — `--edge`, never a card.
+    static let cardBorder = BalancedPalette.edge
 }
 
 enum LedgerSpacing {
@@ -34,12 +35,18 @@ enum LedgerSpacing {
     static let xxl: CGFloat = 24
 }
 
+/// Balanced's geometry has four radii total: 3px for controls (`.btn`,
+/// `.seg-inline`, `.searchbar` — the dedicated Balanced components hardcode
+/// this directly), 2px for square indicators (`.toggle`, `.imp .box`), and 0
+/// for everything else. `LedgerRadius` predates that scale and is referenced
+/// broadly by legacy cards/tiles that are "everything else", so it now
+/// resolves to 0 across the board.
 enum LedgerRadius {
-    static let xs: CGFloat = 2
-    static let sm: CGFloat = 2
-    static let md: CGFloat = 2
-    static let lg: CGFloat = 2
-    static let pill: CGFloat = 2
+    static let xs: CGFloat = 0
+    static let sm: CGFloat = 0
+    static let md: CGFloat = 0
+    static let lg: CGFloat = 0
+    static let pill: CGFloat = 0
 }
 
 enum LedgerLayout {
@@ -298,44 +305,35 @@ struct LedgerPageContext: View {
     }
 }
 
+/// Balanced has one grouping device — a sunken well, square corners, no
+/// border, no shadow. Cards are the thing this design language is defined
+/// against; `cornerRadius` is accepted for call-site compatibility and ignored.
 struct LedgerPanel<Content: View>: View {
-    var cornerRadius: CGFloat = LedgerRadius.md
+    var cornerRadius: CGFloat = 0
     @ViewBuilder let content: Content
 
     var body: some View {
-        content
-            .background(LedgerPalette.panel)
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5)
-            }
+        content.background(BalancedPalette.sunken)
     }
 }
 
 struct LedgerCardModifier: ViewModifier {
-    var cornerRadius: CGFloat = LedgerRadius.md
+    var cornerRadius: CGFloat = 0
     var padding: CGFloat = LedgerSpacing.lg
 
     func body(content: Content) -> some View {
         content
             .padding(padding)
-            .background(LedgerPalette.panel)
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(LedgerPalette.cardBorder.opacity(0.6), lineWidth: 0.5)
-            }
+            .background(BalancedPalette.sunken)
     }
 }
 
 struct LedgerTactileCardModifier: ViewModifier {
-    var cornerRadius: CGFloat = 2
+    var cornerRadius: CGFloat = 0
     var padding: CGFloat = 14
     func body(content: Content) -> some View {
         content.padding(min(padding, 14))
-            .background(TerminalPalette.page)
-            .overlay { Rectangle().stroke(TerminalPalette.line, lineWidth: 1) }
+            .background(BalancedPalette.sunken)
     }
 }
 
@@ -376,14 +374,16 @@ struct AmountLabel: View {
     let minorUnits: Int
     let currency: String
     var prefix = ""
-    var font: Font = .system(.subheadline, design: .rounded, weight: .semibold)
+    /// Plex Sans 450 ("Text") — proportional with tabular figures. Balanced
+    /// reserves mono for account paths and beancount source only.
+    var font: Font = .custom(BalancedWeight.text.sansPostscriptName, size: 15, relativeTo: .subheadline)
     var color: Color = LedgerPalette.ink
     var displayMode: MoneyText.DisplayMode = .adaptive
     var showSign = false
 
     var body: some View {
         amountText
-            .font(font.monospacedDigit()).fontDesign(.monospaced)
+            .font(font).monospacedDigit()
             .foregroundStyle(color)
             .contentTransition(.opacity)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: session.amountsVisible)
@@ -516,12 +516,11 @@ enum LedgerFeedback {
 }
 
 struct LedgerFrostedCardModifier: ViewModifier {
-    var cornerRadius: CGFloat = 2
+    var cornerRadius: CGFloat = 0
     var padding: CGFloat = 14
     func body(content: Content) -> some View {
         content.padding(min(padding, 14))
-            .background(TerminalPalette.page)
-            .overlay { Rectangle().stroke(TerminalPalette.line, lineWidth: 1) }
+            .background(BalancedPalette.sunken)
     }
 }
 
@@ -786,48 +785,50 @@ struct LedgerAccountPicker: View {
                 selection = choice.account
                 dismiss()
             } label: {
-                HStack(spacing: LedgerSpacing.md) {
-                    let visual = TransactionVisualCategory.resolve(account: choice.account, label: choice.label)
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(visual.color.opacity(0.14))
-                            .frame(width: 32, height: 32)
-                        Image(systemName: visual.iconName)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(visual.color)
-                    }
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: LedgerSpacing.sm) {
+                // `.row` with `.acct`: human label over the mono path, a plain
+                // checkmark for the current value. No tinted icon tile, no
+                // filled checkmark — Balanced has no accent colour, and a
+                // colour disc would spend chroma on something with no direction.
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 8) {
                             Text(choice.label)
-                                .font(.system(.subheadline, design: .default, weight: .semibold))
-                                .foregroundStyle(LedgerPalette.ink)
+                                .balancedFont(size: 15, weight: .text)
+                                .foregroundStyle(BalancedPalette.ink)
                             if !choice.active {
+                                // `.tag` — a word with a rule under it, not a pill.
                                 Text("已停用")
-                                    .font(.system(.caption2, design: .default, weight: .semibold))
-                                    .foregroundStyle(LedgerPalette.gold)
+                                    .balancedFont(size: 12)
+                                    .foregroundStyle(BalancedPalette.meta)
+                                    .padding(.bottom, 2)
+                                    .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
                             }
                         }
                         Text(choice.account)
-                            .font(.system(.caption2, design: .default, weight: .medium).monospaced())
-                            .foregroundStyle(LedgerPalette.secondary)
+                            .balancedMono(size: 11.5)
+                            .foregroundStyle(BalancedPalette.meta)
                             .lineLimit(2)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     if choice.account == selection {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(.body, design: .default, weight: .semibold))
-                            .foregroundStyle(LedgerPalette.cobalt)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(BalancedPalette.ink)
                     }
                 }
+                .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(PressScaleButtonStyle())
-            .listRowBackground(LedgerPalette.panel)
+            .buttonStyle(.plain)
+            .listRowBackground(BalancedPalette.page)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+            .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1).padding(.leading, 20) }
         }
         .listStyle(.plain)
+        .listRowSpacing(0)
         .scrollContentBackground(.hidden)
-        .background(LedgerPalette.canvas)
+        .background(BalancedPalette.page)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .ledgerSearch(text: $query, prompt: isCategoryPicker ? "搜索分类名称或路径" : "搜索账户名称或路径")

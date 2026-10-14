@@ -48,6 +48,7 @@ actor LocalLedgerCatalog {
     typealias Validator = @Sendable (URL, String) async throws -> Void
     nonisolated let rootDirectory: URL
     private let validator: Validator
+    private let usesCanonicalStreamCache: Bool
     private let engine: any LocalLedgerEngine
     private let gitTransport: any LocalGitTransport
     private let gitCredentials: any LocalGitCredentialStoring
@@ -55,12 +56,15 @@ actor LocalLedgerCatalog {
     init(rootDirectory: URL, engine: any LocalLedgerEngine = EmbeddedLocalLedgerEngine.shared,
          gitTransport: any LocalGitTransport = EmbeddedLocalGitTransport(),
          gitCredentials: any LocalGitCredentialStoring = DeviceLocalGitCredentialStore(),
-         validator: @escaping Validator = { root, entry in
-             try await EmbeddedBeancountValidator.shared.validate(workspace: root, entryFile: entry)
-         }) {
+         validator: Validator? = nil) {
         self.rootDirectory = rootDirectory.standardizedFileURL
         self.engine = engine
-        self.validator = validator
+        // Only the default canonical validator may be replaced by the cached
+        // export path; an injected validator always runs as given.
+        usesCanonicalStreamCache = validator == nil
+        self.validator = validator ?? { root, entry in
+            try await EmbeddedBeancountValidator.shared.validate(workspace: root, entryFile: entry)
+        }
         self.gitTransport = gitTransport
         self.gitCredentials = gitCredentials
     }
@@ -360,12 +364,17 @@ actor LocalLedgerCatalog {
     /// before an immutable generation becomes the active ledger.
     private nonisolated func publicationValidator(for descriptor: LocalLedgerDescriptor) -> Validator {
         let canonical = validator, engine = engine
+        let cached = usesCanonicalStreamCache ? engine as? EmbeddedLocalLedgerEngine : nil
         // Use the workspace's exact normalized path for both sides of the
         // bridge. iOS temporary URLs can spell /var as /private/var.
         let workspace = LocalLedgerWorkspace(rootDirectory: rootDirectory.appendingPathComponent(descriptor.id.uuidString))
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
         return { root, entry in
-            try await canonical(root, entry)
+            if let cached {
+                try await cached.validateCanonical(workspaceRoot: root.path, runtimeRoot: runtimeRoot, entrypoint: entry)
+            } else {
+                try await canonical(root, entry)
+            }
             _ = try await engine.dispatch(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                 entrypoint: entry, method: "GET", path: "/api/ledger/version"))
         }

@@ -5,7 +5,7 @@ struct ImportClassificationRequest: Codable, Sendable {
         let account: String
         let label: String
     }
-    struct Example: Codable, Sendable {
+    struct Example: Codable, Equatable, Sendable {
         let date: String
         let payee: String
         let narration: String

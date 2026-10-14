@@ -67,132 +67,141 @@ struct AddCategoryView: View {
 
                 // ── 1. 支出 / 收入 ──
                 Section {
-                    Picker("分类类型", selection: $selectedKind) {
-                        ForEach(CategoryKind.allCases) { kind in
-                            Text(kind.title).tag(kind)
+                    CategoryKindSeg(selected: $selectedKind)
+                        .onChange(of: selectedKind) { _, newKind in
+                            if let firstSection = CategoryPresets.sections(for: newKind).first {
+                                selectedSection = firstSection
+                                selectedItem = firstSection.items.first
+                                isCustom = false
+                                isCustomPathEdited = false
+                            }
                         }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: selectedKind) { _, newKind in
-                        if let firstSection = CategoryPresets.sections(for: newKind).first {
-                            selectedSection = firstSection
-                            selectedItem = firstSection.items.first
-                            isCustom = false
-                            isCustomPathEdited = false
-                        }
-                    }
                 }
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
 
                 // ── 2. 一级大类 ──
-                Section("一级大类") {
-                    Picker("一级大类", selection: $selectedSection) {
+                Section {
+                    Menu {
                         ForEach(availableSections) { sec in
-                            Label(sec.name, systemImage: sec.icon).tag(sec)
+                            Button(sec.name) {
+                                selectedSection = sec
+                                selectedItem = sec.items.first
+                                isCustom = false
+                                isCustomPathEdited = false
+                            }
                         }
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(selectedSection.name).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                                Text(selectedSection.rootAccount).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(BalancedPalette.edge)
+                        }
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                     }
-                    .pickerStyle(.menu)
-                    .onChange(of: selectedSection) { _, newSec in
-                        selectedItem = newSec.items.first
-                        isCustom = false
-                        isCustomPathEdited = false
-                    }
-                }
+                } header: { TerminalSectionLabel(text: "上级科目").listRowBackground(BalancedPalette.page) }
 
                 // ── 3. 二级子分类选择 / 自定义 ──
-                Section("子分类") {
-                    if !selectedSection.items.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: LedgerSpacing.sm) {
-                                ForEach(selectedSection.items) { item in
-                                    let isSelected = !isCustom && selectedItem?.id == item.id
-                                    Button {
-                                        LedgerFeedback.selection()
-                                        selectedItem = item
-                                        isCustom = false
-                                        isCustomPathEdited = false
-                                    } label: {
-                                        VStack(spacing: 6) {
-                                            ZStack {
-                                                Circle()
-                                                    .fill(isSelected ? LedgerPalette.cobalt : LedgerPalette.panel)
-                                                    .frame(width: 44, height: 44)
-                                                Image(systemName: item.icon)
-                                                    .font(.system(size: 17, weight: .medium))
-                                                    .foregroundStyle(isSelected ? Color.white : LedgerPalette.ink)
-                                            }
-                                            Text(item.name)
-                                                .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
-                                                .foregroundStyle(isSelected ? LedgerPalette.cobalt : LedgerPalette.ink)
-                                                .lineLimit(1)
-                                        }
-                                        .padding(.vertical, 4)
-                                        .padding(.horizontal, 6)
-                                        .background(isSelected ? LedgerPalette.cobalt.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
-                                    }
-                                    .buttonStyle(.plain)
+                Section {
+                    ForEach(selectedSection.items) { item in
+                        let isSelected = !isCustom && selectedItem?.id == item.id
+                        Button {
+                            LedgerFeedback.selection()
+                            selectedItem = item
+                            isCustom = false
+                            isCustomPathEdited = false
+                        } label: {
+                            HStack {
+                                Text(item.name).balancedFont(size: 15, weight: isSelected ? .medium : .regular)
+                                    .foregroundStyle(isSelected ? BalancedPalette.ink : BalancedPalette.secondary)
+                                Spacer()
+                                if isSelected {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(BalancedPalette.ink)
                                 }
-
-                                // 自定义
-                                Button {
-                                    LedgerFeedback.selection()
-                                    isCustom = true
-                                    selectedItem = nil
-                                    isCustomPathEdited = false
-                                } label: {
-                                    VStack(spacing: 6) {
-                                        ZStack {
-                                            Circle()
-                                                .fill(isCustom ? LedgerPalette.cobalt : LedgerPalette.panel)
-                                                .frame(width: 44, height: 44)
-                                            Image(systemName: "plus")
-                                                .font(.system(size: 17, weight: .semibold))
-                                                .foregroundStyle(isCustom ? Color.white : LedgerPalette.ink)
-                                        }
-                                        Text("自定义")
-                                            .font(.system(size: 11.5, weight: isCustom ? .semibold : .regular))
-                                            .foregroundStyle(isCustom ? LedgerPalette.cobalt : LedgerPalette.ink)
-                                            .lineLimit(1)
-                                    }
-                                    .padding(.vertical, 4)
-                                    .padding(.horizontal, 6)
-                                    .background(isCustom ? LedgerPalette.cobalt.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
-                                }
-                                .buttonStyle(.plain)
                             }
-                            .padding(.vertical, 4)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     }
+
+                    Button {
+                        LedgerFeedback.selection()
+                        isCustom = true
+                        selectedItem = nil
+                        isCustomPathEdited = false
+                    } label: {
+                        HStack {
+                            Text("自定义").balancedFont(size: 15, weight: isCustom ? .medium : .regular)
+                                .foregroundStyle(isCustom ? BalancedPalette.ink : BalancedPalette.secondary)
+                            Spacer()
+                            if isCustom {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(BalancedPalette.ink)
+                            }
+                        }
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
 
                     if isCustom {
                         TextField("输入自定义分类名称（例如：私教课）", text: $customName)
+                            .balancedFont(size: 15)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .onChange(of: customName) { _, _ in
                                 isCustomPathEdited = false
                             }
+                            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
-                }
+                } header: { TerminalSectionLabel(text: "子分类").listRowBackground(BalancedPalette.page) }
 
-                // ── 4. 高级设置 ──
+                // ── 4. 将创建 ──
+                Section {
+                    Text("2000-01-01 open \(calculatedPath) CNY")
+                        .balancedMono(size: 11.5)
+                        .foregroundStyle(BalancedPalette.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .balancedBand()
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    HStack(spacing: 6) {
+                        Image(systemName: isPathValid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(isPathValid ? BalancedPalette.income : BalancedPalette.expense)
+                        Text(isPathValid ? "路径合规" : "路径无效")
+                            .balancedFont(size: 12.5)
+                            .foregroundStyle(BalancedPalette.meta)
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                } header: { TerminalSectionLabel(text: "将创建").listRowBackground(BalancedPalette.page) }
+
+                // ── 5. 高级设置 ──
                 Section {
                     DisclosureGroup("高级：Beancount 路径规范", isExpanded: $showAdvanced) {
-                        VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-                            HStack {
-                                Text("底层路径:")
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(LedgerPalette.secondary)
-                                Spacer()
-                                if isPathValid {
-                                    Label("合规", systemImage: "checkmark.circle.fill")
-                                        .font(.caption2)
-                                        .foregroundStyle(LedgerPalette.success)
-                                } else {
-                                    Label("无效", systemImage: "exclamationmark.triangle.fill")
-                                        .font(.caption2)
-                                        .foregroundStyle(LedgerPalette.risk)
-                                }
-                            }
-
+                        VStack(alignment: .leading, spacing: 10) {
                             TextField("Beancount 路径", text: Binding(
                                 get: { calculatedPath },
                                 set: { newValue in
@@ -200,18 +209,17 @@ struct AddCategoryView: View {
                                     isCustomPathEdited = true
                                 }
                             ))
-                            .font(.system(.footnote, design: .monospaced))
+                            .balancedMono(size: 12.5)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                            .padding(8)
-                            .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
 
                             HStack {
                                 Text("分类中文名 (alias):")
-                                    .font(.caption)
-                                    .foregroundStyle(LedgerPalette.secondary)
+                                    .balancedFont(size: 12)
+                                    .foregroundStyle(BalancedPalette.meta)
                                 Text(effectiveName.isEmpty ? "（空）" : effectiveName)
-                                    .font(.caption.weight(.semibold))
+                                    .balancedFont(size: 12, weight: .medium)
+                                    .foregroundStyle(BalancedPalette.ink)
                             }
 
                             if isCustomPathEdited {
@@ -219,13 +227,17 @@ struct AddCategoryView: View {
                                     isCustomPathEdited = false
                                     manualCategoryPath = ""
                                 }
-                                .font(.caption)
-                                .foregroundStyle(LedgerPalette.cobalt)
+                                .balancedFont(size: 12.5)
+                                .foregroundStyle(BalancedPalette.ink)
                             }
                         }
                         .padding(.vertical, 4)
                     }
+                    .balancedFont(size: 14)
+                    .foregroundStyle(BalancedPalette.secondary)
                 }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             .navigationTitle("新建分类")
             .terminalNativeChrome()

@@ -163,7 +163,7 @@ enum LedgerImportCommitReconciliation {
     }
 }
 
-struct LedgerImportSelectedFile: Identifiable, Equatable, Sendable {
+struct LedgerImportSelectedFile: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String
     let data: Data
@@ -221,7 +221,7 @@ enum LedgerImportFileValidator {
     }
 }
 
-struct LedgerImportProviderDetection: Decodable, Equatable, Sendable {
+struct LedgerImportProviderDetection: Codable, Equatable, Sendable {
     let provider: String
     let reason: String
     let confidence: String
@@ -425,7 +425,7 @@ extension LedgerImportPosting {
     }
 }
 
-struct LedgerImportPreview: Decodable, Equatable, Sendable {
+struct LedgerImportPreview: Codable, Equatable, Sendable {
     let importID: String
     let provider: String
     let providerDetection: LedgerImportProviderDetection

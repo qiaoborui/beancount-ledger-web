@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var compactTabConfigurationPresented = false
     @State private var editingCurrentLedger = false
     @State private var confirmingDeleteCurrent = false
+    @State private var showingLockIntervalPicker = false
     var isRoot = true
 
     var body: some View {
@@ -13,128 +14,156 @@ struct SettingsView: View {
             if let error = session.errorMessage {
                 Section { StatusBanner(message: error, onDismiss: session.dismissError) }
             }
-            Section("导航") {
-                Button {
+            Section {
+                SettingsRow(title: "底部标签栏", value: session.compactTabDestinations.map(\.compactTitle).joined(separator: "、")) {
                     compactTabConfigurationPresented = true
-                } label: {
-                    LabeledContent {
-                        Text(session.compactTabDestinations.map(\.compactTitle).joined(separator: "、"))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.trailing)
-                    } label: {
-                        Label("底部标签栏", systemImage: "rectangle.bottomthird.inset.filled")
-                    }
                 }
                 .accessibilityIdentifier("settings-compact-tabs")
-            }
+            } header: { TerminalSectionLabel(text: "导航").listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
+
             Section {
                 if session.isLocal {
                     Toggle(isOn: Binding(
                         get: { session.localPrivacyProtectionEnabled },
                         set: { enabled in Task { await session.setLocalPrivacyProtectionEnabled(enabled) } }
                     )) {
-                        Label("\(session.biometricTitle) 保护", systemImage: session.biometricSystemImage)
+                        SettingsRowLabel(title: "\(session.biometricTitle) 保护", detail: "打开账本时验证身份")
                     }
                     .disabled(session.isBiometricSettingBusy || session.isAuthenticationBusy)
                     .accessibilityIdentifier("settings-local-authentication")
+                    .settingsRowRule()
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                     Toggle(isOn: Binding(
                         get: { session.localPrivacyCoverEnabled },
                         set: { session.setLocalPrivacyCoverEnabled($0) }
                     )) {
-                        Label("隐私遮罩", systemImage: "rectangle.on.rectangle.slash")
+                        SettingsRowLabel(title: "隐私遮罩", detail: "切换应用时遮住内容")
                     }
                     .disabled(session.isBiometricSettingBusy || session.isAuthenticationBusy)
                     .accessibilityIdentifier("settings-local-privacy-cover")
+                    .settingsRowRule()
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 } else {
-                    Label("使用设备密码或生物识别解锁", systemImage: "lock.shield")
+                    SettingsRowLabel(title: "使用设备密码或生物识别解锁", detail: nil)
+                        .frame(minHeight: 44)
+                        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
 
                 if session.localPrivacyProtectionEnabled {
-                    Picker(selection: lockIntervalBinding) {
-                        ForEach(LedgerLockInterval.allCases) { interval in
-                            Text(interval.title).tag(interval)
-                        }
-                    } label: {
-                        Label("自动锁定", systemImage: "timer")
+                    SettingsRow(title: "自动锁定", value: lockIntervalBinding.wrappedValue.title) {
+                        showingLockIntervalPicker = true
                     }
                     Button {
                         Task { await session.lock() }
                     } label: {
-                        Label("立即锁定", systemImage: "lock.fill")
+                        Text("立即锁定").balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                            .frame(minHeight: 44, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
             } header: {
-                Text("隐私与安全")
+                TerminalSectionLabel(text: "隐私与安全").listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
             } footer: {
                 Text(session.isLocal
                     ? "身份验证控制打开账本时的验证；隐私遮罩控制切换应用时是否遮住账本。两个开关互不影响，仅用于当前账本。"
                     : "打开账本需要验证身份，切换应用时隐藏账本。")
+                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    .listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
             }
             if session.isLocal {
                 if let ledgerID = session.currentLocalLedgerDescriptor?.id {
-                    Section("AI 与智能记账") {
-                        NavigationLink { ImportClassificationSettingsView(ledgerID: ledgerID) } label: {
-                            HStack {
-                                Label("智能分类", systemImage: "sparkles")
-                                Spacer()
-                                Text(ImportClassificationSettings.shared.isEnabled(for: ledgerID) ? "已启用" : "未配置")
-                                    .font(.footnote)
-                                    .foregroundStyle(LedgerPalette.secondary)
-                            }
+                    Section {
+                        SettingsNavRow(title: "智能分类", value: ImportClassificationSettings.shared.isEnabled(for: ledgerID) ? "已启用" : "未配置") {
+                            ImportClassificationSettingsView(ledgerID: ledgerID)
                         }
                         .accessibilityIdentifier("settings-classification")
-                        NavigationLink { BookkeepingSettingsView() } label: {
-                            HStack {
-                                Label("语义解析", systemImage: "text.bubble")
-                                Spacer()
-                                Text(BookkeepingSettings.shared.hasKey ? (BookkeepingSettings.shared.configuration.model.isEmpty ? "已配置" : BookkeepingSettings.shared.configuration.model) : "未配置")
-                                    .font(.footnote)
-                                    .foregroundStyle(LedgerPalette.secondary)
-                            }
+                        SettingsNavRow(title: "语义解析", value: BookkeepingSettings.shared.hasKey ? (BookkeepingSettings.shared.configuration.model.isEmpty ? "已配置" : BookkeepingSettings.shared.configuration.model) : "未配置", valueMono: true) {
+                            BookkeepingSettingsView()
                         }
                         .accessibilityIdentifier("settings-semantic-parser")
-                    }
-                }
-                Section("本地账本") {
-                    Button {
-                        editingCurrentLedger = true
-                    } label: {
-                        HStack {
-                            Text("名称")
-                                .foregroundStyle(LedgerPalette.ink)
-                            Spacer()
-                            Text(session.localLedgerName)
-                                .foregroundStyle(LedgerPalette.secondary)
-                            Image(systemName: "pencil")
-                                .font(.caption)
-                                .foregroundStyle(LedgerPalette.cobalt)
-                        }
-                    }
-                    .accessibilityIdentifier("settings-edit-current-ledger")
-
-                    Label("数据保存在这台设备", systemImage: "internaldrive")
-                    NavigationLink("浏览、编辑与导出文件") { LocalLedgerFilesView() }
-                        .accessibilityIdentifier("settings-local-files")
-                    NavigationLink("存储与同步") { LocalLedgerStorageView() }
-                        .accessibilityIdentifier("local-storage-settings")
+                    } header: { TerminalSectionLabel(text: "AI 与智能记账").listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
                 }
                 Section {
-                    Button("切换账本") { session.chooseLedger() }
-                    Button("删除当前账本", role: .destructive) {
-                        confirmingDeleteCurrent = true
+                    SettingsRow(title: "名称", value: session.localLedgerName, showsChevron: false) {
+                        editingCurrentLedger = true
                     }
-                    .foregroundStyle(LedgerPalette.risk)
+                    .accessibilityIdentifier("settings-edit-current-ledger")
+                    SettingsNavRow(title: "浏览、编辑与导出文件") { LocalLedgerFilesView() }
+                        .accessibilityIdentifier("settings-local-files")
+                    SettingsNavRow(title: "存储与同步") { LocalLedgerStorageView() }
+                        .accessibilityIdentifier("local-storage-settings")
+                } header: { TerminalSectionLabel(text: "本地账本").listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
+                Section {
+                    Button("切换账本") { session.chooseLedger() }
+                        .buttonStyle(.plain)
+                        .balancedFont(size: 15, weight: .text)
+                        .foregroundStyle(BalancedPalette.ink)
+                        .frame(minHeight: 44, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    Button {
+                        confirmingDeleteCurrent = true
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("删除当前账本").balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.expense)
+                            Text("永久抹除所有本地数据").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                        }
+                        .frame(minHeight: 44, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
                     .accessibilityIdentifier("settings-delete-current-ledger")
-                } footer: { Text("小组件会在本地账本更新后显示新的摘要。切换账本会保留文件；删除账本将永久抹除所有本地数据。") }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                } footer: {
+                    Text("小组件会在本地账本更新后显示新的摘要。切换账本会保留文件；删除账本将永久抹除所有本地数据。")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        .listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                }
             }
             Section {
-                LabeledContent("版本", value: "本地版 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
-                    .accessibilityIdentifier("settings-app-version")
+                HStack {
+                    Text("版本").balancedFont(size: 14).foregroundStyle(BalancedPalette.secondary)
+                    Spacer()
+                    Text("本地版 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
+                        .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                }
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("settings-app-version")
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
         }
+        .confirmationDialog("自动锁定", isPresented: $showingLockIntervalPicker, titleVisibility: .visible) {
+            ForEach(LedgerLockInterval.allCases) { interval in
+                Button(interval.title) { session.setLockInterval(interval) }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(BalancedPalette.page)
         .listStyle(.plain)
-        .font(.subheadline)
+        .listSectionSeparator(.hidden, edges: .top)
         .ledgerNavigation("设置", isRoot: isRoot)
         .sheet(isPresented: $compactTabConfigurationPresented) {
             CompactTabConfigurationView(initialDestinations: session.compactTabDestinations) { destinations in
@@ -159,6 +188,7 @@ struct SettingsView: View {
         } message: {
             Text("此操作将永久删除该账本在此设备上的所有文件、交易与配置，且不可恢复。")
         }
+        .toggleStyle(BalancedToggleStyle())
     }
 
     private var biometricDetail: String {
@@ -288,20 +318,21 @@ private struct CompactTabConfigurationView: View {
             List {
                 Section {
                     ForEach(destinations) { destination in
-                        HStack(spacing: LedgerSpacing.md) {
+                        HStack(spacing: 12) {
                             Image(systemName: destination.systemImage)
-                                .foregroundStyle(LedgerPalette.cobalt)
-                                .frame(width: 28)
+                                .font(.system(size: 15))
+                                .foregroundStyle(BalancedPalette.ink)
+                                .frame(width: 24)
                             Text(destination.title)
-                                .font(.system(.subheadline, design: .default, weight: .semibold))
-                                .foregroundStyle(LedgerPalette.ink)
-                            Spacer(minLength: LedgerSpacing.sm)
+                                .balancedFont(size: 15, weight: .text)
+                                .foregroundStyle(BalancedPalette.ink)
+                            Spacer(minLength: 8)
                             Button {
                                 remove(destination)
                             } label: {
                                 Image(systemName: "minus.circle.fill")
-                                    .font(.system(.headline, design: .default, weight: .medium))
-                                    .foregroundStyle(destinations.count > 1 ? LedgerPalette.risk : LedgerPalette.secondary)
+                                    .font(.system(size: 17, weight: .medium))
+                                    .foregroundStyle(destinations.count > 1 ? BalancedPalette.expense : BalancedPalette.meta)
                                     .frame(width: 44, height: 44)
                                     .contentShape(Rectangle())
                             }
@@ -310,53 +341,71 @@ private struct CompactTabConfigurationView: View {
                             .accessibilityLabel("移除\(destination.title)")
                             .accessibilityIdentifier("compact-tab-remove-\(destination.rawValue)")
                         }
+                        .frame(minHeight: 44)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     }
                     .onMove { source, destination in
                         destinations.move(fromOffsets: source, toOffset: destination)
                     }
                 } header: {
-                    Text("已显示 \(destinations.count)/\(LedgerDestination.compactTabLimit)")
+                    TerminalSectionLabel(text: "已显示 \(destinations.count)/\(LedgerDestination.compactTabLimit)")
+                        .listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 } footer: {
                     Text("拖动右侧排序控件调整显示顺序，底栏固定保留“更多”和“搜索”。")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        .listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 }
 
-                Section("可添加") {
+                Section {
                     ForEach(availableDestinations) { destination in
                         Button {
                             add(destination)
                         } label: {
-                            HStack(spacing: LedgerSpacing.md) {
+                            HStack(spacing: 12) {
                                 Image(systemName: destination.systemImage)
-                                    .foregroundStyle(LedgerPalette.cobalt)
-                                    .frame(width: 28)
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(BalancedPalette.ink)
+                                    .frame(width: 24)
                                 Text(destination.title)
-                                    .font(.system(.subheadline, design: .default, weight: .medium))
-                                    .foregroundStyle(LedgerPalette.ink)
-                                Spacer(minLength: LedgerSpacing.sm)
+                                    .balancedFont(size: 15)
+                                    .foregroundStyle(BalancedPalette.ink)
+                                Spacer(minLength: 8)
                                 Image(systemName: "plus.circle.fill")
-                                    .font(.system(.headline, design: .default, weight: .medium))
-                                    .foregroundStyle(LedgerPalette.cobalt)
+                                    .font(.system(size: 17, weight: .medium))
+                                    .foregroundStyle(BalancedPalette.ink)
                             }
+                            .frame(minHeight: 44)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .disabled(destinations.count >= LedgerDestination.compactTabLimit)
                         .accessibilityIdentifier("compact-tab-add-\(destination.rawValue)")
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     }
-                }
+                } header: { TerminalSectionLabel(text: "可添加").listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
 
                 Section {
                     Button("恢复默认") {
                         destinations = LedgerDestination.defaultCompactTabs
                     }
-                    .foregroundStyle(LedgerPalette.cobalt)
+                    .balancedFont(size: 15)
+                    .foregroundStyle(BalancedPalette.ink)
                     .accessibilityIdentifier("compact-tab-reset")
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
             }
             .accessibilityIdentifier("compact-tab-list")
             .environment(\.editMode, .constant(.active))
             .scrollContentBackground(.hidden)
-            .background(LedgerPalette.canvas)
+            .background(BalancedPalette.page)
             .navigationTitle("底部标签栏")
             .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
@@ -389,5 +438,103 @@ private struct CompactTabConfigurationView: View {
     private func remove(_ destination: LedgerDestination) {
         guard destinations.count > 1 else { return }
         destinations.removeAll { $0 == destination }
+    }
+}
+
+/// `.row row--tap` with a trailing `--ink-3` value and an `--edge` chevron —
+/// the settings rows that open a picker or editor (底部标签栏, 自动锁定, 名称).
+private struct SettingsRow: View {
+    let title: String
+    let value: String
+    var showsChevron = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Text(title).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                Spacer(minLength: 8)
+                Text(value).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                    .lineLimit(1)
+                    .multilineTextAlignment(.trailing)
+                if showsChevron {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(BalancedPalette.edge)
+                }
+            }
+            .frame(minHeight: 44)
+            .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+}
+
+/// `.row` title/sub pair used as a `Toggle` label — the row itself carries no
+/// affordance, so it gets no chevron and no rule (the toggle rows share one).
+private struct SettingsRowLabel: View {
+    let title: String
+    let detail: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+            if let detail {
+                Text(detail).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+            }
+        }
+        .frame(minHeight: 44, alignment: .leading)
+    }
+}
+
+/// `.row` — exactly one `--rule` hairline spanning the full row (label +
+/// trailing control), not just under the label text. Applied at the call
+/// site of every `Toggle` row so the rule reaches the same right edge as
+/// every other row's rule, including the toggle's own column.
+private struct SettingsRowRule: ViewModifier {
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+    }
+}
+
+private extension View {
+    func settingsRowRule() -> some View { modifier(SettingsRowRule()) }
+}
+
+/// A `.row row--tap` that pushes a destination, with an optional trailing
+/// value (`已启用`, a model id in mono) before the `--edge` chevron.
+private struct SettingsNavRow<Destination: View>: View {
+    let title: String
+    var value: String?
+    var valueMono = false
+    @ViewBuilder let destination: () -> Destination
+
+    var body: some View {
+        NavigationLink { destination() } label: {
+            HStack(spacing: 12) {
+                Text(title).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                Spacer(minLength: 8)
+                if let value {
+                    if valueMono {
+                        Text(value).balancedMono(size: 12).foregroundStyle(BalancedPalette.meta)
+                    } else {
+                        Text(value).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                    }
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(BalancedPalette.edge)
+            }
+            .frame(minHeight: 44)
+        }
+        .navigationLinkIndicatorVisibility(.hidden)
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 }

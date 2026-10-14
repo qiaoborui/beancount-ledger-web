@@ -106,6 +106,19 @@ final class LedgerSession: ObservableObject {
         let localRevision: UUID?
     }
     private var analysisCache: [AnalysisCacheKey: LedgerAnalysisResource] = [:]
+    /// Last resource shown per kind and range. Survives refreshes (which bump
+    /// the generation) so analysis pages open on the previous result while a
+    /// fresh one loads; cleared only with the session itself.
+    private struct AnalysisDisplayKey: Hashable {
+        let kind: LedgerAnalysisResourceKind
+        let context: URL
+        let start: String
+        let end: String
+        let currency: String
+    }
+    private var analysisDisplayCache: [AnalysisDisplayKey: LedgerAnalysisResource] = [:]
+    private var analysisPrefetchTask: Task<Void, Never>?
+    private var analysisInFlight: [AnalysisCacheKey: Task<LedgerAnalysisResource, Error>] = [:]
     @Published private(set) var localOverviewCategoriesError: String?
     var overviewTransactionStats: OverviewTransactionStats? {
         guard let ledger else { return nil }
@@ -1872,6 +1885,23 @@ final class LedgerSession: ObservableObject {
         let cacheKey = AnalysisCacheKey(kind: kind, start: range.start, end: range.queryEndExclusive,
             currency: valuationCurrency, generation: generation, localRevision: localTransactionPresentationRevision)
         if !forceRefresh, let cached = analysisCache[cacheKey] { return cached }
+        // The background prefetch and the page can ask for the same resource
+        // at once; join the request already in flight instead of repeating it.
+        if !forceRefresh, let pending = analysisInFlight[cacheKey] { return try await pending.value }
+        let task = Task { @MainActor in
+            try await self.fetchAnalysisResource(kind, cacheKey: cacheKey, contextURL: contextURL,
+                range: range, valuationCurrency: valuationCurrency, generation: generation)
+        }
+        analysisInFlight[cacheKey] = task
+        defer { if analysisInFlight[cacheKey] == task { analysisInFlight[cacheKey] = nil } }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
+    }
+
+    private func fetchAnalysisResource(_ kind: LedgerAnalysisResourceKind, cacheKey: AnalysisCacheKey,
+                                       contextURL: URL, range: LedgerDateRange, valuationCurrency: String,
+                                       generation: Int) async throws -> LedgerAnalysisResource {
         do {
             let repository = try repository(at: contextURL)
             let resource: LedgerAnalysisResource
@@ -1920,6 +1950,11 @@ final class LedgerSession: ObservableObject {
             // Only the current presentation's three resource kinds are retained.
             analysisCache = analysisCache.filter { $0.key.generation == generation && $0.key.localRevision == cacheKey.localRevision }
             analysisCache[cacheKey] = resource
+            let displayKey = AnalysisDisplayKey(kind: kind, context: contextURL, start: range.start,
+                end: range.queryEndExclusive, currency: valuationCurrency)
+            // Bounded: three kinds for the current range plus a couple of recent ranges.
+            if analysisDisplayCache.count >= 9 { analysisDisplayCache.removeAll() }
+            analysisDisplayCache[displayKey] = resource
             return resource
         } catch let error as LedgerAPIError {
             if case let .server(status, _) = error,
@@ -1942,7 +1977,24 @@ final class LedgerSession: ObservableObject {
         let currency = ledger?.valuationCurrency ?? storedValuationCurrency(for: contextURL)
         let key = AnalysisCacheKey(kind: kind, start: range.start, end: range.queryEndExclusive,
             currency: currency, generation: requestGeneration, localRevision: localTransactionPresentationRevision)
-        return analysisCache[key]
+        if let current = analysisCache[key] { return current }
+        // Possibly one refresh old; the page replaces it as soon as the
+        // current generation's resource arrives.
+        return analysisDisplayCache[AnalysisDisplayKey(kind: kind, context: contextURL, start: range.start,
+            end: range.queryEndExclusive, currency: currency)]
+    }
+
+    /// Warms income/expense for the selected range at low priority after the
+    /// ledger loads, so the page opens on data instead of a spinner.
+    private func prefetchAnalysis() {
+        analysisPrefetchTask?.cancel()
+        let generation = requestGeneration
+        analysisPrefetchTask = Task(priority: .utility) { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, !Task.isCancelled, generation == self.requestGeneration,
+                  self.phase == .ready, !self.privacyShielded else { return }
+            _ = try? await self.analysisResource(.incomeExpense)
+        }
     }
 
     func importDocuments() async throws -> [LedgerImportDocument] {
@@ -3418,6 +3470,7 @@ final class LedgerSession: ObservableObject {
                       expectedLocation == self.location, self.phase == .ready else { return }
                 await self.publishWidgetSnapshot(ledger: payload, contextURL: contextURL,
                     valuationCurrency: payload.valuationCurrency, generation: generation)
+                self.prefetchAnalysis()
             }
         } else {
             if local != nil { await refreshLocalOverviewCategories() }
@@ -3428,6 +3481,7 @@ final class LedgerSession: ObservableObject {
                 valuationCurrency: payload.valuationCurrency,
                 generation: generation
             )
+            prefetchAnalysis()
         }
     }
 
@@ -4738,6 +4792,7 @@ final class LedgerSession: ObservableObject {
     @discardableResult
     private func invalidateRequests(preservingOverviewCategories: Bool = false) -> Int {
         analysisCache.removeAll()
+        analysisInFlight.removeAll()
         accountDetailCache.removeAll()
         accountTrendCache.removeAll()
         resetLocalTransactionWindow()
@@ -4756,6 +4811,9 @@ final class LedgerSession: ObservableObject {
 
     @discardableResult
     private func invalidateSession() -> Int {
+        analysisDisplayCache.removeAll()
+        analysisPrefetchTask?.cancel()
+        analysisPrefetchTask = nil
         localResumeTask?.cancel()
         localResumeTask = nil
         localResumeID = nil

@@ -178,6 +178,29 @@ plugin "beancount.plugins.implicit_prices"
             self.assertEqual(json.loads(validate_only_json(str(self.root))), expected)
             self.assertEqual(json.loads(validate_json(str(self.root))), expected)
 
+    def test_stream_export_is_identical_for_copies_in_different_directories(self):
+        # Content-addressed reuse: a validated stage and the generation it
+        # becomes must export the same bytes.
+        files = {"main.bean": 'option "operating_currency" "CNY"\ninclude "tx/a.bean"\n2026-01-01 open Assets:Cash\n2026-01-01 open Expenses:Food\n',
+                 "tx/a.bean": '2026-01-02 * "Shop" "Lunch"\n  Expenses:Food 12.00 CNY\n  Assets:Cash\n'}
+        streams = []
+        with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second, tempfile.TemporaryDirectory() as output_dir:
+            for index, root in enumerate((first, second)):
+                for name, text in files.items():
+                    path = pathlib.Path(root) / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(text)
+                output = pathlib.Path(output_dir).resolve() / f"{index}.records"
+                reply = json.loads(ledger_validator.export_canonical_json(root, "main.bean", str(output)))
+                self.assertEqual(reply["errors"], [])
+                streams.append(output.read_bytes())
+        self.assertEqual(streams[0], streams[1])
+        options = {json.loads(line)["key"]: json.loads(line)["value"] for line in streams[0].splitlines()
+                   if json.loads(line)["type"] == "option"}
+        self.assertEqual(options["filename"], "main.bean")
+        self.assertEqual(options["include"], "tx/a.bean")
+        self.assertNotIn("input_hash", options)
+
     def test_stream_export_matches_canonical_without_whole_model_response(self):
         text = '''plugin "beancount.plugins.auto_accounts"
 plugin "beancount.plugins.implicit_prices"

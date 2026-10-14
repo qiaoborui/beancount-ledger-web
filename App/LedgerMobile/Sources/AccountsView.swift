@@ -81,8 +81,8 @@ struct AccountsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(session.accountPeriodBalancesAvailable && (session.ledger?.periodAccountBalancesAvailable ?? false) ? "期末净资产" : "当前净资产")
-                            .terminalFont(size: 12, weight: .semibold, design: .monospaced)
-                            .foregroundStyle(TerminalPalette.secondary)
+                            .balancedFont(size: 12, weight: .medium)
+                            .foregroundStyle(BalancedPalette.meta)
                         Spacer()
                         Button { session.toggleAmounts() } label: {
                             Image(systemName: session.amountsVisible ? "eye" : "eye.slash")
@@ -92,7 +92,8 @@ struct AccountsView: View {
                         }.buttonStyle(.plain)
                             .accessibilityLabel(session.amountsVisible ? "隐藏金额" : "显示金额")
                     }
-                    TerminalAmount(minorUnits: totals.netWorth, currency: session.ledger?.valuationCurrency ?? "CNY", color: TerminalPalette.ink, size: 28, showsCurrency: true)
+                    BalancedKeyTotalText.value(minorUnits: totals.netWorth, currency: session.ledger?.valuationCurrency ?? "CNY", color: BalancedPalette.ink, amountsVisible: session.amountsVisible)
+                        .accessibilityLabel(session.amountsVisible ? MoneyText.format(minorUnits: totals.netWorth, currency: session.ledger?.valuationCurrency ?? "CNY") : "金额已隐藏")
                     TerminalRule()
                     let metricLayout = dynamicTypeSize.isAccessibilitySize
                         ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
@@ -102,7 +103,7 @@ struct AccountsView: View {
                         if !dynamicTypeSize.isAccessibilitySize {
                             Rectangle().fill(TerminalPalette.line).frame(width: 1, height: 30).padding(.horizontal, 12)
                         }
-                        accountMetric("负债", value: totals.liabilities, color: TerminalPalette.negative, prefix: totals.liabilities > 0 ? "-" : "")
+                        accountMetric("负债", value: totals.liabilities, color: TerminalPalette.negative, prefix: totals.liabilities > 0 ? "−" : "")
                     }
                 }
                 .padding(.horizontal, 4).padding(.vertical, 8)
@@ -111,7 +112,7 @@ struct AccountsView: View {
             .listRowSeparator(.hidden)
 
             Section {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: dynamicTypeSize.isAccessibilitySize ? 3 : 5), spacing: 12) {
+                HStack(spacing: 22) {
                     ForEach(AccountFilterCategory.allCases) { filter in
                         let count = filter == .all
                             ? allSections.reduce(0) { $0 + $1.rows.count }
@@ -120,17 +121,21 @@ struct AccountsView: View {
                             LedgerFeedback.selection()
                             withAnimation(.easeOut(duration: 0.18)) { selectedFilter = filter }
                         } label: {
-                            VStack(spacing: 6) {
-                                Text(filter.rawValue).terminalFont(size: 13, weight: selectedFilter == filter ? .semibold : .regular).lineLimit(1).minimumScaleFactor(0.6)
-                                Text("\(count)").terminalFont(size: 10, design: .monospaced).foregroundStyle(TerminalPalette.secondary)
-                                Rectangle().fill(selectedFilter == filter ? TerminalPalette.accent : .clear).frame(height: 2)
+                            VStack(spacing: 7) {
+                                HStack(spacing: 4) {
+                                    Text(filter.rawValue).balancedFont(size: 13, weight: selectedFilter == filter ? .medium : .regular).lineLimit(1)
+                                    Text("\(count)").balancedFont(size: 11).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                                }
+                                .foregroundStyle(selectedFilter == filter ? BalancedPalette.ink : BalancedPalette.meta)
+                                Rectangle().fill(selectedFilter == filter ? BalancedPalette.ink : .clear).frame(height: 2)
                             }
-                            .foregroundStyle(selectedFilter == filter ? TerminalPalette.accent : TerminalPalette.secondary)
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .frame(minHeight: 44)
                         }.buttonStyle(.plain)
                         .accessibilityAddTraits(selectedFilter == filter ? .isSelected : [])
                     }
-                }.padding(.top, 2)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
             }
             .listRowBackground(Color.clear).listRowSeparator(.hidden)
 
@@ -138,9 +143,14 @@ struct AccountsView: View {
                 ForEach(sections) { section in
                     DisclosureGroup(isExpanded: expandedBinding(for: section.id)) {
                         ForEach(section.rows) { row in
-                            NavigationLink { AccountDetailView(account: row.account, currency: row.nativeCurrency) } label: {
+                            let detail = AccountDetailView(account: row.account, currency: row.nativeCurrency)
+                            let rowView = HStack(spacing: 8) {
                                 AccountRowView(row: row)
+                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(BalancedPalette.edge)
                             }
+                            NavigationLink(destination: detail) { rowView }
+                            .navigationLinkIndicatorVisibility(.hidden)
                             .listRowBackground(Color.clear)
                             .accessibilityIdentifier("account-link-" + row.account + "-" + row.nativeCurrency)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -160,10 +170,11 @@ struct AccountsView: View {
                             : AnyLayout(HStackLayout(spacing: 10))
                         layout {
                             Text(section.title)
-                                .terminalFont(size: 14, weight: .semibold)
+                                .balancedFont(size: 15, weight: .text)
                             Text("\(section.rows.count)")
-                                .terminalFont(size: 11, design: .monospaced)
-                                .foregroundStyle(TerminalPalette.secondary)
+                                .balancedFont(size: 11)
+                                .monospacedDigit()
+                                .foregroundStyle(BalancedPalette.meta)
                             if !dynamicTypeSize.isAccessibilitySize { Spacer() }
                             TerminalAmount(
                                 minorUnits: section.rows.filter { $0.periodBalancesAvailable ? !$0.periodValuationMissing : !$0.valuationMissing }
@@ -184,8 +195,10 @@ struct AccountsView: View {
                             let visibleIDs = Set(sections.map(\.id))
                             setExpandedSectionIDs(allVisibleSectionsExpanded ? activeExpandedSectionIDs.subtracting(visibleIDs) : activeExpandedSectionIDs.union(visibleIDs))
                         }
-                        .terminalFont(size: 12, weight: .semibold)
-                        .foregroundStyle(TerminalPalette.accent)
+                        .balancedFont(size: 12.5)
+                        .foregroundStyle(BalancedPalette.secondary)
+                        .padding(.bottom, 1)
+                        .overlay(alignment: .bottom) { Rectangle().fill(BalancedPalette.ruleStrong).frame(height: 1) }
                         .frame(minHeight: 44)
                         .accessibilityIdentifier("account-groups-toggle-all")
                     }
@@ -195,6 +208,8 @@ struct AccountsView: View {
                 ContentUnavailableView("暂无账户", systemImage: "building.columns", description: Text("当前筛选分类下暂无账户。"))
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(BalancedPalette.page)
         .listStyle(.plain)
         .listSectionSpacing(8)
         .tint(TerminalPalette.accent)
@@ -207,7 +222,7 @@ struct AccountsView: View {
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 16)).foregroundStyle(TerminalPalette.accent).frame(width: 44, height: 44)
             }.accessibilityLabel("账户操作")
-        ))
+        ), balanced: true)
         .navigationDestination(item: $session.externalAccount) { account in
             AccountDetailView(account: account.account, currency: account.currency)
         }
@@ -222,7 +237,7 @@ struct AccountsView: View {
     @ViewBuilder
     private func accountMetric(_ label: String, value: Int, color: Color, prefix: String = "") -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(label).terminalFont(size: 11, weight: .semibold, design: .monospaced).foregroundStyle(TerminalPalette.secondary)
+            Text(label).balancedFont(size: 11, weight: .medium).foregroundStyle(BalancedPalette.meta)
             TerminalAmount(minorUnits: value, currency: session.ledger?.valuationCurrency ?? "CNY", color: color, size: 15, prefix: prefix)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -428,7 +443,7 @@ struct AccountDetailView: View {
             }
             if let balance = session.ledger?.accountBalances.first(where: { $0.account == account && $0.currency == currency }) {
                 Section("当前余额") {
-                    AmountLabel(minorUnits: balance.amount, currency: balance.currency, font: .title2.weight(.semibold))
+                    AmountLabel(minorUnits: balance.amount, currency: balance.currency, font: .custom(BalancedWeight.medium.sansPostscriptName, size: 21, relativeTo: .title2))
                 }
             }
         }
@@ -684,7 +699,7 @@ private struct AccountDetailHero: View {
                     AmountLabel(
                         minorUnits: closingBalance,
                         currency: detail.currency,
-                        font: .title2.weight(.semibold),
+                        font: .custom(BalancedWeight.medium.sansPostscriptName, size: 21, relativeTo: .title2),
                         color: detail.account.hasPrefix("Liabilities:")
                             ? LedgerPalette.expense
                             : LedgerPalette.gold
@@ -696,18 +711,13 @@ private struct AccountDetailHero: View {
                 if let onReconcile {
                     Spacer()
                     Button(action: onReconcile) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.seal.fill")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text("校对")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundStyle(LedgerPalette.cobalt)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
+                        Text("校对")
+                            .balancedFont(size: 13)
+                            .foregroundStyle(BalancedPalette.secondary)
+                            .padding(.bottom, 1)
+                            .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                            .frame(minHeight: 44)
                     }
-                    .buttonStyle(PressScaleButtonStyle())
                     .accessibilityLabel("校对余额")
                 }
             }
@@ -720,7 +730,7 @@ private struct AccountDetailHero: View {
                     AmountLabel(
                         minorUnits: openingBalance,
                         currency: detail.currency,
-                        font: .system(.caption, design: .default, weight: .semibold),
+                        font: .custom(BalancedWeight.text.sansPostscriptName, size: 12, relativeTo: .caption),
                         color: LedgerPalette.olive
                     )
                     .lineLimit(1)
@@ -734,7 +744,7 @@ private struct AccountDetailHero: View {
                         minorUnits: periodChange,
                         currency: detail.currency,
                         prefix: periodChange > 0 ? "+" : "",
-                        font: .system(.caption, design: .default, weight: .semibold),
+                        font: .custom(BalancedWeight.text.sansPostscriptName, size: 12, relativeTo: .caption),
                         color: periodChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
                     )
                     .lineLimit(1)
@@ -807,7 +817,7 @@ private struct AccountBalanceTrendPanel: View {
                                 minorUnits: periodChange,
                                 currency: detail.currency,
                                 prefix: periodChange > 0 ? "+" : "",
-                                font: .system(.caption2, design: .default, weight: .semibold),
+                                font: .custom(BalancedWeight.medium.sansPostscriptName, size: 11.5, relativeTo: .caption2),
                                 color: periodChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
                             )
                             .lineLimit(1)
@@ -898,7 +908,7 @@ private struct AccountBalanceTrendPanel: View {
                     AmountLabel(
                         minorUnits: point.balance,
                         currency: detail.currency,
-                        font: .system(.caption2, design: .default, weight: .semibold),
+                        font: .custom(BalancedWeight.medium.sansPostscriptName, size: 11.5, relativeTo: .caption2),
                         color: LedgerPalette.ink
                     )
                 }
@@ -998,14 +1008,14 @@ private struct AccountHistoryRow: View {
                     minorUnits: row.change,
                     currency: currency,
                     prefix: row.change > 0 ? "+" : "",
-                    font: .system(.footnote, design: .default, weight: .semibold),
+                    font: .custom(BalancedWeight.medium.sansPostscriptName, size: 13, relativeTo: .footnote),
                     color: row.change >= 0 ? LedgerPalette.income : LedgerPalette.expense
                 )
                 .lineLimit(1)
                 AmountLabel(
                     minorUnits: row.balance,
                     currency: currency,
-                    font: .system(.caption2, design: .default, weight: .medium),
+                    font: .custom(BalancedWeight.text.sansPostscriptName, size: 11.5, relativeTo: .caption2),
                     color: LedgerPalette.secondary
                 )
                 .lineLimit(1)
@@ -1096,7 +1106,7 @@ private struct AccountRowView: View {
                             AmountLabel(
                                 minorUnits: row.periodBalancesAvailable ? row.closingValuation : row.valuation,
                                 currency: row.valuationCurrency,
-                                font: .system(.subheadline, design: .monospaced, weight: .semibold)
+                                font: .custom(BalancedWeight.text.sansPostscriptName, size: 15, relativeTo: .subheadline)
                             )
                             .lineLimit(1)
                         }
@@ -1112,7 +1122,7 @@ private struct AccountRowView: View {
                             AmountLabel(
                                 minorUnits: row.openingValuation,
                                 currency: row.valuationCurrency,
-                                font: .system(.caption2, design: .monospaced, weight: .medium),
+                                font: .custom(BalancedWeight.text.sansPostscriptName, size: 11.5, relativeTo: .caption2),
                                 color: TerminalPalette.secondary
                             )
                             .lineLimit(1)
@@ -1128,7 +1138,7 @@ private struct AccountRowView: View {
                                 minorUnits: row.periodValuationChange,
                                 currency: row.valuationCurrency,
                                 prefix: row.periodValuationChange > 0 ? "+" : "",
-                                font: .system(.caption2, design: .monospaced, weight: .semibold),
+                                font: .custom(BalancedWeight.medium.sansPostscriptName, size: 11.5, relativeTo: .caption2),
                                 color: row.periodValuationChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
                             )
                             .lineLimit(1)
@@ -1145,7 +1155,7 @@ private struct AccountRowView: View {
                         AmountLabel(
                             minorUnits: row.periodBalancesAvailable ? row.closingNativeAmount : row.nativeAmount,
                             currency: row.nativeCurrency,
-                            font: .system(.caption2, design: .monospaced, weight: .medium),
+                            font: .custom(BalancedWeight.text.sansPostscriptName, size: 11.5, relativeTo: .caption2),
                             color: TerminalPalette.secondary
                         )
                     }
