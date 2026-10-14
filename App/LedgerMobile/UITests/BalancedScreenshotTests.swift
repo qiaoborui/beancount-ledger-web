@@ -412,4 +412,77 @@ final class BalancedScreenshotTests: XCTestCase {
         throw XCTSkip("Simulator-only screenshot capture")
         #endif
     }
+
+    // MARK: - b07/b08 — 资产分析
+
+    func testCaptureAssetsAnalysis() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--tab=assets"]
+        app.launch()
+        Thread.sleep(forTimeInterval: 1.5)
+        save(app.screenshot(), as: "b07-assets-top")
+        for _ in 0..<3 { app.swipeUp() }
+        Thread.sleep(forTimeInterval: 0.6)
+        save(app.screenshot(), as: "b07-assets-table")
+
+        // There's no privacy toggle on the analysis page itself — amounts
+        // are a session-wide flag, so flip it from the 账户 tab (where the
+        // eye button lives) and come back.
+        app.buttons["账户"].firstMatch.tap()
+        let privacyToggle = app.buttons["隐藏金额"].firstMatch
+        XCTAssertTrue(privacyToggle.waitForExistence(timeout: 5), app.debugDescription)
+        privacyToggle.tap()
+        Thread.sleep(forTimeInterval: 0.4)
+        // The More tab keeps 资产分析 pushed from the initial `--tab=assets`
+        // launch argument (it's an overflow destination, not a root tab), so
+        // switching back to it lands straight on the masked analysis page.
+        app.buttons["更多"].firstMatch.tap()
+        Thread.sleep(forTimeInterval: 1)
+        // The scroll view instance survived the tab round trip, still
+        // scrolled from the b07 capture above — scroll back to the top.
+        for _ in 0..<5 { app.swipeDown() }
+        Thread.sleep(forTimeInterval: 0.4)
+        save(app.screenshot(), as: "b08-assets-masked-top")
+        for _ in 0..<3 { app.swipeUp() }
+        Thread.sleep(forTimeInterval: 0.6)
+        save(app.screenshot(), as: "b08-assets-masked-table")
+        #else
+        throw XCTSkip("Simulator-only screenshot capture")
+        #endif
+    }
+
+    // MARK: - b15/b16 — 账单导入复核
+
+    func testCaptureImportReview() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--safe-import-flow", "--tab=imports"]
+        app.launch()
+        let generate = app.buttons["import-generate-preview"]
+        XCTAssertTrue(generate.waitForExistence(timeout: 10), app.debugDescription)
+        generate.tap()
+        let preview = app.descendants(matching: .any)["import-preview-summary"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 15), app.debugDescription)
+        Thread.sleep(forTimeInterval: 0.8)
+
+        // A freshly generated preview starts with every candidate included
+        // (`includedEntryIDs` seeds from all entries), the opposite of b16's
+        // "nothing checked" frame — so uncheck one row first for b15's
+        // "部分条目勾选" (partial), then uncheck the rest for b16 (none).
+        let toggles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'import-entry-toggle-'"))
+        XCTAssertGreaterThan(toggles.count, 0, app.debugDescription)
+        toggles.element(boundBy: 0).tap()
+        Thread.sleep(forTimeInterval: 0.5)
+        save(app.screenshot(), as: "b15-import-review-partial-checked")
+
+        for index in 1..<toggles.count { toggles.element(boundBy: index).tap() }
+        Thread.sleep(forTimeInterval: 0.5)
+        save(app.screenshot(), as: "b16-import-review-none-checked")
+        #else
+        throw XCTSkip("Simulator-only screenshot capture")
+        #endif
+    }
 }

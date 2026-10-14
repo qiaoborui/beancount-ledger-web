@@ -1,14 +1,14 @@
 # 20261013-ios-balanced-conformance
 
 - Status: active
-- Last updated: 2026-10-14 10:40 +0800
+- Last updated: 2026-10-14 11:30 +0800
 - Branch: `codex/ios-balanced-conformance` (from `main` @ `b6ca236`)
 - Code revision covered: the branch tip that contains this note (first
   commit on top of `b6ca236`; pushed to origin). Overview, transactions and
   income/expense follow design batch 1; `docs/design/ios-balanced/` (batch 2)
   and batch 1 are committed under `docs/design/ios-balanced/` and
   `docs/design/ios-balanced/batch1/`.
-- PR: not yet opened
+- PR: https://github.com/qiaoborui/beancount-ledger-web/pull/506
 
 ## Goal and acceptance
 
@@ -41,9 +41,10 @@ UI text/content that misdescribes real behaviour.
    existing behaviour — keep.
 4. Pending inbox keeps title 待整理账单 and 关闭, and the inline payee pencil,
    because existing UI tests assert them.
-5. `docs/design/ios-balanced/` is still untracked — **user has not yet
-   confirmed** it should be committed with this PR (lead's recommendation:
-   yes, code references it).
+5. Design docs (batch 2 and batch 1) are committed under
+   `docs/design/ios-balanced/` with this PR.
+6. **Pushed-page titles stay centred** (user decision, 2026-10-14), even
+   though batch 1 draws them left-aligned. Root tab pages keep the left title.
 
 ## Foundation (done)
 
@@ -277,6 +278,51 @@ batch-2 rules inferred earlier.
   Files: `App/LedgerMobile/Sources/TerminalAnalysisViews.swift`.
 - New screenshot coverage: `testCaptureTransactionsIncomeFilter` (b04) and
   `testCaptureIncomeExpenseAnalysis` (b05/b06) in
+  `App/LedgerMobile/UITests/BalancedScreenshotTests.swift`.
+
+- 资产分析 rebuilt to batch 1 (b07 light, b08 dark · 金额已隐藏) and
+  screenshot-verified both: `.settle` (资产/负债/净值, 净值 always ink — not an
+  opposed income/expense pair, so never colored; 负债 also kept ink with a
+  sign, following the established 概览 precedent rather than the stray
+  `v-out` in the b07 HTML), a `.band` composition bar whose segments are
+  real proportions by account group (`LedgerAccount.group`: wealth/cash/
+  receivable, folded "credit"+"liability" into one 信用 bucket for the
+  账户组变动 table), a 净值走势 line chart, and an 账户组变动 3-column table
+  (期末/变动, from `AccountBalance.periodValuationChange`). Masked state
+  (b08) follows the HTML literally — composition bar and chart line/points
+  stay visible in shape (recoloured to ink-3, axis labels dropped) while
+  every number becomes `••••••`; the b08 copy ("走势保留形状，刻度和末值一并
+  隐藏…") is shown verbatim. 收入来源-equivalent 月末/每日 toggle (existing
+  feature, no b07/b08 equivalent) kept inline in the 净值走势 sechead.
+  File: `App/LedgerMobile/Sources/TerminalAnalysisViews.swift`
+  (`TerminalAssetsReport`).
+- 账单导入复核 review step rebuilt to batch 1 (b15 light · 部分条目勾选, b16
+  dark · 无勾选) and screenshot-verified both. `ImportEntryReviewRow` → `.imp`
+  (flat 18×18 checkbox box, not a filled circle; who/meta/cat stacked left,
+  amount right, no currency symbol; excluded rows dim to ink-3 instead of a
+  status colour; a missing category/funding account reads as plain ink-3
+  prose — "未选择账户" — instead of the old risk-red flag, since batch 1 has
+  no status colours). `previewSummary` → the `.settle` block (已勾选 N/M,
+  勾选金额合计, 重复或被排除, 将写入), with the existing channel/range,
+  AI-classification-status and warnings detail kept below it, reskinned to
+  ink tones (no more cobalt-accent card). `commitBar` → `.sheet-actions`:
+  left `.btn` reads 全部勾选 when nothing is checked yet or 全部展开 once
+  something is (matching b16 vs b15 — `expanded` was lifted from each row's
+  local `@State` to a parent `Set<String>` so "expand all" has something to
+  drive), right `.btn.primary` is the write action. Deliberate deviation:
+  the write button disables only while committing, not while the selection
+  is empty — b16 shows `aria-disabled` at 0 selected, but the app's real
+  write path treats 0-selected as a valid action ("仅归档原始账单", archive
+  the file with no transactions), so mirroring the mock's disabled state
+  would break existing functionality the task said to keep.
+  File: `App/LedgerMobile/Sources/NativeImportFlowView.swift`.
+  **Not done** (time-boxed out of this pass): `ImportHistoryView`'s entry/
+  history list and the first-step file-picker screen in
+  `NativeImportFlowView.swift` are still the old `LedgerPalette`/system-List
+  styling — the task asked for these to be reskinned too ("no frame — apply
+  batch-1 rules") but only the graded b15/b16 review step was reached.
+- New screenshot coverage: `testCaptureAssetsAnalysis` (b07/b08) and
+  `testCaptureImportReview` (b15/b16) in
   `App/LedgerMobile/UITests/BalancedScreenshotTests.swift`.
 
 ## Next concrete action
