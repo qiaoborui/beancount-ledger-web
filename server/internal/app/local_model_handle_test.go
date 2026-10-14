@@ -129,6 +129,12 @@ func TestLocalRuntimeCopyExcludesCanonicalScratch(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "canonical-stream", "orphan.records"), []byte("scratch"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(source, "canonical-cache", "build"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "canonical-cache", "build", "cached.records"), []byte("cache"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(source, "receipt.json"), []byte("{}"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -137,6 +143,9 @@ func TestLocalRuntimeCopyExcludesCanonicalScratch(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(destination, "canonical-stream")); !os.IsNotExist(err) {
 		t.Fatal("scratch copied")
+	}
+	if _, err := os.Stat(filepath.Join(destination, "canonical-cache")); !os.IsNotExist(err) {
+		t.Fatal("canonical cache copied into a stage")
 	}
 	if _, err := os.Stat(filepath.Join(destination, "receipt.json")); err != nil {
 		t.Fatal("receipt not copied", err)

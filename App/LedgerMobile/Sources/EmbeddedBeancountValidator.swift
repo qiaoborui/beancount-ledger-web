@@ -77,12 +77,13 @@ actor EmbeddedBeancountValidator {
         guard let pointer else { throw ValidationError(message: "本地导出内存不足") }
         defer { BRFree(pointer) }
         struct Reply: Decodable {
-            struct Diagnostic: Decodable { let message: String }
-            let errors: [Diagnostic]
+            let errors: [Result.Diagnostic]
             let stream: StreamDescriptor?
         }
         let reply = try JSONDecoder().decode(Reply.self, from: Data(String(cString: pointer).utf8))
-        guard reply.errors.isEmpty else { throw ValidationError(message: reply.errors.prefix(20).map(\.message).joined(separator: "\n")) }
+        // Exports now stand in for validate-only publication checks, so report
+        // diagnostics with the same file:line prefix.
+        guard reply.errors.isEmpty else { throw ValidationError(message: Self.message(for: reply.errors)) }
         guard let descriptor = reply.stream, descriptor.version == 1,
               descriptor.bytes > 0, descriptor.bytes <= 256 * 1024 * 1024,
               descriptor.entries >= 0, descriptor.sha256.count == 64 else {
@@ -92,6 +93,13 @@ actor EmbeddedBeancountValidator {
         #else
         throw ValidationError(message: "此构建缺少本地 Beancount 校验运行时")
         #endif
+    }
+
+    private static func message(for errors: [Result.Diagnostic]) -> String {
+        errors.prefix(20).map { diagnostic in
+            let location = diagnostic.filename.map { "\($0):\(diagnostic.lineno ?? 0) " } ?? ""
+            return location + diagnostic.message
+        }.joined(separator: "\n")
     }
 
     private func initializeIfNeeded() throws {
@@ -120,13 +128,7 @@ actor EmbeddedBeancountValidator {
         guard let pointer else { throw ValidationError(message: "本地校验器内存不足") }
         defer { BRFree(pointer) }
         let result = try Result(data: Data(String(cString: pointer).utf8), includeCanonical: includeCanonical)
-        guard result.errors.isEmpty else {
-            let message = result.errors.prefix(20).map { diagnostic in
-                let location = diagnostic.filename.map { "\($0):\(diagnostic.lineno ?? 0) " } ?? ""
-                return location + diagnostic.message
-            }.joined(separator: "\n")
-            throw ValidationError(message: message)
-        }
+        guard result.errors.isEmpty else { throw ValidationError(message: Self.message(for: result.errors)) }
         return result
         #else
         throw ValidationError(message: "此构建缺少本地 Beancount 校验运行时")

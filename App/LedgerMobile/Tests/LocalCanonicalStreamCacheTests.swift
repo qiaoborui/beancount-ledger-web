@@ -1,0 +1,138 @@
+import Foundation
+import XCTest
+@testable import LedgerMobile
+
+final class LocalCanonicalStreamCacheTests: XCTestCase {
+    private let version = String(repeating: "ab", count: 32)
+
+    private func makeRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CanonicalCache-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        return root
+    }
+
+    private func stream(_ text: String, in root: URL) throws -> (URL, EmbeddedBeancountValidator.StreamDescriptor) {
+        let url = root.appendingPathComponent(UUID().uuidString + ".records")
+        try Data(text.utf8).write(to: url)
+        return (url, .init(version: 1, entries: 1, bytes: text.utf8.count, sha256: String(repeating: "0", count: 64)))
+    }
+
+    func testRestoresStoredStreamByteForByte() throws {
+        let root = try makeRoot()
+        let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
+        let (source, descriptor) = try stream("{\"type\":\"header\"}\n", in: root)
+        XCTAssertFalse(cache.contains(version))
+        cache.store(source, sourceVersion: version, descriptor: descriptor)
+        XCTAssertTrue(cache.contains(version))
+        let output = root.appendingPathComponent("restored.records")
+        XCTAssertTrue(cache.restore(version, to: output))
+        XCTAssertEqual(try Data(contentsOf: output), try Data(contentsOf: source))
+    }
+
+    func testRejectsStreamWhoseSizeDisagreesWithDescriptor() throws {
+        let root = try makeRoot()
+        let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
+        let (source, descriptor) = try stream("abc\n", in: root)
+        let wrong = EmbeddedBeancountValidator.StreamDescriptor(version: 1, entries: 1,
+            bytes: descriptor.bytes + 1, sha256: descriptor.sha256)
+        cache.store(source, sourceVersion: version, descriptor: wrong)
+        XCTAssertFalse(cache.contains(version))
+    }
+
+    func testCorruptedEntryIsDroppedInsteadOfRestored() throws {
+        let root = try makeRoot()
+        let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
+        let (source, descriptor) = try stream("original\n", in: root)
+        cache.store(source, sourceVersion: version, descriptor: descriptor)
+        let cached = cache.directory.appendingPathComponent(version + ".records")
+        // Same length, different bytes: only the digest can catch it.
+        try FileManager.default.removeItem(at: cached)
+        try Data("tampered\n".utf8).write(to: cached)
+        let output = root.appendingPathComponent("restored.records")
+        XCTAssertFalse(cache.restore(version, to: output))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cached.path))
+    }
+
+    func testAnotherBuildNeverSeesAndThenRemovesOlderStreams() throws {
+        let root = try makeRoot()
+        let old = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
+        let (source, descriptor) = try stream("x\n", in: root)
+        old.store(source, sourceVersion: version, descriptor: descriptor)
+        let new = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-b")
+        XCTAssertFalse(new.contains(version))
+        new.store(source, sourceVersion: String(repeating: "cd", count: 32), descriptor: descriptor)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.directory.path))
+    }
+
+    func testKeepsOnlyTheMostRecentEntries() throws {
+        let root = try makeRoot()
+        let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
+        let versions = ["11", "22", "33"].map { String(repeating: $0, count: 32) }
+        for version in versions {
+            let (source, descriptor) = try stream(version + "\n", in: root)
+            cache.store(source, sourceVersion: version, descriptor: descriptor)
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        XCTAssertFalse(cache.contains(versions[0]))
+        XCTAssertTrue(cache.contains(versions[1]))
+        XCTAssertTrue(cache.contains(versions[2]))
+    }
+
+    func testRejectsMalformedSourceVersion() throws {
+        let root = try makeRoot()
+        let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
+        let (source, descriptor) = try stream("x\n", in: root)
+        cache.store(source, sourceVersion: "../escape", descriptor: descriptor)
+        XCTAssertFalse(cache.contains("../escape"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cache.directory.path))
+    }
+
+    /// End to end through the bundled runtimes: an invalid ledger is still
+    /// rejected with its location, and the published generation reuses the
+    /// stream its validation exported.
+    func testPublicationValidationKeepsDiagnosticsAndSeedsCache() async throws {
+        #if os(iOS)
+        let root = try makeRoot()
+        let source = root.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try Data("""
+        option "operating_currency" "CNY"
+        2026-01-01 open Assets:Cash
+        2026-01-01 open Expenses:Food
+        2026-01-02 * "Canteen" "Lunch"
+          Expenses:Food  12.00 CNY
+          Assets:Cash   -12.00 CNY
+
+        """.utf8).write(to: source.appendingPathComponent("main.bean"))
+        let catalog = LocalLedgerCatalog(rootDirectory: root.appendingPathComponent("managed"), engine: EmbeddedLocalLedgerEngine())
+        let descriptor = try await catalog.importLedger(from: source, name: "Cache fixture")
+        let repository = catalog.repository(for: descriptor)
+        let runtime = repository.workspace.rootDirectory.appendingPathComponent("runtime")
+        let cache = LocalCanonicalStreamCache(runtimeRoot: runtime)
+        let cached = try FileManager.default.contentsOfDirectory(at: cache.directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "records" }
+        XCTAssertEqual(cached.count, 1, "import validation should leave the exported stream for the first load")
+        let page = try await repository.bootstrap(start: "2026-01-01", end: "2026-02-01", today: "2026-01-15", valuationCurrency: "CNY")
+        XCTAssertEqual(page.transactions.count, 1)
+
+        let broken = root.appendingPathComponent("broken")
+        try FileManager.default.createDirectory(at: broken, withIntermediateDirectories: true)
+        try Data("""
+        2026-01-02 * "Unopened"
+          Expenses:Nowhere  12.00 CNY
+          Assets:Nowhere   -12.00 CNY
+
+        """.utf8).write(to: broken.appendingPathComponent("main.bean"))
+        do {
+            _ = try await catalog.importLedger(from: broken, name: "Broken fixture")
+            XCTFail("an invalid ledger must not publish")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("main.bean:"), error.localizedDescription)
+        }
+        #else
+        throw XCTSkip("Requires app-linked Go and Beancount runtimes")
+        #endif
+    }
+}
