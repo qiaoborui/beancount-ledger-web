@@ -3,6 +3,7 @@
 The shipped parser and plugins are trusted application code. Imported ledgers
 are data: preflight every parsed include before invoking loader transformations.
 """
+import functools
 import glob
 import hashlib
 import json
@@ -98,6 +99,14 @@ def _metadata_value(value):
     return str(value)
 
 
+@functools.lru_cache(maxsize=8192)
+def _relative_source(root, filename):
+    # Thousands of entries share a few source files; build each Path once.
+    if filename and Path(filename).is_absolute() and Path(filename).is_relative_to(root):
+        return str(Path(filename).relative_to(root))
+    return filename
+
+
 def _canonical_entry(root, entry, *, include_postings=True):
     """Export loader results directly; booking and plugin output stay intact.
 
@@ -106,9 +115,7 @@ def _canonical_entry(root, entry, *, include_postings=True):
     independently of the transformed postings used by the read model.
     """
     meta = entry.meta or {}
-    filename = meta.get("filename", "")
-    if filename and Path(filename).is_absolute() and Path(filename).is_relative_to(root):
-        filename = str(Path(filename).relative_to(root))
+    filename = _relative_source(root, meta.get("filename", ""))
     result = {"Kind": type(entry).__name__.lower(), "Date": entry.date.isoformat(),
               "File": filename, "Line": meta.get("lineno", 0),
               "Metadata": {key: _metadata_value(value) for key, value in meta.items()
@@ -272,13 +279,16 @@ def _write_canonical_stream(root, entries, options, output):
         stream_file = os.fdopen(fd, "wb")
         fd = None  # ownership transferred
         with stream_file as stream:
-            def emit(record, *, hashed=True):
+            def emit(record, *, hashed=True, prechecked=False):
                 nonlocal total
                 # The worst-case bound (every character escaped) is checked
                 # before encoding, so a single C-accelerated encode cannot
                 # build an over-budget string; chunked iterencode runs the
-                # pure-Python encoder and dominated export time.
-                _check_export_value(record, STREAM_RECORD_LIMIT)
+                # pure-Python encoder and dominated export time. Entries and
+                # postings were already bounded field by field before they
+                # were projected, so they skip a second recursive walk.
+                if not prechecked:
+                    _check_export_value(record, STREAM_RECORD_LIMIT)
                 encoded = encoder.encode(record).encode("utf-8") + b"\n"
                 if len(encoded) > STREAM_RECORD_LIMIT:
                     raise ValueError("Canonical export record exceeds byte budget")
@@ -298,11 +308,11 @@ def _write_canonical_stream(root, entries, options, output):
                 emit({"type": "commodity", "value": currency})
             for entry in entries:
                 _check_export_entry(entry)
-                emit({"type": "entry", "entry": _canonical_entry(root, entry, include_postings=False)})
+                emit({"type": "entry", "entry": _canonical_entry(root, entry, include_postings=False)}, prechecked=True)
                 if isinstance(entry, data.Transaction):
                     for posting in entry.postings:
                         _check_export_value(posting, STREAM_RECORD_LIMIT - 4096)
-                        emit({"type": "posting", "posting": _canonical_posting(posting)})
+                        emit({"type": "posting", "posting": _canonical_posting(posting)}, prechecked=True)
                 emit({"type": "end_entry"})
                 count += 1
             checksum = digest.hexdigest()

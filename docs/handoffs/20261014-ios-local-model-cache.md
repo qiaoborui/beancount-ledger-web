@@ -1,7 +1,7 @@
 # 20261014-ios-local-model-cache
 
 - Status: completed (merged with PR #507 after the user's device test)
-- Last updated: 2026-10-14 16:00 +0800
+- Last updated: 2026-10-14 19:45 +0800
 - Branch: `codex/ios-local-model-cache` (from `main` @ `3911814`)
 - PR: https://github.com/qiaoborui/beancount-ledger-web/pull/507
 
@@ -75,3 +75,18 @@ engine is authoritative (canonical Beancount stays the read model).
 1. Possible follow-ups: Go stream ingest speed, deferring widget refreshes,
    avoiding the extra staged Go ingest used only for the publication version
    check.
+
+## Round 2 (branch `codex/ios-perf-round2`, 2026-10-14)
+
+- Profiling showed Go is not the bottleneck: stream ingest about 75 ms and
+  first snapshot about 200 ms on the Mac for 15k transactions. The Python
+  canonical load plus export dominates each write.
+- Exporter: entries and postings are bounded field by field before
+  projection, so `emit` skips its second recursive `_check_export_value` walk
+  for them (the exact post-encode limit stays); per-file relative source paths
+  are memoized. Output is byte-identical. Export 850 ms -> 616 ms on the Mac.
+- Publication validation in the cached path no longer dispatches
+  `/api/ledger/version` on the stage: `model-source` already ran the same Go
+  confinement and source walk, and the extra dispatch only ingested a model.
+- Simulator probe (15k): one write 2.0 s -> 1.34 s, ledger import
+  1.85 s -> 0.88 s, first model build about 370 ms, warm pages 9-26 ms.

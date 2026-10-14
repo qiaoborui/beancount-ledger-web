@@ -371,10 +371,13 @@ actor LocalLedgerCatalog {
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
         return { root, entry in
             if let cached {
+                // `model-source` inside validateCanonical runs the same Go
+                // workspace confinement and source walk as /api/ledger/version,
+                // without registering (ingesting) a model just to read it.
                 try await cached.validateCanonical(workspaceRoot: root.path, runtimeRoot: runtimeRoot, entrypoint: entry)
-            } else {
-                try await canonical(root, entry)
+                return
             }
+            try await canonical(root, entry)
             _ = try await engine.dispatch(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                 entrypoint: entry, method: "GET", path: "/api/ledger/version"))
         }
