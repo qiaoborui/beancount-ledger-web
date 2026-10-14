@@ -199,7 +199,6 @@ struct EventTagReportView: View {
     @State private var windowScope: ReadScope?
     @State private var aggregateError: String?
     @State private var windowError: String?
-    @State private var aggregateLoading = false
     @State private var windowLoading = false
     @State private var active = false
     @State private var page = 0
@@ -270,49 +269,33 @@ struct EventTagReportView: View {
         ScrollView {
             VStack(spacing: 16) {
                 if session.isLocal, let aggregateError, aggregateCurrent {
-                    Text("事件汇总刷新失败：" + aggregateError).foregroundStyle(.secondary)
-                    Button("重试汇总") { reload += 1 }
+                    EventReportInlineNotice(text: "事件汇总刷新失败：" + aggregateError, action: "重试") { reload += 1 }
                 }
                 if !session.isLocal || aggregateCurrent {
                     eventHeroCard
                     if !report.categoryBreakdown.isEmpty { categoryBreakdownCard }
                     if report.dailySeries.count > 1 { dailyRhythmCard }
                 } else if let aggregateError {
-                    Text("事件汇总读取失败：" + aggregateError).foregroundStyle(.secondary)
-                    Button("重试汇总") { reload += 1 }
-                } else if aggregateLoading {
-                    ProgressView("正在核算完整事件…")
+                    EventReportErrorPanel(title: "事件汇总读取失败", detail: aggregateError, action: "重试汇总") { reload += 1 }
                 } else {
-                    Button("读取完整事件汇总") { reload += 1 }
+                    EventReportLoadingPanel(title: "正在核算完整事件…")
                 }
                 if session.isLocal {
-                    if let windowError {
-                        Text("事件流水读取失败：" + windowError).foregroundStyle(.secondary)
-                        Button("重试流水") { reload += 1 }
-                    }
-                    if windowLoading { ProgressView("正在读取事件流水…") }
                     if windowCurrent {
                         transactionsSection
-                        HStack {
-                            Button("上一页") {
-                                let target = max(0, displayedPage - 1)
-                                if page == target { reload += 1 } else { page = target }
-                            }.disabled(displayedPage == 0 || windowLoading)
-                            Spacer()
-                            Text("第 \(displayedPage + 1) 页").font(.caption)
-                                .accessibilityIdentifier("event-report-page")
-                            Spacer()
-                            Button("下一页") {
-                                let target = displayedPage + 1
-                                if page == target { reload += 1 } else { page = target }
-                            }.disabled(window?.isComplete != false || windowLoading)
-                        }
+                        paginationControls
+                    } else if let windowError {
+                        EventReportErrorPanel(title: "事件流水读取失败", detail: windowError, action: "重试流水") { reload += 1 }
+                    } else {
+                        EventReportLoadingPanel(title: "正在读取事件流水…")
                     }
-                } else { transactionsSection }
-                if let exportError {
-                    Text(exportError).foregroundStyle(.secondary)
+                } else {
+                    transactionsSection
                 }
-                if exportID != nil { ProgressView("正在生成完整事件文件…") }
+                if let message = exportError {
+                    EventReportErrorPanel(title: "完整事件文件生成失败", detail: message, action: "关闭") { exportError = nil }
+                }
+                if exportID != nil { EventReportLoadingPanel(title: "正在生成完整事件文件…") }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -343,11 +326,11 @@ struct EventTagReportView: View {
             }
         }
         .sheet(isPresented: $sharePresented) {
-            // Preserve existing full clipboard/image semantics until that API
-            // can consume a file. Never pass the current page as a complete list.
-            EventReportShareSheet(report: session.isLocal
-                ? EventTagCalculator.generateReport(tag: tag, from: allTransactions, accountLabels: accountLabels)
-                : report, accountLabels: accountLabels)
+            // Totals and category shares always come from the complete aggregate.
+            // The local transaction list is a bounded window, so the sheet labels
+            // it as a preview and points at the complete Markdown file export.
+            EventReportShareSheet(report: report, accountLabels: accountLabels,
+                completeTransactionCount: session.isLocal ? aggregate?.summary.transactionCount : nil)
                 .ledgerPrivacyProtectedSheet()
         }
         .sheet(item: $export, onDismiss: cancelExport) { value in
@@ -393,8 +376,7 @@ struct EventTagReportView: View {
     private func loadAggregate() async {
         guard active, scope.readable else { return }
         let key = aggregateRequest
-        aggregateLoading = true; aggregateError = nil
-        defer { if key == aggregateRequest { aggregateLoading = false } }
+        aggregateError = nil
         do {
             let result = try await session.localEventTagReport(tag)
             guard !Task.isCancelled, key == aggregateRequest, scope.readable else { return }
@@ -441,11 +423,28 @@ struct EventTagReportView: View {
         }
     }
 
+    private var paginationControls: some View {
+        HStack {
+            Button("上一页") {
+                let target = max(0, displayedPage - 1)
+                if page == target { reload += 1 } else { page = target }
+            }.disabled(displayedPage == 0 || windowLoading)
+            Spacer()
+            Text("第 \(displayedPage + 1) 页").font(.caption)
+                .accessibilityIdentifier("event-report-page")
+            Spacer()
+            Button("下一页") {
+                let target = displayedPage + 1
+                if page == target { reload += 1 } else { page = target }
+            }.disabled(window?.isComplete != false || windowLoading)
+        }
+    }
+
     private var eventHeroCard: some View {
         VStack(spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("事件独立核算")
+                    Text(session.isLocal ? "事件独立核算 · 全部时间" : "事件独立核算")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(LedgerPalette.secondary)
                     Text("#" + tag)
@@ -746,16 +745,100 @@ struct EventTagReportView: View {
     }
 }
 
+// MARK: - Event Report Status Components
+
+/// Text action shared by the status rows: Balanced `.link` (ink-2 text over a
+/// 1px strong rule), never an accent-coloured button.
+private struct EventReportLink: View {
+    let title: String
+    let perform: () -> Void
+
+    var body: some View {
+        Button(action: perform) {
+            Text(title).balancedFont(size: 13, weight: .medium).foregroundStyle(BalancedPalette.secondary)
+                .padding(.bottom, 2)
+                .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// One stable loading row. A plain inline `ProgressView` sat above the scroll
+/// content and shifted layout as it appeared, disappeared and duplicated.
+struct EventReportLoadingPanel: View {
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small).tint(BalancedPalette.meta)
+            Text(title).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 14)
+        .frame(minHeight: 44)
+        .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+    }
+}
+
+/// Inline retry affordance for a stale-but-usable aggregate.
+struct EventReportInlineNotice: View {
+    let text: String
+    var action: String? = nil
+    var perform: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(text).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            if let action, let perform { EventReportLink(title: action, perform: perform) }
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+/// Error row: title, detail and a retry link. No status colour or card.
+struct EventReportErrorPanel: View {
+    let title: String
+    let detail: String
+    let action: String
+    let perform: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).balancedFont(size: 15, weight: .semibold).foregroundStyle(BalancedPalette.ink)
+            Text(detail).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                .fixedSize(horizontal: false, vertical: true)
+            EventReportLink(title: action, perform: perform)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 14)
+        .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+    }
+}
+
 // MARK: - Event Report Share Sheet
 
 struct EventReportShareSheet: View {
     @Environment(\.dismiss) private var dismiss
     let report: EventTagReport
     let accountLabels: [String: String]
+    /// Complete all-history transaction count. The local `report.transactions`
+    /// array is only the first bounded page, so the preview must say so.
+    var completeTransactionCount: Int? = nil
 
     @State private var renderedImage: UIImage?
     @State private var isRendering = false
     @State private var copiedFeedback = false
+
+    private var previewIsPartial: Bool {
+        guard let completeTransactionCount else { return false }
+        return completeTransactionCount > report.transactions.count
+    }
 
     var body: some View {
         NavigationStack {
@@ -765,6 +848,12 @@ struct EventReportShareSheet: View {
                     EventReportShareCard(report: report, accountLabels: accountLabels)
                         .padding(16)
 
+                    if previewIsPartial, let completeTransactionCount {
+                        EventReportInlineNotice(
+                            text: "长图与文本仅含前 \(report.transactions.count) 笔，共 \(completeTransactionCount) 笔。完整清单请用「导出完整 Markdown 文件」。")
+                            .padding(.horizontal, 16)
+                    }
+
                     // Action buttons
                     VStack(spacing: 10) {
                         Button {
@@ -772,7 +861,7 @@ struct EventReportShareSheet: View {
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "square.and.arrow.up")
-                                Text("分享 / 保存结算单长图")
+                                Text(previewIsPartial ? "分享 / 保存结算单长图（前 \(report.transactions.count) 笔）" : "分享 / 保存结算单长图")
                             }
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(.white)
@@ -787,7 +876,7 @@ struct EventReportShareSheet: View {
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: copiedFeedback ? "checkmark" : "doc.on.doc")
-                                Text(copiedFeedback ? "已复制文本明细" : "复制 Markdown 文本清单")
+                                Text(copiedFeedback ? "已复制文本明细" : (previewIsPartial ? "复制 Markdown 预览清单" : "复制 Markdown 文本清单"))
                             }
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(LedgerPalette.ink)
