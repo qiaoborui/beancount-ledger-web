@@ -32,6 +32,9 @@ targets:
       - target: LedgerShare
         embed: true
     postBuildScripts:
+      - name: Stamp source commit
+        script: bash "$SRCROOT/../../scripts/stamp-ios-build-commit.sh"
+        basedOnDependencyAnalysis: false
       - name: Package embedded Beancount runtime
         script: bash "$SRCROOT/../../scripts/build-beancount-ios-resources.sh"
         basedOnDependencyAnalysis: false
