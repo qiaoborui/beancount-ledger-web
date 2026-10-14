@@ -63,16 +63,24 @@ struct GlobalSearchView: View {
             List {
                 if (loading || localSearching) && hasSearch {
                     ProgressView("正在搜索…").accessibilityIdentifier("global-search-loading")
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
                 if let errorMessage {
                     Section {
-                        Text(errorMessage).foregroundStyle(.secondary)
-                        Button("重新加载") { Task { await load(forceRefresh: true) } }
+                        Text(errorMessage).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                        Button("重新加载") { Task { await load(forceRefresh: true) } }.buttonStyle(.balanced(.quiet))
                     }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
                 if let documentError {
-                    Text(documentError).foregroundStyle(.secondary)
-                    Button("重新加载文件") { Task { await load() } }
+                    Section {
+                        Text(documentError).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                        Button("重新加载文件") { Task { await load() } }.buttonStyle(.balanced(.quiet))
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
                 if !hasSearch {
                     if !session.recentGlobalSearches.isEmpty {
@@ -81,56 +89,80 @@ struct GlobalSearchView: View {
                                 Button {
                                     query = recent
                                     session.recordGlobalSearch(recent)
-                                } label: { Label(recent, systemImage: "clock.arrow.circlepath") }
+                                } label: {
+                                    HStack {
+                                        Text(recent).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                                        Spacer()
+                                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(BalancedPalette.edge)
+                                    }
+                                    .frame(minHeight: 44)
+                                }
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
                             }
                         } header: {
                             HStack {
-                                Text("最近搜索")
+                                Text("最近搜索").balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.meta)
                                 Spacer()
                                 Button("清除") { session.clearRecentGlobalSearches() }
-                                    .font(.subheadline)
+                                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
                             }
                             .textCase(nil)
                         }
+                        .listRowBackground(Color.clear)
                     } else {
-                        ContentUnavailableView("搜索整个账本", systemImage: "magnifyingglass",
-                                               description: Text("查找流水、账户、标签和文件"))
+                        BalancedEmptyState(glyph: "magnifyingglass", title: "搜索整个账本", detail: "查找流水、账户、标签和文件")
+                            .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
+                    Section {
+                        searchHintRow(label: "商户与摘要", value: "任意文字")
+                        searchHintRow(label: "账户", value: "Assets:Bank:CMB", valueMono: true)
+                        searchHintRow(label: "标签", value: "#装修")
+                        searchHintRow(label: "金额", value: "38.5 以上")
+                        searchHintRow(label: "日期", value: "2026-03")
+                    } header: { searchSectionHeader("可以搜什么") }
+                    .listRowBackground(Color.clear)
                 } else if results.isEmpty && !loading && !localSearching && errorMessage == nil && documentError == nil
                             && (!session.isLocal || (localSearchCompleted &&
                                 ((session.globalSearchScope != .all && session.globalSearchScope != .documents) || documentsLoaded))) {
-                    ContentUnavailableView {
-                        Label("没有符合条件的结果", systemImage: "magnifyingglass")
-                    } description: {
-                        Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    BalancedEmptyState(
+                        glyph: "magnifyingglass",
+                        title: "没有符合条件的结果",
+                        detail: query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                              ? "试试其他搜索范围或筛选条件。"
-                             : "未找到“\(query)”的匹配结果，试试其他关键词或调整筛选条件。")
-                    }
+                             : "未找到“\(query)”的匹配结果，试试其他关键词。"
+                    )
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 } else {
                     if !results.destinations.isEmpty {
-                        Section("功能") {
+                        Section {
                             ForEach(results.destinations) { destination in
                                 NavigationLink { LedgerDestinationView(destination: destination).toolbar(.visible, for: .navigationBar).onAppear(perform: recordResultOpen) } label: {
                                     Label(destination.title, systemImage: destination.systemImage)
+                                        .balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
                                 }
                             }
-                        }
+                        } header: { searchSectionHeader("功能") }
+                    .listRowBackground(Color.clear)
                     }
                     if !results.accounts.isEmpty {
-                        Section("账户 · \(results.accounts.count)") {
+                        Section {
                             ForEach(results.accounts, id: \.account) { account in
                                 NavigationLink { AccountDetailView(account: account.account, currency: account.currency).toolbar(.visible, for: .navigationBar).onAppear(perform: recordResultOpen) } label: {
-                                    VStack(alignment: .leading) {
-                                        Text(account.label)
-                                        Text(account.account).font(.caption).foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(account.label).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                                        Text(account.account).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
                                     }
                                 }
                             }
-                        }
+                        } header: { searchSectionHeader("账户", aside: "\(results.accounts.count) 条") }
+                    .listRowBackground(Color.clear)
                     }
                     if !results.tags.isEmpty {
-                        Section("标签") {
+                        Section {
                             ForEach(results.tags, id: \.self) { tag in
                                 NavigationLink {
                                     if session.isLocal {
@@ -145,34 +177,40 @@ struct GlobalSearchView: View {
                                         .onAppear(perform: recordResultOpen)
                                         .toolbar(.visible, for: .navigationBar)
                                     }
-                                } label: { Label(tag, systemImage: "number") }
+                                } label: {
+                                    Label(tag, systemImage: "number").balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                                }
                                 .accessibilityIdentifier("global-search-tag-" + tag)
                                 .disabled(session.isLocal && localSearching)
                             }
-                        }
+                        } header: { searchSectionHeader("标签") }
+                    .listRowBackground(Color.clear)
                     }
                     if !results.transactions.isEmpty {
-                        Section("流水 · \(localWindow?.result.matchedCount ?? results.transactions.count)") {
+                        Section {
                             ForEach(results.transactions.prefix(session.isLocal ? 100 : limit)) { transaction in
                                 transactionLink(transaction).disabled(session.isLocal && localSearching)
                             }
                             if session.isLocal {
                                 HStack {
                                     Button("上一页") { localPageIndex -= 1 }
+                                        .buttonStyle(.balanced(.quiet))
                                         .disabled(localPageIndex == 0 || localSearching)
                                     Spacer()
-                                    Text("第 \(localPageIndex + 1) 页").font(.caption).foregroundStyle(.secondary)
+                                    Text("第 \(localPageIndex + 1) 页").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                                     Spacer()
                                     Button("下一页") { localPageIndex += 1 }
+                                        .buttonStyle(.balanced(.quiet))
                                         .disabled(localWindow?.continuation == nil || localSearching)
                                 }
                             } else if results.transactions.count > limit {
-                                Button("显示更多流水") { limit += 50 }
+                                Button("显示更多流水") { limit += 50 }.buttonStyle(.balanced(.quiet))
                             }
-                        }
+                        } header: { searchSectionHeader("流水", aside: "\(localWindow?.result.matchedCount ?? results.transactions.count) 条") }
+                    .listRowBackground(Color.clear)
                     }
                     if !results.documents.isEmpty {
-                        Section("导入文件 · \(results.documents.count)") {
+                        Section {
                             ForEach(results.documents) { document in
                                 NavigationLink {
                                     List {
@@ -184,9 +222,15 @@ struct GlobalSearchView: View {
                                     }.navigationTitle("导入文件")
                                         .onAppear(perform: recordResultOpen)
                                         .toolbar(.visible, for: .navigationBar)
-                                } label: { Label(document.name ?? "账单归档", systemImage: "doc.text") }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(document.name ?? "账单归档").balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                                        Text(document.path ?? "").balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta).lineLimit(1)
+                                    }
+                                }
                             }
-                        }
+                        } header: { searchSectionHeader("导入文件", aside: "\(results.documents.count) 条") }
+                    .listRowBackground(Color.clear)
                     }
                 }
             }
@@ -195,11 +239,11 @@ struct GlobalSearchView: View {
             .scrollContentBackground(.hidden)
         }
         .navigationTitle("搜索")
-        .terminalNativeChrome()
+        .tint(BalancedPalette.ink)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(usesNativeSearchTab ? .hidden : .automatic, for: .navigationBar)
         .scrollContentBackground(.hidden)
-        .background(LedgerPalette.canvas)
+        .background(BalancedPalette.page)
         .scrollDismissesKeyboard(.interactively)
         .task(id: DocumentRequest(readable: session.isLocal ? localReadable : true,
             revision: session.localTransactionPresentationRevision, invalidation: session.localGlobalSearchInvalidation)) {
@@ -245,10 +289,17 @@ struct GlobalSearchView: View {
         .onChange(of: session.transactionMutationStates) { _, _ in revision += 1 }
     }
 
+    /// `.txn` row for search results: no icon tile, Plex tabular amount in
+    /// direction colour with a scaled `¥`, full-column rule — mirrors
+    /// `BalancedLedgerTransactionRow` (TransactionViews.swift), which is
+    /// private to that file.
     private func transactionLink(_ transaction: LedgerTransaction) -> some View {
         NavigationLink { TransactionDetailView(transaction: transaction).toolbar(.visible, for: .navigationBar).onAppear(perform: recordResultOpen) } label: {
-            TransactionRow(transaction: transaction, accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? []))
+            GlobalSearchTransactionRow(transaction: transaction, accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? []))
         }
+        // `.txn` carries no disclosure chevron in the design — the row is the
+        // tap target, the amount is the right edge.
+        .navigationLinkIndicatorVisibility(.hidden)
         .accessibilityIdentifier("transaction-row-\(transaction.source.line)")
         .ledgerTransactionActions(transaction)
     }
@@ -406,6 +457,29 @@ struct GlobalSearchView: View {
 
     private func recordResultOpen() { session.recordGlobalSearch(query) }
 
+    private func searchSectionHeader(_ text: String, aside: String? = nil) -> some View {
+        BalancedSectionLabel(text: text, aside: aside).textCase(nil)
+    }
+
+    /// A `.key`-style example row in the "可以搜什么" list (d05): a label and a
+    /// sample value, read-only — it documents what the query syntax accepts,
+    /// not a control.
+    private func searchHintRow(label: String, value: String, valueMono: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).balancedFont(size: 14).foregroundStyle(BalancedPalette.secondary)
+            Spacer()
+            Group {
+                if valueMono {
+                    Text(value).balancedMono(size: 12)
+                } else {
+                    Text(value).balancedFont(size: 14)
+                }
+            }
+            .foregroundStyle(BalancedPalette.ink)
+        }
+        .padding(.vertical, 5)
+    }
+
     private var searchHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -415,12 +489,11 @@ struct GlobalSearchView: View {
                 Spacer()
                 Button { filtersPresented = true } label: {
                     Image(systemName: "line.3.horizontal.decrease")
-                        .font(.title3)
+                        .font(.system(size: 17, weight: .regular))
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(session.globalSearchFilters.isEmpty ? Color.primary : Color.accentColor)
-                .background(.quaternary, in: Circle())
+                .foregroundStyle(session.globalSearchFilters.isEmpty ? BalancedPalette.secondary : BalancedPalette.ink)
                 .accessibilityLabel("筛选")
                 .accessibilityValue(session.globalSearchFilters.isEmpty ? "全部日期" : "\(session.globalSearchFilters.count) 项条件")
                 .accessibilityIdentifier("global-search-filters")
@@ -526,7 +599,7 @@ private struct LocalSearchTagTransactionsView: View {
                         NavigationLink {
                             TransactionDetailView(transaction: transaction)
                         } label: {
-                            TransactionRow(transaction: transaction,
+                            GlobalSearchTransactionRow(transaction: transaction,
                                 accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? []))
                         }
                         .ledgerTransactionActions(transaction)
@@ -578,6 +651,61 @@ private struct LocalSearchTagTransactionsView: View {
             if !Task.isCancelled, captured == key { errorMessage = "读取已中断，请重试。" }
         }
         catch { if !Task.isCancelled, captured == key { errorMessage = error.localizedDescription } }
+    }
+}
+
+/// `.txn` row for search results (d06): a 34pt `MM-DD` lede gutter, payee over
+/// category/tag metadata, amount right-aligned in direction colour with a
+/// scaled `¥` — no icon tile, no mono amount, no disclosure chevron.
+/// Equivalent to `BalancedLedgerTransactionRow` in TransactionViews.swift,
+/// which is private to that file and has no date gutter (it is grouped under a
+/// `.daysep` instead).
+private struct GlobalSearchTransactionRow: View {
+    let transaction: LedgerTransaction
+    let accountLabels: [String: String]
+
+    private var presentation: TransactionPresentation { TransactionPresentation(transaction: transaction) }
+    private var visual: TransactionVisualCategory {
+        TransactionVisualCategory.resolve(transaction: transaction, presentation: presentation, accountLabels: accountLabels)
+    }
+
+    /// `03-28` — the design's `.lede` column drops the year from `yyyy-MM-dd`.
+    private var ledeDate: String {
+        let parts = transaction.date.split(separator: "-")
+        guard parts.count == 3 else { return transaction.date }
+        return "\(parts[1])-\(parts[2])"
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(ledeDate)
+                .balancedFont(size: 12)
+                .monospacedDigit()
+                .foregroundStyle(BalancedPalette.meta)
+                .padding(.top, 2)
+                .frame(width: 34, alignment: .leading)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(presentation.title).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(visual.categoryLabel).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    ForEach(transaction.tags ?? [], id: \.self) { tag in
+                        Text("#" + tag).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    }
+                }
+            }
+            Spacer(minLength: 8)
+            BalancedAmount(
+                minorUnits: presentation.minorUnits,
+                currency: presentation.currency,
+                size: 15,
+                color: presentation.kind == .income ? BalancedPalette.income : presentation.kind == .expense ? BalancedPalette.expense : BalancedPalette.ink,
+                showsCurrency: true,
+                currencyScale: 0.78
+            )
+        }
+        .padding(.vertical, 11)
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+        .contentShape(Rectangle())
     }
 }
 

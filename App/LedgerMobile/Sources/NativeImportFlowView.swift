@@ -16,6 +16,7 @@ struct NativeImportFlowView: View {
     @State private var preview: LedgerImportPreview?
     @State private var reviewedEntries: [LedgerImportEntry] = []
     @State private var includedEntryIDs: Set<String> = []
+    @State private var expandedEntryIDs: Set<String> = []
     @State private var selectedTagEntryIDs: Set<String> = []
     @State private var bulkTagInput = ""
     @FocusState private var bulkTagInputFocused: Bool
@@ -459,33 +460,30 @@ struct NativeImportFlowView: View {
         }
     }
 
+    /// `.field-row` idiom for the picker step: flat rows, no icon chips, no
+    /// rounded cards, ink-3 labels, a 1px rule under each row — the same
+    /// treatment `AddCategoryView`/`LocalLedgerStorageView` already use for
+    /// List-based forms.
     private var preparationView: some View {
         List {
             if let errorMessage {
                 Section { StatusBanner(message: errorMessage) { self.errorMessage = nil } }
+                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
             }
-            Section("账单文件") {
+            Section {
                 HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                            .fill(LedgerPalette.cobalt.opacity(0.12))
-                            .frame(width: 38, height: 38)
-                        Image(systemName: file.isZIP ? "doc.zipper" : "doc.text")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(LedgerPalette.cobalt)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(file.name)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(LedgerPalette.ink)
-                            .lineLimit(1)
-                        Text(fileSizeText)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(LedgerPalette.secondary)
+                    Image(systemName: file.isZIP ? "doc.zipper" : "doc.text")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(BalancedPalette.secondary)
+                        .frame(width: 32)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(file.name).balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                        Text(fileSizeText).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                     }
                 }
-                .padding(.vertical, 2)
-            }
+                .padding(.vertical, 6)
+            } header: { TerminalSectionLabel(text: "账单文件").listRowBackground(BalancedPalette.page) }
+
             Section {
                 Picker("账单渠道", selection: $providerOverride) {
                     Text("自动识别").tag(String?.none)
@@ -493,49 +491,55 @@ struct NativeImportFlowView: View {
                         Text(provider.label).tag(Optional(provider.id))
                     }
                 }
+                .balancedFont(size: 15).tint(BalancedPalette.ink)
                 .accessibilityIdentifier("import-provider-menu")
             } footer: {
-                Text(selectedProviderDetail)
+                Text(selectedProviderDetail).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             }
+
             if file.isZIP {
-                Section("压缩包密码") {
+                Section {
                     SecureField("输入账单压缩包密码", text: $archivePassword)
+                        .balancedFont(size: 15)
                         .textContentType(.password)
                         .accessibilityIdentifier("import-archive-password")
-                }
+                } header: { TerminalSectionLabel(text: "压缩包密码").listRowBackground(BalancedPalette.page) }
             }
+
             if providerOverride == nil || providerOverride == "alipay" {
                 Section {
                     Toggle("支付宝基金 9.99 → 10.00 补差", isOn: $alipayFundRounding)
+                        .balancedFont(size: 15).toggleStyle(BalancedToggleStyle())
                 } footer: {
-                    Text("仅在确认该基金定投需要补 0.01 时开启。")
+                    Text("仅在确认该基金定投需要补 0.01 时开启。").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                 }
             }
+
             Section {
                 Button {
                     Task { await generatePreview() }
                 } label: {
                     HStack(spacing: 8) {
                         if isPreparing {
-                            ProgressView().tint(LedgerPalette.onBrand)
+                            ProgressView().tint(BalancedPalette.page)
                             Text("正在生成预览...")
                         } else {
-                            Image(systemName: "sparkles")
                             Text("生成导入预览")
                         }
                     }
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(LedgerPalette.onBrand)
-                    .frame(maxWidth: .infinity, minHeight: 46)
-                    .background(LedgerPalette.cobalt)
-                    .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
                 }
-                .buttonStyle(PressScaleButtonStyle())
+                .buttonStyle(.balanced(.primary, disabled: isPreparing))
+                .disabled(isPreparing)
+                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 8, trailing: 20))
+                .listRowBackground(Color.clear).listRowSeparator(.hidden)
                 .accessibilityIdentifier("import-generate-preview")
             } footer: {
                 Text("预览会检查渠道与重复交易。核对并确认后写入账本，关闭页面会丢弃当前预览。")
+                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             }
         }
+        .listRowSeparatorTint(BalancedPalette.rule)
+        .tint(BalancedPalette.ink)
         .disabled(isPreparing)
         .scrollDismissesKeyboard(.interactively)
         .accessibilityIdentifier("native-import-preparation")
@@ -572,111 +576,134 @@ struct NativeImportFlowView: View {
         }
     }
 
+    /// `.settle` filter-result block (b15/b16): 已勾选 N/M, 勾选金额合计, 重复或被
+    /// 排除, 将写入 — the one verified total on this screen. The channel/range/
+    /// classification/warnings detail that isn't in the mock stays below it,
+    /// reskinned to ink tones instead of the old cobalt-accent card.
     private func previewSummary(_ preview: LedgerImportPreview) -> some View {
-        Section {
-            DisclosureGroup {
-                LabeledContent("识别渠道", value: providerLabel(preview.provider))
-                LabeledContent("交易区间", value: importRangeText(preview))
-                LabeledContent("候选交易", value: "\(preview.candidateCount) 条")
-                if preview.skippedDuplicateCount > 0 {
-                    LabeledContent("已跳过重复", value: "\(preview.skippedDuplicateCount) 条")
+        let currency = reviewedEntries.first?.currency ?? "CNY"
+        let selectedTotal = selectedEntries.reduce(0) { $0 + Int(($1.amount * 100).rounded()) }
+        return Section {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(providerLabel(preview.provider) + " · " + importRangeText(preview))
+                        .balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.secondary).lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text("已勾选 \(selectedEntries.count) / \(reviewedEntries.count)")
+                        .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                }.padding(.bottom, 14)
+                settleRow("勾选金额合计", amountText(selectedTotal, currency: currency))
+                settleRow("重复或被排除", amountText(preview.skippedDuplicateCount, currency: "", suffix: " 行"))
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    Text("将写入").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                    Spacer(minLength: 0)
+                    Text("\(selectedEntries.count) 笔")
+                        .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 22, relativeTo: .title2))
+                        .monospacedDigit().foregroundStyle(BalancedPalette.ink).lineLimit(1).fixedSize()
                 }
+                .padding(.top, 14)
+                .overlay(alignment: .top) { BalancedPalette.ink.frame(height: 1) }
+            }
+            .padding(EdgeInsets(top: 18, leading: 20, bottom: 16, trailing: 20))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(BalancedPalette.sunken)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("import-preview-summary")
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
+            if preview.skippedDuplicateCount > 0, !preview.dedupReport.isEmpty {
+                Text(preview.dedupReport)
+                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                    .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(BalancedPalette.sunken)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+
+            DisclosureGroup {
+                kvRow("识别渠道", providerLabel(preview.provider))
+                kvRow("交易区间", importRangeText(preview))
+                kvRow("候选交易", "\(preview.candidateCount) 条")
+                if preview.skippedDuplicateCount > 0 { kvRow("已跳过重复", "\(preview.skippedDuplicateCount) 条") }
                 if !preview.providerDetection.reason.isEmpty {
-                    Text(preview.providerDetection.reason)
-                        .font(.caption)
-                        .foregroundStyle(LedgerPalette.secondary)
+                    Text(preview.providerDetection.reason).balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta)
                 }
             } label: {
-                HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                            .fill(LedgerPalette.cobalt.opacity(0.12))
-                            .frame(width: 36, height: 36)
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(LedgerPalette.cobalt)
-                    }
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(providerLabel(preview.provider))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(LedgerPalette.ink)
-                        Text(importRangeText(preview) + (preview.skippedDuplicateCount > 0 ? " · 已跳过 \(preview.skippedDuplicateCount) 条重复交易" : ""))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(LedgerPalette.secondary)
-                    }
-                }
-                .padding(.vertical, 4)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("import-preview-summary")
+                Text("导入详情").balancedFont(size: 13).foregroundStyle(BalancedPalette.secondary)
             }
+            .tint(BalancedPalette.ink)
+            .listRowBackground(BalancedPalette.page)
 
             if let ledgerID = session.currentLocalLedgerDescriptor?.id,
                classificationSettings.isEnabled(for: ledgerID) {
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(LedgerPalette.cobalt)
-                    if isClassifying {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                        Text("智能匹配中 (\(classificationCompletedIDs.count)/\(reviewedEntries.count))...")
-                            .font(.caption)
-                            .foregroundStyle(LedgerPalette.secondary)
-                        Spacer()
-                        Button("停止") { classificationPaused = true }
-                            .font(.caption)
-                    } else {
-                        Text(classificationResults.isEmpty ? "智能分类已就绪" : "已自动完成智能匹配 · \(classificationResults.count) 条已填充")
-                            .font(.caption)
-                            .foregroundStyle(LedgerPalette.secondary)
-                        Spacer()
-                        if classificationCompletedIDs.count < reviewedEntries.count {
-                            Button("继续分类") {
-                                classificationError = nil
-                                classificationPaused = false
-                                classificationRetry &+= 1
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        if isClassifying {
+                            ProgressView().scaleEffect(0.8)
+                            Text("智能匹配中 (\(classificationCompletedIDs.count)/\(reviewedEntries.count))...")
+                                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                            Spacer()
+                            Button("停止") { classificationPaused = true }.balancedFont(size: 12.5).foregroundStyle(BalancedPalette.ink)
+                        } else {
+                            Text(classificationResults.isEmpty ? "智能分类已就绪" : "已自动完成智能匹配 · \(classificationResults.count) 条已填充")
+                                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                            Spacer()
+                            if classificationCompletedIDs.count < reviewedEntries.count {
+                                Button("继续分类") {
+                                    classificationError = nil
+                                    classificationPaused = false
+                                    classificationRetry &+= 1
+                                }.balancedFont(size: 12.5).foregroundStyle(BalancedPalette.ink)
                             }
-                            .font(.caption)
                         }
                     }
+                    if let classificationError {
+                        Text(classificationError).balancedFont(size: 12).foregroundStyle(BalancedPalette.secondary)
+                    }
                 }
-                .padding(.vertical, 2)
-                if let classificationError {
-                    Text(classificationError)
-                        .font(.caption)
-                        .foregroundStyle(LedgerPalette.risk)
-                }
+                .listRowBackground(BalancedPalette.page)
             }
 
             if !preview.warnings.isEmpty {
                 DisclosureGroup(isExpanded: $warningsExpanded) {
                     ForEach(Array(preview.warnings.enumerated()), id: \.offset) { _, warning in
-                        HStack(alignment: .top, spacing: LedgerSpacing.xs) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.caption)
-                                .foregroundStyle(LedgerPalette.warm)
-                            Text(warning)
-                                .font(.caption)
-                                .foregroundStyle(LedgerPalette.ink)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.vertical, 2)
+                        Text(warning).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.ink)
+                            .fixedSize(horizontal: false, vertical: true).padding(.vertical, 2)
                     }
                 } label: {
-                    HStack(spacing: LedgerSpacing.sm) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(LedgerPalette.warm)
-                        Text("\(preview.warnings.count) 条账单核对提示")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(LedgerPalette.warm)
-                        Spacer()
-                        Text(warningsExpanded ? "收起" : "展开查看")
-                            .font(.caption2)
-                            .foregroundStyle(LedgerPalette.secondary)
-                    }
+                    Text("\(preview.warnings.count) 条账单核对提示").balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.secondary)
                 }
+                .tint(BalancedPalette.ink)
+                .listRowBackground(BalancedPalette.page)
             }
         }
-        .font(.subheadline)
+    }
+
+    private func settleRow(_ label: String, _ value: Text) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(label).balancedFont(size: 15).foregroundStyle(BalancedPalette.secondary)
+            Spacer(minLength: 0)
+            value.lineLimit(1).fixedSize()
+        }.padding(.vertical, 6)
+    }
+
+    private func amountText(_ minorUnits: Int, currency: String, suffix: String = "") -> Text {
+        let formatted = currency.isEmpty ? "\(minorUnits)\(suffix)" : MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: false) + suffix
+        return Text(formatted)
+            .font(.custom(BalancedWeight.text.sansPostscriptName, size: 15, relativeTo: .body))
+            .monospacedDigit().foregroundColor(BalancedPalette.ink)
+    }
+
+    private func kvRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            Spacer()
+            Text(value).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+        }
     }
 
     private func entrySection(_ preview: LedgerImportPreview) -> some View {
@@ -689,9 +716,14 @@ struct NativeImportFlowView: View {
                     isAIClassified: classificationResults[entry.id] != nil,
                     categoryLabel: friendlyAccountLabel(entry.categoryAccount),
                     fundingLabel: friendlyAccountLabel(entry.fundingAccount),
+                    expanded: expandedEntryIDs.contains(entry.id),
                     onToggle: { toggle(entry.id) },
                     onToggleTag: { toggleTagSelection(entry.id) },
-                    onEdit: { editingEntry = entry }
+                    onEdit: { editingEntry = entry },
+                    onToggleExpanded: {
+                        if expandedEntryIDs.contains(entry.id) { expandedEntryIDs.remove(entry.id) }
+                        else { expandedEntryIDs.insert(entry.id) }
+                    }
                 )
                 .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 16))
 #if DEBUG
@@ -762,67 +794,67 @@ struct NativeImportFlowView: View {
         !reviewedEntries.isEmpty && reviewedEntries.allSatisfy { selectedTagEntryIDs.contains($0.id) }
     }
 
+    /// `.sheet-actions` — a flat left `.btn` (全部勾选/全部展开 depending on
+    /// whether anything is checked yet, matching b15 vs b16) beside the
+    /// primary ink `.btn.primary` write action. The write button is disabled
+    /// only while committing, not while the selection is empty: an empty
+    /// selection is a real, supported action here ("仅归档原始账单"), so
+    /// mirroring b16's `aria-disabled` on a 0-count write would break it.
     private func commitBar(_ preview: LedgerImportPreview) -> some View {
-        VStack(spacing: LedgerSpacing.sm) {
+        VStack(spacing: 10) {
             if let editedEntryStatus {
-                Label(editedEntryStatus, systemImage: "checkmark.circle.fill")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(LedgerPalette.success)
+                Text(editedEntryStatus).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.ink)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("import-edit-saved-status")
             }
-
             if let commitErrorMessage {
-                Label(commitErrorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(LedgerPalette.risk)
+                Text(commitErrorMessage).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.expense)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("import-commit-error")
             }
-
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(selectedEntries.isEmpty ? "仅归档原始账单" : "准备写入 \(selectedEntries.count) 条交易")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(LedgerPalette.ink)
-                    Text(providerLabel(preview.provider) + " · " + importRangeText(preview))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(LedgerPalette.secondary)
+            Text(selectedEntries.isEmpty ? "仅归档原始账单" : "准备写入 \(selectedEntries.count) 条交易")
+                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 10) {
+                Button {
+                    if includedEntryIDs.isEmpty {
+                        includedEntryIDs = Set(reviewedEntries.map(\.id))
+                        persistDraft()
+                    } else {
+                        expandedEntryIDs = Set(reviewedEntries.map(\.id))
+                    }
+                } label: {
+                    Text(includedEntryIDs.isEmpty ? "全部勾选" : "全部展开")
                 }
-                Spacer(minLength: 0)
-            }
+                .buttonStyle(.balanced(.outline))
+                .accessibilityIdentifier("import-bulk-select-or-expand")
 
-            Button {
-                if commitOutcomeNeedsReconciliation {
-                    startCommitReconciliation()
-                } else {
-                    classificationPaused = true
-                    if session.localRepository != nil { Task { await prepareLocalImport() } }
-                    else { confirmationPresented = true }
+                Button {
+                    if commitOutcomeNeedsReconciliation {
+                        startCommitReconciliation()
+                    } else {
+                        classificationPaused = true
+                        if session.localRepository != nil { Task { await prepareLocalImport() } }
+                        else { confirmationPresented = true }
+                    }
+                } label: {
+                    ZStack {
+                        Text(commitButtonTitle).opacity(isCommitting ? 0 : 1).lineLimit(1).minimumScaleFactor(0.8)
+                        if isCommitting { ProgressView().tint(BalancedPalette.page) }
+                    }
                 }
-            } label: {
-                Text(commitButtonTitle)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .opacity(isCommitting ? 0 : 1)
-                    .frame(maxWidth: .infinity)
-                    .overlay { if isCommitting { ProgressView().tint(.white) } }
+                .buttonStyle(.balanced(.primary))
+                .disabled(isCommitting)
+                .accessibilityLabel(commitButtonTitle)
+                .accessibilityValue(commitButtonAccessibilityValue)
+                .accessibilityHint(commitButtonAccessibilityHint)
+                .accessibilityIdentifier("import-commit")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(LedgerPalette.cobalt)
-            .disabled(isCommitting)
-            .accessibilityLabel(commitButtonTitle)
-            .accessibilityValue(commitButtonAccessibilityValue)
-            .accessibilityHint(commitButtonAccessibilityHint)
-            .accessibilityIdentifier("import-commit")
         }
-        .padding(.horizontal, LedgerSpacing.lg)
-        .padding(.top, LedgerSpacing.md)
-        .padding(.bottom, LedgerSpacing.sm)
-        .ledgerFloatingActionSurface()
+        .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+        .background(BalancedPalette.page)
+        .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
     }
 
     private func completionView(_ result: LedgerImportCommitResult) -> some View {
@@ -1593,6 +1625,11 @@ private struct ImportEntryEditor: View {
     }
 }
 
+/// `.imp` — a flat checkbox box (not a filled circle), who/meta/cat stacked
+/// left, amount right. Excluded rows dim to ink-3 (`who`/`amt`) rather than
+/// drawing a status colour; a missing category/funding account also stays
+/// ink-3 prose ("未选择账户") instead of a risk-red flag, matching batch 1's
+/// "no status colours" rule.
 private struct ImportEntryReviewRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let entry: LedgerImportEntry
@@ -1601,11 +1638,11 @@ private struct ImportEntryReviewRow: View {
     let isAIClassified: Bool
     let categoryLabel: String
     let fundingLabel: String
+    let expanded: Bool
     let onToggle: () -> Void
     let onToggleTag: () -> Void
     let onEdit: () -> Void
-
-    @State private var expanded = false
+    let onToggleExpanded: () -> Void
 
     private var categoryMissing: Bool {
         entry.categoryAccount.isEmpty || entry.categoryAccount.lowercased().contains("unknown")
@@ -1617,75 +1654,49 @@ private struct ImportEntryReviewRow: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: LedgerSpacing.sm) {
+            HStack(alignment: .top, spacing: 12) {
                 Button(action: onToggle) {
-                    Image(systemName: included ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(included ? LedgerPalette.cobalt : LedgerPalette.secondary)
-                        .frame(width: 44, height: 44)
+                    ZStack {
+                        Rectangle().fill(included ? BalancedPalette.ink : Color.clear)
+                        Rectangle().stroke(included ? BalancedPalette.ink : BalancedPalette.edge, lineWidth: 1)
+                    }
+                    .frame(width: 18, height: 18)
+                    .frame(width: 44, height: 44)
                 }
-                .buttonStyle(PressScaleButtonStyle())
+                .buttonStyle(.plain)
                 .accessibilityLabel(included ? "排除 \(entry.payee)" : "包含 \(entry.payee)")
                 .accessibilityIdentifier("import-entry-toggle-\(entry.id)")
 
-                Button {
-                    expanded.toggle()
-                } label: {
-                    HStack(alignment: .center, spacing: LedgerSpacing.sm) {
-                        VStack(alignment: .leading, spacing: 3) {
+                Button(action: onToggleExpanded) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(entry.payee.isEmpty ? "未命名交易" : entry.payee)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(LedgerPalette.ink)
+                                .balancedFont(size: 15, weight: .medium)
+                                .foregroundStyle(included ? BalancedPalette.ink : BalancedPalette.meta)
                                 .lineLimit(1)
                             Text("\(entry.date) · \(entry.narration.isEmpty ? "无摘要" : entry.narration)")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(LedgerPalette.secondary)
+                                .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                                 .lineLimit(1)
-                            HStack(alignment: .center, spacing: 5) {
-                                Text(categoryLabel)
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(categoryMissing ? LedgerPalette.risk : LedgerPalette.cobalt)
-                                    .lineLimit(1)
-
-                                Image(systemName: "arrow.left")
-                                    .font(.system(size: 8, weight: .semibold))
-                                    .foregroundStyle(LedgerPalette.secondary.opacity(0.6))
-
-                                Text(fundingLabel)
-                                    .font(.caption)
-                                    .foregroundStyle(fundingMissing ? LedgerPalette.risk : LedgerPalette.olive)
-                                    .lineLimit(1)
-
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text("→ " + (categoryMissing ? "未选择账户" : categoryLabel))
+                                    .balancedMono(size: 12).foregroundStyle(BalancedPalette.secondary).lineLimit(1)
                                 if isAIClassified {
-                                    Image(systemName: "sparkles")
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(LedgerPalette.cobalt)
+                                    Text("AI").balancedFont(size: 10, weight: .medium).foregroundStyle(BalancedPalette.meta)
                                 }
-
                                 if let tags = entry.tags, !tags.isEmpty {
-                                    Spacer(minLength: 4)
                                     Text(tags.prefix(2).map { "#\($0)" }.joined(separator: " "))
-                                        .font(.caption2)
-                                        .foregroundStyle(LedgerPalette.secondary)
-                                        .lineLimit(1)
+                                        .balancedFont(size: 11).foregroundStyle(BalancedPalette.meta).lineLimit(1)
                                 }
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        ViewThatFits(in: .horizontal) {
-                            Text(importAmountText(entry))
-                                .fixedSize(horizontal: true, vertical: false)
-                            Text(importCompactAmountText(entry))
-                                .fixedSize(horizontal: true, vertical: false)
-                        }
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(included ? LedgerPalette.warm : LedgerPalette.secondary)
-                        .accessibilityLabel(importAmountText(entry))
-                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(LedgerPalette.secondary)
-                            .frame(width: 18)
+                        Text(importAmountText(entry))
+                            .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 15, relativeTo: .body))
+                            .monospacedDigit().foregroundStyle(included ? BalancedPalette.ink : BalancedPalette.meta)
+                            .lineLimit(1).fixedSize()
+                            .accessibilityLabel(importAmountText(entry))
                     }
+                    .padding(.trailing, 4)
                     .padding(.vertical, 8)
                     .contentShape(Rectangle())
                 }
@@ -1694,24 +1705,23 @@ private struct ImportEntryReviewRow: View {
 
                 Button(action: onEdit) {
                     Image(systemName: "pencil")
-                        .font(.body)
-                        .foregroundStyle(LedgerPalette.cobalt)
+                        .font(.system(size: 15))
+                        .foregroundStyle(BalancedPalette.secondary)
                         .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .accessibilityLabel("编辑 \(entry.payee.isEmpty ? "未命名交易" : entry.payee)")
                 .accessibilityIdentifier("import-entry-edit-\(entry.id)")
             }
 
             if expanded {
-                VStack(alignment: .leading, spacing: LedgerSpacing.md) {
+                VStack(alignment: .leading, spacing: 12) {
                     Button(action: onToggleTag) {
-                        Label(tagSelected ? "已选为标签操作对象" : "选择为标签操作对象",
-                              systemImage: tagSelected ? "tag.fill" : "tag")
-                            .font(.subheadline)
-                            .frame(minHeight: 44)
+                        Text(tagSelected ? "已选为标签操作对象" : "选择为标签操作对象")
+                            .balancedFont(size: 13).foregroundStyle(BalancedPalette.secondary)
+                            .frame(minHeight: 44, alignment: .leading)
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.plain)
                     .accessibilityLabel(tagSelected ? "取消选择 \(entry.payee) 的标签操作" : "选择 \(entry.payee) 的标签操作")
                     .accessibilityIdentifier("import-entry-tag-toggle-\(entry.id)")
                     ImportEntryDetailLine(label: "分类账户", value: entry.categoryAccount)
@@ -1733,24 +1743,20 @@ private struct ImportEntryReviewRow: View {
                     }
                 }
                 .padding(.leading, 52)
-                .padding(.bottom, LedgerSpacing.lg)
+                .padding(.bottom, 16)
                 .transition(.opacity)
             }
         }
-        .opacity(included ? 1 : 0.58)
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: expanded)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: included)
     }
 
     private func importAmountText(_ entry: LedgerImportEntry) -> String {
         let minorUnits = Int((entry.amount * 100).rounded())
-        return MoneyText.format(minorUnits: minorUnits, currency: entry.currency)
+        return MoneyText.format(minorUnits: minorUnits, currency: entry.currency, showsCurrency: false)
     }
 
-    private func importCompactAmountText(_ entry: LedgerImportEntry) -> String {
-        let minorUnits = Int((entry.amount * 100).rounded())
-        return MoneyText.formatCompact(minorUnits: minorUnits, currency: entry.currency)
-    }
 }
 
 private struct ImportEntryDetailLine: View {
@@ -1759,13 +1765,8 @@ private struct ImportEntryDetailLine: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(LedgerPalette.secondary)
-            Text(value)
-                .font(.subheadline.monospaced())
-                .foregroundStyle(LedgerPalette.olive)
-                .textSelection(.enabled)
+            Text(label).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+            Text(value).balancedMono(size: 13).foregroundStyle(BalancedPalette.secondary).textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

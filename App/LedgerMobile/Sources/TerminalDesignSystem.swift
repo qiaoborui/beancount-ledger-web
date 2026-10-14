@@ -1,35 +1,23 @@
 import SwiftUI
 
+/// Retargeted to the Balanced tokens (docs/design/ios-balanced) so every legacy
+/// page that still reaches for `TerminalPalette` inherits Balanced colour
+/// without a per-call-site rewrite. There is no accent colour in Balanced —
+/// `accent` maps to `ink`, the same tone as every other label.
 enum TerminalPalette {
-    static let onAccent = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark ? UIColor(hex: 0x181D21) : .white
-    })
-    static let page = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark ? UIColor(hex: 0x181D21) : UIColor(hex: 0xF5F6F4)
-    })
-    static let panel = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark ? UIColor(hex: 0x222A30) : UIColor(hex: 0xE9EDE8)
-    })
-    static let ink = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark ? UIColor(hex: 0xE1E7E6) : UIColor(hex: 0x202B2E)
-    })
-    static let secondary = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark ? UIColor(hex: 0xA2AFAF) : UIColor(hex: 0x536266)
-    })
-    static let line = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark ? UIColor(hex: 0x354047) : UIColor(hex: 0xCBD3CF)
-    })
-    static let accent = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark ? UIColor(hex: 0xE5B55F) : UIColor(hex: 0x855300)
-    })
-    static let positive = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark ? UIColor(hex: 0x86C89A) : UIColor(hex: 0x286B42)
-    })
-    static let negative = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark ? UIColor(hex: 0xF0A18C) : UIColor(hex: 0x9D3422)
-    })
+    static let onAccent = BalancedPalette.page
+    static let page = BalancedPalette.page
+    static let panel = BalancedPalette.sunken
+    static let ink = BalancedPalette.ink
+    static let secondary = BalancedPalette.secondary
+    static let line = BalancedPalette.rule
+    static let accent = BalancedPalette.ink
+    static let positive = BalancedPalette.income
+    static let negative = BalancedPalette.expense
 }
 
+/// Proportional Plex Sans with tabular figures — Balanced reserves mono for
+/// account paths and beancount source only, never amounts.
 struct TerminalAmount: View {
     @EnvironmentObject private var session: LedgerSession
     let minorUnits: Int
@@ -39,11 +27,10 @@ struct TerminalAmount: View {
     var prefix: String = ""
     var showsCurrency = false
 
-    @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
-
     var body: some View {
         Text(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: showsCurrency) : "••••••")
-            .font(.system(size: size * scale, weight: .medium, design: .monospaced))
+            .font(.custom(BalancedWeight.text.sansPostscriptName, size: size, relativeTo: .body))
+            .monospacedDigit()
             .foregroundStyle(color)
             .lineLimit(1)
             .minimumScaleFactor(0.35)
@@ -56,16 +43,18 @@ struct TerminalRule: View {
 }
 
 struct TerminalDateRangeButton: View {
+    /// Retained for call-site compatibility; Balanced is the only appearance now.
     var balanced = false
     @EnvironmentObject private var session: LedgerSession
 
     var body: some View {
         Button { session.presentRangePicker() } label: {
             HStack(spacing: 5) {
-                Text(session.selectedRange.preset == .custom ? "自定义" : session.selectedRange.displayTitle).font(.system(size: 13, weight: .regular, design: balanced ? .default : .monospaced))
+                Text(session.selectedRange.preset == .custom ? "自定义" : session.selectedRange.displayTitle)
+                    .balancedFont(size: 13)
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
             }
-            .foregroundStyle(balanced ? BalancedPalette.ink : TerminalPalette.accent)
+            .foregroundStyle(BalancedPalette.ink)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
@@ -86,12 +75,30 @@ struct TerminalPageChrome: ViewModifier {
     var actions: AnyView? = nil
     var showsTimeRange = false
     var showsSync = true
+    /// Retained for call-site compatibility; Balanced is the only appearance now.
     var balanced = false
+
+    private var titleText: some View {
+        Text(compactTitle ?? title)
+            .accessibilityLabel(title)
+            .balancedFont(size: 17, weight: .medium)
+            .tracking(-0.085)
+            .foregroundStyle(BalancedPalette.ink)
+            .lineLimit(1)
+    }
+
+    @ViewBuilder private var trailingControls: some View {
+        if showsTimeRange { TerminalDateRangeButton().fixedSize(horizontal: true, vertical: false) }
+        if showsSync && (!session.isLocal || session.localGitConfiguration != nil) {
+            TerminalSyncButton()
+        }
+        actions
+    }
 
     func body(content: Content) -> some View {
         content
             .scrollContentBackground(.hidden)
-            .background(balanced ? BalancedPalette.page : TerminalPalette.page)
+            .background(BalancedPalette.page)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .background {
@@ -104,8 +111,8 @@ struct TerminalPageChrome: ViewModifier {
                 if horizontalSizeClass == .regular {
                     ToolbarItem(placement: .topBarTrailing) {
                         HStack(spacing: 8) {
-                            if showsTimeRange { TerminalDateRangeButton(balanced: balanced) }
-                            if showsSync && (!session.isLocal || session.localGitConfiguration != nil) { TerminalSyncButton(balanced: balanced) }
+                            if showsTimeRange { TerminalDateRangeButton() }
+                            if showsSync && (!session.isLocal || session.localGitConfiguration != nil) { TerminalSyncButton() }
                             actions
                         }
                     }
@@ -113,32 +120,67 @@ struct TerminalPageChrome: ViewModifier {
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 if horizontalSizeClass != .regular {
-                    VStack(spacing: 0) {
-                        HStack(spacing: 8) {
-                            if !isRoot {
+                    // `.appbar` (styles.css): `padding: 4px var(--pad) 10px`
+                    // with `--pad: 20px`, so a root title sits at x=20. `.back`
+                    // is a 44×44 hit target with `margin-left: -8px`, pulling
+                    // its box left so the chevron glyph still lands near
+                    // x=20. A pushed page (d11/d12/d15) centers its title
+                    // between the chevron and the trailing actions instead of
+                    // setting it left-aligned next to the chevron.
+                    Group {
+                        if isRoot {
+                            HStack(spacing: 8) {
+                                titleText
+                                Spacer(minLength: 4)
+                                trailingControls
+                            }
+                        } else {
+                            BalancedPushedBarLayout(spacing: 8) {
                                 Button { dismiss() } label: {
                                     Image(systemName: "chevron.left").font(.system(size: 18))
-                                        .frame(width: 44, height: 44)
-                                }.buttonStyle(.plain).foregroundStyle(balanced ? BalancedPalette.ink : TerminalPalette.accent)
+                                        .frame(width: 44, height: 44, alignment: .leading)
+                                        .padding(.leading, 8)
+                                }.buttonStyle(.plain).foregroundStyle(BalancedPalette.ink)
                                     .accessibilityLabel("返回上一页")
+                                    .padding(.leading, -8)
+                                titleText
+                                HStack(spacing: 8) { trailingControls }.fixedSize()
                             }
-                            Text(compactTitle ?? title)
-                                .accessibilityLabel(title)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(balanced ? BalancedPalette.ink : TerminalPalette.accent)
-                            Spacer(minLength: 4)
-                            if showsTimeRange { TerminalDateRangeButton(balanced: balanced).fixedSize(horizontal: true, vertical: false) }
-                            if showsSync && (!session.isLocal || session.localGitConfiguration != nil) {
-                                TerminalSyncButton(balanced: balanced)
-                            }
-                            actions
                         }
-                        .padding(.horizontal, 12)
-                        .frame(height: balanced ? 52 : 55)
-                        Rectangle().fill(balanced ? BalancedPalette.rule : TerminalPalette.line).frame(height: 1)
-                    }.background(balanced ? BalancedPalette.page : TerminalPalette.page)
+                    }
+                    .padding(.leading, 20)
+                    .padding(.trailing, 20)
+                    .frame(height: 52)
+                    .background(BalancedPalette.page)
                 }
             }
+    }
+}
+
+/// Pushed-page bar: back button, title, trailing controls. The title is
+/// centred across the whole bar (d11/d12/d15) but never drawn under either
+/// side — when the trailing cluster is wider than the back button, it moves
+/// toward the gap between them, and truncates once that gap is too small.
+private struct BalancedPushedBarLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let height = subviews.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
+        return CGSize(width: proposal.width ?? 0, height: proposal.height ?? height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 3 else { return }
+        let leading = subviews[0].sizeThatFits(.unspecified)
+        let trailing = subviews[2].sizeThatFits(.unspecified)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(leading))
+        subviews[2].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: ProposedViewSize(trailing))
+        let minX = bounds.minX + leading.width + spacing
+        let maxX = bounds.maxX - trailing.width - spacing
+        let available = max(0, maxX - minX)
+        let width = min(subviews[1].sizeThatFits(ProposedViewSize(width: available, height: bounds.height)).width, available)
+        let x = min(max(bounds.midX - width / 2, minX), maxX - width)
+        subviews[1].place(at: CGPoint(x: x, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(width: width, height: bounds.height))
     }
 }
 
@@ -220,8 +262,11 @@ extension View {
 }
 
 
-/// The icon reports real repository state; opening details never initiates a sync.
+/// The icon reports real repository state; opening details never initiates a
+/// sync. Balanced carries that state as a small dot (`.iconbtn .dot`), not a
+/// colour change on the glyph itself.
 private struct TerminalSyncButton: View {
+    /// Retained for call-site compatibility; Balanced is the only appearance now.
     var balanced = false
     @EnvironmentObject private var session: LedgerSession
     @State private var detailsPresented = false
@@ -242,34 +287,45 @@ private struct TerminalSyncButton: View {
         }
     }
 
-    var body: some View {
-        if session.isLocal {
-            Button { detailsPresented = true } label: {
+    private var dotColor: Color {
+        switch presentation.indicator {
+        case .local: BalancedPalette.meta
+        case .synced: BalancedPalette.income
+        case .syncing: BalancedPalette.secondary
+        case .pending, .attention: BalancedPalette.expense
+        }
+    }
+
+    private func iconButton(symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
                 Image(systemName: symbol)
                     .font(.system(size: 18, weight: .regular))
-                    .foregroundStyle(balanced ? BalancedPalette.ink : (presentation.indicator == .attention ? TerminalPalette.negative : TerminalPalette.accent))
+                    .foregroundStyle(BalancedPalette.secondary)
                     .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                Circle().fill(dotColor).frame(width: 8, height: 8)
+                    .offset(x: -9, y: 9)
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("ledger-sync-status")
-            .accessibilityLabel(presentation.title)
-            .accessibilityHint("查看存储与同步详情")
-            .sheet(isPresented: $detailsPresented) {
-                LedgerStorageSheet().ledgerPrivacyProtectedSheet()
-            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    var body: some View {
+        if session.isLocal {
+            iconButton(symbol: symbol) { detailsPresented = true }
+                .accessibilityIdentifier("ledger-sync-status")
+                .accessibilityLabel(presentation.title)
+                .accessibilityHint("查看存储与同步详情")
+                .sheet(isPresented: $detailsPresented) {
+                    LedgerStorageSheet().ledgerPrivacyProtectedSheet()
+                }
         } else {
             // Server mode has no local Git status. Keep its refresh semantics explicit.
-            Button { Task { await session.refresh() } } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 18, weight: .regular))
-                    .foregroundStyle(balanced ? BalancedPalette.ink : TerminalPalette.accent)
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .disabled(session.phase != .ready)
-            .accessibilityIdentifier("ledger-sync-status")
-            .accessibilityLabel("刷新账本")
+            iconButton(symbol: "arrow.clockwise") { Task { await session.refresh() } }
+                .disabled(session.phase != .ready)
+                .accessibilityIdentifier("ledger-sync-status")
+                .accessibilityLabel("刷新账本")
         }
     }
 }
@@ -328,11 +384,15 @@ extension View {
     }
 }
 
+/// `.sechead` — 12.5pt / 500 / `--ink-3` / +0.03em. No numbered prefix, no
+/// mono, no uppercase: the label is the heading, not a terminal readout.
 struct TerminalSectionLabel: View {
     let text: String
     var body: some View {
-        Text(text.uppercased()).terminalFont(size: 11, weight: .semibold, design: .monospaced)
-            .tracking(0.7).foregroundStyle(TerminalPalette.secondary).textCase(nil)
+        Text(text)
+            .balancedFont(size: 12.5, weight: .medium)
+            .tracking(0.375)
+            .foregroundStyle(BalancedPalette.meta)
     }
 }
 
