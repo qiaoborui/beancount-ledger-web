@@ -460,33 +460,30 @@ struct NativeImportFlowView: View {
         }
     }
 
+    /// `.field-row` idiom for the picker step: flat rows, no icon chips, no
+    /// rounded cards, ink-3 labels, a 1px rule under each row — the same
+    /// treatment `AddCategoryView`/`LocalLedgerStorageView` already use for
+    /// List-based forms.
     private var preparationView: some View {
         List {
             if let errorMessage {
                 Section { StatusBanner(message: errorMessage) { self.errorMessage = nil } }
+                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
             }
-            Section("账单文件") {
+            Section {
                 HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                            .fill(LedgerPalette.cobalt.opacity(0.12))
-                            .frame(width: 38, height: 38)
-                        Image(systemName: file.isZIP ? "doc.zipper" : "doc.text")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(LedgerPalette.cobalt)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(file.name)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(LedgerPalette.ink)
-                            .lineLimit(1)
-                        Text(fileSizeText)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(LedgerPalette.secondary)
+                    Image(systemName: file.isZIP ? "doc.zipper" : "doc.text")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(BalancedPalette.secondary)
+                        .frame(width: 32)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(file.name).balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                        Text(fileSizeText).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                     }
                 }
-                .padding(.vertical, 2)
-            }
+                .padding(.vertical, 6)
+            } header: { TerminalSectionLabel(text: "账单文件").listRowBackground(BalancedPalette.page) }
+
             Section {
                 Picker("账单渠道", selection: $providerOverride) {
                     Text("自动识别").tag(String?.none)
@@ -494,49 +491,55 @@ struct NativeImportFlowView: View {
                         Text(provider.label).tag(Optional(provider.id))
                     }
                 }
+                .balancedFont(size: 15).tint(BalancedPalette.ink)
                 .accessibilityIdentifier("import-provider-menu")
             } footer: {
-                Text(selectedProviderDetail)
+                Text(selectedProviderDetail).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             }
+
             if file.isZIP {
-                Section("压缩包密码") {
+                Section {
                     SecureField("输入账单压缩包密码", text: $archivePassword)
+                        .balancedFont(size: 15)
                         .textContentType(.password)
                         .accessibilityIdentifier("import-archive-password")
-                }
+                } header: { TerminalSectionLabel(text: "压缩包密码").listRowBackground(BalancedPalette.page) }
             }
+
             if providerOverride == nil || providerOverride == "alipay" {
                 Section {
                     Toggle("支付宝基金 9.99 → 10.00 补差", isOn: $alipayFundRounding)
+                        .balancedFont(size: 15).toggleStyle(BalancedToggleStyle())
                 } footer: {
-                    Text("仅在确认该基金定投需要补 0.01 时开启。")
+                    Text("仅在确认该基金定投需要补 0.01 时开启。").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                 }
             }
+
             Section {
                 Button {
                     Task { await generatePreview() }
                 } label: {
                     HStack(spacing: 8) {
                         if isPreparing {
-                            ProgressView().tint(LedgerPalette.onBrand)
+                            ProgressView().tint(BalancedPalette.page)
                             Text("正在生成预览...")
                         } else {
-                            Image(systemName: "sparkles")
                             Text("生成导入预览")
                         }
                     }
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(LedgerPalette.onBrand)
-                    .frame(maxWidth: .infinity, minHeight: 46)
-                    .background(LedgerPalette.cobalt)
-                    .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
                 }
-                .buttonStyle(PressScaleButtonStyle())
+                .buttonStyle(.balanced(.primary, disabled: isPreparing))
+                .disabled(isPreparing)
+                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 8, trailing: 20))
+                .listRowBackground(Color.clear).listRowSeparator(.hidden)
                 .accessibilityIdentifier("import-generate-preview")
             } footer: {
                 Text("预览会检查渠道与重复交易。核对并确认后写入账本，关闭页面会丢弃当前预览。")
+                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             }
         }
+        .listRowSeparatorTint(BalancedPalette.rule)
+        .tint(BalancedPalette.ink)
         .disabled(isPreparing)
         .scrollDismissesKeyboard(.interactively)
         .accessibilityIdentifier("native-import-preparation")

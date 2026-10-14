@@ -78,6 +78,23 @@ struct TerminalPageChrome: ViewModifier {
     /// Retained for call-site compatibility; Balanced is the only appearance now.
     var balanced = false
 
+    private var titleText: some View {
+        Text(compactTitle ?? title)
+            .accessibilityLabel(title)
+            .balancedFont(size: 17, weight: .medium)
+            .tracking(-0.085)
+            .foregroundStyle(BalancedPalette.ink)
+            .lineLimit(1)
+    }
+
+    @ViewBuilder private var trailingControls: some View {
+        if showsTimeRange { TerminalDateRangeButton().fixedSize(horizontal: true, vertical: false) }
+        if showsSync && (!session.isLocal || session.localGitConfiguration != nil) {
+            TerminalSyncButton()
+        }
+        actions
+    }
+
     func body(content: Content) -> some View {
         content
             .scrollContentBackground(.hidden)
@@ -110,17 +127,15 @@ struct TerminalPageChrome: ViewModifier {
                     // x=20. A pushed page (d11/d12/d15) centers its title
                     // between the chevron and the trailing actions instead of
                     // setting it left-aligned next to the chevron.
-                    ZStack {
-                        if !isRoot {
-                            Text(compactTitle ?? title)
-                                .accessibilityLabel(title)
-                                .balancedFont(size: 17, weight: .medium)
-                                .tracking(-0.085)
-                                .foregroundStyle(BalancedPalette.ink)
-                                .lineLimit(1)
-                        }
-                        HStack(spacing: 8) {
-                            if !isRoot {
+                    Group {
+                        if isRoot {
+                            HStack(spacing: 8) {
+                                titleText
+                                Spacer(minLength: 4)
+                                trailingControls
+                            }
+                        } else {
+                            BalancedPushedBarLayout(spacing: 8) {
                                 Button { dismiss() } label: {
                                     Image(systemName: "chevron.left").font(.system(size: 18))
                                         .frame(width: 44, height: 44, alignment: .leading)
@@ -128,19 +143,9 @@ struct TerminalPageChrome: ViewModifier {
                                 }.buttonStyle(.plain).foregroundStyle(BalancedPalette.ink)
                                     .accessibilityLabel("返回上一页")
                                     .padding(.leading, -8)
-                            } else {
-                                Text(compactTitle ?? title)
-                                    .accessibilityLabel(title)
-                                    .balancedFont(size: 17, weight: .medium)
-                                    .tracking(-0.085)
-                                    .foregroundStyle(BalancedPalette.ink)
+                                titleText
+                                HStack(spacing: 8) { trailingControls }.fixedSize()
                             }
-                            Spacer(minLength: 4)
-                            if showsTimeRange { TerminalDateRangeButton().fixedSize(horizontal: true, vertical: false) }
-                            if showsSync && (!session.isLocal || session.localGitConfiguration != nil) {
-                                TerminalSyncButton()
-                            }
-                            actions
                         }
                     }
                     .padding(.leading, 20)
@@ -149,6 +154,33 @@ struct TerminalPageChrome: ViewModifier {
                     .background(BalancedPalette.page)
                 }
             }
+    }
+}
+
+/// Pushed-page bar: back button, title, trailing controls. The title is
+/// centred across the whole bar (d11/d12/d15) but never drawn under either
+/// side — when the trailing cluster is wider than the back button, it moves
+/// toward the gap between them, and truncates once that gap is too small.
+private struct BalancedPushedBarLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let height = subviews.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
+        return CGSize(width: proposal.width ?? 0, height: proposal.height ?? height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 3 else { return }
+        let leading = subviews[0].sizeThatFits(.unspecified)
+        let trailing = subviews[2].sizeThatFits(.unspecified)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(leading))
+        subviews[2].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: ProposedViewSize(trailing))
+        let minX = bounds.minX + leading.width + spacing
+        let maxX = bounds.maxX - trailing.width - spacing
+        let available = max(0, maxX - minX)
+        let width = min(subviews[1].sizeThatFits(ProposedViewSize(width: available, height: bounds.height)).width, available)
+        let x = min(max(bounds.midX - width / 2, minX), maxX - width)
+        subviews[1].place(at: CGPoint(x: x, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(width: width, height: bounds.height))
     }
 }
 

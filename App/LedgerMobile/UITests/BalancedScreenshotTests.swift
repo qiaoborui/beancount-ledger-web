@@ -415,7 +415,8 @@ final class BalancedScreenshotTests: XCTestCase {
 
     // MARK: - b07/b08 — 资产分析
 
-    func testCaptureAssetsAnalysis() throws {
+    /// Light only — call with the simulator in light appearance.
+    func testCaptureAssetsLight() throws {
         #if targetEnvironment(simulator)
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -426,7 +427,20 @@ final class BalancedScreenshotTests: XCTestCase {
         for _ in 0..<3 { app.swipeUp() }
         Thread.sleep(forTimeInterval: 0.6)
         save(app.screenshot(), as: "b07-assets-table")
+        #else
+        throw XCTSkip("Simulator-only screenshot capture")
+        #endif
+    }
 
+    /// b08 is dark AND masked — call with the simulator already in dark
+    /// appearance (`xcrun simctl ui <udid> appearance dark` before launch).
+    func testCaptureAssetsMaskedDark() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--tab=assets"]
+        app.launch()
+        Thread.sleep(forTimeInterval: 1.5)
         // There's no privacy toggle on the analysis page itself — amounts
         // are a session-wide flag, so flip it from the 账户 tab (where the
         // eye button lives) and come back.
@@ -440,10 +454,6 @@ final class BalancedScreenshotTests: XCTestCase {
         // switching back to it lands straight on the masked analysis page.
         app.buttons["更多"].firstMatch.tap()
         Thread.sleep(forTimeInterval: 1)
-        // The scroll view instance survived the tab round trip, still
-        // scrolled from the b07 capture above — scroll back to the top.
-        for _ in 0..<5 { app.swipeDown() }
-        Thread.sleep(forTimeInterval: 0.4)
         save(app.screenshot(), as: "b08-assets-masked-top")
         for _ in 0..<3 { app.swipeUp() }
         Thread.sleep(forTimeInterval: 0.6)
@@ -455,7 +465,8 @@ final class BalancedScreenshotTests: XCTestCase {
 
     // MARK: - b15/b16 — 账单导入复核
 
-    func testCaptureImportReview() throws {
+    /// b15 is light, 部分条目勾选 — call with the simulator in light appearance.
+    func testCaptureImportReviewPartialLight() throws {
         #if targetEnvironment(simulator)
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -469,18 +480,95 @@ final class BalancedScreenshotTests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.8)
 
         // A freshly generated preview starts with every candidate included
-        // (`includedEntryIDs` seeds from all entries), the opposite of b16's
-        // "nothing checked" frame — so uncheck one row first for b15's
-        // "部分条目勾选" (partial), then uncheck the rest for b16 (none).
+        // (`includedEntryIDs` seeds from all entries) — uncheck one row for
+        // b15's "部分条目勾选" (partial).
         let toggles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'import-entry-toggle-'"))
         XCTAssertGreaterThan(toggles.count, 0, app.debugDescription)
         toggles.element(boundBy: 0).tap()
         Thread.sleep(forTimeInterval: 0.5)
         save(app.screenshot(), as: "b15-import-review-partial-checked")
+        #else
+        throw XCTSkip("Simulator-only screenshot capture")
+        #endif
+    }
 
-        for index in 1..<toggles.count { toggles.element(boundBy: index).tap() }
+    /// b16 is dark, 无勾选 — call with the simulator already in dark appearance.
+    func testCaptureImportReviewNoneDark() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--safe-import-flow", "--tab=imports"]
+        app.launch()
+        let generate = app.buttons["import-generate-preview"]
+        XCTAssertTrue(generate.waitForExistence(timeout: 10), app.debugDescription)
+        generate.tap()
+        let preview = app.descendants(matching: .any)["import-preview-summary"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 15), app.debugDescription)
+        Thread.sleep(forTimeInterval: 0.8)
+
+        let toggles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'import-entry-toggle-'"))
+        XCTAssertGreaterThan(toggles.count, 0, app.debugDescription)
+        for index in 0..<toggles.count { toggles.element(boundBy: index).tap() }
         Thread.sleep(forTimeInterval: 0.5)
         save(app.screenshot(), as: "b16-import-review-none-checked")
+        #else
+        throw XCTSkip("Simulator-only screenshot capture")
+        #endif
+    }
+
+    // MARK: - Import entry/history list (no design frame — batch-1 rules only)
+
+    func testCaptureImportHistoryLight() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--tab=imports"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["import-history-content"].waitForExistence(timeout: 10), app.debugDescription)
+        Thread.sleep(forTimeInterval: 1)
+        save(app.screenshot(), as: "import-history-light")
+        #else
+        throw XCTSkip("Simulator-only screenshot capture")
+        #endif
+    }
+
+    func testCaptureImportHistoryDark() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--tab=imports"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["import-history-content"].waitForExistence(timeout: 10), app.debugDescription)
+        Thread.sleep(forTimeInterval: 1)
+        save(app.screenshot(), as: "import-history-dark")
+        #else
+        throw XCTSkip("Simulator-only screenshot capture")
+        #endif
+    }
+
+    func testCaptureImportFilePickerLight() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--safe-import-flow", "--tab=imports"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["native-import-preparation"].waitForExistence(timeout: 10), app.debugDescription)
+        Thread.sleep(forTimeInterval: 1)
+        save(app.screenshot(), as: "import-file-picker-light")
+        #else
+        throw XCTSkip("Simulator-only screenshot capture")
+        #endif
+    }
+
+    func testCaptureImportFilePickerDark() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--safe-preview", "--safe-import-flow", "--tab=imports"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["native-import-preparation"].waitForExistence(timeout: 10), app.debugDescription)
+        Thread.sleep(forTimeInterval: 1)
+        save(app.screenshot(), as: "import-file-picker-dark")
         #else
         throw XCTSkip("Simulator-only screenshot capture")
         #endif

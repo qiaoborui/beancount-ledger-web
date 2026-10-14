@@ -1,7 +1,7 @@
 # 20261013-ios-balanced-conformance
 
-- Status: active
-- Last updated: 2026-10-14 11:30 +0800
+- Status: completed (merged with PR #506; follow-ups listed under Remaining work stay open)
+- Last updated: 2026-10-14 12:10 +0800
 - Branch: `codex/ios-balanced-conformance` (from `main` @ `b6ca236`)
 - Code revision covered: the branch tip that contains this note (first
   commit on top of `b6ca236`; pushed to origin). Overview, transactions and
@@ -325,6 +325,32 @@ batch-2 rules inferred earlier.
   `testCaptureImportReview` (b15/b16) in
   `App/LedgerMobile/UITests/BalancedScreenshotTests.swift`.
 
+- NativeImportFlowView first step (file picker) and ImportHistoryView entry/
+  history list restyled to batch 1 (no design frame — applied the rules
+  directly): full-bleed `.field-row`/`.row` idiom, `TerminalSectionLabel`
+  section heads, `BalancedToggleStyle`, `.balanced(.primary)` buttons, flat
+  dot-leader `FormatBadge` instead of filled pill chips, plain ink rows for
+  channel coverage and archive history (the one exception: the channel
+  freshness dot keeps colour, same documented exception as the sync
+  indicator's dot — never a filled pill behind it, just a dot + ink label).
+  Screenshot-verified light + dark (dark captured with `simctl ui … dark`
+  set *before* launch, per the earlier b08/b16 mistake — those two are now
+  correctly dark, not light-with-masked-amounts).
+  Files: `App/LedgerMobile/Sources/NativeImportFlowView.swift`
+  (`preparationView`), `App/LedgerMobile/Sources/ImportHistoryView.swift`.
+- **Flagged, not changed**: asked to drop the b15 row's pencil glyph "if the
+  row itself already opens the editor." Checked — it doesn't: the row tap
+  toggles inline expand (reveals category/funding/postings/tags), a
+  *separate* pencil opens the real edit sheet. Three existing UI tests
+  (`LedgerMobileUITests.swift`: `testImportPreviewFinalRowStaysAboveCommitSurface`,
+  `testNativeImportPreviewSelectionAndCommitFlow`,
+  `testImportClassification…`) tap `import-entry-edit-<id>` directly without
+  expanding first, and a fourth taps the row to reveal
+  `import-entry-tag-toggle-<id>` inside the expanded state — so the two
+  actions are load-bearing and distinct, and merging/dropping the pencil
+  would break those tests, conflicting with "keep accessibility ids and the
+  write path unchanged." Left the row as-is pending clarification.
+
 ## Next concrete action
 
 Continue P3 in the handoff order: analysis views first (`AnalysisViews.swift`,
@@ -333,3 +359,14 @@ currency analysis, then the remaining settings views. Screenshot-verify each by
 adding a capture test (no existing test drives those screens). Keep changes
 presentation-only, and re-run both screenshot suites plus `xcodebuild build`
 before the next handoff.
+
+## Final pass before merge (2026-10-14)
+
+- Import entry (file picker) and ImportHistoryView restyled to batch-1 rules;
+  dark b08/b16 recaptured with the simulator actually in dark appearance.
+- Import review keeps the per-row pencil: row tap toggles inline expand, the
+  pencil opens the editor, and existing UI tests depend on both.
+- Pushed-page bar now uses a collision-aware layout: the title stays centred
+  but never sits under the back button or trailing controls (fixes the account
+  detail title overlapping the date range button). Debug-only launch argument
+  `--open-account-detail` opens that page for screenshots.
