@@ -25,11 +25,15 @@ struct LedgerLaunchView: View {
     var body: some View {
         ZStack {
             TerminalPalette.page.ignoresSafeArea()
-            TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+            // Tick only while the fold is actually moving. Unpaused, the
+            // timeline re-rendered 60 times a second for as long as the view
+            // stayed up, including behind Face ID while the scene was inactive.
+            TimelineView(.animation(minimumInterval: 1.0 / 60.0,
+                                    paused: reduceMotion || scenePhase != .active || foldFinished)) { timeline in
                 let elapsed = startedAt.map { max(0, timeline.date.timeIntervalSince($0)) } ?? 0
                 let linear = min(elapsed / LedgerLaunchTiming.foldDuration, 1)
                 let eased = 1 - pow(1 - linear, 3)
-                LedgerLaunchBrand(progress: reduceMotion || scenePhase != .active ? 1 : eased)
+                LedgerLaunchBrand(progress: reduceMotion || scenePhase != .active || foldFinished ? 1 : eased)
             }
         }
         .opacity(fading ? 0 : 1)
