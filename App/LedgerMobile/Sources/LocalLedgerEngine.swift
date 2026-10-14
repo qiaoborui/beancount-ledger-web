@@ -211,6 +211,47 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         #endif
     }
 
+    /// Canonical validation for a staged or imported tree. A successful export
+    /// is a successful validation, so the export is kept: the generation this
+    /// tree becomes then registers without a second Python pass, and a tree
+    /// whose exact bytes were already validated skips the loader entirely.
+    func validateCanonical(workspaceRoot: String, runtimeRoot: String, entrypoint: String) async throws {
+        await LocalModelRequestGate.shared.acquire()
+        do {
+            try Task.checkCancellation()
+            try await serializedValidateCanonical(workspaceRoot: workspaceRoot, runtimeRoot: runtimeRoot, entrypoint: entrypoint)
+            await LocalModelRequestGate.shared.release()
+        } catch {
+            await LocalModelRequestGate.shared.release()
+            throw error
+        }
+    }
+
+    private func serializedValidateCanonical(workspaceRoot: String, runtimeRoot: String, entrypoint: String) async throws {
+        #if canImport(LedgerCore)
+        var command = LocalLedgerEngineRequest(workspaceRoot: workspaceRoot, runtimeRoot: runtimeRoot,
+            entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
+        command.operation = "model-source"
+        struct Version: Decodable { let sourceVersion: String }
+        let version = try nativeResponse(command).decode(Version.self)
+        let runtime = URL(fileURLWithPath: runtimeRoot)
+        let cache = LocalCanonicalStreamCache(runtimeRoot: runtime)
+        if cache.contains(version.sourceVersion) { return }
+        let directory = runtime.appendingPathComponent("canonical-stream")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard directory.standardizedFileURL.path == directory.resolvingSymlinksInPath().standardizedFileURL.path else {
+            throw LocalLedgerError.invalidConfiguration("模型导出目录不允许符号链接")
+        }
+        let output = directory.appendingPathComponent(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + ".records")
+        defer { try? FileManager.default.removeItem(at: output) }
+        let descriptor = try await EmbeddedBeancountValidator.shared.exportCanonical(
+            workspace: URL(fileURLWithPath: workspaceRoot), entryFile: entrypoint, to: output)
+        cache.store(output, sourceVersion: version.sourceVersion, descriptor: descriptor)
+        #else
+        throw LocalLedgerError.runtimeUnavailable
+        #endif
+    }
+
     #if canImport(LedgerCore)
     private func nativeResponse(_ request: LocalLedgerEngineRequest) throws -> LocalLedgerResponse {
         let encoded = try JSONEncoder().encode(request)
@@ -256,8 +297,14 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         let filename = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + ".records"
         let output = directory.appendingPathComponent(filename)
         defer { try? FileManager.default.removeItem(at: output) }
-        _ = try await EmbeddedBeancountValidator.shared.exportCanonical(
-            workspace: URL(fileURLWithPath: request.workspaceRoot), entryFile: request.entrypoint, to: output)
+        // Same source bytes, same bundled runtime: reuse the earlier export
+        // instead of re-running the Python loader over the whole ledger.
+        let cache = LocalCanonicalStreamCache(runtimeRoot: runtime)
+        if !cache.restore(version.sourceVersion, to: output) {
+            let descriptor = try await EmbeddedBeancountValidator.shared.exportCanonical(
+                workspace: URL(fileURLWithPath: request.workspaceRoot), entryFile: request.entrypoint, to: output)
+            cache.store(output, sourceVersion: version.sourceVersion, descriptor: descriptor)
+        }
         try Task.checkCancellation()
         command.operation = "model-register"
         command.sourceVersion = version.sourceVersion

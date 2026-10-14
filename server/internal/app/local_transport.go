@@ -460,8 +460,9 @@ func copyLocalRuntime(source, destination string) error {
 			return err
 		}
 		// Canonical export is scratch owned by the serialized native bridge,
-		// never an import receipt. Do not copy/read orphaned huge stream files.
-		if relative == "canonical-stream" && entry.IsDir() {
+		// never an import receipt. Do not copy/read orphaned huge stream files,
+		// nor the bridge's content-addressed cache of earlier exports.
+		if (relative == "canonical-stream" || relative == "canonical-cache") && entry.IsDir() {
 			return filepath.SkipDir
 		}
 		target := filepath.Join(destination, relative)
@@ -499,6 +500,29 @@ func walkLocalLedgerSource(cfg Config, collectLines bool) ([]BeanLine, []fileSta
 	var stats []fileStat
 	totalBytes := 0
 	var visit func(string) error
+	visitInclude := func(full, include string) error {
+		if filepath.IsAbs(include) {
+			return errors.New("absolute ledger includes are unsupported in local workspaces")
+		}
+		pattern := filepath.Join(filepath.Dir(full), include)
+		rel, err := filepath.Rel(cfg.LedgerRoot, pattern)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return errors.New("ledger include escapes the workspace")
+		}
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return err
+		}
+		if len(matches) == 0 {
+			return fmt.Errorf("ledger include has no matching files: %s", include)
+		}
+		for _, file := range matches {
+			if err := visit(file); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	visit = func(full string) error {
 		relative, err := filepath.Rel(cfg.LedgerRoot, full)
 		if err != nil || !fs.ValidPath(filepath.ToSlash(relative)) {
@@ -518,6 +542,22 @@ func walkLocalLedgerSource(cfg Config, collectLines bool) ([]BeanLine, []fileSta
 		if !info.Mode().IsRegular() || info.Size() > 8<<20 {
 			return errors.New("ledger include must be a regular file of at most 8 MiB")
 		}
+		memoKey, memoizable := localSourceMemoKeyFor(full, info)
+		if !collectLines && memoizable {
+			if facts, ok := localSourceMemoLookup(memoKey); ok {
+				totalBytes += facts.size
+				if totalBytes > 64<<20 {
+					return errors.New("local ledger exceeds 64 MiB")
+				}
+				stats = append(stats, fileStat{relative: filepath.ToSlash(relative), contentHash: facts.contentHash, mtimeMs: info.ModTime().UnixMilli()})
+				for _, include := range facts.includes {
+					if err := visitInclude(full, include); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+		}
 		raw, err := os.ReadFile(full)
 		if err != nil {
 			return err
@@ -526,7 +566,8 @@ func walkLocalLedgerSource(cfg Config, collectLines bool) ([]BeanLine, []fileSta
 		if totalBytes > 64<<20 {
 			return errors.New("local ledger exceeds 64 MiB")
 		}
-		stats = append(stats, fileStat{relative: filepath.ToSlash(relative), contentHash: sha256.Sum256(raw), mtimeMs: info.ModTime().UnixMilli()})
+		facts := localSourceFacts{size: len(raw), contentHash: sha256.Sum256(raw)}
+		stats = append(stats, fileStat{relative: filepath.ToSlash(relative), contentHash: facts.contentHash, mtimeMs: info.ModTime().UnixMilli()})
 		index := 0
 		for line := range strings.SplitSeq(string(raw), "\n") {
 			index++
@@ -538,26 +579,15 @@ func walkLocalLedgerSource(cfg Config, collectLines bool) ([]BeanLine, []fileSta
 			if match == nil {
 				continue
 			}
-			if filepath.IsAbs(match[1]) {
-				return errors.New("absolute ledger includes are unsupported in local workspaces")
-			}
-			pattern := filepath.Join(filepath.Dir(full), match[1])
-			rel, err := filepath.Rel(cfg.LedgerRoot, pattern)
-			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				return errors.New("ledger include escapes the workspace")
-			}
-			matches, err := filepath.Glob(pattern)
-			if err != nil {
+			facts.includes = append(facts.includes, match[1])
+			if err := visitInclude(full, match[1]); err != nil {
 				return err
 			}
-			if len(matches) == 0 {
-				return fmt.Errorf("ledger include has no matching files: %s", match[1])
-			}
-			for _, file := range matches {
-				if err := visit(file); err != nil {
-					return err
-				}
-			}
+		}
+		// Only the bytes just read are remembered; a later write changes the
+		// file's ctime and therefore its key.
+		if memoizable && len(raw) == int(info.Size()) {
+			localSourceMemoStore(memoKey, facts)
 		}
 		return nil
 	}
