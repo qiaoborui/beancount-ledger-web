@@ -117,6 +117,13 @@ final class LedgerSession: ObservableObject {
         let currency: String
     }
     private var analysisDisplayCache: [AnalysisDisplayKey: LedgerAnalysisResource] = [:]
+    private struct WidgetPublishKey: Equatable {
+        let context: URL
+        let revisionID: UUID
+        let currency: String
+        let today: String
+    }
+    private var lastWidgetPublish: WidgetPublishKey?
     private var analysisPrefetchTask: Task<Void, Never>?
     private var analysisInFlight: [AnalysisCacheKey: Task<LedgerAnalysisResource, Error>] = [:]
     @Published private(set) var localOverviewCategoriesError: String?
@@ -3469,7 +3476,8 @@ final class LedgerSession: ObservableObject {
                 guard generation == self.requestGeneration, epoch == self.sessionEpoch,
                       expectedLocation == self.location, self.phase == .ready else { return }
                 await self.publishWidgetSnapshot(ledger: payload, contextURL: contextURL,
-                    valuationCurrency: payload.valuationCurrency, generation: generation)
+                    valuationCurrency: payload.valuationCurrency, generation: generation,
+                    localRevisionID: presentationRevision)
                 self.prefetchAnalysis()
             }
         } else {
@@ -3479,7 +3487,8 @@ final class LedgerSession: ObservableObject {
                 ledger: payload,
                 contextURL: contextURL,
                 valuationCurrency: payload.valuationCurrency,
-                generation: generation
+                generation: generation,
+                localRevisionID: local == nil ? nil : presentationRevision
             )
             prefetchAnalysis()
         }
@@ -3607,12 +3616,21 @@ final class LedgerSession: ObservableObject {
         ledger: LedgerBootstrap,
         contextURL: URL,
         valuationCurrency: String,
-        generation: Int
+        generation: Int,
+        localRevisionID: UUID? = nil
     ) async {
         let widgetRefreshAttemptAt = ledgerNow()
         let month = LedgerDateRange.current(.month, now: widgetRefreshAttemptAt)
         let today = LedgerDateRange.today(now: widgetRefreshAttemptAt)
         let weekStart = LedgerWidgetDates.weekStart(today)
+        // Range changes and pull-to-refresh reload the ledger, but the widget
+        // shows fixed windows (today, week, month, year). For a local ledger at
+        // the same revision, currency and day it would rebuild the same snapshot
+        // from five more reports.
+        let publishKey = localRevisionID.map {
+            WidgetPublishKey(context: contextURL, revisionID: $0, currency: valuationCurrency, today: today)
+        }
+        if let publishKey, publishKey == lastWidgetPublish { return }
         guard let repository = try? repository(at: contextURL) else { return }
         async let weekRequest: LedgerHomeReport? = try? await repository.homeReport(
             start: weekStart, end: LedgerWidgetDates.adding(7, to: weekStart),
@@ -3676,12 +3694,15 @@ final class LedgerSession: ObservableObject {
             snapshot,
             attemptedAt: widgetRefreshAttemptAt
         )) != nil else { return }
+        // Only a complete publish may be skipped next time.
+        if importDocuments != nil, week != nil, year != nil, history != nil { lastWidgetPublish = publishKey }
         #if canImport(WidgetKit)
         WidgetCenter.shared.reloadAllTimelines()
         #endif
     }
 
     private func clearWidgetSnapshot() {
+        lastWidgetPublish = nil
         widgetSnapshotStore.clear()
         #if canImport(WidgetKit)
         WidgetCenter.shared.reloadAllTimelines()
@@ -4812,6 +4833,7 @@ final class LedgerSession: ObservableObject {
     @discardableResult
     private func invalidateSession() -> Int {
         analysisDisplayCache.removeAll()
+        lastWidgetPublish = nil
         analysisPrefetchTask?.cancel()
         analysisPrefetchTask = nil
         localResumeTask?.cancel()

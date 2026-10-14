@@ -221,6 +221,28 @@ final class LocalLedgerAutomaticSyncSessionTests: XCTestCase {
         XCTAssertTrue(gitRequests.allSatisfy { $0.url == "https://example.invalid/synthetic-ledger.git" })
     }
 
+    func testRangeChangeAtSameRevisionDoesNotRebuildWidgetSnapshot() async throws {
+        let fixture = try await fixture()
+        fixture.authenticator.accepts = true
+        let session = fixture.session(enabled: false)
+        defer { session.chooseLedger() }
+        await session.start()
+        XCTAssertEqual(session.phase, .ready, session.errorMessage ?? "")
+        func reportCount() async -> Int { await fixture.engine.requests.filter { $0.path == "/api/ledger/home-report" }.count }
+        let deadline = Date().addingTimeInterval(5)
+        while await reportCount() < 4, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        let initialReports = await reportCount()
+        XCTAssertEqual(initialReports, 4, "the first load publishes the widget from four reports")
+        XCTAssertNotNil(fixture.store.load())
+
+        await fixture.engine.resetRequests()
+        await session.applyRange(.month(year: 2026, month: 8))
+        XCTAssertEqual(session.phase, .ready, session.errorMessage ?? "")
+        try await Task.sleep(for: .milliseconds(200))
+        let rangeReports = await reportCount()
+        XCTAssertEqual(rangeReports, 0, "widget windows do not depend on the selected range")
+    }
+
     func testForegroundSaveNotificationAutomaticallyPushesValidatedLocalChange() async throws {
         try await assertForegroundSaveAutomaticallyPushes(recoverAuthentication: false)
     }
