@@ -145,8 +145,16 @@ struct SettingsView: View {
                 HStack {
                     Text("版本").balancedFont(size: 14).foregroundStyle(BalancedPalette.secondary)
                     Spacer()
-                    Text("本地版 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
-                        .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("本地版 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
+                            .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                        // Stamped at build time by scripts/stamp-ios-build-commit.sh.
+                        if let commit = Bundle.main.object(forInfoDictionaryKey: "LedgerGitCommit") as? String {
+                            Text(commit).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                                .textSelection(.enabled)
+                                .accessibilityLabel("构建提交 \(commit)")
+                        }
+                    }
                 }
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("settings-app-version")
