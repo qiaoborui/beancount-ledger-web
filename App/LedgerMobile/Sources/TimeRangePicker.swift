@@ -214,7 +214,9 @@ private struct LedgerTimeRangeSheet: View {
                 }
                 .padding(.horizontal, 4)
 
-                // 12-Month Squircle Grid
+                // 12-Month Squircle Grid — a `.seg`-style 3-wide grid. The
+                // active month carries the shared 2px ink mark, not a filled
+                // accent block: Balanced has no accent colour.
                 let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
                 LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(1...12, id: \.self) { month in
@@ -224,15 +226,20 @@ private struct LedgerTimeRangeSheet: View {
                             session.setDraftRange(LedgerDateRange.month(year: selectedYear, month: month))
                         } label: {
                             Text("\(month)月")
-                                .font(.system(size: 13.5, weight: isSelected ? .bold : .medium, design: .monospaced))
-                                .foregroundStyle(isSelected ? TerminalPalette.onAccent : TerminalPalette.ink)
+                                .balancedFont(size: 14, weight: isSelected ? .medium : .regular)
+                                .monospacedDigit()
+                                .foregroundStyle(isSelected ? BalancedPalette.ink : BalancedPalette.secondary)
                                 .frame(maxWidth: .infinity, minHeight: 44)
-                                .background(isSelected ? TerminalPalette.accent : TerminalPalette.panel)
-                                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+                                .contentShape(Rectangle())
+                                .overlay(alignment: .bottom) {
+                                    Rectangle().fill(isSelected ? BalancedPalette.ink : Color.clear).frame(height: 2)
+                                }
                         }
-                        .buttonStyle(PressScaleButtonStyle(pressedScale: 0.94, enablesHaptic: false))
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(isSelected ? .isSelected : [])
                     }
                 }
+                .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
             }
             .padding(.vertical, 4)
         } header: {
@@ -291,17 +298,21 @@ private struct LedgerTimeRangeSheet: View {
                         } label: {
                             VStack(spacing: 3) {
                                 Text("第\(q)季度")
-                                    .font(.system(size: 14.5, weight: isSelected ? .bold : .medium, design: .monospaced))
+                                    .balancedFont(size: 14.5, weight: isSelected ? .medium : .regular)
+                                    .monospacedDigit()
                                 Text(quarterMonthsLabel(q))
-                                    .font(.system(size: 11, weight: .regular))
-                                    .opacity(0.8)
+                                    .balancedFont(size: 11.5)
+                                    .foregroundStyle(BalancedPalette.meta)
                             }
-                            .foregroundStyle(isSelected ? TerminalPalette.onAccent : TerminalPalette.ink)
+                            .foregroundStyle(isSelected ? BalancedPalette.ink : BalancedPalette.secondary)
                             .frame(maxWidth: .infinity, minHeight: 52)
-                            .background(isSelected ? TerminalPalette.accent : TerminalPalette.panel)
-                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+                            .contentShape(Rectangle())
+                            .overlay(alignment: .bottom) {
+                                Rectangle().fill(isSelected ? BalancedPalette.ink : Color.clear).frame(height: 2)
+                            }
                         }
-                        .buttonStyle(PressScaleButtonStyle(pressedScale: 0.94, enablesHaptic: false))
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(isSelected ? .isSelected : [])
                     }
                 }
             }
@@ -325,16 +336,21 @@ private struct LedgerTimeRangeSheet: View {
                         session.setDraftRange(LedgerDateRange.year(year: y))
                     } label: {
                         Text(verbatim: "\(y)年")
-                            .font(.system(size: 14, weight: isSelected ? .bold : .medium, design: .monospaced))
-                            .foregroundStyle(isSelected ? TerminalPalette.onAccent : TerminalPalette.ink)
+                            .balancedFont(size: 14, weight: isSelected ? .medium : .regular)
+                            .monospacedDigit()
+                            .foregroundStyle(isSelected ? BalancedPalette.ink : BalancedPalette.secondary)
                             .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(isSelected ? TerminalPalette.accent : TerminalPalette.panel)
-                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+                            .contentShape(Rectangle())
+                            .overlay(alignment: .bottom) {
+                                Rectangle().fill(isSelected ? BalancedPalette.ink : Color.clear).frame(height: 2)
+                            }
                     }
-                    .buttonStyle(PressScaleButtonStyle(pressedScale: 0.94, enablesHaptic: false))
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
             }
             .padding(.vertical, 4)
+            .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
         } header: {
             Text("年份快捷直选")
         }
@@ -379,18 +395,20 @@ private struct LedgerTimeRangeSheet: View {
         }
     }
 
+    /// `.seg-inline` — a 32pt bordered segment, `--ink` fill on the active item.
     private func customPresetChip(title: String, days: Int) -> some View {
         Button {
             applyCustomPreset(days: days)
         } label: {
             Text(title)
-                .font(.system(size: 12.5, weight: .medium, design: .monospaced))
-                .foregroundStyle(Color.primary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .frame(minHeight: 44)
-                .background(Color(uiColor: .tertiarySystemFill))
-                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
+                .balancedFont(size: 13)
+                .foregroundStyle(BalancedPalette.secondary)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 32)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .stroke(BalancedPalette.edge, lineWidth: 1)
+                }
         }
         .buttonStyle(.plain)
     }

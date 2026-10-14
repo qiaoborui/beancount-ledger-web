@@ -25,59 +25,144 @@ struct LocalLedgerStorageView: View {
     var body: some View {
         List {
             Section {
-                LabeledContent("账本", value: session.localLedgerName)
-                LabeledContent("存储提供方", value: session.localGitConfiguration == nil ? "本机目录" : "Git 工作区")
-                LabeledContent("状态", value: statusTitle)
-                if let date = status?.lastSyncedAt { LabeledContent("最近同步", value: date.formatted()) }
-                if let commit = status?.baseCommit { LabeledContent("同步版本", value: String(commit.prefix(12))).monospaced() }
+                VStack(alignment: .leading, spacing: 0) {
+                    StorageKeyRow(label: "账本", value: session.localLedgerName)
+                    StorageKeyRow(label: "存储提供方", value: session.localGitConfiguration == nil ? "本机目录" : "Git 工作区")
+                    StorageKeyRow(label: "状态", value: statusTitle, color: statusColor)
+                    if let date = status?.lastSyncedAt { StorageKeyRow(label: "最近同步", value: date.formatted()) }
+                    if let commit = status?.baseCommit { StorageKeyRow(label: "同步版本", value: String(commit.prefix(12)), mono: true) }
+                }
+                .balancedBand(lead: true)
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 18, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             } footer: {
                 Text("查询、统计、校验和保存都在本机执行。存储提供方负责版本交换，离线时仍可继续使用账本。")
+                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    .listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
             }
-            if let error { Section { Text(error).foregroundStyle(.red).textSelection(.enabled) } }
+            if let error {
+                Section { Text(error).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.expense).textSelection(.enabled) }
+            }
             if error == nil, let message = status?.message {
-                Section { Text(message).foregroundStyle(.secondary).textSelection(.enabled) }
+                Section { Text(message).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary).textSelection(.enabled) }
             }
             if let paths = status?.conflictPaths, !paths.isEmpty {
-                Section("需要处理的文件") {
-                    ForEach(paths, id: \.self) { Text($0).font(.footnote.monospaced()).textSelection(.enabled) }
+                Section {
+                    ForEach(paths, id: \.self) { path in
+                        Text(path).balancedMono(size: 12.5).foregroundStyle(BalancedPalette.ink)
+                            .frame(minHeight: 44, alignment: .leading)
+                            .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                            .textSelection(.enabled)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                     Button("保留这些文件的本机版本") { conflictChoice = true; confirmingResolution = true }
+                        .buttonStyle(.balanced(.outline))
+                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
                     Button("采用这些文件的远端版本") { conflictChoice = false; confirmingResolution = true }
+                        .buttonStyle(.balanced(.outline))
+                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
                     Button("导出两边版本供检查") { Task { await exportConflicts() } }
-                    if let conflictExport { ShareLink("分享冲突文件", item: conflictExport) }
-                }
+                        .buttonStyle(.balanced(.quiet))
+                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    if let conflictExport {
+                        ShareLink("分享冲突文件", item: conflictExport)
+                            .buttonStyle(.balanced(.quiet))
+                            .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    }
+                } header: { TerminalSectionLabel(text: "需要处理的文件").listRowBackground(BalancedPalette.page).listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
             }
             Section {
-                TextField("https://git.example.com/owner/ledger.git", text: $repositoryURL)
-                    .textContentType(.URL).keyboardType(.URL)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .accessibilityIdentifier("local-git-url")
-                TextField("分支", text: $branch)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .accessibilityIdentifier("local-git-branch")
-                TextField("Git 用户名（可选）", text: $username)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                SecureField("访问令牌（留空保留已有凭据）", text: $token)
-                    .textContentType(.password)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("仓库地址").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    TextField("https://git.example.com/owner/ledger.git", text: $repositoryURL)
+                        .balancedMono(size: 15)
+                        .foregroundStyle(BalancedPalette.ink)
+                        .padding(.bottom, 10)
+                        .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                        .textContentType(.URL).keyboardType(.URL)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .accessibilityIdentifier("local-git-url")
+                }
+                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 10, trailing: 20))
+                .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("分支").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    TextField("分支", text: $branch)
+                        .balancedMono(size: 15)
+                        .foregroundStyle(BalancedPalette.ink)
+                        .padding(.bottom, 10)
+                        .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .accessibilityIdentifier("local-git-branch")
+                }
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 10, trailing: 20))
+                .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Git 用户名（可选）").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    TextField("Git 用户名（可选）", text: $username)
+                        .balancedFont(size: 15)
+                        .foregroundStyle(BalancedPalette.ink)
+                        .padding(.bottom, 10)
+                        .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                }
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 10, trailing: 20))
+                .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("访问令牌").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    SecureField("访问令牌（留空保留已有凭据）", text: $token)
+                        .balancedMono(size: 15)
+                        .foregroundStyle(BalancedPalette.ink)
+                        .padding(.bottom, 10)
+                        .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                        .textContentType(.password)
+                }
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
+                .listRowBackground(Color.clear).listRowSeparator(.hidden)
                 Button("保存存储设置") { Task { await saveConfiguration() } }
+                    .buttonStyle(.balanced(.outline, disabled: repositoryURL.isEmpty || branch.isEmpty))
                     .disabled(repositoryURL.isEmpty || branch.isEmpty)
                     .accessibilityIdentifier("local-git-save")
-            } header: { Text("Git 存储") }
-            footer: { Text("填写 HTTPS 仓库地址。令牌仅存于此设备的钥匙串。保存后将按自动同步设置交换本地与远端变更，请确认仓库和分支。") }
+                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
+            } header: { TerminalSectionLabel(text: "Git 存储").listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
+            footer: {
+                Text("填写 HTTPS 仓库地址。令牌仅存于此设备的钥匙串。保存后将按自动同步设置交换本地与远端变更，请确认仓库和分支。")
+                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    .listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+            }
             if session.localGitConfiguration != nil {
                 Section {
                     Toggle("自动同步", isOn: Binding(get: { session.localAutomaticSyncEnabled }, set: { enabled in
                         Task { await session.setLocalAutomaticSyncEnabled(enabled); await reloadStatus() }
                     }))
+                    .balancedFont(size: 15)
                     .accessibilityIdentifier("local-git-auto-sync")
+                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
                     Button("立即同步") { confirmingSync = true }
+                        .buttonStyle(.balanced(.outline, disabled: !matchesConfiguration))
                         .disabled(!matchesConfiguration)
                         .accessibilityIdentifier("local-git-sync")
+                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
                     Button("改用本机存储") { confirmingDisconnect = true }
+                        .buttonStyle(.balanced(.quiet))
+                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
                 } footer: {
                     Text("保存后自动同步，联网及回到前台时自动重试。后台同步由 iOS 调度；设备首次解锁后可在锁屏时运行。冲突或凭据失效时暂停，账本仍保存在本机。")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        .listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 }
             }
         }
+        .toggleStyle(BalancedToggleStyle())
+        .scrollContentBackground(.hidden)
+        .background(BalancedPalette.page)
         .disabled(busy || session.isStorageSyncBusy)
         .navigationTitle("存储与同步")
         .terminalNativeChrome()
@@ -117,6 +202,18 @@ struct LocalLedgerStorageView: View {
         case .conflicted: return "需要处理冲突"
         case .failed: return "同步失败 · 本机可用"
         case nil: return "读取状态中"
+        }
+    }
+
+    /// Direction is spent sparingly here: `--in` once sync is verified
+    /// complete, `--out` only while it is paused or broken — never for an
+    /// in-progress or merely local state.
+    private var statusColor: Color {
+        if busy || session.isStorageSyncBusy { return BalancedPalette.ink }
+        switch status?.phase {
+        case .synced: return BalancedPalette.income
+        case .conflicted, .failed: return BalancedPalette.expense
+        default: return BalancedPalette.ink
         }
     }
 
@@ -183,26 +280,40 @@ struct GitLedgerSetupView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("账本") {
-                    TextField("名称", text: $name)
-                    TextField("入口文件", text: $entrypoint).textInputAutocapitalization(.never).autocorrectionDisabled()
-                }
-                Section("Git 仓库") {
-                    TextField("HTTPS 仓库地址", text: $repositoryURL).keyboardType(.URL)
+                Section {
+                    TextField("名称", text: $name).balancedFont(size: 15)
+                    TextField("入口文件", text: $entrypoint)
+                        .balancedMono(size: 13.5)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                } header: { TerminalSectionLabel(text: "账本").listRowBackground(BalancedPalette.page).listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
+                Section {
+                    TextField("HTTPS 仓库地址", text: $repositoryURL)
+                        .balancedMono(size: 13)
+                        .keyboardType(.URL)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("local-git-clone-url")
-                    TextField("分支", text: $branch).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    TextField("Git 用户名（可选）", text: $username).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("访问令牌（私有仓库）", text: $token)
+                    TextField("分支", text: $branch)
+                        .balancedMono(size: 13)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                }
+                    TextField("Git 用户名（可选）", text: $username)
+                        .balancedFont(size: 14)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    SecureField("访问令牌（私有仓库）", text: $token)
+                        .balancedMono(size: 13)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                } header: { TerminalSectionLabel(text: "Git 仓库").listRowBackground(BalancedPalette.page).listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
                 Section {
                     Text("下载工作区并在此设备上校验。之后所有账本功能都使用本地文件；本次添加只读取远端仓库。")
-                        .foregroundStyle(.secondary)
+                        .balancedFont(size: 12.5)
+                        .foregroundStyle(BalancedPalette.meta)
                 }
-                if let error = session.errorMessage { Section { Text(error).foregroundStyle(.red) } }
+                if let error = session.errorMessage {
+                    Section { Text(error).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.expense) }
+                }
                 if session.isLocalOperationBusy { Section { ProgressView("正在下载并校验工作区") } }
             }
+            .scrollContentBackground(.hidden)
+            .background(BalancedPalette.page)
             .navigationTitle("添加 Git 账本")
             .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
@@ -225,5 +336,27 @@ struct GitLedgerSetupView: View {
             .interactiveDismissDisabled(session.isLocalOperationBusy)
             .onDisappear { operation?.cancel(); token = "" }
         }
+    }
+}
+
+/// `.key` — a plain label/value pair on a shared baseline, used inside the
+/// `.band--lead` status summary (no amount, so `BalancedKeyRow` doesn't fit).
+private struct StorageKeyRow: View {
+    let label: String
+    let value: String
+    var color: Color = BalancedPalette.ink
+    var mono = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).balancedFont(size: 14).foregroundStyle(BalancedPalette.secondary)
+            Spacer()
+            if mono {
+                Text(value).balancedMono(size: 12).foregroundStyle(color)
+            } else {
+                Text(value).balancedFont(size: 15, weight: .text).foregroundStyle(color)
+            }
+        }
+        .padding(.vertical, 3)
     }
 }

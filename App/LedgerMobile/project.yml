@@ -41,6 +41,13 @@ targets:
         CFBundleDisplayName: Ledger
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UIAppFonts:
+          - IBMPlexSans-Regular.ttf
+          - IBMPlexSans-Text.ttf
+          - IBMPlexSans-Medium.ttf
+          - IBMPlexSans-SemiBold.ttf
+          - IBMPlexMono-Regular.ttf
+          - IBMPlexMono-Medium.ttf
         CFBundleURLTypes:
           - CFBundleURLName: com.qiaoborui.ledger.mobile
             CFBundleURLSchemes:

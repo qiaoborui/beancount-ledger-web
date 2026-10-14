@@ -29,21 +29,15 @@ struct BookkeepingPreviewView: View {
         NavigationStack {
             List {
                 Section {
-                    VStack(alignment: .leading, spacing: LedgerSpacing.xs) {
-                        HStack(spacing: LedgerSpacing.sm) {
-                            Image(systemName: "checkmark.shield.fill")
-                                .foregroundStyle(LedgerPalette.success)
-                                .font(.title3)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("完整账本校验通过")
-                                    .font(.headline)
-                                    .foregroundStyle(LedgerPalette.ink)
-                                Text("本地 Beancount 引擎已验证复式记账平衡与语法规范。")
-                                    .font(.caption)
-                                    .foregroundStyle(LedgerPalette.secondary)
-                            }
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark").font(.system(size: 12, weight: .bold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("完整账本校验通过").balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                            Text("本地 Beancount 引擎已验证复式记账平衡与语法规范。")
+                                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                         }
                     }
+                    .foregroundStyle(BalancedPalette.income)
                     .padding(.vertical, 4)
                 }
 
@@ -62,31 +56,26 @@ struct BookkeepingPreviewView: View {
                                 .accessibilityIdentifier("bookkeeping-file-diff")
                         } else {
                             HStack {
-                                Image(systemName: "doc.fill")
-                                    .foregroundStyle(LedgerPalette.cobalt)
-                                Text("附件变更")
-                                    .font(.subheadline)
+                                Text("附件变更").balancedFont(size: 14)
                                 Spacer()
                                 Text("\(file.before?.count ?? 0) → \(file.after?.count ?? 0) 字节")
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(LedgerPalette.secondary)
+                                    .balancedMono(size: 11.5)
+                                    .foregroundStyle(BalancedPalette.meta)
                             }
                         }
                     } header: {
                         HStack(spacing: 6) {
-                            Image(systemName: file.path.hasSuffix(".bean") ? (isIncludeOnly ? "link" : "doc.text.fill") : "paperclip")
-                                .foregroundStyle(LedgerPalette.cobalt)
-                            Text(file.path)
-                                .font(.caption.weight(.semibold).monospaced())
+                            Text(file.path).balancedMono(size: 11.5, weight: .medium).foregroundStyle(BalancedPalette.meta)
                             if isIncludeOnly {
-                                Text("（入口关联引用）")
-                                    .font(.caption2)
-                                    .foregroundStyle(LedgerPalette.secondary)
+                                Text("（入口关联引用）").balancedFont(size: 11).foregroundStyle(BalancedPalette.meta)
                             }
                         }
+                        .listRowBackground(BalancedPalette.page)
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(BalancedPalette.page)
             .navigationTitle("确认账本改动")
             .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
@@ -202,21 +191,15 @@ private struct DiffCodeBlock: View {
 
         HStack(alignment: .top, spacing: 6) {
             Text(isAdded ? "+" : (isRemoved ? "-" : " "))
-                .font(.system(.caption2, design: .monospaced).weight(.bold))
-                .foregroundStyle(isAdded ? LedgerPalette.income : (isRemoved ? LedgerPalette.expense : LedgerPalette.secondary))
+                .balancedMono(size: 11, weight: .medium)
+                .foregroundStyle(isAdded ? BalancedPalette.income : (isRemoved ? BalancedPalette.expense : BalancedPalette.meta))
                 .frame(width: 12)
 
             Text(line.count >= 2 ? String(line.dropFirst(2)) : line)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(isAdded ? LedgerPalette.income : (isRemoved ? LedgerPalette.expense : LedgerPalette.ink))
+                .balancedMono(size: 11.5)
+                .foregroundStyle(isAdded ? BalancedPalette.income : (isRemoved ? BalancedPalette.expense : BalancedPalette.ink))
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            isAdded ? LedgerPalette.income.opacity(0.08) :
-            (isRemoved ? LedgerPalette.expense.opacity(0.08) : Color.clear)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
     }
 }

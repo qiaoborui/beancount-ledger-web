@@ -61,7 +61,7 @@ struct SingleTransactionReceiptCard: View {
 
     private var amountPrefix: String {
         switch presentation.kind {
-        case .expense: return "-"
+        case .expense: return "−"
         case .income: return "+"
         case .transfer: return ""
         }
@@ -71,63 +71,50 @@ struct SingleTransactionReceiptCard: View {
         VStack(spacing: 16) {
             // Header: Logo & Receipt Title
             HStack(spacing: 8) {
-                Image(systemName: "building.columns.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(LedgerPalette.cobalt)
                 Text("LEDGER")
-                    .font(.system(size: 13, weight: .black, design: .monospaced))
+                    .balancedFont(size: 13, weight: .semibold)
                     .tracking(1.5)
-                    .foregroundStyle(LedgerPalette.ink)
+                    .foregroundStyle(BalancedPalette.ink)
                 Text("· 记账凭证")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(LedgerPalette.secondary)
+                    .balancedFont(size: 12)
+                    .foregroundStyle(BalancedPalette.meta)
                 Spacer()
-                Text(kindBadgeText)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(amountColor)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(amountColor.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
+                BalancedTag(text: kindBadgeText, kind: {
+                    switch presentation.kind {
+                    case .expense: .pending
+                    case .income: .ok
+                    case .transfer: .neutral
+                    }
+                }())
             }
 
             // Hero Amount & Payee
             VStack(spacing: 6) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                        .fill(categoryVisual.color.opacity(0.15))
-                        .frame(width: 48, height: 48)
-                    Image(systemName: categoryVisual.iconName)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(categoryVisual.color)
-                }
-                .padding(.top, 4)
-
                 ShareAmountText(
                     minorUnits: presentation.minorUnits,
                     currency: presentation.currency,
                     prefix: amountPrefix,
-                    font: .system(size: 34, weight: .bold, design: .monospaced),
+                    font: .custom(BalancedWeight.medium.sansPostscriptName, size: 32),
                     color: amountColor
                 )
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
                 Text(presentation.title)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.ink)
+                    .balancedFont(size: 17, weight: .medium)
+                    .foregroundStyle(BalancedPalette.ink)
                     .multilineTextAlignment(.center)
 
                 if !presentation.subtitle.isEmpty {
                     Text(presentation.subtitle)
-                        .font(.system(size: 13))
-                        .foregroundStyle(LedgerPalette.secondary)
+                        .balancedFont(size: 13)
+                        .foregroundStyle(BalancedPalette.meta)
                         .multilineTextAlignment(.center)
                 }
             }
             .padding(.vertical, 2)
 
-            ReceiptDashedLine()
-                .frame(height: 1)
+            BalancedPalette.rule.frame(height: 1)
 
             // Money Flow
             let moneyFlow = TransactionMoneyFlow.build(
@@ -137,8 +124,7 @@ struct SingleTransactionReceiptCard: View {
             )
             TransactionMoneyFlowView(flow: moneyFlow, compact: true, isShareReceipt: true)
 
-            ReceiptDashedLine()
-                .frame(height: 1)
+            BalancedPalette.rule.frame(height: 1)
 
             // Info rows
             VStack(spacing: 9) {
@@ -149,7 +135,7 @@ struct SingleTransactionReceiptCard: View {
                     ForEach(Array(transaction.postings.prefix(4).enumerated()), id: \.offset) { _, posting in
                         let label = accountLabels[posting.account] ?? posting.account
                         let amt = MoneyText.format(minorUnits: abs(posting.amount), currency: posting.currency ?? presentation.currency)
-                        let sign = posting.amount >= 0 ? "+" : "-"
+                        let sign = posting.amount >= 0 ? "+" : "−"
                         receiptRow(title: label, value: "\(sign)\(amt)")
                     }
                 }
@@ -157,65 +143,49 @@ struct SingleTransactionReceiptCard: View {
                 if let tags = transaction.tags, !tags.isEmpty {
                     HStack {
                         Text("交易标签")
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(LedgerPalette.secondary)
+                            .balancedFont(size: 12.5)
+                            .foregroundStyle(BalancedPalette.meta)
                         Spacer()
-                        HStack(spacing: 4) {
+                        HStack(spacing: 8) {
                             ForEach(tags, id: \.self) { tag in
                                 Text("#\(tag)")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(LedgerPalette.cobalt)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
+                                    .balancedFont(size: 11.5)
+                                    .foregroundStyle(BalancedPalette.ink)
                             }
                         }
                     }
                 }
             }
 
-            ReceiptDashedLine()
-                .frame(height: 1)
+            BalancedPalette.rule.frame(height: 1)
 
             // Footer
             HStack {
                 HStack(spacing: 4) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 11))
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
                     Text("复式平衡 · 双向校验")
-                        .font(.system(size: 11, weight: .medium))
+                        .balancedFont(size: 11)
                 }
-                .foregroundStyle(LedgerPalette.success)
+                .foregroundStyle(BalancedPalette.income)
 
                 Spacer()
 
                 Text("由 Beancount 生成")
-                    .font(.system(size: 10.5, weight: .regular))
-                    .foregroundStyle(LedgerPalette.secondary.opacity(0.8))
+                    .balancedFont(size: 10.5)
+                    .foregroundStyle(BalancedPalette.meta)
             }
         }
         .padding(20)
         .frame(width: 340)
-        .background {
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .fill(colorScheme == .dark ? Color(uiColor: .secondarySystemBackground) : Color.white)
-
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(LedgerPalette.line.opacity(0.4), lineWidth: 0.5)
-        }
+        .background(BalancedPalette.page)
     }
 
     private func receiptRow(title: String, value: String) -> some View {
         HStack {
-            Text(title)
-                .font(.system(size: 12.5))
-                .foregroundStyle(LedgerPalette.secondary)
+            Text(title).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             Spacer()
-            Text(value)
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(LedgerPalette.ink)
+            Text(value).balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.ink)
         }
     }
 }
@@ -249,29 +219,19 @@ struct CombinedTransactionStatementCard: View {
             // Header
             statementHeader
 
-            ReceiptDashedLine()
-                .frame(height: 1)
+            BalancedPalette.rule.frame(height: 1)
 
             // Body grouped by date
             statementBody
 
-            ReceiptDashedLine()
-                .frame(height: 1)
+            BalancedPalette.rule.frame(height: 1)
 
             // Footer
             statementFooter
         }
         .padding(20)
         .frame(width: 360)
-        .background {
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .fill(colorScheme == .dark ? Color(uiColor: .secondarySystemBackground) : Color.white)
-
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                .stroke(LedgerPalette.line.opacity(0.4), lineWidth: 0.75)
-        }
+        .background(BalancedPalette.page)
     }
 
     // MARK: - Header
@@ -280,38 +240,30 @@ struct CombinedTransactionStatementCard: View {
         VStack(spacing: 10) {
             HStack(alignment: .center) {
                 HStack(spacing: 6) {
-                    Image(systemName: "list.bullet.rectangle.portrait.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(LedgerPalette.cobalt)
                     Text("LEDGER")
-                        .font(.system(size: 13, weight: .black, design: .monospaced))
+                        .balancedFont(size: 13, weight: .semibold)
                         .tracking(1.8)
-                        .foregroundStyle(LedgerPalette.ink)
+                        .foregroundStyle(BalancedPalette.ink)
                     Text("·")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(LedgerPalette.secondary.opacity(0.5))
+                        .balancedFont(size: 12)
+                        .foregroundStyle(BalancedPalette.meta)
                     Text("流水对账明细")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.ink)
+                        .balancedFont(size: 12.5, weight: .medium)
+                        .foregroundStyle(BalancedPalette.ink)
                 }
 
                 Spacer()
 
                 Text("共 \(sortedTransactions.count) 笔")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced).monospacedDigit())
-                    .foregroundStyle(LedgerPalette.cobalt)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 3.5)
-                    .background(LedgerPalette.cobalt.opacity(0.1), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
+                    .balancedFont(size: 11)
+                    .monospacedDigit()
+                    .foregroundStyle(BalancedPalette.meta)
             }
 
             HStack(spacing: 5) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(LedgerPalette.secondary)
                 Text(dateSpanDescription)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(LedgerPalette.secondary)
+                    .balancedFont(size: 12)
+                    .foregroundStyle(BalancedPalette.meta)
                 Spacer()
             }
         }
@@ -332,44 +284,33 @@ struct CombinedTransactionStatementCard: View {
                     // Date section header
                     HStack(spacing: 6) {
                         Text(TransactionDateHeaderFormatter.format(date))
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(LedgerPalette.ink)
+                            .balancedFont(size: 12, weight: .medium)
+                            .foregroundStyle(BalancedPalette.ink)
                         Spacer()
                         Text("\(txs.count) 笔")
-                            .font(.system(size: 10.5, weight: .medium, design: .monospaced).monospacedDigit())
-                            .foregroundStyle(LedgerPalette.secondary)
+                            .balancedFont(size: 10.5)
+                            .monospacedDigit()
+                            .foregroundStyle(BalancedPalette.meta)
                     }
                     .padding(.horizontal, 2)
 
-                    // Group card container
                     VStack(spacing: 0) {
                         ForEach(Array(txs.enumerated()), id: \.element.id) { index, tx in
                             transactionRow(tx)
                                 .padding(.vertical, 8)
-                                .padding(.horizontal, 10)
 
                             if index < txs.count - 1 {
-                                Divider()
-                                    .overlay(LedgerPalette.line.opacity(0.3))
-                                    .padding(.leading, 54)
+                                BalancedPalette.rule.frame(height: 1)
                             }
                         }
-                    }
-                    .background(
-                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                            .fill(colorScheme == .dark ? Color.white.opacity(0.04) : Color(uiColor: .systemGray6).opacity(0.55))
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                            .stroke(LedgerPalette.line.opacity(0.3), lineWidth: 0.5)
                     }
                 }
             }
 
             if truncated {
                 Text("... 仅展示前 45 笔，共 \(sortedTransactions.count) 笔流水")
-                    .font(.system(size: 11))
-                    .foregroundStyle(LedgerPalette.secondary)
+                    .balancedFont(size: 11)
+                    .foregroundStyle(BalancedPalette.meta)
                     .padding(.top, 2)
             }
         }
@@ -384,8 +325,8 @@ struct CombinedTransactionStatementCard: View {
             presentation: p,
             accountLabels: accountLabels
         )
-        let sign = p.kind == .expense ? "-" : (p.kind == .income ? "+" : "")
-        let color = p.kind == .expense ? LedgerPalette.ink : (p.kind == .income ? LedgerPalette.income : LedgerPalette.secondary)
+        let sign = p.kind == .expense ? "−" : (p.kind == .income ? "+" : "")
+        let color = p.kind == .expense ? BalancedPalette.expense : (p.kind == .income ? BalancedPalette.income : BalancedPalette.ink)
 
         let title: String = {
             if !tx.payee.isEmpty {
@@ -407,38 +348,25 @@ struct CombinedTransactionStatementCard: View {
         let account = fundingAccount(for: tx)
 
         return HStack(spacing: 12) {
-            // Category Icon
-            ZStack {
-                RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                    .fill(visual.color.opacity(0.13))
-                    .frame(width: 36, height: 36)
-                Image(systemName: visual.iconName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(visual.color)
-            }
-
             // Title & Subtitle
             VStack(alignment: .leading, spacing: 2.5) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.ink)
+                    .balancedFont(size: 14, weight: .medium)
+                    .foregroundStyle(BalancedPalette.ink)
                     .lineLimit(1)
 
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Text(subtitleDetail)
                         .lineLimit(1)
 
                     if let tag = tx.tags?.first, !tag.isEmpty {
                         Text("#\(tag)")
-                            .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(LedgerPalette.cobalt)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(LedgerPalette.cobalt.opacity(0.08), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+                            .balancedFont(size: 9.5)
+                            .foregroundStyle(BalancedPalette.ink)
                     }
                 }
-                .font(.system(size: 11.5))
-                .foregroundStyle(LedgerPalette.secondary)
+                .balancedFont(size: 11.5)
+                .foregroundStyle(BalancedPalette.meta)
             }
 
             Spacer(minLength: 8)
@@ -449,15 +377,15 @@ struct CombinedTransactionStatementCard: View {
                     minorUnits: p.minorUnits,
                     currency: p.currency,
                     prefix: sign,
-                    font: .system(size: 15.5, weight: .bold, design: .monospaced),
+                    font: .custom(BalancedWeight.medium.sansPostscriptName, size: 15),
                     color: color
                 )
                 .lineLimit(1)
 
                 if let account, !account.isEmpty {
                     Text(account)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(LedgerPalette.secondary)
+                        .balancedFont(size: 10.5)
+                        .foregroundStyle(BalancedPalette.meta)
                         .lineLimit(1)
                 }
             }
@@ -482,19 +410,16 @@ struct CombinedTransactionStatementCard: View {
     private var statementFooter: some View {
         HStack {
             HStack(spacing: 4) {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(LedgerPalette.success)
-                Text("复式平衡凭证 · 真实流水记录")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(LedgerPalette.secondary)
+                Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
+                Text("复式平衡凭证 · 真实流水记录").balancedFont(size: 10.5)
             }
+            .foregroundStyle(BalancedPalette.income)
 
             Spacer()
 
             Text("Beancount Ledger")
-                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                .foregroundStyle(LedgerPalette.secondary.opacity(0.8))
+                .balancedMono(size: 10.5)
+                .foregroundStyle(BalancedPalette.meta)
         }
     }
 }
@@ -542,24 +467,27 @@ struct TransactionShareSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Segmented Picker
-                Picker("分享形式", selection: $selectedTab) {
+                // `.seg` — full-width mark, not a filled segmented control.
+                HStack(spacing: 0) {
                     ForEach(ShareTab.allCases) { tab in
-                        Text(tab.rawValue).tag(tab)
+                        Button { selectedTab = tab } label: {
+                            BalancedMark(title: tab.rawValue, selected: selectedTab == tab)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                .pickerStyle(.segmented)
+                .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
                 .padding(.horizontal, 20)
-                .padding(.vertical, 10)
 
                 // Notice Toast
                 if let actionNotice {
                     Text(actionNotice)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.white)
+                        .balancedFont(size: 13, weight: .medium)
+                        .foregroundStyle(BalancedPalette.page)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 7)
-                        .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
+                        .background(BalancedPalette.ink, in: RoundedRectangle(cornerRadius: 3))
                         .transition(.move(edge: .top).combined(with: .opacity))
                         .padding(.bottom, 6)
                 }
@@ -572,7 +500,7 @@ struct TransactionShareSheet: View {
                     textPreviewSection
                 }
             }
-            .background(LedgerPalette.canvas)
+            .background(BalancedPalette.page)
             .navigationTitle(sheetTitle)
             .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
@@ -613,63 +541,44 @@ struct TransactionShareSheet: View {
             }
 
             // Bottom Action Bar
-            VStack(spacing: 8) {
-                HStack(spacing: 12) {
-                    // Copy Image Button
-                    Button {
-                        copyImage()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "doc.on.doc")
-                            Text("拷贝图片")
-                        }
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(LedgerPalette.ink)
-                        .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+            HStack(spacing: 10) {
+                Button("拷贝图片") { copyImage() }
+                    .buttonStyle(.balanced(.outline))
+
+                if let imageURL = tempImageURL {
+                    ShareLink(
+                        item: imageURL,
+                        preview: SharePreview(
+                            isSingle ? "记账凭证" : "消费对账清单",
+                            icon: Image(systemName: "doc.text.image")
+                        )
+                    ) {
+                        Text("系统分享")
+                            .balancedFont(size: 15, weight: .medium)
+                            .foregroundStyle(BalancedPalette.page)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .background(BalancedPalette.ink, in: RoundedRectangle(cornerRadius: 3))
                     }
                     .buttonStyle(PressScaleButtonStyle())
-
-                    // Share Link (System Share Sheet)
-                    if let imageURL = tempImageURL {
-                        ShareLink(
-                            item: imageURL,
-                            preview: SharePreview(
-                                isSingle ? "记账凭证" : "消费对账清单",
-                                icon: Image(systemName: "doc.text.image")
-                            )
-                        ) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "square.and.arrow.up")
-                                Text("系统分享")
-                            }
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.white)
-                            .frame(maxWidth: .infinity, minHeight: 46)
-                            .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+                } else {
+                    Button {
+                        renderCard()
+                    } label: {
+                        HStack(spacing: 6) {
+                            ProgressView().tint(BalancedPalette.page)
+                            Text("生成图片中...")
                         }
-                        .buttonStyle(PressScaleButtonStyle())
-                    } else {
-                        Button {
-                            renderCard()
-                        } label: {
-                            HStack(spacing: 6) {
-                                ProgressView()
-                                    .tint(.white)
-                                Text("生成图片中...")
-                            }
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.white)
-                            .frame(maxWidth: .infinity, minHeight: 46)
-                            .background(LedgerPalette.cobalt.opacity(0.8), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-                        }
-                        .disabled(true)
+                        .balancedFont(size: 15, weight: .medium)
+                        .foregroundStyle(BalancedPalette.page)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(BalancedPalette.ink.opacity(0.6), in: RoundedRectangle(cornerRadius: 3))
                     }
+                    .disabled(true)
                 }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
-            .background(LedgerPalette.panel)
+            .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
         }
     }
 
@@ -678,57 +587,32 @@ struct TransactionShareSheet: View {
     private var textPreviewSection: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(shareText)
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(LedgerPalette.ink)
-                        .textSelection(.enabled)
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(LedgerPalette.panel, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                                .stroke(LedgerPalette.line.opacity(0.4), lineWidth: 0.5)
-                        }
-                }
-                .padding(20)
+                Text(shareText)
+                    .balancedMono(size: 13)
+                    .foregroundStyle(BalancedPalette.ink)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .balancedBand()
+                    .padding(20)
             }
 
             // Bottom Action Bar
-            VStack(spacing: 8) {
-                HStack(spacing: 12) {
-                    // Copy Text Button
-                    Button {
-                        copyText()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "doc.on.doc")
-                            Text("拷贝文字")
-                        }
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(LedgerPalette.ink)
-                        .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-                    }
-                    .buttonStyle(PressScaleButtonStyle())
+            HStack(spacing: 10) {
+                Button("拷贝文字") { copyText() }
+                    .buttonStyle(.balanced(.outline))
 
-                    // Share Text Button
-                    ShareLink(item: shareText) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "square.and.arrow.up")
-                            Text("分享文字")
-                        }
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.white)
-                        .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(LedgerPalette.cobalt, in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
-                    }
-                    .buttonStyle(PressScaleButtonStyle())
+                ShareLink(item: shareText) {
+                    Text("分享文字")
+                        .balancedFont(size: 15, weight: .medium)
+                        .foregroundStyle(BalancedPalette.page)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(BalancedPalette.ink, in: RoundedRectangle(cornerRadius: 3))
                 }
+                .buttonStyle(PressScaleButtonStyle())
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
-            .background(LedgerPalette.panel)
+            .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
         }
     }
 

@@ -164,19 +164,115 @@ private struct TerminalReportChart: View {
     }
 }
 
+/// `.sechead` — plain 15/600 heading with a right-aligned aside, no numbered
+/// prefix. A private copy of `OverviewView`'s section head (that one stays
+/// file-private there) so this report can stay self-contained.
+@MainActor
+private func balancedSechead(_ title: String, aside: String) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: 14) {
+        Text(title).balancedFont(size: 15, weight: .semibold).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
+        Spacer(minLength: 0)
+        Text(aside).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+    }.padding(EdgeInsets(top: 26, leading: 20, bottom: 10, trailing: 20))
+}
+
+/// `.metric` cell: label, 22/500 tabular value, sub caption. Two per row with
+/// a shared rule grid, matching `.metrics` / `.metric` in styles.css.
+private struct BalancedAnalysisMetric: View {
+    @EnvironmentObject private var session: LedgerSession
+    let title: String
+    let minorUnits: Int
+    let currency: String
+    var prefix = ""
+    var color: Color = BalancedPalette.ink
+    var sub = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            Text(session.amountsVisible ? prefix + MoneyText.format(minorUnits: abs(minorUnits), currency: currency, showsCurrency: false) : "••••••")
+                .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 22, relativeTo: .title2))
+                .tracking(-0.44).monospacedDigit().foregroundStyle(color).lineLimit(1).minimumScaleFactor(0.6)
+            Text(sub).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+        }
+        .padding(EdgeInsets(top: 16, leading: 20, bottom: 16, trailing: 20))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// `.tbl` — a category/payee/account table: right-aligned `.amt` at 500
+/// weight, a fixed-width `.share` column, an optional totals row in `--sunken`.
+private struct BalancedAnalysisTable: View {
+    @EnvironmentObject private var session: LedgerSession
+    struct Row: Identifiable { let id: String; let label: String; let detail: String; let minorUnits: Int; let share: Double?; var action: (() -> Void)? = nil }
+    let rows: [Row]
+    let currency: String
+    var total: (label: String, minorUnits: Int)? = nil
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(rows) { row in
+                let content = HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(row.label).balancedFont(size: 14.5).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(amountText(row.minorUnits))
+                        .balancedFont(size: 14.5, weight: .medium).monospacedDigit().foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                    if let share = row.share {
+                        Text(session.amountsVisible ? String(format: "%.1f%%", share * 100) : "—")
+                            .balancedFont(size: 14.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                            .frame(width: 54, alignment: .trailing)
+                    }
+                }
+                .padding(EdgeInsets(top: 11, leading: 20, bottom: 11, trailing: 20))
+                .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                .contentShape(Rectangle())
+                if let action = row.action {
+                    Button(action: action) { content }.buttonStyle(.plain)
+                } else { content }
+            }
+            if let total {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(total.label).balancedFont(size: 14.5, weight: .semibold).foregroundStyle(BalancedPalette.ink)
+                    Spacer(minLength: 8)
+                    Text(amountText(total.minorUnits)).balancedFont(size: 14.5, weight: .semibold).monospacedDigit().foregroundStyle(BalancedPalette.ink)
+                    Text("100%").balancedFont(size: 14.5, weight: .semibold).monospacedDigit().foregroundStyle(BalancedPalette.secondary)
+                        .frame(width: 54, alignment: .trailing)
+                }
+                .padding(EdgeInsets(top: 11, leading: 20, bottom: 11, trailing: 20))
+                .background(BalancedPalette.sunken)
+            }
+        }
+    }
+
+    private func amountText(_ minorUnits: Int) -> String {
+        session.amountsVisible ? MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: false) : "••••••"
+    }
+}
+
+/// Design batch 1, 收支分析 (b05 light · 月度收支, b06 dark · 分类与商户). KPI
+/// grid, two charts with ink/--out opposed colours, category tables with a
+/// share column, and real flagged transactions under 异常与提示 — the mock's
+/// prose insights ("本月支出低于前三月均值…") have no backing data source, so
+/// this reads the actual anomaly rows instead of inventing summary text.
 struct TerminalIncomeExpenseReport: View {
     @EnvironmentObject private var session: LedgerSession
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let data: LedgerIncomeExpenseAnalysis
     @State private var incomeCategories = false
+    @State private var showsMonthlyData = false
     @State private var eventsPresented = false
     @State private var selectedTag: String?
+
     private var statement: LedgerIncomeStatement { data.statement }
     private var currency: String { statement.valuationCurrency }
-    private var savings: String {
-        guard session.amountsVisible else { return "••••••" }
-        guard statement.totalIncome > 0 else { return "暂无基数" }
-        return (Double(statement.netIncome) / Double(statement.totalIncome)).formatted(.percent.precision(.fractionLength(1)))
+    private var dayCount: Int {
+        guard let start = LedgerDateRange.parse(data.dashboard.start), let end = LedgerDateRange.parse(data.dashboard.end) else { return 1 }
+        let diff = LedgerDateRange.calendar.dateComponents([.day], from: start, to: end).day ?? 0
+        return max(1, diff)
     }
+    private var dailyAverageExpense: Int { statement.totalExpense / dayCount }
+    private var netColor: Color { statement.netIncome >= 0 ? BalancedPalette.income : BalancedPalette.expense }
+    private var netPrefix: String { statement.netIncome >= 0 ? "+" : "−" }
     private var events: [EventTagSummary] {
         if session.isLocal { return session.localEventTagSummaries ?? [] }
         return EventTagCalculator.summarizeAllTags(from: session.visibleTransactions,
@@ -187,93 +283,27 @@ struct TerminalIncomeExpenseReport: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            TerminalReportGrid {
-                metric("收入", amount: statement.totalIncome, kind: .income)
-                metric("支出", amount: statement.totalExpense, kind: .expense)
-                metric("结余", amount: statement.netIncome, kind: .all)
-                TerminalReportMetric(title: "储蓄率", amount: nil, currency: currency, value: savings, note: "结余 / 收入")
-            }
-            TerminalReportSection(title: "01 / 月度收支", detail: currency) {
-                Text("按月汇总 · 转账不计收支").terminalFont(size: 11)
-                    .foregroundStyle(TerminalPalette.secondary).padding(.top, 12)
-                TerminalReportChart(points: data.dashboard.cashflowSeries, currency: currency)
-            }
-            TerminalReportSection(title: "02 / 结余趋势", detail: currency) {
-                TerminalReportChart(points: data.dashboard.cashflowSeries, currency: currency, netOnly: true)
-            }
-            TerminalReportSection(title: "03 / 分类构成", detail: "金额 / 占比") {
-                HStack(spacing: 0) {
-                    categoryTab("支出", income: false)
-                    categoryTab("收入", income: true)
-                }
-                if incomeCategories {
-                    ForEach(statement.income) { node in
-                        Button { session.navigateToTransactions(kind: .income, account: node.account) } label: {
-                            TerminalReportRow(title: node.label, detail: "\(node.txCount) 笔",
-                                amount: node.amount, currency: currency,
-                                annotation: share(node.amount, total: statement.totalIncome))
-                        }.buttonStyle(.plain)
-                    }
-                    if statement.income.isEmpty { empty("暂无收入分类") }
-                } else {
-                    ForEach(Array(statement.expenseAnalytics.enumerated()), id: \.element.id) { index, item in
-                        Button { session.navigateToTransactions(kind: .expense, account: item.account) } label: {
-                            TerminalReportRow(title: String(format: "%02d / ", index + 1) + item.label,
-                                detail: "\(item.txCount) 笔" + categoryChange(item.changeRatio),
-                                amount: item.amount, currency: currency,
-                                annotation: share(item.amount, total: statement.totalExpense))
-                        }.buttonStyle(.plain)
-                    }
-                    if statement.expenseAnalytics.isEmpty { empty("暂无支出分类") }
-                }
-            }
-            TerminalReportSection(title: "04 / 商户排行", detail: "支出前 5 项") {
-                ForEach(statement.topPayees.prefix(5)) { item in
-                    Button { session.navigateToTransactions(query: item.payee) } label: {
-                        TerminalReportRow(title: item.payee, detail: "\(item.txCount) 笔", amount: item.amount, currency: currency)
-                    }.buttonStyle(.plain)
-                }
-                if statement.topPayees.isEmpty { empty("暂无商户数据") }
-            }
-            TerminalReportSection(title: "05 / 支付账户", detail: "前 5 项") {
-                ForEach(statement.topPaymentAccounts.prefix(5)) { item in
-                    Button { session.navigateToTransactions(account: item.account) } label: {
-                        TerminalReportRow(title: item.label, detail: "\(item.txCount) 笔", amount: item.amount, currency: currency)
-                    }.buttonStyle(.plain)
-                }
-            }
-            TerminalReportSection(title: "06 / 事件与项目", detail: "独立核算") {
-                if session.isLocal, let error = session.localEventTagSummaryError {
-                    Text(error).terminalFont(size: 12)
-                    Button("重试事件汇总") { Task { await session.loadLocalEventTagSummaries(force: true) } }
-                } else if session.isLocal && session.localEventTagSummaries == nil {
-                    ProgressView("正在统计事件与项目…").padding(.vertical, 12)
-                }
-                ForEach(events.prefix(3)) { event in
-                    Button { selectedTag = event.tag } label: {
-                        TerminalReportRow(title: "#" + event.tag, detail: "\(event.transactionCount) 笔",
-                            amount: event.netSpend, currency: event.currency, showsCurrency: true)
-                    }.buttonStyle(.plain)
-                }
-                Button("查看全部事件与项目") { eventsPresented = true }
-                    .terminalFont(size: 12).frame(minHeight: 44).foregroundStyle(TerminalPalette.accent)
-            }
-            TerminalReportSection(title: "07 / 账户明细", detail: currency) {
-                accountNodes(statement.income, kind: .income)
-                accountNodes(statement.expense, kind: .expense)
-            }
-            if !data.dashboard.anomalies.isEmpty {
-                TerminalReportSection(title: "08 / 需要留意", detail: "金额与历史模式") {
-                    ForEach(data.dashboard.anomalies.prefix(4)) { item in
-                        Button { session.navigateToTransactions(account: item.account) } label: {
-                            TerminalReportRow(title: item.payee.isEmpty ? item.narration : item.payee,
-                                detail: item.date, amount: item.amount, currency: data.dashboard.currency)
-                        }.buttonStyle(.plain)
-                    }
-                }
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            // b05/b06 order: KPI grid, two charts, 支出构成, 支出商户, 资金来源,
+            // (收入来源 — omitted, see below), 异常与提示. Existing functionality
+            // the mock doesn't show (分类明细 toggle, 事件与项目, 账户明细) follows
+            // after, so the mock's own section order stays intact up top.
+            metricsGrid
+            monthlyChart
+            netTrendChart
+            expenseComposition
+            payeesSection
+            fundingSection
+            // b06 also tables a 收入来源 (deposit accounts income lands in) —
+            // the API exposes only income by category account, not by the
+            // destination asset account, so that table is omitted rather than
+            // approximated.
+            anomaliesSection
+            categoryToggleSection
+            eventsSection
+            accountDetailSection
         }
+        .padding(.horizontal, horizontalSizeClass == .regular ? 0 : -20)
         .task(id: eventReadKey) { if session.isLocal { await session.loadLocalEventTagSummaries() } }
         .sheet(isPresented: $eventsPresented) { EventTagListView().ledgerPrivacyProtectedSheet() }
         .sheet(isPresented: Binding(get: { selectedTag != nil }, set: { if !$0 { selectedTag = nil } })) {
@@ -287,27 +317,297 @@ struct TerminalIncomeExpenseReport: View {
         }
     }
 
-    private func metric(_ title: String, amount: Int, kind: TransactionKindFilter) -> some View {
-        Button { session.navigateToTransactions(kind: kind) } label: {
-            TerminalReportMetric(title: title, amount: amount, currency: currency, note: currency + " · 所选期间")
-        }.buttonStyle(.plain)
+    // MARK: KPI grid (`.metrics`)
+
+    private var metricsGrid: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                BalancedAnalysisMetric(title: "收入", minorUnits: statement.totalIncome, currency: currency, sub: currency + " · 所选区间")
+                    .overlay(alignment: .trailing) { BalancedPalette.rule.frame(width: 1) }
+                BalancedAnalysisMetric(title: "支出", minorUnits: statement.totalExpense, currency: currency, sub: currency + " · 所选区间")
+            }.overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+            HStack(spacing: 0) {
+                BalancedAnalysisMetric(title: "净结余", minorUnits: statement.netIncome, currency: currency, prefix: netPrefix, color: netColor, sub: "收入 − 支出")
+                    .overlay(alignment: .trailing) { BalancedPalette.rule.frame(width: 1) }
+                BalancedAnalysisMetric(title: "日均支出", minorUnits: dailyAverageExpense, currency: currency, sub: "\(dayCount) 天")
+            }
+        }
+        .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
     }
-    private func share(_ amount: Int, total: Int) -> String {
-        guard session.amountsVisible else { return "••••" }
-        guard total > 0 else { return "暂无基数" }
-        return (Double(amount) / Double(total)).formatted(.percent.precision(.fractionLength(1)))
+
+    // MARK: Charts (`.chart`, `.chart-foot`, `.disclose`)
+
+    private var monthlyChart: some View {
+        let points = data.dashboard.cashflowSeries
+        return VStack(alignment: .leading, spacing: 0) {
+            balancedSechead("月度收支", aside: currency)
+            if !session.amountsVisible {
+                Text("金额已隐藏").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).frame(maxWidth: .infinity, minHeight: 140)
+            } else if points.isEmpty {
+                Text("所选范围暂无趋势数据").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .padding(EdgeInsets(top: 4, leading: 20, bottom: 16, trailing: 20))
+            } else {
+                Chart(points) { point in
+                    BarMark(x: .value("月份", point.month), y: .value("收入", Double(point.income) / 100))
+                        .position(by: .value("类别", "收入")).foregroundStyle(BalancedPalette.ink)
+                    BarMark(x: .value("月份", point.month), y: .value("支出", Double(point.expense) / 100))
+                        .position(by: .value("类别", "支出")).foregroundStyle(BalancedPalette.expense)
+                }
+                .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { value in
+                    AxisGridLine().foregroundStyle(BalancedPalette.rule)
+                    AxisValueLabel {
+                        if let amount = value.as(Double.self) {
+                            Text(amount.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Locale(identifier: "zh_CN"))))
+                                .balancedFont(size: 10).foregroundStyle(BalancedPalette.meta)
+                        }
+                    }
+                } }
+                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 5)) }
+                .chartLegend(.hidden)
+                .frame(height: 156)
+                .padding(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))
+                .accessibilityLabel("月度收支").accessibilityIdentifier("balanced-cashflow-chart")
+                HStack(spacing: 20) {
+                    legendKey("收入", color: BalancedPalette.ink)
+                    legendKey("支出", color: BalancedPalette.expense)
+                }.padding(EdgeInsets(top: 10, leading: 20, bottom: 6, trailing: 20))
+                Text("按月汇总 · 转账不计收支").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    .padding(EdgeInsets(top: 0, leading: 20, bottom: 4, trailing: 20))
+                Button { showsMonthlyData.toggle() } label: {
+                    HStack {
+                        Text("查看数据").balancedFont(size: 13).foregroundStyle(BalancedPalette.secondary)
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(BalancedPalette.edge)
+                            .rotationEffect(.degrees(showsMonthlyData ? 90 : 0))
+                    }
+                    .padding(EdgeInsets(top: 13, leading: 20, bottom: 13, trailing: 20)).frame(minHeight: 44)
+                    .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+                    .contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityAddTraits(.isButton)
+                if showsMonthlyData {
+                    ForEach(points) { point in monthlyDataRow(point) }
+                }
+            }
+        }
+    }
+
+    private var netTrendChart: some View {
+        let points = data.dashboard.cashflowSeries
+        return VStack(alignment: .leading, spacing: 0) {
+            balancedSechead("净结余趋势", aside: currency)
+            if !session.amountsVisible {
+                Text("金额已隐藏").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).frame(maxWidth: .infinity, minHeight: 120)
+            } else if points.isEmpty {
+                Text("所选范围暂无趋势数据").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .padding(EdgeInsets(top: 4, leading: 20, bottom: 16, trailing: 20))
+            } else {
+                Chart(points) { point in
+                    LineMark(x: .value("月份", point.month), y: .value("净结余", Double(point.net) / 100))
+                        .foregroundStyle(BalancedPalette.ink).lineStyle(StrokeStyle(lineWidth: 1.6))
+                    PointMark(x: .value("月份", point.month), y: .value("净结余", Double(point.net) / 100))
+                        .foregroundStyle(BalancedPalette.ink).symbolSize(16)
+                }
+                .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { value in
+                    AxisGridLine().foregroundStyle(BalancedPalette.rule)
+                    AxisValueLabel {
+                        if let amount = value.as(Double.self) {
+                            Text(amount.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Locale(identifier: "zh_CN"))))
+                                .balancedFont(size: 10).foregroundStyle(BalancedPalette.meta)
+                        }
+                    }
+                } }
+                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 5)) }
+                .chartLegend(.hidden)
+                .frame(height: 136)
+                .padding(EdgeInsets(top: 4, leading: 20, bottom: 16, trailing: 20))
+                .accessibilityLabel("净结余趋势").accessibilityIdentifier("balanced-net-chart")
+            }
+        }.overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+    }
+
+    private func legendKey(_ label: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Rectangle().fill(color).frame(width: 9, height: 9)
+            Text(label).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+        }
+    }
+
+    private func monthlyDataRow(_ point: LedgerCashflowPoint) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(point.month).balancedFont(size: 14.5).foregroundStyle(BalancedPalette.secondary)
+            Spacer(minLength: 0)
+            Text(session.amountsVisible ? "+" + MoneyText.format(minorUnits: point.income, currency: currency, showsCurrency: false) : "••••••")
+                .balancedFont(size: 13, weight: .medium).monospacedDigit().foregroundStyle(BalancedPalette.ink)
+            Text(session.amountsVisible ? "−" + MoneyText.format(minorUnits: point.expense, currency: currency, showsCurrency: false) : "••••••")
+                .balancedFont(size: 13, weight: .medium).monospacedDigit().foregroundStyle(BalancedPalette.expense)
+        }
+        .padding(EdgeInsets(top: 11, leading: 20, bottom: 11, trailing: 20))
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+    }
+
+    // MARK: Tables (`.tbl`)
+
+    private var expenseComposition: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                Text("支出构成").balancedFont(size: 15, weight: .semibold).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
+                Spacer(minLength: 0)
+                HStack(spacing: 4) {
+                    Text(session.amountsVisible ? MoneyText.format(minorUnits: statement.totalExpense, currency: currency, showsCurrency: false) : "••••••")
+                        .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                    Text(currency).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                }
+            }.padding(EdgeInsets(top: 26, leading: 20, bottom: 10, trailing: 20))
+            if statement.expenseAnalytics.isEmpty {
+                empty("所选区间暂无支出")
+            } else {
+                BalancedAnalysisTable(rows: statement.expenseAnalytics.prefix(5).map { item in
+                    .init(id: item.id, label: item.label, detail: "\(item.txCount) 笔", minorUnits: item.amount,
+                        share: item.share ?? share(item.amount, total: statement.totalExpense),
+                        action: { session.navigateToTransactions(kind: .expense, account: item.account) })
+                }, currency: currency, total: ("合计", statement.totalExpense))
+            }
+            Text("占比按所选区间重算，不引用历史缓存。").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                .padding(EdgeInsets(top: 12, leading: 20, bottom: 20, trailing: 20))
+        }.overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+    }
+
+    private var payeesSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            balancedSechead("支出商户", aside: "按金额")
+            if statement.topPayees.isEmpty {
+                empty("暂无商户数据")
+            } else {
+                BalancedAnalysisTable(rows: statement.topPayees.prefix(6).map { item in
+                    .init(id: item.id, label: item.payee, detail: "\(item.txCount) 笔", minorUnits: item.amount, share: share(item.amount, total: statement.totalExpense),
+                        action: { session.navigateToTransactions(query: item.payee) })
+                }, currency: currency)
+            }
+        }.overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+    }
+
+    private var fundingSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            balancedSechead("资金来源", aside: "支出账户")
+            if statement.topPaymentAccounts.isEmpty {
+                empty("暂无支出账户数据")
+            } else {
+                BalancedAnalysisTable(rows: statement.topPaymentAccounts.prefix(6).map { item in
+                    .init(id: item.id, label: item.label, detail: "\(item.txCount) 笔", minorUnits: item.amount, share: share(item.amount, total: statement.totalExpense),
+                        action: { session.navigateToTransactions(account: item.account) })
+                }, currency: currency)
+            }
+        }.overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+    }
+
+    /// 收入分类 isn't part of the b05/b06 mock, but the existing feature (a
+    /// toggle onto the income breakdown) stays — reskinned onto the same
+    /// `.sechead` / `.tbl` idiom rather than dropped.
+    private var categoryToggleSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            balancedSechead(incomeCategories ? "收入分类" : "支出分类明细", aside: "按分类")
+            HStack(spacing: 22) {
+                categoryTab("支出", income: false)
+                categoryTab("收入", income: true)
+            }.padding(.horizontal, 20).overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+            if incomeCategories {
+                if statement.income.isEmpty {
+                    empty("暂无收入分类")
+                } else {
+                    BalancedAnalysisTable(rows: statement.income.map { node in
+                        .init(id: node.id, label: node.label, detail: "\(node.txCount) 笔", minorUnits: node.amount,
+                            share: share(node.amount, total: statement.totalIncome),
+                            action: { session.navigateToTransactions(kind: .income, account: node.account) })
+                    }, currency: currency)
+                }
+            } else if statement.expenseAnalytics.isEmpty {
+                empty("暂无支出分类")
+            } else {
+                BalancedAnalysisTable(rows: statement.expenseAnalytics.map { item in
+                    .init(id: item.id, label: item.label, detail: "\(item.txCount) 笔" + categoryChange(item.changeRatio), minorUnits: item.amount,
+                        share: share(item.amount, total: statement.totalExpense),
+                        action: { session.navigateToTransactions(kind: .expense, account: item.account) })
+                }, currency: currency)
+            }
+        }.overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+    }
+
+    private var eventsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            balancedSechead("事件与项目", aside: "独立核算")
+            if session.isLocal, let error = session.localEventTagSummaryError {
+                Text(error).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).padding(.horizontal, 20)
+                Button("重试事件汇总") { Task { await session.loadLocalEventTagSummaries(force: true) } }
+                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.ink).padding(.horizontal, 20).frame(minHeight: 44)
+            } else if session.isLocal && session.localEventTagSummaries == nil {
+                ProgressView("正在统计事件与项目…").padding(.horizontal, 20).padding(.vertical, 12)
+            }
+            if events.isEmpty {
+                empty("暂无事件与项目")
+            } else {
+                BalancedAnalysisTable(rows: events.prefix(3).map { event in
+                    .init(id: event.tag, label: "#" + event.tag, detail: "\(event.transactionCount) 笔", minorUnits: event.netSpend, share: nil,
+                        action: { selectedTag = event.tag })
+                }, currency: events.first?.currency ?? currency)
+            }
+            Button("查看全部事件与项目") { eventsPresented = true }
+                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.ink).frame(minHeight: 44)
+                .padding(.horizontal, 20)
+        }.overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+    }
+
+    private var accountDetailSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            balancedSechead("账户明细", aside: currency)
+            accountNodes(statement.income, kind: .income)
+            accountNodes(statement.expense, kind: .expense)
+        }.overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+    }
+
+    private var anomaliesSection: some View {
+        let anomalies = data.dashboard.anomalies
+        return VStack(alignment: .leading, spacing: 0) {
+            balancedSechead("异常与提示", aside: "\(anomalies.count) 条")
+            if anomalies.isEmpty {
+                empty("区间内未发现异常交易")
+            } else {
+                ForEach(anomalies.prefix(6)) { item in
+                    Button { session.navigateToTransactions(account: item.account) } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.payee.isEmpty ? item.narration : item.payee)
+                                .balancedFont(size: 15.5, weight: .medium).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                            Text(item.date + " · " + (session.amountsVisible ? MoneyText.format(minorUnits: item.amount, currency: data.dashboard.currency, showsCurrency: false) : "••••••"))
+                                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(EdgeInsets(top: 14, leading: 20, bottom: 14, trailing: 20)).frame(minHeight: 52)
+                        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                        .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+                Text("未记录的消费不会被推算，只提示差异。").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .padding(EdgeInsets(top: 12, leading: 20, bottom: 24, trailing: 20))
+            }
+        }.overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+    }
+
+    // MARK: Helpers
+
+    private func share(_ amount: Int, total: Int) -> Double? {
+        guard total > 0 else { return nil }
+        return Double(amount) / Double(total)
     }
     private func categoryChange(_ ratio: Double?) -> String {
         guard session.amountsVisible, let ratio, ratio.isFinite else { return "" }
-        return " · 金额较上期 " + ratio.formatted(.percent.precision(.fractionLength(1)).sign(strategy: .always()))
+        return " · 较上期 " + ratio.formatted(.percent.precision(.fractionLength(1)).sign(strategy: .always()))
     }
     private func categoryTab(_ label: String, income: Bool) -> some View {
         Button { incomeCategories = income } label: {
-            Text(label).terminalFont(size: 13, weight: incomeCategories == income ? .semibold : .regular)
-                .foregroundStyle(incomeCategories == income ? TerminalPalette.accent : TerminalPalette.secondary)
-                .frame(maxWidth: .infinity, minHeight: 44)
+            Text(label).balancedFont(size: 14.5, weight: incomeCategories == income ? .semibold : .regular)
+                .foregroundStyle(incomeCategories == income ? BalancedPalette.ink : BalancedPalette.meta)
+                .frame(minHeight: 44)
                 .overlay(alignment: .bottom) {
-                    if incomeCategories == income { Rectangle().fill(TerminalPalette.accent).frame(height: 2) }
+                    if incomeCategories == income { BalancedPalette.ink.frame(height: 2) }
                 }
         }.buttonStyle(.plain).accessibilityAddTraits(incomeCategories == income ? .isSelected : [])
     }
@@ -317,13 +617,24 @@ struct TerminalIncomeExpenseReport: View {
     private func accountNodes(_ nodes: [LedgerIncomeNode], kind: TransactionKindFilter) -> some View {
         ForEach(flatten(nodes)) { node in
             Button { session.navigateToTransactions(kind: kind, account: node.account) } label: {
-                TerminalReportRow(title: node.label, detail: node.account, amount: node.amount, currency: currency)
-                    .padding(.leading, CGFloat(min(node.depth, 3)) * 8)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(node.label).balancedFont(size: 14.5).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                        Text(node.account).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta).lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Text(session.amountsVisible ? MoneyText.format(minorUnits: node.amount, currency: currency, showsCurrency: false) : "••••••")
+                        .balancedFont(size: 14.5, weight: .medium).monospacedDigit().foregroundStyle(BalancedPalette.ink)
+                }
+                .padding(EdgeInsets(top: 11, leading: 20 + CGFloat(min(node.depth, 3)) * 12, bottom: 11, trailing: 20))
+                .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                .contentShape(Rectangle())
             }.buttonStyle(.plain)
         }
     }
     private func empty(_ title: String) -> some View {
-        Text(title).terminalFont(size: 12).foregroundStyle(TerminalPalette.secondary).padding(.vertical, 16)
+        Text(title).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+            .padding(EdgeInsets(top: 4, leading: 20, bottom: 16, trailing: 20))
     }
 }
 

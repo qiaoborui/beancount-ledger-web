@@ -71,7 +71,16 @@ struct RootView: View {
             LedgerIslandOverlayContainer(currentNotice: $session.pendingIslandNotice)
                 .zIndex(2)
         }
-        .tint(LedgerPalette.cobalt)
+        // Balanced has no accent colour (docs/design/ios-balanced/README.md):
+        // every native control that doesn't set its own explicit tint — a
+        // system alert, a default-styled toolbar button, a List disclosure
+        // chevron — falls back to this root tint. `LedgerPalette.cobalt` is
+        // the retired terminal-design accent; leaving it here is what put a
+        // stray blue glyph at the bottom-left edge of d09/d10 screenshots
+        // (the DEBUG-only testing buttons in the `#if targetEnvironment(simulator)`
+        // overlay below pick up whatever tint is active and have no
+        // foregroundStyle override of their own).
+        .tint(BalancedPalette.ink)
         // Remote startup cross-fades its connecting surface into the shell. The
         // local path is excluded here because it presents one authenticated frame;
         // its cover lifts on the scope above instead.
@@ -97,10 +106,19 @@ struct RootView: View {
         }
         #if DEBUG
         #if targetEnvironment(simulator)
+        // The testing buttons live in the bottom-left corner, which is exactly
+        // where a presented sheet's rounded corner is: at 20pt gutter the
+        // sheet does not cover x=0, so a label that draws wider than its own
+        // hit box leaks a sliver of blue glyph through the corner gap in
+        // d09/d10 screenshots. Two things were wrong — the overlay is applied
+        // *outside* the `.tint(BalancedPalette.ink)` above, so its default
+        // button style still drew in the system accent; and the label had no
+        // frame, so it drew outside its own hit box. Give each button a real
+        // 44×44 hit target with a clear label and its own ink tint.
         .overlay(alignment: .bottomLeading) {
             if ProcessInfo.processInfo.arguments.contains("--local-ui-testing"),
                ProcessInfo.processInfo.arguments.contains("--pagination-ui-testing"), session.phase != .ready {
-                Button("测试分页账本") {
+                Button {
                     Task {
                         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Pagination-" + UUID().uuidString)
                         do {
@@ -115,16 +133,24 @@ struct RootView: View {
                             testingPaginationReady = session.phase == .ready
                         } catch { session.errorMessage = error.localizedDescription }
                     }
+                } label: {
+                    Text("测试分页账本").foregroundStyle(.clear)
+                        .frame(width: 44, height: 44, alignment: .leading)
                 }
                 .accessibilityIdentifier("test-import-pagination-ledger")
+                .tint(BalancedPalette.ink)
             }
             if testingPaginationReady {
                 Text("Fixture ready").font(.system(size: 1)).foregroundStyle(.clear).accessibilityIdentifier("pagination-fixture-ready")
             }
             if ProcessInfo.processInfo.arguments.contains("--local-ui-testing"),
                ProcessInfo.processInfo.arguments.contains("--pending-ui-testing"), session.phase == .ready {
-                Button("测试待整理入口") { testingPendingInbox = true }
-                    .accessibilityIdentifier("test-open-pending-inbox")
+                Button { testingPendingInbox = true } label: {
+                    Text("测试待整理入口").foregroundStyle(.clear)
+                        .frame(width: 44, height: 44, alignment: .leading)
+                }
+                .accessibilityIdentifier("test-open-pending-inbox")
+                .tint(BalancedPalette.ink)
             }
         }
         .sheet(isPresented: $testingPendingInbox) {
@@ -290,71 +316,106 @@ struct ServerConfigurationView: View {
     }
 }
 
+/// `.empty` — the locked state shows no ledger content at all, not even the
+/// ledger name's account figures. A 1px-stroke lock glyph, a title, one
+/// sentence, then the unlock actions as a `.btn` stack (primary first).
 private struct LoginView: View {
     @EnvironmentObject private var session: LedgerSession
     @FocusState private var passwordFocused: Bool
+    @State private var showingPasswordField = false
     let authenticated: Bool
+
+    private var ledgerTitle: String {
+        session.isLocal ? session.localLedgerName : (session.serverURL?.host ?? "Ledger")
+    }
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    Label(session.isLocal ? session.localLedgerName : session.serverURL?.host ?? "Ledger", systemImage: "lock.shield")
-                        .font(.headline)
-                        .padding(.vertical, 8)
-                } footer: {
-                    Text(authenticated ? "验证身份后即可继续查看账本。" : "使用账本密码或已启用的解锁方式登录。")
+            VStack(spacing: 0) {
+                Spacer()
+                VStack(spacing: 0) {
+                    Image(systemName: "lock.shield")
+                        .font(.system(size: 30, weight: .regular))
+                        .foregroundStyle(BalancedPalette.meta)
+                        .padding(.bottom, 20)
+                    Text(ledgerTitle)
+                        .balancedFont(size: 19, weight: .medium)
+                        .foregroundStyle(BalancedPalette.ink)
+                        .padding(.bottom, 6)
+                    Text(authenticated ? "验证身份后即可继续查看。账本内容在此之前不会出现在屏幕上。" : "使用账本密码或已启用的解锁方式登录。")
+                        .balancedFont(size: 13.5)
+                        .foregroundStyle(BalancedPalette.meta)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 260)
                 }
-                if session.canUseBiometricUnlock || session.passkeyAvailable {
-                    Section {
-                        if session.canUseBiometricUnlock {
-                            Button {
-                                passwordFocused = false
-                                Task { await session.unlockWithBiometrics() }
-                            } label: {
-                                Label("使用 \(session.biometricTitle) 解锁", systemImage: session.biometricSystemImage)
-                            }
-                        }
-                        if session.passkeyAvailable {
-                            Button {
-                                passwordFocused = false
-                                Task { await session.loginWithPasskey() }
-                            } label: {
-                                Label(authenticated ? "使用通行密钥解锁" : "使用通行密钥登录", systemImage: "person.badge.key.fill")
-                            }
-                        }
-                    }
-                    .disabled(session.isAuthenticationBusy)
-                }
-                if !session.isLocal { Section("账本密码") {
-                    SecureField("输入密码", text: $session.password)
-                        .textContentType(.password)
-                        .submitLabel(.go)
-                        .focused($passwordFocused)
-                        .onSubmit { Task { await session.login() } }
-                    Button(authenticated ? "使用密码解锁" : "登录") {
-                        passwordFocused = false
-                        Task { await session.login() }
-                    }
-                    .disabled(session.password.isEmpty)
-                }
-                .disabled(session.isAuthenticationBusy)
-                }
+                Spacer()
+
                 if session.isAuthenticationBusy {
-                    Section { ProgressView("正在安全恢复账本") }
+                    ProgressView("正在安全恢复账本")
+                        .balancedFont(size: 13)
+                        .foregroundStyle(BalancedPalette.meta)
+                        .padding(.bottom, 12)
                 }
                 if let error = session.errorMessage {
-                    Section { StatusBanner(message: error, onDismiss: session.dismissError) }
+                    StatusBanner(message: error, onDismiss: session.dismissError)
+                        .padding(.bottom, 12)
                 }
-                Section {
+
+                VStack(spacing: 10) {
+                    if session.canUseBiometricUnlock {
+                        Button("使用 \(session.biometricTitle) 解锁") {
+                            passwordFocused = false
+                            Task { await session.unlockWithBiometrics() }
+                        }
+                        .buttonStyle(.balanced(.primary))
+                        .disabled(session.isAuthenticationBusy)
+                    }
+                    if session.passkeyAvailable {
+                        Button(authenticated ? "使用通行密钥解锁" : "使用通行密钥登录") {
+                            passwordFocused = false
+                            Task { await session.loginWithPasskey() }
+                        }
+                        .buttonStyle(.balanced(session.canUseBiometricUnlock ? .outline : .primary))
+                        .disabled(session.isAuthenticationBusy)
+                    }
+                    if !session.isLocal {
+                        if showingPasswordField || !(session.canUseBiometricUnlock || session.passkeyAvailable) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("账本密码").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                                SecureField("输入密码", text: $session.password)
+                                    .balancedFont(size: 15)
+                                    .textContentType(.password)
+                                    .submitLabel(.go)
+                                    .focused($passwordFocused)
+                                    .onSubmit { Task { await session.login() } }
+                                    .padding(.vertical, 10)
+                                    .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                            }
+                            .padding(.bottom, 4)
+                            Button(authenticated ? "使用密码解锁" : "登录") {
+                                passwordFocused = false
+                                Task { await session.login() }
+                            }
+                            .buttonStyle(.balanced(.outline))
+                            .disabled(session.password.isEmpty || session.isAuthenticationBusy)
+                        } else {
+                            Button("使用密码") { showingPasswordField = true; passwordFocused = true }
+                                .buttonStyle(.balanced(.quiet))
+                                .disabled(session.isAuthenticationBusy)
+                        }
+                    }
                     Button("选择其他账本") { session.chooseLedger() }
+                        .buttonStyle(.balanced(.quiet))
                         .disabled(session.isAuthenticationBusy)
                 }
+                .padding(.bottom, 18)
             }
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(authenticated ? "账本已锁定" : "登录 Ledger")
             .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .scrollDismissesKeyboard(.interactively)
         }
     }
 }
