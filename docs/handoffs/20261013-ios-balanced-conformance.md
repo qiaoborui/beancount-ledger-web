@@ -6,7 +6,8 @@
 - Code revision covered: the branch tip that contains this note (first
   commit on top of `b6ca236`; pushed to origin). Overview, transactions and
   income/expense follow design batch 1; `docs/design/ios-balanced/` (batch 2)
-  is still untracked pending the user's decision.
+  and batch 1 are committed under `docs/design/ios-balanced/` and
+  `docs/design/ios-balanced/batch1/`.
 - PR: not yet opened
 
 ## Goal and acceptance
@@ -236,7 +237,7 @@ batch-2 rules inferred earlier.
   omitted when absent), 支出分类 table, 最近流水 grouped by day with
   expense amounts in ink and income in `--in`.
 - Next: re-check 账户 / 更多 / 资产分析 / 记一笔 / 导入 / 日期选择 against
-  batch 1 (render `cc78ae3:docs/design/ios-balanced/index.html`). Notably
+  batch 1 (render `docs/design/ios-balanced/batch1/index.html`). Notably
   batch 1 draws expense amounts in ink, not `--out`.
 - 流水 rebuilt to batch 1 (b03/b04) and screenshot-verified light (全部) +
   dark (收入筛选): `.seg` tabs now natural-width/left-aligned with a 22px gap
