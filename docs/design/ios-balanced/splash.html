@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>结平 — 开屏动画</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+      'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    --bezel: #0b0a09;
+    --measure: 393px;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    padding: 40px 24px 96px;
+    background: #e8e4dc;
+    color: #14100c;
+    font-family: var(--font-sans);
+    transition: background 0.2s ease;
+  }
+  body[data-gallery='dark'] { background: #1c1a18; color: #f6f3ee; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; }
+
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 28px;
+  }
+  .toolbar button {
+    font: inherit;
+    font-size: 13px;
+    padding: 8px 14px;
+    min-height: 36px;
+    border: 1px solid rgba(20, 16, 12, 0.24);
+    border-radius: 2px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  body[data-gallery='dark'] .toolbar button { border-color: rgba(246, 243, 238, 0.28); }
+  .toolbar button[aria-pressed='true'] { background: currentColor; border-color: currentColor; }
+  .toolbar button[aria-pressed='true'] span { color: #e8e4dc; }
+  body[data-gallery='dark'] .toolbar button[aria-pressed='true'] span { color: #1c1a18; }
+  .toolbar .spacer { flex: 1; }
+  .toolbar .hint { font-size: 12.5px; color: #6f675a; }
+  body[data-gallery='dark'] .toolbar .hint { color: #9a9086; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 44px; align-items: flex-start; }
+
+  .phone {
+    width: var(--measure);
+    height: 852px;
+    border-radius: 46px;
+    background: #fbfaf8;
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.6),
+      0 0 0 9px var(--bezel),
+      0 0 0 10px rgba(255, 255, 255, 0.08),
+      0 30px 60px -18px rgba(20, 16, 12, 0.45);
+    display: flex;
+    overflow: hidden;
+    position: relative;
+    isolation: isolate;
+  }
+  .phone canvas { display: block; width: var(--measure); height: 852px; }
+
+  .notes { width: 340px; }
+  .notes h2 {
+    margin: 0 0 4px;
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .notes > p {
+    margin: 0 0 22px;
+    font-size: 13.5px;
+    line-height: 1.65;
+    color: #57504a;
+  }
+  body[data-gallery='dark'] .notes > p { color: #c4bcb0; }
+  .notes dl { margin: 0; }
+  .notes dt {
+    font-size: 12.5px;
+    color: #6f675a;
+    margin-top: 16px;
+  }
+  body[data-gallery='dark'] .notes dt { color: #9a9086; }
+  .notes dd {
+    margin: 3px 0 0;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+  .mono { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .notes dt:first-child { margin-top: 0; }
+</style>
+</head>
+<body data-gallery="light">
+
+<div class="wrap">
+
+  <div class="toolbar">
+    <button type="button" id="replay"><span>重播</span></button>
+    <button type="button" id="theme-light" aria-pressed="true"><span>浅色</span></button>
+    <button type="button" id="theme-dark" aria-pressed="false"><span>深色</span></button>
+    <span class="spacer"></span>
+    <span class="hint">结平 · 开屏 3.3s · 不含任何账目数据</span>
+  </div>
+
+  <div class="row">
+    <div class="phone">
+      <canvas id="splash" width="393" height="852" role="img"
+        aria-label="开屏动画：结平标志由两侧弧线向中心合拢，双线落定，随后出现结平与 Beancount Ledger 标题；不含任何账目数据。"></canvas>
+    </div>
+
+    <div class="notes">
+      <h2>开屏动画</h2>
+      <p>复式记账的两边向中心收拢，形成一个独立的结平印记；印记中的双线保留会计上“已核对”的动作。标志稳定后，中文标题和英文副标题才出现。</p>
+      <p><b>开屏不出现任何金额。</b>开屏发生在解锁之前，此时应用还没有读到账本，任何数字既属于敏感数据，又并不是这一段时期的真实值。账页横线只作为很淡的背景语境。</p>
+      <dl>
+        <dt>0.26s</dt>
+        <dd>两侧弧线向中心合拢，中心双线同时成形</dd>
+        <dt>0.57s / 0.72s</dt>
+        <dd>「结平」与 <span class="mono">BEANCOUNT LEDGER</span> 出现，品牌名称完整可读</dd>
+        <dt>1.53s / 1.61s</dt>
+        <dd>标志下方的双线落下——锚点动作。第二道晚 80ms</dd>
+      </dl>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------------
+     结平 — 开屏动画
+
+     复式记账收尾时会画双线：合计下方两道并排细横线，表示此栏已核对结平。
+     这个开屏动画只做这一个动作，其余入场都服务于它。
+
+     No shadow, no gradient, no accent colour beyond --in / --out, no monospace
+     (mono is reserved for account paths and the write preview, neither of which
+     belongs on a splash screen).
+     ------------------------------------------------------------------------ */
+
+  var W = 393, H = 852;                 // 逻辑尺寸，与 .phone 一致
+  var PAD = 20;                         // 内容内边距，与设计系统一致
+  var RIGHT = W - PAD;                  // 373
+
+  var SANS = "'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'PingFang SC'," +
+             "'Hiragino Sans GB', 'Microsoft YaHei', sans-serif";
+
+  var THEMES = {
+    light: { bg: '#fbfaf8', ink: '#14100c', ink2: '#453e36', ink3: '#6f675a',
+             edge: '#88837a', rule: '#e2ded4', ruleStrong: '#c8c2b4' },
+    dark:  { bg: '#121110', ink: '#f6f3ee', ink2: '#c4bcb0', ink3: '#9a9086',
+             edge: '#78746e', rule: '#2b2825', ruleStrong: '#423c36' }
+  };
+
+  /* ---- 时间轴 ------------------------------------------------------------ */
+  var T = {
+    symbol:  260,   // 标志
+    word:    570,   // 中文标题
+    sub:     720,   // 英文副标题
+    line0:  1050,   // 账页线
+    lineDur: 360,
+    dblA:   1530,   // 双线第一道
+    dblB:   1610,   // 双线第二道
+    fadeOut:999999, // 完成后保持，不做白屏淡出
+    loop:   3300    // 重新开始
+  };
+  var ENTER = 420;                      // 与 CSS 的 settle-in 0.42s 一致
+
+  /* ---- 版面 -------------------------------------------------------------- */
+  var L = {
+    symbolX: 196,
+    symbolY: 320,
+    symbolR: 54,
+    wordY:   490,
+    subY:    523,
+    lineTop:590,
+    lineGap: 30,
+    lineN:    4,
+    dblY:   722,
+    dblStep:  3
+  };
+
+  /* ---- 缓动 -------------------------------------------------------------- */
+  function bezier(x1, y1, x2, y2) {
+    var cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+    var cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+    function fx(t) { return ((ax * t + bx) * t + cx) * t; }
+    function fy(t) { return ((ay * t + by) * t + cy) * t; }
+    function dfx(t) { return (3 * ax * t + 2 * bx) * t + cx; }
+    return function (x) {
+      if (x <= 0) return 0;
+      if (x >= 1) return 1;
+      var t = x;
+      for (var i = 0; i < 8; i++) {
+        var e = fx(t) - x;
+        if (Math.abs(e) < 1e-5) return fy(t);
+        var d = dfx(t);
+        if (Math.abs(d) < 1e-6) break;
+        t -= e / d;
+      }
+      return fy(t);
+    };
+  }
+  var settleEase = bezier(0.2, 0.7, 0.3, 1);   // == cubic-bezier(.2,.7,.3,1)
+  var ruleEase = bezier(0.33, 1, 0.68, 1);
+
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function at(t, start, dur) { return clamp01((t - start) / (dur || ENTER)); }
+
+  // settle-in：淡入 + 自下 6px 升位，两件事由同一条缓动驱动
+  function enter(t, start) {
+    var p = at(t, start);
+    if (p <= 0) return null;
+    var e = settleEase(p);
+    return { a: e, dy: (1 - e) * 6 };
+  }
+
+  /* ---- 画布 -------------------------------------------------------------- */
+  var canvas = document.getElementById('splash');
+  var ctx = canvas.getContext('2d');
+  var theme = 'light';
+  var th = THEMES[theme];
+
+  function sizeCanvas() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 3);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function setFont(size, weight, trackingPx) {
+    ctx.font = weight + ' ' + size + 'px ' + SANS;
+    try {
+      ctx.letterSpacing = (trackingPx || 0) + 'px';
+    } catch (e) { /* 旧浏览器忽略字距 */ }
+  }
+
+  function hairline(x, y, w) {
+    // 1 逻辑像素的横线，对齐到设备像素以免发虚
+    var dpr = Math.min(window.devicePixelRatio || 1, 3);
+    ctx.fillRect(x, Math.round(y * dpr) / dpr, w, 1);
+  }
+
+  /* ---- 状态栏 ------------------------------------------------------------ */
+  function drawStatusBar() {
+    var cy = 27;
+    ctx.fillStyle = th.ink;
+    setFont(15, 600, 0.15);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('09:41', 36, cy + 5.5);
+
+    // 信号格
+    ctx.fillStyle = th.ink;
+    for (var i = 0; i < 4; i++) {
+      var h = 3.5 + i * 2.2;
+      ctx.fillRect(297 + i * 4.4, cy + 5 - h, 3, h);
+    }
+    // Wi-Fi 三弧
+    ctx.strokeStyle = th.ink;
+    ctx.lineWidth = 1.4;
+    ctx.lineCap = 'round';
+    for (var r = 0; r < 3; r++) {
+      var rad = 3.4 + r * 3.1;
+      ctx.beginPath();
+      ctx.arc(322, cy + 4.4, rad, Math.PI * 1.22, Math.PI * 1.78);
+      ctx.stroke();
+    }
+    // 电池
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = th.ink;
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(338.5, cy - 5.5, 22, 11.5, 3.4);
+    } else {
+      ctx.rect(338.5, cy - 5.5, 22, 11.5);
+    }
+    ctx.stroke();
+    ctx.fillStyle = th.ink;
+    ctx.fillRect(340.5, cy - 3.5, 15, 7.5);
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(361.8, cy - 2, 1.7, 4.5, 1);
+    } else {
+      ctx.rect(361.8, cy - 2, 1.7, 4.5);
+    }
+    ctx.fill();
+  }
+
+  /* ---- 一层：品牌标志 ----------------------------------------------------
+     两侧弧线代表复式账的两边，向中心收拢；中心的双线代表核对完成。
+     标志是唯一的视觉主角，且不携带任何账目数据。
+     ---------------------------------------------------------------------- */
+  function drawSymbol(m) {
+    if (!m) return;
+    var e = settleEase(m);
+    var cx = L.symbolX, cy = L.symbolY;
+    ctx.save();
+    ctx.globalAlpha = e;
+    ctx.strokeStyle = th.ink;
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // 一个由两层账面组成的 B：左侧是共同中轴，右侧是上下两边。
+    // 读作 Balanced，也保留“两个方向围绕同一账线”的含义。
+    ctx.beginPath();
+    ctx.moveTo(cx - 30, cy - 48);
+    ctx.lineTo(cx - 30, cy + 48);
+    ctx.moveTo(cx - 30, cy - 48);
+    ctx.bezierCurveTo(cx + 34, cy - 48, cx + 40, cy - 8, cx - 30, cy - 2);
+    ctx.moveTo(cx - 30, cy - 2);
+    ctx.bezierCurveTo(cx + 42, cy - 2, cx + 40, cy + 48, cx - 30, cy + 48);
+    ctx.stroke();
+
+    // 中心双线是 B 的结平横梁。
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx - 19, cy - 5);
+    ctx.lineTo(cx + 22, cy - 5);
+    ctx.moveTo(cx - 19, cy + 5);
+    ctx.lineTo(cx + 22, cy + 5);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ---- 二层：品牌文字 ---------------------------------------------------- */
+  function drawWordmark(mWord, mSub) {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    if (mWord) {
+      ctx.globalAlpha = settleEase(mWord);
+      ctx.fillStyle = th.ink;
+      setFont(34, 600, -0.68);
+      ctx.fillText('结平', W / 2, L.wordY);
+    }
+    if (mSub) {
+      ctx.globalAlpha = settleEase(mSub);
+      ctx.fillStyle = th.ink3;
+      setFont(13, 400, 0.1);
+      ctx.fillText('BEANCOUNT LEDGER', W / 2, L.subY);
+    }
+    ctx.restore();
+  }
+
+  /* ---- 三层：淡淡的账页语境 -------------------------------------------- */
+  function drawLedgerLines(t) {
+    for (var i = 0; i < L.lineN; i++) {
+      var y = L.lineTop + i * L.lineGap;
+      var p = at(t, T.line0 + i * 55, T.lineDur);
+      if (p <= 0) continue;
+      var e = settleEase(p);
+      ctx.globalAlpha = e * 0.5;
+      ctx.fillStyle = th.rule;
+      hairline(PAD + 34, y, (RIGHT - PAD - 68) * e);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /* ---- 主绘制 ------------------------------------------------------------ */
+  function draw(t) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+
+    var dpr = Math.min(window.devicePixelRatio || 1, 3);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    ctx.fillStyle = th.bg;
+    ctx.fillRect(0, 0, W, H);
+
+    drawStatusBar();
+
+    drawSymbol(at(t, T.symbol, ENTER));
+    drawWordmark(at(t, T.word, ENTER), at(t, T.sub, ENTER));
+
+    drawLedgerLines(t);
+
+    // logo 下方的双线：锚点动作。第二道晚 80ms，形成一次双击感。
+    var pA = at(t, T.dblA, 190);
+    var pB = at(t, T.dblB, 190);
+    ctx.fillStyle = th.ink;
+    if (pA > 0) hairline(PAD, L.dblY, (RIGHT - PAD) * ruleEase(pA));
+    if (pB > 0) hairline(PAD, L.dblY + L.dblStep, (RIGHT - PAD) * ruleEase(pB));
+
+    // 完成后保持品牌画面；下一轮直接从空白第一帧开始，避免闪白。
+
+  }
+
+  /* ---- 播放 -------------------------------------------------------------- */
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var raf = null, startedAt = 0, clock = 0;
+
+  function render(now) {
+    if (!startedAt) startedAt = now;
+    clock = now - startedAt;
+    if (clock >= T.loop) { startedAt = now; clock = 0; }
+    draw(clock);
+    raf = requestAnimationFrame(render);
+  }
+
+  function play() {
+    if (raf) cancelAnimationFrame(raf);
+    startedAt = 0;
+    if (reduce.matches) {
+      draw(2000);                       // 直接呈现结平之后的状态
+      return;
+    }
+    raf = requestAnimationFrame(render);
+  }
+
+  /* ---- 外壳交互 ---------------------------------------------------------- */
+  var body = document.body;
+  var canvasWrap = canvas.parentElement;
+
+  function setTheme(name) {
+    theme = name;
+    th = THEMES[theme];
+    body.dataset.gallery = name;
+    canvasWrap.style.background = th.bg;
+    document.getElementById('theme-light').setAttribute('aria-pressed', String(name === 'light'));
+    document.getElementById('theme-dark').setAttribute('aria-pressed', String(name === 'dark'));
+    if (reduce.matches) draw(2000);
+  }
+
+  document.getElementById('theme-light').addEventListener('click', function () { setTheme('light'); });
+  document.getElementById('theme-dark').addEventListener('click', function () { setTheme('dark'); });
+  document.getElementById('replay').addEventListener('click', play);
+  reduce.addEventListener('change', play);
+  window.addEventListener('resize', function () { sizeCanvas(); if (reduce.matches) draw(2000); });
+
+  sizeCanvas();
+  canvasWrap.style.background = THEMES.light.bg;
+
+  // 等字体真正可用再开画，否则首帧会用后备字体量错宽度
+  var go = function () { play(); };
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.load('600 34px "IBM Plex Sans"').catch(function () {});
+    document.fonts.load('500 30px "IBM Plex Sans"').catch(function () {});
+    document.fonts.load('400 15px "IBM Plex Sans"').catch(function () {});
+    document.fonts.ready.then(go, go);
+  } else {
+    go();
+  }
+})();
+</script>
+</body>
+</html>

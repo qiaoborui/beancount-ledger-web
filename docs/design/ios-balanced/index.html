@@ -1,0 +1,1477 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>结平 — 剩余页面</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-gallery="light">
+
+<div class="wrap">
+
+  <div class="toolbar">
+    <button type="button" id="theme-light" aria-pressed="true"><span>浅色</span></button>
+    <button type="button" id="theme-dark" aria-pressed="false"><span>深色</span></button>
+    <span class="spacer"></span>
+    <span class="hint">批次二 · 20 帧 · 393 × 852</span>
+    <a class="link" href="splash.html" style="margin-left:14px">开屏动画 →</a>
+    <a class="link" href="README.md" style="margin-left:14px">规范说明 →</a>
+  </div>
+
+  <div class="gallery-head">
+    <h1>结平 · 剩余页面</h1>
+    <p class="sub">账本库、开账向导、搜索、分类、待整理、对账、存储、设置与系统浮层</p>
+    <p>承接第一批的六页与关键浮层，这里补齐应用里其余的用户可见界面。同一套语言：色度只留给 <code>--in</code> 与 <code>--out</code> 两个相反方向，其余全是四个明度的墨；行高靠明度与字重拉开层次，不用卡片、不用投影；<code>IBM Plex Mono</code> 只出现在账户路径与 beancount 源码上。</p>
+    <p>双线（<code>.settle</code>）这一批出现了三次，都是同一件事：一列数字已经封闭并核对通过——向导最后一步的期初结余、单账户对账的断言、导入复核的合计。</p>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       01 · 账本库与开账
+       ═══════════════════════════════════════════════════════════════ -->
+
+  <section class="group" id="library">
+    <h2>账本库与开账</h2>
+    <p class="lead">应用进入的第一个界面。它不是账本，是账本的目录——所以这里一个金额也没有。开账向导是本批最重的一屏：它把一个 beancount 仓库的创建过程，翻译成勾选、填数、然后看着净值结平。</p>
+    <div class="frames">
+
+      <!-- 账本库 -->
+      <figure class="frame">
+        <figcaption><b>账本库</b><span class="tag">LedgerLibraryView</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar"><span class="title">账本</span></div>
+          <div class="body scroll">
+
+            <div class="band band--lead">
+              <div class="sechead" style="margin-top:0"><h3>新手开账向导</h3><span class="aside">约 1 分钟</span></div>
+              <p class="note" style="margin-top:0">勾选微信、支付宝、银行卡与日常分类，填上今天各处的余额。全程离线，数据只落在这台设备上。</p>
+              <button class="btn btn--primary gap-lg" type="button">开启向导</button>
+            </div>
+
+            <div class="sechead"><h3>快速操作</h3></div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">新建空账本</div><div class="row-sub">从零开始，自己写账户</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">导入账本文件夹</div><div class="row-sub">已有 .bean 文件，直接接管</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">从 Git 添加</div><div class="row-sub">用仓库做版本交换，多设备共用</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+
+            <div class="sechead"><h3>本地账本</h3><span class="aside">2 个</span></div>
+            <div class="row row--tap">
+              <div class="row-main">
+                <div class="row-title">我的账本</div>
+                <div class="row-sub">Git 同步 · <span class="mono">main.bean</span></div>
+              </div>
+              <button class="iconbtn accent" type="button" style="margin-right:0" aria-label="账本操作">
+                <svg width="16" height="4" viewBox="0 0 16 4" fill="currentColor" aria-hidden="true"><circle cx="2" cy="2" r="1.6"/><circle cx="8" cy="2" r="1.6"/><circle cx="14" cy="2" r="1.6"/></svg>
+              </button>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main">
+                <div class="row-title">旅行记账</div>
+                <div class="row-sub">仅本机 · <span class="mono">japan-2026.bean</span></div>
+              </div>
+              <button class="iconbtn accent" type="button" style="margin-right:0" aria-label="账本操作">
+                <svg width="16" height="4" viewBox="0 0 16 4" fill="currentColor" aria-hidden="true"><circle cx="2" cy="2" r="1.6"/><circle cx="8" cy="2" r="1.6"/><circle cx="14" cy="2" r="1.6"/></svg>
+              </button>
+            </div>
+            <p class="note">查询、统计、校验与保存都在本机执行。存储提供方只负责版本交换。</p>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 向导 1 -->
+      <figure class="frame">
+        <figcaption><b>开账向导 · 第一步</b><span class="tag">OnboardingWizardView</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back text" type="button">取消</button>
+            <span class="spacer"></span>
+            <span class="title title--sm">开账</span>
+            <span class="spacer"></span>
+            <span style="width:44px"></span>
+          </div>
+          <div class="body">
+            <div class="rail" style="margin-bottom:22px">
+              <i data-done="true"></i><i></i><i></i><i></i>
+            </div>
+
+            <h3 style="font-size:23px;font-weight:600;letter-spacing:-0.01em;margin:6px 0 8px">先给它起个名字</h3>
+            <p class="note" style="margin-bottom:24px">账本是磁盘上的一个文件夹。名字只影响这里的显示，文件名之后随时可以改。</p>
+
+            <label class="field--label" for="wz-name">账本名称</label>
+            <input class="field" id="wz-name" value="我的账本" autocomplete="off">
+
+            <div class="sechead"><h3>记账货币</h3></div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">人民币</div><div class="row-sub mono">CNY · ¥</div></div>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="color:var(--ink)"><path d="M3 8.5l3.2 3.2L13 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">美元</div><div class="row-sub mono">USD · $</div></div>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">日元</div><div class="row-sub mono">JPY · ¥</div></div>
+            </div>
+            <p class="note">这是估值货币。其它币种按录入当日的汇率折算到它。</p>
+          </div>
+          <div class="tabbar" style="justify-content:flex-end;border-top:1px solid var(--rule)">
+            <button class="btn btn--primary" type="button" style="margin:8px var(--pad) 0">下一步</button>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 向导 2 -->
+      <figure class="frame">
+        <figcaption><b>开账向导 · 第二步</b><span class="tag">勾选账户与期初余额</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back" type="button" aria-label="返回">
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true"><path d="M9.5 1.5L2 9l7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="spacer"></span>
+            <span class="title title--sm">选择账户</span>
+            <span class="spacer"></span>
+            <span class="small muted" style="width:44px;text-align:right">2 / 4</span>
+          </div>
+          <div class="body scroll">
+            <div class="rail" style="margin-bottom:12px">
+              <i data-done="true"></i><i data-done="true"></i><i></i><i></i>
+            </div>
+            <p class="note" style="margin-bottom:14px">已勾选 8 个。填了余额的账户会在 <span class="mono">accounts.bean</span> 里生成一条 <span class="mono">open</span> 加上期初 <span class="mono">balance</span> 断言。</p>
+
+            <div class="sechead" style="margin-top:8px"><h3>移动支付</h3><span class="aside">3 / 5</span></div>
+            <div class="imp row" style="align-items:center;padding:8px 0">
+              <button class="box" type="button" role="checkbox" aria-checked="true" aria-label="微信零钱">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.4 6.3l2.4 2.4 4.8-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div class="row-main">
+                <div class="row-title">微信零钱</div>
+                <div class="acct">Assets:Wallet:WeChat:LingQian</div>
+              </div>
+              <div class="row-val" style="color:var(--ink-3);font-size:13px">¥ 1,240.00</div>
+            </div>
+            <div class="imp row" style="align-items:center;padding:8px 0">
+              <button class="box" type="button" role="checkbox" aria-checked="true" aria-label="支付宝余额">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.4 6.3l2.4 2.4 4.8-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div class="row-main">
+                <div class="row-title">支付宝余额</div>
+                <div class="acct">Assets:Wallet:Alipay:Balance</div>
+              </div>
+              <div class="row-val" style="color:var(--ink-3);font-size:13px">¥ 486.50</div>
+            </div>
+            <div class="imp row" style="align-items:center;padding:8px 0">
+              <button class="box" type="button" role="checkbox" aria-checked="true" aria-label="余额宝">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.4 6.3l2.4 2.4 4.8-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div class="row-main">
+                <div class="row-title">余额宝</div>
+                <div class="acct">Assets:Wallet:Alipay:YuEBao</div>
+              </div>
+              <div class="row-val" style="color:var(--ink-3);font-size:13px">¥ 32,000.00</div>
+            </div>
+            <div class="imp row" style="align-items:center;padding:8px 0;border-bottom:0">
+              <button class="box" type="button" role="checkbox" aria-checked="false" aria-label="云闪付"></button>
+              <div class="row-main">
+                <div class="row-title" style="color:var(--ink-3)">云闪付</div>
+                <div class="acct">Assets:Wallet:UnionPay</div>
+              </div>
+              <div class="row-val" style="color:var(--ink-3);font-size:13px">—</div>
+            </div>
+
+            <div class="sechead"><h3>银行储蓄卡</h3><span class="aside">1 / 7</span></div>
+            <div class="imp row" style="align-items:center;padding:8px 0;border-bottom:0">
+              <button class="box" type="button" role="checkbox" aria-checked="true" aria-label="招商银行储蓄卡">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.4 6.3l2.4 2.4 4.8-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div class="row-main">
+                <div class="row-title">招商银行储蓄卡</div>
+                <div class="acct">Assets:Bank:CMB</div>
+              </div>
+              <div class="row-val" style="color:var(--ink-3);font-size:13px">¥ 28,640.00</div>
+            </div>
+            <p class="note">没填余额的账户只生成 <span class="mono">open</span>，之后第一次对账再补。</p>
+          </div>
+          <div class="tabbar" style="border-top:1px solid var(--rule);gap:10px">
+            <button class="btn btn--quiet" type="button" style="margin:8px 0 0 var(--pad)">上一步</button>
+            <button class="btn btn--primary" type="button" style="margin:8px var(--pad) 0 0">下一步</button>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 向导 4 · 结平 -->
+      <figure class="frame">
+        <figcaption><b>开账向导 · 期末结平</b><span class="tag">净值验算</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back" type="button" aria-label="返回">
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true"><path d="M9.5 1.5L2 9l7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="spacer"></span>
+            <span class="title title--sm">核对期初</span>
+            <span class="spacer"></span>
+            <span class="small muted" style="width:44px;text-align:right">4 / 4</span>
+          </div>
+          <div class="body scroll">
+            <div class="rail" style="margin-bottom:18px">
+              <i data-done="true"></i><i data-done="true"></i><i data-done="true"></i><i data-done="true"></i>
+            </div>
+
+            <p class="note" style="margin-bottom:16px">你填了 8 个账户的余额。加起来应当等于你的净值——这是这张表唯一要说的话。</p>
+
+            <div class="band band--lead">
+              <div class="key">
+                <span class="k">资产</span>
+                <span class="v"><span class="cur">¥</span>126,480.00</span>
+              </div>
+              <div class="key">
+                <span class="k">负债</span>
+                <span class="v" data-dir="out"><span class="cur">¥</span>18,320.00</span>
+              </div>
+
+              <hr class="rule" style="margin:10px 0 0">
+
+              <div class="settle" style="margin-bottom:0;padding-bottom:6px">
+                <div class="key key--total" style="padding-bottom:0">
+                  <span class="k">净值</span>
+                  <span class="v"><span class="cur">¥</span>108,160.00</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="sechead" style="margin-top:0"><h3>将写入 accounts.bean</h3></div>
+            <div class="band" style="padding:14px 14px;font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:var(--ink-2);white-space:pre">2000-01-01 open Assets:Bank:CMB CNY
+2000-01-01 open Assets:Wallet:WeChat:LingQian CNY
+2000-01-01 open Liabilities:CreditCard:CMB CNY</div>
+            <p class="note">余额会写成 <span class="mono">balance</span> 断言放在同一天。之后每次改动都要通过 <span class="mono">bean-check</span> 才会落盘。</p>
+          </div>
+          <div class="tabbar" style="border-top:1px solid var(--rule);gap:10px">
+            <button class="btn btn--quiet" type="button" style="margin:8px 0 0 var(--pad)">上一步</button>
+            <button class="btn btn--primary" type="button" style="margin:8px var(--pad) 0 0">创建账本</button>
+          </div>
+        </div>
+      </figure>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       02 · 搜索与分类
+       ═══════════════════════════════════════════════════════════════ -->
+
+  <section class="group" id="search">
+    <h2>搜索与分类</h2>
+    <p class="lead">两个查询界面：一个是横向找任何东西，一个是纵向看一棵账户树。搜索结果按类型分节，不混排；分类管理里 <code>已停用</code> 的账户用一条细标签表示，不用彩色胶囊。</p>
+    <div class="frames">
+
+      <!-- 搜索 · 空态 -->
+      <figure class="frame">
+        <figcaption><b>全局搜索 · 空态</b><span class="tag">GlobalSearchPage</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <span class="title">搜索</span>
+            <span class="spacer"></span>
+            <button class="appbar back text" type="button" style="margin-left:0;margin-right:-8px">取消</button>
+          </div>
+          <div class="body scroll">
+            <div class="searchbar">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><circle cx="6.4" cy="6.4" r="4.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 10l3.4 3.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              <span class="q">搜索整个账本</span>
+            </div>
+
+            <div class="tabs tabs--tight" style="margin-top:14px">
+              <button class="mark" type="button" aria-selected="true">全部</button>
+              <button class="mark" type="button" aria-selected="false">流水</button>
+              <button class="mark" type="button" aria-selected="false">账户</button>
+              <button class="mark" type="button" aria-selected="false">标签</button>
+              <button class="mark" type="button" aria-selected="false">文件</button>
+            </div>
+
+            <div class="sechead" style="margin-top:18px"><h3>最近搜索</h3><span class="aside"><a class="link" href="#search">清除</a></span></div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">星巴克</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">#装修</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">招商银行</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+
+            <div class="sechead"><h3>可以搜什么</h3></div>
+            <div class="key"><span class="k">商户与摘要</span><span class="v muted" style="font-weight:400;font-size:13px">任意文字</span></div>
+            <div class="key"><span class="k">账户</span><span class="v muted mono" style="font-weight:400;font-size:12px">Assets:Bank:CMB</span></div>
+            <div class="key"><span class="k">标签</span><span class="v muted" style="font-weight:400;font-size:13px">#装修</span></div>
+            <div class="key"><span class="k">金额</span><span class="v muted" style="font-weight:400;font-size:13px">38.5 以上</span></div>
+            <div class="key"><span class="k">日期</span><span class="v muted" style="font-weight:400;font-size:13px">2026-03</span></div>
+          </div>
+          <div class="tabbar">
+            <a href="#search" aria-current="false"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 11l8-8 8 8v8a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" stroke-linejoin="round"/></svg>概览</a>
+            <a href="#search" aria-current="false"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 6h14M4 11h14M4 16h9"/></svg>流水</a>
+            <a href="#search" aria-current="false"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="16" height="12" rx="2"/><path d="M3 10h16"/></svg>账户</a>
+            <a href="#search" aria-current="page"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="6"/><path d="M14.5 14.5L19 19"/></svg>搜索</a>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 搜索结果 -->
+      <figure class="frame">
+        <figcaption><b>全局搜索 · 结果</b><span class="tag">按类型分节</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <span class="title">搜索</span>
+            <span class="spacer"></span>
+            <button class="appbar back text" type="button" style="margin-left:0;margin-right:-8px">取消</button>
+          </div>
+          <div class="body scroll">
+            <div class="searchbar">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><circle cx="6.4" cy="6.4" r="4.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 10l3.4 3.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              <span class="q" data-filled="true">星巴克</span>
+            </div>
+
+            <div class="tabs tabs--tight" style="margin-top:14px">
+              <button class="mark" type="button" aria-selected="true">全部</button>
+              <button class="mark" type="button" aria-selected="false">流水</button>
+              <button class="mark" type="button" aria-selected="false">账户</button>
+              <button class="mark" type="button" aria-selected="false">标签</button>
+              <button class="mark" type="button" aria-selected="false">文件</button>
+            </div>
+
+            <div class="sechead" style="margin-top:16px"><h3>账户</h3><span class="aside">1 条</span></div>
+            <div class="row row--tap">
+              <div class="row-main">
+                <div class="row-title">星巴克专户</div>
+                <div class="acct">Expenses:Food:Coffee:Starbucks</div>
+              </div>
+            </div>
+
+            <div class="sechead"><h3>流水</h3><span class="aside">12 条 · 共 ¥ 486.00</span></div>
+            <div class="txn">
+              <span class="lede">03-28</span>
+              <span class="mid">
+                <span class="payee">星巴克 国贸店</span>
+                <span class="meta">餐饮 · 咖啡 <span class="tag">#工作日</span></span>
+              </span>
+              <span class="amt" data-dir="out"><span class="cur">¥</span>38.00</span>
+            </div>
+            <div class="txn">
+              <span class="lede">03-26</span>
+              <span class="mid">
+                <span class="payee">星巴克 望京店</span>
+                <span class="meta">餐饮 · 咖啡</span>
+              </span>
+              <span class="amt" data-dir="out"><span class="cur">¥</span>42.00</span>
+            </div>
+            <div class="txn">
+              <span class="lede">03-24</span>
+              <span class="mid">
+                <span class="payee">星巴克 国贸店</span>
+                <span class="meta">餐饮 · 咖啡 <span class="tag">#工作日</span></span>
+              </span>
+              <span class="amt" data-dir="out"><span class="cur">¥</span>38.00</span>
+            </div>
+            <div class="txn">
+              <span class="lede">03-21</span>
+              <span class="mid">
+                <span class="payee">星巴克 国贸店</span>
+                <span class="meta">餐饮 · 咖啡</span>
+              </span>
+              <span class="amt" data-dir="out"><span class="cur">¥</span>35.00</span>
+            </div>
+
+            <div class="sechead"><h3>文件</h3><span class="aside">1 条</span></div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title mono" style="font-size:12.5px">imports/alipay-2026-03.csv</div>
+                <div class="row-sub">匹配 12 行 · 已归档</div>
+              </div>
+            </div>
+
+            <div class="sechead"><span class="aside" style="margin-left:0"><a class="link" href="#search">加载更多</a></span></div>
+          </div>
+          <div class="tabbar">
+            <a href="#search" aria-current="false"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 11l8-8 8 8v8a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" stroke-linejoin="round"/></svg>概览</a>
+            <a href="#search" aria-current="false"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 6h14M4 11h14M4 16h9"/></svg>流水</a>
+            <a href="#search" aria-current="false"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="16" height="12" rx="2"/><path d="M3 10h16"/></svg>账户</a>
+            <a href="#search" aria-current="page"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="6"/><path d="M14.5 14.5L19 19"/></svg>搜索</a>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 分类管理 -->
+      <figure class="frame">
+        <figcaption><b>分类管理</b><span class="tag">CategoriesManagementView</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back" type="button" aria-label="返回">
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true"><path d="M9.5 1.5L2 9l7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="spacer"></span>
+            <span class="title title--sm">分类管理</span>
+            <span class="spacer"></span>
+            <button class="iconbtn accent" type="button" aria-label="新增分类">
+              <svg width="17" height="17" viewBox="0 0 17 17" fill="none" aria-hidden="true"><path d="M8.5 2v13M2 8.5h13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="body scroll">
+            <div class="searchbar" style="margin-top:4px">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><circle cx="6.4" cy="6.4" r="4.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 10l3.4 3.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              <span class="q">搜索分类名称或路径</span>
+            </div>
+
+            <div class="seg" style="margin-top:12px">
+              <button type="button" aria-pressed="true">支出</button>
+              <button type="button" aria-pressed="false">收入</button>
+            </div>
+
+            <p class="note">共 46 个支出分类，按一级科目分组。加号新增，左滑可停用。</p>
+
+            <div class="sechead" style="margin-top:12px"><h3>Food</h3><span class="aside">8</span></div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">餐饮</div><div class="acct">Expenses:Food</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">咖啡</div><div class="acct">Expenses:Food:Coffee</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main">
+                <div class="row-title">外卖</div>
+                <div class="acct">Expenses:Food:Delivery</div>
+              </div>
+              <span class="tag muted">已停用</span>
+            </div>
+
+            <div class="sechead"><h3>Home</h3><span class="aside">5</span></div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">居住</div><div class="acct">Expenses:Home</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">房租</div><div class="acct">Expenses:Home:Rent</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">水电燃气</div><div class="acct">Expenses:Home:Utilities</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+
+            <div class="sechead"><h3>Transport</h3><span class="aside">6</span></div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">交通</div><div class="acct">Expenses:Transport</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 新增分类 -->
+      <figure class="frame">
+        <figcaption><b>新增分类</b><span class="tag">AddCategoryView · 浮层</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back" type="button" aria-label="返回">
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true"><path d="M9.5 1.5L2 9l7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="spacer"></span>
+            <span class="title title--sm">分类管理</span>
+            <span class="spacer"></span>
+            <span style="width:44px"></span>
+          </div>
+          <div class="body">
+            <div class="sechead" style="margin-top:33px"><h3>Food</h3></div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">餐饮</div></div>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">咖啡</div></div>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">外卖</div><span class="tag muted">已停用</span></div>
+            </div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grabber"></div>
+            <div class="sheet-head">
+              <h3>新增支出分类</h3>
+              <span class="aside">支出</span>
+            </div>
+            <div class="sheet-body scroll" style="padding-bottom:8px">
+              <label class="field--label" for="cat-name">名称</label>
+              <input class="field" id="cat-name" value="宠物" autocomplete="off">
+
+              <label class="field--label" style="margin-top:14px" for="cat-parent">上级科目</label>
+              <div class="row" style="border-bottom:1px solid var(--edge);min-height:44px">
+                <div class="row-main"><div class="row-title">生活</div><div class="acct">Expenses:Life</div></div>
+                <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+
+              <div class="sechead"><h3>将创建</h3></div>
+              <div class="band" style="padding:12px 14px;font-family:var(--font-mono);font-size:11.5px;color:var(--ink-2);white-space:pre">2000-01-01 open Expenses:Life:Pet CNY</div>
+              <p class="note">帐户名由上级科目与名称合成。写入前会跑一次 <span class="mono">bean-check</span>。</p>
+            </div>
+            <div class="sheet-foot" style="display:flex;gap:10px">
+              <button class="btn btn--quiet" type="button">取消</button>
+              <button class="btn btn--primary" type="button">创建</button>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       03 · 待整理与对账
+       ═══════════════════════════════════════════════════════════════ -->
+
+  <section class="group" id="reconcile">
+    <h2>待整理与对账</h2>
+    <p class="lead">应用的清账台。待整理收件箱收集"记了但没记全"的流水，对账工作台把账面余额和现实对上。两屏都在同一件事实上工作：一笔分录的两侧是否同时成立。</p>
+    <div class="frames">
+
+      <!-- 待整理 -->
+      <figure class="frame">
+        <figcaption><b>待整理收件箱</b><span class="tag">PendingInboxView</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <span class="title">待整理</span>
+            <span class="spacer"></span>
+            <button class="appbar back text" type="button" style="margin-left:0;margin-right:-8px">完成</button>
+          </div>
+          <div class="body scroll">
+
+            <div class="band band--lead" style="margin-top:6px">
+              <div class="key">
+                <span class="k">待整理金额</span>
+                <span class="v" data-dir="out"><span class="cur">¥</span>2,318.40</span>
+              </div>
+              <div class="key">
+                <span class="k">涉及笔数</span>
+                <span class="v">14</span>
+              </div>
+              <p class="note" style="margin-bottom:0">这些流水已经写入，只是分类或商户还空着。补全不会改变金额。</p>
+            </div>
+
+            <div class="tabs tabs--tight">
+              <button class="mark" type="button" aria-selected="true">全部 <span class="muted">14</span></button>
+              <button class="mark" type="button" aria-selected="false">未分类 <span class="muted">9</span></button>
+              <button class="mark" type="button" aria-selected="false">待核对 <span class="muted">3</span></button>
+              <button class="mark" type="button" aria-selected="false">缺商户 <span class="muted">2</span></button>
+            </div>
+
+            <div class="daysep">2026-03-28 <span class="sum">2 笔</span></div>
+            <div class="txn">
+              <span class="lede">14:22</span>
+              <span class="mid">
+                <span class="payee">未知商户</span>
+                <span class="meta"><span class="tag" data-kind="pending">未分类</span> 支出</span>
+              </span>
+              <span class="amt" data-dir="out"><span class="cur">¥</span>68.00</span>
+            </div>
+            <div class="txn">
+              <span class="lede">09:05</span>
+              <span class="mid">
+                <span class="payee">滴滴出行</span>
+                <span class="meta"><span class="tag" data-kind="pending">缺商户</span> 交通</span>
+              </span>
+              <span class="amt" data-dir="out"><span class="cur">¥</span>32.50</span>
+            </div>
+
+            <div class="daysep">2026-03-27 <span class="sum">3 笔</span></div>
+            <div class="txn">
+              <span class="lede">19:41</span>
+              <span class="mid">
+                <span class="payee">美团外卖</span>
+                <span class="meta"><span class="tag" data-dir="pending" data-kind="pending">待核对</span> 餐饮</span>
+              </span>
+              <span class="amt" data-dir="out"><span class="cur">¥</span>45.00</span>
+            </div>
+            <div class="txn">
+              <span class="lede">12:30</span>
+              <span class="mid">
+                <span class="payee">未知商户</span>
+                <span class="meta"><span class="tag" data-kind="pending">未分类</span> 支出</span>
+              </span>
+              <span class="amt" data-dir="out"><span class="cur">¥</span>128.00</span>
+            </div>
+            <div class="txn">
+              <span class="lede">08:12</span>
+              <span class="mid">
+                <span class="payee">全家便利店</span>
+                <span class="meta"><span class="tag" data-kind="pending">未分类</span> 支出</span>
+              </span>
+              <span class="amt" data-dir="out"><span class="cur">¥</span>22.80</span>
+            </div>
+          </div>
+          <div class="tabbar" style="border-top:1px solid var(--rule);gap:10px">
+            <button class="btn btn--primary" type="button" style="margin:8px var(--pad) 0">逐条整理</button>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 待整理 · 单条 -->
+      <figure class="frame">
+        <figcaption><b>待整理 · 补分类</b><span class="tag">单条操作浮层</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <span class="title">待整理</span>
+            <span class="spacer"></span>
+            <button class="appbar back text" type="button" style="margin-left:0;margin-right:-8px">完成</button>
+          </div>
+          <div class="body">
+            <div class="tabs tabs--tight">
+              <button class="mark" type="button" aria-selected="true">全部 <span class="muted">14</span></button>
+              <button class="mark" type="button" aria-selected="false">未分类</button>
+              <button class="mark" type="button" aria-selected="false">待核对</button>
+              <button class="mark" type="button" aria-selected="false">缺商户</button>
+            </div>
+            <div class="daysep">2026-03-28 <span class="sum">2 笔</span></div>
+            <div class="txn row--tap" style="background:var(--sunken);margin:0 -20px;padding-left:20px;padding-right:20px">
+              <span class="lede">14:22</span>
+              <span class="mid">
+                <span class="payee">未知商户</span>
+                <span class="meta"><span class="tag" data-kind="pending">未分类</span> 支出</span>
+              </span>
+              <span class="amt" data-dir="out"><span class="cur">¥</span>68.00</span>
+            </div>
+            <div class="txn">
+              <span class="lede">09:05</span>
+              <span class="mid">
+                <span class="payee">滴滴出行</span>
+                <span class="meta"><span class="tag" data-kind="pending">缺商户</span> 交通</span>
+              </span>
+              <span class="amt" data-dir="out"><span class="cur">¥</span>32.50</span>
+            </div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grabber"></div>
+            <div class="sheet-head">
+              <h3>这条流水的分类</h3>
+              <span class="aside" style="color:var(--out)">未分类</span>
+            </div>
+            <div class="sheet-body">
+              <div class="band" style="margin-bottom:14px">
+                <div class="key">
+                  <span class="k">金额</span>
+                  <span class="v" data-dir="out"><span class="cur">¥</span>68.00</span>
+                </div>
+                <div class="key">
+                  <span class="k">账户</span>
+                  <span class="v mono" style="font-size:12px;font-weight:400">Assets:Wallet:WeChat:LingQian</span>
+                </div>
+                <div class="key">
+                  <span class="k">日期</span>
+                  <span class="v" style="font-weight:400">2026-03-28 14:22</span>
+                </div>
+              </div>
+
+              <div class="sechead" style="margin-top:0"><h3>建议</h3><span class="aside">来自历史商户</span></div>
+              <div class="row row--tap">
+                <div class="row-main"><div class="row-title">餐饮 · 外卖</div><div class="acct">Expenses:Food:Delivery</div></div>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="color:var(--in)"><path d="M3 8.5l3.2 3.2L13 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <div class="row row--tap">
+                <div class="row-main"><div class="row-title">餐饮</div><div class="acct">Expenses:Food</div></div>
+              </div>
+              <div class="row row--tap">
+                <div class="row-main"><div class="row-title">日用</div><div class="acct">Expenses:Daily</div></div>
+              </div>
+              <div class="row row--tap">
+                <div class="row-main"><div class="row-title">选择其它分类…</div></div>
+                <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+            </div>
+            <div class="sheet-foot" style="display:flex;gap:10px">
+              <button class="btn btn--quiet" type="button">跳过</button>
+              <button class="btn btn--primary" type="button">保存</button>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 对账工作台 -->
+      <figure class="frame">
+        <figcaption><b>对账工作台</b><span class="tag">ReconciliationView</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back" type="button" aria-label="返回">
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true"><path d="M9.5 1.5L2 9l7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="spacer"></span>
+            <span class="title title--sm">对账</span>
+            <span class="spacer"></span>
+            <button class="iconbtn" type="button" aria-label="刷新">
+              <svg width="17" height="17" viewBox="0 0 17 17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M14 8.5a5.5 5.5 0 1 1-1.6-3.9"/><path d="M14 2v3.2h-3.2"/></svg>
+            </button>
+          </div>
+          <div class="body scroll">
+
+            <div class="band band--lead" style="margin-top:6px">
+              <div class="key">
+                <span class="k">已核平</span>
+                <span class="v" data-dir="in">9 个账户</span>
+              </div>
+              <div class="key">
+                <span class="k">待对账</span>
+                <span class="v">4 个账户</span>
+              </div>
+              <div class="key">
+                <span class="k">异常</span>
+                <span class="v" data-dir="out">1 个账户</span>
+              </div>
+            </div>
+
+            <div class="tabs tabs--tight">
+              <button class="mark" type="button" aria-selected="false">全部</button>
+              <button class="mark" type="button" aria-selected="false">待对账 <span class="muted">4</span></button>
+              <button class="mark" type="button" aria-selected="false">异常 <span class="muted">1</span></button>
+              <button class="mark" type="button" aria-selected="true">已核平 <span class="muted">9</span></button>
+            </div>
+
+            <div class="sechead" style="margin-top:14px"><h3>资产</h3><span class="aside">10 个</span></div>
+            <div class="row row--tap">
+              <div class="row-main">
+                <div class="row-title">招商银行储蓄卡</div>
+                <div class="row-sub">2026-03-31 断言 · <span class="tag" data-kind="ok">已核平</span></div>
+              </div>
+              <span class="row-val"><span class="cur">¥</span>28,640.00</span>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main">
+                <div class="row-title">微信零钱</div>
+                <div class="row-sub">尚未断言 · <span class="tag" data-kind="pending">待对账</span></div>
+              </div>
+              <span class="row-val"><span class="cur">¥</span>1,240.00</span>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main">
+                <div class="row-title">余额宝</div>
+                <div class="row-sub">差异 ¥ 320.00 · <span class="tag" data-kind="pending" style="color:var(--out);border-bottom-color:var(--out)">异常</span></div>
+              </div>
+              <span class="row-val"><span class="cur">¥</span>32,000.00</span>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main">
+                <div class="row-title">人民币现金</div>
+                <div class="row-sub">2026-03-25 断言 · <span class="tag" data-kind="ok">已核平</span></div>
+              </div>
+              <span class="row-val"><span class="cur">¥</span>860.00</span>
+            </div>
+
+            <div class="sechead"><h3>负债</h3><span class="aside">4 个</span></div>
+            <div class="row row--tap">
+              <div class="row-main">
+                <div class="row-title">招行信用卡</div>
+                <div class="row-sub">2026-03-28 断言 · <span class="tag" data-kind="ok">已核平</span></div>
+              </div>
+              <span class="row-val" data-dir="out"><span class="cur">¥</span>6,820.00</span>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main">
+                <div class="row-title">蚂蚁花呗</div>
+                <div class="row-sub">尚未断言 · <span class="tag" data-kind="pending">待对账</span></div>
+              </div>
+              <span class="row-val" data-dir="out"><span class="cur">¥</span>1,500.00</span>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 单账户对账 -->
+      <figure class="frame">
+        <figcaption><b>单账户对账</b><span class="tag">断言与差异</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back" type="button" aria-label="返回">
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true"><path d="M9.5 1.5L2 9l7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="spacer"></span>
+            <span class="title title--sm">余额宝</span>
+            <span class="spacer"></span>
+            <span style="width:44px"></span>
+          </div>
+          <div class="body scroll">
+            <div class="acct" style="margin:2px 0 14px">Assets:Wallet:Alipay:YuEBao</div>
+
+            <div class="band band--lead">
+              <div class="key">
+                <span class="k">账本余额</span>
+                <span class="v"><span class="cur">¥</span>32,000.00</span>
+              </div>
+              <div class="key">
+                <span class="k">实际余额</span>
+                <span class="v"><span class="cur">¥</span>32,320.00</span>
+              </div>
+              <div class="key">
+                <span class="k">差异</span>
+                <span class="v" data-dir="in"><span class="cur">¥</span>320.00</span>
+              </div>
+              <hr class="rule" style="margin:10px 0 0">
+              <div class="key" style="padding-top:8px">
+                <span class="k">断言后余额</span>
+                <span class="v" style="font-size:19px;font-weight:500"><span class="cur">¥</span>32,320.00</span>
+              </div>
+            </div>
+
+            <p class="note" style="margin-top:-8px">差异会记成一笔 <span class="mono">Income:Other</span> 的调整分录，不会改动已有流水。</p>
+
+            <label class="field--label" for="rc-amt">实际余额</label>
+            <input class="field range" id="rc-amt" value="32320.00" inputmode="decimal" style="font-variant-numeric:tabular-nums">
+
+            <label class="field--label" style="margin-top:14px" for="rc-date">对账日期</label>
+            <div class="row range" style="border-bottom:1px solid var(--edge);min-height:44px">
+              <div class="row-main"><div class="row-title" style="font-variant-numeric:tabular-nums">2026-03-31</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+
+            <div class="sechead"><h3>将写入</h3><span class="aside">main.bean</span></div>
+            <div class="band" style="padding:14px;font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:var(--ink-2);white-space:pre-wrap">2026-03-31 balance Assets:Wallet:Alipay:YuEBao  32320.00 CNY</div>
+          </div>
+          <div class="tabbar" style="border-top:1px solid var(--rule);gap:10px">
+            <button class="btn btn--quiet" type="button" style="margin:8px 0 0 var(--pad)">稍后</button>
+            <button class="btn btn--primary" type="button" style="margin:8px var(--pad) 0 0">写入断言</button>
+          </div>
+        </div>
+      </figure>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       04 · 存储、设置与解锁
+       ═══════════════════════════════════════════════════════════════ -->
+
+  <section class="group" id="settings">
+    <h2>存储、设置与解锁</h2>
+    <p class="lead">表单和设置是唯一允许成组的地方——因此这里的行不再靠分隔线，而是靠 <code>.band</code> 的浅底把它们框在一起。冲突解决是这批里唯一一屏要求用户做取舍的界面，所以它把三个选项摊开写清楚，不用红色。</p>
+    <div class="frames">
+
+      <!-- 存储与同步 -->
+      <figure class="frame">
+        <figcaption><b>存储与同步</b><span class="tag">LocalLedgerStorageView</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back" type="button" aria-label="返回">
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true"><path d="M9.5 1.5L2 9l7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="spacer"></span>
+            <span class="title title--sm">存储与同步</span>
+            <span class="spacer"></span>
+            <span style="width:44px"></span>
+          </div>
+          <div class="body scroll">
+
+            <div class="band band--lead" style="margin-top:6px">
+              <div class="key"><span class="k">账本</span><span class="v" style="font-weight:400">我的账本</span></div>
+              <div class="key"><span class="k">存储提供方</span><span class="v" style="font-weight:400">Git 工作区</span></div>
+              <div class="key"><span class="k">状态</span><span class="v" data-dir="in">已同步</span></div>
+              <div class="key"><span class="k">最近同步</span><span class="v" style="font-weight:400">今天 09:12</span></div>
+              <div class="key"><span class="k">同步版本</span><span class="v mono" style="font-size:12px;font-weight:400">a41f9c2e0b7d</span></div>
+            </div>
+
+            <div class="sechead" style="margin-top:0"><h3>自动同步</h3></div>
+            <div class="row" style="border-bottom:0">
+              <div class="row-main"><div class="row-title">联网时自动交换变更</div><div class="row-sub">回到前台自动重试</div></div>
+              <span class="toggle" role="switch" aria-checked="true"><i></i></span>
+            </div>
+
+            <div class="sechead"><h3>Git 存储</h3></div>
+            <label class="field--label" for="git-url">仓库地址</label>
+            <input class="field" id="git-url" value="https://git.example.com/owner/ledger.git" style="font-size:13px">
+
+            <label class="field--label" style="margin-top:12px" for="git-branch">分支</label>
+            <input class="field" id="git-branch" value="main">
+
+            <label class="field--label" style="margin-top:12px" for="git-token">访问令牌</label>
+            <input class="field" id="git-token" type="password" value="••••••••••••" style="letter-spacing:0.15em">
+
+            <p class="note">令牌只存在这台设备的钥匙串里，不会写进仓库。</p>
+
+            <div style="display:flex;gap:10px;margin-top:18px">
+              <button class="btn" type="button">立即同步</button>
+              <button class="btn btn--quiet" type="button">改用本机存储</button>
+            </div>
+            <p class="note">冲突或凭据失效时同步暂停，账本仍然完整地留在本机。</p>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 冲突 -->
+      <figure class="frame">
+        <figcaption><b>同步冲突</b><span class="tag">需要选择</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back" type="button" aria-label="返回">
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true"><path d="M9.5 1.5L2 9l7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="spacer"></span>
+            <span class="title title--sm">存储与同步</span>
+            <span class="spacer"></span>
+            <span style="width:44px"></span>
+          </div>
+          <div class="body scroll">
+            <div class="band band--lead" style="margin-top:6px">
+              <div class="key"><span class="k">账本</span><span class="v" style="font-weight:400">我的账本</span></div>
+              <div class="key"><span class="k">状态</span><span class="v" data-dir="out">同步已暂停</span></div>
+              <div class="key"><span class="k">最近同步</span><span class="v" style="font-weight:400">昨天 21:40</span></div>
+            </div>
+
+            <div class="sechead" style="margin-top:0"><h3>需要处理的文件</h3><span class="aside">2 个</span></div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title mono" style="font-size:12.5px">transactions/2026-03.bean</div>
+                <div class="row-sub">本机 4 行 · 远端 7 行，两侧都改过</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title mono" style="font-size:12.5px">prices.bean</div>
+                <div class="row-sub">本机 0 行 · 远端新增 12 行</div>
+              </div>
+            </div>
+
+            <p class="note">处理前建议先导出两边版本看一眼。选择只影响这两个文件，其余变更等同步恢复后照常交换。</p>
+
+            <div class="stack gap-lg">
+              <button class="btn" type="button">保留本机版本</button>
+              <button class="btn" type="button">采用远端版本</button>
+              <button class="btn btn--quiet" type="button">导出两边版本供检查</button>
+            </div>
+
+            <div class="sechead"><h3>将写入</h3></div>
+            <div class="band" style="padding:14px;font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:var(--ink-2);white-space:pre-wrap">git checkout --ours transactions/2026-03.bean
+git add transactions/2026-03.bean
+# 之后重跑 bean-check 再提交</div>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 设置 -->
+      <figure class="frame">
+        <figcaption><b>设置</b><span class="tag">SettingsView</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back" type="button" aria-label="返回">
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true"><path d="M9.5 1.5L2 9l7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="spacer"></span>
+            <span class="title title--sm">设置</span>
+            <span class="spacer"></span>
+            <span style="width:44px"></span>
+          </div>
+          <div class="body scroll">
+
+            <div class="sechead" style="margin-top:6px"><h3>导航</h3></div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">底部标签栏</div></div>
+              <span class="row-val" style="font-weight:400;color:var(--ink-3);font-size:13px">概览、流水、账户</span>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+
+            <div class="sechead"><h3>隐私与安全</h3></div>
+            <div class="row">
+              <div class="row-main"><div class="row-title">面容 ID 保护</div><div class="row-sub">打开账本时验证身份</div></div>
+              <span class="toggle" role="switch" aria-checked="true"><i></i></span>
+            </div>
+            <div class="row">
+              <div class="row-main"><div class="row-title">隐私遮罩</div><div class="row-sub">切换应用时遮住内容</div></div>
+              <span class="toggle" role="switch" aria-checked="true"><i></i></span>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">自动锁定</div></div>
+              <span class="row-val" style="font-weight:400;color:var(--ink-3);font-size:13px">5 分钟后</span>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">立即锁定</div></div>
+            </div>
+            <p class="note">两个开关互不影响：前者管开账本，后者管切出去。设置只对当前账本生效。</p>
+
+            <div class="sechead"><h3>AI 与智能记账</h3></div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">智能分类</div></div>
+              <span class="row-val" style="font-weight:400;color:var(--ink-3);font-size:13px">已启用</span>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">语义解析</div></div>
+              <span class="row-val mono" style="font-weight:400;color:var(--ink-3);font-size:12px">claude-sonnet-5</span>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+
+            <div class="sechead"><h3>本地账本</h3></div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">名称</div></div>
+              <span class="row-val" style="font-weight:400;color:var(--ink-3)">我的账本</span>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">浏览、编辑与导出文件</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">存储与同步</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">切换账本</div></div>
+            </div>
+            <div class="row row--tap" style="border-bottom:0">
+              <div class="row-main"><div class="row-title" style="color:var(--out)">删除当前账本</div><div class="row-sub">永久抹除所有本地数据</div></div>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 解锁 -->
+      <figure class="frame">
+        <figcaption><b>解锁</b><span class="tag">LoginView · 锁定态</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar"><span class="title title--sm">账本已锁定</span></div>
+          <div class="body" style="display:flex;flex-direction:column">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding-bottom:30px">
+              <svg width="34" height="34" viewBox="0 0 34 34" fill="none" aria-hidden="true" style="color:var(--ink-3);margin-bottom:20px">
+                <rect x="6" y="14" width="22" height="15" rx="2" stroke="currentColor" stroke-width="1.6"/>
+                <path d="M11 14v-4.5a6 6 0 0 1 12 0V14" stroke="currentColor" stroke-width="1.6"/>
+                <circle cx="17" cy="21.5" r="1.7" fill="currentColor"/>
+              </svg>
+              <h3 style="font-size:19px;font-weight:500;margin:0 0 6px">我的账本</h3>
+              <p class="note" style="max-width:26ch;margin:0">验证身份后即可继续查看。账本内容在此之前不会出现在屏幕上。</p>
+            </div>
+
+            <button class="btn btn--primary" type="button" style="margin-bottom:10px">使用面容 ID 解锁</button>
+            <button class="btn" type="button" style="margin-bottom:10px">使用通行密钥</button>
+            <button class="btn btn--quiet" type="button">使用密码</button>
+            <p class="note" style="text-align:center;margin-bottom:18px"><a class="link" href="#settings">选择其他账本</a></p>
+          </div>
+        </div>
+      </figure>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       05 · 系统浮层与扩展
+       ═══════════════════════════════════════════════════════════════ -->
+
+  <section class="group" id="system">
+    <h2>系统浮层与扩展</h2>
+    <p class="lead">灵动岛胶囊是全应用唯一一处允许圆角与深色实底的地方——因为它不是我们的界面，是系统的。小组件同样：它借用系统容器，只把自己的排版规则带过去。</p>
+    <div class="frames">
+
+      <!-- 灵动岛 -->
+      <figure class="frame">
+        <figcaption><b>记账成功 · 灵动岛</b><span class="tag">LedgerIslandPillView · 224 × 68</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar"><span class="title">概览</span><span class="spacer"></span><button class="iconbtn" type="button" aria-label="同步"><span class="dot" data-state="synced"></span><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M15 9a6 6 0 1 1-1.8-4.2"/><path d="M15 2.5v3.4h-3.4"/></svg></button></div>
+          <div class="body scroll">
+            <div class="band band--lead" style="margin-top:6px">
+              <div class="key"><span class="k">本月支出</span><span class="v" data-dir="out"><span class="cur">¥</span>5,551.80</span></div>
+              <div class="key"><span class="k">本月收入</span><span class="v" data-dir="in"><span class="cur">¥</span>50,500.00</span></div>
+              <div class="settle" style="margin-bottom:0;padding-bottom:6px;margin-top:8px">
+                <div class="key key--total" style="padding-bottom:0"><span class="k">结余</span><span class="v"><span class="cur">¥</span>44,948.20</span></div>
+              </div>
+            </div>
+            <div class="sechead" style="margin-top:6px"><h3>最近</h3></div>
+            <div class="txn"><span class="lede">14:22</span><span class="mid"><span class="payee">星巴克 国贸店</span><span class="meta">餐饮 · 咖啡</span></span><span class="amt" data-dir="out"><span class="cur">¥</span>38.00</span></div>
+            <div class="txn"><span class="lede">12:30</span><span class="mid"><span class="payee">美团外卖</span><span class="meta">餐饮 · 外卖</span></span><span class="amt" data-dir="out"><span class="cur">¥</span>45.00</span></div>
+          </div>
+          <div class="pill">
+            <span class="badge" style="background:rgba(79,191,171,.18);border:1px solid rgba(79,191,171,.35);color:#4fbfab">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M7.5 1.5v12M1.5 7.5h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </span>
+            <span class="mid">
+              <span class="amt" style="color:#4fbfab">+ ¥ 50,500.00</span>
+              <span class="lbl">工资 · Assets:Bank:CMB</span>
+            </span>
+            <span class="ring" style="border-color:rgba(79,191,171,.4)">
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true" style="color:#4fbfab"><path d="M2 5.6l2.4 2.4L9 3.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+          </div>
+          <div class="tabbar">
+            <a href="#system" aria-current="page"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 11l8-8 8 8v8a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" stroke-linejoin="round"/></svg>概览</a>
+            <a href="#system" aria-current="false"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 6h14M4 11h14M4 16h9"/></svg>流水</a>
+            <a href="#system" aria-current="false"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="16" height="12" rx="2"/><path d="M3 10h16"/></svg>账户</a>
+            <a href="#system" aria-current="false"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.4"/><circle cx="15" cy="8" r="2.4"/><circle cx="8" cy="15" r="2.4"/><circle cx="15" cy="15" r="2.4"/></svg>更多</a>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 小组件 -->
+      <figure class="frame">
+        <figcaption><b>桌面小组件</b><span class="tag">WidgetKit · 中号</span></figcaption>
+        <div style="width:393px;padding:30px 0 0">
+          <div class="widget">
+            <div class="whead">
+              <span class="nm">我的账本</span>
+              <span style="margin-left:auto">今天 09:12</span>
+            </div>
+            <div class="wnum">¥ 44,948.20</div>
+            <div style="color:var(--ink-3);font-size:11px">本月结余</div>
+            <div class="wrow">
+              <div><span class="k">收入</span><span style="color:var(--in)">¥ 50,500.00</span></div>
+              <div><span class="k">支出</span><span style="color:var(--out)">¥ 5,551.80</span></div>
+            </div>
+            <div style="margin-top:12px;border-top:1px solid var(--rule);padding-top:9px;display:flex;align-items:baseline;gap:10px">
+              <span style="color:var(--ink-3);font-size:11px">最近</span>
+              <span style="color:var(--ink-2)">星巴克 国贸店</span>
+              <span style="margin-left:auto;color:var(--out);font-variant-numeric:tabular-nums">− ¥ 38.00</span>
+            </div>
+          </div>
+          <p class="note" style="max-width:340px;margin-top:16px">小组件读的是应用发布的本地快照，不自己发请求。所以它永远显示上一次成功同步的结果，而不是一个转圈的占位。</p>
+        </div>
+      </figure>
+
+      <!-- 本机文件 -->
+      <figure class="frame">
+        <figcaption><b>本机文件</b><span class="tag">LocalLedgerFilesView</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back" type="button" aria-label="返回">
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true"><path d="M9.5 1.5L2 9l7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="spacer"></span>
+            <span class="title title--sm">账本文件</span>
+            <span class="spacer"></span>
+            <button class="iconbtn accent" type="button" aria-label="导出">
+              <svg width="17" height="17" viewBox="0 0 17 17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 11V2.5"/><path d="M5 6l3.5-3.5L12 6"/><path d="M2.5 11.5v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2"/></svg>
+            </button>
+          </div>
+          <div class="body scroll">
+            <p class="note" style="margin:2px 0 14px">共 6 个文件 · 1.2 MB。改动会先校验再落盘，失败时回滚到上一个可用版本。</p>
+
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title mono" style="font-size:13px">main.bean</div><div class="row-sub">入口 · 2.1 KB · 昨天 21:40</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title mono" style="font-size:13px">accounts.bean</div><div class="row-sub">6.4 KB · 今天 09:05</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title mono" style="font-size:13px">prices.bean</div><div class="row-sub">18.9 KB · 昨天 21:40</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+
+            <div class="sechead"><h3>transactions/</h3><span class="aside">3 个文件</span></div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title mono" style="font-size:13px">2026-03.bean</div><div class="row-sub">142 行 · 今天 14:22</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title mono" style="font-size:13px">2026-02.bean</div><div class="row-sub">168 行 · 02-28 23:10</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap" style="border-bottom:0">
+              <div class="row-main"><div class="row-title mono" style="font-size:13px">2026-01.bean</div><div class="row-sub">151 行 · 01-31 22:48</div></div>
+              <svg class="chev" width="7" height="12" viewBox="0 0 7 12" fill="none" aria-hidden="true"><path d="M1 1l5 5-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+      <!-- 标签选择 -->
+      <figure class="frame">
+        <figcaption><b>事件标签</b><span class="tag">EventTagListView · 浮层</span></figcaption>
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <span class="title title--sm">标签</span>
+            <span class="spacer"></span>
+            <button class="appbar back text" type="button" style="margin-left:0;margin-right:-8px">完成</button>
+          </div>
+          <div class="body scroll">
+            <p class="note" style="margin:2px 0 14px">选中的标签会加到这批流水上，用来做跨月的事件报表。</p>
+
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">#装修</div><div class="row-sub">28 笔 · 共 ¥ 46,200.00</div></div>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="color:var(--ink)"><path d="M3 8.5l3.2 3.2L13 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">#日本2026</div><div class="row-sub">64 笔 · 共 ¥ 18,940.00</div></div>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="color:var(--ink)"><path d="M3 8.5l3.2 3.2L13 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">#报销待办</div><div class="row-sub">7 笔 · 共 ¥ 3,120.00</div></div>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">#搬家</div><div class="row-sub">3 笔 · 共 ¥ 860.00</div></div>
+            </div>
+
+            <div class="sechead"><h3>新建标签</h3></div>
+            <input class="field" value="#" style="font-family:var(--font-mono)">
+          </div>
+          <div class="tabbar" style="border-top:1px solid var(--rule);gap:10px">
+            <button class="btn btn--quiet" type="button" style="margin:8px 0 0 var(--pad)">取消</button>
+            <button class="btn btn--primary" type="button" style="margin:8px var(--pad) 0 0">应用 2 个标签</button>
+          </div>
+        </div>
+      </figure>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       06 · 深色
+       ═══════════════════════════════════════════════════════════════ -->
+
+  <section class="group" id="dark">
+    <h2>深色</h2>
+    <p class="lead">同一套层级，换一组明度。深色下 <code>--in</code> 与 <code>--out</code> 需要提亮才够对比——<code>#4fbfab</code> 与 <code>#cf7a52</code> 是它们在暗底上的形态，而不是浅色值加了透明度。双线在深色下用 <code>--ink</code>，因此依然是最重的一条线。</p>
+    <div class="frames">
+
+      <figure class="frame">
+        <figcaption><b>开账向导 · 期末结平</b><span class="tag">深色</span></figcaption>
+        <div class="phone" data-theme="dark">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back" type="button" aria-label="返回">
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true"><path d="M9.5 1.5L2 9l7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="spacer"></span>
+            <span class="title title--sm">核对期初</span>
+            <span class="spacer"></span>
+            <span class="small muted" style="width:44px;text-align:right">4 / 4</span>
+          </div>
+          <div class="body scroll">
+            <div class="rail" style="margin-bottom:18px"><i data-done="true"></i><i data-done="true"></i><i data-done="true"></i><i data-done="true"></i></div>
+            <p class="note" style="margin-bottom:16px">你填了 8 个账户的余额。加起来应当等于你的净值。</p>
+            <div class="band band--lead">
+              <div class="key"><span class="k">资产</span><span class="v"><span class="cur">¥</span>126,480.00</span></div>
+              <div class="key"><span class="k">负债</span><span class="v" data-dir="out"><span class="cur">¥</span>18,320.00</span></div>
+              <hr class="rule" style="margin:10px 0 0">
+              <div class="settle" style="margin-bottom:0;padding-bottom:6px">
+                <div class="key key--total" style="padding-bottom:0"><span class="k">净值</span><span class="v"><span class="cur">¥</span>108,160.00</span></div>
+              </div>
+            </div>
+            <div class="sechead" style="margin-top:0"><h3>将写入 accounts.bean</h3></div>
+            <div class="band" style="padding:14px;font-family:var(--font-mono);font-size:11.5px;line-height:1.75;color:var(--ink-2);white-space:pre">2000-01-01 open Assets:Bank:CMB CNY
+2000-01-01 open Assets:Wallet:WeChat:LingQian CNY
+2000-01-01 open Liabilities:CreditCard:CMB CNY</div>
+          </div>
+          <div class="tabbar" style="border-top:1px solid var(--rule);gap:10px">
+            <button class="btn btn--quiet" type="button" style="margin:8px 0 0 var(--pad)">上一步</button>
+            <button class="btn btn--primary" type="button" style="margin:8px var(--pad) 0 0">创建账本</button>
+          </div>
+        </div>
+      </figure>
+
+      <figure class="frame">
+        <figcaption><b>对账工作台</b><span class="tag">深色</span></figcaption>
+        <div class="phone" data-theme="dark">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <button class="appbar back" type="button" aria-label="返回">
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true"><path d="M9.5 1.5L2 9l7.5 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="spacer"></span>
+            <span class="title title--sm">对账</span>
+            <span class="spacer"></span>
+            <span style="width:44px"></span>
+          </div>
+          <div class="body scroll">
+            <div class="band band--lead" style="margin-top:6px">
+              <div class="key"><span class="k">已核平</span><span class="v" data-dir="in">9 个账户</span></div>
+              <div class="key"><span class="k">待对账</span><span class="v">4 个账户</span></div>
+              <div class="key"><span class="k">异常</span><span class="v" data-dir="out">1 个账户</span></div>
+            </div>
+            <div class="tabs tabs--tight">
+              <button class="mark" type="button" aria-selected="false">全部</button>
+              <button class="mark" type="button" aria-selected="false">待对账</button>
+              <button class="mark" type="button" aria-selected="false">异常</button>
+              <button class="mark" type="button" aria-selected="true">已核平</button>
+            </div>
+            <div class="sechead" style="margin-top:14px"><h3>资产</h3><span class="aside">10 个</span></div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">招商银行储蓄卡</div><div class="row-sub">2026-03-31 断言 · <span class="tag" data-kind="ok">已核平</span></div></div>
+              <span class="row-val"><span class="cur">¥</span>28,640.00</span>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">微信零钱</div><div class="row-sub">尚未断言 · <span class="tag" data-kind="pending">待对账</span></div></div>
+              <span class="row-val"><span class="cur">¥</span>1,240.00</span>
+            </div>
+            <div class="row row--tap">
+              <div class="row-main"><div class="row-title">余额宝</div><div class="row-sub">差异 ¥ 320.00 · <span class="tag" data-kind="pending" style="color:var(--out);border-bottom-color:var(--out)">异常</span></div></div>
+              <span class="row-val"><span class="cur">¥</span>32,000.00</span>
+            </div>
+            <div class="row row--tap" style="border-bottom:0">
+              <div class="row-main"><div class="row-title">人民币现金</div><div class="row-sub">2026-03-25 断言 · <span class="tag" data-kind="ok">已核平</span></div></div>
+              <span class="row-val"><span class="cur">¥</span>860.00</span>
+            </div>
+          </div>
+        </div>
+      </figure>
+
+      <figure class="frame">
+        <figcaption><b>待整理收件箱</b><span class="tag">深色</span></figcaption>
+        <div class="phone" data-theme="dark">
+          <div class="statusbar"><span>9:41</span><span class="glyphs"><svg width="62" height="12" viewBox="0 0 62 12" fill="none" aria-hidden="true"><rect x="0" y="7" width="3" height="5" rx="1" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="1" width="3" height="11" rx="1" fill="currentColor"/><path d="M23 4.2a8.6 8.6 0 0 1 11 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M25.6 7a4.8 4.8 0 0 1 5.8 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="28.5" cy="10" r="1.2" fill="currentColor"/><rect x="46" y="2.5" width="15" height="7.5" rx="2" stroke="currentColor" stroke-opacity=".45"/><rect x="47.6" y="4.1" width="9" height="4.3" rx="1" fill="currentColor"/></svg></span></div>
+          <div class="appbar">
+            <span class="title">待整理</span>
+            <span class="spacer"></span>
+            <button class="appbar back text" type="button" style="margin-left:0;margin-right:-8px">完成</button>
+          </div>
+          <div class="body scroll">
+            <div class="band band--lead" style="margin-top:6px">
+              <div class="key"><span class="k">待整理金额</span><span class="v" data-dir="out"><span class="cur">¥</span>2,318.40</span></div>
+              <div class="key"><span class="k">涉及笔数</span><span class="v">14</span></div>
+            </div>
+            <div class="tabs tabs--tight">
+              <button class="mark" type="button" aria-selected="true">全部 <span class="muted">14</span></button>
+              <button class="mark" type="button" aria-selected="false">未分类 <span class="muted">9</span></button>
+              <button class="mark" type="button" aria-selected="false">待核对 <span class="muted">3</span></button>
+              <button class="mark" type="button" aria-selected="false">缺商户 <span class="muted">2</span></button>
+            </div>
+            <div class="daysep">2026-03-28 <span class="sum">2 笔</span></div>
+            <div class="txn"><span class="lede">14:22</span><span class="mid"><span class="payee">未知商户</span><span class="meta"><span class="tag" data-kind="pending">未分类</span> 支出</span></span><span class="amt" data-dir="out"><span class="cur">¥</span>68.00</span></div>
+            <div class="txn"><span class="lede">09:05</span><span class="mid"><span class="payee">滴滴出行</span><span class="meta"><span class="tag" data-kind="pending">缺商户</span> 交通</span></span><span class="amt" data-dir="out"><span class="cur">¥</span>32.50</span></div>
+            <div class="daysep">2026-03-27 <span class="sum">3 笔</span></div>
+            <div class="txn"><span class="lede">19:41</span><span class="mid"><span class="payee">美团外卖</span><span class="meta"><span class="tag" data-kind="pending">待核对</span> 餐饮</span></span><span class="amt" data-dir="out"><span class="cur">¥</span>45.00</span></div>
+            <div class="txn" style="border-bottom:0"><span class="lede">12:30</span><span class="mid"><span class="payee">未知商户</span><span class="meta"><span class="tag" data-kind="pending">未分类</span> 支出</span></span><span class="amt" data-dir="out"><span class="cur">¥</span>128.00</span></div>
+          </div>
+          <div class="tabbar" style="border-top:1px solid var(--rule);gap:10px">
+            <button class="btn btn--primary" type="button" style="margin:8px var(--pad) 0">逐条整理</button>
+          </div>
+        </div>
+      </figure>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       规范
+       ═══════════════════════════════════════════════════════════════ -->
+
+  <section class="group" id="spec">
+    <h2>本批用到的构件</h2>
+    <p class="lead">完整规范在 <a class="link" href="README.md">README.md</a>。这一批新增了三个构件，都在上面的帧里出现过。</p>
+    <div class="spec">
+      <h3>新增构件</h3>
+      <table>
+        <thead><tr><th style="width:22%">构件</th><th style="width:26%">用途</th><th>规则</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>.rail</code></td>
+            <td>多步流程的进度</td>
+            <td>四段等宽细线，已完成段用 <code>--ink</code>，未完成用 <code>--rule-strong</code>。不用圆点，不用数字。</td>
+          </tr>
+          <tr>
+            <td><code>.pill</code></td>
+            <td>灵动岛入账回执</td>
+            <td>全应用唯一的圆角与深色实底——因为它借用系统容器。尺寸固定 224 × 68，内部金额用 mono。</td>
+          </tr>
+          <tr>
+            <td><code>.widget</code></td>
+            <td>桌面小组件</td>
+            <td>沿用 <code>--sunken</code> 底与同一套数字排版。只读快照，从不自己发请求，因此没有加载态。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 style="margin-top:26px">双线出现的三个位置</h3>
+      <table>
+        <thead><tr><th style="width:30%">位置</th><th>它断言什么</th></tr></thead>
+        <tbody>
+          <tr><td>开账向导 · 期初结余</td><td>用户填入的各账户余额之和等于净值。创建账本前唯一一次让用户看见这个等式。</td></tr>
+          <tr><td>单账户对账</td><td>账面余额与用户输入的实际余额已对齐，断言可以写入。</td></tr>
+          <tr><td>总账合计（第一批）</td><td>一列数字已封闭，可以直接引用。</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="margin-top:26px">这一批里有意的克制</h3>
+      <table>
+        <thead><tr><th style="width:30%">没有做</th><th>原因</th></tr></thead>
+        <tbody>
+          <tr><td>待整理 / 异常用红色</td><td><code>--out</code> 已经承担"减少"这一含义。红色会把"未分类"误读成"错误"——它只是一种状态。</td></tr>
+          <tr><td>设置页用卡片分组</td><td>表单是唯一允许成组的地方，用 <code>.band</code> 的浅底即可，不需要边框和投影。</td></tr>
+          <tr><td>向导用编号步骤头</td><td>编号只在内容真的是序列时才有信息量。<code>.rail</code> 已经表达了位置，再写一遍是重复。</td></tr>
+          <tr><td>搜索结果的类型图标</td><td>分节标题已经说了类型，图标不增加信息。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function () {
+  var body = document.body;
+
+  function setTheme(name) {
+    body.dataset.gallery = name;
+    document.getElementById('theme-light').setAttribute('aria-pressed', String(name === 'light'));
+    document.getElementById('theme-dark').setAttribute('aria-pressed', String(name === 'dark'));
+  }
+  document.getElementById('theme-light').addEventListener('click', function () { setTheme('light'); });
+  document.getElementById('theme-dark').addEventListener('click', function () { setTheme('dark'); });
+
+  // tabs / segments: one 2px underline mark, mutually exclusive within a group
+  document.querySelectorAll('.tabs, .seg, .seg-inline').forEach(function (group) {
+    var items = group.querySelectorAll('button');
+    items.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        items.forEach(function (other) {
+          if (other.hasAttribute('aria-selected')) other.setAttribute('aria-selected', 'false');
+          if (other.hasAttribute('aria-pressed')) other.setAttribute('aria-pressed', 'false');
+        });
+        if (btn.hasAttribute('aria-selected')) btn.setAttribute('aria-selected', 'true');
+        if (btn.hasAttribute('aria-pressed')) btn.setAttribute('aria-pressed', 'true');
+      });
+    });
+  });
+
+  // checkboxes: the ones flagged as write-gates keep a counter honest
+  document.querySelectorAll('.imp .box').forEach(function (box) {
+    box.addEventListener('click', function () {
+      var on = box.getAttribute('aria-checked') === 'true';
+      box.setAttribute('aria-checked', String(!on));
+      box.innerHTML = !on
+        ? '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.4 6.3l2.4 2.4 4.8-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        : '';
+    });
+  });
+
+  document.querySelectorAll('.toggle').forEach(function (t) {
+    t.addEventListener('click', function () {
+      t.setAttribute('aria-checked', String(t.getAttribute('aria-checked') !== 'true'));
+    });
+  });
+})();
+</script>
+
+</body>
+</html>
