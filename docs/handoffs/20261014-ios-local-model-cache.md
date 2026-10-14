@@ -1,9 +1,9 @@
 # 20261014-ios-local-model-cache
 
-- Status: active
-- Last updated: 2026-10-14 15:05 +0800
+- Status: completed (merged with PR #507 after the user's device test)
+- Last updated: 2026-10-14 16:00 +0800
 - Branch: `codex/ios-local-model-cache` (from `main` @ `3911814`)
-- PR: not yet opened
+- PR: https://github.com/qiaoborui/beancount-ledger-web/pull/507
 
 ## Goal
 
@@ -68,11 +68,10 @@ engine is authoritative (canonical Beancount stays the read model).
 - Local-ledger UI suites: six failures, all of which also fail on clean
   `main` @ `3911814`. Two were known to fail before PR #506; whether the
   other four predate #506 was not checked. They need a follow-up fix.
-- Not yet: physical-device measurement with a real ledger.
+- The user installed the branch IPA and reported no problems on device.
 
 ## Next steps
 
-1. Open the PR, build an IPA, ask the user to compare device temperature.
-2. Possible follow-ups: Go stream ingest speed, deferring widget refreshes,
+1. Possible follow-ups: Go stream ingest speed, deferring widget refreshes,
    avoiding the extra staged Go ingest used only for the publication version
    check.
