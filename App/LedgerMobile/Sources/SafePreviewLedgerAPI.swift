@@ -1149,13 +1149,13 @@ private enum SafePreviewLedgerData {
                 LedgerNetWorthPoint(date: "2026-07", assets: value(1_376_800_000), liabilities: value(310_400), netWorth: value(1_376_489_600)),
                 LedgerNetWorthPoint(date: "2026-08", assets: value(1_415_200_366), liabilities: value(289_900), netWorth: value(1_414_910_466)),
             ],
-            cashflowSeries: [
-                LedgerCashflowPoint(month: "03", income: value(4_820_000), expense: value(1_138_000), net: value(3_682_000)),
-                LedgerCashflowPoint(month: "04", income: value(5_080_000), expense: value(1_246_000), net: value(3_834_000)),
-                LedgerCashflowPoint(month: "05", income: value(4_960_000), expense: value(932_000), net: value(4_028_000)),
-                LedgerCashflowPoint(month: "06", income: value(5_160_000), expense: value(1_328_000), net: value(3_832_000)),
-                LedgerCashflowPoint(month: "08", income: value(5_050_000), expense: value(555_180), net: value(4_494_820)),
-            ],
+            // A one-month range buckets by day on the server ("08-01"…).
+            cashflowSeries: (1...31).map { day in
+                let income = day == 10 ? 5_000_000 : (day % 9 == 0 ? 12_000 : 0)
+                let expense = 8_000 + (day * 3_517) % 31_000
+                return LedgerCashflowPoint(month: String(format: "08-%02d", day), income: value(income),
+                    expense: value(expense), net: value(income - expense))
+            },
             categorySeries: [
                 LedgerCategorySeries(account: "Expenses:Housing", alias: "居住", label: "居住", total: value(380_000), values: []),
                 LedgerCategorySeries(account: "Expenses:Education", alias: "教育", label: "教育", total: value(32_800), values: []),

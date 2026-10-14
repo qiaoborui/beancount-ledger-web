@@ -340,7 +340,7 @@ struct TerminalIncomeExpenseReport: View {
     private var monthlyChart: some View {
         let points = data.dashboard.cashflowSeries
         return VStack(alignment: .leading, spacing: 0) {
-            balancedSechead("月度收支", aside: currency)
+            balancedSechead(BalancedBucketAxis.title(points.map(\.month)), aside: currency)
             if !session.amountsVisible {
                 Text("金额已隐藏").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).frame(maxWidth: .infinity, minHeight: 140)
             } else if points.isEmpty {
@@ -362,16 +362,16 @@ struct TerminalIncomeExpenseReport: View {
                         }
                     }
                 } }
-                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 5)) }
+                .chartXAxis { BalancedBucketAxis.marks(for: points.map(\.month)) }
                 .chartLegend(.hidden)
                 .frame(height: 156)
                 .padding(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))
-                .accessibilityLabel("月度收支").accessibilityIdentifier("balanced-cashflow-chart")
+                .accessibilityLabel(BalancedBucketAxis.title(points.map(\.month))).accessibilityIdentifier("balanced-cashflow-chart")
                 HStack(spacing: 20) {
                     legendKey("收入", color: BalancedPalette.ink)
                     legendKey("支出", color: BalancedPalette.expense)
                 }.padding(EdgeInsets(top: 10, leading: 20, bottom: 6, trailing: 20))
-                Text("按月汇总 · 转账不计收支").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                Text(BalancedBucketAxis.footnote(points.map(\.month))).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                     .padding(EdgeInsets(top: 0, leading: 20, bottom: 4, trailing: 20))
                 Button { showsMonthlyData.toggle() } label: {
                     HStack {
@@ -416,7 +416,7 @@ struct TerminalIncomeExpenseReport: View {
                         }
                     }
                 } }
-                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 5)) }
+                .chartXAxis { BalancedBucketAxis.marks(for: points.map(\.month)) }
                 .chartLegend(.hidden)
                 .frame(height: 136)
                 .padding(EdgeInsets(top: 4, leading: 20, bottom: 16, trailing: 20))
@@ -1115,5 +1115,89 @@ struct TerminalInvestmentsReport: View {
                 if data.positions.isEmpty { Text("暂无账户持仓明细").terminalFont(size: 13).padding(.vertical, 24) }
             }
         }.foregroundStyle(TerminalPalette.ink)
+    }
+}
+
+
+/// Axis for the income/expense series. The server buckets by day (≤45
+/// days, "08-01"), week ("08-01~08-07"), month ("2026-08") or quarter
+/// ("2026-Q1"). `.automatic` printed every daily "08-01" label in the system
+/// face or dropped arbitrary months. Labels now thin to an even stride and
+/// read "8/1", "8月" or "26 Q1", with the year at January or where the range
+/// starts in another year.
+@MainActor
+enum BalancedBucketAxis {
+    enum Granularity { case day, week, month, quarter }
+    static let maxLabels = 6
+
+    static func granularity(_ labels: [String]) -> Granularity {
+        guard let sample = labels.first else { return .month }
+        if sample.contains("~") { return .week }
+        if sample.contains("Q") { return .quarter }
+        return sample.split(separator: "-").count == 2 && sample.count == 7 ? .month : .day
+    }
+
+    /// Section head for the bar chart, so a month range is not called 月度.
+    static func title(_ labels: [String]) -> String {
+        switch granularity(labels) {
+        case .day: "每日收支"
+        case .week: "每周收支"
+        case .month: "月度收支"
+        case .quarter: "季度收支"
+        }
+    }
+
+    static func footnote(_ labels: [String]) -> String {
+        switch granularity(labels) {
+        case .day: "按日汇总 · 转账不计收支"
+        case .week: "按周汇总 · 转账不计收支"
+        case .month: "按月汇总 · 转账不计收支"
+        case .quarter: "按季汇总 · 转账不计收支"
+        }
+    }
+
+    static func labelled(_ labels: [String]) -> [String] {
+        guard labels.count > maxLabels else { return labels }
+        let stride = Int((Double(labels.count) / Double(maxLabels)).rounded(.up))
+        // Days and weeks read from the start of the range; months and quarters
+        // anchor on the latest bucket so the current period is labelled.
+        let fromStart = [.day, .week].contains(granularity(labels))
+        return labels.enumerated().filter { item in
+            (fromStart ? item.offset : labels.count - 1 - item.offset) % stride == 0
+        }.map(\.element)
+    }
+
+    static func label(_ raw: String, showsYear: Bool) -> String {
+        let start = raw.split(separator: "~").first.map(String.init) ?? raw
+        let parts = start.split(separator: "-").map(String.init)
+        switch granularity([raw]) {
+        case .quarter:
+            guard parts.count == 2 else { return raw }
+            return "\(parts[0].suffix(2)) \(parts[1])"
+        case .month:
+            guard parts.count == 2, let month = Int(parts[1]) else { return raw }
+            return showsYear || month == 1 ? "\(parts[0].suffix(2))年\(month)月" : "\(month)月"
+        case .day, .week:
+            let tail = parts.suffix(2)
+            guard tail.count == 2, let month = Int(tail.first!), let day = Int(tail.last!) else { return raw }
+            return "\(month)/\(day)"
+        }
+    }
+
+    @AxisContentBuilder
+    static func marks(for labels: [String]) -> some AxisContent {
+        let shown = labelled(labels)
+        let years = Set(labels.compactMap { $0.split(separator: "-").first }.filter { $0.count == 4 })
+        // A category axis ignores an explicit `values:` list and labels every
+        // bucket, so unlabelled buckets render an empty label instead.
+        AxisMarks { value in
+            AxisValueLabel(centered: true, collisionResolution: .disabled) {
+                if let raw = value.as(String.self), shown.contains(raw) {
+                    Text(label(raw, showsYear: years.count > 1 && raw == shown.first))
+                        .balancedFont(size: 11).monospacedDigit()
+                        .foregroundStyle(BalancedPalette.secondary).fixedSize()
+                }
+            }
+        }
     }
 }

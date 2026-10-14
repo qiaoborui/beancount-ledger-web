@@ -1503,6 +1503,10 @@ final class LedgerSessionTests: XCTestCase {
         let refreshedCalls = await api.callCounts()
         XCTAssertEqual(refreshedCalls.dashboard, 2)
         XCTAssertEqual(refreshedCalls.incomeStatement, 2)
+        // A refresh starts a new request generation; the page keeps showing
+        // the last result while the background prefetch replaces it.
+        await session.refresh()
+        XCTAssertNotNil(session.cachedAnalysisResource(.incomeExpense))
         await session.applyRange(.month(year: 2026, month: 8))
         XCTAssertNil(session.cachedAnalysisResource(.incomeExpense))
         _ = try await session.analysisResource(.incomeExpense)
