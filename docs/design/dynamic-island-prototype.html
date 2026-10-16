@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>灵动岛 · 记账 / 导入动画原型</title>
+<style>
+  :root { color-scheme: dark; --fg:#ececf1; --mut:#8e8e99; --line:#2a2a30; --card:#141417; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: #0a0a0c; color: var(--fg);
+    font: 13px/1.55 -apple-system, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+    display: flex; gap: 44px; justify-content: center; align-items: flex-start; padding: 28px;
+  }
+  .stage-wrap { flex: none; width: 393px; transform-origin: top center; }
+  .phone {
+    position: relative; width: 393px; height: 852px; border-radius: 56px; overflow: hidden;
+    box-shadow: 0 0 0 9px #18181b, 0 0 0 10px #34343a, 0 40px 90px rgba(0,0,0,.65);
+  }
+  canvas#stage { display: block; width: 393px; height: 852px; }
+  .timeline { margin-top: 26px; }
+  .tl-bar { position: relative; height: 26px; border-radius: 8px; background: var(--card); overflow: hidden; border: 1px solid var(--line); }
+  .tl-seg { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; padding-left: 8px; font-size: 11px; color: #d7d7de; white-space: nowrap; }
+  .tl-mark { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.35); }
+  .tl-head { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #fff; border-radius: 2px; box-shadow: 0 0 8px rgba(255,255,255,.6); }
+  .tl-legend { display: flex; justify-content: space-between; color: var(--mut); font-size: 11px; margin-top: 6px; }
+  .panel { width: 380px; }
+  h1 { font-size: 20px; margin: 4px 0 4px; letter-spacing: -.01em; }
+  .sub { color: var(--mut); margin: 0 0 20px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--mut); margin: 22px 0 10px; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  button {
+    appearance: none; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+    border-radius: 12px; padding: 11px 12px; font: inherit; text-align: left; cursor: pointer;
+    display: flex; align-items: center; gap: 10px; transition: background .15s, border-color .15s, transform .1s;
+  }
+  button:hover { background: #1c1c21; border-color: #3a3a42; }
+  button:active { transform: scale(.98); }
+  button .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  button kbd { margin-left: auto; color: var(--mut); font: 11px ui-monospace, monospace; }
+  button.wide { grid-column: 1 / -1; }
+  .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+  label.t { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; padding: 4px 0; }
+  label.t input { accent-color: #0a84ff; }
+  .haptic {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+    background: #1b2a1e; color: #63e08a; font-size: 11px; opacity: 0; transition: opacity .5s;
+  }
+  .haptic.on { opacity: 1; transition: none; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  td { padding: 6px 0; border-bottom: 1px solid #1d1d22; vertical-align: top; }
+  td:first-child { color: var(--mut); width: 42%; padding-right: 10px; }
+  code { font: 11.5px ui-monospace, "SF Mono", monospace; color: #c9d1ff; }
+  .note { color: var(--mut); font-size: 12px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="stage-wrap" id="wrap">
+  <div class="phone"><canvas id="stage"></canvas></div>
+  <div class="timeline">
+    <div class="tl-bar" id="tlBar"></div>
+    <div class="tl-legend"><span id="tlLeft">—</span><span id="tlRight"></span></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h1>灵动岛 · 记账反馈</h1>
+  <p class="sub">Canvas 原型：从硬件岛「长出」→ 展开确认 → 紧凑态 → 收回。所有形变均为真实弹簧（response / dampingFraction 与 SwiftUI 同义），可直接迁移。</p>
+
+  <h2>触发 <span class="haptic" id="haptic">● 触感 .success</span></h2>
+  <div class="grid">
+    <button data-s="expense"><span class="dot" style="background:#FF9F0A"></span>支出记账<kbd>1</kbd></button>
+    <button data-s="income"><span class="dot" style="background:#30D158"></span>收入记账<kbd>2</kbd></button>
+    <button data-s="transfer"><span class="dot" style="background:#64D2FF"></span>转账<kbd>3</kbd></button>
+    <button data-s="import"><span class="dot" style="background:#BF5AF2"></span>批量导入<kbd>4</kbd></button>
+    <button data-s="burst" class="wide"><span class="dot" style="background:linear-gradient(90deg,#FF9F0A,#30D158,#64D2FF)"></span>连续记 3 笔（测试打断 / 速度连续）<kbd>5</kbd></button>
+  </div>
+
+  <h2>查看</h2>
+  <div class="toggles">
+    <label class="t"><input type="checkbox" id="slow"> 慢放 0.25× <kbd style="color:var(--mut);font:11px ui-monospace">S</kbd></label>
+    <label class="t"><input type="checkbox" id="pause"> 暂停 <kbd style="color:var(--mut);font:11px ui-monospace">␣</kbd></label>
+    <label class="t"><input type="checkbox" id="debug"> 布局 / 摄像头轮廓</label>
+    <label class="t"><input type="checkbox" id="reduce"> 减弱动态效果</label>
+    <label class="t"><input type="checkbox" id="dark"> 深色 App 背景</label>
+    <label class="t"><input type="checkbox" id="loop"> 自动循环</label>
+  </div>
+
+  <h2>动效规格</h2>
+  <table>
+    <tr><td>起点</td><td>硬件岛 <code>126 × 37</code>，顶部 <code>y = 11</code>，形状始终顶部锚定、胶囊圆角 <code>min(h/2, 42)</code></td></tr>
+    <tr><td>展开 352 × 84</td><td>宽 <code>spring(0.46, 0.70)</code><br>高 <code>spring(0.54, 0.76)</code> —— 宽先于高，形成「横向甩出」</td></tr>
+    <tr><td>内容入场</td><td>以岛中心为锚：<code>blur 10→0</code>、<code>scale .86→1</code>、<code>opacity</code>，<code>spring(0.42, 0.90)</code>；徽标 / 文字 / 金额错开 <code>0 / 50 / 90ms</code>。布局按最终尺寸计算并随形状比例映射，不发生文字重排</td></tr>
+    <tr><td>金额</td><td>逐位滚动 <code>spring(0.62, 0.82)</code>，每位错开 30ms；导入为真实里程表进位计数</td></tr>
+    <tr><td>确认</td><td>进度环 0.22–0.62s，随后徽标被强调色实心圆「绽放」覆盖 <code>spring(0.38, 0.62)</code>，白色对勾描边 0.26s，外环扩散消失；此刻触发 <code>.success</code> 触感</td></tr>
+    <tr><td>紧凑态</td><td>2.3s（导入 3.0s）后内容 160ms 模糊退场，形状 <code>spring(0.42, 0.82)</code> 收为 <code>宽 × 37</code>：左对勾、右金额，停留 1.5s</td></tr>
+    <tr><td>收回</td><td>宽 <code>spring(0.40, 0.88)</code> / 高 <code>spring(0.34, 0.90)</code> 回到硬件岛，状态栏同步淡入</td></tr>
+    <tr><td>打断</td><td>新通知直接重定向目标值，弹簧保留当前速度；旧内容 160ms 退场，新内容延后 100ms 入场</td></tr>
+    <tr><td>减弱动态</td><td>无模糊 / 缩放，形状使用临界阻尼，内容纯淡入淡出</td></tr>
+  </table>
+  <p class="note">按键 1–5 触发，S 慢放，空格暂停。</p>
+</div>
+
+<script>
+(() => {
+  // ---------- setup ----------
+  const W = 393, H = 852, TOP = 11;
+  const PILL = { w: 126, h: 37 };
+  const EXP = { w: 352, h: 84 };
+  const SF = '-apple-system, "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif';
+  const ROUND = 'ui-rounded, "SF Pro Rounded", ' + SF;
+
+  const cvs = document.getElementById('stage');
+  const ctx = cvs.getContext('2d');
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  cvs.width = W * dpr; cvs.height = H * dpr;
+  const supportsFilter = 'filter' in ctx;
+
+  const $ = id => document.getElementById(id);
+  const opt = { slow: false, pause: false, debug: false, reduce: false, dark: false, loop: false };
+  for (const k of Object.keys(opt)) $(k).addEventListener('change', e => { opt[k] = e.target.checked; if (k === 'dark') bg = renderBg(); });
+
+  // ---------- math ----------
+  const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const easeOut = t => 1 - Math.pow(1 - clamp(t), 3);
+  const easeInOut = t => { t = clamp(t); return t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; };
+
+  // Closed-form step response of a SwiftUI-style spring(response, dampingFraction).
+  function springP(t, response = .5, zeta = .8) {
+    if (t <= 0) return 0;
+    if (opt.reduce) zeta = Math.max(zeta, 1);
+    const w = 2 * Math.PI / response;
+    if (zeta >= 1) return 1 - (1 + w * t) * Math.exp(-w * t);
+    const wd = w * Math.sqrt(1 - zeta * zeta);
+    return 1 - Math.exp(-zeta * w * t) * (Math.cos(wd * t) + (zeta * w / wd) * Math.sin(wd * t));
+  }
+
+  // Integrated spring for the island shape so retargeting keeps velocity.
+  class Spring {
+    constructor(x) { this.x = x; this.v = 0; this.t = x; this.tune(.5, .8); }
+    tune(r, z) { if (opt.reduce) { z = 1; r = Math.min(r, .32); } this.k = (2 * Math.PI / r) ** 2; this.c = 4 * Math.PI * z / r; }
+    to(t, r, z) { this.t = t; this.tune(r, z); }
+    step(dt) { const a = -this.k * (this.x - this.t) - this.c * this.v; this.v += a * dt; this.x += this.v * dt; }
+  }
+  const shape = { w: new Spring(PILL.w), h: new Spring(PILL.h) };
+
+  // ---------- scenarios ----------
+  const SCENES = {
+    expense:  { kind: 'expense',  tint: '#FF9F0A', accent: '#0A84FF', icon: 'coffee',   title: '瑞幸咖啡',   sub: '餐饮 · 招行信用卡',   amount: '-¥18.90',     amountColor: '#FFFFFF', caption: '已记账' },
+    income:   { kind: 'income',   tint: '#30D158', accent: '#30D158', icon: 'banknote', title: '十月工资',   sub: '收入 · 招商银行',     amount: '+¥12,800.00', amountColor: '#30D158', caption: '已入账' },
+    transfer: { kind: 'transfer', tint: '#64D2FF', accent: '#0A84FF', icon: 'transfer', title: '信用卡还款', sub: '招商银行 → 招行信用卡', amount: '¥2,000.00',  amountColor: '#64D2FF', caption: '已转账' },
+    import:   { kind: 'import',   tint: '#BF5AF2', accent: '#30D158', icon: 'inbox',    title: '支付宝账单', sub: '正在写入账本…', subDone: '共支出 ¥3,482.10', count: 128, amountColor: '#FFFFFF', caption: '已导入', captionPending: '写入中' },
+  };
+
+  const ICONS = {
+    coffee:   ['M10 2v2', 'M14 2v2', 'M6 2v2', 'M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1'],
+    banknote: ['M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z', 'M12 9.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z', 'M6 12h.01', 'M18 12h.01'],
+    transferA:['M8 3 4 7l4 4', 'M4 7h16'],
+    transferB:['m16 21 4-4-4-4', 'M20 17H4'],
+    inbox:    ['M22 12h-6l-2 3h-4l-2-3H2', 'M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z'],
+  };
+  const PATHS = Object.fromEntries(Object.entries(ICONS).map(([k, v]) => [k, v.map(d => new Path2D(d))]));
+
+  function timelineFor(s, interrupting) {
+    const imp = s.kind === 'import';
+    const t = {
+      contentIn: interrupting ? .1 : .05,
+      ringStart: imp ? .2 : .22,
+      ringEnd: imp ? 1.55 : .62,
+    };
+    t.check = t.ringEnd + .04;
+    t.toCompact = imp ? 3.0 : 2.3;
+    t.toPill = t.toCompact + 1.5;
+    t.end = t.toPill + .55;
+    return t;
+  }
+
+  // ---------- clock & notices ----------
+  let now = 0;
+  let notices = [];   // all notices still drawing (current is last)
+  let current = null;
+
+  function trigger(key) {
+    const s = SCENES[key];
+    const interrupting = !!current && phaseOf(current) !== 'done';
+    if (current) current.killedAt = now;
+    const n = { s, t0: now, tl: timelineFor(s, interrupting), phase: null, haptic: false };
+    ctx.font = `600 14px ${ROUND}`;
+    const trailing = s.kind === 'import' ? `${s.count} 笔` : s.amount;
+    n.compactW = PILL.w + 2 * Math.max(48, ctx.measureText(trailing).width + 30);
+    n.trailing = trailing;
+    notices.push(n);
+    current = n;
+  }
+
+  let burstTimers = [];
+  function burst() {
+    burstTimers.forEach(clearTimeout);
+    const scale = () => opt.slow ? 4 : 1;
+    trigger('expense');
+    burstTimers = [
+      setTimeout(() => trigger('income'), 900 * scale()),
+      setTimeout(() => trigger('transfer'), 1800 * scale()),
+    ];
+  }
+
+  function phaseOf(n) {
+    const lt = now - n.t0, tl = n.tl;
+    if (lt < tl.toCompact + .06) return 'exp';
+    if (lt < tl.toPill + .08) return 'cmp';
+    if (lt < tl.end) return 'pill';
+    return 'done';
+  }
+
+  function driveShape() {
+    if (!current) return;
+    const p = phaseOf(current);
+    if (p === current.phase) return;
+    current.phase = p;
+    if (p === 'exp') { shape.w.to(EXP.w, .46, .70); shape.h.to(EXP.h, .54, .76); }
+    if (p === 'cmp') { shape.w.to(current.compactW, .42, .82); shape.h.to(PILL.h, .36, .86); }
+    if (p === 'pill' || p === 'done') { shape.w.to(PILL.w, .40, .88); shape.h.to(PILL.h, .34, .90); }
+  }
+
+  // Visibility of one layer element: enter spring, exit blur.
+  function fx(n, layer, delay) {
+    const lt = now - n.t0, tl = n.tl;
+    const inAt = layer === 'exp' ? tl.contentIn : tl.toCompact + .2;
+    let outAt = layer === 'exp' ? tl.toCompact : tl.toPill;
+    if (n.killedAt != null) outAt = Math.min(outAt, n.killedAt - n.t0);
+    const enter = clamp(springP(lt - inAt - delay, .42, .9), 0, 1.2);
+    const exit = easeOut((lt - outAt - delay * .4) / .16);
+    const a = clamp(enter) * (1 - exit);
+    if (opt.reduce) return { a, blur: 0, s: 1, y: 0 };
+    return { a, blur: (1 - clamp(enter)) * 10 + exit * 6, s: .86 + .14 * enter - .05 * exit, y: (1 - clamp(enter)) * 3 };
+  }
+
+  function withFx(f, ox, oy, draw) {
+    if (f.a <= .003) return;
+    ctx.save();
+    ctx.globalAlpha *= f.a;
+    if (supportsFilter && f.blur > .3) ctx.filter = `blur(${f.blur.toFixed(2)}px)`;
+    ctx.translate(ox, oy + f.y);
+    ctx.scale(f.s, f.s);
+    ctx.translate(-ox, -oy);
+    draw();
+    ctx.restore();
+  }
+
+  // ---------- primitives ----------
+  function capsule(x, y, w, h) {
+    const r = Math.min(h / 2, 42);
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+  }
+
+  function glyph(name, cx, cy, size, color, extra) {
+    ctx.save();
+    ctx.translate(cx - size / 2, cy - size / 2);
+    ctx.scale(size / 24, size / 24);
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (name === 'transfer') {
+      const o = (1 - clamp(extra, 0, 1.3)) * 7;
+      ctx.save(); ctx.translate(o, 0); PATHS.transferA.forEach(p => ctx.stroke(p)); ctx.restore();
+      ctx.save(); ctx.translate(-o, 0); PATHS.transferB.forEach(p => ctx.stroke(p)); ctx.restore();
+    } else {
+      PATHS[name].forEach(p => ctx.stroke(p));
+    }
+    ctx.restore();
+  }
+
+  function checkStroke(cx, cy, scale, p, width, color) {
+    if (p <= 0) return;
+    const pts = [[-8.5, .5], [-2.5, 6.5], [9, -6]].map(([x, y]) => [cx + x * scale, cy + y * scale]);
+    const l1 = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]);
+    const l2 = Math.hypot(pts[2][0] - pts[1][0], pts[2][1] - pts[1][1]);
+    let d = (l1 + l2) * clamp(p);
+    ctx.beginPath(); ctx.moveTo(...pts[0]);
+    if (d <= l1) { const t = d / l1; ctx.lineTo(lerp(pts[0][0], pts[1][0], t), lerp(pts[0][1], pts[1][1], t)); }
+    else { ctx.lineTo(...pts[1]); const t = (d - l1) / l2; ctx.lineTo(lerp(pts[1][0], pts[2][0], t), lerp(pts[1][1], pts[2][1], t)); }
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+
+  function fit(text, maxW) {
+    if (ctx.measureText(text).width <= maxW) return text;
+    let s = text;
+    while (s.length > 1 && ctx.measureText(s + '…').width > maxW) s = s.slice(0, -1);
+    return s + '…';
+  }
+
+  function hexA(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+  }
+
+  // Slot-machine roll: every digit spins one revolution, staggered left → right.
+  function drawRoll(str, right, base, lh, lt, start) {
+    const chars = [...str];
+    const ws = chars.map(c => ctx.measureText(c).width);
+    let x = right - ws.reduce((a, b) => a + b, 0);
+    let di = 0;
+    chars.forEach((c, i) => {
+      const w = ws[i];
+      if (/\d/.test(c)) {
+        const p = springP(lt - start - di * .03, .62, .82);
+        const pos = +c - 10 * (1 - p);
+        drawColumn(pos, x, w, base, lh, 1);
+        di++;
+      } else {
+        ctx.save();
+        ctx.globalAlpha *= clamp(springP(lt - start, .4, 1));
+        ctx.fillText(c, x, base);
+        ctx.restore();
+      }
+      x += w;
+    });
+  }
+
+  function drawColumn(pos, x, w, base, lh, alpha) {
+    if (alpha <= 0) return;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x - 1, base - lh * .86, w + 2, lh * 1.08); ctx.clip();
+    const baseAlpha = ctx.globalAlpha;
+    const f = Math.floor(pos);
+    for (let k = f - 1; k <= f + 2; k++) {
+      const off = pos - k;
+      const a = 1 - Math.min(1, Math.abs(off));
+      if (a <= 0) continue;
+      ctx.globalAlpha = baseAlpha * alpha * a;
+      const label = String(((k % 10) + 10) % 10);
+      const lw = ctx.measureText(label).width;
+      ctx.fillText(label, x + (w - lw) / 2, base - off * lh * .9);
+    }
+    ctx.restore();
+  }
+
+  // Real odometer: higher digits only move while every lower digit sits on 9.
+  function drawOdometer(v, digits, right, base, lh) {
+    const cw = ctx.measureText('0').width;
+    for (let i = 0; i < digits; i++) {
+      const pw = 10 ** i;
+      let pos;
+      if (i === 0) pos = v;
+      else { const lower = v % pw; pos = Math.floor(v / pw) + Math.max(0, lower - (pw - 1)); }
+      const alpha = i === 0 ? 1 : clamp(v - pw + 1);
+      drawColumn(pos, right - (i + 1) * cw, cw, base, lh, alpha);
+    }
+    return digits * cw;
+  }
+
+  // ---------- layers ----------
+  function drawExpanded(n, R) {
+    const s = n.s, tl = n.tl, lt = now - n.t0;
+    const cx = R.x + R.w / 2, cy = R.y + R.h / 2;
+    const kx = R.w / EXP.w, ky = R.h / EXP.h;
+    const P = (x, y) => [cx + x * kx, cy + y * ky];   // layout in final-size coords, mapped to live shape
+
+    const ringP = easeInOut((lt - tl.ringStart) / (tl.ringEnd - tl.ringStart));
+    const bloom = springP(lt - tl.check, .38, .62);
+    const tick = easeOut((lt - tl.check - .06) / .26);
+    const ripple = clamp((lt - tl.check) / .55);
+
+    // badge
+    const [bx, by] = P(-EXP.w / 2 + 20 + 24, 0);
+    const r = 24;
+    withFx(fx(n, 'exp', 0), cx, cy, () => {
+      ctx.fillStyle = hexA(s.tint, .2);
+      ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.fill();
+      ctx.save();
+      ctx.globalAlpha *= 1 - clamp(bloom * 1.6);
+      const gs = 1 - .35 * clamp(bloom);
+      glyph(s.icon, bx, by, 22 * gs, s.tint, springP(lt - .12, .6, .55));
+      ctx.restore();
+
+      if (bloom > 0) {
+        ctx.fillStyle = s.accent;
+        ctx.beginPath(); ctx.arc(bx, by, r * Math.max(0, bloom), 0, Math.PI * 2); ctx.fill();
+      }
+      checkStroke(bx, by, r / 24, tick, 3, '#fff');
+
+      const rr = r + 4.5;
+      if (lt < tl.check) {
+        ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+        ctx.strokeStyle = 'rgba(255,255,255,.12)';
+        ctx.beginPath(); ctx.arc(bx, by, rr, 0, Math.PI * 2); ctx.stroke();
+        if (ringP > 0) {
+          ctx.strokeStyle = s.accent;
+          ctx.beginPath(); ctx.arc(bx, by, rr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ringP); ctx.stroke();
+        }
+      } else if (ripple < 1) {
+        ctx.strokeStyle = hexA(s.accent, .7 * (1 - ripple));
+        ctx.lineWidth = 2.5 * (1 - ripple) + .5;
+        ctx.beginPath(); ctx.arc(bx, by, rr + 9 * easeOut(ripple), 0, Math.PI * 2); ctx.stroke();
+      }
+    });
+
+    // right column: amount + caption
+    const rightX = P(EXP.w / 2 - 22, 0)[0];
+    const titleBase = P(0, -4)[1], subBase = P(0, 15)[1];
+    let amountW;
+    ctx.font = `700 21px ${ROUND}`;
+    if (s.kind === 'import') {
+      ctx.font = `600 13px ${SF}`; const uw = ctx.measureText(' 笔').width;
+      ctx.font = `700 21px ${ROUND}`; amountW = uw + ctx.measureText('0').width * String(s.count).length;
+    } else amountW = ctx.measureText(s.amount).width;
+
+    withFx(fx(n, 'exp', .09), cx, cy, () => {
+      ctx.fillStyle = s.amountColor;
+      if (s.kind === 'import') {
+        ctx.font = `600 13px ${SF}`;
+        const uw = ctx.measureText(' 笔').width;
+        ctx.fillStyle = 'rgba(235,235,245,.6)';
+        ctx.fillText(' 笔', rightX - uw, titleBase);
+        ctx.font = `700 21px ${ROUND}`; ctx.fillStyle = s.amountColor;
+        drawOdometer(s.count * ringP, String(s.count).length, rightX - uw, titleBase, 24);
+      } else {
+        drawRoll(s.amount, rightX, titleBase, 24, lt, tl.contentIn + .12);
+      }
+
+      ctx.font = `600 12px ${SF}`;
+      const cp = clamp(springP(lt - tl.check - .05, .4, .9));
+      if (s.captionPending && cp < 1) {
+        ctx.save(); ctx.globalAlpha *= 1 - cp; ctx.fillStyle = 'rgba(235,235,245,.45)';
+        const t = s.captionPending; ctx.fillText(t, rightX - ctx.measureText(t).width, subBase); ctx.restore();
+      }
+      if (cp > 0) {
+        ctx.save(); ctx.globalAlpha *= cp; ctx.fillStyle = s.accent === '#0A84FF' ? '#409CFF' : s.accent;
+        const t = s.caption; ctx.fillText(t, rightX - ctx.measureText(t).width, subBase + 4 * (1 - cp)); ctx.restore();
+      }
+    });
+
+    // left text block
+    const textX = P(-EXP.w / 2 + 80, 0)[0];
+    const maxW = EXP.w - 80 - 22 - amountW - 14;
+    withFx(fx(n, 'exp', .05), cx, cy, () => {
+      ctx.fillStyle = '#fff';
+      ctx.font = `600 16px ${SF}`;
+      ctx.fillText(fit(s.title, maxW), textX, titleBase);
+      ctx.font = `500 12.5px ${SF}`;
+      ctx.fillStyle = 'rgba(235,235,245,.6)';
+      if (s.subDone) {
+        const sw = clamp(springP(lt - tl.check - .08, .4, .95));
+        ctx.save(); ctx.globalAlpha *= 1 - sw; ctx.fillText(fit(s.sub, maxW), textX, subBase - 4 * sw); ctx.restore();
+        ctx.save(); ctx.globalAlpha *= sw; ctx.fillText(fit(s.subDone, maxW), textX, subBase + 4 * (1 - sw)); ctx.restore();
+      } else {
+        ctx.fillText(fit(s.sub, maxW), textX, subBase);
+      }
+    });
+
+    if (opt.debug) {
+      ctx.save(); ctx.globalAlpha = .7; ctx.strokeStyle = '#ff375f'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.strokeRect(textX, titleBase - 16, maxW * kx, 36);
+      ctx.strokeRect(rightX - amountW * kx, titleBase - 20, amountW * kx, 40);
+      ctx.restore();
+    }
+  }
+
+  function drawCompact(n, R) {
+    const s = n.s;
+    const cx = R.x + R.w / 2, cy = R.y + R.h / 2;
+    const kx = R.w / n.compactW;
+    const lx = cx + (-n.compactW / 2 + 22) * kx;
+    const rx = cx + (n.compactW / 2 - 16) * kx;
+    withFx(fx(n, 'cmp', 0), cx, cy, () => {
+      ctx.fillStyle = s.accent;
+      ctx.beginPath(); ctx.arc(lx, cy, 10, 0, Math.PI * 2); ctx.fill();
+      checkStroke(lx, cy, 10 / 24, 1, 2.2, '#fff');
+    });
+    withFx(fx(n, 'cmp', .04), cx, cy, () => {
+      ctx.font = `600 14px ${ROUND}`;
+      ctx.fillStyle = s.amountColor;
+      ctx.fillText(n.trailing, rx - ctx.measureText(n.trailing).width, cy + 5);
+    });
+  }
+
+  // ---------- background & chrome ----------
+  function renderBg() {
+    const c = document.createElement('canvas'); c.width = W * dpr; c.height = H * dpr;
+    const g = c.getContext('2d'); g.scale(dpr, dpr);
+    const dark = opt.dark;
+    const bgc = dark ? '#000' : '#F2F2F7', card = dark ? '#1C1C1E' : '#FFF', fg = dark ? '#FFF' : '#000', mut = dark ? 'rgba(235,235,245,.6)' : 'rgba(60,60,67,.6)';
+    g.fillStyle = bgc; g.fillRect(0, 0, W, H);
+    g.fillStyle = fg; g.font = `700 34px ${SF}`; g.fillText('账本', 20, 112);
+    g.fillStyle = mut; g.font = `500 13px ${SF}`; g.fillText('2026 年 10 月', 20, 84);
+    g.fillStyle = card; g.beginPath(); g.roundRect(16, 132, W - 32, 136, 22); g.fill();
+    g.fillStyle = mut; g.font = `500 13px ${SF}`; g.fillText('本月支出', 34, 166);
+    g.fillStyle = fg; g.font = `700 34px ${ROUND}`; g.fillText('¥8,214.36', 34, 210);
+    g.fillStyle = mut; g.font = `500 13px ${SF}`; g.fillText('预算剩余 ¥1,785.64 · 82%', 34, 244);
+    g.fillStyle = dark ? '#2C2C2E' : '#E5E5EA'; g.beginPath(); g.roundRect(34, 252, W - 68, 6, 3); g.fill();
+    g.fillStyle = '#0A84FF'; g.beginPath(); g.roundRect(34, 252, (W - 68) * .82, 6, 3); g.fill();
+    g.fillStyle = fg; g.font = `600 20px ${SF}`; g.fillText('最近', 20, 312);
+    const rows = [['#FF9F0A', '午餐 · 食堂', '餐饮', '-¥26.00'], ['#5E5CE6', '地铁', '交通', '-¥4.00'], ['#30D158', '退款', '收入', '+¥59.00'], ['#FF375F', '电影票', '娱乐', '-¥78.00'], ['#64D2FF', '房租', '居住', '-¥4,200.00'], ['#FF9F0A', '超市', '日用', '-¥132.40']];
+    g.fillStyle = card; g.beginPath(); g.roundRect(16, 326, W - 32, rows.length * 62, 22); g.fill();
+    rows.forEach(([col, t, sub, amt], i) => {
+      const y = 326 + i * 62;
+      g.fillStyle = col; g.globalAlpha = .18; g.beginPath(); g.arc(50, y + 31, 18, 0, 7); g.fill(); g.globalAlpha = 1;
+      g.fillStyle = col; g.beginPath(); g.arc(50, y + 31, 5, 0, 7); g.fill();
+      g.fillStyle = fg; g.font = `500 15px ${SF}`; g.fillText(t, 80, y + 28);
+      g.fillStyle = mut; g.font = `400 12px ${SF}`; g.fillText(sub, 80, y + 46);
+      g.fillStyle = amt.startsWith('+') ? '#30D158' : fg; g.font = `600 15px ${ROUND}`;
+      g.fillText(amt, W - 34 - g.measureText(amt).width, y + 36);
+      if (i < rows.length - 1) { g.fillStyle = dark ? '#38383A' : '#E5E5EA'; g.fillRect(80, y + 61.5, W - 96, .5); }
+    });
+    g.fillStyle = dark ? 'rgba(255,255,255,.3)' : 'rgba(0,0,0,.25)'; g.beginPath(); g.roundRect(W / 2 - 67, H - 13, 134, 5, 3); g.fill();
+    return c;
+  }
+  let bg = renderBg();
+
+  function drawStatusBar(alpha) {
+    if (alpha <= 0) return;
+    ctx.save(); ctx.globalAlpha = alpha;
+    const fg = opt.dark ? '#fff' : '#000';
+    ctx.fillStyle = fg; ctx.font = `600 17px ${SF}`; ctx.fillText('9:41', 52, 34);
+    const x = W - 98;
+    [4, 6.5, 9, 11.5].forEach((h, i) => { ctx.beginPath(); ctx.roundRect(x + i * 5, 33 - h, 3.2, h, 1); ctx.fill(); });
+    ctx.save(); ctx.translate(x + 33, 32); ctx.strokeStyle = fg; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    [8, 4.8].forEach(rad => { ctx.beginPath(); ctx.arc(0, 0, rad, -Math.PI * .78, -Math.PI * .22); ctx.stroke(); });
+    ctx.beginPath(); ctx.arc(0, 0, 1.5, 0, 7); ctx.fill(); ctx.restore();
+    ctx.globalAlpha = alpha * .4; ctx.strokeStyle = fg; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(x + 50.5, 22.5, 25, 12, 3.5); ctx.stroke();
+    ctx.globalAlpha = alpha; ctx.beginPath(); ctx.roundRect(x + 52.5, 24.5, 18, 8, 2); ctx.fill();
+    ctx.restore();
+  }
+
+  // ---------- frame ----------
+  let last = performance.now();
+  let loopAt = 0;
+  const hapticEl = $('haptic');
+
+  function frame(t) {
+    let dt = Math.min(.05, (t - last) / 1000); last = t;
+    if (opt.pause) dt = 0;
+    if (opt.slow) dt *= .25;
+
+    // fixed sub-steps for stable springs
+    const steps = Math.ceil(dt / (1 / 240));
+    for (let i = 0; i < steps; i++) { now += dt / steps; driveShape(); shape.w.step(dt / steps); shape.h.step(dt / steps); }
+
+    notices = notices.filter(n => {
+      const lt = now - n.t0;
+      if (n.killedAt != null) return now - n.killedAt < .4;
+      return lt < n.tl.end;
+    });
+    if (current && phaseOf(current) === 'done') current = null;
+
+    if (current && !current.haptic && now - current.t0 >= current.tl.check) {
+      current.haptic = true;
+      hapticEl.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => hapticEl.classList.remove('on')));
+      if (navigator.vibrate) navigator.vibrate(12);
+    }
+
+    if (opt.loop && !current && notices.length === 0) {
+      loopAt += dt;
+      if (loopAt > .8) { loopAt = 0; const keys = ['expense', 'income', 'transfer', 'import']; trigger(keys[(loopIdx++) % keys.length]); }
+    }
+
+    render();
+    updateTimeline();
+    requestAnimationFrame(frame);
+  }
+  let loopIdx = 0;
+
+  function render() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.drawImage(bg, 0, 0, W, H);
+
+    const w = shape.w.x, h = shape.h.x;
+    const R = { x: (W - w) / 2, y: TOP, w, h };
+    const grow = clamp((w - PILL.w) / 60);
+    drawStatusBar(1 - clamp((w - PILL.w - 16) / 50));
+
+    // hardware island (always there underneath)
+    ctx.fillStyle = '#000'; capsule((W - PILL.w) / 2, TOP, PILL.w, PILL.h); ctx.fill();
+
+    // live shape
+    const expand = clamp((h - PILL.h) / (EXP.h - PILL.h));
+    ctx.save();
+    if (!opt.dark) { ctx.shadowColor = `rgba(0,0,0,${.28 * expand})`; ctx.shadowBlur = 30 * expand; ctx.shadowOffsetY = 10 * expand; }
+    ctx.fillStyle = '#000'; capsule(R.x, R.y, R.w, R.h); ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    capsule(R.x, R.y, R.w, R.h); ctx.clip();
+
+    // ambient tint behind the badge
+    if (current && grow > 0) {
+      const f = fx(current, 'exp', 0).a;
+      if (f > 0) {
+        const gx = R.x + 44 * (R.w / EXP.w), gy = R.y + R.h / 2;
+        const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, 150);
+        g.addColorStop(0, hexA(current.s.tint, .2 * f)); g.addColorStop(1, hexA(current.s.tint, 0));
+        ctx.fillStyle = g; ctx.fillRect(R.x, R.y, R.w, R.h);
+      }
+    }
+    for (const n of notices) { drawExpanded(n, R); drawCompact(n, R); }
+    ctx.restore();
+
+    if (opt.debug) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,214,10,.9)'; ctx.setLineDash([4, 3]); ctx.lineWidth = 1;
+      capsule((W - PILL.w) / 2, TOP, PILL.w, PILL.h); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#16161c'; ctx.beginPath(); ctx.arc(W / 2 + PILL.w / 2 - 18.5, TOP + PILL.h / 2, 6, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#ff375f'; ctx.beginPath(); ctx.arc(W / 2 + PILL.w / 2 - 18.5, TOP + PILL.h / 2, 7.5, 0, 7); ctx.stroke();
+      ctx.fillStyle = '#ffd60a'; ctx.font = '11px ui-monospace, monospace';
+      ctx.fillText(`${w.toFixed(1)} × ${h.toFixed(1)}`, 12, H - 30);
+      ctx.restore();
+    }
+  }
+
+  // ---------- timeline ----------
+  const tlBar = $('tlBar'), tlLeft = $('tlLeft'), tlRight = $('tlRight');
+  let tlFor = null, tlHead = null;
+  function updateTimeline() {
+    const n = current;
+    if (n !== tlFor) {
+      tlFor = n; tlBar.innerHTML = '';
+      if (n) {
+        const tl = n.tl, pct = v => (v / tl.end * 100) + '%';
+        [[0, tl.toCompact, '展开确认', 'rgba(10,132,255,.25)'], [tl.toCompact, tl.toPill, '紧凑', 'rgba(48,209,88,.2)'], [tl.toPill, tl.end, '收回', 'rgba(255,255,255,.08)']]
+          .forEach(([a, b, name, col]) => {
+            const d = document.createElement('div'); d.className = 'tl-seg';
+            d.style.left = pct(a); d.style.width = `calc(${pct(b - a)} - 1px)`; d.style.background = col; d.textContent = name;
+            tlBar.appendChild(d);
+          });
+        [tl.ringStart, tl.check].forEach(v => { const m = document.createElement('div'); m.className = 'tl-mark'; m.style.left = pct(v); tlBar.appendChild(m); });
+        tlHead = document.createElement('div'); tlHead.className = 'tl-head'; tlBar.appendChild(tlHead);
+        tlLeft.textContent = `${n.s.title} · ${n.s.kind}`;
+      } else { tlLeft.textContent = '—'; tlRight.textContent = ''; }
+    }
+    if (n && tlHead) {
+      const lt = now - n.t0;
+      tlHead.style.left = (clamp(lt / n.tl.end) * 100) + '%';
+      tlRight.textContent = `${lt.toFixed(2)}s / ${n.tl.end.toFixed(2)}s`;
+    }
+  }
+
+  // ---------- input ----------
+  document.querySelectorAll('button[data-s]').forEach(b => b.addEventListener('click', () => b.dataset.s === 'burst' ? burst() : trigger(b.dataset.s)));
+  const keys = { '1': 'expense', '2': 'income', '3': 'transfer', '4': 'import' };
+  addEventListener('keydown', e => {
+    if (keys[e.key]) trigger(keys[e.key]);
+    else if (e.key === '5') burst();
+    else if (e.key === 's' || e.key === 'S') { $('slow').click(); }
+    else if (e.key === ' ') { e.preventDefault(); $('pause').click(); }
+  });
+
+  function fitStage() {
+    const s = Math.min(1, (innerHeight - 56) / 940);
+    $('wrap').style.transform = `scale(${s})`;
+    $('wrap').style.marginBottom = `${(s - 1) * 940}px`;
+  }
+  addEventListener('resize', fitStage); fitStage();
+
+  // Deterministic stepping for frame-by-frame review: islandDebug.advance(0.5)
+  window.islandDebug = {
+    trigger,
+    advance(sec) {
+      const step = 1 / 240;
+      for (let t = 0; t < sec; t += step) { now += step; driveShape(); shape.w.step(step); shape.h.step(step); }
+      notices = notices.filter(n => n.killedAt != null ? now - n.killedAt < .4 : now - n.t0 < n.tl.end);
+      render();
+    },
+  };
+
+  if (location.hash.includes('manual')) { opt.pause = true; $('pause').checked = true; }
+  else setTimeout(() => trigger('expense'), 500);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
