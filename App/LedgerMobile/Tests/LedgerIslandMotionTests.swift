@@ -78,15 +78,34 @@ struct LedgerIslandMotionTests {
         #expect(stage.visibleEntries(at: entry.timeline.end + 1).isEmpty)
     }
 
-    @Test("Hardware islands reserve the camera cutout band")
-    func cutoutReservation() {
-        let plain = LedgerIslandStage(containerWidth: 393, reduceMotion: false)
-        #expect(plain.contentCenterY == plain.expandedHeight / 2)
-        let island = LedgerIslandStage(containerWidth: 393, reduceMotion: false, reservesCutout: true)
-        #expect(island.expandedHeight > plain.expandedHeight)
-        // A 57pt progress ring around the row centre must clear the 37pt cutout.
-        #expect(island.contentCenterY - 28.5 > Double(island.pill.height))
-        #expect(island.contentCenterY + 28.5 < island.expandedHeight)
+    @Test("Expanded layout wraps the camera like a Live Activity")
+    func expandedLayoutWrapsCamera() {
+        typealias L = LedgerIslandStage.Layout
+        let stage = LedgerIslandStage(containerWidth: 402, reduceMotion: false, pill: CGSize(width: 126.8, height: 38.2))
+        let cameraLeft = (stage.expandedWidth - Double(stage.pill.width)) / 2
+        // Leading badge (with its 53pt ring) clears the camera and the edges.
+        #expect(L.badgeCenter.x + 26.5 < cameraLeft)
+        #expect(L.badgeCenter.y - 26.5 > 0)
+        #expect(L.badgeCenter.y + 26.5 < stage.expandedHeight)
+        // Text rows sit below the camera.
+        #expect(L.titleY - 10 > Double(stage.pill.height))
+        #expect(L.subtitleY + 8 < stage.expandedHeight)
+        #expect(stage.flankWidth > 80)
+        // Expanded corners are rounded rather than a full capsule.
+        #expect(LedgerIslandStage.cornerRadius(height: stage.expandedHeight) < stage.expandedHeight / 2)
+        #expect(LedgerIslandStage.cornerRadius(height: 37) == 18.5)
+    }
+
+    @Test("Compact island stays snug and symmetric around the camera")
+    func compactIsSnug() {
+        let stage = LedgerIslandStage(containerWidth: 402, reduceMotion: false)
+        let narrow = stage.compactWidth(trailingTextWidth: 30)
+        let wide = stage.compactWidth(trailingTextWidth: 60)
+        #expect(narrow < wide)
+        #expect(wide - Double(stage.pill.width) < 2 * 90)
+        #expect(LedgerIslandAmount.compact("-¥38.00") == "-¥38")
+        #expect(LedgerIslandAmount.compact("+¥12,800.00") == "+¥1.28万")
+        #expect(LedgerIslandAmount.compact("¥3.50") == "¥3.50")
     }
 
     @Test("Hardware cutout is located per panel and covered with a bleed")
@@ -108,7 +127,7 @@ struct LedgerIslandMotionTests {
         #expect(cover.top + Double(cover.pill.height) > pro.top + Double(pro.size.height))
         #expect(Double(cover.pill.width) > Double(pro.size.width))
 
-        var stage = LedgerIslandStage(containerWidth: 402, reduceMotion: false, pill: cover.pill, reservesCutout: true)
+        var stage = LedgerIslandStage(containerWidth: 402, reduceMotion: false, pill: cover.pill)
         stage.present(notice(), trailingTextWidth: 60, at: 0)
         let entry = try! #require(stage.current)
         let retracted = stage.size(at: entry.timeline.end + 1)
@@ -116,10 +135,10 @@ struct LedgerIslandMotionTests {
         #expect(abs(retracted.height - cover.pill.height) < 0.5)
     }
 
-    @Test("Expanded width respects narrow screens")
+    @Test("Expanded width follows the screen minus 22pt")
     func expandedWidthFitsContainer() {
-        #expect(LedgerIslandStage(containerWidth: 320, reduceMotion: false).expandedWidth == 296)
-        #expect(LedgerIslandStage(containerWidth: 440, reduceMotion: false).expandedWidth == LedgerIslandStage.maxExpandedWidth)
+        #expect(LedgerIslandStage(containerWidth: 393, reduceMotion: false).expandedWidth == 371)
+        #expect(LedgerIslandStage(containerWidth: 430, reduceMotion: false).expandedWidth == 408)
     }
 
     @Test("A new notice interrupts without jumping the shape")

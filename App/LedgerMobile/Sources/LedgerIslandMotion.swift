@@ -205,29 +205,51 @@ struct LedgerIslandPanel: Hashable, Sendable {
 /// Shape and notice schedule for the overlay. The shape grows out of the hardware
 /// island, settles into an expanded confirmation, shrinks to a compact pill, then
 /// retracts. Width leads height so the expansion reads as a sideways fling.
+///
+/// Proportions follow Apple's Live Activity specs (HIG): the expanded island
+/// spans the screen minus 22pt, leading and trailing content flank the camera
+/// in the top band, the rest sits below it, and the compact island stays snug
+/// around the camera.
 struct LedgerIslandStage: Equatable, Sendable {
     /// Resting shape on screens without a hardware island.
     static let defaultPill = CGSize(width: 126, height: 37)
-    static let maxExpandedWidth: Double = 352
+    static let expandedHeight: Double = 96
+    /// Expanded corners; smaller shapes use half their height, i.e. a capsule.
+    static let cornerRadius: Double = 38
+
+    /// Expanded layout in final-size coordinates (origin at the shape's top-left).
+    /// The badge shares its centre with the top-left corner arc, so its margin
+    /// is concentric; the amount flanks the camera and the text sits below it.
+    enum Layout {
+        static let inset: Double = 20
+        static let badge: Double = 44
+        static var badgeCenter: CGPoint { CGPoint(x: cornerRadius, y: cornerRadius) }
+        static let amountY: Double = 27
+        static let titleY: Double = 57
+        static let subtitleY: Double = 76
+        static var textLeft: Double { cornerRadius + badge / 2 + 12 }
+        /// Space kept clear between flanking content and the camera.
+        static let cameraGap: Double = 8
+    }
+
+    /// Compact layout: the leading glyph sits concentric with the end cap.
+    enum CompactLayout {
+        static let glyph: Double = 22
+        static let trailingInset: Double = 12
+    }
 
     /// Resting shape; on Dynamic Island hardware it covers the camera cutout.
     let pill: CGSize
     let expandedWidth: Double
-    /// On Dynamic Island hardware the camera cutout covers the top band of the
-    /// shape, so the content row moves below it and the island grows taller.
-    let expandedHeight: Double
-    let contentCenterY: Double
+    var expandedHeight: Double { Self.expandedHeight }
     let reduceMotion: Bool
     private(set) var entries: [LedgerIslandStageEntry] = []
     private(set) var width: LedgerIslandSpringTrack
     private(set) var height: LedgerIslandSpringTrack
 
-    init(containerWidth: Double, reduceMotion: Bool, pill: CGSize = Self.defaultPill, reservesCutout: Bool = false) {
+    init(containerWidth: Double, reduceMotion: Bool, pill: CGSize = Self.defaultPill) {
         self.pill = pill
-        expandedWidth = min(Self.maxExpandedWidth, max(Double(pill.width), containerWidth - 24))
-        let cutout = reservesCutout ? Double(pill.height) : 0
-        expandedHeight = reservesCutout ? cutout + 75 : 84
-        contentCenterY = cutout + (expandedHeight - cutout) / 2
+        expandedWidth = max(Double(pill.width), containerWidth - 22)
         self.reduceMotion = reduceMotion
         width = LedgerIslandSpringTrack(value: Double(pill.width))
         height = LedgerIslandSpringTrack(value: Double(pill.height))
@@ -238,8 +260,19 @@ struct LedgerIslandStage: Equatable, Sendable {
     /// Absolute time after which nothing remains on screen.
     var endTime: Double { current.map { $0.start + $0.timeline.end } ?? 0 }
 
+    static func cornerRadius(height: Double) -> Double { min(height / 2, cornerRadius) }
+
+    /// Width available to the amount beside the camera in the top band.
+    var flankWidth: Double {
+        (expandedWidth - Double(pill.width)) / 2 - Layout.inset - Layout.cameraGap
+    }
+
+    /// Both sides take the wider of the two so the camera stays centred and
+    /// the leading and trailing elements read as one piece.
     func compactWidth(trailingTextWidth: Double) -> Double {
-        let side = max(48, trailingTextWidth + 30)
+        let leading = (Double(pill.height) - CompactLayout.glyph) / 2 + CompactLayout.glyph
+        let trailing = CompactLayout.trailingInset + trailingTextWidth
+        let side = max(leading, trailing) + Layout.cameraGap
         return min(expandedWidth, Double(pill.width) + 2 * side)
     }
 
@@ -285,5 +318,30 @@ struct LedgerIslandStage: Equatable, Sendable {
         let critical = reduceMotion ? 1.0 : nil
         width.retarget(to: targetWidth, at: time, response: min(widthSpring.0, reduceMotion ? 0.32 : .infinity), damping: critical ?? widthSpring.1)
         height.retarget(to: targetHeight, at: time, response: min(heightSpring.0, reduceMotion ? 0.32 : .infinity), damping: critical ?? heightSpring.1)
+    }
+}
+
+enum LedgerIslandAmount {
+    /// The compact island stays snug around the camera, so large amounts use
+    /// a shorter unit ("¥12,800.00" → "¥1.28万") and whole amounts drop ".00".
+    static func compact(_ text: String) -> String {
+        guard let first = text.firstIndex(where: \.isNumber),
+              let last = text.lastIndex(where: \.isNumber) else { return text }
+        let prefix = String(text[..<first])
+        let suffix = String(text[text.index(after: last)...])
+        let digits = text[first...last].filter { $0.isNumber || $0 == "." }
+        guard let value = Double(digits) else { return text }
+        let body: String
+        if value >= 10_000 {
+            var short = String(format: "%.2f", value / 10_000)
+            while short.hasSuffix("0") { short.removeLast() }
+            if short.hasSuffix(".") { short.removeLast() }
+            body = short + "万"
+        } else if value == value.rounded() {
+            body = text[first...last].replacingOccurrences(of: ".00", with: "")
+        } else {
+            body = String(text[first...last])
+        }
+        return prefix + body + suffix
     }
 }

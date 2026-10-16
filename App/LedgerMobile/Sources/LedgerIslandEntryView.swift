@@ -4,7 +4,9 @@ import UIKit
 /// 灵动岛入账反馈：从硬件岛长出 → 展开确认 → 紧凑态 → 收回。
 /// 每一帧都是时间的纯函数（见 `LedgerIslandStage`），由 `TimelineView` 驱动，
 /// 不依赖 `withAnimation` 链，因此新通知可以在任意时刻打断并保留形状速度。
-/// 原型与参数说明：docs/design/dynamic-island-prototype.html
+/// 布局遵循 Apple HIG（Live Activities）：展开态宽为屏宽 − 22pt、圆角与内容同心，
+/// 前后内容贴着摄像头两侧，其余内容放在摄像头下方；紧凑态紧贴摄像头；
+/// 背景保持纯黑，深色模式用着色描边（keyline）而非阴影。
 struct LedgerIslandStyle {
     let tint: Color
     let accent: Color
@@ -24,18 +26,18 @@ struct LedgerIslandStyle {
             tint = Color(uiColor: UIColor(hex: 0xFF9F0A)); accent = blue
             amountColor = .white; caption = "已记账"
             pendingCaption = nil; pendingSubtitle = nil; count = nil
-            trailingText = notice.amountText
+            trailingText = LedgerIslandAmount.compact(notice.amountText)
         case .income:
             tint = green; accent = green
             amountColor = green; caption = "已入账"
             pendingCaption = nil; pendingSubtitle = nil; count = nil
-            trailingText = notice.amountText
+            trailingText = LedgerIslandAmount.compact(notice.amountText)
         case .transfer:
             let cyan = Color(uiColor: UIColor(hex: 0x64D2FF))
             tint = cyan; accent = blue
             amountColor = cyan; caption = "已转账"
             pendingCaption = nil; pendingSubtitle = nil; count = nil
-            trailingText = notice.amountText
+            trailingText = LedgerIslandAmount.compact(notice.amountText)
         case .batchImport(let total):
             tint = Color(uiColor: UIColor(hex: 0xBF5AF2)); accent = green
             amountColor = .white; caption = "已导入"
@@ -49,7 +51,7 @@ struct LedgerIslandStyle {
 enum LedgerIslandFonts {
     static let title = Font.system(size: 16, weight: .semibold)
     static let subtitle = Font.system(size: 12.5, weight: .medium)
-    static let amount = Font.system(size: 21, weight: .bold, design: .rounded).monospacedDigit()
+    static let amount = Font.system(size: 20, weight: .bold, design: .rounded).monospacedDigit()
     static let unit = Font.system(size: 13, weight: .semibold)
     static let caption = Font.system(size: 12, weight: .semibold)
     static let compact = Font.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit()
@@ -64,9 +66,9 @@ enum LedgerIslandFonts {
 
     static func amountWidth(_ notice: LedgerIslandNotice, style: LedgerIslandStyle) -> Double {
         if let count = style.count {
-            return width(String(count), size: 21, weight: .bold, rounded: true) + width(" 笔", size: 13, weight: .semibold)
+            return width(String(count), size: 20, weight: .bold, rounded: true) + width(" 笔", size: 13, weight: .semibold)
         }
-        return width(notice.amountText, size: 21, weight: .bold, rounded: true)
+        return width(notice.amountText, size: 20, weight: .bold, rounded: true)
     }
 }
 
@@ -97,11 +99,11 @@ final class LedgerIslandPresenter: ObservableObject {
 
     var isActive: Bool { stage?.current != nil }
 
-    func present(_ notice: LedgerIslandNotice, containerWidth: Double, reduceMotion: Bool, pill: CGSize, reservesCutout: Bool) {
+    func present(_ notice: LedgerIslandNotice, containerWidth: Double, reduceMotion: Bool, pill: CGSize) {
         let now = Date.timeIntervalSinceReferenceDate
         // Only a mid-flight stage is kept, so its springs carry their velocity.
         var next = stage.flatMap { $0.visibleEntries(at: now).isEmpty ? nil : $0 }
-            ?? LedgerIslandStage(containerWidth: containerWidth, reduceMotion: reduceMotion, pill: pill, reservesCutout: reservesCutout)
+            ?? LedgerIslandStage(containerWidth: containerWidth, reduceMotion: reduceMotion, pill: pill)
         let entryMetrics = LedgerIslandEntryMetrics(notice)
         next.present(notice, trailingTextWidth: entryMetrics.trailingWidth, at: now)
         let live = Set(next.entries.map(\.notice.id))
@@ -134,7 +136,13 @@ final class LedgerIslandPresenter: ObservableObject {
 
     private func setStatusBarHidden(_ hidden: Bool) {
         guard hidesStatusBar != hidden else { return }
-        withAnimation(.easeOut(duration: 0.2)) { hidesStatusBar = hidden }
+        // The system draws the status bar above every app window, so it must be
+        // gone before the island grows over it; only its return is animated.
+        if hidden {
+            hidesStatusBar = true
+        } else {
+            withAnimation(.easeOut(duration: 0.2)) { hidesStatusBar = false }
+        }
     }
 
     private func finish() {
@@ -165,11 +173,16 @@ struct LedgerIslandStageView: View {
     private func island(_ stage: LedgerIslandStage, now: Double) -> some View {
         let size = stage.size(at: now)
         let pill = stage.pill
-        let expansion = LedgerIslandEasing.clamp(Double((size.height - pill.height) / (stage.expandedHeight - pill.height)))
+        let growth = LedgerIslandEasing.clamp(Double((size.width - pill.width) / 30))
         // Without a hardware island there is nothing to grow out of, so fade in.
-        let appear = hasHardwareIsland ? 1 : LedgerIslandEasing.clamp(Double((size.width - pill.width) / 30))
+        let appear = hasHardwareIsland ? 1 : growth
         let entries = stage.visibleEntries(at: now)
-        let shadow = colorScheme == .dark ? 0 : expansion
+        let shape = RoundedRectangle(cornerRadius: LedgerIslandStage.cornerRadius(height: size.height), style: .continuous)
+        // Dark mode outlines the island with a tinted key line; it never casts a
+        // shadow, and it stays pure black so the camera disappears into it.
+        let keyline = colorScheme == .dark
+            ? stage.current.flatMap { presenter.metrics[$0.notice.id]?.style.tint }
+            : nil
 
         return ZStack {
             ForEach(entries, id: \.notice.id) { entry in
@@ -180,14 +193,12 @@ struct LedgerIslandStageView: View {
             }
         }
         .frame(width: size.width, height: size.height)
-        .clipShape(Capsule())
-        // The shape stays pure black so the camera cutout disappears into it.
-        // Only the plain shape casts the shadow, so the content stack is not
-        // re-rasterised for it on every frame.
-        .background {
-            Capsule()
-                .fill(Color.black)
-                .shadow(color: .black.opacity(0.28 * shadow), radius: 15 * shadow, y: 10 * shadow)
+        .clipShape(shape)
+        .background(shape.fill(Color.black))
+        .overlay {
+            if let keyline {
+                shape.strokeBorder(keyline.opacity(0.45 * growth), lineWidth: 1)
+            }
         }
         .opacity(appear)
         .accessibilityElement(children: .ignore)
@@ -225,66 +236,73 @@ private struct LedgerIslandExpandedContent: View {
     let size: CGSize
     let now: Double
 
+    private typealias L = LedgerIslandStage.Layout
+
+    /// Layout lives in final-size coordinates and is mapped onto the live
+    /// shape (top-anchored, centred), so text never reflows while it grows.
+    private func map(_ x: Double, _ y: Double) -> CGPoint {
+        let fullWidth = stage.expandedWidth
+        return CGPoint(
+            x: size.width / 2 + (x - fullWidth / 2) * size.width / fullWidth,
+            y: y * size.height / stage.expandedHeight
+        )
+    }
+
     var body: some View {
         let notice = entry.notice
         let style = metrics.style
         let lt = entry.localTime(now)
         let timeline = entry.timeline
-        let fullWidth = stage.expandedWidth
-        let fullHeight = stage.expandedHeight
-        let kx = size.width / fullWidth
-        let ky = size.height / fullHeight
-        let cx = size.width / 2
-        let rowY = size.height / 2 + (stage.contentCenterY - fullHeight / 2) * ky
-
-        // Layout lives in final-size coordinates and is mapped onto the live
-        // shape, so text never reflows while the island grows.
-        let amountWidth = metrics.amountWidth
-        // Per-glyph rolling columns lose kerning, so leave a little slack.
-        let columnWidth = max(amountWidth + 6, 56)
-        let rightEdge = cx + (fullWidth / 2 - 22) * kx
-        let textLeft = cx + (-fullWidth / 2 + 80) * kx
-        let textWidth = max(40, fullWidth - 80 - 22 - columnWidth - 10)
-        let badgeCenter = CGPoint(x: cx + (-fullWidth / 2 + 44) * kx, y: rowY)
+        let rightEdge = stage.expandedWidth - L.inset
+        // Per-glyph rolling columns lose kerning, so leave a little slack, and
+        // shrink an amount that would reach under the camera.
+        let amountWidth = metrics.amountWidth + 4
+        let amountScale = min(1, stage.flankWidth / amountWidth)
+        let captionWidth = 48.0
+        let textWidth = max(40, rightEdge - L.textLeft)
+        let subtitleWidth = max(40, textWidth - captionWidth - 8)
 
         let reduce = stage.reduceMotion
         let ringProgress = LedgerIslandEasing.easeInOut((lt - timeline.ringStart) / (timeline.ringEnd - timeline.ringStart))
 
         ZStack {
             LedgerIslandBadge(notice: notice, style: style, lt: lt, timeline: timeline, ringProgress: ringProgress)
-                .islandPlaced(entry.effect(.expanded, delay: 0, at: now, reduceMotion: reduce), at: badgeCenter, in: size)
+                .islandPlaced(entry.effect(.expanded, delay: 0, at: now, reduceMotion: reduce), at: map(L.badgeCenter.x, L.badgeCenter.y), in: size)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(notice.title)
-                    .font(LedgerIslandFonts.title)
-                    .foregroundStyle(.white)
-                LedgerIslandSubtitle(notice: notice, style: style, lt: lt, timeline: timeline)
-            }
-            .lineLimit(1)
-            .frame(width: textWidth, alignment: .leading)
-            .islandPlaced(entry.effect(.expanded, delay: 0.05, at: now, reduceMotion: reduce), at: CGPoint(x: textLeft + textWidth / 2, y: rowY + 1), in: size)
-
-            VStack(alignment: .trailing, spacing: 3) {
-                Group {
-                    if let count = style.count {
-                        HStack(alignment: .firstTextBaseline, spacing: 0) {
-                            LedgerIslandOdometer(value: Double(count) * ringProgress, digits: String(count).count)
-                            Text(" 笔")
-                                .font(LedgerIslandFonts.unit)
-                                .foregroundStyle(Color.white.opacity(0.6))
-                        }
-                    } else {
-                        LedgerIslandRollingText(text: notice.amountText, lt: lt, start: timeline.contentIn + 0.12)
+            Group {
+                if let count = style.count {
+                    HStack(alignment: .firstTextBaseline, spacing: 0) {
+                        LedgerIslandOdometer(value: Double(count) * ringProgress, digits: String(count).count)
+                        Text(" 笔")
+                            .font(LedgerIslandFonts.unit)
+                            .foregroundStyle(Color.white.opacity(0.6))
                     }
+                } else {
+                    LedgerIslandRollingText(text: notice.amountText, lt: lt, start: timeline.contentIn + 0.12)
                 }
-                .font(LedgerIslandFonts.amount)
-                .foregroundStyle(style.amountColor)
-                .fixedSize()
-
-                LedgerIslandCaption(style: style, lt: lt, timeline: timeline)
             }
-            .frame(width: columnWidth, alignment: .trailing)
-            .islandPlaced(entry.effect(.expanded, delay: 0.09, at: now, reduceMotion: reduce), at: CGPoint(x: rightEdge - columnWidth / 2, y: rowY), in: size)
+            .font(LedgerIslandFonts.amount)
+            .foregroundStyle(style.amountColor)
+            .fixedSize()
+            .frame(width: amountWidth, alignment: .trailing)
+            .scaleEffect(amountScale, anchor: .trailing)
+            .islandPlaced(entry.effect(.expanded, delay: 0.04, at: now, reduceMotion: reduce), at: map(rightEdge - amountWidth / 2, L.amountY), in: size)
+
+            Text(notice.title)
+                .font(LedgerIslandFonts.title)
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .frame(width: textWidth, alignment: .leading)
+                .islandPlaced(entry.effect(.expanded, delay: 0.07, at: now, reduceMotion: reduce), at: map(L.textLeft + textWidth / 2, L.titleY), in: size)
+
+            LedgerIslandSubtitle(notice: notice, style: style, lt: lt, timeline: timeline)
+                .lineLimit(1)
+                .frame(width: subtitleWidth, alignment: .leading)
+                .islandPlaced(entry.effect(.expanded, delay: 0.1, at: now, reduceMotion: reduce), at: map(L.textLeft + subtitleWidth / 2, L.subtitleY), in: size)
+
+            LedgerIslandCaption(style: style, lt: lt, timeline: timeline)
+                .frame(width: captionWidth, alignment: .trailing)
+                .islandPlaced(entry.effect(.expanded, delay: 0.1, at: now, reduceMotion: reduce), at: map(rightEdge - captionWidth / 2, L.subtitleY), in: size)
         }
         .frame(width: size.width, height: size.height)
     }
@@ -297,6 +315,8 @@ private struct LedgerIslandCompactContent: View {
     let size: CGSize
     let now: Double
 
+    private typealias C = LedgerIslandStage.CompactLayout
+
     var body: some View {
         let style = metrics.style
         let compactWidth = entry.compactWidth
@@ -304,6 +324,8 @@ private struct LedgerIslandCompactContent: View {
         let cx = size.width / 2, cy = size.height / 2
         let trailingWidth = metrics.trailingWidth + 4
         let reduce = stage.reduceMotion
+        // The glyph sits on the end cap's centre, so its margin is concentric.
+        let capCenter = Double(stage.pill.height) / 2
 
         ZStack {
             ZStack {
@@ -311,8 +333,8 @@ private struct LedgerIslandCompactContent: View {
                 LedgerIslandCheckmark()
                     .stroke(Color.white, style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
             }
-            .frame(width: 20, height: 20)
-            .islandPlaced(entry.effect(.compact, delay: 0, at: now, reduceMotion: reduce), at: CGPoint(x: cx + (-compactWidth / 2 + 22) * kx, y: cy), in: size)
+            .frame(width: C.glyph, height: C.glyph)
+            .islandPlaced(entry.effect(.compact, delay: 0, at: now, reduceMotion: reduce), at: CGPoint(x: cx + (-compactWidth / 2 + capCenter) * kx, y: cy), in: size)
 
             Text(style.trailingText)
                 .font(LedgerIslandFonts.compact)
@@ -320,7 +342,7 @@ private struct LedgerIslandCompactContent: View {
                 .lineLimit(1)
                 .fixedSize()
                 .frame(width: trailingWidth, alignment: .trailing)
-                .islandPlaced(entry.effect(.compact, delay: 0.04, at: now, reduceMotion: reduce), at: CGPoint(x: cx + (compactWidth / 2 - 16) * kx - trailingWidth / 2, y: cy), in: size)
+                .islandPlaced(entry.effect(.compact, delay: 0.04, at: now, reduceMotion: reduce), at: CGPoint(x: cx + (compactWidth / 2 - C.trailingInset + 2) * kx - trailingWidth / 2, y: cy), in: size)
         }
         .frame(width: size.width, height: size.height)
     }
@@ -343,7 +365,7 @@ private struct LedgerIslandBadge: View {
         ZStack {
             Circle()
                 .fill(style.tint.opacity(0.2))
-                .frame(width: 48, height: 48)
+                .frame(width: 44, height: 44)
             Image(systemName: notice.iconName)
                 .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(style.tint)
@@ -351,26 +373,26 @@ private struct LedgerIslandBadge: View {
                 .opacity(1 - LedgerIslandEasing.clamp(bloom * 1.6))
             Circle()
                 .fill(style.accent)
-                .frame(width: 48, height: 48)
+                .frame(width: 44, height: 44)
                 .scaleEffect(max(0, bloom))
             LedgerIslandCheckmark()
                 .trim(from: 0, to: tick)
                 .stroke(Color.white, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-                .frame(width: 48, height: 48)
+                .frame(width: 44, height: 44)
 
             if lt < timeline.check {
                 Circle()
                     .stroke(Color.white.opacity(0.12), lineWidth: 2.5)
-                    .frame(width: 57, height: 57)
+                    .frame(width: 53, height: 53)
                 Circle()
                     .trim(from: 0, to: ringProgress)
                     .stroke(style.accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .frame(width: 57, height: 57)
+                    .frame(width: 53, height: 53)
             } else if ripple < 1 {
                 Circle()
                     .stroke(style.accent.opacity(0.7 * (1 - ripple)), lineWidth: 2.5 * (1 - ripple) + 0.5)
-                    .frame(width: 57 + 18 * LedgerIslandEasing.easeOut(ripple), height: 57 + 18 * LedgerIslandEasing.easeOut(ripple))
+                    .frame(width: 53 + 14 * LedgerIslandEasing.easeOut(ripple), height: 53 + 14 * LedgerIslandEasing.easeOut(ripple))
             }
         }
         .frame(width: 80, height: 80)
@@ -607,8 +629,7 @@ final class LedgerIslandWindowManager {
             notice,
             containerWidth: Double(scene.screen.bounds.width),
             reduceMotion: UIAccessibility.isReduceMotionEnabled,
-            pill: pill,
-            reservesCutout: hasHardwareIsland
+            pill: pill
         )
     }
 
