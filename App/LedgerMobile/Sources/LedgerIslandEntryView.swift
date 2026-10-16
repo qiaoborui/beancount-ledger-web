@@ -70,10 +70,25 @@ enum LedgerIslandFonts {
     }
 }
 
+/// Style and text measurements resolved once per notice; the island redraws
+/// every frame, and measuring with UIKit fonts there is what made it stutter.
+struct LedgerIslandEntryMetrics {
+    let style: LedgerIslandStyle
+    let amountWidth: Double
+    let trailingWidth: Double
+
+    init(_ notice: LedgerIslandNotice) {
+        style = LedgerIslandStyle(notice)
+        amountWidth = LedgerIslandFonts.amountWidth(notice, style: style)
+        trailingWidth = LedgerIslandFonts.width(style.trailingText, size: 14, weight: .semibold, rounded: true)
+    }
+}
+
 @MainActor
 final class LedgerIslandPresenter: ObservableObject {
     @Published private(set) var stage: LedgerIslandStage?
     @Published private(set) var hidesStatusBar = false
+    private(set) var metrics: [LedgerIslandNotice.ID: LedgerIslandEntryMetrics] = [:]
     var onFinished: (() -> Void)?
 
     private var hapticTask: Task<Void, Never>?
@@ -82,14 +97,16 @@ final class LedgerIslandPresenter: ObservableObject {
 
     var isActive: Bool { stage?.current != nil }
 
-    func present(_ notice: LedgerIslandNotice, containerWidth: Double, reduceMotion: Bool, reservesCutout: Bool) {
+    func present(_ notice: LedgerIslandNotice, containerWidth: Double, reduceMotion: Bool, pill: CGSize, reservesCutout: Bool) {
         let now = Date.timeIntervalSinceReferenceDate
         // Only a mid-flight stage is kept, so its springs carry their velocity.
         var next = stage.flatMap { $0.visibleEntries(at: now).isEmpty ? nil : $0 }
-            ?? LedgerIslandStage(containerWidth: containerWidth, reduceMotion: reduceMotion, reservesCutout: reservesCutout)
-        let style = LedgerIslandStyle(notice)
-        let trailing = LedgerIslandFonts.width(style.trailingText, size: 14, weight: .semibold, rounded: true)
-        next.present(notice, trailingTextWidth: trailing, at: now)
+            ?? LedgerIslandStage(containerWidth: containerWidth, reduceMotion: reduceMotion, pill: pill, reservesCutout: reservesCutout)
+        let entryMetrics = LedgerIslandEntryMetrics(notice)
+        next.present(notice, trailingTextWidth: entryMetrics.trailingWidth, at: now)
+        let live = Set(next.entries.map(\.notice.id))
+        metrics = metrics.filter { live.contains($0.key) }
+        metrics[notice.id] = entryMetrics
         stage = next
 
         guard let entry = next.current else { return }
@@ -122,6 +139,7 @@ final class LedgerIslandPresenter: ObservableObject {
 
     private func finish() {
         stage = nil
+        metrics = [:]
         setStatusBarHidden(false)
         onFinished?()
     }
@@ -146,7 +164,7 @@ struct LedgerIslandStageView: View {
 
     private func island(_ stage: LedgerIslandStage, now: Double) -> some View {
         let size = stage.size(at: now)
-        let pill = LedgerIslandStage.pill
+        let pill = stage.pill
         let expansion = LedgerIslandEasing.clamp(Double((size.height - pill.height) / (stage.expandedHeight - pill.height)))
         // Without a hardware island there is nothing to grow out of, so fade in.
         let appear = hasHardwareIsland ? 1 : LedgerIslandEasing.clamp(Double((size.width - pill.width) / 30))
@@ -154,18 +172,23 @@ struct LedgerIslandStageView: View {
         let shadow = colorScheme == .dark ? 0 : expansion
 
         return ZStack {
-            Capsule().fill(Color.black)
-            if let current = stage.current {
-                ambient(current, stage: stage, size: size, now: now)
-            }
             ForEach(entries, id: \.notice.id) { entry in
-                LedgerIslandExpandedContent(entry: entry, stage: stage, size: size, now: now)
-                LedgerIslandCompactContent(entry: entry, stage: stage, size: size, now: now)
+                if let metrics = presenter.metrics[entry.notice.id] {
+                    LedgerIslandExpandedContent(entry: entry, metrics: metrics, stage: stage, size: size, now: now)
+                    LedgerIslandCompactContent(entry: entry, metrics: metrics, stage: stage, size: size, now: now)
+                }
             }
         }
         .frame(width: size.width, height: size.height)
         .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.28 * shadow), radius: 15 * shadow, y: 10 * shadow)
+        // The shape stays pure black so the camera cutout disappears into it.
+        // Only the plain shape casts the shadow, so the content stack is not
+        // re-rasterised for it on every frame.
+        .background {
+            Capsule()
+                .fill(Color.black)
+                .shadow(color: .black.opacity(0.28 * shadow), radius: 15 * shadow, y: 10 * shadow)
+        }
         .opacity(appear)
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("ledger-dynamic-island-notice")
@@ -173,50 +196,38 @@ struct LedgerIslandStageView: View {
         .padding(.top, topOffset)
         .frame(maxWidth: .infinity, alignment: .top)
     }
-
-    private func ambient(_ entry: LedgerIslandStageEntry, stage: LedgerIslandStage, size: CGSize, now: Double) -> some View {
-        let fx = entry.effect(.expanded, delay: 0, at: now, reduceMotion: stage.reduceMotion)
-        let tint = LedgerIslandStyle(entry.notice).tint
-        let center = UnitPoint(x: 44 / stage.expandedWidth, y: stage.contentCenterY / stage.expandedHeight)
-        return RadialGradient(
-            colors: [tint.opacity(0.2 * fx.opacity), tint.opacity(0)],
-            center: center, startRadius: 0, endRadius: 150
-        )
-        .allowsHitTesting(false)
-    }
-}
-
-/// Wraps an element in an island-sized frame so scale and blur anchor on the
-/// island centre, letting content emerge from inside the shape.
-private struct LedgerIslandEffectModifier: ViewModifier {
-    let effect: LedgerIslandEffect
-    let size: CGSize
-
-    func body(content: Content) -> some View {
-        content
-            .frame(width: size.width, height: size.height)
-            .scaleEffect(effect.scale)
-            .offset(y: effect.yOffset)
-            .blur(radius: effect.blur)
-            .opacity(effect.opacity)
-    }
 }
 
 private extension View {
-    func islandEffect(_ effect: LedgerIslandEffect, size: CGSize) -> some View {
-        modifier(LedgerIslandEffectModifier(effect: effect, size: size))
+    /// Places an element on the island with its enter/exit effect. The effect
+    /// runs at the element's own size (blurring a full island-sized layer per
+    /// element was expensive), while scale still pivots on the island centre so
+    /// content emerges from inside the shape. Fully hidden elements are skipped.
+    @ViewBuilder
+    func islandPlaced(_ effect: LedgerIslandEffect, at point: CGPoint, in size: CGSize) -> some View {
+        if effect.opacity > 0.001 {
+            let cx = size.width / 2, cy = size.height / 2
+            scaleEffect(effect.scale)
+                .blur(radius: effect.blur)
+                .opacity(effect.opacity)
+                .position(
+                    x: cx + (point.x - cx) * effect.scale,
+                    y: cy + (point.y - cy) * effect.scale + effect.yOffset
+                )
+        }
     }
 }
 
 private struct LedgerIslandExpandedContent: View {
     let entry: LedgerIslandStageEntry
+    let metrics: LedgerIslandEntryMetrics
     let stage: LedgerIslandStage
     let size: CGSize
     let now: Double
 
     var body: some View {
         let notice = entry.notice
-        let style = LedgerIslandStyle(notice)
+        let style = metrics.style
         let lt = entry.localTime(now)
         let timeline = entry.timeline
         let fullWidth = stage.expandedWidth
@@ -228,7 +239,7 @@ private struct LedgerIslandExpandedContent: View {
 
         // Layout lives in final-size coordinates and is mapped onto the live
         // shape, so text never reflows while the island grows.
-        let amountWidth = LedgerIslandFonts.amountWidth(notice, style: style)
+        let amountWidth = metrics.amountWidth
         // Per-glyph rolling columns lose kerning, so leave a little slack.
         let columnWidth = max(amountWidth + 6, 56)
         let rightEdge = cx + (fullWidth / 2 - 22) * kx
@@ -241,8 +252,7 @@ private struct LedgerIslandExpandedContent: View {
 
         ZStack {
             LedgerIslandBadge(notice: notice, style: style, lt: lt, timeline: timeline, ringProgress: ringProgress)
-                .position(badgeCenter)
-                .islandEffect(entry.effect(.expanded, delay: 0, at: now, reduceMotion: reduce), size: size)
+                .islandPlaced(entry.effect(.expanded, delay: 0, at: now, reduceMotion: reduce), at: badgeCenter, in: size)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(notice.title)
@@ -252,8 +262,7 @@ private struct LedgerIslandExpandedContent: View {
             }
             .lineLimit(1)
             .frame(width: textWidth, alignment: .leading)
-            .position(x: textLeft + textWidth / 2, y: rowY + 1)
-            .islandEffect(entry.effect(.expanded, delay: 0.05, at: now, reduceMotion: reduce), size: size)
+            .islandPlaced(entry.effect(.expanded, delay: 0.05, at: now, reduceMotion: reduce), at: CGPoint(x: textLeft + textWidth / 2, y: rowY + 1), in: size)
 
             VStack(alignment: .trailing, spacing: 3) {
                 Group {
@@ -275,8 +284,7 @@ private struct LedgerIslandExpandedContent: View {
                 LedgerIslandCaption(style: style, lt: lt, timeline: timeline)
             }
             .frame(width: columnWidth, alignment: .trailing)
-            .position(x: rightEdge - columnWidth / 2, y: rowY)
-            .islandEffect(entry.effect(.expanded, delay: 0.09, at: now, reduceMotion: reduce), size: size)
+            .islandPlaced(entry.effect(.expanded, delay: 0.09, at: now, reduceMotion: reduce), at: CGPoint(x: rightEdge - columnWidth / 2, y: rowY), in: size)
         }
         .frame(width: size.width, height: size.height)
     }
@@ -284,16 +292,17 @@ private struct LedgerIslandExpandedContent: View {
 
 private struct LedgerIslandCompactContent: View {
     let entry: LedgerIslandStageEntry
+    let metrics: LedgerIslandEntryMetrics
     let stage: LedgerIslandStage
     let size: CGSize
     let now: Double
 
     var body: some View {
-        let style = LedgerIslandStyle(entry.notice)
+        let style = metrics.style
         let compactWidth = entry.compactWidth
         let kx = size.width / compactWidth
         let cx = size.width / 2, cy = size.height / 2
-        let trailingWidth = LedgerIslandFonts.width(style.trailingText, size: 14, weight: .semibold, rounded: true) + 4
+        let trailingWidth = metrics.trailingWidth + 4
         let reduce = stage.reduceMotion
 
         ZStack {
@@ -303,8 +312,7 @@ private struct LedgerIslandCompactContent: View {
                     .stroke(Color.white, style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
             }
             .frame(width: 20, height: 20)
-            .position(x: cx + (-compactWidth / 2 + 22) * kx, y: cy)
-            .islandEffect(entry.effect(.compact, delay: 0, at: now, reduceMotion: reduce), size: size)
+            .islandPlaced(entry.effect(.compact, delay: 0, at: now, reduceMotion: reduce), at: CGPoint(x: cx + (-compactWidth / 2 + 22) * kx, y: cy), in: size)
 
             Text(style.trailingText)
                 .font(LedgerIslandFonts.compact)
@@ -312,8 +320,7 @@ private struct LedgerIslandCompactContent: View {
                 .lineLimit(1)
                 .fixedSize()
                 .frame(width: trailingWidth, alignment: .trailing)
-                .position(x: cx + (compactWidth / 2 - 16) * kx - trailingWidth / 2, y: cy)
-                .islandEffect(entry.effect(.compact, delay: 0.04, at: now, reduceMotion: reduce), size: size)
+                .islandPlaced(entry.effect(.compact, delay: 0.04, at: now, reduceMotion: reduce), at: CGPoint(x: cx + (compactWidth / 2 - 16) * kx - trailingWidth / 2, y: cy), in: size)
         }
         .frame(width: size.width, height: size.height)
     }
@@ -534,6 +541,7 @@ final class LedgerIslandWindowManager {
     private var overlayWindow: LedgerIslandPassthroughWindow?
     let presenter = LedgerIslandPresenter()
     private var hasHardwareIsland = false
+    private var pill = LedgerIslandStage.defaultPill
     private var dismissHandler: (() -> Void)?
 
     private init() {
@@ -570,10 +578,23 @@ final class LedgerIslandWindowManager {
             let safeTop = scene.windows.first(where: \.isKeyWindow)?.safeAreaInsets.top ?? 0
             // Dynamic Island devices report a top inset of 51pt or more.
             hasHardwareIsland = UIDevice.current.userInterfaceIdiom == .phone && safeTop >= 51
+            var topOffset: CGFloat = 8
+            pill = LedgerIslandStage.defaultPill
+            if hasHardwareIsland {
+                let screen = scene.screen
+                let cover = LedgerIslandCutout.hardware(
+                    nativeWidth: screen.nativeBounds.width,
+                    nativeHeight: screen.nativeBounds.height,
+                    nativeScale: screen.nativeScale,
+                    safeTop: safeTop
+                ).covering(bleed: 0.75)
+                topOffset = cover.top
+                pill = cover.pill
+            }
             let hosting = UIHostingController(rootView: LedgerIslandStageView(
                 presenter: presenter,
                 hasHardwareIsland: hasHardwareIsland,
-                topOffset: hasHardwareIsland ? 11 : 8
+                topOffset: topOffset
             ))
             hosting.view.backgroundColor = .clear
             hosting.view.isOpaque = false
@@ -586,6 +607,7 @@ final class LedgerIslandWindowManager {
             notice,
             containerWidth: Double(scene.screen.bounds.width),
             reduceMotion: UIAccessibility.isReduceMotionEnabled,
+            pill: pill,
             reservesCutout: hasHardwareIsland
         )
     }

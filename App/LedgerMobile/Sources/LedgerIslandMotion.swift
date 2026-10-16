@@ -135,9 +135,12 @@ struct LedgerIslandStageEntry: Equatable, Sendable {
         guard !reduceMotion else {
             return LedgerIslandEffect(opacity: opacity, blur: 0, scale: 1, yOffset: 0)
         }
+        // The spring only approaches 1, so snap the tail: a sub-pixel blur still
+        // costs an offscreen pass on every frame while content sits settled.
+        let blur = (1 - clampedEnter) * 10 + exit * 6
         return LedgerIslandEffect(
             opacity: opacity,
-            blur: (1 - clampedEnter) * 10 + exit * 6,
+            blur: blur < 0.1 ? 0 : blur,
             scale: 0.86 + 0.14 * enter - 0.05 * exit,
             yOffset: (1 - clampedEnter) * 3
         )
@@ -157,13 +160,58 @@ enum LedgerIslandEasing {
     }
 }
 
+/// Where the hardware Dynamic Island sits, so the overlay grows out of it
+/// instead of guessing. Frames are stored in device pixels (measured from the
+/// simulator device masks) and converted with `nativeScale`, which keeps them
+/// right under Display Zoom, where points no longer map 1:1 to the panel.
+struct LedgerIslandCutout: Equatable, Sendable {
+    let top: Double
+    let size: CGSize
+
+    /// Native panel size (portrait px) → cutout top, width, height in px.
+    static let measured: [LedgerIslandPanel: (top: Double, width: Double, height: Double)] = [
+        LedgerIslandPanel(1179, 2556): (34, 375, 110),
+        LedgerIslandPanel(1206, 2622): (42, 376, 110),
+    ]
+
+    static func hardware(nativeWidth: Double, nativeHeight: Double, nativeScale: Double, safeTop: Double) -> LedgerIslandCutout {
+        let scale = max(nativeScale, 1)
+        let panel = LedgerIslandPanel(min(nativeWidth, nativeHeight), max(nativeWidth, nativeHeight))
+        if let px = measured[panel] {
+            return LedgerIslandCutout(top: px.top / scale, size: CGSize(width: px.width / scale, height: px.height / scale))
+        }
+        // Unknown hardware: the cutout is the same physical size everywhere and
+        // sits about 48pt above the bottom of the status bar inset.
+        return LedgerIslandCutout(top: max(11, safeTop - 48), size: CGSize(width: 376 / scale, height: 110 / scale))
+    }
+
+    /// The overlay frame that hides the cutout, bleeding past its edges so the
+    /// anti-aliased rim never leaves a hairline of hardware visible.
+    func covering(bleed: Double) -> (top: Double, pill: CGSize) {
+        (top - bleed, CGSize(width: size.width + 2 * bleed, height: size.height + 2 * bleed))
+    }
+}
+
+struct LedgerIslandPanel: Hashable, Sendable {
+    let width: Int
+    let height: Int
+
+    init(_ width: Double, _ height: Double) {
+        self.width = Int(width.rounded())
+        self.height = Int(height.rounded())
+    }
+}
+
 /// Shape and notice schedule for the overlay. The shape grows out of the hardware
 /// island, settles into an expanded confirmation, shrinks to a compact pill, then
 /// retracts. Width leads height so the expansion reads as a sideways fling.
 struct LedgerIslandStage: Equatable, Sendable {
-    static let pill = CGSize(width: 126, height: 37)
+    /// Resting shape on screens without a hardware island.
+    static let defaultPill = CGSize(width: 126, height: 37)
     static let maxExpandedWidth: Double = 352
 
+    /// Resting shape; on Dynamic Island hardware it covers the camera cutout.
+    let pill: CGSize
     let expandedWidth: Double
     /// On Dynamic Island hardware the camera cutout covers the top band of the
     /// shape, so the content row moves below it and the island grows taller.
@@ -171,15 +219,18 @@ struct LedgerIslandStage: Equatable, Sendable {
     let contentCenterY: Double
     let reduceMotion: Bool
     private(set) var entries: [LedgerIslandStageEntry] = []
-    private(set) var width = LedgerIslandSpringTrack(value: Double(pill.width))
-    private(set) var height = LedgerIslandSpringTrack(value: Double(pill.height))
+    private(set) var width: LedgerIslandSpringTrack
+    private(set) var height: LedgerIslandSpringTrack
 
-    init(containerWidth: Double, reduceMotion: Bool, reservesCutout: Bool = false) {
-        expandedWidth = min(Self.maxExpandedWidth, max(Double(Self.pill.width), containerWidth - 24))
-        let cutout = reservesCutout ? Double(Self.pill.height) : 0
-        expandedHeight = reservesCutout ? 112 : 84
+    init(containerWidth: Double, reduceMotion: Bool, pill: CGSize = Self.defaultPill, reservesCutout: Bool = false) {
+        self.pill = pill
+        expandedWidth = min(Self.maxExpandedWidth, max(Double(pill.width), containerWidth - 24))
+        let cutout = reservesCutout ? Double(pill.height) : 0
+        expandedHeight = reservesCutout ? cutout + 75 : 84
         contentCenterY = cutout + (expandedHeight - cutout) / 2
         self.reduceMotion = reduceMotion
+        width = LedgerIslandSpringTrack(value: Double(pill.width))
+        height = LedgerIslandSpringTrack(value: Double(pill.height))
     }
 
     var current: LedgerIslandStageEntry? { entries.last }
@@ -189,7 +240,7 @@ struct LedgerIslandStage: Equatable, Sendable {
 
     func compactWidth(trailingTextWidth: Double) -> Double {
         let side = max(48, trailingTextWidth + 30)
-        return min(expandedWidth, Double(Self.pill.width) + 2 * side)
+        return min(expandedWidth, Double(pill.width) + 2 * side)
     }
 
     mutating func present(_ notice: LedgerIslandNotice, trailingTextWidth: Double, at now: Double) {
@@ -209,7 +260,6 @@ struct LedgerIslandStage: Equatable, Sendable {
         let compact = compactWidth(trailingTextWidth: trailingTextWidth)
         entries.append(LedgerIslandStageEntry(notice: notice, start: now, timeline: timeline, compactWidth: compact))
 
-        let pill = Self.pill
         retarget(width: expandedWidth, (0.46, 0.70), height: expandedHeight, (0.54, 0.76), at: now)
         retarget(width: compact, (0.42, 0.82), height: Double(pill.height), (0.36, 0.86), at: now + timeline.compactShapeStart)
         retarget(width: Double(pill.width), (0.40, 0.88), height: Double(pill.height), (0.34, 0.90), at: now + timeline.pillShapeStart)

@@ -66,15 +66,15 @@ struct LedgerIslandMotionTests {
         let entry = try! #require(stage.current)
         let compact = stage.compactWidth(trailingTextWidth: 60)
 
-        #expect(stage.size(at: 0).width == LedgerIslandStage.pill.width)
+        #expect(stage.size(at: 0).width == stage.pill.width)
         let expanded = stage.size(at: entry.timeline.toCompact)
         #expect(abs(expanded.width - stage.expandedWidth) < 1)
         #expect(abs(expanded.height - stage.expandedHeight) < 1)
         let compacted = stage.size(at: entry.timeline.toPill)
         #expect(abs(compacted.width - compact) < 1)
-        #expect(abs(compacted.height - LedgerIslandStage.pill.height) < 1)
+        #expect(abs(compacted.height - stage.pill.height) < 1)
         let retracted = stage.size(at: entry.timeline.end + 1)
-        #expect(abs(retracted.width - LedgerIslandStage.pill.width) < 0.5)
+        #expect(abs(retracted.width - stage.pill.width) < 0.5)
         #expect(stage.visibleEntries(at: entry.timeline.end + 1).isEmpty)
     }
 
@@ -85,8 +85,35 @@ struct LedgerIslandMotionTests {
         let island = LedgerIslandStage(containerWidth: 393, reduceMotion: false, reservesCutout: true)
         #expect(island.expandedHeight > plain.expandedHeight)
         // A 57pt progress ring around the row centre must clear the 37pt cutout.
-        #expect(island.contentCenterY - 28.5 > Double(LedgerIslandStage.pill.height))
+        #expect(island.contentCenterY - 28.5 > Double(island.pill.height))
         #expect(island.contentCenterY + 28.5 < island.expandedHeight)
+    }
+
+    @Test("Hardware cutout is located per panel and covered with a bleed")
+    func hardwareCutout() {
+        // iPhone 16 Pro / 17 Pro: the island starts 14pt down, not 11pt.
+        let pro = LedgerIslandCutout.hardware(nativeWidth: 1206, nativeHeight: 2622, nativeScale: 3, safeTop: 62)
+        #expect(abs(pro.top - 14) < 0.01)
+        #expect(abs(pro.size.width - 376.0 / 3) < 0.01)
+        let base = LedgerIslandCutout.hardware(nativeWidth: 1179, nativeHeight: 2556, nativeScale: 3, safeTop: 59)
+        #expect(abs(base.top - 34.0 / 3) < 0.01)
+        // Display Zoom changes the point scale, not the physical cutout.
+        let zoomed = LedgerIslandCutout.hardware(nativeWidth: 1206, nativeHeight: 2622, nativeScale: 3.5, safeTop: 54)
+        #expect(abs(zoomed.top - 12) < 0.01)
+        let unknown = LedgerIslandCutout.hardware(nativeWidth: 1320, nativeHeight: 2868, nativeScale: 3, safeTop: 62)
+        #expect(abs(unknown.top - 14) < 0.01)
+
+        let cover = pro.covering(bleed: 0.75)
+        #expect(cover.top < pro.top)
+        #expect(cover.top + Double(cover.pill.height) > pro.top + Double(pro.size.height))
+        #expect(Double(cover.pill.width) > Double(pro.size.width))
+
+        var stage = LedgerIslandStage(containerWidth: 402, reduceMotion: false, pill: cover.pill, reservesCutout: true)
+        stage.present(notice(), trailingTextWidth: 60, at: 0)
+        let entry = try! #require(stage.current)
+        let retracted = stage.size(at: entry.timeline.end + 1)
+        #expect(abs(retracted.width - cover.pill.width) < 0.5)
+        #expect(abs(retracted.height - cover.pill.height) < 0.5)
     }
 
     @Test("Expanded width respects narrow screens")
