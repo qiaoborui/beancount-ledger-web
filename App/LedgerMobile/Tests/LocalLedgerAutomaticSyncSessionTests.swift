@@ -149,7 +149,13 @@ final class LocalLedgerAutomaticSyncSessionTests: XCTestCase {
         }
     }
 
+    private final class Clock: @unchecked Sendable {
+        var now: Date
+        init(_ text: String) { now = ISO8601DateFormatter().date(from: text)! }
+    }
+
     private struct Fixture {
+        let clock: Clock
         let catalog: LocalLedgerCatalog
         let descriptor: LocalLedgerDescriptor
         let defaults: UserDefaults
@@ -164,7 +170,7 @@ final class LocalLedgerAutomaticSyncSessionTests: XCTestCase {
             LedgerSession(localOnly: true, automaticLocalSyncServicesEnabled: enabled,
                 localCatalog: catalog, localAuthenticator: authenticator, defaults: defaults,
                 widgetSnapshotStore: store, widgetCredentialStore: WidgetCredentials(),
-                ledgerNow: { ISO8601DateFormatter().date(from: "2026-09-15T04:00:00Z")! })
+                ledgerNow: { clock.now })
         }
     }
 
@@ -187,7 +193,7 @@ final class LocalLedgerAutomaticSyncSessionTests: XCTestCase {
         defaults.set(descriptor.id.uuidString + ":" + (try XCTUnwrap(descriptor.git).id.uuidString), forKey: Self.authorizationKey)
         await git.resetRequests()
         await engine.resetRequests()
-        return Fixture(catalog: catalog, descriptor: descriptor, defaults: defaults,
+        return Fixture(clock: Clock("2026-09-15T04:00:00Z"), catalog: catalog, descriptor: descriptor, defaults: defaults,
             store: LedgerWidgetSnapshotStore(suiteName: suite, lockDirectory: root),
             git: git, engine: engine, validator: validator, authenticator: Authenticator())
     }
@@ -241,6 +247,91 @@ final class LocalLedgerAutomaticSyncSessionTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(200))
         let rangeReports = await reportCount()
         XCTAssertEqual(rangeReports, 0, "widget windows do not depend on the selected range")
+    }
+
+    /// Reloading a local ledger (pull-to-refresh, unlock) must not wait for
+    /// widget publication. The snapshot is derived from the generation already
+    /// on screen, so the reload completes first and the widget work lands after.
+    /// Holding the first home report open used to stall the reload.
+    func testLocalReloadCompletesWhileWidgetPublicationIsStillRunning() async throws {
+        let fixture = try await fixture()
+        fixture.authenticator.accepts = true
+        let session = fixture.session(enabled: false)
+        defer { session.chooseLedger() }
+        await session.start()
+        XCTAssertEqual(session.phase, .ready, session.errorMessage ?? "")
+        let deadline = Date().addingTimeInterval(5)
+        while fixture.store.load() == nil, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNotNil(fixture.store.load(), "the initial load publishes the widget")
+
+        // Force the next reload to rebuild the snapshot, then hold it open. The
+        // widget windows are anchored to today, so advancing the clock changes
+        // the publish key and the reload cannot short-circuit.
+        let entered = expectation(description: "widget report is in flight")
+        let gate = Gate(entered)
+        await fixture.engine.suspendReport(gate)
+        fixture.clock.now = ISO8601DateFormatter().date(from: "2026-09-16T04:00:00Z")!
+
+        await session.refresh()
+
+        XCTAssertEqual(session.phase, .ready, session.errorMessage ?? "reload finished")
+        await fulfillment(of: [entered], timeout: 5)
+        // The report is still suspended, so the snapshot cannot have been
+        // rebuilt yet; the reload nevertheless completed.
+        let inFlight = await fixture.engine.requests.filter { $0.path == "/api/ledger/home-report" }.count
+        XCTAssertGreaterThan(inFlight, 0, "the widget rebuild started")
+
+        await gate.release()
+        let published = Date().addingTimeInterval(5)
+        while fixture.store.load() == nil, Date() < published {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNotNil(fixture.store.load(), "the widget snapshot still publishes after the reload")
+    }
+
+    /// The periodic automatic sync runs every few minutes. When the fetch leaves
+    /// the ledger on the revision the stored widget snapshot already describes,
+    /// rebuilding five identical reports is pure waste.
+    func testRepeatedSyncAtSameRevisionSkipsWidgetRebuild() async throws {
+        let fixture = try await fixture()
+        let session = fixture.session()
+        let first = await session.performBackgroundLocalSync()
+        XCTAssertTrue(first, session.localSyncStatus?.message ?? "Initial background publication failed")
+        XCTAssertNotNil(fixture.store.load())
+        let repository = fixture.catalog.repository(for: fixture.descriptor)
+        let revision = try await repository.workspace.currentRevision()
+        XCTAssertEqual(fixture.store.publishedRevision(), revision?.id)
+
+        await fixture.engine.resetRequests()
+        let second = await session.performBackgroundLocalSync()
+        XCTAssertTrue(second, session.localSyncStatus?.message ?? "Repeat background publication failed")
+        let reports = await fixture.engine.requests.filter { $0.path == "/api/ledger/home-report" }.count
+        XCTAssertEqual(reports, 0, "an unchanged revision must not rebuild the widget")
+        XCTAssertEqual(fixture.store.publishedRevision(), revision?.id)
+    }
+
+    /// The skip must never outlive a real ledger change: a fetched revision has
+    /// to rebuild the snapshot and republish it.
+    func testSyncAtNewRevisionRebuildsWidget() async throws {
+        let fixture = try await fixture()
+        let session = fixture.session()
+        let first = await session.performBackgroundLocalSync()
+        XCTAssertTrue(first, session.localSyncStatus?.message ?? "Initial background publication failed")
+        let repository = fixture.catalog.repository(for: fixture.descriptor)
+        let before = try await repository.workspace.currentRevision()
+
+        await fixture.git.setRemote("; synthetic expense 77\n")
+        await fixture.engine.resetRequests()
+        let second = await session.performBackgroundLocalSync()
+        XCTAssertTrue(second, session.localSyncStatus?.message ?? "Background publication after remote change failed")
+        let reports = await fixture.engine.requests.filter { $0.path == "/api/ledger/home-report" }.count
+        XCTAssertGreaterThanOrEqual(reports, 4, "a new revision must rebuild the widget reports")
+        let after = try await repository.workspace.currentRevision()
+        XCTAssertNotEqual(after?.id, before?.id)
+        XCTAssertEqual(fixture.store.publishedRevision(), after?.id)
+        XCTAssertEqual(fixture.store.load()?.expense.amount, 77)
     }
 
     func testForegroundSaveNotificationAutomaticallyPushesValidatedLocalChange() async throws {

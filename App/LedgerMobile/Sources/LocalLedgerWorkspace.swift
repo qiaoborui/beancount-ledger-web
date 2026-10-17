@@ -352,11 +352,13 @@ actor LocalLedgerWorkspace {
             expectedSourceIdentity: directoryIdentity(at: previous), requiresExternalSource: false)
         try await mutateStage(workspace)
         try Task.checkCancellation()
-        _ = try validateTree(at: workspace)
+        // Validated once here; `newPaths` below reuses this result. The tree is
+        // already final at this point, so re-walking it a second time only
+        // repeated a full stat sweep over every file.
+        let newPaths = Set(try validateTree(at: workspace))
         try await validator(workspace)
         try Task.checkCancellation()
         let oldPaths = Set(try validateTree(at: previous))
-        let newPaths = Set(try validateTree(at: workspace))
         var files: [PreparedFiles.File] = []
         var previewBytes = 0
         for path in oldPaths.union(newPaths).sorted() {
