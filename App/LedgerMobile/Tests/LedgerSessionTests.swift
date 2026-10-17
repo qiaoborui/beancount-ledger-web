@@ -2530,6 +2530,57 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertNil(session.importIndexProgress)
     }
 
+    /// A stalled index used to be polled once per second for up to 600 requests
+    /// over ten minutes. The cadence now backs off, so a short observation window
+    /// must see far fewer requests.
+    func testImportIndexPollingBacksOffWhenTheIndexDoesNotAdvance() async throws {
+        let suiteName = "ledger-mobile-import-index-backoff-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let targetGitSHA = "never-indexed-revision"
+        let api = SessionMockAPI(
+            payload: Self.payload,
+            indexInfoPayload: LedgerIndexInfo(
+                enabled: true,
+                active: true,
+                gitSHA: "still-old-revision",
+                indexedAt: "2026-09-01T08:00:00Z",
+                requestCompleted: false
+            )
+        )
+        let session = LedgerSession(api: api, defaults: defaults)
+        await session.resume()
+
+        session.startImportIndexTracking(
+            result: LedgerImportCommitResult(
+                ok: true,
+                outputFile: "transactions/2026/imports/import.bean",
+                includeFile: "transactions/2026/09.bean",
+                documentFile: nil,
+                count: 2,
+                beanText: nil,
+                readModelPending: true,
+                indexGitSHA: targetGitSHA,
+                runtimeCleanupError: nil,
+                gmailPendingStatusWarning: nil
+            ),
+            providerLabel: "支付宝",
+            baselineGitSHA: "old-index-revision"
+        )
+
+        // Backoff is 0.5, 1, 2, 4, 8 ... so six seconds covers four polls.
+        // The old fixed one-second cadence would issue six in the same window.
+        try await Task.sleep(for: .seconds(6))
+        let calls = await api.indexInfoCallCount()
+        XCTAssertGreaterThan(calls, 0, "polling still starts immediately")
+        XCTAssertLessThanOrEqual(calls, 4,
+            "a fixed one-second cadence would issue about six requests in six seconds")
+
+        await session.lock()
+    }
+
     func testImportIndexTrackingDoesNotUseUncorrelatedRevisionWithoutTargetOrBaseline() async {
         let suiteName = "ledger-mobile-import-index-uncorrelated-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

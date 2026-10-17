@@ -1377,6 +1377,86 @@ struct LedgerAssetsAnalysis: Equatable, Sendable {
     let valuationCurrency: String
 }
 
+/// Derived balances for the assets report.
+///
+/// The report reads the same grouped totals from `assets`, `debt`, `missing`,
+/// `accountNames` and one `accountRow` per account during a single body
+/// evaluation. Recomputing the filter and grouping on each access cost several
+/// passes over every balance per render, and the per-account row lookup made it
+/// quadratic. This computes everything once per `data`.
+struct TerminalAssetsIndex: Equatable {
+    let balances: [AccountBalance]
+    let valuations: [String: Int]
+    let balancesByAccount: [String: [AccountBalance]]
+    let accountNames: [String]
+    let assets: Int
+    let debt: Int
+    let missing: Bool
+
+    private final class Cache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entry: (data: LedgerAssetsAnalysis, index: TerminalAssetsIndex)?
+
+        func index(for data: LedgerAssetsAnalysis) -> TerminalAssetsIndex {
+            lock.lock()
+            if let cached = entry, cached.data == data {
+                let index = cached.index
+                lock.unlock()
+                return index
+            }
+            lock.unlock()
+
+            let index = TerminalAssetsIndex(data: data)
+
+            lock.lock()
+            entry = (data, index)
+            lock.unlock()
+            return index
+        }
+    }
+
+    private static let cache = Cache()
+
+    static func index(for data: LedgerAssetsAnalysis) -> TerminalAssetsIndex {
+        cache.index(for: data)
+    }
+
+    private init(data: LedgerAssetsAnalysis) {
+        let filtered = data.accountBalances.filter {
+            $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:")
+        }
+        balances = filtered
+
+        var grouped: [String: [AccountBalance]] = [:]
+        var values: [String: Int] = [:]
+        var assetTotal = 0
+        var debtTotal = 0
+        var hasMissing = false
+        for balance in filtered {
+            grouped[balance.account, default: []].append(balance)
+            if balance.valuationMissing == true {
+                hasMissing = true
+            } else {
+                values[balance.account, default: 0] += balance.valuation
+            }
+        }
+        balancesByAccount = grouped
+        valuations = values
+        missing = hasMissing
+
+        for (account, value) in values {
+            if account.hasPrefix("Assets:") {
+                assetTotal += value
+            } else if account.hasPrefix("Liabilities:") {
+                debtTotal += abs(value)
+            }
+        }
+        assets = assetTotal
+        debt = debtTotal
+        accountNames = grouped.keys.sorted()
+    }
+}
+
 struct LedgerIncomeExpenseAnalysis: Equatable, Sendable {
     let dashboard: LedgerDashboard
     let statement: LedgerIncomeStatement
