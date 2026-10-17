@@ -2369,7 +2369,7 @@ final class LedgerSession: ObservableObject {
     }
 
     var visibleGlobalTransactions: [LedgerTransaction] {
-        globalTransactions.filter { !isConfirmedDeletion($0.source) }.map(projectedTransaction)
+        projected(globalTransactions)
     }
 
     private func knownTransaction(_ source: TransactionSource) -> LedgerTransaction? {
@@ -2378,7 +2378,20 @@ final class LedgerSession: ObservableObject {
     }
 
     var visibleTransactions: [LedgerTransaction] {
-        (ledger?.transactions ?? []).filter { !isConfirmedDeletion($0.source) }.map(projectedTransaction)
+        projected(ledger?.transactions ?? [])
+    }
+
+    /// Filters confirmed deletions and applies pending/confirmed overlays.
+    ///
+    /// Both steps key off `transactionMutationKey`, which builds a string per
+    /// row. When nothing is deleted or mutated — the overwhelmingly common case
+    /// — the input is returned untouched instead of allocating a copy and
+    /// rebuilding every key.
+    private func projected(_ transactions: [LedgerTransaction]) -> [LedgerTransaction] {
+        guard !transactionMutations.isEmpty || !transactionMutationStates.isEmpty else { return transactions }
+        return transactions
+            .filter { !isConfirmedDeletion($0.source) }
+            .map(projectedTransaction)
     }
 
     func visibleTransaction(matching source: TransactionSource) -> LedgerTransaction? {

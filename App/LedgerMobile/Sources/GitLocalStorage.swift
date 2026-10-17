@@ -321,15 +321,35 @@ actor GitLocalStorage: LogicalLocalStorage {
     }
     private var attemptsRoot: URL { syncRoot.appendingPathComponent("candidates", isDirectory: true) }
     private var stateURL: URL { syncRoot.appendingPathComponent("state.json") }
+
+    /// `status()` runs after every local save notification. Decoding `state.json`
+    /// each time re-reads and re-parses a file that only changes during
+    /// synchronization, so the decoded value is cached against the file's
+    /// modification date and size.
+    private var cachedState: (stamp: StateStamp, state: State)?
     private func discardAttempt(_ id: UUID?) {
         guard let id else { return }
         try? FileManager.default.removeItem(at: attemptsRoot.appendingPathComponent(id.uuidString))
     }
+    private struct StateStamp: Equatable {
+        let modified: Date
+        let size: Int
+    }
+
+    private func stateStamp() -> StateStamp? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: stateURL.path),
+              let modified = attributes[.modificationDate] as? Date,
+              let size = (attributes[.size] as? NSNumber)?.intValue else { return nil }
+        return StateStamp(modified: modified, size: size)
+    }
+
     private func loadState() throws -> State {
-        guard FileManager.default.fileExists(atPath: stateURL.path) else { return State() }
+        guard let stamp = stateStamp() else { return State() }
+        if let cachedState, cachedState.stamp == stamp { return cachedState.state }
         do {
             let state = try JSONDecoder().decode(State.self, from: Data(contentsOf: stateURL))
             guard state.version == 1 else { throw LocalStorageError.corruptSyncState }
+            cachedState = (stamp, state)
             return state
         } catch { throw LocalStorageError.corruptSyncState }
     }
@@ -340,6 +360,7 @@ actor GitLocalStorage: LogicalLocalStorage {
         #else
         try JSONEncoder().encode(state).write(to: stateURL, options: .atomic)
         #endif
+        if let stamp = stateStamp() { cachedState = (stamp, state) } else { cachedState = nil }
     }
     private func safeMessage(_ error: Error) -> String {
         var message = error.localizedDescription
