@@ -1327,16 +1327,35 @@ final class LedgerSession: ObservableObject {
             guard epoch == sessionEpoch, allowsAutomaticSync(active) else { return .paused }
             if location == .local(active.id) { localSyncStatus = status }
             let origin = URL(string: "ledger-local://" + active.id.uuidString.lowercased())!
-            let published = try await LocalLedgerWidgetPublisher.refresh(repository: current,
-                valuationCurrency: storedValuationCurrency(for: origin), store: widgetSnapshotStore, now: ledgerNow()) {
-                    !Task.isCancelled && self.sessionEpoch == epoch && self.allowsAutomaticSync(active)
+            // Rebuilding the widget costs five reports plus a Keychain read, and
+            // this runs on every periodic tick. Skip it only when the stored
+            // snapshot provably already describes the revision we are on: the
+            // ledger did not move, so every widget window would be identical.
+            // The fetch above still runs, so remote changes are never missed.
+            let currentRevisionID = try await current.workspace.currentRevision()?.id
+            let alreadyPublished = currentRevisionID != nil
+                && currentRevisionID == widgetSnapshotStore.publishedRevision()
+            var published = true
+            if alreadyPublished {
+                published = widgetSnapshotStore.load() != nil
+            } else {
+                let publication = try await LocalLedgerWidgetPublisher.refreshReportingChange(repository: current,
+                    valuationCurrency: storedValuationCurrency(for: origin), store: widgetSnapshotStore, now: ledgerNow()) {
+                        !Task.isCancelled && self.sessionEpoch == epoch && self.allowsAutomaticSync(active)
+                    }
+                published = publication.published
+                if publication.changed {
+                    #if canImport(WidgetKit)
+                    WidgetCenter.shared.reloadAllTimelines()
+                    #endif
                 }
-            if published {
-                #if canImport(WidgetKit)
-                WidgetCenter.shared.reloadAllTimelines()
-                #endif
             }
-            if !background, epoch == sessionEpoch, phase == .ready, applicationActive {
+            // Only reload the presented ledger when the exchange actually moved
+            // it. The periodic path runs this every few minutes; refreshing an
+            // unchanged ledger rebuilt the whole bootstrap and every projection.
+            let movedCommit = status.baseCommit != previous.baseCommit
+            let changed = status.phase == .pending || movedCommit
+            if changed, !background, epoch == sessionEpoch, phase == .ready, applicationActive {
                 await refresh()
             }
             guard !Task.isCancelled, epoch == sessionEpoch else { return .retryableFailure }
@@ -3483,13 +3502,31 @@ final class LedgerSession: ObservableObject {
         } else {
             if local != nil { await refreshLocalOverviewCategories() }
             guard generation == requestGeneration else { return }
-            await publishWidgetSnapshot(
-                ledger: payload,
-                contextURL: contextURL,
-                valuationCurrency: payload.valuationCurrency,
-                generation: generation,
-                localRevisionID: local == nil ? nil : presentationRevision
-            )
+            if local != nil {
+                // A local ledger can publish its widget snapshot off the critical
+                // path: the snapshot is derived from the same generation that is
+                // already displayed. Awaiting it here made every cold launch and
+                // every unlock wait on five reports plus a Keychain read before
+                // `loadLedger` returned.
+                let epoch = sessionEpoch, expectedLocation = location
+                Task(priority: .utility) { @MainActor [weak self] in
+                    await Task.yield()
+                    guard let self, generation == self.requestGeneration,
+                          epoch == self.sessionEpoch, expectedLocation == self.location,
+                          self.phase == .ready else { return }
+                    await self.publishWidgetSnapshot(ledger: payload, contextURL: contextURL,
+                        valuationCurrency: payload.valuationCurrency, generation: generation,
+                        localRevisionID: presentationRevision)
+                }
+            } else {
+                await publishWidgetSnapshot(
+                    ledger: payload,
+                    contextURL: contextURL,
+                    valuationCurrency: payload.valuationCurrency,
+                    generation: generation,
+                    localRevisionID: nil
+                )
+            }
             prefetchAnalysis()
         }
     }

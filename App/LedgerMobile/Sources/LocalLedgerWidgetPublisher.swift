@@ -78,7 +78,8 @@ enum LocalLedgerWidgetPublisher {
         let revision = try await repository.workspace.currentRevision()
         try Task.checkCancellation()
         guard revision?.id == prepared.revisionID, isAuthorized() else { return false }
-        return try store.saveIfNewer(prepared.snapshot, attemptedAt: prepared.attemptedAt)
+        return try store.saveIfNewer(prepared.snapshot, attemptedAt: prepared.attemptedAt,
+            revisionID: prepared.revisionID)
     }
 
     @MainActor
@@ -90,8 +91,30 @@ enum LocalLedgerWidgetPublisher {
         now: Date = Date(),
         isAuthorized: @MainActor () -> Bool
     ) async throws -> Bool {
-        guard isAuthorized() else { return false }
+        try await refreshReportingChange(repository: repository, valuationCurrency: valuationCurrency,
+            store: store, now: now, isAuthorized: isAuthorized).changed
+    }
+
+    /// Same as `refresh`, but also reports whether the stored snapshot actually
+    /// changed. Automatic sync runs this every few minutes; when the ledger
+    /// revision and day are unchanged the rebuilt snapshot is identical, and
+    /// reloading widget timelines for identical content wakes every widget for
+    /// nothing.
+    @MainActor
+    @discardableResult
+    static func refreshReportingChange(
+        repository: LocalLedgerRepository,
+        valuationCurrency: String,
+        store: LedgerWidgetSnapshotStore = .shared,
+        now: Date = Date(),
+        isAuthorized: @MainActor () -> Bool
+    ) async throws -> (published: Bool, changed: Bool) {
+        guard isAuthorized() else { return (false, false) }
         let prepared = try await prepare(repository: repository, valuationCurrency: valuationCurrency, now: now)
-        return try await publish(prepared, repository: repository, store: store, isAuthorized: isAuthorized)
+        let previous = store.load()
+        let published = try await publish(prepared, repository: repository, store: store, isAuthorized: isAuthorized)
+        guard published else { return (false, false) }
+        let changed = previous != prepared.snapshot
+        return (true, changed)
     }
 }
