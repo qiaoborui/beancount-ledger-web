@@ -653,21 +653,22 @@ struct TerminalAssetsReport: View {
     @State private var monthEnd = true
     @State private var showsHistory = false
 
-    private var balances: [AccountBalance] {
-        data.accountBalances.filter { $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:") }
-    }
-    private var valuations: [String: Int] {
-        Dictionary(grouping: balances.filter { $0.valuationMissing != true }, by: \.account)
-            .mapValues { $0.reduce(0) { $0 + $1.valuation } }
-    }
-    private var assets: Int { valuations.filter { $0.key.hasPrefix("Assets:") }.values.reduce(0, +) }
-    private var debt: Int { valuations.filter { $0.key.hasPrefix("Liabilities:") }.values.reduce(0) { $0 + abs($1) } }
-    private var missing: Bool { balances.contains { $0.valuationMissing == true } }
+    /// One derived index per `data`, not one per accessor. `balances`,
+    /// `valuations`, `accountNames` and the per-account row lookup are all read
+    /// during a single body evaluation, and `accountRow` used to scan every
+    /// balance for every account — O(accounts x balances).
+    private var index: TerminalAssetsIndex { TerminalAssetsIndex.index(for: data) }
+
+    private var balances: [AccountBalance] { index.balances }
+    private var valuations: [String: Int] { index.valuations }
+    private var assets: Int { index.assets }
+    private var debt: Int { index.debt }
+    private var missing: Bool { index.missing }
     private var currency: String { data.valuationCurrency }
     private var points: [LedgerNetWorthPoint] {
         monthEnd && !data.monthEndNetWorth.isEmpty ? data.monthEndNetWorth : data.netWorthHistory
     }
-    private var accountNames: [String] { Array(Set(balances.map(\.account))).sorted() }
+    private var accountNames: [String] { index.accountNames }
     private var labels: [String: String] { TransactionCategoryPresentation.accountLabels(data.accounts) }
 
     var body: some View {
@@ -986,7 +987,7 @@ struct TerminalAssetsReport: View {
     // MARK: Account detail / currency rows
 
     private func accountRow(_ account: String) -> some View {
-        let rows = balances.filter { $0.account == account }
+        let rows = index.balancesByAccount[account] ?? []
         let unavailable = rows.contains { $0.valuationMissing == true }
         let periodAvailable = rows.allSatisfy { $0.periodAvailable == true && $0.periodValuationMissing != true && $0.periodValuationChange != nil }
         return VStack(alignment: .leading, spacing: 3) {
