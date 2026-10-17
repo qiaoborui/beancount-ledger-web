@@ -2228,6 +2228,7 @@ final class LedgerSession: ObservableObject {
         guard !keys.contains(where: { transactionMutations[$0]?.phase.blocksFurtherWrites == true }) else {
             throw LedgerTransactionMutationError.alreadyInProgress
         }
+        var pendingStates = transactionMutationStates
         for original in originals {
             let key = Self.transactionMutationKey(original.source)
             try beginTransactionMutation(
@@ -2238,9 +2239,16 @@ final class LedgerSession: ObservableObject {
                     projected: original.projecting(addingTags: tags),
                     kind: .addTags(tags),
                     phase: .pending
-                )
+                ),
+                publishing: false
             )
+            pendingStates[key] = .pending
         }
+        if isLocal {
+            resetLocalTransactionWindow()
+            invalidateOverviewCategories()
+        }
+        if pendingStates != transactionMutationStates { transactionMutationStates = pendingStates }
 
         do {
             try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
@@ -2397,26 +2405,44 @@ final class LedgerSession: ObservableObject {
         key: String,
         mutation: LedgerTransactionMutation
     ) throws {
+        try beginTransactionMutation(key: key, mutation: mutation, publishing: true)
+    }
+
+    /// `publishing: false` lets a bulk caller register every row first and then
+    /// invalidate the derived reads once. Resetting the window per row made a
+    /// 200-row tag operation rebuild the list and overview 200 times.
+    private func beginTransactionMutation(
+        key: String,
+        mutation: LedgerTransactionMutation,
+        publishing: Bool
+    ) throws {
         if transactionMutations[key]?.phase.blocksFurtherWrites == true {
             throw LedgerTransactionMutationError.alreadyInProgress
         }
-        if isLocal {
+        if publishing, isLocal {
             resetLocalTransactionWindow()
             invalidateOverviewCategories()
         }
         transactionMutations[key] = mutation
-        transactionMutationStates[key] = .pending
+        if publishing {
+            transactionMutationStates[key] = .pending
+        }
     }
 
     private func confirmTransactionMutations(keys: [String], operationID: UUID,
         receipt: LocalLedgerRepository.TransactionCommitReceipt? = nil) {
+        // Publishing per key would invalidate every observing view once per row
+        // and flap the `contains(.pending)` request keys that gate list, search
+        // and account reads. Mutate a copy, then publish once.
+        var states = transactionMutationStates
         for key in keys {
             guard var mutation = transactionMutations[key], mutation.operationID == operationID else { continue }
             mutation.phase = .confirmed
             mutation.commitReceipt = receipt
             transactionMutations[key] = mutation
-            transactionMutationStates[key] = .confirmed
+            states[key] = .confirmed
         }
+        if states != transactionMutationStates { transactionMutationStates = states }
         if receipt != nil { retirePublishedLocalCommitReceipts() }
     }
 
@@ -2433,11 +2459,14 @@ final class LedgerSession: ObservableObject {
             return key
         }
         guard !keys.isEmpty else { return }
+        let retired = Set(keys)
+        var states = transactionMutationStates
         for key in keys {
             transactionMutations.removeValue(forKey: key)
-            transactionMutationStates.removeValue(forKey: key)
-            transactionMutationAliases = transactionMutationAliases.filter { $0.value != key }
+            states.removeValue(forKey: key)
         }
+        transactionMutationAliases = transactionMutationAliases.filter { !retired.contains($0.value) }
+        if states != transactionMutationStates { transactionMutationStates = states }
         // A legacy all-history cache may still contain a cross-month original.
         // Do not expose it when its overlay is retired; local search owns bounded
         // fresh reads and explicit legacy consumers may reload if needed.
@@ -2448,12 +2477,14 @@ final class LedgerSession: ObservableObject {
 
     private func failTransactionMutations(keys: [String], operationID: UUID, error: Error) {
         let message = error.localizedDescription
+        var states = transactionMutationStates
         for key in keys {
             guard var mutation = transactionMutations[key], mutation.operationID == operationID else { continue }
             mutation.phase = .failed(message)
             transactionMutations[key] = mutation
-            transactionMutationStates[key] = .failed(message)
+            states[key] = .failed(message)
         }
+        if states != transactionMutationStates { transactionMutationStates = states }
     }
 
     private func projectedTransaction(_ transaction: LedgerTransaction) -> LedgerTransaction {
@@ -4751,6 +4782,7 @@ final class LedgerSession: ObservableObject {
         }
         localTransactionActionID = nil // Consume BEFORE begin resets the window generation.
         let operationID = UUID()
+        var pendingStates = transactionMutationStates
         for original in action.originals {
             let projected: LedgerTransaction
             switch mutation {
@@ -4758,10 +4790,20 @@ final class LedgerSession: ObservableObject {
             case .delete: projected = original
             case .addTags(let tags): projected = original.projecting(addingTags: tags)
             }
-            try beginTransactionMutation(key: Self.transactionMutationKey(original.source),
+            let key = Self.transactionMutationKey(original.source)
+            try beginTransactionMutation(key: key,
                 mutation: LedgerTransactionMutation(operationID: operationID, original: original,
-                    projected: projected, kind: mutation, phase: .pending))
+                    projected: projected, kind: mutation, phase: .pending),
+                publishing: false)
+            pendingStates[key] = .pending
         }
+        // Invalidate and publish once for the whole batch. Doing it per row made a
+        // 200-row tag operation rebuild the window and overview 200 times.
+        if isLocal {
+            resetLocalTransactionWindow()
+            invalidateOverviewCategories()
+        }
+        if pendingStates != transactionMutationStates { transactionMutationStates = pendingStates }
         do {
             let receipt: LocalLedgerRepository.TransactionCommitReceipt = try await performSensitiveRequest(validatesRequestGeneration: false) { _ in
                 // Never use mutable presentedRevisionID as the authority for this action.
