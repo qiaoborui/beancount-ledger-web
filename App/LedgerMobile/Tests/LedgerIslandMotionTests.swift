@@ -8,6 +8,29 @@ struct LedgerIslandMotionTests {
         LedgerIslandNotice(type: type, title: "Coffee", amountText: "-¥38.00", iconName: "cup.and.saucer.fill", iconColorHex: 0xFF9F0A)
     }
 
+    /// The island is drawn inside `TimelineView(.animation)`, which re-evaluates
+    /// at display refresh rate. Under Reduce Motion every effect is constant, and
+    /// after the choreography ends nothing changes, so both cases must stop
+    /// requesting frames instead of ticking for the whole 4-5 s window.
+    @Test("Frames are requested only while an effect can still change")
+    func frameGating() {
+        let entry = LedgerIslandStageEntry(notice: notice(), start: 100,
+            timeline: LedgerIslandTimeline(isImport: false, interrupting: false), compactWidth: 120)
+        let now = Date.timeIntervalSinceReferenceDate
+
+        // Mid-flight with motion allowed: the island is animating.
+        #expect(LedgerIslandFrameGate.needsFrames(entry: entry, reduceMotion: false, now: entry.start + 0.5))
+        // Same instant under Reduce Motion: every effect is a constant.
+        #expect(!LedgerIslandFrameGate.needsFrames(entry: entry, reduceMotion: true, now: entry.start + 0.5))
+        // Past the end of the choreography: settled, nothing left to animate.
+        #expect(!LedgerIslandFrameGate.needsFrames(entry: entry, reduceMotion: false,
+            now: entry.start + entry.timeline.end + 0.01))
+        // A live entry keeps animating right up to its end.
+        #expect(LedgerIslandFrameGate.needsFrames(entry: entry, reduceMotion: false,
+            now: entry.start + entry.timeline.end - 0.01))
+        _ = now
+    }
+
     @Test("Springs settle on their target")
     func springConverges() {
         for damping in [0.6, 0.82, 1.0] {
