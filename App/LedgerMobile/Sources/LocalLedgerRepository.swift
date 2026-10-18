@@ -1210,9 +1210,8 @@ private struct BootstrapPresentationCache: Sendable {
     func load(revisionID: UUID, query: [String: String]) -> Restored? {
         // The workspace has checked its managed root and current generation.
         // Cache failures are misses, so damaged or unsupported data is rebuilt.
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              attributes[.type] as? FileAttributeType == .typeRegular,
-              let size = attributes[.size] as? NSNumber, size.intValue <= Self.maximumBytes,
+        guard let stat = try? PosixStat.at(url), stat.isRegularFile,
+              stat.size <= Self.maximumBytes,
               let data = try? Data(contentsOf: url),
               let record = try? JSONDecoder().decode(Record.self, from: data),
               record.formatVersion == Self.formatVersion,
@@ -1225,9 +1224,8 @@ private struct BootstrapPresentationCache: Sendable {
     }
 
     func loadPage(revisionID: UUID, query: [String: String]) -> LocalBootstrapPage? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              attributes[.type] as? FileAttributeType == .typeRegular,
-              let size = attributes[.size] as? NSNumber, size.intValue <= Self.maximumBytes,
+        guard let stat = try? PosixStat.at(url), stat.isRegularFile,
+              stat.size <= Self.maximumBytes,
               let data = try? Data(contentsOf: url),
               let record = try? JSONDecoder().decode(Record.self, from: data),
               record.formatVersion == Self.formatVersion,
@@ -1241,9 +1239,8 @@ private struct BootstrapPresentationCache: Sendable {
     }
 
     func loadOverview(revisionID: UUID, query: [String: String]) -> LedgerOverviewCategories? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              attributes[.type] as? FileAttributeType == .typeRegular,
-              let size = attributes[.size] as? NSNumber, size.intValue <= Self.maximumBytes,
+        guard let stat = try? PosixStat.at(url), stat.isRegularFile,
+              stat.size <= Self.maximumBytes,
               let data = try? Data(contentsOf: url),
               let record = try? JSONDecoder().decode(Record.self, from: data),
               record.formatVersion == Self.formatVersion,
@@ -1258,8 +1255,7 @@ private struct BootstrapPresentationCache: Sendable {
 
     func save(_ payload: Data, revisionID: UUID, query: [String: String]) {
         guard payload.count <= Self.maximumBytes else { return }
-        if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-           attributes[.type] as? FileAttributeType != .typeRegular { return }
+        if let stat = try? PosixStat.at(url), !stat.isRegularFile { return }
         let record = Record(formatVersion: Self.formatVersion, applicationVersion: Self.applicationVersion,
             ledgerID: ledgerID, revisionID: revisionID, entrypoint: entrypoint, query: query, payload: payload)
         guard let data = try? JSONEncoder().encode(record), data.count <= Self.maximumBytes else { return }
