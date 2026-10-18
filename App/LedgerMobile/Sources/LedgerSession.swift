@@ -2369,7 +2369,7 @@ final class LedgerSession: ObservableObject {
     }
 
     var visibleGlobalTransactions: [LedgerTransaction] {
-        globalTransactions.filter { !isConfirmedDeletion($0.source) }.map(projectedTransaction)
+        projected(globalTransactions)
     }
 
     private func knownTransaction(_ source: TransactionSource) -> LedgerTransaction? {
@@ -2378,7 +2378,20 @@ final class LedgerSession: ObservableObject {
     }
 
     var visibleTransactions: [LedgerTransaction] {
-        (ledger?.transactions ?? []).filter { !isConfirmedDeletion($0.source) }.map(projectedTransaction)
+        projected(ledger?.transactions ?? [])
+    }
+
+    /// Filters confirmed deletions and applies pending/confirmed overlays.
+    ///
+    /// Both steps key off `transactionMutationKey`, which builds a string per
+    /// row. When nothing is deleted or mutated — the overwhelmingly common case
+    /// — the input is returned untouched instead of allocating a copy and
+    /// rebuilding every key.
+    private func projected(_ transactions: [LedgerTransaction]) -> [LedgerTransaction] {
+        guard !transactionMutations.isEmpty || !transactionMutationStates.isEmpty else { return transactions }
+        return transactions
+            .filter { !isConfirmedDeletion($0.source) }
+            .map(projectedTransaction)
     }
 
     func visibleTransaction(matching source: TransactionSource) -> LedgerTransaction? {
@@ -3562,6 +3575,11 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    /// Fast enough to feel immediate for a short index, capped so a stalled one
+    /// does not keep the radio busy.
+    private static let importIndexPollInitialInterval = Duration.milliseconds(500)
+    private static let importIndexPollMaximumInterval = Duration.seconds(8)
+
     private func beginImportIndexPolling(
         providerLabel: String,
         entryCount: Int,
@@ -3582,6 +3600,10 @@ final class LedgerSession: ObservableObject {
             }
             guard !Task.isCancelled, self.importIndexGeneration == trackingGeneration else { return }
             var attempts = 0
+            // Poll quickly at first so a short index is reported promptly, then
+            // back off. A fixed one-second cadence spent up to 600 requests over
+            // ten minutes on an index that was not moving.
+            var interval = Self.importIndexPollInitialInterval
             while !Task.isCancelled, attempts < 600 {
                 attempts += 1
                 let info = try? await self.indexInfo(targetGitSHA: targetGitSHA)
@@ -3606,7 +3628,8 @@ final class LedgerSession: ObservableObject {
                 if attempts.isMultiple(of: 20) {
                     await self.importIndexActivity.updateIndexing()
                 }
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: interval)
+                interval = min(interval * 2, Self.importIndexPollMaximumInterval)
             }
             if self.importIndexGeneration == trackingGeneration {
                 self.importIndexTask = nil

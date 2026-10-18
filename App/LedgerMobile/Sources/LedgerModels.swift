@@ -1377,6 +1377,86 @@ struct LedgerAssetsAnalysis: Equatable, Sendable {
     let valuationCurrency: String
 }
 
+/// Derived balances for the assets report.
+///
+/// The report reads the same grouped totals from `assets`, `debt`, `missing`,
+/// `accountNames` and one `accountRow` per account during a single body
+/// evaluation. Recomputing the filter and grouping on each access cost several
+/// passes over every balance per render, and the per-account row lookup made it
+/// quadratic. This computes everything once per `data`.
+struct TerminalAssetsIndex: Equatable {
+    let balances: [AccountBalance]
+    let valuations: [String: Int]
+    let balancesByAccount: [String: [AccountBalance]]
+    let accountNames: [String]
+    let assets: Int
+    let debt: Int
+    let missing: Bool
+
+    private final class Cache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entry: (data: LedgerAssetsAnalysis, index: TerminalAssetsIndex)?
+
+        func index(for data: LedgerAssetsAnalysis) -> TerminalAssetsIndex {
+            lock.lock()
+            if let cached = entry, cached.data == data {
+                let index = cached.index
+                lock.unlock()
+                return index
+            }
+            lock.unlock()
+
+            let index = TerminalAssetsIndex(data: data)
+
+            lock.lock()
+            entry = (data, index)
+            lock.unlock()
+            return index
+        }
+    }
+
+    private static let cache = Cache()
+
+    static func index(for data: LedgerAssetsAnalysis) -> TerminalAssetsIndex {
+        cache.index(for: data)
+    }
+
+    private init(data: LedgerAssetsAnalysis) {
+        let filtered = data.accountBalances.filter {
+            $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:")
+        }
+        balances = filtered
+
+        var grouped: [String: [AccountBalance]] = [:]
+        var values: [String: Int] = [:]
+        var assetTotal = 0
+        var debtTotal = 0
+        var hasMissing = false
+        for balance in filtered {
+            grouped[balance.account, default: []].append(balance)
+            if balance.valuationMissing == true {
+                hasMissing = true
+            } else {
+                values[balance.account, default: 0] += balance.valuation
+            }
+        }
+        balancesByAccount = grouped
+        valuations = values
+        missing = hasMissing
+
+        for (account, value) in values {
+            if account.hasPrefix("Assets:") {
+                assetTotal += value
+            } else if account.hasPrefix("Liabilities:") {
+                debtTotal += abs(value)
+            }
+        }
+        assets = assetTotal
+        debt = debtTotal
+        accountNames = grouped.keys.sorted()
+    }
+}
+
 struct LedgerIncomeExpenseAnalysis: Equatable, Sendable {
     let dashboard: LedgerDashboard
     let statement: LedgerIncomeStatement
@@ -2679,6 +2759,32 @@ enum EventTagCalculator {
         )
     }
 
+    /// Memoizes the last aggregation.
+    ///
+    /// `EventTagViews`, `AnalysisViews` and `TerminalAnalysisViews` all call
+    /// `summarizeAllTags` from computed properties inside view bodies, so an
+    /// unrelated publish recomputes the whole scan. The result depends only on
+    /// the transactions and labels, so the last pair is kept.
+    private final class SummaryCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entry: (transactions: [LedgerTransaction], labels: [String: String], summaries: [EventTagSummary])?
+
+        func summaries(for transactions: [LedgerTransaction], labels: [String: String]) -> [EventTagSummary]? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let entry, entry.labels == labels, entry.transactions == transactions else { return nil }
+            return entry.summaries
+        }
+
+        func store(_ summaries: [EventTagSummary], for transactions: [LedgerTransaction], labels: [String: String]) {
+            lock.lock()
+            entry = (transactions, labels, summaries)
+            lock.unlock()
+        }
+    }
+
+    private static let summaryCache = SummaryCache()
+
     /// Aggregates every tag in a single pass over `transactions`.
     ///
     /// The previous shape called `generateReport` once per distinct tag, and each
@@ -2694,6 +2800,7 @@ enum EventTagCalculator {
         from transactions: [LedgerTransaction],
         accountLabels: [String: String] = [:]
     ) -> [EventTagSummary] {
+        if let cached = summaryCache.summaries(for: transactions, labels: accountLabels) { return cached }
         struct Accumulator {
             var transactionCount = 0
             var totalExpense = 0
@@ -2776,7 +2883,7 @@ enum EventTagCalculator {
 
         // Tags previously came from a `Set`, so ties resolved differently on
         // every launch. Break them on the tag name to keep the list stable.
-        return summaries.sorted {
+        let sorted = summaries.sorted {
             if let e1 = $0.endDate, let e2 = $1.endDate, e1 != e2 {
                 return e1 > e2
             }
@@ -2785,6 +2892,8 @@ enum EventTagCalculator {
             }
             return $0.tag < $1.tag
         }
+        summaryCache.store(sorted, for: transactions, labels: accountLabels)
+        return sorted
     }
 }
 
