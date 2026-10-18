@@ -7,18 +7,51 @@ enum MoneyText {
         case compact
     }
 
-    static func format(minorUnits: Int, currency: String, showSign: Bool = false, showsCurrency: Bool = true) -> String {
+    /// Formatters are expensive to build (locale + currency tables). Creating one
+    /// per formatted amount meant ~3 allocations per visible row on every scroll
+    /// pass. Cache by the four properties that actually vary.
+    private struct FormatterKey: Hashable {
+        let currency: String
+        let showsCurrency: Bool
+        let showSign: Bool
+    }
+
+    private final class FormatterBox {
+        let formatter: NumberFormatter
+        init(formatter: NumberFormatter) { self.formatter = formatter }
+    }
+
+    private static let formatterLock = NSLock()
+    nonisolated(unsafe) private static var formatterCache: [FormatterKey: FormatterBox] = [:]
+
+    /// `NumberFormatter` is not safe for concurrent use, and `format` is called from
+    /// renders, exports and tests. The lock both guards the cache and serialises the
+    /// formatting call, so a cached formatter can never be entered twice at once.
+    private static func currencyFormatter(currency: String, showsCurrency: Bool, showSign: Bool) -> NumberFormatter {
+        let key = FormatterKey(currency: currency, showsCurrency: showsCurrency, showSign: showSign)
+        if let cached = formatterCache[key] { return cached.formatter }
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.currencyCode = currency.isEmpty ? "CNY" : currency
+        formatter.currencyCode = currency
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.usesGroupingSeparator = true
         if !showsCurrency { formatter.currencySymbol = "" }
         if showSign {
             formatter.positivePrefix = "+" + (formatter.positivePrefix ?? "")
         }
+        // Cap growth so unusual currencies cannot leak formatters.
+        if formatterCache.count >= 16 { formatterCache.removeAll(keepingCapacity: true) }
+        formatterCache[key] = FormatterBox(formatter: formatter)
+        return formatter
+    }
+
+    static func format(minorUnits: Int, currency: String, showSign: Bool = false, showsCurrency: Bool = true) -> String {
+        let code = currency.isEmpty ? "CNY" : currency
         let value = NSDecimalNumber(value: Double(minorUnits) / 100)
-        return formatter.string(from: value)?.trimmingCharacters(in: .whitespaces) ?? "\(currency) \(value)"
+        formatterLock.lock()
+        defer { formatterLock.unlock() }
+        let formatter = currencyFormatter(currency: code, showsCurrency: showsCurrency, showSign: showSign)
+        return formatter.string(from: value)?.trimmingCharacters(in: .whitespaces) ?? "\(code) \(value)"
     }
 
     static func formatCompact(minorUnits: Int, currency: String, showSign: Bool = false) -> String {

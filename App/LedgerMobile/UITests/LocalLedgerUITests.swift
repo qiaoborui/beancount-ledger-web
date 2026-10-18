@@ -30,7 +30,7 @@ final class LocalLedgerUITests: XCTestCase {
         #endif
     }
 
-    func test292TransactionsPageThroughListButtons() throws {
+    func test292TransactionsScrollLoadsEveryRowWithoutJumping() throws {
         #if targetEnvironment(simulator)
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -45,35 +45,48 @@ final class LocalLedgerUITests: XCTestCase {
         app.tabBars.buttons["流水"].tap()
         if !app.textFields["transaction-quick-search"].waitForExistence(timeout: 3) { app.tabBars.buttons["流水"].tap() }
         XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 10), app.debugDescription)
-        let next = app.buttons["transaction-window-next"]
-        XCTAssertTrue(next.waitForExistence(timeout: 10))
         func capture(_ name: String) {
             let attachment = XCTAttachment(screenshot: app.screenshot())
             attachment.name = name
             attachment.lifetime = .keepAlways
             add(attachment)
         }
-        XCTAssertTrue(app.staticTexts["第 1 页"].exists)
-        XCTAssertTrue(next.isHittable)
-        capture("transactions-first-page")
-        // Scroll away from the top; the pager stays reachable and flips return to the filter.
-        app.swipeUp()
-        app.swipeUp()
-        XCTAssertTrue(next.isHittable)
-        next.tap()
-        XCTAssertTrue(app.staticTexts["第 2 页"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(app.buttons["全部"].isHittable)
-        next.tap()
-        XCTAssertTrue(app.staticTexts["第 3 页"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertFalse(next.isEnabled)
-        XCTAssertTrue(app.staticTexts["共 292 笔 · 本页 92 笔"].exists)
-        capture("transactions-third-page")
-        let previous = app.buttons["transaction-window-previous"]
-        previous.tap()
-        XCTAssertTrue(app.staticTexts["第 2 页"].waitForExistence(timeout: 10))
-        previous.tap()
-        XCTAssertTrue(app.staticTexts["第 1 页"].waitForExistence(timeout: 10))
-        XCTAssertFalse(previous.isEnabled)
+        func firstRow() -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'transaction-row-'")).firstMatch
+        }
+        func lastRow() -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'transaction-row-'")).element(boundBy: 0)
+        }
+
+        XCTAssertTrue(app.staticTexts["全部账户 · 292 笔"].exists)
+        capture("transactions-scroll-start")
+        let topRowID = firstRow().identifier
+        XCTAssertEqual(topRowID, "transaction-row-4", app.debugDescription)
+
+        // Scroll forward. The footer fetches the next window as it appears, so rows
+        // must keep growing (101, 201, ...) and the list must end on "已全部加载".
+        let footnote = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "已全部加载")).firstMatch
+        var sawSecondWindow = false
+        for _ in 0..<90 where !footnote.exists {
+            app.swipeUp(velocity: .fast)
+            if app.staticTexts["Pagination 101"].exists || firstRow().label.contains("Pagination 1") {
+                sawSecondWindow = true
+            }
+        }
+        XCTAssertTrue(footnote.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertTrue(sawSecondWindow, "Scrolling must append the next window instead of replacing rows")
+        capture("transactions-scroll-end")
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Pagination 292")).firstMatch.exists)
+        XCTAssertFalse(app.buttons["transaction-load-more"].exists)
+
+        // The appended windows are cumulative: scrolling back reaches the original
+        // first row rather than a reshuffled list.
+        for _ in 0..<90 {
+            if firstRow().identifier == topRowID { break }
+            app.swipeDown(velocity: .fast)
+        }
+        XCTAssertEqual(firstRow().identifier, topRowID, app.debugDescription)
+
         app.buttons["transaction-actions"].tap()
         let sync = app.buttons["transaction-storage"]
         XCTAssertTrue(sync.waitForExistence(timeout: 3), app.debugDescription)
@@ -82,13 +95,9 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["完成"].tap()
         app.buttons["transaction-actions"].tap()
         app.buttons["transaction-tag-selection"].tap()
-        XCTAssertTrue(next.isHittable)
-        next.tap()
-        XCTAssertTrue(app.staticTexts["第 2 页"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'transaction-select-row-'")).firstMatch.waitForExistence(timeout: 5))
         app.buttons["完成多选"].tap()
-        previous.tap()
-        XCTAssertTrue(app.staticTexts["第 1 页"].waitForExistence(timeout: 10))
-        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'transaction-row-'")).firstMatch
+        let row = firstRow()
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
         XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 5))
@@ -315,11 +324,12 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Synthetic action edited"].firstMatch.waitForExistence(timeout: 15))
         app.navigationBars["#synthetic-reviewed"].buttons.element(boundBy: 0).tap()
         app.open(URL(string: "ledger://accounts?account=Assets%3ABank&currency=CNY")!)
-        let historyPage = app.staticTexts["account-history-page"]
-        XCTAssertTrue(historyPage.waitForExistence(timeout: 20), app.debugDescription)
-        XCTAssertEqual(historyPage.label, "第 1 页")
-        XCTAssertFalse(app.buttons["account-history-previous"].isEnabled)
-        XCTAssertFalse(app.buttons["account-history-next"].isEnabled)
+        // Account history is an infinite-scroll list now: the row count reports what
+        // has been appended, and there are no page buttons to enable or disable.
+        let historyRows = app.staticTexts.containing(NSPredicate(format: "label ENDSWITH %@", " 笔")).firstMatch
+        XCTAssertTrue(historyRows.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertFalse(app.buttons["account-history-previous"].exists)
+        XCTAssertFalse(app.buttons["account-history-page"].exists)
         let trend = app.descendants(matching: .any)["account-balance-trend-chart"]
         XCTAssertTrue(trend.waitForExistence(timeout: 20), app.debugDescription)
         app.buttons["校对余额"].firstMatch.tap()
@@ -333,7 +343,7 @@ final class LocalLedgerUITests: XCTestCase {
         accountRow.tap()
         XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 10))
         app.navigationBars["交易详情"].buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(historyPage.waitForExistence(timeout: 15))
+        XCTAssertTrue(historyRows.waitForExistence(timeout: 15))
         app.tabBars.buttons["流水"].tap()
         XCTAssertTrue(editedRow.waitForExistence(timeout: 15))
         let date = DateFormatter()
