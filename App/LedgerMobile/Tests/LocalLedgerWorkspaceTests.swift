@@ -33,6 +33,32 @@ final class LocalLedgerWorkspaceTests: XCTestCase {
         ))
     }
 
+    /// `prepareLayout()` runs from every `currentRevision()`, and a paged read
+    /// calls that once per page. It used to re-verify all three directories each
+    /// time (three `lstat` + three `setAttributes`). Verification now happens
+    /// once, so removing the managed `staging` directory behind the workspace's
+    /// back must not be silently recreated on the next read — proving the check
+    /// is skipped — while a fresh workspace still prepares normally.
+    func testLayoutVerificationIsPerformedOncePerWorkspace() async throws {
+        let fixture = try fixture()
+        _ = try await fixture.workspace.create()
+
+        let staging = fixture.workspace.rootDirectory.appendingPathComponent("staging", isDirectory: true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staging.path))
+        try FileManager.default.removeItem(at: staging)
+
+        // Reads keep working against the prepared layout without re-creating it.
+        _ = try await fixture.workspace.currentRevision()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staging.path),
+            "layout verification must not run again on every read")
+
+        // A new workspace over the same root performs its own verification.
+        let reopened = LocalLedgerWorkspace(rootDirectory: fixture.workspace.rootDirectory)
+        _ = try await reopened.currentRevision()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staging.path),
+            "a fresh workspace must still prepare the layout")
+    }
+
     func testPublishedGenerationDiscardsStagedImportRuntime() async throws {
         let fixture = try fixture()
         let original = try await fixture.workspace.create()

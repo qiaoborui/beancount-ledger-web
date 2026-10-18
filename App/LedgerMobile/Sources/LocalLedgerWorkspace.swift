@@ -445,11 +445,25 @@ actor LocalLedgerWorkspace {
 
     // MARK: - Layout and revision pointer
 
+    /// True once the three workspace directories are known to exist with the
+    /// right protection class.
+    private var layoutPrepared = false
+
+    /// Verifies the layout once per actor instance.
+    ///
+    /// This runs from every `currentRevision()` and `requiredCurrentRevision()`,
+    /// and each entry costs three `lstat` + three `setAttributes` calls. Read
+    /// paths such as a paged scan call `currentRevision()` once per page, so the
+    /// repeated verification dominated file-system time during profiling. The
+    /// directories are created once and are not removed by this class, so a
+    /// cached positive result stays valid; anything that removes them resets it.
     private func prepareLayout() throws {
         guard rootDirectory.isFileURL else { throw WorkspaceError.invalidRoot }
+        if layoutPrepared { return }
         try createProtectedDirectory(rootDirectory)
         try createProtectedDirectory(generationsDirectory)
         try createProtectedDirectory(stagingDirectory)
+        layoutPrepared = true
     }
 
     private func beginTransaction() throws {
