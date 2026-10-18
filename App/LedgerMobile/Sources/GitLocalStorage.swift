@@ -198,9 +198,13 @@ actor GitLocalStorage: LogicalLocalStorage {
         try saveState(state)
         discardAttempt(previousAttempt)
         if !matchesRemote {
+            // `merge.files` already holds a complete `StorageTree`, so the push
+            // does not need to read and hash the workspace again.
+            let merged = merge.files
             let newCommit = try await workspace.withCurrentSnapshot { current, root in
                 guard current.id == published.id else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
-                return try await self.commitAndPush(root: root, parent: remoteCommit, credential: credential)
+                return try await self.commitAndPush(root: root, parent: remoteCommit,
+                    credential: credential, preloaded: merged)
             }
             state.baseCommit = newCommit
             state.syncedRevisionID = published.id
@@ -257,7 +261,10 @@ actor GitLocalStorage: LogicalLocalStorage {
         return destination
     }
 
-    private func commitAndPush(root: URL, parent: String, credential: LocalGitCredential?) async throws -> String {
+    /// `preloaded` avoids a second full read+hash of `root` when the caller
+    /// already materialized it for the merge.
+    private func commitAndPush(root: URL, parent: String, credential: LocalGitCredential?,
+                               preloaded: [String: StorageTree.File]? = nil) async throws -> String {
         // Imported folders can retain their original .git metadata locally.
         // Construct a dedicated immutable Git tree containing only ledger files if .git exists.
         let hasGitMetadata = FileManager.default.fileExists(atPath: root.appendingPathComponent(".git").path)
@@ -266,7 +273,8 @@ actor GitLocalStorage: LogicalLocalStorage {
         if hasGitMetadata {
             let snapshot = attemptsRoot.appendingPathComponent("push-" + UUID().uuidString, isDirectory: true)
             try FileManager.default.createDirectory(at: snapshot, withIntermediateDirectories: true)
-            try StorageTree.materialize(StorageTree.read(root), in: snapshot)
+            let tree = try preloaded ?? StorageTree.read(root)
+            try StorageTree.materialize(tree, in: snapshot)
             directoryToCommit = snapshot.path
             tempSnapshot = snapshot
         } else {
@@ -469,6 +477,9 @@ private enum StorageTree {
         }
         return Merge(files: merged, conflicts: Array(Set(conflicts)).sorted())
     }
+    /// Copies a tree that was already read. Copying needs only each file's source
+    /// URL and executable bit, so a caller that already holds a `StorageTree`
+    /// must not re-hash every ledger file to rebuild one.
     static func materialize(_ files: [String: File], in stage: URL) throws {
         var directories = Set<String>(), bytes = 0
         for (path, file) in files {
