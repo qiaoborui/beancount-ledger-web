@@ -30,6 +30,32 @@ final class LocalCanonicalStreamCacheTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: output), try Data(contentsOf: source))
     }
 
+    /// A hit re-hashes the whole stream, and `contains` + `restore` did it twice
+    /// per request. The result is now remembered against the file identity, so a
+    /// stream rewritten behind the cache's back must still be rejected.
+    func testRewrittenStreamInvalidatesRememberedVerification() throws {
+        let root = try makeRoot()
+        let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
+        let (source, descriptor) = try stream("{\"type\":\"header\"}\n", in: root)
+        cache.store(source, sourceVersion: version, descriptor: descriptor)
+        XCTAssertTrue(cache.contains(version), "first verification passes")
+        XCTAssertTrue(cache.contains(version), "repeat verification reuses the remembered result")
+
+        // Replace the cached stream with different bytes of the same length.
+        let cachedStream = root.appendingPathComponent("canonical-cache", isDirectory: true)
+            .appendingPathComponent("build-a", isDirectory: true)
+            .appendingPathComponent(version + ".records")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cachedStream.path))
+        let original = try Data(contentsOf: cachedStream)
+        var tampered = original
+        tampered[tampered.count - 1] = tampered[tampered.count - 1] &+ 1
+        try tampered.write(to: cachedStream)
+
+        let stillContains = cache.contains(version)
+        XCTAssertFalse(stillContains,
+            "a rewritten stream must not inherit the remembered verification (got \(stillContains))")
+    }
+
     func testRejectsStreamWhoseSizeDisagreesWithDescriptor() throws {
         let root = try makeRoot()
         let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")

@@ -1,5 +1,12 @@
 import Foundation
 
+/// Money formatting for every visible amount.
+///
+/// `NumberFormatter` construction is roughly 18× more expensive than a format
+/// call, and these helpers sit on the transaction-list and analysis hot paths.
+/// Every formatter is therefore built once per configuration and reused. The
+/// caches are bounded and guarded because SwiftUI may format from more than one
+/// thread during layout and snapshot work.
 enum MoneyText {
     enum DisplayMode {
         case full
@@ -7,51 +14,91 @@ enum MoneyText {
         case compact
     }
 
-    /// Formatters are expensive to build (locale + currency tables). Creating one
-    /// per formatted amount meant ~3 allocations per visible row on every scroll
-    /// pass. Cache by the four properties that actually vary.
-    private struct FormatterKey: Hashable {
-        let currency: String
+    /// Formatter caches. `FormatterStore` owns the mutable state so the Swift 6
+    /// concurrency checker sees a single immutable reference.
+    private static let store = FormatterStore()
+
+    private final class FormatterStore: @unchecked Sendable {
+        private let lock = NSLock()
+        private var currencyFormatters: [CurrencyFormatterKey: NumberFormatter] = [:]
+        private var compactFormatters: [CompactFormatterKey: NumberFormatter] = [:]
+        private var symbolFormatters: [String: String] = [:]
+
+        func currency(for key: CurrencyFormatterKey, build: () -> NumberFormatter) -> NumberFormatter {
+            lock.lock()
+            if let cached = currencyFormatters[key] { lock.unlock(); return cached }
+            lock.unlock()
+
+            let formatter = build()
+
+            lock.lock()
+            defer { lock.unlock() }
+            if let existing = currencyFormatters[key] { return existing }
+            if currencyFormatters.count >= MoneyText.capacity { currencyFormatters.removeAll(keepingCapacity: true) }
+            currencyFormatters[key] = formatter
+            return formatter
+        }
+
+        func compact(maximumFractionDigits: Int, build: () -> NumberFormatter) -> NumberFormatter {
+            let key = CompactFormatterKey(maximumFractionDigits: maximumFractionDigits)
+            lock.lock()
+            if let cached = compactFormatters[key] { lock.unlock(); return cached }
+            lock.unlock()
+
+            let formatter = build()
+
+            lock.lock()
+            defer { lock.unlock() }
+            if let existing = compactFormatters[key] { return existing }
+            if compactFormatters.count >= MoneyText.capacity { compactFormatters.removeAll(keepingCapacity: true) }
+            compactFormatters[key] = formatter
+            return formatter
+        }
+
+        func symbol(for currency: String, build: () -> String) -> String {
+            lock.lock()
+            if let cached = symbolFormatters[currency] { lock.unlock(); return cached }
+            lock.unlock()
+
+            let resolved = build()
+
+            lock.lock()
+            defer { lock.unlock() }
+            if symbolFormatters.count >= MoneyText.capacity { symbolFormatters.removeAll(keepingCapacity: true) }
+            symbolFormatters[currency] = resolved
+            return resolved
+        }
+    }
+
+    /// Currency formatting configuration. Every field that changes the
+    /// formatter's output must appear here, otherwise a cached formatter would
+    /// be reused for a different rendering.
+    private struct CurrencyFormatterKey: Hashable {
+        let currencyCode: String
         let showsCurrency: Bool
         let showSign: Bool
+        let maximumFractionDigits: Int?
     }
 
-    private final class FormatterBox {
-        let formatter: NumberFormatter
-        init(formatter: NumberFormatter) { self.formatter = formatter }
+    private struct CompactFormatterKey: Hashable {
+        let maximumFractionDigits: Int
     }
 
-    private static let formatterLock = NSLock()
-    nonisolated(unsafe) private static var formatterCache: [FormatterKey: FormatterBox] = [:]
-
-    /// `NumberFormatter` is not safe for concurrent use, and `format` is called from
-    /// renders, exports and tests. The lock both guards the cache and serialises the
-    /// formatting call, so a cached formatter can never be entered twice at once.
-    private static func currencyFormatter(currency: String, showsCurrency: Bool, showSign: Bool) -> NumberFormatter {
-        let key = FormatterKey(currency: currency, showsCurrency: showsCurrency, showSign: showSign)
-        if let cached = formatterCache[key] { return cached.formatter }
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currency
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.usesGroupingSeparator = true
-        if !showsCurrency { formatter.currencySymbol = "" }
-        if showSign {
-            formatter.positivePrefix = "+" + (formatter.positivePrefix ?? "")
-        }
-        // Cap growth so unusual currencies cannot leak formatters.
-        if formatterCache.count >= 16 { formatterCache.removeAll(keepingCapacity: true) }
-        formatterCache[key] = FormatterBox(formatter: formatter)
-        return formatter
-    }
+    /// Keeps the caches small. A ledger has a handful of currencies, so this is
+    /// only a guard against pathological input.
+    private static let capacity = 64
 
     static func format(minorUnits: Int, currency: String, showSign: Bool = false, showsCurrency: Bool = true) -> String {
-        let code = currency.isEmpty ? "CNY" : currency
+        let currencyCode = currency.isEmpty ? "CNY" : currency
+        let key = CurrencyFormatterKey(
+            currencyCode: currencyCode,
+            showsCurrency: showsCurrency,
+            showSign: showSign,
+            maximumFractionDigits: nil
+        )
+        let formatter = currencyFormatter(for: key)
         let value = NSDecimalNumber(value: Double(minorUnits) / 100)
-        formatterLock.lock()
-        defer { formatterLock.unlock() }
-        let formatter = currencyFormatter(currency: code, showsCurrency: showsCurrency, showSign: showSign)
-        return formatter.string(from: value)?.trimmingCharacters(in: .whitespaces) ?? "\(code) \(value)"
+        return formatter.string(from: value)?.trimmingCharacters(in: .whitespaces) ?? "\(currency) \(value)"
     }
 
     static func formatCompact(minorUnits: Int, currency: String, showSign: Bool = false) -> String {
@@ -82,12 +129,7 @@ enum MoneyText {
             return format(minorUnits: minorUnits, currency: currencyCode, showSign: showSign)
         }
 
-        let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 1
-        formatter.roundingMode = .halfUp
+        let formatter = compactFormatter(maximumFractionDigits: 1)
         let compactValue = absoluteValue / unit.divisor
         let number = formatter.string(from: NSNumber(value: compactValue)) ?? String(format: "%.1f", compactValue)
         let sign = value < 0 ? "-" : showSign ? "+" : ""
@@ -100,13 +142,14 @@ enum MoneyText {
         let full = format(minorUnits: minorUnits, currency: currencyCode)
         guard compact == full else { return compact }
 
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currencyCode
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.usesGroupingSeparator = true
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = abs(Double(minorUnits)) < 10_000 ? 2 : 0
+        let maximumFractionDigits = abs(Double(minorUnits)) < 10_000 ? 2 : 0
+        let key = CurrencyFormatterKey(
+            currencyCode: currencyCode,
+            showsCurrency: true,
+            showSign: false,
+            maximumFractionDigits: maximumFractionDigits
+        )
+        let formatter = currencyFormatter(for: key)
         return formatter.string(from: NSDecimalNumber(value: Double(minorUnits) / 100)) ?? full
     }
 
@@ -124,11 +167,47 @@ enum MoneyText {
             "HKD": "HK$",
         ]
         if let symbol = commonSymbols[currency] { return symbol }
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currency
-        formatter.locale = Locale(identifier: "zh_CN")
-        let symbol = formatter.currencySymbol ?? currency
-        return symbol == currency ? "\(currency) " : symbol
+
+        return store.symbol(for: currency) {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .currency
+            formatter.currencyCode = currency
+            formatter.locale = Locale(identifier: "zh_CN")
+            let symbol = formatter.currencySymbol ?? currency
+            return symbol == currency ? "\(currency) " : symbol
+        }
+    }
+
+    // MARK: - Formatter caches
+
+    private static func currencyFormatter(for key: CurrencyFormatterKey) -> NumberFormatter {
+        store.currency(for: key) {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .currency
+            formatter.currencyCode = key.currencyCode
+            formatter.locale = Locale(identifier: "zh_CN")
+            formatter.usesGroupingSeparator = true
+            if !key.showsCurrency { formatter.currencySymbol = "" }
+            if key.showSign {
+                formatter.positivePrefix = "+" + (formatter.positivePrefix ?? "")
+            }
+            if let maximumFractionDigits = key.maximumFractionDigits {
+                formatter.minimumFractionDigits = 0
+                formatter.maximumFractionDigits = maximumFractionDigits
+            }
+            return formatter
+        }
+    }
+
+    private static func compactFormatter(maximumFractionDigits: Int) -> NumberFormatter {
+        store.compact(maximumFractionDigits: maximumFractionDigits) {
+            let formatter = NumberFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.numberStyle = .decimal
+            formatter.minimumFractionDigits = 0
+            formatter.maximumFractionDigits = maximumFractionDigits
+            formatter.roundingMode = .halfUp
+            return formatter
+        }
     }
 }

@@ -236,14 +236,56 @@ private func assetVisual(for account: String, label: String, group: String? = ni
     return ("wallet.bifold.fill", LedgerPalette.cobalt)
 }
 
+/// Sums the valued balance of every account.
+///
+/// The assets screen reads the same grouped totals from five different computed
+/// properties during one body evaluation. Rebuilding the grouping each time cost
+/// six passes over every balance per render; this keeps one entry per distinct
+/// `balances` array.
+private enum AssetsValuationIndex {
+    private final class Cache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entry: (balances: [AccountBalance], values: [String: Int])?
+
+        func values(for balances: [AccountBalance]) -> [String: Int] {
+            lock.lock()
+            if let cached = entry, cached.balances == balances {
+                let values = cached.values
+                lock.unlock()
+                return values
+            }
+            lock.unlock()
+
+            var grouped: [String: Int] = [:]
+            for balance in balances where balance.valuationMissing != true {
+                grouped[balance.account, default: 0] += balance.valuation
+            }
+
+            lock.lock()
+            entry = (balances, grouped)
+            lock.unlock()
+            return grouped
+        }
+    }
+
+    private static let cache = Cache()
+
+    static func index(for balances: [AccountBalance]) -> [String: Int] {
+        cache.values(for: balances)
+    }
+}
+
 private struct AssetsAnalysisContent: View {
     let data: LedgerAssetsAnalysis
 
     @State private var trendMode = AssetTrendMode.daily
 
+    /// Built once per `data`. `assets`, `liabilities`, `assetAccountsList`,
+    /// `liabilitiesAccountsList` and `allocationList` all read this during a
+    /// single body evaluation, so the previous computed property grouped every
+    /// balance about six times per render.
     private var valuations: [String: Int] {
-        Dictionary(grouping: data.accountBalances.filter { $0.valuationMissing != true }, by: \.account)
-            .mapValues { $0.reduce(0) { $0 + $1.valuation } }
+        AssetsValuationIndex.index(for: data.accountBalances)
     }
 
     private var assets: Int {

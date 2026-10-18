@@ -71,6 +71,19 @@ struct LedgerIslandSpringTrack: Equatable, Sendable {
 }
 
 /// Per-notice choreography in seconds from the notice's start.
+/// Decides whether the island still needs animation frames.
+///
+/// The island renders inside `TimelineView(.animation)`, which re-evaluates at
+/// display refresh rate. Under Reduce Motion every effect is a constant, so no
+/// frame can change anything; and once `timeline.end` has passed the content is
+/// settled. Both cases previously kept ticking for the whole 4-5 s window.
+enum LedgerIslandFrameGate {
+    static func needsFrames(entry: LedgerIslandStageEntry, reduceMotion: Bool, now: Double) -> Bool {
+        if reduceMotion { return false }
+        return now < entry.start + entry.timeline.end
+    }
+}
+
 struct LedgerIslandTimeline: Equatable, Sendable {
     let contentIn: Double
     let ringStart: Double

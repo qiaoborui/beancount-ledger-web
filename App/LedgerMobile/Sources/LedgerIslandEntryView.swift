@@ -99,6 +99,15 @@ final class LedgerIslandPresenter: ObservableObject {
 
     var isActive: Bool { stage?.current != nil }
 
+    /// True only while an effect still changes with time. Once every entry has
+    /// settled the timeline can stop; a `TimelineView(.animation)` that stays
+    /// unpaused re-evaluates the island at display refresh rate for nothing.
+    var needsFrames: Bool {
+        guard let stage, let entry = stage.current else { return false }
+        return LedgerIslandFrameGate.needsFrames(entry: entry, reduceMotion: stage.reduceMotion,
+            now: Date.timeIntervalSinceReferenceDate)
+    }
+
     func present(_ notice: LedgerIslandNotice, containerWidth: Double, reduceMotion: Bool, pill: CGSize) {
         let now = Date.timeIntervalSinceReferenceDate
         // Only a mid-flight stage is kept, so its springs carry their velocity.
@@ -161,7 +170,7 @@ struct LedgerIslandStageView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: nil, paused: !presenter.isActive)) { context in
+        TimelineView(.animation(minimumInterval: nil, paused: !presenter.needsFrames)) { context in
             if let stage = presenter.stage {
                 island(stage, now: context.date.timeIntervalSinceReferenceDate)
             }

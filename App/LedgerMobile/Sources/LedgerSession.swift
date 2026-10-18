@@ -1339,16 +1339,35 @@ final class LedgerSession: ObservableObject {
             guard epoch == sessionEpoch, allowsAutomaticSync(active) else { return .paused }
             if location == .local(active.id) { localSyncStatus = status }
             let origin = URL(string: "ledger-local://" + active.id.uuidString.lowercased())!
-            let published = try await LocalLedgerWidgetPublisher.refresh(repository: current,
-                valuationCurrency: storedValuationCurrency(for: origin), store: widgetSnapshotStore, now: ledgerNow()) {
-                    !Task.isCancelled && self.sessionEpoch == epoch && self.allowsAutomaticSync(active)
+            // Rebuilding the widget costs five reports plus a Keychain read, and
+            // this runs on every periodic tick. Skip it only when the stored
+            // snapshot provably already describes the revision we are on: the
+            // ledger did not move, so every widget window would be identical.
+            // The fetch above still runs, so remote changes are never missed.
+            let currentRevisionID = try await current.workspace.currentRevision()?.id
+            let alreadyPublished = currentRevisionID != nil
+                && currentRevisionID == widgetSnapshotStore.publishedRevision()
+            var published = true
+            if alreadyPublished {
+                published = widgetSnapshotStore.load() != nil
+            } else {
+                let publication = try await LocalLedgerWidgetPublisher.refreshReportingChange(repository: current,
+                    valuationCurrency: storedValuationCurrency(for: origin), store: widgetSnapshotStore, now: ledgerNow()) {
+                        !Task.isCancelled && self.sessionEpoch == epoch && self.allowsAutomaticSync(active)
+                    }
+                published = publication.published
+                if publication.changed {
+                    #if canImport(WidgetKit)
+                    WidgetCenter.shared.reloadAllTimelines()
+                    #endif
                 }
-            if published {
-                #if canImport(WidgetKit)
-                WidgetCenter.shared.reloadAllTimelines()
-                #endif
             }
-            if !background, epoch == sessionEpoch, phase == .ready, applicationActive {
+            // Only reload the presented ledger when the exchange actually moved
+            // it. The periodic path runs this every few minutes; refreshing an
+            // unchanged ledger rebuilt the whole bootstrap and every projection.
+            let movedCommit = status.baseCommit != previous.baseCommit
+            let changed = status.phase == .pending || movedCommit
+            if changed, !background, epoch == sessionEpoch, phase == .ready, applicationActive {
                 await refresh()
             }
             guard !Task.isCancelled, epoch == sessionEpoch else { return .retryableFailure }
@@ -2221,6 +2240,7 @@ final class LedgerSession: ObservableObject {
         guard !keys.contains(where: { transactionMutations[$0]?.phase.blocksFurtherWrites == true }) else {
             throw LedgerTransactionMutationError.alreadyInProgress
         }
+        var pendingStates = transactionMutationStates
         for original in originals {
             let key = Self.transactionMutationKey(original.source)
             try beginTransactionMutation(
@@ -2231,9 +2251,16 @@ final class LedgerSession: ObservableObject {
                     projected: original.projecting(addingTags: tags),
                     kind: .addTags(tags),
                     phase: .pending
-                )
+                ),
+                publishing: false
             )
+            pendingStates[key] = .pending
         }
+        if isLocal {
+            resetLocalTransactionWindow()
+            invalidateOverviewCategories()
+        }
+        if pendingStates != transactionMutationStates { transactionMutationStates = pendingStates }
 
         do {
             try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
@@ -2354,7 +2381,7 @@ final class LedgerSession: ObservableObject {
     }
 
     var visibleGlobalTransactions: [LedgerTransaction] {
-        globalTransactions.filter { !isConfirmedDeletion($0.source) }.map(projectedTransaction)
+        projected(globalTransactions)
     }
 
     private func knownTransaction(_ source: TransactionSource) -> LedgerTransaction? {
@@ -2363,7 +2390,20 @@ final class LedgerSession: ObservableObject {
     }
 
     var visibleTransactions: [LedgerTransaction] {
-        (ledger?.transactions ?? []).filter { !isConfirmedDeletion($0.source) }.map(projectedTransaction)
+        projected(ledger?.transactions ?? [])
+    }
+
+    /// Filters confirmed deletions and applies pending/confirmed overlays.
+    ///
+    /// Both steps key off `transactionMutationKey`, which builds a string per
+    /// row. When nothing is deleted or mutated — the overwhelmingly common case
+    /// — the input is returned untouched instead of allocating a copy and
+    /// rebuilding every key.
+    private func projected(_ transactions: [LedgerTransaction]) -> [LedgerTransaction] {
+        guard !transactionMutations.isEmpty || !transactionMutationStates.isEmpty else { return transactions }
+        return transactions
+            .filter { !isConfirmedDeletion($0.source) }
+            .map(projectedTransaction)
     }
 
     func visibleTransaction(matching source: TransactionSource) -> LedgerTransaction? {
@@ -2390,26 +2430,44 @@ final class LedgerSession: ObservableObject {
         key: String,
         mutation: LedgerTransactionMutation
     ) throws {
+        try beginTransactionMutation(key: key, mutation: mutation, publishing: true)
+    }
+
+    /// `publishing: false` lets a bulk caller register every row first and then
+    /// invalidate the derived reads once. Resetting the window per row made a
+    /// 200-row tag operation rebuild the list and overview 200 times.
+    private func beginTransactionMutation(
+        key: String,
+        mutation: LedgerTransactionMutation,
+        publishing: Bool
+    ) throws {
         if transactionMutations[key]?.phase.blocksFurtherWrites == true {
             throw LedgerTransactionMutationError.alreadyInProgress
         }
-        if isLocal {
+        if publishing, isLocal {
             resetLocalTransactionWindow()
             invalidateOverviewCategories()
         }
         transactionMutations[key] = mutation
-        transactionMutationStates[key] = .pending
+        if publishing {
+            transactionMutationStates[key] = .pending
+        }
     }
 
     private func confirmTransactionMutations(keys: [String], operationID: UUID,
         receipt: LocalLedgerRepository.TransactionCommitReceipt? = nil) {
+        // Publishing per key would invalidate every observing view once per row
+        // and flap the `contains(.pending)` request keys that gate list, search
+        // and account reads. Mutate a copy, then publish once.
+        var states = transactionMutationStates
         for key in keys {
             guard var mutation = transactionMutations[key], mutation.operationID == operationID else { continue }
             mutation.phase = .confirmed
             mutation.commitReceipt = receipt
             transactionMutations[key] = mutation
-            transactionMutationStates[key] = .confirmed
+            states[key] = .confirmed
         }
+        if states != transactionMutationStates { transactionMutationStates = states }
         if receipt != nil { retirePublishedLocalCommitReceipts() }
     }
 
@@ -2426,11 +2484,14 @@ final class LedgerSession: ObservableObject {
             return key
         }
         guard !keys.isEmpty else { return }
+        let retired = Set(keys)
+        var states = transactionMutationStates
         for key in keys {
             transactionMutations.removeValue(forKey: key)
-            transactionMutationStates.removeValue(forKey: key)
-            transactionMutationAliases = transactionMutationAliases.filter { $0.value != key }
+            states.removeValue(forKey: key)
         }
+        transactionMutationAliases = transactionMutationAliases.filter { !retired.contains($0.value) }
+        if states != transactionMutationStates { transactionMutationStates = states }
         // A legacy all-history cache may still contain a cross-month original.
         // Do not expose it when its overlay is retired; local search owns bounded
         // fresh reads and explicit legacy consumers may reload if needed.
@@ -2441,12 +2502,14 @@ final class LedgerSession: ObservableObject {
 
     private func failTransactionMutations(keys: [String], operationID: UUID, error: Error) {
         let message = error.localizedDescription
+        var states = transactionMutationStates
         for key in keys {
             guard var mutation = transactionMutations[key], mutation.operationID == operationID else { continue }
             mutation.phase = .failed(message)
             transactionMutations[key] = mutation
-            transactionMutationStates[key] = .failed(message)
+            states[key] = .failed(message)
         }
+        if states != transactionMutationStates { transactionMutationStates = states }
     }
 
     private func projectedTransaction(_ transaction: LedgerTransaction) -> LedgerTransaction {
@@ -3495,16 +3558,39 @@ final class LedgerSession: ObservableObject {
         } else {
             if local != nil { await refreshLocalOverviewCategories() }
             guard generation == requestGeneration else { return }
-            await publishWidgetSnapshot(
-                ledger: payload,
-                contextURL: contextURL,
-                valuationCurrency: payload.valuationCurrency,
-                generation: generation,
-                localRevisionID: local == nil ? nil : presentationRevision
-            )
+            if local != nil {
+                // A local ledger can publish its widget snapshot off the critical
+                // path: the snapshot is derived from the same generation that is
+                // already displayed. Awaiting it here made every cold launch and
+                // every unlock wait on five reports plus a Keychain read before
+                // `loadLedger` returned.
+                let epoch = sessionEpoch, expectedLocation = location
+                Task(priority: .utility) { @MainActor [weak self] in
+                    await Task.yield()
+                    guard let self, generation == self.requestGeneration,
+                          epoch == self.sessionEpoch, expectedLocation == self.location,
+                          self.phase == .ready else { return }
+                    await self.publishWidgetSnapshot(ledger: payload, contextURL: contextURL,
+                        valuationCurrency: payload.valuationCurrency, generation: generation,
+                        localRevisionID: presentationRevision)
+                }
+            } else {
+                await publishWidgetSnapshot(
+                    ledger: payload,
+                    contextURL: contextURL,
+                    valuationCurrency: payload.valuationCurrency,
+                    generation: generation,
+                    localRevisionID: nil
+                )
+            }
             prefetchAnalysis()
         }
     }
+
+    /// Fast enough to feel immediate for a short index, capped so a stalled one
+    /// does not keep the radio busy.
+    private static let importIndexPollInitialInterval = Duration.milliseconds(500)
+    private static let importIndexPollMaximumInterval = Duration.seconds(8)
 
     private func beginImportIndexPolling(
         providerLabel: String,
@@ -3526,6 +3612,10 @@ final class LedgerSession: ObservableObject {
             }
             guard !Task.isCancelled, self.importIndexGeneration == trackingGeneration else { return }
             var attempts = 0
+            // Poll quickly at first so a short index is reported promptly, then
+            // back off. A fixed one-second cadence spent up to 600 requests over
+            // ten minutes on an index that was not moving.
+            var interval = Self.importIndexPollInitialInterval
             while !Task.isCancelled, attempts < 600 {
                 attempts += 1
                 let info = try? await self.indexInfo(targetGitSHA: targetGitSHA)
@@ -3550,7 +3640,8 @@ final class LedgerSession: ObservableObject {
                 if attempts.isMultiple(of: 20) {
                     await self.importIndexActivity.updateIndexing()
                 }
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: interval)
+                interval = min(interval * 2, Self.importIndexPollMaximumInterval)
             }
             if self.importIndexGeneration == trackingGeneration {
                 self.importIndexTask = nil
@@ -4750,6 +4841,7 @@ final class LedgerSession: ObservableObject {
         }
         localTransactionActionID = nil // Consume BEFORE begin resets the window generation.
         let operationID = UUID()
+        var pendingStates = transactionMutationStates
         for original in action.originals {
             let projected: LedgerTransaction
             switch mutation {
@@ -4757,10 +4849,20 @@ final class LedgerSession: ObservableObject {
             case .delete: projected = original
             case .addTags(let tags): projected = original.projecting(addingTags: tags)
             }
-            try beginTransactionMutation(key: Self.transactionMutationKey(original.source),
+            let key = Self.transactionMutationKey(original.source)
+            try beginTransactionMutation(key: key,
                 mutation: LedgerTransactionMutation(operationID: operationID, original: original,
-                    projected: projected, kind: mutation, phase: .pending))
+                    projected: projected, kind: mutation, phase: .pending),
+                publishing: false)
+            pendingStates[key] = .pending
         }
+        // Invalidate and publish once for the whole batch. Doing it per row made a
+        // 200-row tag operation rebuild the window and overview 200 times.
+        if isLocal {
+            resetLocalTransactionWindow()
+            invalidateOverviewCategories()
+        }
+        if pendingStates != transactionMutationStates { transactionMutationStates = pendingStates }
         do {
             let receipt: LocalLedgerRepository.TransactionCommitReceipt = try await performSensitiveRequest(validatesRequestGeneration: false) { _ in
                 // Never use mutable presentedRevisionID as the authority for this action.

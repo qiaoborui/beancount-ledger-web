@@ -312,6 +312,25 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         }
     }
 
+    /// A bulk tag operation registers every row before committing. Resetting the
+    /// window and overview per row made a 200-row tag rebuild the list 200 times,
+    /// and each reset bumps the search invalidation that gates ten readers.
+    func testBulkTagBatchInvalidatesDerivedReadsOnce() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.enableSuccessfulOtherWrites()
+        let sources = (1...2).map { actionSource($0) }
+        let action = try await session.prepareLocalTransactionAction(sources: sources, kind: .addTags)
+        let before = session.localGlobalSearchInvalidation
+        try await session.addLocalTransactionTags(action: action, tags: ["batched"])
+        // One reset for the batch, not one per row.
+        XCTAssertEqual(session.localGlobalSearchInvalidation, before + 1,
+            "a batch of \(sources.count) rows must invalidate derived reads once")
+        for original in action.originals {
+            XCTAssertNotEqual(session.transactionMutationPhase(for: original), .pending)
+        }
+    }
+
     func testPreparedActionRevokedByResetPrivacyRangeAndCancellation() async throws {
         for revocation in ["reset", "privacy", "range", "cancel", "choose"] {
             let (session, _, repository) = try await fixture()

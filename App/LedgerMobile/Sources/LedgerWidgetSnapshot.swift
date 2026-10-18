@@ -211,6 +211,11 @@ struct LedgerWidgetSnapshotStore: Sendable {
     static let appGroupIdentifier = LedgerSharedAccess.current.appGroupIdentifier
     static let snapshotKey = "ledger.widgets.snapshot.v1"
     static let snapshotAttemptKey = "ledger.widgets.snapshot-attempt.v1"
+    /// Ledger revision the stored snapshot was built from. Automatic sync reads
+    /// this to skip rebuilding five identical reports on a periodic tick. It is
+    /// written next to the snapshot but never read by the widget extension, so
+    /// it cannot change what a widget renders.
+    static let snapshotRevisionKey = "ledger.widgets.snapshot-revision.v1"
     static let shared = LedgerWidgetSnapshotStore()
 
     let suiteName: String
@@ -223,6 +228,14 @@ struct LedgerWidgetSnapshotStore: Sendable {
 
     func load() -> LedgerWidgetSnapshot? { loadState().snapshot }
 
+    /// Revision the currently stored snapshot was built from, if known.
+    func publishedRevision() -> UUID? {
+        (try? coordinator.withLock {
+            guard let defaults else { return nil }
+            return defaults.string(forKey: Self.snapshotRevisionKey).flatMap(UUID.init(uuidString:))
+        }) ?? nil
+    }
+
     func loadState() -> LedgerWidgetSnapshotState {
         (try? coordinator.withLock {
             guard let defaults else { return LedgerWidgetSnapshotState(snapshot: nil, attemptedAt: nil) }
@@ -234,12 +247,21 @@ struct LedgerWidgetSnapshotStore: Sendable {
         }) ?? LedgerWidgetSnapshotState(snapshot: nil, attemptedAt: nil)
     }
 
-    func save(_ snapshot: LedgerWidgetSnapshot) throws {
+    func save(_ snapshot: LedgerWidgetSnapshot, revisionID: UUID? = nil) throws {
         try coordinator.withLock {
             guard let defaults else { throw LedgerWidgetSnapshotStoreError.unavailable }
             defaults.set(try JSONEncoder().encode(snapshot), forKey: Self.snapshotKey)
             defaults.removeObject(forKey: Self.snapshotAttemptKey)
+            Self.storeRevision(revisionID, in: defaults)
             _ = defaults.synchronize()
+        }
+    }
+
+    private static func storeRevision(_ revisionID: UUID?, in defaults: UserDefaults) {
+        if let revisionID {
+            defaults.set(revisionID.uuidString, forKey: snapshotRevisionKey)
+        } else {
+            defaults.removeObject(forKey: snapshotRevisionKey)
         }
     }
 
@@ -247,6 +269,7 @@ struct LedgerWidgetSnapshotStore: Sendable {
     func saveIfNewer(
         _ snapshot: LedgerWidgetSnapshot,
         attemptedAt: Date,
+        revisionID: UUID? = nil,
         recoveringFutureState expected: LedgerWidgetSnapshotState? = nil
     ) throws -> Bool {
         try coordinator.withLock {
@@ -270,6 +293,7 @@ struct LedgerWidgetSnapshotStore: Sendable {
             }
             defaults.set(try JSONEncoder().encode(snapshot), forKey: Self.snapshotKey)
             defaults.set(attemptedAt, forKey: Self.snapshotAttemptKey)
+            Self.storeRevision(revisionID, in: defaults)
             _ = defaults.synchronize()
             return true
         }
@@ -279,6 +303,7 @@ struct LedgerWidgetSnapshotStore: Sendable {
         try? coordinator.withLock {
             defaults?.removeObject(forKey: Self.snapshotKey)
             defaults?.removeObject(forKey: Self.snapshotAttemptKey)
+            defaults?.removeObject(forKey: Self.snapshotRevisionKey)
             _ = defaults?.synchronize()
         }
     }

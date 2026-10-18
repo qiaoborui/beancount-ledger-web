@@ -1377,6 +1377,86 @@ struct LedgerAssetsAnalysis: Equatable, Sendable {
     let valuationCurrency: String
 }
 
+/// Derived balances for the assets report.
+///
+/// The report reads the same grouped totals from `assets`, `debt`, `missing`,
+/// `accountNames` and one `accountRow` per account during a single body
+/// evaluation. Recomputing the filter and grouping on each access cost several
+/// passes over every balance per render, and the per-account row lookup made it
+/// quadratic. This computes everything once per `data`.
+struct TerminalAssetsIndex: Equatable {
+    let balances: [AccountBalance]
+    let valuations: [String: Int]
+    let balancesByAccount: [String: [AccountBalance]]
+    let accountNames: [String]
+    let assets: Int
+    let debt: Int
+    let missing: Bool
+
+    private final class Cache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entry: (data: LedgerAssetsAnalysis, index: TerminalAssetsIndex)?
+
+        func index(for data: LedgerAssetsAnalysis) -> TerminalAssetsIndex {
+            lock.lock()
+            if let cached = entry, cached.data == data {
+                let index = cached.index
+                lock.unlock()
+                return index
+            }
+            lock.unlock()
+
+            let index = TerminalAssetsIndex(data: data)
+
+            lock.lock()
+            entry = (data, index)
+            lock.unlock()
+            return index
+        }
+    }
+
+    private static let cache = Cache()
+
+    static func index(for data: LedgerAssetsAnalysis) -> TerminalAssetsIndex {
+        cache.index(for: data)
+    }
+
+    private init(data: LedgerAssetsAnalysis) {
+        let filtered = data.accountBalances.filter {
+            $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:")
+        }
+        balances = filtered
+
+        var grouped: [String: [AccountBalance]] = [:]
+        var values: [String: Int] = [:]
+        var assetTotal = 0
+        var debtTotal = 0
+        var hasMissing = false
+        for balance in filtered {
+            grouped[balance.account, default: []].append(balance)
+            if balance.valuationMissing == true {
+                hasMissing = true
+            } else {
+                values[balance.account, default: 0] += balance.valuation
+            }
+        }
+        balancesByAccount = grouped
+        valuations = values
+        missing = hasMissing
+
+        for (account, value) in values {
+            if account.hasPrefix("Assets:") {
+                assetTotal += value
+            } else if account.hasPrefix("Liabilities:") {
+                debtTotal += abs(value)
+            }
+        }
+        assets = assetTotal
+        debt = debtTotal
+        accountNames = grouped.keys.sorted()
+    }
+}
+
 struct LedgerIncomeExpenseAnalysis: Equatable, Sendable {
     let dashboard: LedgerDashboard
     let statement: LedgerIncomeStatement
@@ -1896,18 +1976,23 @@ struct LedgerTransactionFilter: Equatable, Sendable {
     }
 
     func matches(_ transaction: LedgerTransaction) -> Bool {
-        let presentation = TransactionPresentation(transaction: transaction)
-        switch kind {
-        case .all:
-            break
-        case .expense where presentation.kind != .expense:
-            return false
-        case .income where presentation.kind != .income:
-            return false
-        case .transfer where presentation.kind != .transfer:
-            return false
-        default:
-            break
+        // `TransactionPresentation` walks every posting, so only build it when a
+        // kind filter is actually active. The common `.all` case used to pay for
+        // it and throw it away, on every pass over the list.
+        if kind != .all {
+            let presentation = TransactionPresentation(transaction: transaction)
+            switch kind {
+            case .all:
+                break
+            case .expense where presentation.kind != .expense:
+                return false
+            case .income where presentation.kind != .income:
+                return false
+            case .transfer where presentation.kind != .transfer:
+                return false
+            default:
+                break
+            }
         }
 
         if let account, !transaction.postings.contains(where: { $0.account == account || $0.account.hasPrefix(account + ":") }) {
@@ -1974,12 +2059,39 @@ struct TransactionCategoryPresentation: Equatable {
         }
     }
 
-    static func accountLabels(_ accounts: [LedgerAccount]) -> [String: String] {
-        accounts.reduce(into: [:]) { result, account in
-            let label = account.label.trimmingCharacters(in: .whitespacesAndNewlines)
-            result[account.account] = label.isEmpty || label == account.account
-                ? (account.alias ?? account.account) : label
+    /// Cached because callers invoke this from view bodies — several of them
+    /// inside `ForEach` closures — and a ledger can carry hundreds of accounts.
+    /// Keyed by the exact `accounts` array so any content change misses.
+    private static let accountLabelsCache = AccountLabelCache()
+
+    private final class AccountLabelCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entry: (accounts: [LedgerAccount], labels: [String: String])?
+
+        func labels(for accounts: [LedgerAccount]) -> [String: String] {
+            lock.lock()
+            if let cached = entry, cached.accounts == accounts {
+                let labels = cached.labels
+                lock.unlock()
+                return labels
+            }
+            lock.unlock()
+
+            let labels = accounts.reduce(into: [String: String]()) { result, account in
+                let label = account.label.trimmingCharacters(in: .whitespacesAndNewlines)
+                result[account.account] = label.isEmpty || label == account.account
+                    ? (account.alias ?? account.account) : label
+            }
+
+            lock.lock()
+            entry = (accounts, labels)
+            lock.unlock()
+            return labels
         }
+    }
+
+    static func accountLabels(_ accounts: [LedgerAccount]) -> [String: String] {
+        accountLabelsCache.labels(for: accounts)
     }
 }
 
@@ -2647,42 +2759,141 @@ enum EventTagCalculator {
         )
     }
 
+    /// Memoizes the last aggregation.
+    ///
+    /// `EventTagViews`, `AnalysisViews` and `TerminalAnalysisViews` all call
+    /// `summarizeAllTags` from computed properties inside view bodies, so an
+    /// unrelated publish recomputes the whole scan. The result depends only on
+    /// the transactions and labels, so the last pair is kept.
+    private final class SummaryCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entry: (transactions: [LedgerTransaction], labels: [String: String], summaries: [EventTagSummary])?
+
+        func summaries(for transactions: [LedgerTransaction], labels: [String: String]) -> [EventTagSummary]? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let entry, entry.labels == labels, entry.transactions == transactions else { return nil }
+            return entry.summaries
+        }
+
+        func store(_ summaries: [EventTagSummary], for transactions: [LedgerTransaction], labels: [String: String]) {
+            lock.lock()
+            entry = (transactions, labels, summaries)
+            lock.unlock()
+        }
+    }
+
+    private static let summaryCache = SummaryCache()
+
+    /// Aggregates every tag in a single pass over `transactions`.
+    ///
+    /// The previous shape called `generateReport` once per distinct tag, and each
+    /// call rescanned the whole transaction array. That is O(tags × transactions)
+    /// and it ran from view bodies, so it re-executed on every render. Bucketing
+    /// transaction indices in one pass makes it O(transactions + tags × log).
+    ///
+    /// The reported currency is the last non-empty expense currency in
+    /// date-descending order, which is what `generateReport` produced. It depends
+    /// on iteration order, so the matched transactions are still sorted per tag
+    /// before their currency is read.
     static func summarizeAllTags(
         from transactions: [LedgerTransaction],
         accountLabels: [String: String] = [:]
     ) -> [EventTagSummary] {
-        var tagsSet = Set<String>()
-        for tx in transactions {
-            if let tags = tx.tags {
-                for t in tags where !t.isEmpty {
-                    tagsSet.insert(t)
+        if let cached = summaryCache.summaries(for: transactions, labels: accountLabels) { return cached }
+        struct Accumulator {
+            var transactionCount = 0
+            var totalExpense = 0
+            var totalIncome = 0
+            var startDate: String?
+            var endDate: String?
+            var indices: [Int] = []
+        }
+
+        var totals: [String: Accumulator] = [:]
+
+        for (index, tx) in transactions.enumerated() {
+            guard let tags = tx.tags, !tags.isEmpty else { continue }
+
+            // Per-transaction accounting is tag-independent: compute once, reuse
+            // for every tag carried by this transaction.
+            var expense = 0
+            var income = 0
+            for posting in tx.postings {
+                if posting.account.hasPrefix("Expenses:") {
+                    expense += posting.amount
+                } else if posting.account.hasPrefix("Income:") {
+                    income += posting.amount
                 }
+            }
+            let countedIncome = income < 0 ? abs(income) : 0
+
+            // A transaction may repeat a tag; the original per-tag filter counted
+            // it once, so dedupe before accumulating.
+            var seenTags = Set<String>()
+            for tag in tags where !tag.isEmpty {
+                guard seenTags.insert(tag).inserted else { continue }
+                var entry = totals[tag] ?? Accumulator()
+                entry.transactionCount += 1
+                entry.totalExpense += expense
+                entry.totalIncome += countedIncome
+                entry.indices.append(index)
+                if entry.startDate == nil || tx.date < entry.startDate! { entry.startDate = tx.date }
+                if entry.endDate == nil || tx.date > entry.endDate! { entry.endDate = tx.date }
+                totals[tag] = entry
             }
         }
 
-        var summaries: [EventTagSummary] = []
-        for tag in tagsSet {
-            let report = generateReport(tag: tag, from: transactions, accountLabels: accountLabels)
-            summaries.append(EventTagSummary(
+        let summaries = totals.map { tag, entry -> EventTagSummary in
+            let totalExpense = max(0, entry.totalExpense)
+            let netSpend = max(0, totalExpense - entry.totalIncome)
+
+            var daysCount = 1
+            if let start = entry.startDate, let end = entry.endDate,
+               let from = LedgerDateRange.parse(start), let to = LedgerDateRange.parse(end) {
+                let difference = Calendar.current.dateComponents([.day], from: from, to: to).day ?? 0
+                daysCount = max(1, abs(difference) + 1)
+            }
+
+            // Preserve `generateReport`'s date-descending scan for the currency.
+            var currency = "CNY"
+            let ordered = entry.indices
+                .map { (date: transactions[$0].date, index: $0) }
+                .sorted { $0.date > $1.date }
+            for item in ordered {
+                for posting in transactions[item.index].postings
+                where posting.account.hasPrefix("Expenses:") {
+                    if let code = posting.currency, !code.isEmpty { currency = code }
+                }
+            }
+
+            return EventTagSummary(
                 tag: tag,
-                transactionCount: report.transactions.count,
-                totalExpense: report.totalExpense,
-                totalIncome: report.totalIncome,
-                netSpend: report.netSpend,
-                currency: report.currency,
-                startDate: report.startDate,
-                endDate: report.endDate,
-                daysCount: report.daysCount,
-                dailyAverage: report.dailyAverage
-            ))
+                transactionCount: entry.transactionCount,
+                totalExpense: totalExpense,
+                totalIncome: entry.totalIncome,
+                netSpend: netSpend,
+                currency: currency,
+                startDate: entry.startDate,
+                endDate: entry.endDate,
+                daysCount: daysCount,
+                dailyAverage: daysCount > 0 ? totalExpense / daysCount : totalExpense
+            )
         }
 
-        return summaries.sorted {
+        // Tags previously came from a `Set`, so ties resolved differently on
+        // every launch. Break them on the tag name to keep the list stable.
+        let sorted = summaries.sorted {
             if let e1 = $0.endDate, let e2 = $1.endDate, e1 != e2 {
                 return e1 > e2
             }
-            return $0.totalExpense > $1.totalExpense
+            if $0.totalExpense != $1.totalExpense {
+                return $0.totalExpense > $1.totalExpense
+            }
+            return $0.tag < $1.tag
         }
+        summaryCache.store(sorted, for: transactions, labels: accountLabels)
+        return sorted
     }
 }
 

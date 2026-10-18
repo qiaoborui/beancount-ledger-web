@@ -9,6 +9,45 @@ import Darwin
 /// atomic pointer to the active generation, so readers never observe a partial
 /// multi-file write. This type deliberately has no App Group entry point: full
 /// ledger files stay in the main application's container.
+/// POSIX metadata for one path.
+///
+/// Several call sites only need the file type, size and permission bits.
+/// `FileManager.attributesOfItem` costs about eleven times more than `lstat`
+/// because it also lists and fetches extended attributes — on iOS the file
+/// protection class lives there. Tree walks call this once per file, so the
+/// difference compounds.
+struct PosixStat {
+    let mode: mode_t
+    let size: Int
+    let modified: Date
+
+    var isDirectory: Bool { (mode & S_IFMT) == S_IFDIR }
+    var isRegularFile: Bool { (mode & S_IFMT) == S_IFREG }
+    var isSymbolicLink: Bool { (mode & S_IFMT) == S_IFLNK }
+    var isExecutable: Bool { (mode & 0o111) != 0 }
+
+    static func at(_ url: URL) throws -> PosixStat {
+        #if canImport(Darwin)
+        var status = stat()
+        guard lstat(url.path, &status) == 0 else { throw CocoaError(.fileReadUnknown) }
+        let seconds = TimeInterval(status.st_mtimespec.tv_sec)
+        let fraction = TimeInterval(status.st_mtimespec.tv_nsec) / 1_000_000_000
+        return PosixStat(mode: status.st_mode, size: Int(status.st_size),
+            modified: Date(timeIntervalSince1970: seconds + fraction))
+        #else
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0
+        let type = attributes[.type] as? FileAttributeType
+        let mode: mode_t = type == .typeDirectory ? S_IFDIR
+            : type == .typeSymbolicLink ? S_IFLNK
+            : S_IFREG
+        return PosixStat(mode: mode | mode_t(permissions),
+            size: (attributes[.size] as? NSNumber)?.intValue ?? 0,
+            modified: attributes[.modificationDate] as? Date ?? .distantPast)
+        #endif
+    }
+}
+
 actor LocalLedgerWorkspace {
     typealias Validator = @Sendable (URL) async throws -> Void
 
@@ -352,11 +391,13 @@ actor LocalLedgerWorkspace {
             expectedSourceIdentity: directoryIdentity(at: previous), requiresExternalSource: false)
         try await mutateStage(workspace)
         try Task.checkCancellation()
-        _ = try validateTree(at: workspace)
+        // Validated once here; `newPaths` below reuses this result. The tree is
+        // already final at this point, so re-walking it a second time only
+        // repeated a full stat sweep over every file.
+        let newPaths = Set(try validateTree(at: workspace))
         try await validator(workspace)
         try Task.checkCancellation()
         let oldPaths = Set(try validateTree(at: previous))
-        let newPaths = Set(try validateTree(at: workspace))
         var files: [PreparedFiles.File] = []
         var previewBytes = 0
         for path in oldPaths.union(newPaths).sorted() {
@@ -443,11 +484,25 @@ actor LocalLedgerWorkspace {
 
     // MARK: - Layout and revision pointer
 
+    /// True once the three workspace directories are known to exist with the
+    /// right protection class.
+    private var layoutPrepared = false
+
+    /// Verifies the layout once per actor instance.
+    ///
+    /// This runs from every `currentRevision()` and `requiredCurrentRevision()`,
+    /// and each entry costs three `lstat` + three `setAttributes` calls. Read
+    /// paths such as a paged scan call `currentRevision()` once per page, so the
+    /// repeated verification dominated file-system time during profiling. The
+    /// directories are created once and are not removed by this class, so a
+    /// cached positive result stays valid; anything that removes them resets it.
     private func prepareLayout() throws {
         guard rootDirectory.isFileURL else { throw WorkspaceError.invalidRoot }
+        if layoutPrepared { return }
         try createProtectedDirectory(rootDirectory)
         try createProtectedDirectory(generationsDirectory)
         try createProtectedDirectory(stagingDirectory)
+        layoutPrepared = true
     }
 
     private func beginTransaction() throws {
@@ -591,7 +646,7 @@ actor LocalLedgerWorkspace {
             default:
                 throw WorkspaceError.unsupportedItem(item.path)
             }
-            let modified = try fileManager.attributesOfItem(atPath: item.path)[.modificationDate] as? Date
+            let modified = try PosixStat.at(item).modified
             latest = max(latest, modified ?? .distantFuture)
         }
         return latest
@@ -1236,10 +1291,9 @@ actor LocalLedgerWorkspace {
                     budget: &budget
                 ))
             case .regularFile:
-                let attributes = try fileManager.attributesOfItem(atPath: item.path)
-                guard let size = attributes[.size] as? NSNumber,
-                      size.uint64Value <= UInt64(Int.max) else { throw WorkspaceError.treeLimitExceeded }
-                try budget.addBytes(size.intValue)
+                let size = try PosixStat.at(item).size
+                guard size >= 0 else { throw WorkspaceError.treeLimitExceeded }
+                try budget.addBytes(size)
                 files.append(relativePath)
             case .symbolicLink:
                 throw WorkspaceError.symbolicLink(relativePath)
@@ -1422,8 +1476,7 @@ actor LocalLedgerWorkspace {
     }
 
     private func isExecutable(_ url: URL) throws -> Bool {
-        let permissions = try fileManager.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
-        return (permissions?.intValue ?? 0) & 0o111 != 0
+        try PosixStat.at(url).isExecutable
     }
 
     private func removeIfPresent(_ url: URL) {
