@@ -5,7 +5,25 @@ struct TransactionVisualCategory: Equatable {
     let color: Color
     let categoryLabel: String
 
+    /// Memoized `resolve`. A scrolling list asks for the same row's icon, colour
+    /// and category label on every body evaluation, and the uncached path builds a
+    /// lowercased account string plus a `Color` per posting. Keyed on the row's
+    /// identity plus the label map's version, so a label edit invalidates it.
     static func resolve(
+        transaction: LedgerTransaction,
+        presentation: TransactionPresentation,
+        accountLabels: [String: String] = [:],
+        labelsVersion: Int? = nil
+    ) -> TransactionVisualCategory {
+        // Callers inside a `ForEach` hoist the version out of the closure; a caller
+        // that does not gets the memoized one, never a fresh dictionary walk.
+        let version = labelsVersion ?? TransactionCategoryPresentation.labelsVersion(accountLabels)
+        return categoryCache.value(for: transaction.id, presentation: presentation, labelsVersion: version) {
+            uncachedResolve(transaction: transaction, presentation: presentation, accountLabels: accountLabels)
+        }
+    }
+
+    private static func uncachedResolve(
         transaction: LedgerTransaction,
         presentation: TransactionPresentation,
         accountLabels: [String: String] = [:]
@@ -228,3 +246,55 @@ struct TransactionVisualCategory: Equatable {
         return TransactionVisualCategory(iconName: "cart.fill", color: Color(red: 0.95, green: 0.45, blue: 0.22), categoryLabel: displayLabel)
     }
 }
+
+/// Bounded memo for `TransactionVisualCategory.resolve`. Kept small because only
+/// the visible window is ever asked for, and cleared wholesale when it fills.
+private final class TransactionVisualCategoryCache: @unchecked Sendable {
+    struct Key: Hashable {
+        let transactionID: String
+        let labelsVersion: Int
+        let title: String
+        let subtitle: String
+        let minorUnits: Int
+        let currency: String
+        let kind: TransactionKind
+    }
+
+    private let lock = NSLock()
+    private var values: [Key: TransactionVisualCategory] = [:]
+    private let capacity = 4_096
+
+    func value(for transactionID: String, presentation: TransactionPresentation, labelsVersion: Int,
+               build: () -> TransactionVisualCategory) -> TransactionVisualCategory {
+        // Only the row identity and the label map decide the result: the icon and
+        // colour come from postings, the label from `accountLabels`. The remaining
+        // presentation fields are kept in the key so a reused id can never serve a
+        // stale icon after an edit.
+        let key = Key(transactionID: transactionID, labelsVersion: labelsVersion,
+                      title: presentation.title, subtitle: presentation.subtitle,
+                      minorUnits: presentation.minorUnits, currency: presentation.currency,
+                      kind: presentation.kind)
+        lock.lock()
+        if let cached = values[key] { lock.unlock(); return cached }
+        lock.unlock()
+
+        let resolved = build()
+
+        lock.lock()
+        defer { lock.unlock() }
+        if let existing = values[key] { return existing }
+        if values.count >= capacity { values.removeAll(keepingCapacity: true) }
+        values[key] = resolved
+        return resolved
+    }
+
+    /// Called when the underlying ledger revision changes; a stale icon or label
+    /// must never outlive the row it described.
+    func removeAll() {
+        lock.lock()
+        values.removeAll(keepingCapacity: true)
+        lock.unlock()
+    }
+}
+
+private let categoryCache = TransactionVisualCategoryCache()
