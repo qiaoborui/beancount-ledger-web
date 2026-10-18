@@ -93,11 +93,63 @@ struct LocalCanonicalStreamCache {
         }
     }
 
+    /// Identity of a cached stream file. A hit re-hashes the whole `.records`
+    /// file (13.8 ms at 32 MB) and `contains` + `restore` did it twice per
+    /// request. Cached streams are immutable once moved into place, so the
+    /// verification result is remembered against the file's identity and only
+    /// recomputed when that identity changes.
+    private struct StreamStamp: Equatable {
+        let bytes: Int
+        let modified: Date
+        let entryBytes: Int
+        let entryModified: Date
+    }
+
+    private final class VerificationCache: @unchecked Sendable {
+        private let limit = 8
+        private var entries: [String: (stamp: StreamStamp, digest: String)] = [:]
+        private var order: [String] = []
+
+        func digest(for key: String, matching stamp: StreamStamp) -> String? {
+            guard let entry = entries[key], entry.stamp == stamp else { return nil }
+            return entry.digest
+        }
+
+        func remember(_ digest: String, stamp: StreamStamp, key: String) {
+            entries[key] = (stamp, digest)
+            order.removeAll { $0 == key }
+            order.append(key)
+            while order.count > limit { entries.removeValue(forKey: order.removeFirst()) }
+        }
+    }
+
+    private static let verificationCache = VerificationCache()
+
+    private func stamp(stream: URL, entry: URL) -> StreamStamp? {
+        guard let streamValues = try? stream.resourceValues(
+                forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey, .isSymbolicLinkKey]),
+              streamValues.isRegularFile == true, streamValues.isSymbolicLink != true,
+              let streamBytes = streamValues.fileSize,
+              let streamModified = streamValues.contentModificationDate,
+              let entryValues = try? entry.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+              let entryBytes = entryValues.fileSize,
+              let entryModified = entryValues.contentModificationDate else { return nil }
+        return StreamStamp(bytes: streamBytes, modified: streamModified,
+            entryBytes: entryBytes, entryModified: entryModified)
+    }
+
     private func verified(stream: URL, entry: URL) -> Bool {
+        let key = stream.lastPathComponent
+        let current = stamp(stream: stream, entry: entry)
         guard let data = try? Data(contentsOf: entry),
               let record = try? JSONDecoder().decode(Entry.self, from: data),
-              Self.size(of: stream) == record.bytes,
-              Self.sha256(of: stream) == record.sha256 else { return false }
+              Self.size(of: stream) == record.bytes else { return false }
+        // A matching stamp proves this exact file already produced this digest.
+        if let current, Self.verificationCache.digest(for: key, matching: current) == record.sha256 {
+            return true
+        }
+        guard Self.sha256(of: stream) == record.sha256 else { return false }
+        if let current { Self.verificationCache.remember(record.sha256, stamp: current, key: key) }
         return true
     }
 
