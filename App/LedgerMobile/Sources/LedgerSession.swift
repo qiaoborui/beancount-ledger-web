@@ -244,7 +244,19 @@ final class LedgerSession: ObservableObject {
 
     // Bounded reads. These do not replace bootstrap/global arrays or grant
     // mutation authority. Only the caller of localTransactionDetail holds detail.
+    /// Rows currently shown by the scrolling list. Each fetch appends one bounded
+    /// window; the array is capped so a long scroll cannot grow without bound.
+    @Published private(set) var localTransactionAccumulatedRows: [LedgerTransaction] = []
+    /// True while another window is available from the reader.
+    var localTransactionHasMore: Bool { localTransactionWindow?.continuation != nil && !localTransactionReachedRowCap }
+    /// True once the list hit its retained-row cap; further windows are not appended.
+    @Published private(set) var localTransactionReachedRowCap = false
+    var localTransactionRows: [LedgerTransaction] {
+        guard isLocal, phase == .ready, !privacyShielded, applicationActive else { return [] }
+        return localTransactionAccumulatedRows
+    }
     @Published private(set) var localTransactionWindow: LocalTransactionWindow.Window?
+    private var localTransactionAccumulatedIDs: Set<String> = []
     var localBootstrapTransactions: [LedgerTransaction] {
         guard isLocal, phase == .ready, !privacyShielded, applicationActive,
               !isRangeLoading, !isValuationCurrencyLoading,
@@ -4013,6 +4025,9 @@ final class LedgerSession: ObservableObject {
         transactionWindowReader = nil
         transactionWindowContext = nil
         localTransactionWindow = nil
+        localTransactionAccumulatedRows = []
+        localTransactionAccumulatedIDs = []
+        localTransactionReachedRowCap = false
         isLocalTransactionWindowLoading = false
         localTransactionWindowError = nil
         if let reader { Task { await reader.invalidate() } }
@@ -4069,19 +4084,22 @@ final class LedgerSession: ObservableObject {
         await runLocalTransactionWindow(context: context, repository: repository, filter: filter, limits: limits)
     }
 
-    /// Concurrent next requests are no-ops and cannot overwrite the active read's
-    /// loading/error state. Retain exactly one published window, never append rows.
+    /// Append the next bounded window to the rows already on screen. This is the
+    /// infinite-scroll entry point: rows accumulate up to the window accumulator
+    /// cap, then the reader stops appending and reports that more remain.
+    /// Concurrent calls are no-ops and cannot overwrite the active read.
     func loadNextLocalTransactionWindow() async {
         guard !Task.isCancelled, !isLocalTransactionWindowLoading,
               localTransactionWindow?.continuation != nil,
+              localTransactionAccumulatedRows.count < Self.localTransactionRowCap,
               let context = transactionWindowContext, let repository = localRepository,
               (try? validateLocalRead(context)) != nil else { return }
         await runLocalTransactionWindow(context: context, repository: repository,
-            targetIndex: localTransactionWindowIndex + 1)
+            targetIndex: localTransactionWindowIndex + 1, append: true)
     }
 
-    /// Reload evicted windows from bounded cursor anchors, or replay from the
-    /// beginning if the anchor was evicted. Never retain previously visible rows.
+    /// Reload the previous window in place. Used when the reader is restored from a
+    /// checkpoint; scrolling lists normally only move forward.
     func loadPreviousLocalTransactionWindow() async {
         guard !Task.isCancelled, !isLocalTransactionWindowLoading,
               localTransactionWindowIndex > 0,
@@ -4133,9 +4151,13 @@ final class LedgerSession: ObservableObject {
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
     }
 
+    /// Rows kept on screen for the scrolling list, so a long scroll cannot grow the
+    /// accumulator without bound. Internal so tests can exercise the cap cheaply.
+    static var localTransactionRowCap = 1_000
+
     private func runLocalTransactionWindow(context: LocalReadContext, repository: LocalLedgerRepository,
         filter: LedgerTransactionFilter = .init(), limits: LocalTransactionWindow.Limits = .init(),
-        targetIndex: Int = 0, replay: Bool = false) async {
+        targetIndex: Int = 0, replay: Bool = false, append: Bool = false) async {
         isLocalTransactionWindowLoading = true
         localTransactionWindowError = nil
         let task = Task { @MainActor [self] in
@@ -4192,6 +4214,20 @@ final class LedgerSession: ObservableObject {
                 }
                 if let continuation = window.continuation {
                     transactionWindowAnchors.insert(continuation, for: targetIndex + 1)
+                }
+                if append {
+                    // Append the window in order. Duplicate ids cannot occur on the
+                    // normal path (strict cursor + revision checks); filtering them
+                    // only guards a retried identical window from doubling rows.
+                    for row in window.transactions where !localTransactionAccumulatedIDs.contains(row.id) {
+                        localTransactionAccumulatedRows.append(row)
+                        localTransactionAccumulatedIDs.insert(row.id)
+                    }
+                    localTransactionReachedRowCap = localTransactionAccumulatedRows.count >= Self.localTransactionRowCap
+                } else {
+                    localTransactionAccumulatedRows = window.transactions
+                    localTransactionAccumulatedIDs = Set(window.transactions.map(\.id))
+                    localTransactionReachedRowCap = false
                 }
                 localTransactionWindowIndex = targetIndex
                 localTransactionWindow = window // complete summary exists only at EOF

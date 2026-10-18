@@ -318,13 +318,17 @@ struct AccountDetailView: View {
     @State private var localWindow: LedgerSession.LocalAccountWindow?
     @State private var completeTrend: LocalAccountTrendScan.Result?
     @State private var trendError: String?
-    @State private var pageIndex = 0
     @State private var pageLoading = false
+    /// Rows appended by scrolling. `detail` always describes the accumulated page,
+    /// so the hero and row count keep matching what is on screen.
+    @State private var accumulatedRows: [LedgerAccountDetailRow] = []
+    @State private var loadedRowIDs: Set<String> = []
+    @State private var reachedRowCap = false
+    static let historyRowCap = 1_000
     @State private var trendLoading = false
     @State private var active = false
     @State private var completedRequest: AccountDetailRequestKey?
     @State private var completedTrendRequest: AccountDetailRequestKey?
-    private var displayedPage: Int { completedRequest?.page ?? 0 }
     private var displayedRange: LedgerDateRange {
         guard session.isLocal, let completedRequest else { return session.selectedRange }
         return .init(start: completedRequest.start, end: completedRequest.end, preset: .custom)
@@ -351,7 +355,7 @@ struct AccountDetailView: View {
             invalidation: session.isLocal ? session.localGlobalSearchInvalidation : 0,
             readable: session.isLocal ? readable : true,
             active: session.isLocal ? active : true,
-            page: session.isLocal ? pageIndex : 0
+            page: 0
         )
     }
 
@@ -428,8 +432,8 @@ struct AccountDetailView: View {
                 errorMessage = nil; trendError = nil
             }
         }
-        .onChange(of: session.selectedRange) { _, _ in pageIndex = 0 }
-        .onChange(of: session.localTransactionPresentationRevision) { _, _ in pageIndex = 0 }
+        .onChange(of: session.selectedRange) { _, _ in resetHistory() }
+        .onChange(of: session.localTransactionPresentationRevision) { _, _ in resetHistory() }
     }
 
     // The bootstrap already contains the account catalog and current balances.
@@ -452,6 +456,7 @@ struct AccountDetailView: View {
 
     private func detailContent(_ detail: LedgerAccountDetail) -> some View {
         let accountLabels = TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
+        let visibleRows: [LedgerAccountDetailRow] = session.isLocal && !accumulatedRows.isEmpty ? accumulatedRows : detail.rows
         return ScrollView {
             LazyVStack(spacing: LedgerSpacing.md) {
                 AccountDetailHero(
@@ -492,13 +497,13 @@ struct AccountDetailView: View {
                         .font(.system(.body, design: .default, weight: .semibold))
                         .foregroundStyle(LedgerPalette.ink)
                     Spacer()
-                    Text("\(localWindow?.page.rowCount ?? detail.rows.count) 笔")
+                    Text("\(session.isLocal && !accumulatedRows.isEmpty ? accumulatedRows.count : (localWindow?.page.rowCount ?? detail.rows.count)) 笔")
                         .font(.system(.caption2, design: .default, weight: .medium).monospacedDigit())
                         .foregroundStyle(LedgerPalette.secondary)
                 }
                 .padding(.top, LedgerSpacing.sm)
 
-                if detail.rows.isEmpty {
+                if visibleRows.isEmpty {
                     Text("这个账户暂无关联流水。")
                         .font(.system(.footnote, design: .default))
                         .foregroundStyle(LedgerPalette.secondary)
@@ -507,7 +512,7 @@ struct AccountDetailView: View {
                 } else {
                     LedgerPanel {
                         LazyVStack(spacing: 0) {
-                            ForEach(Array((session.isLocal ? detail.rows : Array(detail.rows.reversed())).enumerated()), id: \.element.id) { index, row in
+                            ForEach(Array((session.isLocal ? visibleRows : Array(detail.rows.reversed())).enumerated()), id: \.element.id) { index, row in
                                 NavigationLink {
                                     TransactionDetailView(transaction: row.transaction)
                                 } label: {
@@ -518,7 +523,7 @@ struct AccountDetailView: View {
                                 .disabled(session.isLocal && pageLoading)
                                 .accessibilityIdentifier("account-history-row-" + row.transaction.id)
 
-                                if index < detail.rows.count - 1 {
+                                if index < visibleRows.count - 1 {
                                     Divider()
                                         .overlay(LedgerPalette.line)
                                         .padding(.leading, LedgerSpacing.lg)
@@ -527,25 +532,14 @@ struct AccountDetailView: View {
                         }
                     }
                 }
-                if session.isLocal, let localWindow {
-                    HStack {
-                        Button("上一页") {
-                            let target = max(0, displayedPage - 1)
-                            if pageIndex == target { reloadToken += 1 } else { pageIndex = target }
-                        }
-                            .disabled(displayedPage == 0 || pageLoading)
-                            .accessibilityIdentifier("account-history-previous")
-                        Spacer()
-                        Text("第 \(displayedPage + 1) 页").font(.caption).foregroundStyle(.secondary)
-                            .accessibilityIdentifier("account-history-page")
-                        Spacer()
-                        Button("下一页") {
-                            let target = displayedPage + 1
-                            if pageIndex == target { reloadToken += 1 } else { pageIndex = target }
-                        }
-                            .disabled(localWindow.continuation == nil || pageLoading)
-                            .accessibilityIdentifier("account-history-next")
-                    }
+                if session.isLocal, let localWindow, localWindow.continuation != nil, !reachedRowCap {
+                    historyLoadMore
+                } else if session.isLocal, reachedRowCap {
+                    Text("已加载 \(accumulatedRows.count) 笔，缩小时间范围可以看得更远。")
+                        .font(.system(.caption, design: .default))
+                        .foregroundStyle(LedgerPalette.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, LedgerSpacing.sm)
                 }
             }
             .padding(LedgerSpacing.lg)
@@ -553,8 +547,73 @@ struct AccountDetailView: View {
             .ledgerAdaptivePageWidth()
         }
         .refreshable {
-            if session.isLocal { pageIndex = 0; reloadToken += 1 }
+            if session.isLocal { resetHistory(); reloadToken += 1 }
             else { await load(replacingContent: false) }
+        }
+    }
+
+    /// Tail of the account history. Appearing appends the next window in place, so
+    /// the reader keeps its position; tapping retries a stalled fetch.
+    private var historyLoadMore: some View {
+        let busy = pageLoading
+        return Button {
+            guard !busy else { return }
+            Task { await appendLocalPage() }
+        } label: {
+            HStack(spacing: 8) {
+                if busy {
+                    ProgressView().controlSize(.small).tint(LedgerPalette.secondary)
+                    Text("正在加载更多流水…")
+                } else {
+                    Image(systemName: "arrow.down.circle").font(.system(size: 14))
+                    Text("继续加载")
+                }
+            }
+            .font(.system(.caption, design: .default))
+            .foregroundStyle(LedgerPalette.secondary)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(busy)
+        .padding(.top, LedgerSpacing.sm)
+        .onAppear {
+            guard !busy else { return }
+            Task { await appendLocalPage() }
+        }
+        .accessibilityIdentifier("account-history-load-more")
+        .accessibilityLabel(busy ? "正在加载更多账户流水" : "继续加载更多账户流水")
+    }
+
+    private func resetHistory() {
+        accumulatedRows = []
+        loadedRowIDs = []
+        reachedRowCap = false
+    }
+
+    /// Append the next bounded page of history without replacing what is visible.
+    private func appendLocalPage() async {
+        guard active, readable, !pageLoading, let localWindow,
+              let continuation = localWindow.continuation,
+              accumulatedRows.count < Self.historyRowCap else { return }
+        let key = requestKey
+        pageLoading = true
+        errorMessage = nil
+        defer { if key == requestKey { pageLoading = false } }
+        do {
+            let window = try await session.localAccountWindow(account: account, currency: currency,
+                continuation: continuation, order: .desc)
+            guard !Task.isCancelled, key == requestKey, readable else { return }
+            for row in window.page.detail.rows where !loadedRowIDs.contains(row.id) {
+                accumulatedRows.append(row)
+                loadedRowIDs.insert(row.id)
+            }
+            reachedRowCap = accumulatedRows.count >= Self.historyRowCap
+            self.localWindow = window
+        } catch {
+            if !Task.isCancelled, key == requestKey {
+                errorMessage = error is CancellationError ? "账户读取已中断，请重新加载。" : error.localizedDescription
+            }
         }
     }
 
@@ -565,25 +624,15 @@ struct AccountDetailView: View {
         errorMessage = nil
         defer { if key == requestKey { pageLoading = false } }
         do {
-            var previous = completedRequest
-            previous?.page = key.page
-            let forward = previous == key && completedRequest?.page == key.page - 1
-                && localWindow?.continuation != nil
-            var window = try await session.localAccountWindow(account: account, currency: currency,
-                continuation: forward ? localWindow?.continuation : nil, order: .desc)
-            if key.page > 0 && !forward {
-                for index in 0..<key.page {
-                    guard let continuation = window.continuation else {
-                        if !Task.isCancelled, key == requestKey { pageIndex = index }
-                        return
-                    }
-                    window = try await session.localAccountWindow(account: account, currency: currency,
-                        continuation: continuation, order: .desc)
-                }
-            }
+            // Always load the first page of the window; further pages append from here.
+            let window = try await session.localAccountWindow(account: account, currency: currency,
+                continuation: nil, order: .desc)
             guard !Task.isCancelled, key == requestKey, readable else { return }
             localWindow = window
             detail = window.page.detail
+            accumulatedRows = window.page.detail.rows
+            loadedRowIDs = Set(window.page.detail.rows.map(\.id))
+            reachedRowCap = accumulatedRows.count >= Self.historyRowCap
             completedRequest = key
         } catch {
             if !Task.isCancelled, key == requestKey {

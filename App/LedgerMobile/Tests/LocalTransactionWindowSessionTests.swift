@@ -600,6 +600,48 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertEqual(session.localTransactionWindowIndex, 0)
     }
 
+    func testScrollingAppendsWindowsAndKeepsEarlierRows() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(292)
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 100))
+        XCTAssertEqual(session.localTransactionAccumulatedRows.map(\.source.line), Array(1...100))
+        XCTAssertTrue(session.localTransactionHasMore)
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionAccumulatedRows.map(\.source.line), Array(1...200))
+        XCTAssertEqual(session.localTransactionWindow?.transactions.map(\.source.line), Array(101...200))
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionAccumulatedRows.map(\.source.line), Array(1...292))
+        XCTAssertFalse(session.localTransactionHasMore)
+        XCTAssertFalse(session.localTransactionReachedRowCap)
+        // Reaching EOF stops the append path instead of repeating the last window.
+        await session.loadNextLocalTransactionWindow()
+        XCTAssertEqual(session.localTransactionAccumulatedRows.count, 292)
+    }
+
+    func testScrollingPastRetainedRowCapStopsFetchingAndSaysWhy() async throws {
+        let previousCap = LedgerSession.localTransactionRowCap
+        LedgerSession.localTransactionRowCap = 300
+        defer { LedgerSession.localTransactionRowCap = previousCap }
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        await engine.setRowCount(500)
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 100))
+        for _ in 0..<2 { await session.loadNextLocalTransactionWindow() }
+        XCTAssertEqual(session.localTransactionAccumulatedRows.count, 300)
+        XCTAssertTrue(session.localTransactionReachedRowCap)
+        XCTAssertFalse(session.localTransactionHasMore)
+        // The cap never truncates what is already on screen.
+        XCTAssertEqual(session.localTransactionAccumulatedRows.first?.source.line, 1)
+        XCTAssertEqual(session.localTransactionAccumulatedRows.last?.source.line, 300)
+        // The cap is a hard stop, not a retry loop: no further page is requested.
+        let requests = await engine.pageRequests.count
+        await session.loadNextLocalTransactionWindow()
+        let afterCap = await engine.pageRequests.count
+        XCTAssertEqual(afterCap, requests)
+        XCTAssertNil(session.localTransactionWindowError)
+    }
+
     func test292TransactionsTraverseAllThreePagesAndReturn() async throws {
         let (session, engine, _) = try await fixture()
         defer { session.chooseLedger() }

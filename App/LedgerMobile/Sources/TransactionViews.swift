@@ -539,7 +539,9 @@ struct TransactionsView: View {
 
     private var displayedTransactions: [LedgerTransaction] {
         if session.isLocal {
-            return (session.localTransactionWindow?.transactions ?? session.localBootstrapTransactions)
+            return (session.localTransactionAccumulatedRows.isEmpty
+                ? session.localBootstrapTransactions
+                : session.localTransactionAccumulatedRows)
                 .filter(filters.matches)
         }
         return filteredTransactions
@@ -553,7 +555,9 @@ struct TransactionsView: View {
         var kindAgnostic = filters
         kindAgnostic.kind = .all
         if session.isLocal {
-            return (session.localTransactionWindow?.transactions ?? session.localBootstrapTransactions)
+            return (session.localTransactionAccumulatedRows.isEmpty
+                ? session.localBootstrapTransactions
+                : session.localTransactionAccumulatedRows)
                 .filter(kindAgnostic.matches)
         }
         return transactions.filter(kindAgnostic.matches)
@@ -841,12 +845,22 @@ struct TransactionsView: View {
                     }
                 }
             }
-            if displayed.isEmpty && (!session.isLocal || session.localTransactionWindow?.isComplete == true) {
+            if displayed.isEmpty && (!session.isLocal || !session.localTransactionHasMore) {
                 ContentUnavailableView(
                     filters.query.isEmpty && activeStructuredFilterCount == 0 ? "所选范围暂无流水" : "没有匹配的交易",
                     systemImage: "list.bullet.rectangle",
                     description: Text("调整时间范围或搜索条件。")
                 )
+            }
+            if displayed.isEmpty && session.isLocal && session.localTransactionHasMore {
+                // The current window matched nothing but the reader still has rows to
+                // check, so keep the spinner reachable instead of stranding the list.
+                Section {
+                    infiniteScrollFooter
+                }
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             ForEach(grouped, id: \.date) { group in
                 let parts = balancedDate(group.date)
@@ -862,9 +876,13 @@ struct TransactionsView: View {
             }
             if !displayed.isEmpty {
                 Section {
-                    Text(balancedListFootnote)
-                        .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
-                        .padding(.top, 12).padding(.bottom, 20)
+                    if session.isLocal && session.localTransactionHasMore {
+                        infiniteScrollFooter
+                    } else {
+                        Text(balancedListFootnote)
+                            .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                            .padding(.top, 12).padding(.bottom, 20)
+                    }
                 }
                 .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 .listRowBackground(Color.clear)
@@ -880,59 +898,56 @@ struct TransactionsView: View {
         }
     }
 
+    /// Tail of the scrolling list. Appearing on screen appends the next bounded
+    /// window; the row is also a button so a stalled fetch has an explicit retry.
+    /// Because windows are appended (never replaced), the reading position holds.
+    private var infiniteScrollFooter: some View {
+        let loading = session.isLocalTransactionWindowLoading
+        return Button {
+            guard !loading else { return }
+            Task { await session.loadNextLocalTransactionWindow() }
+        } label: {
+            HStack(spacing: 8) {
+                if loading {
+                    ProgressView().controlSize(.small).tint(BalancedPalette.meta)
+                    Text("正在加载更多流水…")
+                } else {
+                    Image(systemName: "arrow.down.circle").font(.system(size: 14))
+                    Text("继续加载")
+                }
+            }
+            .balancedFont(size: 12)
+            .foregroundStyle(BalancedPalette.meta)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(loading)
+        .padding(.top, 6)
+        .padding(.bottom, 16)
+        .onAppear {
+            guard session.localTransactionHasMore, !session.isLocalTransactionWindowLoading else { return }
+            Task { await session.loadNextLocalTransactionWindow() }
+        }
+        .accessibilityIdentifier("transaction-load-more")
+        .accessibilityLabel(loading ? "正在加载更多流水" : "继续加载更多流水")
+    }
+
     /// `.note` under the list — the filtered tab points at the settle block
     /// above it instead of repeating the "fully loaded" footnote.
     private var balancedListFootnote: String {
         guard filters.kind == .all else { return "筛选只作用于当前区间，其余账目未被隐藏。" }
         let count = displayedTransactions.count
-        return "本页 \(count) 笔已全部加载。长按可多选，左滑显示改分类与对账。"
-    }
-
-    private var pageNavigation: some View {
-        HStack(spacing: 16) {
-            Button { Task { await session.loadPreviousLocalTransactionWindow() } } label: {
-                Image(systemName: "chevron.left").frame(width: 44, height: 44)
-            }
-            .disabled(session.localTransactionWindowIndex == 0 || session.isLocalTransactionWindowLoading)
-            .accessibilityLabel("上一页")
-            .accessibilityIdentifier("transaction-window-previous")
-            Spacer(minLength: 0)
-            VStack(spacing: 2) {
-                Text("第 \(session.localTransactionWindowIndex + 1) 页")
-                    .balancedFont(size: 13).monospacedDigit()
-                if let displayedCount {
-                    Text("共 \(displayedCount) 笔 · 本页 \(displayedTransactions.count) 笔")
-                        .balancedFont(size: 11.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
-                }
-            }
-            .lineLimit(1)
-            Spacer(minLength: 0)
-            Button { Task { await session.loadNextLocalTransactionWindow() } } label: {
-                Image(systemName: "chevron.right").frame(width: 44, height: 44)
-            }
-            .disabled(session.localTransactionWindow?.continuation == nil || session.isLocalTransactionWindowLoading)
-            .accessibilityLabel("下一页")
-            .accessibilityIdentifier("transaction-window-next")
+        if session.isLocal, session.localTransactionReachedRowCap {
+            return "已加载 \(count) 笔，收窄时间范围可以看得更远。长按可多选，左滑显示改分类与对账。"
         }
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 2)
-        .frame(maxWidth: 360)
-        .background(BalancedPalette.page, in: Capsule())
-        .overlay(Capsule().stroke(BalancedPalette.edge, lineWidth: 1))
+        return "已全部加载 \(count) 笔。长按可多选，左滑显示改分类与对账。"
     }
 
     private var navigationContent: some View {
-        ScrollViewReader { proxy in
-            transactionList
-                .onChange(of: session.localTransactionWindowIndex) { _, _ in
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        proxy.scrollTo("transaction-list-top", anchor: .top)
-                    }
-                }
-        }
+        // No ScrollViewReader: appended windows extend the list in place, so the
+        // reading position never resets when more rows arrive.
+        transactionList
         .listStyle(.plain)
         .listSectionSpacing(0)
         .tint(TerminalPalette.accent)
@@ -1097,9 +1112,6 @@ struct TransactionsView: View {
             .task(id: selectionReadKey) { await loadSelectionFacts(selectionReadKey) }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
-                    if session.isLocal, session.localTransactionWindow != nil {
-                        pageNavigation.padding(.horizontal, 16).padding(.vertical, 6)
-                    }
                     if isSelecting {
                         TransactionBatchActionBar(
                             selectedCount: selectedCount,

@@ -32,9 +32,14 @@ struct PendingInboxView: View {
     @State private var completedRequest: ReadRequest?
     @State private var loading = false
     @State private var loadError: String?
-    @State private var page = 0
-    @State private var displayedPage = 0
     @State private var reload = 0
+    /// Rows appended by scrolling, plus the cursor for the next window. The summary
+    /// counts come from `localWindow`, which always describes the whole range.
+    @State private var accumulated: [LedgerTransaction] = []
+    @State private var loadedIDs: Set<String> = []
+    @State private var continuation: LedgerSession.LocalPendingContinuation?
+    @State private var reachedRowCap = false
+    static let rowCap = 1_000
     @State private var active = false
     @State private var localAction: LedgerSession.LocalTransactionAction?
     @State private var actionTask: Task<Void, Never>?
@@ -50,14 +55,13 @@ struct PendingInboxView: View {
         let readable: Bool
         let active: Bool
         let reload: Int
-        var page: Int
     }
     private var request: ReadRequest {
         .init(revision: session.localTransactionPresentationRevision, invalidation: session.localGlobalSearchInvalidation,
             range: session.selectedRange, filter: selectedTab.filter,
             readable: session.phase == .ready && !session.privacyShielded && !session.isRangeLoading
                 && !session.isValuationCurrencyLoading && !session.transactionMutationStates.values.contains(.pending),
-            active: active, reload: reload, page: page)
+            active: active, reload: reload)
     }
     private var windowCurrent: Bool {
         guard let completedRequest else { return false }
@@ -68,8 +72,9 @@ struct PendingInboxView: View {
     private var filteredCount: Int { session.isLocal ? (localWindow?.result.counts[selectedTab.filter] ?? 0) : filteredItems.count }
 
     private var allTransactions: [LedgerTransaction] {
-        session.isLocal ? (windowCurrent ? localWindow?.result.transactions ?? [] : []) : session.visibleTransactions
+        session.isLocal ? (windowCurrent ? accumulated : []) : session.visibleTransactions
     }
+    private var hasMore: Bool { session.isLocal && continuation != nil && !reachedRowCap }
 
     private var pendingItems: [(transaction: LedgerTransaction, reasons: [PendingTransactionReason])] {
         allTransactions.compactMap { tx in
@@ -204,8 +209,9 @@ struct PendingInboxView: View {
                 active = false
                 if editingCategoryTarget == nil && editingPayeeTarget == nil && fullEditorTarget == nil { revokeAction() }
             }
-            .onChange(of: selectedTab) { _, _ in page = 0; displayedPage = 0 }
-            .onChange(of: session.localTransactionPresentationRevision) { _, _ in page = 0; displayedPage = 0 }
+            .onChange(of: selectedTab) { _, _ in resetAccumulation() }
+            .onChange(of: session.localTransactionPresentationRevision) { _, _ in resetAccumulation() }
+            .onChange(of: session.selectedRange) { _, _ in resetAccumulation() }
             .onChange(of: session.privacyShielded) { _, hidden in if hidden { clearActions() } }
             .onChange(of: session.phase) { _, phase in if phase != .ready { clearActions() } }
             .overlay(alignment: .top) {
@@ -265,22 +271,23 @@ struct PendingInboxView: View {
                         }
                         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                     }
+                    if session.isLocal, hasMore {
+                        Section {
+                            loadMoreFooter
+                        }
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
                 }
                 .listStyle(.plain)
                 .listSectionSpacing(0)
                 .scrollContentBackground(.hidden)
-                // Dock pagination + the primary action directly under the
-                // list's own content, the same pattern `TransactionsView`
-                // uses for `pageNavigation` — not as flexible VStack
-                // siblings, which let `List`'s greedy height push them away
-                // from a short list into empty mid-screen space.
+                // The primary action docks under the list; paging is the list's
+                // own tail so rows append in place, the same way `TransactionsView`
+                // scrolls through its bounded windows.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    VStack(spacing: 0) {
-                        if session.isLocal, windowCurrent, localWindow != nil {
-                            pageNav
-                        }
-                        footerBar
-                    }
+                    footerBar
                 }
             }
         }
@@ -420,25 +427,45 @@ struct PendingInboxView: View {
         }
     }
 
-    private var pageNav: some View {
-        HStack {
-            Button("上一页") {
-                let target = max(0, displayedPage - 1)
-                if page == target { reload += 1 } else { page = target }
+    /// Tail of the list. Appearing appends the next window; tapping retries a
+    /// stalled fetch. Rows are appended, never replaced, so the scroll position holds.
+    private var loadMoreFooter: some View {
+        let busy = loading || updating || actionID != nil
+        return Button {
+            guard !busy else { return }
+            Task { await loadWindow() }
+        } label: {
+            HStack(spacing: 8) {
+                if busy {
+                    ProgressView().controlSize(.small).tint(BalancedPalette.meta)
+                    Text("正在加载更多待整理账单…")
+                } else {
+                    Image(systemName: "arrow.down.circle").font(.system(size: 14))
+                    Text("继续加载")
+                }
             }
-            .buttonStyle(.balanced(.quiet))
-            .disabled(displayedPage == 0 || loading || updating || actionID != nil)
-            Spacer()
-            Text("第 \(displayedPage + 1) 页").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta).accessibilityIdentifier("pending-inbox-page")
-            Spacer()
-            Button("下一页") {
-                let target = displayedPage + 1
-                if page == target { reload += 1 } else { page = target }
-            }
-            .buttonStyle(.balanced(.quiet))
-            .disabled(localWindow?.continuation == nil || loading || updating || actionID != nil)
+            .balancedFont(size: 12)
+            .foregroundStyle(BalancedPalette.meta)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 20).padding(.vertical, 8)
+        .buttonStyle(.plain)
+        .disabled(busy)
+        .padding(.top, 6)
+        .padding(.bottom, 16)
+        .onAppear {
+            guard !busy else { return }
+            Task { await loadWindow() }
+        }
+        .accessibilityIdentifier("pending-inbox-load-more")
+        .accessibilityLabel(busy ? "正在加载更多待整理账单" : "继续加载更多待整理账单")
+    }
+
+    private func resetAccumulation() {
+        accumulated = []
+        loadedIDs = []
+        continuation = nil
+        reachedRowCap = false
     }
 
     private var allCleanState: some View {
@@ -462,26 +489,32 @@ struct PendingInboxView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// Fetch one more window. The first call seeds the accumulated rows; later
+    /// calls append the next page in place. `localWindow` keeps the complete counts
+    /// so the band summary and tab badges still describe the whole range.
     private func loadWindow() async {
         guard active, request.readable else { return }
         let key = request
         loading = true; loadError = nil
         defer { if key == request { loading = false } }
         do {
-            var previous = completedRequest; previous?.page = key.page
-            let forward = previous == key && completedRequest?.page == key.page - 1 && localWindow?.continuation != nil
-            var result = try await session.localPendingWindow(filter: key.filter, continuation: forward ? localWindow?.continuation : nil)
-            if key.page > 0 && !forward {
-                for index in 0..<key.page {
-                    guard let next = result.continuation else {
-                        if !Task.isCancelled, key == request { page = index }
-                        return
-                    }
-                    result = try await session.localPendingWindow(filter: key.filter, continuation: next)
-                }
-            }
+            let result = try await session.localPendingWindow(filter: key.filter,
+                continuation: key.revision == completedRequest?.revision ? continuation : nil)
             guard !Task.isCancelled, key == request, request.readable else { return }
-            localWindow = result; completedRequest = key; displayedPage = key.page
+            if key.revision != completedRequest?.revision || accumulated.isEmpty {
+                accumulated = result.result.transactions
+                loadedIDs = Set(result.result.transactions.map(\.id))
+                reachedRowCap = false
+            } else {
+                for row in result.result.transactions where !loadedIDs.contains(row.id) {
+                    accumulated.append(row)
+                    loadedIDs.insert(row.id)
+                }
+                reachedRowCap = accumulated.count >= Self.rowCap
+            }
+            continuation = result.continuation
+            localWindow = result
+            completedRequest = key
         } catch {
             if !Task.isCancelled, key == request { loadError = error.localizedDescription }
         }
