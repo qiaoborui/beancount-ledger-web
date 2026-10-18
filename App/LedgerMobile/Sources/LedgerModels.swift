@@ -2759,6 +2759,32 @@ enum EventTagCalculator {
         )
     }
 
+    /// Memoizes the last aggregation.
+    ///
+    /// `EventTagViews`, `AnalysisViews` and `TerminalAnalysisViews` all call
+    /// `summarizeAllTags` from computed properties inside view bodies, so an
+    /// unrelated publish recomputes the whole scan. The result depends only on
+    /// the transactions and labels, so the last pair is kept.
+    private final class SummaryCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entry: (transactions: [LedgerTransaction], labels: [String: String], summaries: [EventTagSummary])?
+
+        func summaries(for transactions: [LedgerTransaction], labels: [String: String]) -> [EventTagSummary]? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let entry, entry.labels == labels, entry.transactions == transactions else { return nil }
+            return entry.summaries
+        }
+
+        func store(_ summaries: [EventTagSummary], for transactions: [LedgerTransaction], labels: [String: String]) {
+            lock.lock()
+            entry = (transactions, labels, summaries)
+            lock.unlock()
+        }
+    }
+
+    private static let summaryCache = SummaryCache()
+
     /// Aggregates every tag in a single pass over `transactions`.
     ///
     /// The previous shape called `generateReport` once per distinct tag, and each
@@ -2774,6 +2800,7 @@ enum EventTagCalculator {
         from transactions: [LedgerTransaction],
         accountLabels: [String: String] = [:]
     ) -> [EventTagSummary] {
+        if let cached = summaryCache.summaries(for: transactions, labels: accountLabels) { return cached }
         struct Accumulator {
             var transactionCount = 0
             var totalExpense = 0
@@ -2856,7 +2883,7 @@ enum EventTagCalculator {
 
         // Tags previously came from a `Set`, so ties resolved differently on
         // every launch. Break them on the tag name to keep the list stable.
-        return summaries.sorted {
+        let sorted = summaries.sorted {
             if let e1 = $0.endDate, let e2 = $1.endDate, e1 != e2 {
                 return e1 > e2
             }
@@ -2865,6 +2892,8 @@ enum EventTagCalculator {
             }
             return $0.tag < $1.tag
         }
+        summaryCache.store(sorted, for: transactions, labels: accountLabels)
+        return sorted
     }
 }
 
