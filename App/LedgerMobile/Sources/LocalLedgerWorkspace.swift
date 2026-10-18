@@ -9,6 +9,45 @@ import Darwin
 /// atomic pointer to the active generation, so readers never observe a partial
 /// multi-file write. This type deliberately has no App Group entry point: full
 /// ledger files stay in the main application's container.
+/// POSIX metadata for one path.
+///
+/// Several call sites only need the file type, size and permission bits.
+/// `FileManager.attributesOfItem` costs about eleven times more than `lstat`
+/// because it also lists and fetches extended attributes — on iOS the file
+/// protection class lives there. Tree walks call this once per file, so the
+/// difference compounds.
+struct PosixStat {
+    let mode: mode_t
+    let size: Int
+    let modified: Date
+
+    var isDirectory: Bool { (mode & S_IFMT) == S_IFDIR }
+    var isRegularFile: Bool { (mode & S_IFMT) == S_IFREG }
+    var isSymbolicLink: Bool { (mode & S_IFMT) == S_IFLNK }
+    var isExecutable: Bool { (mode & 0o111) != 0 }
+
+    static func at(_ url: URL) throws -> PosixStat {
+        #if canImport(Darwin)
+        var status = stat()
+        guard lstat(url.path, &status) == 0 else { throw CocoaError(.fileReadUnknown) }
+        let seconds = TimeInterval(status.st_mtimespec.tv_sec)
+        let fraction = TimeInterval(status.st_mtimespec.tv_nsec) / 1_000_000_000
+        return PosixStat(mode: status.st_mode, size: Int(status.st_size),
+            modified: Date(timeIntervalSince1970: seconds + fraction))
+        #else
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0
+        let type = attributes[.type] as? FileAttributeType
+        let mode: mode_t = type == .typeDirectory ? S_IFDIR
+            : type == .typeSymbolicLink ? S_IFLNK
+            : S_IFREG
+        return PosixStat(mode: mode | mode_t(permissions),
+            size: (attributes[.size] as? NSNumber)?.intValue ?? 0,
+            modified: attributes[.modificationDate] as? Date ?? .distantPast)
+        #endif
+    }
+}
+
 actor LocalLedgerWorkspace {
     typealias Validator = @Sendable (URL) async throws -> Void
 
@@ -607,7 +646,7 @@ actor LocalLedgerWorkspace {
             default:
                 throw WorkspaceError.unsupportedItem(item.path)
             }
-            let modified = try fileManager.attributesOfItem(atPath: item.path)[.modificationDate] as? Date
+            let modified = try PosixStat.at(item).modified
             latest = max(latest, modified ?? .distantFuture)
         }
         return latest
@@ -1252,10 +1291,9 @@ actor LocalLedgerWorkspace {
                     budget: &budget
                 ))
             case .regularFile:
-                let attributes = try fileManager.attributesOfItem(atPath: item.path)
-                guard let size = attributes[.size] as? NSNumber,
-                      size.uint64Value <= UInt64(Int.max) else { throw WorkspaceError.treeLimitExceeded }
-                try budget.addBytes(size.intValue)
+                let size = try PosixStat.at(item).size
+                guard size >= 0 else { throw WorkspaceError.treeLimitExceeded }
+                try budget.addBytes(size)
                 files.append(relativePath)
             case .symbolicLink:
                 throw WorkspaceError.symbolicLink(relativePath)
@@ -1438,8 +1476,7 @@ actor LocalLedgerWorkspace {
     }
 
     private func isExecutable(_ url: URL) throws -> Bool {
-        let permissions = try fileManager.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
-        return (permissions?.intValue ?? 0) & 0o111 != 0
+        try PosixStat.at(url).isExecutable
     }
 
     private func removeIfPresent(_ url: URL) {

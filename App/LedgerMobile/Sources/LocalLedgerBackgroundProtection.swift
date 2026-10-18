@@ -87,11 +87,11 @@ enum LocalLedgerBackgroundProtection {
     }
 
     private static func itemType(_ url: URL) throws -> FileAttributeType {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        guard let type = attributes[.type] as? FileAttributeType,
-              type == .typeDirectory || type == .typeRegular else {
-            throw LocalStorageError.unsafeFile(url.lastPathComponent)
-        }
-        return type
+        // Only the file type is needed. `attributesOfItem` additionally reads
+        // extended attributes on iOS, which this check never uses.
+        let stat = try PosixStat.at(url)
+        if stat.isDirectory { return .typeDirectory }
+        if stat.isRegularFile { return .typeRegular }
+        throw LocalStorageError.unsafeFile(url.lastPathComponent)
     }
 }

@@ -337,10 +337,8 @@ actor GitLocalStorage: LogicalLocalStorage {
     }
 
     private func stateStamp() -> StateStamp? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: stateURL.path),
-              let modified = attributes[.modificationDate] as? Date,
-              let size = (attributes[.size] as? NSNumber)?.intValue else { return nil }
-        return StateStamp(modified: modified, size: size)
+        guard let stat = try? PosixStat.at(stateURL) else { return nil }
+        return StateStamp(modified: stat.modified, size: stat.size)
     }
 
     private func loadState() throws -> State {
@@ -435,9 +433,11 @@ private enum StorageTree {
             bytes += size
             let data = try Data(contentsOf: url)
             let digest = SHA256.hash(data: data)
-            let permissions = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+            // Only the permission bits are needed; `attributesOfItem` would also
+            // list and fetch extended attributes for every file in the tree.
+            let executable = (try? PosixStat.at(url).isExecutable) ?? false
             files[path] = File(url: url, digest: Data(digest), size: size,
-                executable: (permissions?.intValue ?? 0) & 0o111 != 0)
+                executable: executable)
         }
         return files
     }
