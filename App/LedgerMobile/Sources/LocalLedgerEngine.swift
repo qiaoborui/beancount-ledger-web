@@ -137,22 +137,6 @@ struct LocalLedgerResponse: Sendable {
     }
 }
 
-/// Process-wide FIFO gate prevents actor reentrancy from duplicating canonical
-/// registration or replacing handles while another native request is preparing.
-private actor LocalModelRequestGate {
-    static let shared = LocalModelRequestGate()
-    private var occupied = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-    func acquire() async {
-        if !occupied { occupied = true; return }
-        await withCheckedContinuation { waiters.append($0) }
-    }
-    func release() {
-        if waiters.isEmpty { occupied = false }
-        else { waiters.removeFirst().resume() }
-    }
-}
-
 actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     static let shared = EmbeddedLocalLedgerEngine()
     // Committed generation directories are immutable. Keep only the most recent
@@ -164,25 +148,71 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     }
 
     func response(_ request: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse {
-        await LocalModelRequestGate.shared.acquire()
+        // Fast path: an already-registered, committed generation is read-only, so
+        // pages and analysis reads share the gate instead of queueing. Anything
+        // that may register, export or release a handle falls through to the
+        // exclusive path below.
+        await LocalModelRequestGate.shared.acquireRead()
+        do {
+            if let live = try concurrentResponse(request) {
+                await LocalModelRequestGate.shared.releaseRead()
+                return live
+            }
+        } catch {
+            await LocalModelRequestGate.shared.releaseRead()
+            throw error
+        }
+        await LocalModelRequestGate.shared.releaseRead()
+
+        await LocalModelRequestGate.shared.acquireWrite()
         do {
             try Task.checkCancellation()
             let result = try await serializedResponse(request)
-            await LocalModelRequestGate.shared.release()
+            await LocalModelRequestGate.shared.releaseWrite()
             return result
         } catch {
-            await LocalModelRequestGate.shared.release()
+            await LocalModelRequestGate.shared.releaseWrite()
             throw error
         }
     }
 
+    /// Serve a request from the live committed handle. Caller must hold the read
+    /// lock: there is no suspension point between the handle check and
+    /// `nativeResponse`, so the handle cannot be released underneath it.
+    /// Returns nil when this request needs the exclusive path.
+    private func concurrentResponse(_ original: LocalLedgerEngineRequest) throws -> LocalLedgerResponse? {
+        let request = normalized(original)
+        guard !request.staging,
+              let cached = canonicalCache,
+              cached.workspace == request.workspaceRoot,
+              cached.entrypoint == request.entrypoint else { return nil }
+        var small = request
+        small.canonical = nil
+        small.modelHandle = cached.handle
+        let result = try nativeResponse(small)
+        guard !result.modelUnavailable else {
+            // The generation moved. Drop the stale handle and redo this request
+            // through the exclusive path, which re-registers.
+            if canonicalCache?.handle == cached.handle { canonicalCache = nil }
+            release(cached.handle, request: request)
+            return nil
+        }
+        return result
+    }
+
+    /// Publication validation performs a GET against a mutable stage too, so the
+    /// staging scope is derived from the workspace, not only the POST flag.
+    private func normalized(_ original: LocalLedgerEngineRequest) -> LocalLedgerEngineRequest {
+        var request = original
+        let container = URL(fileURLWithPath: request.workspaceRoot)
+            .deletingLastPathComponent().deletingLastPathComponent().lastPathComponent
+        request.staging = request.staging || container == "staging"
+        return request
+    }
+
     private func serializedResponse(_ original: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse {
         #if canImport(LedgerCore)
-        var request = original
-        // Publication validation performs a GET against a mutable stage too.
-        // Scope by actual workspace, not merely the POST mutation flag.
-        let container = URL(fileURLWithPath: request.workspaceRoot).deletingLastPathComponent().deletingLastPathComponent().lastPathComponent
-        request.staging = request.staging || container == "staging"
+        let request = normalized(original)
         let handle: String
         if !request.staging, let cached = canonicalCache,
            cached.workspace == request.workspaceRoot, cached.entrypoint == request.entrypoint {
@@ -216,13 +246,15 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     /// tree becomes then registers without a second Python pass, and a tree
     /// whose exact bytes were already validated skips the loader entirely.
     func validateCanonical(workspaceRoot: String, runtimeRoot: String, entrypoint: String) async throws {
-        await LocalModelRequestGate.shared.acquire()
+        // Export writes the shared scratch directory and can replace the cached
+        // stream, so it takes the gate exclusively.
+        await LocalModelRequestGate.shared.acquireWrite()
         do {
             try Task.checkCancellation()
             try await serializedValidateCanonical(workspaceRoot: workspaceRoot, runtimeRoot: runtimeRoot, entrypoint: entrypoint)
-            await LocalModelRequestGate.shared.release()
+            await LocalModelRequestGate.shared.releaseWrite()
         } catch {
-            await LocalModelRequestGate.shared.release()
+            await LocalModelRequestGate.shared.releaseWrite()
             throw error
         }
     }

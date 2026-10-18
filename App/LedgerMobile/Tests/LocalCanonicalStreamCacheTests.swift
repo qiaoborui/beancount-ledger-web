@@ -95,15 +95,20 @@ final class LocalCanonicalStreamCacheTests: XCTestCase {
     func testKeepsOnlyTheMostRecentEntries() throws {
         let root = try makeRoot()
         let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
-        let versions = ["11", "22", "33"].map { String(repeating: $0, count: 32) }
+        // One more entry than the cache retains, so exactly the oldest is evicted.
+        let capacity = LocalCanonicalStreamCache.capacity
+        let versions = (0..<(capacity + 1)).map {
+            String(format: "%02d", $0) + String(repeating: "0", count: 62)
+        }
         for version in versions {
             let (source, descriptor) = try stream(version + "\n", in: root)
             cache.store(source, sourceVersion: version, descriptor: descriptor)
             Thread.sleep(forTimeInterval: 0.02)
         }
-        XCTAssertFalse(cache.contains(versions[0]))
-        XCTAssertTrue(cache.contains(versions[1]))
-        XCTAssertTrue(cache.contains(versions[2]))
+        XCTAssertFalse(cache.contains(versions[0]), "the oldest stream must be evicted")
+        for version in versions.dropFirst() {
+            XCTAssertTrue(cache.contains(version), "recent streams must survive")
+        }
     }
 
     func testRejectsMalformedSourceVersion() throws {
