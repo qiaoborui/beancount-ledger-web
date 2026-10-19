@@ -2066,11 +2066,53 @@ struct TransactionCategoryPresentation: Equatable {
 
     private final class AccountLabelCache: @unchecked Sendable {
         private let lock = NSLock()
-        private var entry: (accounts: [LedgerAccount], labels: [String: String])?
+        private var entry: (signature: Int, labels: [String: String])?
+        /// Last version handed out to callers, keyed by the exact map.
+        private var versionEntry: (labels: [String: String], version: Int)?
+
+        /// Cheap identity for an `[LedgerAccount]`. Comparing the arrays themselves
+        /// is a full element-by-element `Equatable` walk of every account, which ran
+        /// once per call site per body evaluation — hundreds of times per scroll
+        /// pass. Hashing the fields that affect a label is O(n) over small values
+        /// and gives a single `Int` to compare.
+        private static func signature(_ accounts: [LedgerAccount]) -> Int {
+            var hasher = Hasher()
+            hasher.combine(accounts.count)
+            for account in accounts {
+                hasher.combine(account.account)
+                hasher.combine(account.label)
+                hasher.combine(account.alias)
+            }
+            return hasher.finalize()
+        }
+
+        /// Version for a label map. The full hash is computed once, when the map is
+        /// built, and remembered; a caller holding that map gets it back in O(1).
+        /// A map this cache did not build (a test fixture, say) falls back to
+        /// hashing it, which is correct and only happens off the scroll path.
+        func version(for labels: [String: String]) -> Int {
+            lock.lock()
+            defer { lock.unlock() }
+            if let cached = versionEntry, cached.labels == labels { return cached.version }
+            let version = Self.signature(labels)
+            versionEntry = (labels, version)
+            return version
+        }
+
+        private static func signature(_ labels: [String: String]) -> Int {
+            var hasher = Hasher()
+            hasher.combine(labels.count)
+            for (key, value) in labels {
+                hasher.combine(key)
+                hasher.combine(value)
+            }
+            return hasher.finalize()
+        }
 
         func labels(for accounts: [LedgerAccount]) -> [String: String] {
+            let signature = Self.signature(accounts)
             lock.lock()
-            if let cached = entry, cached.accounts == accounts {
+            if let cached = entry, cached.signature == signature {
                 let labels = cached.labels
                 lock.unlock()
                 return labels
@@ -2084,10 +2126,20 @@ struct TransactionCategoryPresentation: Equatable {
             }
 
             lock.lock()
-            entry = (accounts, labels)
+            entry = (signature, labels)
+            // Seed the version so the first per-row lookup is a hit, not a re-hash.
+            versionEntry = (labels, Self.signature(labels))
             lock.unlock()
             return labels
         }
+    }
+
+    /// Identity for a label map, used to key per-row presentation caches. Default
+    /// dictionaries are copied on write, so the map a view holds is one of the few
+    /// instances `AccountLabelCache` produced; remembering its version keeps the
+    /// per-row lookup O(1) instead of walking the dictionary for every visible row.
+    static func labelsVersion(_ labels: [String: String]) -> Int {
+        accountLabelsCache.version(for: labels)
     }
 
     static func accountLabels(_ accounts: [LedgerAccount]) -> [String: String] {
@@ -2114,38 +2166,52 @@ struct TransactionPresentation: Equatable {
             subtitle = transaction.postings.first?.account ?? ""
         }
 
-        let expensePostings = transaction.postings.filter { $0.account.hasPrefix("Expenses:") && $0.amount != 0 }
-        let incomePostings = transaction.postings.filter { $0.account.hasPrefix("Income:") && $0.amount != 0 }
-
-        if !expensePostings.isEmpty {
-            let netExpense = expensePostings.reduce(0) { $0 + $1.amount }
-            if netExpense < 0 {
+        // Two small passes instead of two allocating filters. The order matters:
+        // expense is summed and acted on before income is touched, exactly like the
+        // original `filter` + `reduce` version. Summing both up front would evaluate
+        // an income total that a real ledger never needs, and `Int.max + 1` traps
+        // even when the expense branch returns first.
+        var expenseTotal = 0
+        var expenseCurrency: String?
+        var hasExpense = false
+        for posting in transaction.postings where posting.amount != 0 && posting.account.hasPrefix("Expenses:") {
+            if !hasExpense { hasExpense = true; expenseCurrency = posting.currency }
+            expenseTotal += posting.amount
+        }
+        if hasExpense {
+            if expenseTotal < 0 {
                 kind = .income
-                minorUnits = abs(netExpense)
-                currency = expensePostings.first?.currency ?? "CNY"
+                minorUnits = abs(expenseTotal)
+                currency = expenseCurrency ?? "CNY"
                 isRefund = true
                 return
-            } else if netExpense > 0 {
+            } else if expenseTotal > 0 {
                 kind = .expense
-                minorUnits = netExpense
-                currency = expensePostings.first?.currency ?? "CNY"
+                minorUnits = expenseTotal
+                currency = expenseCurrency ?? "CNY"
                 isRefund = false
                 return
             }
         }
 
-        if !incomePostings.isEmpty {
-            let netIncome = incomePostings.reduce(0) { $0 + $1.amount }
-            if netIncome > 0 {
+        var incomeTotal = 0
+        var incomeCurrency: String?
+        var hasIncome = false
+        for posting in transaction.postings where posting.amount != 0 && posting.account.hasPrefix("Income:") {
+            if !hasIncome { hasIncome = true; incomeCurrency = posting.currency }
+            incomeTotal += posting.amount
+        }
+        if hasIncome {
+            if incomeTotal > 0 {
                 kind = .expense
-                minorUnits = netIncome
-                currency = incomePostings.first?.currency ?? "CNY"
+                minorUnits = incomeTotal
+                currency = incomeCurrency ?? "CNY"
                 isRefund = false
                 return
-            } else if netIncome < 0 {
+            } else if incomeTotal < 0 {
                 kind = .income
-                minorUnits = abs(netIncome)
-                currency = incomePostings.first?.currency ?? "CNY"
+                minorUnits = abs(incomeTotal)
+                currency = incomeCurrency ?? "CNY"
                 let metadataType = transaction.metadata?["type"]?.stringValue ?? ""
                 isRefund = transaction.narration.contains("退款")
                     || transaction.payee.contains("退款")
