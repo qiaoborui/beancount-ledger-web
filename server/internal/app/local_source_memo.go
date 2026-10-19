@@ -56,3 +56,28 @@ func localSourceMemoStore(key localSourceMemoKey, facts localSourceFacts) {
 	facts.includes = append([]string(nil), facts.includes...)
 	localSourceMemo.entries[key] = facts
 }
+
+// localSourceStamps is the set of stat identities that produced one verified
+// source version. If every file still has its recorded identity (path, device,
+// inode, size, mtime, ctime) no content changed and no include was added, so
+// the recorded version is still exact. Glob includes make this unprovable.
+type localSourceStamps struct {
+	keys     []localSourceMemoKey
+	unusable bool
+}
+
+func (s *localSourceStamps) matches() bool {
+	if s == nil || s.unusable || len(s.keys) == 0 {
+		return false
+	}
+	for _, want := range s.keys {
+		info, err := os.Lstat(want.path)
+		if err != nil || !info.Mode().IsRegular() {
+			return false
+		}
+		if got, ok := localSourceMemoKeyFor(want.path, info); !ok || got != want {
+			return false
+		}
+	}
+	return true
+}
