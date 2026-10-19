@@ -12,9 +12,12 @@ import Foundation
 /// Callers serialize access through `LocalModelRequestGate`, which also guards
 /// the sibling `canonical-stream` scratch directory the entries are linked into.
 struct LocalCanonicalStreamCache {
-    /// Two entries cover the committed generation plus the one a write is
-    /// about to publish. Streams are O(N) in ledger size, so keep this small.
-    static let capacity = 2
+    /// Each entry is an O(N) `.records` stream. Four covers a committed
+    /// generation, the stage a write is publishing, and the generation it is
+    /// replacing: with two, any single write evicted the committed stream and the
+    /// next read re-ran the Python loader (measured 770 ms at 20k transactions).
+    /// Still bounded, and eviction is by modification date.
+    static let capacity = 4
 
     let directory: URL
     private let fileManager = FileManager.default
