@@ -139,9 +139,45 @@ struct LocalLedgerResponse: Sendable {
 
 actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     static let shared = EmbeddedLocalLedgerEngine()
-    // Committed generation directories are immutable. Keep only the most recent
-    // model; mutable stages always load their current contents independently.
-    private var canonicalCache: (workspace: String, entrypoint: String, handle: String)?
+    // Committed generation directories are immutable. Keep a handle for each of
+    // the few most recently used ledgers (the core holds a bounded LRU of the
+    // same size and may evict earlier); mutable stages always load their
+    // current contents independently. Most recently registered first.
+    private typealias CanonicalHandle = (workspace: String, entrypoint: String, handle: String)
+    private static let canonicalHandleLimit = 4
+    private var canonicalHandles: [CanonicalHandle] = []
+
+    private func cachedHandle(_ request: LocalLedgerEngineRequest) -> String? {
+        canonicalHandles.first { $0.workspace == request.workspaceRoot && $0.entrypoint == request.entrypoint }?.handle
+    }
+
+    private func forget(_ handle: String) {
+        canonicalHandles.removeAll { $0.handle == handle }
+    }
+
+    /// One ledger across its immutable generations
+    /// (<ledger>/generations/<id>/workspace); other roots key by themselves.
+    private static func ledgerKey(_ workspace: String) -> String {
+        let generations = URL(fileURLWithPath: workspace).deletingLastPathComponent().deletingLastPathComponent()
+        return generations.lastPathComponent == "generations" ? generations.path : workspace
+    }
+
+    /// Record a new committed handle, releasing the one it supersedes (an older
+    /// generation of the same ledger) and any beyond the limit.
+    private func remember(_ handle: String, request: LocalLedgerEngineRequest) {
+        let ledger = Self.ledgerKey(request.workspaceRoot)
+        var released: [String] = []
+        canonicalHandles.removeAll { cached in
+            let superseded = cached.entrypoint == request.entrypoint && Self.ledgerKey(cached.workspace) == ledger
+            if superseded { released.append(cached.handle) }
+            return superseded
+        }
+        canonicalHandles.insert((request.workspaceRoot, request.entrypoint, handle), at: 0)
+        while canonicalHandles.count > Self.canonicalHandleLimit {
+            released.append(canonicalHandles.removeLast().handle)
+        }
+        for old in released { release(old, request: request) }
+    }
 
     func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
         try await response(request).resultData()
@@ -182,19 +218,17 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     /// Returns nil when this request needs the exclusive path.
     private func concurrentResponse(_ original: LocalLedgerEngineRequest) throws -> LocalLedgerResponse? {
         let request = normalized(original)
-        guard !request.staging,
-              let cached = canonicalCache,
-              cached.workspace == request.workspaceRoot,
-              cached.entrypoint == request.entrypoint else { return nil }
+        guard !request.staging, let cached = cachedHandle(request) else { return nil }
         var small = request
         small.canonical = nil
-        small.modelHandle = cached.handle
+        small.modelHandle = cached
         let result = try nativeResponse(small)
         guard !result.modelUnavailable else {
-            // The generation moved. Drop the stale handle and redo this request
-            // through the exclusive path, which re-registers.
-            if canonicalCache?.handle == cached.handle { canonicalCache = nil }
-            release(cached.handle, request: request)
+            // The generation moved or the core evicted the model. Drop the stale
+            // handle and redo this request through the exclusive path, which
+            // re-registers.
+            forget(cached)
+            release(cached, request: request)
             return nil
         }
         return result
@@ -214,16 +248,11 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         #if canImport(LedgerCore)
         let request = normalized(original)
         let handle: String
-        if !request.staging, let cached = canonicalCache,
-           cached.workspace == request.workspaceRoot, cached.entrypoint == request.entrypoint {
-            handle = cached.handle
+        if !request.staging, let cached = cachedHandle(request) {
+            handle = cached
         } else {
-            if !request.staging, let old = canonicalCache {
-                release(old.handle, request: request)
-                canonicalCache = nil
-            }
             handle = try await register(request)
-            if !request.staging { canonicalCache = (request.workspaceRoot, request.entrypoint, handle) }
+            if !request.staging { remember(handle, request: request) }
         }
         defer { if request.staging { release(handle, request: request) } }
         var small = request
@@ -232,7 +261,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         let result = try nativeResponse(small)
         // Fail stale reads safely; do not retry financial writes automatically.
         if result.modelUnavailable {
-            if canonicalCache?.handle == handle { canonicalCache = nil }
+            forget(handle)
             release(handle, request: request)
         }
         return result
