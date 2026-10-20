@@ -437,7 +437,7 @@ private struct LedgerIslandExpandedContent: View {
         let style = metrics.style
         let lt = entry.localTime(now)
         let timeline = entry.timeline
-        let rightEdge = stage.expandedWidth - L.inset
+        let rightEdge = stage.expandedWidth - L.bandInset
         let flankWidth = max(0, stage.flankWidth)
         let amountScale = min(1, flankWidth / amountWidth)
         let rows = layout.rows
@@ -456,7 +456,7 @@ private struct LedgerIslandExpandedContent: View {
                 .minimumScaleFactor(0.8)
                 .frame(width: flankWidth, alignment: .leading)
                 .islandPlaced(entry.effect(.expanded, delay: 0.1, at: now, reduceMotion: reduce, contentIn: contentIn),
-                              at: flankPoint(L.inset + flankWidth / 2), in: size)
+                              at: flankPoint(L.bandInset + flankWidth / 2), in: size)
 
             Group {
                 if let count = style.count {
@@ -861,7 +861,7 @@ final class LedgerIslandWindowManager {
     /// Top of the hardware island in overlay coordinates, and the room the
     /// expanded island gets on each side of it.
     private var cameraTop: Double = 8
-    private var flank: Double = LedgerIslandStage.Layout.inset + LedgerIslandStage.Layout.cameraGap
+    private var flank: Double = LedgerIslandStage.Layout.bandInset + LedgerIslandStage.Layout.cameraGap
     private var dismissHandler: (() -> Void)?
 
     private init() {

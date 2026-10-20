@@ -296,17 +296,22 @@ struct LedgerIslandStage: Equatable, Sendable {
     /// the camera: there it would either run into the cutout or out of the
     /// rounded corner.
     enum Layout {
-        /// Margin to the island's leading and trailing edges.
-        static let inset: Double = 22
+        /// Margin from the body row (badge, title, subtitle) to the island's
+        /// leading and trailing edges.
+        static let inset: Double = 26
+        /// Margin from the caption and the amount to the island's edges. The
+        /// camera band runs through the top corners, where the edge curves in,
+        /// so it keeps more room than the body row below.
+        static let bandInset: Double = 32
         static let badge: Double = 36
         /// The ring around the badge; the badge is centred inside it.
         static let ring: Double = 44
         /// Space kept clear between flanking content and the camera.
         static let cameraGap: Double = 8
         /// Space between the camera's bottom edge and the body row.
-        static let bodyGap: Double = 10
+        static let bodyGap: Double = 12
         /// Space kept under the body row.
-        static let bottomMargin: Double = 16
+        static let bottomMargin: Double = 22
         /// Space between the ring and the text column.
         static let textGap: Double = 12
         /// Cap for the title when it has to fold; `titleLines` names it.
@@ -428,7 +433,7 @@ struct LedgerIslandStage: Equatable, Sendable {
     /// screen (less its margins) whatever the cutout's width. Phones without
     /// a hardware island use the stand-in pill the same way.
     static func flank(screenWidth: Double, cutoutWidth: Double) -> Double {
-        let wanted = cutoutWidth / 2 + Layout.inset + Layout.cameraGap
+        let wanted = cutoutWidth / 2 + Layout.bandInset + Layout.cameraGap
         let room = screenWidth / 2 - screenMargin
         return max(wanted, room) - cutoutWidth / 2
     }
@@ -460,7 +465,7 @@ struct LedgerIslandStage: Equatable, Sendable {
 
     /// Width each flank of the camera band offers the caption and the amount.
     var flankWidth: Double {
-        (expandedWidth - cutout.pillWidth) / 2 - Layout.inset - Layout.cameraGap
+        (expandedWidth - cutout.pillWidth) / 2 - Layout.bandInset - Layout.cameraGap
     }
 
     /// Both sides take the wider of the two so the camera stays centred and

@@ -24,6 +24,9 @@ expanded shape grows out of the physical island.
   (previously flank width was 0 there).
 - `foldedLines` no longer leaves a trailing space at a fold.
 
+- Padding: body rows 26pt from the side edges, caption/amount 32pt (the band runs through the
+  rounded top corners), 12pt under the camera, 22pt bottom margin.
+
 ## Validation
 - `xcodebuild test -only-testing:LedgerMobileTests` on iPhone 17 Pro simulator: all passed.
 - New test asserts no content rect intersects the camera for 1179/1206/unknown panels and

@@ -107,14 +107,14 @@ struct LedgerIslandMotionTests {
         typealias L = LedgerIslandStage.Layout
         let band = stage.band
         let mid = L.bandCenterY(band: band)
-        let right = stage.expandedWidth - L.inset
+        let right = stage.expandedWidth - L.bandInset
         let flank = stage.flankWidth
         let text = LedgerIslandTextLayout.columnWidth(stage: stage)
         let ripple = L.ring + 12
         let badgeY = L.badgeCenterY(band: band, rows: rows)
         let titleHeight = Double(rows.titleLines) * LedgerIslandFonts.titleLineHeight
         return [
-            "caption": CGRect(x: L.inset, y: mid - 8, width: flank, height: 16),
+            "caption": CGRect(x: L.bandInset, y: mid - 8, width: flank, height: 16),
             "amount": CGRect(x: right - flank, y: mid - 12, width: flank, height: 24),
             "badge": CGRect(x: L.badgeCenterX - ripple / 2, y: badgeY - ripple / 2, width: ripple, height: ripple),
             "title": CGRect(x: L.textLeft, y: L.titleCenterY(band: band, rows: rows) - titleHeight / 2,
@@ -152,12 +152,25 @@ struct LedgerIslandMotionTests {
                 let shape = CGRect(x: 0, y: 0, width: stage.expandedWidth, height: height)
                 for (name, rect) in contentRects(stage, rows: rows) {
                     #expect(!rect.intersects(keepOut), "\(name) overlaps the camera on \(island.pill)")
-                    #expect(shape.insetBy(dx: 12, dy: 2).contains(rect), "\(name) leaves the island on \(island.pill)")
+                    // Every element keeps at least 20pt to the side edges.
+                    let breathing = name == "badge" ? 18.0 : 20.0
+                    #expect(shape.insetBy(dx: breathing, dy: 2).contains(rect), "\(name) is tight to the edge on \(island.pill)")
                 }
                 // Body rows start below the camera.
                 let rects = contentRects(stage, rows: rows)
                 for name in ["badge", "title", "subtitle"] {
                     #expect(rects[name]!.minY > camera.maxY, "\(name) rides beside the camera")
+                }
+                // The text rows keep 20pt to the bottom edge.
+                #expect(height - rects["subtitle"]!.maxY >= 20)
+                // The band's glyphs (about 12pt and 16pt tall) stay clear of the
+                // rounded top corners.
+                let radius0 = LedgerIslandStage.cornerRadius(height: height)
+                let mid = L.bandCenterY(band: stage.band)
+                for point in [CGPoint(x: rects["caption"]!.minX, y: mid - 6),
+                              CGPoint(x: stage.expandedWidth - rects["amount"]!.maxX, y: mid - 8)] {
+                    let fromCentre = hypot(radius0 - point.x, radius0 - point.y)
+                    #expect(radius0 - fromCentre >= 8, "band content crowds the top corner on \(island.pill)")
                 }
                 // Caption and amount sit on the camera's centre line.
                 #expect(abs(rects["amount"]!.midY - camera.midY) < 0.001)
@@ -271,7 +284,7 @@ struct LedgerIslandMotionTests {
         #expect(LedgerIslandStage.screenMargin > 22)
         // The amount keeps the same margins whether the cutout is a measured
         // 125.3pt band or a narrower one: the island grows to make room.
-        let inset = LedgerIslandStage.Layout.inset + LedgerIslandStage.Layout.cameraGap
+        let inset = LedgerIslandStage.Layout.bandInset + LedgerIslandStage.Layout.cameraGap
         let wide = LedgerIslandStage(containerWidth: 402, reduceMotion: false,
                                      pill: CGSize(width: 125.3, height: 36.7), flank: 36)
         #expect(abs(wide.expandedWidth - (125.3 + 2 * 36)) < 0.01)
