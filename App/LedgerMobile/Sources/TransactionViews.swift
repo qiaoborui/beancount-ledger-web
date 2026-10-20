@@ -301,7 +301,8 @@ struct TransactionFilterBar: View {
 /// 2px ink underline on that tab only; unselected tabs stay ink-3.
 private struct BalancedTransactionFilterBar: View {
     @Binding var kindFilter: TransactionKindFilter
-    let counts: [TransactionKindFilter: Int]
+    /// nil while the full-range counts are still being computed.
+    let counts: [TransactionKindFilter: Int]?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -310,7 +311,7 @@ private struct BalancedTransactionFilterBar: View {
                     Button { kindFilter = filter } label: {
                         HStack(spacing: 4) {
                             Text(filter.title).balancedFont(size: 14.5, weight: kindFilter == filter ? .semibold : .regular)
-                            Text("\(counts[filter, default: 0])")
+                            Text(counts.map { "\($0[filter, default: 0])" } ?? "…")
                                 .balancedFont(size: 11.5).monospacedDigit()
                         }
                         .foregroundStyle(kindFilter == filter ? BalancedPalette.ink : BalancedPalette.meta)
@@ -593,6 +594,16 @@ struct TransactionsView: View {
             + (filters.tags.isEmpty ? 0 : 1)
     }
 
+    /// Local lists load lazily, so tab counts come from the full-range scan, not
+    /// from the windows scrolled so far. nil while that scan is still running.
+    private var displayedKindCounts: [TransactionKindFilter: Int]? {
+        guard session.isLocal else { return balancedKindCounts(for: kindAgnosticDisplayedTransactions) }
+        // The local window is read with the kind filter applied, so its rows
+        // cannot produce counts for the other tabs either.
+        guard let counts = session.localTransactionSummary?.kindCounts else { return nil }
+        return Dictionary(uniqueKeysWithValues: TransactionKindFilter.allCases.map { ($0, counts[$0]) })
+    }
+
     private func balancedKindCounts(for transactions: [LedgerTransaction]) -> [TransactionKindFilter: Int] {
         var counts = Dictionary(uniqueKeysWithValues: TransactionKindFilter.allCases.map { ($0, 0) })
         for transaction in transactions {
@@ -619,12 +630,15 @@ struct TransactionsView: View {
 
     /// Only shown in the unfiltered (全部) tab — once a kind filter narrows the
     /// list the per-day total is redundant with the settle block above it.
-    private func balancedDaySummary(_ transactions: [LedgerTransaction]) -> String {
+    ///
+    /// Local lists load lazily, so a day can be split across windows; prefer the
+    /// full-range day totals from the summary scan when they exist.
+    private func balancedDaySummary(_ transactions: [LedgerTransaction], day: LocalTransactionScan.Day? = nil) -> String {
         guard filters.kind == .all else { return "" }
-        var income = 0
-        var expense = 0
-        var transfers = false
-        for transaction in transactions {
+        var income = day?.incomeTotal ?? 0
+        var expense = day?.expenseTotal ?? 0
+        var transfers = day?.hasTransfer ?? false
+        for transaction in transactions where day == nil {
             let presentation = TransactionPresentation(transaction: transaction)
             switch presentation.kind {
             case .income: income += abs(presentation.minorUnits)
@@ -640,7 +654,35 @@ struct TransactionsView: View {
     /// `.settle` filter-result block (b04) — only once a kind filter narrows
     /// the list. Rows group by the leaf category within the current range.
     private func balancedFilterSettle(_ transactions: [LedgerTransaction], accountLabels: [String: String]) -> (rows: [(label: String, minorUnits: Int)], total: Int, count: Int)? {
-        guard filters.kind != .all, !transactions.isEmpty else { return nil }
+        guard filters.kind != .all else { return nil }
+        if session.isLocal {
+            // Loaded rows are only the windows scrolled so far; totals must come
+            // from the full-range scan, so show nothing until it finishes.
+            guard let summary = session.localTransactionSummary else { return nil }
+            return balancedFilterSettle(summary, accountLabels: accountLabels)
+        }
+        return balancedFilterSettleRows(transactions, accountLabels: accountLabels)
+    }
+
+    private func balancedFilterSettle(_ summary: LocalTransactionScan.Result, accountLabels: [String: String]) -> (rows: [(label: String, minorUnits: Int)], total: Int, count: Int)? {
+        guard summary.matchedCount > 0 else { return nil }
+        var totals: [String: Int] = [:]
+        var total = 0
+        for category in summary.categories {
+            let label = TransactionCategoryPresentation(key: category.key, accountLabels: accountLabels).label
+            let leaf = label.split(separator: "›").last.map { $0.trimmingCharacters(in: .whitespaces) } ?? label
+            totals[leaf, default: 0] &+= category.total
+            total &+= category.total
+        }
+        let rows = totals.map { (label: $0.key, minorUnits: $0.value) }.sorted { lhs, rhs in
+            if lhs.minorUnits != rhs.minorUnits { return lhs.minorUnits > rhs.minorUnits }
+            return lhs.label < rhs.label
+        }
+        return (rows, total, summary.matchedCount)
+    }
+
+    private func balancedFilterSettleRows(_ transactions: [LedgerTransaction], accountLabels: [String: String]) -> (rows: [(label: String, minorUnits: Int)], total: Int, count: Int)? {
+        guard !transactions.isEmpty else { return nil }
         var totals: [String: Int] = [:]
         var order: [String] = []
         var total = 0
@@ -773,8 +815,11 @@ struct TransactionsView: View {
         let grouped = Dictionary(grouping: displayed, by: \.date)
             .map { (date: $0.key, transactions: $0.value) }
             .sorted { $0.date > $1.date }
-        let kindCounts = balancedKindCounts(for: kindAgnosticDisplayedTransactions)
+        let kindCounts = displayedKindCounts
         let filterSettle = balancedFilterSettle(displayed, accountLabels: labels)
+        let summaryDays: [String: LocalTransactionScan.Day] = session.isLocal
+            ? Dictionary(session.localTransactionSummary?.days.map { ($0.date, $0) } ?? [], uniquingKeysWith: { first, _ in first })
+            : [:]
         return List {
             Section {
                 VStack(spacing: 0) {
@@ -869,7 +914,7 @@ struct TransactionsView: View {
                         transactionRow(for: transaction, accountLabels: labels)
                     }
                 } header: {
-                    BalancedTransactionDayHeader(date: parts.date, weekday: parts.weekday, summary: balancedDaySummary(group.transactions))
+                    BalancedTransactionDayHeader(date: parts.date, weekday: parts.weekday, summary: balancedDaySummary(group.transactions, day: summaryDays[group.date]))
                 }
                 .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 .listRowBackground(BalancedPalette.page)

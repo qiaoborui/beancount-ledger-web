@@ -140,6 +140,79 @@ final class LocalTransactionScanTests: XCTestCase {
         XCTAssertEqual(try final([rows[5]]).days.first?.expense, 30)
     }
 
+    func testKindCountsCategoriesAndDayTotalsCoverRowsBeyondTheVisiblePrefix() throws {
+        let rows = [
+            transaction(0, postings: [posting("Expenses:Food", 1_000), posting("Assets:Cash", -1_000)]),
+            transaction(1, postings: [posting("Expenses:Food", -400), posting("Assets:Cash", 400)]),
+            transaction(2, date: "2026-09-22", postings: [posting("Income:Salary", -2_000), posting("Assets:Bank", 2_000)]),
+            transaction(3, date: "2026-09-22", postings: [posting("Expenses:Transport", 300), posting("Assets:Cash", -300)]),
+            transaction(4, date: "2026-09-21", postings: [posting("Assets:Bank", -700), posting("Assets:Cash", 700)]),
+            transaction(5, date: "2026-09-21", postings: [posting("Expenses:Food", 50), posting("Assets:Cash", -50)])
+        ]
+        for kind in TransactionKindFilter.allCases {
+            let filter = LedgerTransactionFilter(kind: kind)
+            var limits = LocalTransactionScan.Limits()
+            limits.maxVisibleCount = 1
+            var scan = try LocalTransactionScan(expectedRevision: revision, filter: filter, limits: limits)
+            XCTAssertNil(try scan.consume(page(Array(rows.prefix(2)), next: "next"), requestedCursor: nil))
+            let result = try XCTUnwrap(scan.consume(page(Array(rows.dropFirst(2))), requestedCursor: "next"))
+            // Tab counts ignore the active kind so they stay stable across tabs.
+            XCTAssertEqual(result.kindCounts, .init(all: 6, expense: 3, income: 2, transfer: 1))
+            let matched = rows.filter(filter.matches)
+            XCTAssertEqual(result.categories.reduce(0) { $0 + $1.matchedCount }, matched.count)
+            XCTAssertEqual(result.categories.reduce(0) { $0 + $1.total },
+                           matched.reduce(0) { $0 + abs(TransactionPresentation(transaction: $1).minorUnits) })
+            for category in result.categories {
+                let members = matched.filter { TransactionCategoryKey(transaction: $0) == category.key }
+                XCTAssertEqual(category.matchedCount, members.count)
+                XCTAssertEqual(category.total, members.reduce(0) { $0 + abs(TransactionPresentation(transaction: $1).minorUnits) })
+            }
+        }
+
+        let expense = try final(rows, filter: .init(kind: .expense))
+        XCTAssertEqual(expense.categories.map(\.key), [.category("Expenses:Food"), .category("Expenses:Transport")])
+        XCTAssertEqual(expense.categories.map(\.total), [1_050, 300])
+
+        let all = try final(rows)
+        let days = Dictionary(uniqueKeysWithValues: all.days.map { ($0.date, $0) })
+        XCTAssertEqual(days["2026-09-23"]?.expenseTotal, 1_000)
+        XCTAssertEqual(days["2026-09-23"]?.incomeTotal, 400)
+        XCTAssertEqual(days["2026-09-22"]?.incomeTotal, 2_000)
+        XCTAssertEqual(days["2026-09-22"]?.expenseTotal, 300)
+        XCTAssertEqual(days["2026-09-21"]?.hasTransfer, true)
+        XCTAssertEqual(days["2026-09-21"]?.expenseTotal, 50)
+        XCTAssertEqual(days["2026-09-22"]?.hasTransfer, false)
+    }
+
+    func testCategoryKeyLabelsMatchTransactionLabels() {
+        let labels = ["Expenses:Food": "餐饮", "Assets:Cash": "现金"]
+        let fixtures: [[LedgerPosting]] = [
+            [posting("Expenses:Food", 10), posting("Assets:Cash", -10)],
+            [posting("Expenses:Food", 10), posting("Expenses:Other", 5), posting("Assets:Cash", -15)],
+            [posting("Assets:Bank", -10), posting("Assets:Cash", 10)],
+            [posting("Assets:Bank", -10), posting("Liabilities:Card", -5), posting("Assets:Cash", 15)],
+            [posting("Equity:Opening", -10), posting("Assets:Cash", 10)],
+            [posting("Assets:Cash", 0)]
+        ]
+        for postings in fixtures {
+            let row = transaction(postings: postings)
+            XCTAssertEqual(TransactionCategoryPresentation(key: TransactionCategoryKey(transaction: row), accountLabels: labels),
+                           TransactionCategoryPresentation(transaction: row, accountLabels: labels))
+        }
+        XCTAssertEqual(TransactionCategoryPresentation(transaction: transaction(postings: fixtures[3])).label, "多个账户 → Cash")
+    }
+
+    func testCategoryCapIsTypedAndFailsClosed() throws {
+        var limits = LocalTransactionScan.Limits()
+        limits.maxCategories = 1
+        assertError(.capacityExceeded(.categories)) {
+            try final([
+                transaction(postings: [posting("Expenses:Food", 10)]),
+                transaction(1, postings: [posting("Expenses:Other", 10)])
+            ], limits: limits)
+        }
+    }
+
     func testRefundClampOccursOnlyAtEOFIncludingInvisibleAndNoncontiguousRows() throws {
         var limits = LocalTransactionScan.Limits()
         limits.maxVisibleCount = 1

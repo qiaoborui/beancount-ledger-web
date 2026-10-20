@@ -13,11 +13,12 @@ struct LocalTransactionScan: Sendable {
         var maxAccounts = 10_000
         var maxTags = 10_000
         var maxPages = 10_000
+        var maxCategories = 10_000
         var maxStateBytes = 4 * 1_024 * 1_024
     }
 
     enum Capacity: Equatable, Sendable {
-        case pageRows, visibleBytes, days, accounts, tags, pages, stateBytes
+        case pageRows, visibleBytes, days, accounts, tags, pages, categories, stateBytes
     }
 
     enum ScanError: Error, Equatable, Sendable {
@@ -40,6 +41,36 @@ struct LocalTransactionScan: Sendable {
         let signedExpense: Int
         /// Clamped once, after the entire scan, not per transaction or page.
         var expense: Int { max(0, signedExpense) }
+        /// TransactionPresentation totals, matching the list's day header.
+        var incomeTotal = 0
+        var expenseTotal = 0
+        var hasTransfer = false
+    }
+
+    /// Kind-tab counts. Every filter applies except the kind filter itself, so
+    /// the tabs stay stable while switching between them.
+    struct KindCounts: Equatable, Sendable {
+        var all = 0
+        var expense = 0
+        var income = 0
+        var transfer = 0
+
+        subscript(kind: TransactionKindFilter) -> Int {
+            switch kind {
+            case .all: all
+            case .expense: expense
+            case .income: income
+            case .transfer: transfer
+            }
+        }
+    }
+
+    /// Matched rows grouped by category, labelled by the caller.
+    struct Category: Equatable, Sendable {
+        let key: TransactionCategoryKey
+        let matchedCount: Int
+        /// Sum of TransactionPresentation's absolute amounts, no FX conversion.
+        let total: Int
     }
 
     struct Result: Sendable {
@@ -54,12 +85,23 @@ struct LocalTransactionScan: Sendable {
         let availableTags: [String]
         /// All matched days, including days outside the visible prefix, newest first.
         let days: [Day]
+        var kindCounts = KindCounts()
+        /// All matched categories, largest total first.
+        var categories: [Category] = []
         var hasMoreMatches: Bool { matchedCount > visibleTransactions.count }
     }
 
     private struct DayAccumulator: Sendable {
         var count = 0
         var signedExpense = 0
+        var income = 0
+        var expense = 0
+        var transfer = false
+    }
+
+    private struct CategoryAccumulator: Sendable {
+        var count = 0
+        var total = 0
     }
 
     private struct State: Sendable {
@@ -73,6 +115,8 @@ struct LocalTransactionScan: Sendable {
         var accounts: Set<String> = []
         var tags: Set<String> = []
         var days: [String: DayAccumulator] = [:]
+        var kindCounts = KindCounts()
+        var categories: [TransactionCategoryKey: CategoryAccumulator] = [:]
         // Opaque cursors cannot be compared for monotonicity. Remember them within
         // explicit page/state limits to reject A -> B -> A, not just A -> A.
         var cursors: Set<String> = []
@@ -80,6 +124,7 @@ struct LocalTransactionScan: Sendable {
 
     private let expectedRevision: String
     private let filter: LedgerTransactionFilter
+    private let kindAgnosticFilter: LedgerTransactionFilter
     private let limits: Limits
     private var state = State()
     private var hasFailed = false
@@ -96,10 +141,13 @@ struct LocalTransactionScan: Sendable {
         guard !expectedRevision.isEmpty,
               (0...1_000).contains(limits.maxVisibleCount),
               limits.maxVisibleBytes >= 0, limits.maxStateBytes >= 0,
-              limits.maxDays >= 0, limits.maxAccounts >= 0, limits.maxTags >= 0,
+              limits.maxDays >= 0, limits.maxAccounts >= 0, limits.maxTags >= 0, limits.maxCategories >= 0,
               limits.maxPages > 0 else { throw ScanError.invalidConfiguration }
         self.expectedRevision = expectedRevision
         self.filter = filter
+        var kindAgnosticFilter = filter
+        kindAgnosticFilter.kind = .all
+        self.kindAgnosticFilter = kindAgnosticFilter
         self.limits = limits
         // Account also for retained configuration, not only growing aggregates.
         var bytes = try Self.add(512, Self.stringBytes(expectedRevision))
@@ -162,8 +210,35 @@ struct LocalTransactionScan: Sendable {
             }
             // Reuse canonical Swift equality, prefix, lowercasing and substring
             // semantics; native/Go Unicode approximations are not authoritative.
-            guard filter.matches(transaction) else { continue }
+            // The kind filter is applied below from the same presentation that
+            // feeds the kind-tab counts, so `filter.matches` semantics are kept.
+            guard kindAgnosticFilter.matches(transaction) else { continue }
+            let presentation = TransactionPresentation(transaction: transaction)
+            switch presentation.kind {
+            case .expense: state.kindCounts.expense = try Self.add(state.kindCounts.expense, 1)
+            case .income: state.kindCounts.income = try Self.add(state.kindCounts.income, 1)
+            case .transfer: state.kindCounts.transfer = try Self.add(state.kindCounts.transfer, 1)
+            }
+            state.kindCounts.all = try Self.add(state.kindCounts.all, 1)
+            switch (filter.kind, presentation.kind) {
+            case (.all, _), (.expense, .expense), (.income, .income), (.transfer, .transfer): break
+            default: continue
+            }
             state.matchedCount = try Self.add(state.matchedCount, 1)
+            // Display-only magnitudes: a refund of -Int.max next to -1 is a legal
+            // signed day sum, so these saturate instead of failing the scan.
+            let amount = presentation.minorUnits == Int.min ? Int.max : abs(presentation.minorUnits)
+            let categoryKey = TransactionCategoryKey(transaction: transaction)
+            if state.categories[categoryKey] == nil {
+                guard state.categories.count < limits.maxCategories else { throw ScanError.capacityExceeded(.categories) }
+                var charge = 64
+                for account in categoryKey.accounts { charge = try Self.add(charge, Self.stringBytes(account)) }
+                try chargeState(charge)
+            }
+            var category = state.categories[categoryKey] ?? CategoryAccumulator()
+            category.count = try Self.add(category.count, 1)
+            category.total = Self.saturatingAdd(category.total, amount)
+            state.categories[categoryKey] = category
             if state.days[transaction.date] == nil {
                 guard state.days.count < limits.maxDays else { throw ScanError.capacityExceeded(.days) }
                 try chargeState(Self.add(64, Self.stringBytes(transaction.date)))
@@ -171,6 +246,11 @@ struct LocalTransactionScan: Sendable {
             var day = state.days[transaction.date] ?? DayAccumulator()
             day.count = try Self.add(day.count, 1)
             day.signedExpense = try Self.add(day.signedExpense, signedExpense)
+            switch presentation.kind {
+            case .income: day.income = Self.saturatingAdd(day.income, amount)
+            case .expense: day.expense = Self.saturatingAdd(day.expense, amount)
+            case .transfer: day.transfer = true
+            }
             state.days[transaction.date] = day
 
             if !state.visiblePrefixClosed, state.visible.count < limits.maxVisibleCount {
@@ -198,8 +278,13 @@ struct LocalTransactionScan: Sendable {
             stateAccountedBytes: state.bytes,
             availableAccounts: state.accounts.sorted { $0.localizedStandardCompare($1) == .orderedAscending },
             availableTags: state.tags.sorted { $0.localizedStandardCompare($1) == .orderedAscending },
-            days: state.days.map { Day(date: $0.key, matchedCount: $0.value.count, signedExpense: $0.value.signedExpense) }
-                .sorted { $0.date > $1.date }
+            days: state.days.map {
+                Day(date: $0.key, matchedCount: $0.value.count, signedExpense: $0.value.signedExpense,
+                    incomeTotal: $0.value.income, expenseTotal: $0.value.expense, hasTransfer: $0.value.transfer)
+            }.sorted { $0.date > $1.date },
+            kindCounts: state.kindCounts,
+            categories: state.categories.map { Category(key: $0.key, matchedCount: $0.value.count, total: $0.value.total) }
+                .sorted { $0.total > $1.total }
         )
         isComplete = true
         state = State() // The final result, not the reducer, now owns the visible prefix.
@@ -216,6 +301,12 @@ struct LocalTransactionScan: Sendable {
         let (value, overflow) = lhs.addingReportingOverflow(rhs)
         guard !overflow else { throw ScanError.arithmeticOverflow }
         return value
+    }
+
+    static func saturatingAdd(_ lhs: Int, _ rhs: Int) -> Int {
+        let (value, overflow) = lhs.addingReportingOverflow(rhs)
+        guard overflow else { return value }
+        return rhs < 0 ? Int.min : Int.max
     }
 
     static func checkedExpense(_ transaction: LedgerTransaction) throws -> Int {
