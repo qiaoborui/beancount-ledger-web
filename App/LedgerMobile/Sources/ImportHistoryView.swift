@@ -135,9 +135,10 @@ struct ImportHistoryView: View {
         }
         .onChange(of: session.sharedImportRevision) { _, _ in Task { await loadSharedInbox() } }
         .task {
-            restoreImportDraftIfAvailable()
             await loadSharedInbox()
             await refreshAll(replacingContent: true)
+            // Restore after the archive list loads so an already-committed draft is dropped, not reopened.
+            restoreImportDraftIfAvailable()
             presentDebugImportFlowIfNeeded()
         }
         .onChange(of: scenePhase) { _, updatedPhase in
@@ -237,6 +238,11 @@ struct ImportHistoryView: View {
         guard activeImportFile == nil,
               let ledgerID = session.currentLocalLedgerDescriptor?.id,
               let draft = LedgerImportDraftStore.shared.load(ledgerID: ledgerID) else { return }
+        if let importID = draft.preview?.importID,
+           LedgerImportCommitReconciliation.archivedDocument(importID: importID, in: documents) != nil {
+            LedgerImportDraftStore.shared.remove(ledgerID: ledgerID)
+            return
+        }
         activeImportFile = draft.selectedFile
     }
 

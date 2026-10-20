@@ -192,6 +192,7 @@ struct NativeImportFlowView: View {
             BookkeepingPreviewView(preview: prepared) { result in
                 guard let result else { return }
                 commitResult = result
+                discardDraft()
                 onCommitted(result)
             }
         }
@@ -1284,6 +1285,7 @@ struct NativeImportFlowView: View {
             commitOutcomeNeedsReconciliation = false
             commitErrorMessage = nil
             commitResult = result
+            discardDraft()
             onCommitted(result)
             return
         }
