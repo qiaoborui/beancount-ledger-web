@@ -350,6 +350,15 @@ struct LedgerIslandStageView: View {
 }
 
 private extension View {
+    /// `.islandPlaced` positions an element's own centre, but a view that
+    /// stretches to its slot (a centre-aligned block inside the island stack)
+    /// has its drawing at the slot's centre. Scaling about the view's centre
+    /// keeps the size and has no visual effect; it only makes the view's own
+    /// centre the point the island places.
+    func centredBeforePlacement() -> some View {
+        scaleEffect(1.0)
+    }
+
     /// Places an element on the island with its enter/exit effect. The effect
     /// runs at the element's own size (blurring a full island-sized layer per
     /// element was expensive), while scale still pivots on the island centre so
@@ -358,6 +367,10 @@ private extension View {
     func islandPlaced(_ effect: LedgerIslandEffect, at point: CGPoint, in size: CGSize) -> some View {
         if effect.opacity > 0.001 {
             let cx = size.width / 2, cy = size.height / 2
+            // The content stack gives every row the island's height and centres
+            // it, so a row's own centre is the island centre plus
+            // `point - islandCentre`. `position` then wants that offset from
+            // the island centre, which is exactly this.
             scaleEffect(effect.scale)
                 .blur(radius: effect.blur)
                 .opacity(effect.opacity)
@@ -439,7 +452,8 @@ private struct LedgerIslandExpandedContent: View {
         // rows at the same size as the subtitle.
         let textScale = layout.scale
         let contentIn = stage.contentIn(entry: entry)
-        let titleCenterY = L.titleCenterY(lines: lines)
+        // With a fixed title block, the block's own centre is where it lands.
+        let titleBlockCenterY = L.titleBlockCenterY
         let subtitleCenterY = L.subtitleCenterY(rows: rows)
         let captionCenterY = L.captionCenterY(rows: rows)
 
@@ -448,6 +462,7 @@ private struct LedgerIslandExpandedContent: View {
 
         ZStack {
             LedgerIslandBadge(notice: notice, style: style, lt: lt, timeline: timeline, ringProgress: ringProgress)
+                .centredBeforePlacement()
                 .islandPlaced(entry.effect(.expanded, delay: 0, at: now, reduceMotion: reduce, contentIn: contentIn), at: map(L.badgeCenter.x, L.badgeCenter.y), in: size)
 
             Group {
@@ -469,11 +484,13 @@ private struct LedgerIslandExpandedContent: View {
             .scaleEffect(amountScale, anchor: .trailing)
             .islandPlaced(entry.effect(.expanded, delay: 0.04, at: now, reduceMotion: reduce, contentIn: contentIn), at: map(rightEdge - amountColumn, L.amountCenterY(stage.cutout)), in: size)
 
-            // The stack frames every element at its slot's full height, which
-            // would centre a two-line title on that slot rather than on its own
-            // centre; the overlay pins each row and lets it render naturally.
+            // The stack stretches every child to the island's height and
+            // centres it there; a fixed 76pt slot would land a two-line title
+            // a band too low. The block fills the island's height instead, so
+            // `.position` resolves to the island centre, and the block's own
+            // centre is the camera band's centre.
             Color.clear
-                .frame(width: textWidth, height: L.titleBlockHeight)
+                .frame(width: textWidth, height: max(size.height, L.titleBandHeight))
                 .overlay(alignment: .center) {
                     Text(layout.title)
                         .font(LedgerIslandFonts.title)
@@ -485,7 +502,8 @@ private struct LedgerIslandExpandedContent: View {
                         .frame(width: textWidth, alignment: .leading)
                 }
                 .scaleEffect(textScale, anchor: .leading)
-                .islandPlaced(entry.effect(.expanded, delay: 0.07, at: now, reduceMotion: reduce, contentIn: contentIn), at: mapTextCenter(textWidth, titleCenterY), in: size)
+                .centredBeforePlacement()
+                .islandPlaced(entry.effect(.expanded, delay: 0.07, at: now, reduceMotion: reduce, contentIn: contentIn), at: mapTextCenter(textWidth, titleBlockCenterY), in: size)
 
             LedgerIslandSubtitle(notice: notice, style: style, lt: lt, timeline: timeline)
                 .lineLimit(1)
