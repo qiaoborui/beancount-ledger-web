@@ -727,6 +727,22 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertNotNil(session.localTransactionWindow)
     }
 
+    func testReturningToForegroundSignalsWindowReload() async throws {
+        for background in [false, true] {
+            let (session, _, _) = try await fixture()
+            defer { session.chooseLedger() }
+            await session.loadLocalTransactionWindow()
+            XCTAssertNotNil(session.localTransactionWindow)
+            let before = session.localTransactionReloadID
+            await session.updateActivity(isActive: false, isBackground: background)
+            XCTAssertNil(session.localTransactionWindow)
+            await session.updateActivity(isActive: true, isBackground: false)
+            XCTAssertGreaterThan(session.localTransactionReloadID, before)
+            await session.ensureLocalTransactionWindow()
+            XCTAssertNotNil(session.localTransactionWindow)
+        }
+    }
+
     func testEventExportFullCountAndRevocationOnDismissResetPrivacyOrSwitch() async throws {
         for operation in 0..<4 {
             let (session, _, _) = try await fixture()
