@@ -2022,25 +2022,26 @@ struct LedgerTransactionFilter: Equatable, Sendable {
 }
 
 /// Display-only context derived from postings; it never changes amounts or write payloads.
-struct TransactionCategoryPresentation: Equatable {
-    let label: String
+/// Everything `TransactionCategoryPresentation` needs from a transaction, without
+/// the transaction. Full-range scans group by this key so category totals can be
+/// labelled later with the current account labels instead of retaining rows.
+enum TransactionCategoryKey: Hashable, Sendable {
+    case multiple
+    case category(String)
+    /// nil on either side means several accounts ("多个账户").
+    case transfer(from: String?, to: String?)
+    case equity
+    case uncategorized
 
-    init(transaction: LedgerTransaction, accountLabels: [String: String] = [:]) {
-        func displayName(_ account: String) -> String {
-            let label = accountLabels[account]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !label.isEmpty, label != account { return label }
-            let path = account.split(separator: ":").dropFirst().joined(separator: " › ")
-            return path.isEmpty ? account : path
-        }
-
+    init(transaction: LedgerTransaction) {
         let postings = transaction.postings.filter { $0.amount != 0 }
         let categories = Set(postings.filter {
             $0.account.hasPrefix("Expenses:") || $0.account.hasPrefix("Income:")
         }.map(\.account))
         if categories.count > 1 {
-            label = "多分类"
+            self = .multiple
         } else if let account = categories.first {
-            label = displayName(account)
+            self = .category(account)
         } else {
             let funding = postings.filter {
                 $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:")
@@ -2048,14 +2049,52 @@ struct TransactionCategoryPresentation: Equatable {
             let outgoing = Set(funding.filter { $0.amount < 0 }.map(\.account))
             let incoming = Set(funding.filter { $0.amount > 0 }.map(\.account))
             if !outgoing.isEmpty, !incoming.isEmpty {
-                let from = outgoing.count == 1 ? displayName(outgoing.first!) : "多个账户"
-                let to = incoming.count == 1 ? displayName(incoming.first!) : "多个账户"
-                label = "\(from) → \(to)"
+                self = .transfer(from: outgoing.count == 1 ? outgoing.first : nil,
+                                 to: incoming.count == 1 ? incoming.first : nil)
             } else if postings.contains(where: { $0.account.hasPrefix("Equity:") }) {
-                label = "权益调整"
+                self = .equity
             } else {
-                label = "未分类"
+                self = .uncategorized
             }
+        }
+    }
+
+    /// Retained UTF-8 payload, for callers that account bounded state.
+    var accounts: [String] {
+        switch self {
+        case .category(let account): [account]
+        case .transfer(let from, let to): [from, to].compactMap { $0 }
+        case .multiple, .equity, .uncategorized: []
+        }
+    }
+}
+
+struct TransactionCategoryPresentation: Equatable {
+    let label: String
+
+    init(transaction: LedgerTransaction, accountLabels: [String: String] = [:]) {
+        self.init(key: TransactionCategoryKey(transaction: transaction), accountLabels: accountLabels)
+    }
+
+    init(key: TransactionCategoryKey, accountLabels: [String: String] = [:]) {
+        func displayName(_ account: String) -> String {
+            let label = accountLabels[account]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !label.isEmpty, label != account { return label }
+            let path = account.split(separator: ":").dropFirst().joined(separator: " › ")
+            return path.isEmpty ? account : path
+        }
+
+        switch key {
+        case .multiple:
+            label = "多分类"
+        case .category(let account):
+            label = displayName(account)
+        case .transfer(let from, let to):
+            label = "\(from.map(displayName) ?? "多个账户") → \(to.map(displayName) ?? "多个账户")"
+        case .equity:
+            label = "权益调整"
+        case .uncategorized:
+            label = "未分类"
         }
     }
 
