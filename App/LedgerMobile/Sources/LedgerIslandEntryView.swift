@@ -815,6 +815,29 @@ struct LedgerIslandOverlayContainer: View {
                     currentNotice = nil
                 }
             }
+            .task { await previewLoop() }
+    }
+
+    /// `--preview-island` replays sample notices so the island can be checked
+    /// on a simulator or device without writing to a ledger.
+    private func previewLoop() async {
+        guard ProcessInfo.processInfo.arguments.contains("--preview-island") else { return }
+        let samples = [
+            LedgerIslandNotice(type: .expense, title: "楼下便利店", subtitle: "餐饮 · 支出已记录",
+                               amountText: "-¥38.00", iconName: "fork.knife", iconColorHex: 0xF59E0B),
+            LedgerIslandNotice(type: .batchImport(count: 128), title: "支付宝账单导入", subtitle: "已归档至账本",
+                               amountText: "128 笔已归档", iconName: "tray.and.arrow.down.fill", iconColorHex: 0x30D158),
+            LedgerIslandNotice(type: .income, title: "Synthetic context action with a long name",
+                               subtitle: "收入入账", amountText: "+¥12,800.00", iconName: "banknote.fill",
+                               iconColorHex: 0x107C41),
+        ]
+        var index = 0
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(2))
+            currentNotice = samples[index % samples.count]
+            index += 1
+            try? await Task.sleep(for: .seconds(5))
+        }
     }
 }
 
