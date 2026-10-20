@@ -20,6 +20,20 @@ struct PosixStat {
     let mode: mode_t
     let size: Int
     let modified: Date
+    /// Raw nanosecond timestamps and inode, for change detection that a
+    /// `Date` (double precision) would round away. Zero where unavailable.
+    var inode: UInt64 = 0
+    var modifiedNanos: Int64 = 0
+    var changedNanos: Int64 = 0
+
+    /// True when two stats of the same path prove the file was not written
+    /// between them: a content write updates `mtime` and `ctime`, an atomic
+    /// replace changes the inode, and `ctime` cannot be set from user space.
+    func isUnchanged(since earlier: PosixStat) -> Bool {
+        inode != 0 && inode == earlier.inode && size == earlier.size
+            && mode == earlier.mode && modifiedNanos == earlier.modifiedNanos
+            && changedNanos == earlier.changedNanos
+    }
 
     var isDirectory: Bool { (mode & S_IFMT) == S_IFDIR }
     var isRegularFile: Bool { (mode & S_IFMT) == S_IFREG }
@@ -33,7 +47,10 @@ struct PosixStat {
         let seconds = TimeInterval(status.st_mtimespec.tv_sec)
         let fraction = TimeInterval(status.st_mtimespec.tv_nsec) / 1_000_000_000
         return PosixStat(mode: status.st_mode, size: Int(status.st_size),
-            modified: Date(timeIntervalSince1970: seconds + fraction))
+            modified: Date(timeIntervalSince1970: seconds + fraction),
+            inode: UInt64(status.st_ino),
+            modifiedNanos: Int64(status.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(status.st_mtimespec.tv_nsec),
+            changedNanos: Int64(status.st_ctimespec.tv_sec) * 1_000_000_000 + Int64(status.st_ctimespec.tv_nsec))
         #else
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0
@@ -168,12 +185,20 @@ actor LocalLedgerWorkspace {
 
     nonisolated let rootDirectory: URL
 
+    /// How regular files were staged since this workspace was created.
+    struct CopyStatistics: Equatable, Sendable {
+        var cloned = 0
+        var copied = 0
+    }
+    private(set) var copyStatistics = CopyStatistics()
+
     private let fileManager: FileManager
     private let generationsDirectory: URL
     private let stagingDirectory: URL
     private let currentRevisionFile: URL
     private let copyEntryHook: @Sendable (String) throws -> Void
     private let treeLimits: TreeLimits
+    private let usesFileCloning: Bool
     private var transactionInProgress = false
     private var transactionLockHeld = false
     #if canImport(Darwin)
@@ -184,8 +209,10 @@ actor LocalLedgerWorkspace {
         rootDirectory: URL,
         fileManager: FileManager = FileManager(),
         treeLimits: TreeLimits = TreeLimits(),
+        usesFileCloning: Bool = true,
         copyEntryHook: @escaping @Sendable (String) throws -> Void = { _ in }
     ) {
+        self.usesFileCloning = usesFileCloning
         let root = rootDirectory.standardizedFileURL
         self.fileManager = fileManager
         self.rootDirectory = root
@@ -257,7 +284,7 @@ actor LocalLedgerWorkspace {
         defer { removeIfPresent(stage) }
         let workspace = stage.appendingPathComponent("workspace", isDirectory: true)
         try createProtectedDirectory(workspace)
-        try copyDirectoryContents(
+        _ = try copyDirectoryContents(
             from: source,
             to: workspace,
             sourceRoot: source,
@@ -295,17 +322,19 @@ actor LocalLedgerWorkspace {
         let stage = try makeStage()
         defer { removeIfPresent(stage) }
         let workspace = stage.appendingPathComponent("workspace", isDirectory: true)
+        var baseline: [String: PosixStat] = [:]
 
         if let parent {
-            let currentWorkspace = try workspaceURL(for: parent)
+            let currentWorkspace = try workspaceLocation(for: parent)
             let sourceIdentity = try directoryIdentity(at: currentWorkspace)
             try createProtectedDirectory(workspace)
-            try copyDirectoryContents(
+            baseline = try copyDirectoryContents(
                 from: currentWorkspace,
                 to: workspace,
                 sourceRoot: currentWorkspace,
                 expectedSourceIdentity: sourceIdentity,
-                requiresExternalSource: false
+                requiresExternalSource: false,
+                recordsFiles: mutateStage != nil
             )
         } else {
             try createProtectedDirectory(workspace)
@@ -321,30 +350,26 @@ actor LocalLedgerWorkspace {
         }
         try await validator(workspace)
         try Task.checkCancellation()
-        let finalPaths = try validateTree(at: workspace)
+        let finalStats = try validateTreeStats(at: workspace)
         var changedPaths = Set(normalizedChanges.map(\.relativePath))
         if mutateStage != nil {
             if let parent {
-                let previous = try workspaceURL(for: parent)
-                let previousPaths = Set(try validateTree(at: previous))
-                let finalPathSet = Set(finalPaths)
-                for path in previousPaths.union(finalPathSet) {
-                    let existed = previousPaths.contains(path)
-                    let exists = finalPathSet.contains(path)
-                    if !existed || !exists {
+                let previous = try workspaceLocation(for: parent)
+                for path in changeCandidates(baseline: baseline, final: finalStats) {
+                    if baseline[path] == nil || finalStats[path] == nil {
                         changedPaths.insert(path)
-                    } else {
-                        let oldFile = try secureDescendant(path, of: previous, allowMissingLeaf: false)
-                        let newFile = try secureDescendant(path, of: workspace, allowMissingLeaf: false)
-                        let executionChanged = try isExecutable(oldFile) != isExecutable(newFile)
-                        if !fileManager.contentsEqual(atPath: oldFile.path, andPath: newFile.path)
-                            || executionChanged {
-                            changedPaths.insert(path)
-                        }
+                        continue
+                    }
+                    let oldFile = try secureDescendant(path, of: previous, allowMissingLeaf: false)
+                    let newFile = try secureDescendant(path, of: workspace, allowMissingLeaf: false)
+                    let executionChanged = try isExecutable(oldFile) != isExecutable(newFile)
+                    if !fileManager.contentsEqual(atPath: oldFile.path, andPath: newFile.path)
+                        || executionChanged {
+                        changedPaths.insert(path)
                     }
                 }
             } else {
-                changedPaths.formUnion(finalPaths)
+                changedPaths.formUnion(finalStats.keys)
             }
         }
         try protectTree(at: workspace)
@@ -382,31 +407,35 @@ actor LocalLedgerWorkspace {
         try removeAbandonedStages()
         let parent = try requiredCurrentRevision()
         guard parent.id == expectedRevisionID else { throw WorkspaceError.staleRevision }
-        let previous = try workspaceURL(for: parent)
+        // `requiredCurrentRevision` already validated this immutable tree; the
+        // copy below re-checks every entry as it walks it.
+        let previous = try workspaceLocation(for: parent)
         let stage = try makeStage()
         defer { removeIfPresent(stage) }
         let workspace = stage.appendingPathComponent("workspace", isDirectory: true)
         try createProtectedDirectory(workspace)
-        try copyDirectoryContents(from: previous, to: workspace, sourceRoot: previous,
-            expectedSourceIdentity: directoryIdentity(at: previous), requiresExternalSource: false)
+        let baseline = try copyDirectoryContents(from: previous, to: workspace, sourceRoot: previous,
+            expectedSourceIdentity: directoryIdentity(at: previous), requiresExternalSource: false,
+            recordsFiles: true)
         try await mutateStage(workspace)
         try Task.checkCancellation()
-        // Validated once here; `newPaths` below reuses this result. The tree is
-        // already final at this point, so re-walking it a second time only
-        // repeated a full stat sweep over every file.
-        let newPaths = Set(try validateTree(at: workspace))
+        // Validated once here; the tree is final, and its stats double as the
+        // change-detection snapshot.
+        let newStats = try validateTreeStats(at: workspace)
         try await validator(workspace)
         try Task.checkCancellation()
-        let oldPaths = Set(try validateTree(at: previous))
+        let candidates = changeCandidates(baseline: baseline, final: newStats)
         var files: [PreparedFiles.File] = []
         var previewBytes = 0
-        for path in oldPaths.union(newPaths).sorted() {
-            if oldPaths.contains(path), newPaths.contains(path),
+        for path in candidates {
+            let inOld = baseline[path] != nil
+            let inNew = newStats[path] != nil
+            if inOld, inNew,
                fileManager.contentsEqual(atPath: try secureDescendant(path, of: previous, allowMissingLeaf: false).path,
                                          andPath: try secureDescendant(path, of: workspace, allowMissingLeaf: false).path) { continue }
-            let before = try oldPaths.contains(path)
+            let before = try inOld
                 ? readRegularFile(at: secureDescendant(path, of: previous, allowMissingLeaf: false), displayPath: path) : nil
-            let after = try newPaths.contains(path)
+            let after = try inNew
                 ? readRegularFile(at: secureDescendant(path, of: workspace, allowMissingLeaf: false), displayPath: path) : nil
             if before != after {
                 previewBytes += (before?.count ?? 0) + (after?.count ?? 0)
@@ -415,6 +444,20 @@ actor LocalLedgerWorkspace {
             }
         }
         return PreparedFiles(revisionID: parent.id, files: files)
+    }
+
+    /// Paths whose content may differ between the parent generation and the
+    /// final stage, sorted. Generations are immutable and the stage starts as a
+    /// byte-equal copy, so a file whose stat still matches the post-copy
+    /// snapshot was never written and is skipped without reading it.
+    private func changeCandidates(baseline: [String: PosixStat], final: [String: PosixStat]) -> [String] {
+        var candidates: [String] = []
+        for (path, base) in baseline {
+            if let now = final[path], now.isUnchanged(since: base) { continue }
+            candidates.append(path)
+        }
+        for path in final.keys where baseline[path] == nil { candidates.append(path) }
+        return candidates.sorted()
     }
 
     /// Preview creation shares the cross-instance write lock with publication
@@ -1039,13 +1082,17 @@ actor LocalLedgerWorkspace {
         return standardized
     }
 
+    /// Stages `source` into `destination`. When `recordsFiles` is set, returns
+    /// every staged regular file's relative path with its stat taken right after
+    /// staging — the baseline later used to detect files a mutation touched.
     private func copyDirectoryContents(
         from source: URL,
         to destination: URL,
         sourceRoot: URL,
         expectedSourceIdentity: FileIdentity,
-        requiresExternalSource: Bool
-    ) throws {
+        requiresExternalSource: Bool,
+        recordsFiles: Bool = false
+    ) throws -> [String: PosixStat] {
         var budget = TreeBudget(limits: treeLimits)
         #if canImport(Darwin)
         let descriptor = open(source.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
@@ -1064,18 +1111,25 @@ actor LocalLedgerWorkspace {
             throw WorkspaceError.invalidSource
         }
         var aliases = Set<String>()
+        var recorded: [String: PosixStat] = [:]
         try copyDirectoryContents(
             fromDirectoryDescriptor: descriptor,
             to: destination,
             relativePrefix: "",
             aliases: &aliases,
-            budget: &budget
+            budget: &budget,
+            recordsFiles: recordsFiles,
+            recorded: &recorded
         )
+        return recorded
         #else
         guard try directoryIdentity(at: source) == expectedSourceIdentity else {
             throw WorkspaceError.invalidSource
         }
-        try copyDirectoryContentsByPath(from: source, to: destination, sourceRoot: sourceRoot, budget: &budget)
+        var recorded: [String: PosixStat] = [:]
+        try copyDirectoryContentsByPath(from: source, to: destination, sourceRoot: sourceRoot,
+            budget: &budget, recordsFiles: recordsFiles, recorded: &recorded)
+        return recorded
         #endif
     }
 
@@ -1085,7 +1139,9 @@ actor LocalLedgerWorkspace {
         to destination: URL,
         relativePrefix: String,
         aliases: inout Set<String>,
-        budget: inout TreeBudget
+        budget: inout TreeBudget,
+        recordsFiles: Bool,
+        recorded: inout [String: PosixStat]
     ) throws {
         try Task.checkCancellation()
         for name in try directoryEntryNames(directoryDescriptor, maximumEntries: treeLimits.maximumEntries - budget.entries) {
@@ -1121,12 +1177,25 @@ actor LocalLedgerWorkspace {
                     to: target,
                     relativePrefix: relativePath,
                     aliases: &aliases,
-                    budget: &budget
+                    budget: &budget,
+                    recordsFiles: recordsFiles,
+                    recorded: &recorded
                 )
             case S_IFREG:
-                try copyRegularFile(fromDescriptor: childDescriptor, to: target,
-                    executable: status.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH) != 0, budget: &budget)
-                try protect(target)
+                let executable = status.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH) != 0
+                var cloned = false
+                if usesFileCloning, cloneRegularFile(fromDescriptor: childDescriptor, to: target,
+                    size: Int(status.st_size), executable: executable, budget: &budget) {
+                    close(childDescriptor)
+                    cloned = true
+                    copyStatistics.cloned += 1
+                } else {
+                    try copyRegularFile(fromDescriptor: childDescriptor, to: target,
+                        executable: executable, budget: &budget)
+                    copyStatistics.copied += 1
+                }
+                try protectFile(target, modeAlreadySet: cloned)
+                if recordsFiles { recorded[relativePath] = try PosixStat.at(target) }
             default:
                 close(childDescriptor)
                 throw WorkspaceError.unsupportedItem(relativePath)
@@ -1173,6 +1242,28 @@ actor LocalLedgerWorkspace {
         return URL(fileURLWithPath: path).standardizedFileURL
     }
 
+    /// Copy-on-write clone of an immutable generation's file (APFS). Returns
+    /// false, leaving nothing behind and the descriptor open, when the volume or
+    /// file cannot be cloned; the caller then byte-copies. A clone shares extents
+    /// but is a distinct inode, so a later in-place write to the staged file
+    /// never reaches the parent generation (unlike a hard link).
+    private func cloneRegularFile(
+        fromDescriptor sourceDescriptor: Int32,
+        to destination: URL,
+        size: Int,
+        executable: Bool,
+        budget: inout TreeBudget
+    ) -> Bool {
+        guard size >= 0, size <= budget.limits.maximumBytes - budget.bytes,
+              fclonefileat(sourceDescriptor, AT_FDCWD, destination.path, 0) == 0 else { return false }
+        guard chmod(destination.path, executable ? S_IRUSR | S_IWUSR | S_IXUSR : S_IRUSR | S_IWUSR) == 0,
+              (try? budget.addBytes(size)) != nil else {
+            unlink(destination.path)
+            return false
+        }
+        return true
+    }
+
     private func copyRegularFile(
         fromDescriptor sourceDescriptor: Int32,
         to destination: URL,
@@ -1207,7 +1298,8 @@ actor LocalLedgerWorkspace {
     }
     #else
     private func copyDirectoryContentsByPath(
-        from source: URL, to destination: URL, sourceRoot: URL, budget: inout TreeBudget
+        from source: URL, to destination: URL, sourceRoot: URL, budget: inout TreeBudget,
+        recordsFiles: Bool, recorded: inout [String: PosixStat]
     ) throws {
         try Task.checkCancellation()
         guard try itemKind(at: source) == .directory,
@@ -1226,7 +1318,8 @@ actor LocalLedgerWorkspace {
             switch try itemKind(at: item) {
             case .directory:
                 try createProtectedDirectory(target)
-                try copyDirectoryContentsByPath(from: item, to: target, sourceRoot: sourceRoot, budget: &budget)
+                try copyDirectoryContentsByPath(from: item, to: target, sourceRoot: sourceRoot,
+                    budget: &budget, recordsFiles: recordsFiles, recorded: &recorded)
             case .regularFile:
                 let executable = try isExecutable(item)
                 let input = try FileHandle(forReadingFrom: item)
@@ -1241,6 +1334,8 @@ actor LocalLedgerWorkspace {
                 }
                 try fileManager.setAttributes([.posixPermissions: executable ? 0o700 : 0o600], ofItemAtPath: target.path)
                 try protect(target)
+                copyStatistics.copied += 1
+                if recordsFiles { recorded[relativePath] = try PosixStat.at(target) }
             case .symbolicLink:
                 throw WorkspaceError.symbolicLink(item.path)
             case .other:
@@ -1252,22 +1347,29 @@ actor LocalLedgerWorkspace {
 
     @discardableResult
     private func validateTree(at directory: URL) throws -> [String] {
+        try validateTreeStats(at: directory).keys.sorted()
+    }
+
+    /// Same checks as `validateTree`, keeping each regular file's stat.
+    private func validateTreeStats(at directory: URL) throws -> [String: PosixStat] {
         var aliases = Set<String>()
         var budget = TreeBudget(limits: treeLimits)
-        return try validateTree(at: directory, relativePrefix: "", aliases: &aliases, budget: &budget)
+        var stats: [String: PosixStat] = [:]
+        try validateTree(at: directory, relativePrefix: "", aliases: &aliases, budget: &budget, stats: &stats)
+        return stats
     }
 
     private func validateTree(
         at directory: URL,
         relativePrefix: String,
         aliases: inout Set<String>,
-        budget: inout TreeBudget
-    ) throws -> [String] {
+        budget: inout TreeBudget,
+        stats: inout [String: PosixStat]
+    ) throws {
         try Task.checkCancellation()
         guard try itemKind(at: directory) == .directory else {
             throw WorkspaceError.unsupportedItem(relativePrefix)
         }
-        var files: [String] = []
         for item in try fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil,
@@ -1284,24 +1386,24 @@ actor LocalLedgerWorkspace {
             }
             switch try itemKind(at: item) {
             case .directory:
-                files.append(contentsOf: try validateTree(
+                try validateTree(
                     at: item,
                     relativePrefix: relativePath,
                     aliases: &aliases,
-                    budget: &budget
-                ))
+                    budget: &budget,
+                    stats: &stats
+                )
             case .regularFile:
-                let size = try PosixStat.at(item).size
-                guard size >= 0 else { throw WorkspaceError.treeLimitExceeded }
-                try budget.addBytes(size)
-                files.append(relativePath)
+                let stat = try PosixStat.at(item)
+                guard stat.size >= 0 else { throw WorkspaceError.treeLimitExceeded }
+                try budget.addBytes(stat.size)
+                stats[relativePath] = stat
             case .symbolicLink:
                 throw WorkspaceError.symbolicLink(relativePath)
             case .other:
                 throw WorkspaceError.unsupportedItem(relativePath)
             }
         }
-        return files.sorted()
     }
 
     private func protectTree(at directory: URL) throws {
@@ -1462,6 +1564,19 @@ actor LocalLedgerWorkspace {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         }
         try protect(directory)
+    }
+
+    /// `protect` for a regular file whose permission bits were just set by the
+    /// caller (cloning applies them with `chmod`): only the data-protection
+    /// class remains, so skip the two `lstat`s and the second `setAttributes`.
+    private func protectFile(_ url: URL, modeAlreadySet: Bool) throws {
+        guard modeAlreadySet else { return try protect(url) }
+        #if os(iOS)
+        try fileManager.setAttributes(
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: url.path
+        )
+        #endif
     }
 
     private func protect(_ url: URL) throws {
