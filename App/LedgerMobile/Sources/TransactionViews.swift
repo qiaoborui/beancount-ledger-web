@@ -275,6 +275,43 @@ private struct LedgerTransactionActions: ViewModifier {
     }
 }
 
+/// Records a transaction in one tap from a page header. The fast editor used
+/// to sit behind the 流水 overflow menu, three taps from the overview.
+struct LedgerQuickEntryButton: View {
+    @EnvironmentObject private var session: LedgerSession
+    @State private var presented = false
+    var accessibilityID = "quick-entry"
+
+    var body: some View {
+        if session.isLocal {
+            Button {
+                LedgerFeedback.light()
+                presented = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(BalancedPalette.page)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(BalancedPalette.ink))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("记一笔")
+            .accessibilityIdentifier(accessibilityID)
+            .sheet(isPresented: $presented) {
+                TransactionEditorView(
+                    accounts: session.ledger?.accounts ?? [],
+                    commodities: session.ledger?.commodities ?? []
+                ) { entry in
+                    try await session.addLocalTransaction(entry)
+                }
+                .ledgerPrivacyProtectedSheet()
+            }
+        }
+    }
+}
+
 struct TransactionFilterBar: View {
     @Binding var kindFilter: TransactionKindFilter
 
@@ -478,7 +515,6 @@ struct TransactionsView: View {
     @State private var filters = LedgerTransactionFilter()
     @State private var filterPresented = false
     @State private var storagePresented = false
-    @State private var creatingTransaction = false
     @State private var duplicateTarget: LedgerTransaction?
     @State private var editingTarget: LedgerTransaction?
     @State private var deletionTarget: LedgerTransaction?
@@ -1013,11 +1049,8 @@ struct TransactionsView: View {
         } else if actionRequestID != nil {
             ProgressView().frame(width: 44, height: 44).accessibilityLabel("准备交易操作")
         } else {
+            LedgerQuickEntryButton(accessibilityID: "transaction-create-local")
             Menu {
-                if session.isLocal {
-                    Button("记一笔", systemImage: "plus") { creatingTransaction = true }
-                        .accessibilityIdentifier("transaction-create-local")
-                }
                 Button("筛选交易", systemImage: "line.3.horizontal.decrease") { filterPresented = true }
                 Button("多选流水", systemImage: "checkmark.circle") { beginSelection() }
                     .accessibilityIdentifier("transaction-tag-selection")
@@ -1039,12 +1072,6 @@ struct TransactionsView: View {
         navigationContent
             .sheet(isPresented: $storagePresented) {
                 LedgerStorageSheet().ledgerPrivacyProtectedSheet()
-            }
-            .sheet(isPresented: $creatingTransaction) {
-                TransactionEditorView(accounts: session.ledger?.accounts ?? [], commodities: session.ledger?.commodities ?? []) { entry in
-                    try await session.addLocalTransaction(entry)
-                }
-                .ledgerPrivacyProtectedSheet()
             }
             .sheet(item: $duplicateTarget) { transaction in
                 TransactionEditorView(
@@ -4602,6 +4629,9 @@ struct CookieFastTransactionEditorBody: View {
                 transferTargetAccount = p1IsSource ? p2.account : p1.account
             }
         }
+        if initialPostings.isEmpty, let currency = commodities.first, !currency.isEmpty {
+            selectedCurrency = currency
+        }
 
         if transferSourceAccount.isEmpty && transferTargetAccount.isEmpty {
             let remembered = CookieTransferMemory.load(validAccounts: Set(assetAccounts.map(\.account)))
@@ -4609,6 +4639,9 @@ struct CookieFastTransactionEditorBody: View {
             transferTargetAccount = remembered.target ?? ""
         }
 
+        if assetAccount.isEmpty, let remembered = CookieFundingMemory.load(validAccounts: Set(assetAccounts.map(\.account))) {
+            assetAccount = remembered
+        }
         if assetAccount.isEmpty {
             assetAccount = assetAccounts.first(where: { $0.account.contains("Wechat") || $0.account.contains("Alipay") || $0.account.contains("Bank") })?.account
                 ?? assetAccounts.first?.account ?? "Assets:CN:Bank:Checking"
@@ -4760,6 +4793,8 @@ struct CookieFastTransactionEditorBody: View {
 
         if !isSplitMode && kind == .transfer {
             CookieTransferMemory.save(source: transferSourceAccount, target: transferTargetAccount)
+        } else if !isSplitMode {
+            CookieFundingMemory.save(assetAccount)
         }
 
         saving = true
@@ -4828,6 +4863,11 @@ struct TransactionEditorView: View {
     let commodities: [String]
     let onSave: (LedgerTransactionEntry) async throws -> Void
     private var requiresAdvancedEditor = false
+    /// A new entry with nothing prefilled. The advanced form still needs
+    /// placeholder postings, but the fast editor picks its own defaults
+    /// (common category, last-used funding account) instead of whichever
+    /// Expenses/Assets account happens to sort first.
+    private var fastEditorStartsBlank = false
 
     @State private var mode: EditorMode
     @State private var date: Date
@@ -4912,6 +4952,7 @@ struct TransactionEditorView: View {
         if let prefillPostings, !prefillPostings.isEmpty {
             _postings = State(initialValue: prefillPostings)
         } else {
+            fastEditorStartsBlank = prefillPayee.isEmpty && prefillNarration.isEmpty
             _postings = State(initialValue: [
                 EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Expenses:") })?.account ?? "Expenses:Other", amount: "", currency: commodities.first ?? "CNY"),
                 EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Assets:") })?.account ?? "Assets:Cash", amount: "", currency: "")
@@ -4966,7 +5007,7 @@ struct TransactionEditorView: View {
                     initialPayee: payee,
                     initialNarration: narration,
                     initialTags: tagsText,
-                    initialPostings: postings,
+                    initialPostings: fastEditorStartsBlank ? [] : postings,
                     onSave: onSave,
                     onSwitchToAdvanced: { newDate, newPayee, newNarration, newPostings in
                         date = newDate
@@ -5379,6 +5420,21 @@ func amountColor(_ kind: TransactionKind) -> Color {
 /// render filled.
 func outlineGlyph(_ name: String) -> String {
     name.hasSuffix(".fill") ? String(name.dropLast(5)) : name
+}
+
+/// The account the last fast expense or income was paid from or into, so the
+/// next entry starts there instead of on a guessed asset account.
+enum CookieFundingMemory {
+    private static let key = "ledger.fastEntry.lastFundingAccount"
+
+    static func load(validAccounts: Set<String>, defaults: UserDefaults = .standard) -> String? {
+        defaults.string(forKey: key).flatMap { validAccounts.contains($0) ? $0 : nil }
+    }
+
+    static func save(_ account: String, defaults: UserDefaults = .standard) {
+        guard !account.isEmpty else { return }
+        defaults.set(account, forKey: key)
+    }
 }
 
 /// Remembers the last transfer route so new transfers start from the accounts

@@ -20,7 +20,8 @@ struct OverviewView: View {
             }.padding(.bottom, 24).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
         }
         .scrollContentBackground(.hidden).background(BalancedPalette.page)
-        .terminalPageChrome("财务概览", compactTitle: "概览", isRoot: isRoot, showsTimeRange: true)
+        .terminalPageChrome("财务概览", compactTitle: "概览", isRoot: isRoot, showsTimeRange: true,
+                            actions: AnyView(LedgerQuickEntryButton(accessibilityID: "overview-quick-entry")))
         .refreshable { await Task { await session.refresh() }.value }
         .sheet(item: $comparisonDetails) { details in
             NavigationStack {

@@ -188,8 +188,7 @@ final class LocalLedgerUITests: XCTestCase {
         if !app.buttons["transaction-actions"].waitForExistence(timeout: 3) {
             app.tabBars.buttons["流水"].tap()
         }
-        XCTAssertTrue(app.buttons["transaction-actions"].waitForExistence(timeout: 10), app.debugDescription)
-        app.buttons["transaction-actions"].tap()
+        XCTAssertTrue(app.buttons["transaction-create-local"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["transaction-create-local"].tap()
         XCTAssertTrue(app.buttons["高级"].waitForExistence(timeout: 5))
         app.buttons["高级"].tap()
@@ -387,7 +386,6 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["local-ledger-create"].tap(); app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
         app.tabBars.buttons["流水"].tap()
-        app.buttons["transaction-actions"].tap()
         app.buttons["transaction-create-local"].tap()
         XCTAssertTrue(app.buttons["高级"].waitForExistence(timeout: 5)); app.buttons["高级"].tap()
         // The backend requires a nonempty payee. A generic payee with blank
@@ -452,7 +450,6 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
         app.tabBars.buttons["流水"].tap()
-        app.buttons["transaction-actions"].tap()
         app.buttons["transaction-create-local"].tap()
         app.buttons["bookkeeping-natural-entry"].tap()
         let input = app.textViews["bookkeeping-natural-input"]
@@ -492,7 +489,6 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
         app.tabBars.buttons["流水"].tap()
-        app.buttons["transaction-actions"].tap()
         app.buttons["transaction-create-local"].tap()
         let natural = app.buttons["bookkeeping-natural-entry"]
         XCTAssertTrue(natural.waitForExistence(timeout: 5))
@@ -526,8 +522,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30), app.debugDescription)
         app.tabBars.buttons["流水"].tap()
-        XCTAssertTrue(app.buttons["transaction-actions"].waitForExistence(timeout: 5))
-        app.buttons["transaction-actions"].tap()
+        XCTAssertTrue(app.buttons["transaction-create-local"].waitForExistence(timeout: 5))
         app.buttons["transaction-create-local"].tap()
         XCTAssertTrue(app.buttons["高级"].waitForExistence(timeout: 5))
         app.buttons["高级"].tap()

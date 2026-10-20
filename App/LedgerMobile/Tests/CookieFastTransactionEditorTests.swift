@@ -73,4 +73,26 @@ final class CookieFastTransactionEditorTests: XCTestCase {
         let isRealMerchantCategory = expenseNames.contains(realMerchant) || incomeNames.contains(realMerchant)
         XCTAssertFalse(isRealMerchantCategory)
     }
+
+    func testFundingMemoryRestoresOnlyAccountsStillInTheLedger() throws {
+        let suite = "CookieFundingMemoryTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertNil(CookieFundingMemory.load(validAccounts: ["Assets:Alipay"], defaults: defaults))
+
+        CookieFundingMemory.save("Liabilities:CreditCard:CMB", defaults: defaults)
+        XCTAssertEqual(
+            CookieFundingMemory.load(validAccounts: ["Assets:Alipay", "Liabilities:CreditCard:CMB"], defaults: defaults),
+            "Liabilities:CreditCard:CMB"
+        )
+        // A closed or renamed account falls back to the editor's own default.
+        XCTAssertNil(CookieFundingMemory.load(validAccounts: ["Assets:Alipay"], defaults: defaults))
+
+        CookieFundingMemory.save("", defaults: defaults)
+        XCTAssertEqual(
+            CookieFundingMemory.load(validAccounts: ["Liabilities:CreditCard:CMB"], defaults: defaults),
+            "Liabilities:CreditCard:CMB"
+        )
+    }
 }
