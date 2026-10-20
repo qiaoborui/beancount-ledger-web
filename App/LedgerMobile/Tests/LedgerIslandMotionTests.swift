@@ -92,7 +92,7 @@ struct LedgerIslandMotionTests {
         #expect(stage.size(at: 0).width == stage.pill.width)
         let expanded = stage.size(at: entry.timeline.toCompact)
         #expect(abs(expanded.width - stage.expandedWidth) < 1)
-        #expect(abs(expanded.height - stage.expandedHeight) < 1)
+        #expect(abs(expanded.height - stage.settledHeight(rows: .init(titleLines: 1))) < 1)
         let compacted = stage.size(at: entry.timeline.toPill)
         #expect(abs(compacted.width - compact) < 1)
         #expect(abs(compacted.height - stage.pill.height) < 1)
@@ -101,22 +101,125 @@ struct LedgerIslandMotionTests {
         #expect(stage.visibleEntries(at: entry.timeline.end + 1).isEmpty)
     }
 
-    @Test("Expanded layout wraps the camera like a Live Activity")
-    func expandedLayoutWrapsCamera() {
+    /// Content rectangles of the settled island, derived from the same layout
+    /// the view uses. The badge rect is its ring.
+    private func contentRects(_ stage: LedgerIslandStage, rows: LedgerIslandStage.Layout.TextRows) -> [String: CGRect] {
         typealias L = LedgerIslandStage.Layout
-        let stage = LedgerIslandStage(containerWidth: 402, reduceMotion: false, pill: CGSize(width: 126.8, height: 38.2))
-        let cameraLeft = (stage.expandedWidth - Double(stage.pill.width)) / 2
-        // Leading badge (with its 53pt ring) clears the camera and the edges.
-        #expect(L.badgeCenter.x + 26.5 < cameraLeft)
-        #expect(L.badgeCenter.y - 26.5 > 0)
-        #expect(L.badgeCenter.y + 26.5 < stage.expandedHeight)
-        // Text rows sit below the camera.
-        #expect(L.titleY - 10 > Double(stage.pill.height))
-        #expect(L.subtitleY + 8 < stage.expandedHeight)
-        #expect(stage.flankWidth > 80)
+        let band = stage.band
+        let line = L.flankY(band: band)
+        let right = stage.expandedWidth - L.inset
+        let flank = stage.flankWidth
+        let text = LedgerIslandTextLayout.columnWidth(stage: stage)
+        let titleHeight = Double(rows.titleLines) * LedgerIslandFonts.titleLineHeight
+        return [
+            "badge": CGRect(x: L.badgeCenterX - L.ring / 2, y: line - L.ring / 2, width: L.ring, height: L.ring),
+            "amount": CGRect(x: right - flank, y: line - 12, width: flank, height: 24),
+            "title": CGRect(x: L.textLeft, y: L.titleCenterY(band: band, rows: rows) - titleHeight / 2,
+                            width: text, height: titleHeight),
+            "subtitle": CGRect(x: L.textLeft, y: L.subtitleCenterY(band: band, rows: rows) - 8, width: text, height: 16),
+        ]
+    }
+
+    @Test("No expanded content touches the camera, on any island")
+    func expandedContentClearsTheCamera() {
+        typealias L = LedgerIslandStage.Layout
+        let base = LedgerIslandCutout.hardware(nativeWidth: 1179, nativeHeight: 2556, nativeScale: 3, safeTop: 59).covering(bleed: 0.75)
+        let pro = LedgerIslandCutout.hardware(nativeWidth: 1206, nativeHeight: 2622, nativeScale: 3, safeTop: 62).covering(bleed: 0.75)
+        let unknown = LedgerIslandCutout.hardware(nativeWidth: 1320, nativeHeight: 2868, nativeScale: 3, safeTop: 62).covering(bleed: 0.75)
+        let islands: [(screen: Double, pill: CGSize, top: Double)] = [
+            (393, base.pill, base.top), (402, pro.pill, pro.top), (440, unknown.pill, unknown.top),
+            (375, LedgerIslandStage.defaultPill, 8),
+        ]
+        for island in islands {
+            let stage = LedgerIslandStage(containerWidth: island.screen, reduceMotion: false, pill: island.pill,
+                pillTop: island.top,
+                flank: LedgerIslandStage.flank(screenWidth: island.screen, cutoutWidth: Double(island.pill.width)))
+            let camera = stage.cameraRect
+            // The camera spans the band at the top centre of the island.
+            #expect(camera.minY == 0 && abs(camera.height - Double(island.pill.height)) < 0.001)
+            #expect(abs(camera.midX - stage.expandedWidth / 2) < 0.001)
+            // The island spans the screen less its margins, and each flank
+            // has room for an everyday amount.
+            #expect(abs(stage.expandedWidth - (island.screen - 2 * LedgerIslandStage.screenMargin)) < 0.01)
+            #expect(stage.flankWidth >= 60)
+            let keepOut = camera.insetBy(dx: -L.cameraGap + 0.01, dy: 0)
+            for lines in [1, 2] {
+                let rows = L.TextRows(titleLines: lines)
+                let height = stage.settledHeight(rows: rows)
+                let shape = CGRect(x: 0, y: 0, width: stage.expandedWidth, height: height)
+                let rects = contentRects(stage, rows: rows)
+                for (name, rect) in rects {
+                    #expect(!rect.intersects(keepOut), "\(name) overlaps the camera on \(island.pill)")
+                    // Every element keeps its margin to the side edges.
+                    #expect(shape.insetBy(dx: L.inset - 0.01, dy: 2).contains(rect), "\(name) is tight to the edge on \(island.pill)")
+                }
+                // The text starts below the camera and keeps 20pt to the bottom.
+                #expect(rects["title"]!.minY > camera.maxY)
+                #expect(height - rects["subtitle"]!.maxY >= 20)
+                // The badge and the amount share a line beside the camera,
+                // with room above them.
+                #expect(abs(rects["badge"]!.midY - rects["amount"]!.midY) < 0.001)
+                #expect(rects["badge"]!.minY >= 12)
+                #expect(rects["title"]!.minY >= rects["badge"]!.maxY + 6)
+                // The ring sits inside the rounded top-leading corner with room
+                // to spare, and the amount's glyphs clear the trailing one.
+                let radius = LedgerIslandStage.cornerRadius(height: height)
+                let ringReach = hypot(radius - L.badgeCenterX, radius - L.flankY(band: stage.band)) + L.ring / 2
+                #expect(ringReach <= radius - 4)
+                let amountCorner = hypot(radius - L.inset, radius - (L.flankY(band: stage.band) - 8))
+                #expect(radius - amountCorner >= 8)
+            }
+        }
         // Expanded corners are rounded rather than a full capsule.
-        #expect(LedgerIslandStage.cornerRadius(height: stage.expandedHeight) < stage.expandedHeight / 2)
+        let stage = LedgerIslandStage(containerWidth: 402, reduceMotion: false)
+        let height = stage.settledHeight(rows: .init(titleLines: 1))
+        #expect(LedgerIslandStage.cornerRadius(height: height) < height / 2)
         #expect(LedgerIslandStage.cornerRadius(height: 37) == 18.5)
+    }
+
+    @Test("Long titles take a second line instead of truncating")
+    func longTitleGrowsTheTextColumn() {
+        typealias L = LedgerIslandStage.Layout
+        // English fits per glyph, not per CJK character: a short Latin name
+        // stays on one line even in a narrow column.
+        let latin = LedgerIslandTextLayout(title: "Synthetic context action", totalWidth: 128)
+        #expect(latin.rows.titleLines == 2)
+        let short = LedgerIslandTextLayout(title: "Coffee", totalWidth: 128)
+        #expect(short.rows.titleLines == 1)
+        // A CJK title that fits on one line does not wrap.
+        let cjk = LedgerIslandTextLayout(title: "楼下便利店", totalWidth: 128)
+        #expect(cjk.rows.titleLines == 1)
+        // A second title line makes the settled shape one line taller.
+        let one = L.TextRows(titleLines: 1)
+        let two = L.TextRows(titleLines: 2)
+        #expect(abs(L.expandedHeight(band: 37, rows: two) - L.expandedHeight(band: 37, rows: one)
+                    - LedgerIslandFonts.titleLineHeight) < 0.001)
+        #expect(L.subtitleCenterY(band: 37, rows: two) > L.titleCenterY(band: 37, rows: two))
+        #expect(abs(L.titleCenterY(band: 37, rows: one) - LedgerIslandFonts.titleLineHeight / 2 - L.bodyTop(band: 37)) < 0.001)
+    }
+
+    @Test("The shape lands before content arrives, and interruptions keep moving")
+    func preludeAndContentPhase() {
+        let stage = LedgerIslandStage(containerWidth: 402, reduceMotion: false, pill: CGSize(width: 125.8, height: 37.2))
+        let rows = LedgerIslandStage.Layout.TextRows(titleLines: 1)
+        let pill = stage.size(at: 0)
+        #expect(abs(pill.width - Double(stage.pill.width)) < 0.01)
+        let wait = stage.preludeDelay(rows: rows, at: 0)
+        #expect(wait > 0.05 && wait < 0.6)
+        // A shape already on its way starts its notice immediately.
+        var moving = stage
+        moving.grow(to: rows, at: 0)
+        #expect(moving.preludeDelay(rows: rows, at: 0.15) == 0)
+
+        // Content enters later when the shape has further to travel.
+        func entry(compactWidth: Double) -> LedgerIslandStageEntry {
+            LedgerIslandStageEntry(notice: notice(), start: 0,
+                timeline: LedgerIslandTimeline(isImport: false, interrupting: false), compactWidth: compactWidth)
+        }
+        let farther = LedgerIslandFrameGate.contentIn(entry: entry(compactWidth: 150), expandedWidth: 354)
+        let close = LedgerIslandFrameGate.contentIn(entry: entry(compactWidth: 345), expandedWidth: 354)
+        #expect(close == entry(compactWidth: 345).timeline.contentIn)
+        #expect(farther > close)
     }
 
     @Test("Compact island stays snug and symmetric around the camera")
@@ -158,10 +261,77 @@ struct LedgerIslandMotionTests {
         #expect(abs(retracted.height - cover.pill.height) < 0.5)
     }
 
-    @Test("Expanded width follows the screen minus 22pt")
-    func expandedWidthFitsContainer() {
-        #expect(LedgerIslandStage(containerWidth: 393, reduceMotion: false).expandedWidth == 371)
-        #expect(LedgerIslandStage(containerWidth: 430, reduceMotion: false).expandedWidth == 408)
+    @Test("The island is sized around the camera, not the screen or the pill")
+    func expandedWidthWrapsTheCamera() {
+        // A little more breathing room than a Live Activity's 22pt.
+        #expect(LedgerIslandStage.screenMargin > 22)
+        // The island is the camera plus `flank` on each side.
+        let inset = LedgerIslandStage.Layout.inset + LedgerIslandStage.Layout.cameraGap
+        let wide = LedgerIslandStage(containerWidth: 402, reduceMotion: false,
+                                     pill: CGSize(width: 125.3, height: 36.7), flank: 36)
+        #expect(abs(wide.expandedWidth - (125.3 + 2 * 36)) < 0.01)
+        #expect(abs(wide.flankWidth - (36 - inset)) < 0.01)
+        let narrow = LedgerIslandStage(containerWidth: 402, reduceMotion: false,
+                                       pill: CGSize(width: 112, height: 36.7), flank: 43.3)
+        #expect(abs(narrow.flankWidth - (43.3 - inset)) < 0.01)
+        // Even on a narrow screen each flank keeps its margins.
+        #expect(LedgerIslandStage.flank(screenWidth: 200, cutoutWidth: 126) >= inset)
+        // The screen only bounds it, so it never runs under the bezel.
+        let cramped = LedgerIslandStage(containerWidth: 393, reduceMotion: false,
+                                        pill: CGSize(width: 126, height: 37), flank: 133.5)
+        #expect(cramped.expandedWidth == 393 - 2 * LedgerIslandStage.screenMargin)
+        // Never narrower than the cutout it grows out of.
+        #expect(narrow.expandedWidth > Double(narrow.pill.width))
+    }
+
+    @Test("The camera band follows the cutout, not the live shape")
+    func expandedRowsAnchorOnTheCamera() {
+        typealias L = LedgerIslandStage.Layout
+        // The shape's top is the camera's top, so the band is the covering
+        // pill's height wherever the cutout sits on the screen.
+        let idle = LedgerIslandStage(containerWidth: 402, reduceMotion: false,
+                                     pill: CGSize(width: 125.3, height: 36.7), pillTop: 13.25, flank: 102)
+        #expect(abs(idle.band - 36.7) < 0.001)
+        #expect(L.bodyTop(band: idle.band) > idle.cameraRect.maxY)
+        // The text column runs under the camera across the island.
+        let column = LedgerIslandTextLayout.columnWidth(stage: idle)
+        #expect(abs(column - (idle.expandedWidth - 2 * L.inset)) < 0.001)
+        #expect(LedgerIslandTextLayout(title: "Synthetic context action", totalWidth: column).rows.titleLines == 1)
+    }
+
+    @Test("Long titles fold at words and keep the camera band clear")
+    func titleFoldsAtWords() {
+        // "Synthetic context action" fits two lines at full size in the column
+        // between the badge and the camera; it must not be cut mid-word.
+        let layout = LedgerIslandTextLayout(title: "Synthetic context action", totalWidth: 128)
+        #expect(layout.rows.titleLines == 2)
+        #expect(layout.scale == 1)
+        // Latin words fold between words; the folded lines never exceed the
+        // column one line of CJK would occupy.
+        let lines = LedgerIslandFonts.foldedLines("Synthetic context action", size: 16, weight: .semibold,
+                                                  count: 2, width: 128)
+        #expect(lines.count <= 2)
+        #expect(lines.allSatisfy { !$0.hasSuffix(" ") })
+        // No folded line reaches past the column.
+        #expect(lines.allSatisfy {
+            LedgerIslandFonts.width($0, size: 16, weight: .semibold) <= 128
+        })
+    }
+
+    @Test("Compact amount stays clear of the end cap")
+    func compactTrailingKeepsGap() {
+        let stage = LedgerIslandStage(containerWidth: 402, reduceMotion: false, pill: CGSize(width: 125.5, height: 37.25))
+        let textWidth = 60.0
+        // Re-derive the amount's right edge from the same layout constants the
+        // view uses, and require a gap to where the end cap starts to curve.
+        typealias C = LedgerIslandStage.CompactLayout
+        let width = stage.compactWidth(trailingTextWidth: textWidth)
+        // The view right-aligns the amount this many points inside the end cap.
+        let rightInset = C.trailingInset + C.trailingGap
+        let amountHalfWidth = (textWidth + 4) / 2
+        #expect(C.trailingGap > 0)
+        #expect(width / 2 - rightInset - amountHalfWidth > Double(stage.pill.width) / 2)
+        #expect(width > Double(stage.pill.width))
     }
 
     @Test("A new notice interrupts without jumping the shape")
@@ -183,7 +353,7 @@ struct LedgerIslandMotionTests {
         let old = stage.entries[0]
         #expect(old.effect(.expanded, delay: 0, at: at + 0.3, reduceMotion: false).opacity < 0.01)
         // The re-scheduled expansion must win over the first notice's compact step.
-        #expect(abs(stage.size(at: at + 1.5).height - stage.expandedHeight) < 1)
+        #expect(abs(stage.size(at: at + 1.5).height - stage.settledHeight(rows: .init(titleLines: 1))) < 1)
     }
 
     @Test("Content effects enter blurred and leave cleanly")

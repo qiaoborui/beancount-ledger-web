@@ -122,17 +122,20 @@ struct ImportIndexLiveActivity: Widget {
         }
     }
 
+    /// Phase words, not a step counter: the activity has three states and no
+    /// measurable progress, and a hard-coded "1 / 2" read as a promise the
+    /// island could not keep. The words match the entry island's own.
     private func badgeText(_ phase: DisplayPhase) -> String {
         switch phase {
-        case .indexing: "1 / 2"
+        case .indexing: "写入中"
         case .waiting: "待确认"
-        case .indexed: "2 / 2"
+        case .indexed: "已入库"
         }
     }
 
     private func compactText(_ phase: DisplayPhase) -> String {
         switch phase {
-        case .indexing: "1/2"
+        case .indexing: "写入中"
         case .waiting: "待确认"
         case .indexed: "完成"
         }
@@ -157,7 +160,7 @@ struct ImportIndexLiveActivity: Widget {
         _ context: ActivityViewContext<ImportIndexActivityAttributes>,
         phase: DisplayPhase
     ) -> String {
-        "\(title(phase))，\(detail(context))，进度\(badgeText(phase))"
+        "\(title(phase))，\(detail(context))，\(badgeText(phase))"
     }
 }
 #endif
