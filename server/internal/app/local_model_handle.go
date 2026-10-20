@@ -19,6 +19,7 @@ type localRegisteredModel struct {
 	version    string
 	model      *LocalCanonicalModel
 	cache      *LedgerCache
+	stamps     *localSourceStamps
 	staging    bool
 }
 
@@ -87,7 +88,8 @@ func RegisterLocalModel(input LocalRequest, streamName, expectedVersion string) 
 	if err != nil {
 		return "", err
 	}
-	after, err := ledgerVersion(cfg)
+	stamps := &localSourceStamps{}
+	after, err := ledgerVersionStamped(cfg, stamps)
 	if err != nil {
 		return "", err
 	}
@@ -105,7 +107,9 @@ func RegisterLocalModel(input LocalRequest, streamName, expectedVersion string) 
 	// normalized semantic entries without retaining another rich copy.
 	cfg.localCanonicalOwned = true
 	cfg.localCanonicalVersion = expectedVersion
-	registered := &localRegisteredModel{handle: handle, root: cfg.LedgerRoot, entrypoint: cfg.localEntrypoint, version: expectedVersion, model: model, cache: NewLedgerCache(cfg), staging: input.Staging}
+	cache := NewLedgerCache(cfg)
+	cache.stamps, cache.stampVersion = stamps, after
+	registered := &localRegisteredModel{handle: handle, root: cfg.LedgerRoot, entrypoint: cfg.localEntrypoint, version: expectedVersion, model: model, cache: cache, stamps: stamps, staging: input.Staging}
 	localModels.Lock()
 	defer localModels.Unlock()
 	if input.Staging {
@@ -130,13 +134,17 @@ func resolveLocalModel(cfg Config, handle string, staging bool) (Config, error) 
 	if model == nil || model.handle != handle || model.root != cfg.LedgerRoot || model.entrypoint != cfg.localEntrypoint || model.staging != staging {
 		return cfg, ErrLocalModelUnavailable
 	}
-	version, err := ledgerVersion(cfg)
-	if err != nil {
-		return cfg, err
-	}
-	if version.Version != model.version {
-		ReleaseLocalModel(handle)
-		return cfg, ErrLocalModelUnavailable
+	// Unchanged stat identities prove the immutable source is still the one
+	// registered; anything else falls back to the full content-hash check.
+	if !model.stamps.matches() {
+		version, err := ledgerVersion(cfg)
+		if err != nil {
+			return cfg, err
+		}
+		if version.Version != model.version {
+			ReleaseLocalModel(handle)
+			return cfg, ErrLocalModelUnavailable
+		}
 	}
 	cfg.localCanonical = model.model
 	cfg.localRegisteredCache = model.cache

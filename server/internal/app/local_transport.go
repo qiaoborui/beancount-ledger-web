@@ -495,6 +495,13 @@ func localLedgerSource(cfg Config) ([]BeanLine, []fileStat, error) {
 // Version checks use the same include traversal and content hashes as source
 // loading, but must not retain every line of the ledger just to discard it.
 func walkLocalLedgerSource(cfg Config, collectLines bool) ([]BeanLine, []fileStat, error) {
+	return walkLocalLedgerSourceStamped(cfg, collectLines, nil)
+}
+
+// walkLocalLedgerSourceStamped additionally records every visited file's stat
+// identity into stamps (when non-nil) so a registered model can later verify
+// the source without traversing includes or hashing.
+func walkLocalLedgerSourceStamped(cfg Config, collectLines bool, stamps *localSourceStamps) ([]BeanLine, []fileStat, error) {
 	seen := map[string]bool{}
 	var lines []BeanLine
 	var stats []fileStat
@@ -503,6 +510,11 @@ func walkLocalLedgerSource(cfg Config, collectLines bool) ([]BeanLine, []fileSta
 	visitInclude := func(full, include string) error {
 		if filepath.IsAbs(include) {
 			return errors.New("absolute ledger includes are unsupported in local workspaces")
+		}
+		if stamps != nil && strings.ContainsAny(include, "*?[") {
+			// A glob can match files created later without touching any
+			// stamped file, so stamps alone cannot prove freshness.
+			stamps.unusable = true
 		}
 		pattern := filepath.Join(filepath.Dir(full), include)
 		rel, err := filepath.Rel(cfg.LedgerRoot, pattern)
@@ -543,6 +555,13 @@ func walkLocalLedgerSource(cfg Config, collectLines bool) ([]BeanLine, []fileSta
 			return errors.New("ledger include must be a regular file of at most 8 MiB")
 		}
 		memoKey, memoizable := localSourceMemoKeyFor(full, info)
+		if stamps != nil {
+			if memoizable {
+				stamps.keys = append(stamps.keys, memoKey)
+			} else {
+				stamps.unusable = true
+			}
+		}
 		if !collectLines && memoizable {
 			if facts, ok := localSourceMemoLookup(memoKey); ok {
 				totalBytes += facts.size

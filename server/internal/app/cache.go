@@ -52,6 +52,10 @@ type LedgerCache struct {
 	version       LedgerVersion
 	versionReadAt time.Time
 	metrics       *Metrics
+	// Set for registered immutable models: lets freshness checks run in
+	// O(files) stats instead of re-walking and re-hashing the source.
+	stamps       *localSourceStamps
+	stampVersion LedgerVersion
 }
 
 func NewLedgerCache(cfg Config) *LedgerCache {
@@ -192,6 +196,14 @@ func (c *LedgerCache) currentVersion(forceRefresh bool) (LedgerVersion, error) {
 		c.mu.Unlock()
 	}
 
+	if forceRefresh && c.stamps != nil && c.stamps.matches() {
+		c.mu.Lock()
+		c.version = c.stampVersion
+		c.versionReadAt = time.Now()
+		c.mu.Unlock()
+		return c.stampVersion, nil
+	}
+
 	version, err := ledgerVersion(c.cfg)
 	if err != nil {
 		return LedgerVersion{}, err
@@ -323,10 +335,14 @@ type fileStat struct {
 }
 
 func ledgerVersion(cfg Config) (LedgerVersion, error) {
+	return ledgerVersionStamped(cfg, nil)
+}
+
+func ledgerVersionStamped(cfg Config, stamps *localSourceStamps) (LedgerVersion, error) {
 	var stats []fileStat
 	var err error
 	if cfg.localTransport {
-		_, stats, err = walkLocalLedgerSource(cfg, false)
+		_, stats, err = walkLocalLedgerSourceStamped(cfg, false, stamps)
 	} else {
 		stats, err = ledgerVersionFiles(mainBeanPath(cfg), cfg.LedgerRoot, map[string]bool{})
 	}
