@@ -385,8 +385,9 @@ struct AmountLabel: View {
         amountText
             .font(font).monospacedDigit()
             .foregroundStyle(color)
-            .contentTransition(.opacity)
+            .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(minorUnits)))
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: session.amountsVisible)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.32), value: minorUnits)
             .accessibilityLabel(
                 session.amountsVisible
                     ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showSign: showSign)

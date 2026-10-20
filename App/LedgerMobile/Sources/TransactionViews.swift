@@ -3386,6 +3386,9 @@ struct CookieFastTransactionEditorBody: View {
     @State private var assetAccount: String = ""
     @State private var transferSourceAccount: String = ""
     @State private var transferTargetAccount: String = ""
+    // onAppear re-fires after the account picker / preview covers dismiss;
+    // setup must run once or it clobbers the user's selections.
+    @State private var didSetup = false
 
     @State private var date: Date = Date()
     @State private var payee: String = ""
@@ -3662,6 +3665,8 @@ struct CookieFastTransactionEditorBody: View {
                 BookkeepingPreviewView(preview: preview) { _ in dismiss() }
             }
             .onAppear {
+                guard !didSetup else { return }
+                didSetup = true
                 setupFromInitialValues()
             }
             .onChange(of: calculator.displayText) { _, _ in
@@ -3960,7 +3965,7 @@ struct CookieFastTransactionEditorBody: View {
             let amtStr = String(format: "%.2f", NSDecimalNumber(decimal: amt).doubleValue)
             let negAmtStr = String(format: "-%.2f", NSDecimalNumber(decimal: amt).doubleValue)
 
-            if splitPostings.isEmpty {
+            if splitPostings.isEmpty || splitPostingsMatchSimpleDraft {
                 switch kind {
                 case .expense:
                     splitPostings = [
@@ -4346,7 +4351,7 @@ struct CookieFastTransactionEditorBody: View {
                     get: {
                         switch purpose {
                         case .funding: return assetAccount
-                        case .transferSource: transferSourceAccount = transferSourceAccount.isEmpty ? assetAccount : transferSourceAccount; return transferSourceAccount
+                        case .transferSource: return transferSourceAccount.isEmpty ? assetAccount : transferSourceAccount
                         case .transferTarget: return transferTargetAccount
                         case .customCategory:
                             return (kind == .expense ? customExpenseAccount : customIncomeAccount) ?? ""
@@ -4542,9 +4547,21 @@ struct CookieFastTransactionEditorBody: View {
                 assetAccount = fundingPosting.account
             } else {
                 kind = .transfer
-                transferTargetAccount = p1.account
-                transferSourceAccount = p2.account
+                // The negative posting is the source regardless of posting order.
+                // An elided (blank) amount balances the other posting, so it is
+                // the source when the other one is positive.
+                let a1 = p1.amount.trimmingCharacters(in: .whitespaces)
+                let a2 = p2.amount.trimmingCharacters(in: .whitespaces)
+                let p1IsSource = a1.hasPrefix("-") || (a1.isEmpty && !a2.hasPrefix("-"))
+                transferSourceAccount = p1IsSource ? p1.account : p2.account
+                transferTargetAccount = p1IsSource ? p2.account : p1.account
             }
+        }
+
+        if transferSourceAccount.isEmpty && transferTargetAccount.isEmpty {
+            let remembered = CookieTransferMemory.load(validAccounts: Set(assetAccounts.map(\.account)))
+            transferSourceAccount = remembered.source ?? ""
+            transferTargetAccount = remembered.target ?? ""
         }
 
         if assetAccount.isEmpty {
@@ -4554,10 +4571,17 @@ struct CookieFastTransactionEditorBody: View {
         if transferSourceAccount.isEmpty {
             transferSourceAccount = assetAccount
         }
-        if transferTargetAccount.isEmpty {
+        if transferTargetAccount.isEmpty || transferTargetAccount == transferSourceAccount {
             transferTargetAccount = assetAccounts.first(where: { $0.account != transferSourceAccount })?.account
                 ?? assetAccounts.last?.account ?? "Assets:CN:Wechat:Balance"
         }
+    }
+
+    /// Two-posting splits are just a copy of the simple draft; rebuild them
+    /// from the currently selected accounts so they never go stale. Splits
+    /// with extra postings are user work and are kept.
+    private var splitPostingsMatchSimpleDraft: Bool {
+        splitPostings.count <= 2
     }
 
     private func resolveExpenseAccount() -> String {
@@ -4649,6 +4673,12 @@ struct CookieFastTransactionEditorBody: View {
             let amountText = ExactBookkeepingAmount.text(amountVal)
             let negativeAmountText = ExactBookkeepingAmount.text(-amountVal)
 
+            if kind == .transfer && transferSourceAccount == transferTargetAccount {
+                errorMessage = "转出和转入账户不能相同"
+                failureFeedback &+= 1
+                return
+            }
+
             switch kind {
             case .expense:
                 let expAcc = resolveExpenseAccount()
@@ -4682,6 +4712,10 @@ struct CookieFastTransactionEditorBody: View {
             links: [],
             postings: postings
         )
+
+        if !isSplitMode && kind == .transfer {
+            CookieTransferMemory.save(source: transferSourceAccount, target: transferTargetAccount)
+        }
 
         saving = true
         do {
@@ -5300,4 +5334,27 @@ func amountColor(_ kind: TransactionKind) -> Color {
 /// render filled.
 func outlineGlyph(_ name: String) -> String {
     name.hasSuffix(".fill") ? String(name.dropLast(5)) : name
+}
+
+/// Remembers the last transfer route so new transfers start from the accounts
+/// the user actually moves money between instead of the first asset account.
+enum CookieTransferMemory {
+    private static let sourceKey = "ledger.fastEntry.lastTransferSource"
+    private static let targetKey = "ledger.fastEntry.lastTransferTarget"
+
+    static func load(
+        validAccounts: Set<String>,
+        defaults: UserDefaults = .standard
+    ) -> (source: String?, target: String?) {
+        let source = defaults.string(forKey: sourceKey).flatMap { validAccounts.contains($0) ? $0 : nil }
+        var target = defaults.string(forKey: targetKey).flatMap { validAccounts.contains($0) ? $0 : nil }
+        if target == source { target = nil }
+        return (source, target)
+    }
+
+    static func save(source: String, target: String, defaults: UserDefaults = .standard) {
+        guard !source.isEmpty, !target.isEmpty, source != target else { return }
+        defaults.set(source, forKey: sourceKey)
+        defaults.set(target, forKey: targetKey)
+    }
 }
