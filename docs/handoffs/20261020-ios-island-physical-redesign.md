@@ -28,8 +28,8 @@ expanded shape grows out of the physical island.
 - `xcodebuild test -only-testing:LedgerMobileTests` on iPhone 17 Pro simulator: all passed.
 - New test asserts no content rect intersects the camera for 1179/1206/unknown panels and
   the no-hardware pill, and the ring stays inside the bottom-leading corner.
-- Simulator run (iPhone 17 Pro, \`--preview-island --safe-preview\`, recorded with \`simctl io recordVideo\`): expense, import and long-title income notices all keep the camera rect clear in expanded and compact states.
+- Simulator run (iPhone 17 Pro, `--preview-island --safe-preview`, recorded with `simctl io recordVideo`): expense, import and long-title income notices all keep the camera rect clear in expanded and compact states.
 - Not done: a physical device.
 
 ## Next
-- Optional: check on a physical Dynamic Island phone with the \`--preview-island\` launch argument.
+- Optional: check on a physical Dynamic Island phone with the `--preview-island` launch argument.
