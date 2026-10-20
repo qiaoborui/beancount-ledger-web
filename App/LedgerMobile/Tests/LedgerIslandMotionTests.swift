@@ -157,9 +157,10 @@ struct LedgerIslandMotionTests {
                 #expect(rects["title"]!.minY > camera.maxY)
                 #expect(height - rects["subtitle"]!.maxY >= 20)
                 // The badge and the amount share a line beside the camera,
-                // within the camera band.
+                // with room above them.
                 #expect(abs(rects["badge"]!.midY - rects["amount"]!.midY) < 0.001)
-                #expect(L.flankY(band: stage.band) + L.ring / 2 <= camera.maxY + 1)
+                #expect(rects["badge"]!.minY >= 12)
+                #expect(rects["title"]!.minY >= rects["badge"]!.maxY + 6)
                 // The ring sits inside the rounded top-leading corner with room
                 // to spare, and the amount's glyphs clear the trailing one.
                 let radius = LedgerIslandStage.cornerRadius(height: height)
@@ -194,7 +195,7 @@ struct LedgerIslandMotionTests {
         #expect(abs(L.expandedHeight(band: 37, rows: two) - L.expandedHeight(band: 37, rows: one)
                     - LedgerIslandFonts.titleLineHeight) < 0.001)
         #expect(L.subtitleCenterY(band: 37, rows: two) > L.titleCenterY(band: 37, rows: two))
-        #expect(abs(L.titleCenterY(band: 37, rows: one) - LedgerIslandFonts.titleLineHeight / 2 - (37 + L.bodyGap)) < 0.001)
+        #expect(abs(L.titleCenterY(band: 37, rows: one) - LedgerIslandFonts.titleLineHeight / 2 - L.bodyTop(band: 37)) < 0.001)
     }
 
     @Test("The shape lands before content arrives, and interruptions keep moving")

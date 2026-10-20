@@ -13,7 +13,7 @@ expanded shape grows out of the physical island.
 - Shape top == camera top; the camera is a fixed rect (cover pill size) at top centre
   (`LedgerIslandStage.cameraRect`, `band`).
 - Beside the camera (Live Activity style): a small badge (28pt, 32pt ring) in the leading flank
-  and the amount in the trailing flank, on one line 3pt under the camera's centre so the ring
+  and the amount in the trailing flank, on one line whose ring keeps 14pt from the top edge (the title sits 8pt under it); the ring
   clears the rounded corner. Both are anchored to the camera, revealed by the clipping shape.
 - Below the camera: title over subtitle across the full width. Body rows map only into the
   part of the live shape below the band.

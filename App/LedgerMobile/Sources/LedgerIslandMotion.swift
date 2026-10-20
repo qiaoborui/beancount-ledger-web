@@ -302,8 +302,11 @@ struct LedgerIslandStage: Equatable, Sendable {
         static let badge: Double = 28
         /// The ring around the badge; the badge is centred inside it.
         static let ring: Double = 32
-        /// How far the flank line sits under the camera's centre.
-        static let flankDrop: Double = 3
+        /// Space between the shape's top edge and the ring, so the flank
+        /// content does not hug the top.
+        static let flankTop: Double = 14
+        /// Space between the ring and the title below it.
+        static let flankGap: Double = 8
         /// Space kept clear between flank content and the camera.
         static let cameraGap: Double = 8
         /// Space between the camera's bottom edge and the title.
@@ -327,10 +330,12 @@ struct LedgerIslandStage: Equatable, Sendable {
         }
 
         /// The line the badge and the amount share beside the camera.
-        static func flankY(band: Double) -> Double { band / 2 + flankDrop }
+        static func flankY(band: Double) -> Double { flankTop + ring / 2 }
 
-        /// Top of the text: under the camera, never beside it.
-        static func bodyTop(band: Double) -> Double { band + bodyGap }
+        /// Top of the text: under the camera and under the flank line.
+        static func bodyTop(band: Double) -> Double {
+            max(band + bodyGap, flankY(band: band) + ring / 2 + flankGap)
+        }
 
         /// Title lines, the gap and the subtitle.
         static func textBlockHeight(rows: TextRows) -> Double {
