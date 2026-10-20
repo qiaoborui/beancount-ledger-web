@@ -12,8 +12,10 @@ expanded shape grows out of the physical island.
 ## Decisions
 - Shape top == camera top; the camera is a fixed rect (cover pill size) at top centre
   (`LedgerIslandStage.cameraRect`, `band`).
-- Camera band: kept empty, including beside the camera (it runs through the rounded top corners).
-- Body below the camera: badge + ring, title/subtitle, amount. Body rows map only into the
+- Beside the camera (Live Activity style): a small badge (28pt, 32pt ring) in the leading flank
+  and the amount in the trailing flank, on one line 3pt under the camera's centre so the ring
+  clears the rounded corner. Both are anchored to the camera, revealed by the clipping shape.
+- Below the camera: title over subtitle across the full width. Body rows map only into the
   part of the live shape below the band.
 - The 44pt ring no longer rides beside the camera (it is taller than the 37pt band).
 - Caption placement (inline/below) removed; `TextRows` carries only title lines.
@@ -22,9 +24,8 @@ expanded shape grows out of the physical island.
   (previously flank width was 0 there).
 - `foldedLines` no longer leaves a trailing space at a fold.
 
-- Fewer elements: the status caption is gone (the check and the subtitle already say it) and the
-  amount moved into the body row, level with the title's first line, so the band beside the
-  camera is empty. The row is badge | title + subtitle | amount (capped at 36% of the row).
+- Four elements: the status caption was dropped (the check and the subtitle already say it).
+  A one-row layout under the camera was tried and rejected: the flanks looked empty.
 - Padding: body rows 26pt from the side edges, 12pt under the camera, 22pt bottom margin.
 
 ## Validation

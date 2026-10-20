@@ -102,21 +102,18 @@ struct LedgerIslandMotionTests {
     }
 
     /// Content rectangles of the settled island, derived from the same layout
-    /// the view uses. The badge rect includes the check's ripple.
-    private func contentRects(_ stage: LedgerIslandStage, rows: LedgerIslandStage.Layout.TextRows,
-                              amountWidth: Double = 80) -> [String: CGRect] {
+    /// the view uses. The badge rect is its ring.
+    private func contentRects(_ stage: LedgerIslandStage, rows: LedgerIslandStage.Layout.TextRows) -> [String: CGRect] {
         typealias L = LedgerIslandStage.Layout
         let band = stage.band
+        let line = L.flankY(band: band)
         let right = stage.expandedWidth - L.inset
-        let amount = stage.amountColumn(amountWidth: amountWidth)
-        let amountY = L.textTop(band: band, rows: rows) + LedgerIslandFonts.titleLineHeight / 2
-        let text = LedgerIslandTextLayout.columnWidth(stage: stage, amountWidth: amountWidth)
-        let ripple = L.ring + 12
-        let badgeY = L.badgeCenterY(band: band, rows: rows)
+        let flank = stage.flankWidth
+        let text = LedgerIslandTextLayout.columnWidth(stage: stage)
         let titleHeight = Double(rows.titleLines) * LedgerIslandFonts.titleLineHeight
         return [
-            "amount": CGRect(x: right - amount, y: amountY - 12, width: amount, height: 24),
-            "badge": CGRect(x: L.badgeCenterX - ripple / 2, y: badgeY - ripple / 2, width: ripple, height: ripple),
+            "badge": CGRect(x: L.badgeCenterX - L.ring / 2, y: line - L.ring / 2, width: L.ring, height: L.ring),
+            "amount": CGRect(x: right - flank, y: line - 12, width: flank, height: 24),
             "title": CGRect(x: L.textLeft, y: L.titleCenterY(band: band, rows: rows) - titleHeight / 2,
                             width: text, height: titleHeight),
             "subtitle": CGRect(x: L.textLeft, y: L.subtitleCenterY(band: band, rows: rows) - 8, width: text, height: 16),
@@ -141,40 +138,35 @@ struct LedgerIslandMotionTests {
             // The camera spans the band at the top centre of the island.
             #expect(camera.minY == 0 && abs(camera.height - Double(island.pill.height)) < 0.001)
             #expect(abs(camera.midX - stage.expandedWidth / 2) < 0.001)
-            // The island spans the screen less its margins.
+            // The island spans the screen less its margins, and each flank
+            // has room for an everyday amount.
             #expect(abs(stage.expandedWidth - (island.screen - 2 * LedgerIslandStage.screenMargin)) < 0.01)
-            // Nothing sits beside the camera either: the whole band is clear.
-            let keepOut = CGRect(x: 0, y: 0, width: stage.expandedWidth, height: camera.maxY)
+            #expect(stage.flankWidth >= 60)
+            let keepOut = camera.insetBy(dx: -L.cameraGap + 0.01, dy: 0)
             for lines in [1, 2] {
                 let rows = L.TextRows(titleLines: lines)
                 let height = stage.settledHeight(rows: rows)
                 let shape = CGRect(x: 0, y: 0, width: stage.expandedWidth, height: height)
-                for (name, rect) in contentRects(stage, rows: rows) {
-                    #expect(!rect.intersects(keepOut), "\(name) overlaps the camera on \(island.pill)")
-                    // Every element keeps at least 20pt to the side edges.
-                    let breathing = name == "badge" ? 18.0 : 20.0
-                    #expect(shape.insetBy(dx: breathing, dy: 2).contains(rect), "\(name) is tight to the edge on \(island.pill)")
-                }
-                // Body rows start below the camera.
                 let rects = contentRects(stage, rows: rows)
-                for name in ["badge", "title", "subtitle", "amount"] {
-                    #expect(rects[name]!.minY > camera.maxY, "\(name) rides beside the camera")
+                for (name, rect) in rects {
+                    #expect(!rect.intersects(keepOut), "\(name) overlaps the camera on \(island.pill)")
+                    // Every element keeps its margin to the side edges.
+                    #expect(shape.insetBy(dx: L.inset - 0.01, dy: 2).contains(rect), "\(name) is tight to the edge on \(island.pill)")
                 }
-                // The text rows keep 20pt to the bottom edge.
+                // The text starts below the camera and keeps 20pt to the bottom.
+                #expect(rects["title"]!.minY > camera.maxY)
                 #expect(height - rects["subtitle"]!.maxY >= 20)
-                // The title column stops short of the amount, which reads
-                // level with the title's first line.
-                #expect(rects["title"]!.maxX + L.amountGap <= rects["amount"]!.minX + 0.001)
-                #expect(abs(rects["amount"]!.midY - (rects["title"]!.minY + LedgerIslandFonts.titleLineHeight / 2)) < 0.001)
-                // A very long amount is capped and scaled; the title keeps room.
-                let wide = contentRects(stage, rows: rows, amountWidth: 400)
-                #expect(wide["title"]!.width > 100)
-                // The ring stays inside the rounded bottom-leading corner.
+                // The badge and the amount share a line beside the camera,
+                // within the camera band.
+                #expect(abs(rects["badge"]!.midY - rects["amount"]!.midY) < 0.001)
+                #expect(L.flankY(band: stage.band) + L.ring / 2 <= camera.maxY + 1)
+                // The ring sits inside the rounded top-leading corner with room
+                // to spare, and the amount's glyphs clear the trailing one.
                 let radius = LedgerIslandStage.cornerRadius(height: height)
-                let corner = CGPoint(x: radius, y: height - radius)
-                let ringCentre = CGPoint(x: L.badgeCenterX, y: L.badgeCenterY(band: stage.band, rows: rows))
-                let reach = hypot(max(0, corner.x - ringCentre.x), max(0, ringCentre.y - corner.y)) + L.ring / 2
-                #expect(reach <= radius - 4)
+                let ringReach = hypot(radius - L.badgeCenterX, radius - L.flankY(band: stage.band)) + L.ring / 2
+                #expect(ringReach <= radius - 4)
+                let amountCorner = hypot(radius - L.inset, radius - (L.flankY(band: stage.band) - 8))
+                #expect(radius - amountCorner >= 8)
             }
         }
         // Expanded corners are rounded rather than a full capsule.
@@ -196,17 +188,13 @@ struct LedgerIslandMotionTests {
         // A CJK title that fits on one line does not wrap.
         let cjk = LedgerIslandTextLayout(title: "楼下便利店", totalWidth: 128)
         #expect(cjk.rows.titleLines == 1)
-        // A second title line makes the settled shape taller, by the
-        // difference between the text block and the ring.
+        // A second title line makes the settled shape one line taller.
         let one = L.TextRows(titleLines: 1)
         let two = L.TextRows(titleLines: 2)
-        #expect(L.expandedHeight(band: 37, rows: one) == 37 + L.bodyGap + L.ring + L.bottomMargin)
-        #expect(L.expandedHeight(band: 37, rows: two) > L.expandedHeight(band: 37, rows: one))
+        #expect(abs(L.expandedHeight(band: 37, rows: two) - L.expandedHeight(band: 37, rows: one)
+                    - LedgerIslandFonts.titleLineHeight) < 0.001)
         #expect(L.subtitleCenterY(band: 37, rows: two) > L.titleCenterY(band: 37, rows: two))
-        // A one-line text block is centred on the badge.
-        let block = (L.titleCenterY(band: 37, rows: one) - LedgerIslandFonts.titleLineHeight / 2
-            + L.subtitleCenterY(band: 37, rows: one) + LedgerIslandFonts.subtitleLineHeight / 2) / 2
-        #expect(abs(block - L.badgeCenterY(band: 37, rows: one)) < 0.001)
+        #expect(abs(L.titleCenterY(band: 37, rows: one) - LedgerIslandFonts.titleLineHeight / 2 - (37 + L.bodyGap)) < 0.001)
     }
 
     @Test("The shape lands before content arrives, and interruptions keep moving")
@@ -277,14 +265,16 @@ struct LedgerIslandMotionTests {
         // A little more breathing room than a Live Activity's 22pt.
         #expect(LedgerIslandStage.screenMargin > 22)
         // The island is the camera plus `flank` on each side.
+        let inset = LedgerIslandStage.Layout.inset + LedgerIslandStage.Layout.cameraGap
         let wide = LedgerIslandStage(containerWidth: 402, reduceMotion: false,
                                      pill: CGSize(width: 125.3, height: 36.7), flank: 36)
         #expect(abs(wide.expandedWidth - (125.3 + 2 * 36)) < 0.01)
+        #expect(abs(wide.flankWidth - (36 - inset)) < 0.01)
         let narrow = LedgerIslandStage(containerWidth: 402, reduceMotion: false,
                                        pill: CGSize(width: 112, height: 36.7), flank: 43.3)
-        #expect(abs(narrow.expandedWidth - (112 + 2 * 43.3)) < 0.01)
-        // Even on a narrow screen the island reaches past the camera.
-        #expect(LedgerIslandStage.flank(screenWidth: 200, cutoutWidth: 126) >= LedgerIslandStage.Layout.inset)
+        #expect(abs(narrow.flankWidth - (43.3 - inset)) < 0.01)
+        // Even on a narrow screen each flank keeps its margins.
+        #expect(LedgerIslandStage.flank(screenWidth: 200, cutoutWidth: 126) >= inset)
         // The screen only bounds it, so it never runs under the bezel.
         let cramped = LedgerIslandStage(containerWidth: 393, reduceMotion: false,
                                         pill: CGSize(width: 126, height: 37), flank: 133.5)
@@ -302,12 +292,10 @@ struct LedgerIslandMotionTests {
                                      pill: CGSize(width: 125.3, height: 36.7), pillTop: 13.25, flank: 102)
         #expect(abs(idle.band - 36.7) < 0.001)
         #expect(L.bodyTop(band: idle.band) > idle.cameraRect.maxY)
-        // The text column runs under the camera, from the ring to the amount.
-        let column = LedgerIslandTextLayout.columnWidth(stage: idle, amountWidth: 80)
-        #expect(abs(column - (idle.expandedWidth - L.inset - L.textLeft - L.amountGap - 80)) < 0.001)
-        #expect(LedgerIslandTextLayout(title: "楼下便利店", totalWidth: column).rows.titleLines == 1)
-        #expect(LedgerIslandTextLayout(title: "Synthetic context action with a long name",
-                                       totalWidth: column).rows.titleLines == 2)
+        // The text column runs under the camera across the island.
+        let column = LedgerIslandTextLayout.columnWidth(stage: idle)
+        #expect(abs(column - (idle.expandedWidth - 2 * L.inset)) < 0.001)
+        #expect(LedgerIslandTextLayout(title: "Synthetic context action", totalWidth: column).rows.titleLines == 1)
     }
 
     @Test("Long titles fold at words and keep the camera band clear")

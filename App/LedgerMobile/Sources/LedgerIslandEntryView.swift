@@ -200,8 +200,7 @@ final class LedgerIslandPresenter: ObservableObject {
         var next = stage.flatMap { $0.visibleEntries(at: now).isEmpty ? nil : $0 }
             ?? LedgerIslandStage(containerWidth: containerWidth, reduceMotion: reduceMotion, pill: pill,
                                  pillTop: pillTop, flank: flank)
-        let rows = LedgerIslandTextLayout.rows(
-            for: notice, stage: next, amountWidth: LedgerIslandEntryMetrics(notice).amountWidth + 4)
+        let rows = LedgerIslandTextLayout.rows(for: notice, stage: next)
         // A shape still on its way receives its next instruction when the
         // notice is presented; a resting pill starts moving toward the
         // expanded size here, ahead of the content.
@@ -233,7 +232,7 @@ final class LedgerIslandPresenter: ObservableObject {
                                  pillTop: pillTop, flank: flank)
         let entryMetrics = LedgerIslandEntryMetrics(notice)
         // The settled height depends on whether the title needs two lines.
-        let rows = LedgerIslandTextLayout.rows(for: notice, stage: next, amountWidth: entryMetrics.amountWidth + 4)
+        let rows = LedgerIslandTextLayout.rows(for: notice, stage: next)
         // If the prelude did not run, the shape has to travel before content
         // appears; the notice then starts at the top of the expansion instead
         // of posing the island at its full size for a moment.
@@ -397,20 +396,18 @@ private struct LedgerIslandExpandedContent: View {
     /// The amount needs a little slack: per-glyph rolling columns lose kerning.
     private var amountWidth: Double { metrics.amountWidth + 4 }
 
-    private var amountColumn: Double { stage.amountColumn(amountWidth: amountWidth) }
-
-    private var textWidth: Double { LedgerIslandTextLayout.columnWidth(stage: stage, amountWidth: amountWidth) }
+    private var textWidth: Double { LedgerIslandTextLayout.columnWidth(stage: stage) }
 
     private var layout: LedgerIslandTextLayout {
         LedgerIslandTextLayout(title: entry.notice.title, totalWidth: textWidth)
     }
 
-    /// The row lives in final-size coordinates and is mapped onto the live
+    /// Text rows live in final-size coordinates and are mapped onto the live
     /// shape (top-anchored, centred), so text never reflows while it grows.
-    /// Vertically it maps into the part of the shape below the camera band,
-    /// so even a shape that is still short never pulls it up beside the
+    /// Vertically they map into the part of the shape below the camera band,
+    /// so even a shape that is still short never pulls them up beside the
     /// camera. The horizontal mapping applies to anchor points only.
-    private func point(_ x: Double, _ y: Double) -> CGPoint {
+    private func bodyPoint(_ x: Double, _ y: Double) -> CGPoint {
         let band = stage.band
         let full = stage.settledHeight(rows: layout.rows)
         let live = max(0, Double(size.height) - band)
@@ -422,6 +419,13 @@ private struct LedgerIslandExpandedContent: View {
         return size.width / 2 + (x - fullWidth / 2) * size.width / fullWidth
     }
 
+    /// Flank elements are anchored to the camera, not to the live shape: they
+    /// keep their final distance from the cutout and the growing shape reveals
+    /// them (the island clips its content), so no frame slides them under it.
+    private func flankPoint(_ x: Double) -> CGPoint {
+        CGPoint(x: size.width / 2 + (x - stage.expandedWidth / 2), y: L.flankY(band: stage.band))
+    }
+
     var body: some View {
         let notice = entry.notice
         let style = metrics.style
@@ -429,15 +433,13 @@ private struct LedgerIslandExpandedContent: View {
         let timeline = entry.timeline
         let band = stage.band
         let rightEdge = stage.expandedWidth - L.inset
-        let amountScale = min(1, amountColumn / amountWidth)
+        let amountScale = min(1, max(0, stage.flankWidth) / amountWidth)
         let rows = layout.rows
         // One scale for the whole text column, so a two-line title keeps both
         // rows at the same size as the subtitle.
         let textScale = layout.scale
         let contentIn = stage.contentIn(entry: entry)
         let titleHeight = Double(rows.titleLines) * LedgerIslandFonts.titleLineHeight
-        // The amount reads with the name: level with the title's first line.
-        let amountY = L.textTop(band: band, rows: rows) + LedgerIslandFonts.titleLineHeight / 2
 
         let reduce = stage.reduceMotion
         let ringProgress = LedgerIslandEasing.easeInOut((lt - timeline.ringStart) / (timeline.ringEnd - timeline.ringStart))
@@ -446,27 +448,7 @@ private struct LedgerIslandExpandedContent: View {
             LedgerIslandBadge(notice: notice, style: style, lt: lt, timeline: timeline, ringProgress: ringProgress)
                 .centredBeforePlacement()
                 .islandPlaced(entry.effect(.expanded, delay: 0, at: now, reduceMotion: reduce, contentIn: contentIn),
-                              at: point(L.badgeCenterX, L.badgeCenterY(band: band, rows: rows)), in: size)
-
-            Text(layout.title)
-                .font(LedgerIslandFonts.title)
-                .foregroundStyle(.white)
-                .lineLimit(L.titleLines)
-                .truncationMode(.tail)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(width: textWidth, height: titleHeight, alignment: .leading)
-                .scaleEffect(textScale, anchor: .leading)
-                .centredBeforePlacement()
-                .islandPlaced(entry.effect(.expanded, delay: 0.04, at: now, reduceMotion: reduce, contentIn: contentIn),
-                              at: point(L.textLeft + textWidth / 2, L.titleCenterY(band: band, rows: rows)), in: size)
-
-            LedgerIslandSubtitle(notice: notice, style: style, lt: lt, timeline: timeline)
-                .lineLimit(1)
-                .frame(width: textWidth, alignment: .leading)
-                .scaleEffect(textScale, anchor: .leading)
-                .islandPlaced(entry.effect(.expanded, delay: 0.08, at: now, reduceMotion: reduce, contentIn: contentIn),
-                              at: point(L.textLeft + textWidth / 2, L.subtitleCenterY(band: band, rows: rows)), in: size)
+                              at: flankPoint(L.badgeCenterX), in: size)
 
             Group {
                 if let count = style.count {
@@ -485,8 +467,28 @@ private struct LedgerIslandExpandedContent: View {
             .fixedSize()
             .frame(width: amountWidth, alignment: .trailing)
             .scaleEffect(amountScale, anchor: .trailing)
-            .islandPlaced(entry.effect(.expanded, delay: 0.06, at: now, reduceMotion: reduce, contentIn: contentIn),
-                          at: point(rightEdge - amountWidth / 2, amountY), in: size)
+            .islandPlaced(entry.effect(.expanded, delay: 0.04, at: now, reduceMotion: reduce, contentIn: contentIn),
+                          at: flankPoint(rightEdge - amountWidth / 2), in: size)
+
+            Text(layout.title)
+                .font(LedgerIslandFonts.title)
+                .foregroundStyle(.white)
+                .lineLimit(L.titleLines)
+                .truncationMode(.tail)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: textWidth, height: titleHeight, alignment: .leading)
+                .scaleEffect(textScale, anchor: .leading)
+                .centredBeforePlacement()
+                .islandPlaced(entry.effect(.expanded, delay: 0.07, at: now, reduceMotion: reduce, contentIn: contentIn),
+                              at: bodyPoint(L.textLeft + textWidth / 2, L.titleCenterY(band: band, rows: rows)), in: size)
+
+            LedgerIslandSubtitle(notice: notice, style: style, lt: lt, timeline: timeline)
+                .lineLimit(1)
+                .frame(width: textWidth, alignment: .leading)
+                .scaleEffect(textScale, anchor: .leading)
+                .islandPlaced(entry.effect(.expanded, delay: 0.1, at: now, reduceMotion: reduce, contentIn: contentIn),
+                              at: bodyPoint(L.textLeft + textWidth / 2, L.subtitleCenterY(band: band, rows: rows)), in: size)
         }
         .frame(width: size.width, height: size.height)
     }
@@ -537,20 +539,16 @@ struct LedgerIslandTextLayout {
         }
     }
 
-    /// The text column runs below the camera, from beside the ring to the
-    /// amount at the end of the row.
-    static func columnWidth(stage: LedgerIslandStage, amountWidth: Double) -> Double {
-        typealias L = LedgerIslandStage.Layout
-        let amount = stage.amountColumn(amountWidth: amountWidth)
-        return max(60, stage.expandedWidth - L.inset - L.textLeft - L.amountGap - amount)
+    /// The text column runs below the camera, across the island's width.
+    static func columnWidth(stage: LedgerIslandStage) -> Double {
+        max(60, stage.expandedWidth - 2 * LedgerIslandStage.Layout.inset)
     }
 
     /// Rows the stage should reserve for this notice, measured at the settled
     /// column (the shape may still be growing when the notice is presented).
     @MainActor
-    static func rows(for notice: LedgerIslandNotice, stage: LedgerIslandStage,
-                     amountWidth: Double) -> LedgerIslandStage.Layout.TextRows {
-        LedgerIslandTextLayout(title: notice.title, totalWidth: columnWidth(stage: stage, amountWidth: amountWidth)).rows
+    static func rows(for notice: LedgerIslandNotice, stage: LedgerIslandStage) -> LedgerIslandStage.Layout.TextRows {
+        LedgerIslandTextLayout(title: notice.title, totalWidth: columnWidth(stage: stage)).rows
     }
 }
 
@@ -617,7 +615,7 @@ private struct LedgerIslandBadge: View {
                 .fill(style.badgeIconColor.opacity(0.2))
                 .frame(width: badge, height: badge)
             Image(systemName: notice.iconName)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(style.badgeIconColor)
                 .scaleEffect(glyphPop * (1 - 0.35 * LedgerIslandEasing.clamp(bloom)))
                 .opacity(1 - LedgerIslandEasing.clamp(bloom * 1.6))
@@ -627,25 +625,25 @@ private struct LedgerIslandBadge: View {
                 .scaleEffect(max(0, bloom))
             LedgerIslandCheckmark()
                 .trim(from: 0, to: tick)
-                .stroke(Color.white, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                .stroke(Color.white, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                 .frame(width: badge, height: badge)
 
             if lt < timeline.check {
                 Circle()
-                    .stroke(Color.white.opacity(0.12), lineWidth: 2.5)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 2)
                     .frame(width: ring, height: ring)
                 Circle()
                     .trim(from: 0, to: ringProgress)
-                    .stroke(style.accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .stroke(style.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .frame(width: ring, height: ring)
             } else if ripple < 1 {
                 Circle()
-                    .stroke(style.accent.opacity(0.7 * (1 - ripple)), lineWidth: 2.5 * (1 - ripple) + 0.5)
-                    .frame(width: ring + 12 * LedgerIslandEasing.easeOut(ripple), height: ring + 12 * LedgerIslandEasing.easeOut(ripple))
+                    .stroke(style.accent.opacity(0.7 * (1 - ripple)), lineWidth: 2 * (1 - ripple) + 0.5)
+                    .frame(width: ring + 10 * LedgerIslandEasing.easeOut(ripple), height: ring + 10 * LedgerIslandEasing.easeOut(ripple))
             }
         }
-        .frame(width: 76, height: 76)
+        .frame(width: 60, height: 60)
     }
 }
 
@@ -825,7 +823,7 @@ final class LedgerIslandWindowManager {
     /// Top of the hardware island in overlay coordinates, and the room the
     /// expanded island gets on each side of it.
     private var cameraTop: Double = 8
-    private var flank: Double = LedgerIslandStage.Layout.inset
+    private var flank: Double = LedgerIslandStage.Layout.inset + LedgerIslandStage.Layout.cameraGap
     private var dismissHandler: (() -> Void)?
 
     private init() {
