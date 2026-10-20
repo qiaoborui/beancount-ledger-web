@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/borui/beancount-ledger-web/server/internal/ledgercore"
 )
 
 type LedgerVersion struct {
@@ -43,6 +45,9 @@ type LedgerSnapshot struct {
 	Commodities       []string                  `json:"commodities"`
 	Prices            []Price                   `json:"prices"`
 	ParsedAt          int64                     `json:"parsedAt"`
+	// Deferred raw transaction source for a registered canonical model. When
+	// set, Transactions carry no editor drafts; see snapshotEditable.
+	localSource *localSourceDrafts
 }
 
 type LedgerCache struct {
@@ -100,7 +105,18 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	parseStarted := time.Now()
 	var compiled BeanParseResult
 	var sourceEntries []BeanEntry
-	if c.cfg.localTransport && c.cfg.localCanonical != nil {
+	var segments ledgercore.SourceSegments
+	deferRaw := c.cfg.localTransport && c.cfg.localCanonical != nil && localDeferRawParse
+	if deferRaw {
+		// The canonical loader has already validated and transformed the
+		// ledger. Hashes need only exact block text; transaction bodies are
+		// parsed later, and only for requests that return editor drafts.
+		segments = ledgercore.SegmentLines(lines)
+		compiled.Entries, err = localCanonicalEntries(c.cfg, segments.Entries)
+		if err != nil {
+			return nil, err
+		}
+	} else if c.cfg.localTransport && c.cfg.localCanonical != nil {
 		// The canonical loader has already validated and transformed the
 		// ledger. Parse raw source exclusively for editor drafts and hashes.
 		sourceEntries = ParseBeanLines(lines).Entries
@@ -119,7 +135,12 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 	entries := compiled.Entries
 	var txns []Transaction
 	var options map[string]string
-	if c.cfg.localTransport && c.cfg.localCanonical != nil {
+	var localSource *localSourceDrafts
+	if deferRaw {
+		txns = localCanonicalTransactionRows(entries, segments.Entries, false)
+		localSource = newLocalSourceDrafts(segments)
+		options = copyStringMap(c.cfg.localCanonical.Options)
+	} else if c.cfg.localTransport && c.cfg.localCanonical != nil {
 		txns = localCanonicalTransactions(entries, sourceEntries)
 		sourceEntries = compactLocalCanonicalSource(sourceEntries, txns)
 		options = copyStringMap(c.cfg.localCanonical.Options)
@@ -154,6 +175,7 @@ func (c *LedgerCache) Snapshot() (*LedgerSnapshot, error) {
 		Commodities:       commodities,
 		Prices:            prices,
 		ParsedAt:          time.Now().UnixMilli(),
+		localSource:       localSource,
 	}
 	prepareLedgerSnapshot(snapshot)
 	c.snapshot = snapshot

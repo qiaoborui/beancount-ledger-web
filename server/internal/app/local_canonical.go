@@ -148,6 +148,12 @@ func localCanonicalCommodities(entries []BeanEntry, model *LocalCanonicalModel) 
 }
 
 func localCanonicalTransactions(entries, source []BeanEntry) []Transaction {
+	return localCanonicalTransactionRows(entries, source, true)
+}
+
+// localCanonicalTransactionRows matches canonical transactions to source
+// blocks. Without editor drafts, source only needs locators and RawLines.
+func localCanonicalTransactionRows(entries, source []BeanEntry, withDrafts bool) []Transaction {
 	// Canonical Beancount has already expanded pads. Do not run raw-source
 	// expansion, accumulate its unused balances, or create canonical editor
 	// drafts only to replace them with exact source drafts below.
@@ -171,7 +177,9 @@ func localCanonicalTransactions(entries, source []BeanEntry) []Transaction {
 		if index, ok := bySource[canonicalSourceKey(entry)]; ok {
 			raw := source[index]
 			txn.Source.Hash = transactionHash(raw.RawLines)
-			txn.Entry = EditableLedgerEntryFromBeanTransaction(raw)
+			if withDrafts {
+				txn.Entry = EditableLedgerEntryFromBeanTransaction(raw)
+			}
 		} else {
 			// A generated transaction has no editable transaction block. Give it
 			// a stable identity that cannot resolve to its originating pad line.
@@ -227,6 +235,7 @@ func compactLocalCanonicalSource(source []BeanEntry, txns []Transaction) []BeanE
 }
 
 func snapshotSourceBeanEntries(snapshot *LedgerSnapshot) []BeanEntry {
+	snapshot = snapshotEditable(snapshot)
 	if snapshot.SourceBeanEntries != nil {
 		return snapshot.SourceBeanEntries
 	}

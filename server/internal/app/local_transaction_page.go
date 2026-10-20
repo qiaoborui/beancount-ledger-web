@@ -196,7 +196,8 @@ func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query 
 		// These remain in the model for filtering and legacy/detail requests.
 		txn.PendingReviewFlag = nil
 		if pendingCandidates {
-			flagged := txn.Entry != nil && (txn.Entry.Flag == "!" || txn.Entry.NeedsReview)
+			entry := snapshotTransactionEntry(snapshot, txn)
+			flagged := entry != nil && (entry.Flag == "!" || entry.NeedsReview)
 			txn.PendingReviewFlag = &flagged
 		}
 		txn.Entry = nil
@@ -286,6 +287,7 @@ func localTransactionDetailResponse(cfg Config, snapshot *LedgerSnapshot, query 
 		if txn.Source.File != full || txn.Source.Line != line || txn.Source.Hash != hash {
 			continue
 		}
+		txn.Entry = snapshotTransactionEntry(snapshot, txn)
 		txn.Source.File = filepath.ToSlash(clean)
 		if txn.Postings == nil {
 			txn.Postings = []Posting{}

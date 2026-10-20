@@ -49,6 +49,7 @@ func (s *TransactionService) Reverse(input ReverseTransactionRequest) (LedgerEnt
 	if err != nil {
 		return LedgerEntry{}, err
 	}
+	snapshot = snapshotEditable(snapshot)
 	original := FindTransaction(snapshot.Transactions, input.Source)
 	if original == nil {
 		return LedgerEntry{}, errors.New("找不到原交易，账本可能已被修改，请刷新后重试")

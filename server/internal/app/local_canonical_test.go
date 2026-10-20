@@ -91,7 +91,7 @@ plugin "beancount.plugins.implicit_prices"
 	if snapshot.RawBalances["Assets:Stock"]["HOOL"] != 200 || snapshot.RawBalances["Assets:Cash"]["USD"] != -2000 {
 		t.Fatalf("booked quantities changed: %+v", snapshot.RawBalances)
 	}
-	txn := snapshot.Transactions[0]
+	txn := snapshotEditable(snapshot).Transactions[0]
 	if txn.Source.Line != 3 || txn.Entry == nil || len(txn.Entry.Postings) != 2 {
 		t.Fatalf("raw editor source missing: %+v", txn)
 	}
