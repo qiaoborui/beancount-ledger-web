@@ -3095,7 +3095,15 @@ final class LedgerSession: ObservableObject {
         let wasActive = applicationActive
         applicationActive = isActive
         applicationBackground = isBackground
-        if !isActive || isBackground { resetLocalTransactionWindow() }
+        if !isActive || isBackground {
+            resetLocalTransactionWindow()
+        } else if !wasActive {
+            // Leaving the foreground dropped the list window, but the transactions
+            // page keys its reload on revision/range/filter/readability, none of
+            // which change when no privacy cover was shown. Signal a reload so the
+            // page re-reads instead of showing an empty range.
+            localTransactionReloadID &+= 1
+        }
         if isBackground {
             if isLocalOperationBusy || (isLocal && isAuthenticationBusy) { _ = invalidateSession() }
             finishLocalAuthenticationForegroundWaiters(cancelled: true)
