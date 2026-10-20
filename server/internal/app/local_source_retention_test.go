@@ -133,13 +133,16 @@ func TestLocalSourceRetentionSnapshotEquivalence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(snapshot.BeanEntries, expectedEntries) || !reflect.DeepEqual(snapshot.Transactions, expectedTxns) {
+	// Drafts and retained source are deferred; the editable view must rebuild
+	// exactly what the eager parse produced.
+	editable := snapshotEditable(snapshot)
+	if !reflect.DeepEqual(snapshot.BeanEntries, expectedEntries) || !reflect.DeepEqual(editable.Transactions, expectedTxns) {
 		t.Fatal("canonical entries/postings/rawlines/hashes/editor drafts changed")
 	}
-	if len(snapshot.SourceBeanEntries) != 8 || cap(snapshot.SourceBeanEntries) != 8 {
-		t.Fatalf("retained %d/%d source entries, want 8", len(snapshot.SourceBeanEntries), cap(snapshot.SourceBeanEntries))
+	if len(editable.SourceBeanEntries) != 8 || cap(editable.SourceBeanEntries) != 8 {
+		t.Fatalf("retained %d/%d source entries, want 8", len(editable.SourceBeanEntries), cap(editable.SourceBeanEntries))
 	}
-	for _, entry := range snapshot.SourceBeanEntries {
+	for _, entry := range editable.SourceBeanEntries {
 		if entry.Kind == "transaction" && entry.Payee == "Ordinary" {
 			t.Fatal("ordinary source retained")
 		}
@@ -163,14 +166,14 @@ func TestLocalSourceRetentionSnapshotEquivalence(t *testing.T) {
 			t.Fatal("detail changed", status, err)
 		}
 	}
-	last := snapshot.Transactions[len(snapshot.Transactions)-1]
+	last := editable.Transactions[len(editable.Transactions)-1]
 	if last.Source.Line != 0 || last.Entry != nil || !strings.HasPrefix(last.Source.Hash, "generated:") {
 		t.Fatal("generated locator changed")
 	}
-	if snapshot.Transactions[0].Entry == nil || snapshot.Transactions[0].Entry.Postings[1].Amount != "" {
+	if editable.Transactions[0].Entry == nil || editable.Transactions[0].Entry.Postings[1].Amount != "" {
 		t.Fatal("inferred editor leg changed")
 	}
-	if snapshot.Transactions[2].Entry != nil || snapshot.Transactions[2].Metadata["project"] != "scope" || !reflect.DeepEqual(snapshot.Transactions[2].Tags, []string{"trip"}) {
+	if editable.Transactions[2].Entry != nil || editable.Transactions[2].Metadata["project"] != "scope" || !reflect.DeepEqual(editable.Transactions[2].Tags, []string{"trip"}) {
 		t.Fatal("metadata scope or edit guard changed")
 	}
 }
@@ -310,6 +313,7 @@ func TestLocalSourceRetentionReversalRejectsStaleHash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	snapshot = snapshotEditable(snapshot)
 	if len(snapshot.SourceBeanEntries) != 1 || snapshot.Transactions[0].Entry != nil {
 		t.Fatal("missing fallback fixture")
 	}

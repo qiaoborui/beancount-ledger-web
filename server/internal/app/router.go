@@ -87,9 +87,10 @@ func (s *Server) ledgerEntries(c *gin.Context) {
 		// The canonical loader consumes source controls while transforming
 		// semantic entries. Keep the source-only SDK fields from the raw parse.
 		result.OptionsMap = copyStringMap(snapshot.OptionsMap)
-		result.Plugins = SDKPluginsFromBeanEntries(snapshot.SourceBeanEntries)
-		result.Includes = SDKIncludesFromBeanEntries(snapshot.SourceBeanEntries)
-		result.Directives = SDKControlEntriesFromBeanEntries(snapshot.SourceBeanEntries)
+		controls := snapshotSourceControls(snapshot)
+		result.Plugins = SDKPluginsFromBeanEntries(controls)
+		result.Includes = SDKIncludesFromBeanEntries(controls)
+		result.Directives = SDKControlEntriesFromBeanEntries(controls)
 	}
 	c.JSON(http.StatusOK, result)
 }

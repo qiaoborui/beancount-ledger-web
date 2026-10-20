@@ -305,7 +305,7 @@ func buildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 	incomeStatement := buildLedgerIncomeStatementFields(snapshot, start, end, unlocked, valuationCurrency)
 	transactions := []Transaction{}
 	if includeTransactions {
-		transactions = filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked, nil)
+		transactions = filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshotWithDrafts(snapshot, unlocked)), start, end, unlocked, nil)
 	}
 	return BootstrapResult{
 		Start:              start,
@@ -359,7 +359,7 @@ func BuildLedgerBootstrapLite(snapshot *LedgerSnapshot, start, end string, unloc
 		NetWorthWindows:    nil,
 		CreditCards:        []CreditCardAnalytics{},
 		Investments:        InvestmentSummary{},
-		Transactions:       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked, nil),
+		Transactions:       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshotWithDrafts(snapshot, unlocked)), start, end, unlocked, nil),
 		ReconciliationRows: []ReconciliationRow{},
 		Accounts:           snapshot.Accounts,
 		Commodities:        snapshot.Commodities,
@@ -399,7 +399,7 @@ func BuildLedgerTransactions(snapshot *LedgerSnapshot, start, end string, unlock
 	return TransactionQueryResult{
 		Start:             start,
 		End:               end,
-		Transactions:      filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshot), start, end, unlocked, firstTransactionQuery(query)),
+		Transactions:      filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshotWithDrafts(snapshot, unlocked)), start, end, unlocked, firstTransactionQuery(query)),
 		SensitiveUnlocked: unlocked,
 	}
 }
