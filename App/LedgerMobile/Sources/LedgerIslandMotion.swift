@@ -71,7 +71,8 @@ struct LedgerIslandSpringTrack: Equatable, Sendable {
 }
 
 /// Per-notice choreography in seconds from the notice's start.
-/// Decides whether the island still needs animation frames.
+/// Decides whether the island still needs animation frames, and when its
+/// expanded content may start.
 ///
 /// The island renders inside `TimelineView(.animation)`, which re-evaluates at
 /// display refresh rate. Under Reduce Motion every effect is a constant, so no
@@ -81,6 +82,44 @@ enum LedgerIslandFrameGate {
     static func needsFrames(entry: LedgerIslandStageEntry, reduceMotion: Bool, now: Double) -> Bool {
         if reduceMotion { return false }
         return now < entry.start + entry.timeline.end
+    }
+
+    /// Content enters once the shape is past `settled` of its way to the
+    /// expanded width. Large amounts close to the pill hide nothing: the shape
+    /// is already most of the way there when the content starts.
+    static let settled: Double = 0.55
+
+    static func contentIn(entry: LedgerIslandStageEntry, expandedWidth: Double) -> Double {
+        let start = entry.compactWidth
+        let travel = expandedWidth - start
+        let tolerance = max(30, travel * 0.18)
+        return start + travel * settled > expandedWidth - tolerance
+            ? entry.timeline.contentIn
+            : entry.timeline.contentIn + settled
+    }
+
+    /// Time for the shape to grow from the pill past `settled` of the way to the
+    /// expanded size; zero when it is already that far (content would show at
+    /// once, so the expansion is not worth delaying for).
+    static func preludeDelay(pillWidth: Double, pillHeight: Double, expandedWidth: Double,
+                             expandedHeight: Double) -> Double {
+        let travel = expandedWidth - pillWidth
+        guard travel > 30 else { return 0 }
+        let target = pillWidth + travel * settled
+        let width = LedgerIslandSpringSegment(start: 0, from: pillWidth, velocity: 0, target: expandedWidth,
+                                              response: 0.46, damping: 0.70)
+        let height = LedgerIslandSpringSegment(start: 0, from: pillHeight, velocity: 0, target: expandedHeight,
+                                               response: 0.54, damping: 0.76)
+        // The target is reached once and never again for these damping ratios,
+        // so the first crossing is the whole answer.
+        var time = 0.0
+        while time < 1.2 {
+            if width.sample(at: time).value >= target && height.sample(at: time).value >= pillHeight + (expandedHeight - pillHeight) * settled {
+                return time
+            }
+            time += 0.005
+        }
+        return 0
     }
 }
 
@@ -109,6 +148,13 @@ struct LedgerIslandTimeline: Equatable, Sendable {
     var compactContentIn: Double { toCompact + 0.2 }
 }
 
+/// Where the status caption ("已记账") sits in the expanded island: beside the
+/// subtitle, or under it when the name is long and the column narrow.
+enum LedgerIslandCaptionPlacement: Equatable, Sendable {
+    case inline
+    case below
+}
+
 enum LedgerIslandLayer: Sendable {
     case expanded
     case compact
@@ -133,9 +179,14 @@ struct LedgerIslandStageEntry: Equatable, Sendable {
 
     func localTime(_ now: Double) -> Double { now - start }
 
-    func effect(_ layer: LedgerIslandLayer, delay: Double, at now: Double, reduceMotion: Bool) -> LedgerIslandEffect {
+    func effect(_ layer: LedgerIslandLayer, delay: Double, at now: Double, reduceMotion: Bool,
+                contentIn: Double? = nil) -> LedgerIslandEffect {
         let lt = localTime(now)
-        let enterAt = layer == .expanded ? timeline.contentIn : timeline.compactContentIn
+        // The stage hands back its own content time, which waits for the shape
+        // when the shape has further to travel (a short notice that never needed
+        // the full expanded width). Content then never fades out of a shape that
+        // is still growing, which is what read as a flash.
+        let enterAt = contentIn ?? (layer == .expanded ? timeline.contentIn : timeline.compactContentIn)
         var exitAt = layer == .expanded ? timeline.toCompact : timeline.toPill
         if let interruptedAt { exitAt = min(exitAt, interruptedAt - start) }
 
@@ -219,14 +270,23 @@ struct LedgerIslandPanel: Hashable, Sendable {
 /// island, settles into an expanded confirmation, shrinks to a compact pill, then
 /// retracts. Width leads height so the expansion reads as a sideways fling.
 ///
-/// Proportions follow Apple's Live Activity specs (HIG): the expanded island
-/// spans the screen minus 22pt, leading and trailing content flank the camera
-/// in the top band, the rest sits below it, and the compact island stays snug
-/// around the camera.
+/// Proportions follow the expanded Live Activity: leading and trailing content
+/// flank the camera in the top band and the rest sits below it, while the
+/// compact and resting shapes stay snug around the camera.
+///
+/// The expanded island keeps a wider margin to the screen edges than a Live
+/// Activity does (24pt instead of 22pt), and its content is inset from the
+/// rounded edges rather than hugging them, so the confirmation reads as a card
+/// floating under the camera instead of something pressed against the bezel.
 struct LedgerIslandStage: Equatable, Sendable {
     /// Resting shape on screens without a hardware island.
     static let defaultPill = CGSize(width: 126, height: 37)
+    /// Gap between the expanded island and the screen edges.
+    static let screenMargin: Double = 24
     static let expandedHeight: Double = 96
+    /// Height when a long title needs two lines: the rows above the camera keep
+    /// their positions and the text column grows downward.
+    static let expandedHeightWithTwoLineTitle: Double = 112
     /// Expanded corners; smaller shapes use half their height, i.e. a capsule.
     static let cornerRadius: Double = 38
 
@@ -234,27 +294,81 @@ struct LedgerIslandStage: Equatable, Sendable {
     /// The badge shares its centre with the top-left corner arc, so its margin
     /// is concentric; the amount flanks the camera and the text sits below it.
     enum Layout {
-        static let inset: Double = 20
-        static let badge: Double = 44
-        static var badgeCenter: CGPoint { CGPoint(x: cornerRadius, y: cornerRadius) }
+        /// Trailing margin for the amount and the caption.
+        static let inset: Double = 22
+        static let badge: Double = 40
+        /// The ring around the badge; the badge is centred inside it. Its 4pt
+        /// margin matches what a Live Activity keeps from the shape's edge.
+        static let ring: Double = 48
+        static var badgeCenter: CGPoint { CGPoint(x: cornerRadius + 1, y: cornerRadius) }
         static let amountY: Double = 27
-        static let titleY: Double = 57
-        static let subtitleY: Double = 76
-        static var textLeft: Double { cornerRadius + badge / 2 + 12 }
+        /// Cap for the title when it has to fold; `titleLines` names it.
+        static let titleLines: Int = 2
+        /// A title that still overflows two lines uses this type scale.
+        static let longTitleScale: Double = 0.9
+        /// Gap between the title block and the subtitle.
+        static let titleGap: Double = 3
+        static let titleYOneLine: Double = 57
+        /// Room for a two-line title; one line is centred inside it.
+        static var titleBlockHeight: Double { Double(titleLines) * LedgerIslandFonts.titleLineHeight }
+        static var textLeft: Double { badgeCenter.x + ring / 2 + 14 }
         /// Space kept clear between flanking content and the camera.
         static let cameraGap: Double = 8
+        /// Width of the "已记账" / "已入库" caption on the subtitle row.
+        static let captionWidth: Double = 48
+        static let captionGap: Double = 8
+
+        static func titleCenterY(lines: Int) -> Double {
+            guard lines > 1 else { return titleYOneLine }
+            return titleYOneLine + Double(lines - 1) * LedgerIslandFonts.titleLineHeight / 2
+        }
+
+        static func subtitleCenterY(rows: TextRows) -> Double {
+            let titleBottom = titleCenterY(lines: rows.titleLines) + Double(rows.titleLines) * LedgerIslandFonts.titleLineHeight / 2
+            return titleBottom + titleGap + LedgerIslandFonts.subtitleLineHeight / 2
+        }
+
+        /// Caption centre: on the subtitle row, or a row lower when the name
+        /// leaves no room for it beside the amount.
+        static func captionCenterY(rows: TextRows) -> Double {
+            rows.caption == .below ? subtitleCenterY(rows: rows) + captionRowHeight : subtitleCenterY(rows: rows)
+        }
+
+        /// Rows the text column needs: the title folded to one or two lines,
+        /// plus the caption row when the status text does not fit beside the
+        /// amount on the subtitle row.
+        struct TextRows: Equatable, Sendable {
+            let titleLines: Int
+            let caption: LedgerIslandCaptionPlacement
+        }
+
+        /// One extra row for the caption when it moves below the subtitle.
+        static let captionRowHeight: Double = 18
+
+        static func expandedHeight(rows: TextRows) -> Double {
+            let base: Double
+            if rows.titleLines > 1 {
+                base = LedgerIslandStage.expandedHeightWithTwoLineTitle
+            } else {
+                base = LedgerIslandStage.expandedHeight
+            }
+            return rows.caption == .below ? base + captionRowHeight : base
+        }
     }
 
     /// Compact layout: the leading glyph sits concentric with the end cap.
     enum CompactLayout {
         static let glyph: Double = 22
-        static let trailingInset: Double = 12
+        static let trailingInset: Double = 14
+        /// Space between the amount and the end cap. The expanded island leaves
+        /// a breath at the bottom, and the compact one keeps that ratio.
+        static let trailingGap: Double = 3
     }
 
     /// Resting shape; on Dynamic Island hardware it covers the camera cutout.
     let pill: CGSize
     let expandedWidth: Double
-    var expandedHeight: Double { Self.expandedHeight }
+    func expandedHeight(rows: Layout.TextRows) -> Double { Layout.expandedHeight(rows: rows) }
     let reduceMotion: Bool
     private(set) var entries: [LedgerIslandStageEntry] = []
     private(set) var width: LedgerIslandSpringTrack
@@ -262,7 +376,7 @@ struct LedgerIslandStage: Equatable, Sendable {
 
     init(containerWidth: Double, reduceMotion: Bool, pill: CGSize = Self.defaultPill) {
         self.pill = pill
-        expandedWidth = max(Double(pill.width), containerWidth - 22)
+        expandedWidth = max(Double(pill.width), containerWidth - 2 * Self.screenMargin)
         self.reduceMotion = reduceMotion
         width = LedgerIslandSpringTrack(value: Double(pill.width))
         height = LedgerIslandSpringTrack(value: Double(pill.height))
@@ -284,12 +398,15 @@ struct LedgerIslandStage: Equatable, Sendable {
     /// the leading and trailing elements read as one piece.
     func compactWidth(trailingTextWidth: Double) -> Double {
         let leading = (Double(pill.height) - CompactLayout.glyph) / 2 + CompactLayout.glyph
-        let trailing = CompactLayout.trailingInset + trailingTextWidth
+        // The end cap curves away at the top and bottom, so the amount needs
+        // a little more room than its own width to clear the rounded edges.
+        let trailing = CompactLayout.trailingInset + trailingTextWidth + CompactLayout.trailingGap
         let side = max(leading, trailing) + Layout.cameraGap
         return min(expandedWidth, Double(pill.width) + 2 * side)
     }
 
-    mutating func present(_ notice: LedgerIslandNotice, trailingTextWidth: Double, at now: Double) {
+    mutating func present(_ notice: LedgerIslandNotice, trailingTextWidth: Double,
+                          rows: Layout.TextRows = .init(titleLines: 1, caption: .inline), at now: Double) {
         let interrupting = current.map { now < $0.start + $0.timeline.end } ?? false
         if interrupting, var last = entries.popLast() {
             last.interruptedAt = now
@@ -306,13 +423,38 @@ struct LedgerIslandStage: Equatable, Sendable {
         let compact = compactWidth(trailingTextWidth: trailingTextWidth)
         entries.append(LedgerIslandStageEntry(notice: notice, start: now, timeline: timeline, compactWidth: compact))
 
-        retarget(width: expandedWidth, (0.46, 0.70), height: expandedHeight, (0.54, 0.76), at: now)
+        retarget(width: expandedWidth, (0.46, 0.70), height: expandedHeight(rows: rows), (0.54, 0.76), at: now)
         retarget(width: compact, (0.42, 0.82), height: Double(pill.height), (0.36, 0.86), at: now + timeline.compactShapeStart)
         retarget(width: Double(pill.width), (0.40, 0.88), height: Double(pill.height), (0.34, 0.90), at: now + timeline.pillShapeStart)
     }
 
+    /// Starts the expansion to the expanded size without content yet; the
+    /// notice is presented `wait` seconds later, when the shape has landed.
+    mutating func grow(to rows: Layout.TextRows, at now: Double) {
+        retarget(width: expandedWidth, (0.46, 0.70), height: expandedHeight(rows: rows), (0.54, 0.76), at: now)
+    }
+
     func size(at now: Double) -> CGSize {
         CGSize(width: width.value(at: now), height: height.value(at: now))
+    }
+
+    /// The expanded content starts only once the shape is close to its final
+    /// width: when the start line is too far from the expanded width, the
+    /// content waits for the shape instead of arriving into a still-growing
+    /// pill and then fading out again.
+    func contentIn(entry: LedgerIslandStageEntry) -> Double {
+        LedgerIslandFrameGate.contentIn(entry: entry, expandedWidth: expandedWidth)
+    }
+
+    /// Delay before a notice starts when nothing has moved it yet. A resting
+    /// pill waits for the expansion to land first; a shape that is already
+    /// moving starts its notice right away, so an interruption keeps speed.
+    func preludeDelay(rows: Layout.TextRows, at now: Double) -> Double {
+        let current = size(at: now)
+        let atRest = abs(current.width - Double(pill.width)) < 2 && abs(current.height - Double(pill.height)) < 2
+        guard atRest else { return 0 }
+        return LedgerIslandFrameGate.preludeDelay(pillWidth: Double(pill.width), pillHeight: Double(pill.height),
+            expandedWidth: expandedWidth, expandedHeight: expandedHeight(rows: rows))
     }
 
     /// Entries whose content can still be visible at `now`.
