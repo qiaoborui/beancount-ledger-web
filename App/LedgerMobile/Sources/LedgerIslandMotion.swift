@@ -301,7 +301,12 @@ struct LedgerIslandStage: Equatable, Sendable {
         /// margin matches what a Live Activity keeps from the shape's edge.
         static let ring: Double = 48
         static var badgeCenter: CGPoint { CGPoint(x: cornerRadius + 1, y: cornerRadius) }
-        static let amountY: Double = 27
+        /// Centre of the amount beside the camera. It is measured from the top
+        /// of the shape together with the cutout, so it stays level with the
+        /// camera whatever the island grows out of.
+        static func amountCenterY(_ cutout: LedgerIslandStage.Viewport) -> Double {
+            cutout.top + cutout.pillHeight / 2
+        }
         /// Cap for the title when it has to fold; `titleLines` names it.
         static let titleLines: Int = 2
         /// A title that still overflows two lines uses this type scale.
@@ -365,21 +370,62 @@ struct LedgerIslandStage: Equatable, Sendable {
         static let trailingGap: Double = 3
     }
 
-    /// Resting shape; on Dynamic Island hardware it covers the camera cutout.
+    /// The hardware island as the overlay sees it: its top in overlay
+    /// coordinates and the size the resting shape takes to cover it. Without a
+    /// hardware island the resting shape itself stands in for the cutout.
+    struct Viewport: Equatable, Sendable {
+        let top: Double
+        let pillWidth: Double
+        let pillHeight: Double
+
+        init(top: Double, pillWidth: Double, pillHeight: Double) {
+            self.top = top
+            self.pillWidth = pillWidth
+            self.pillHeight = pillHeight
+        }
+
+        /// The same cutout with a different resting shape behind it.
+        func sized(width: Double, height: Double) -> Viewport {
+            Viewport(top: top, pillWidth: width, pillHeight: height)
+        }
+    }
+
+    /// The shape's footprint: the resting shape, which covers the camera on
+    /// Dynamic Island hardware.
     let pill: CGSize
-    let expandedWidth: Double
-    func expandedHeight(rows: Layout.TextRows) -> Double { Layout.expandedHeight(rows: rows) }
+    /// Gap between the expanded island's leading edge and the cutout's.
+    let flank: Double
+    /// The hardware island. Content is placed against it, never against the
+    /// shape's own size: the shape may be mid-flight or, for a short notice
+    /// before its prelude, still the resting pill, and the camera does not move.
+    let cutout: Viewport
     let reduceMotion: Bool
     private(set) var entries: [LedgerIslandStageEntry] = []
     private(set) var width: LedgerIslandSpringTrack
     private(set) var height: LedgerIslandSpringTrack
 
-    init(containerWidth: Double, reduceMotion: Bool, pill: CGSize = Self.defaultPill) {
+    init(containerWidth: Double, reduceMotion: Bool, pill: CGSize = Self.defaultPill,
+         pillTop: Double = 0, flank: Double = 0) {
         self.pill = pill
-        expandedWidth = max(Double(pill.width), containerWidth - 2 * Self.screenMargin)
+        self.flank = flank
+        cutout = Viewport(top: pillTop, pillWidth: Double(pill.width), pillHeight: Double(pill.height))
         self.reduceMotion = reduceMotion
         width = LedgerIslandSpringTrack(value: Double(pill.width))
         height = LedgerIslandSpringTrack(value: Double(pill.height))
+        // The island is as wide as the camera band needs; the screen only
+        // bounds it so it never runs under the rounded screen edges on a
+        // small phone.
+        let room = containerWidth - 2 * Self.screenMargin
+        expandedWidth = min(max(Double(pill.width), cutout.pillWidth + 2 * flank), max(room, Double(pill.width)))
+    }
+
+    /// Width of the expanded island, set in `init` from the cutout and the
+    /// screen: beyond the camera by `flank` on each side.
+    let expandedWidth: Double
+
+    /// Height of the settled shape for a notice's text rows.
+    func settledHeight(lines titleLines: Int, caption: LedgerIslandCaptionPlacement) -> Double {
+        Layout.expandedHeight(rows: Layout.TextRows(titleLines: titleLines, caption: caption))
     }
 
     var current: LedgerIslandStageEntry? { entries.last }
@@ -391,7 +437,7 @@ struct LedgerIslandStage: Equatable, Sendable {
 
     /// Width available to the amount beside the camera in the top band.
     var flankWidth: Double {
-        (expandedWidth - Double(pill.width)) / 2 - Layout.inset - Layout.cameraGap
+        (expandedWidth - cutout.pillWidth) / 2 - Layout.inset - Layout.cameraGap
     }
 
     /// Both sides take the wider of the two so the camera stays centred and
@@ -423,7 +469,7 @@ struct LedgerIslandStage: Equatable, Sendable {
         let compact = compactWidth(trailingTextWidth: trailingTextWidth)
         entries.append(LedgerIslandStageEntry(notice: notice, start: now, timeline: timeline, compactWidth: compact))
 
-        retarget(width: expandedWidth, (0.46, 0.70), height: expandedHeight(rows: rows), (0.54, 0.76), at: now)
+        retarget(width: expandedWidth, (0.46, 0.70), height: settledHeight(lines: rows.titleLines, caption: rows.caption), (0.54, 0.76), at: now)
         retarget(width: compact, (0.42, 0.82), height: Double(pill.height), (0.36, 0.86), at: now + timeline.compactShapeStart)
         retarget(width: Double(pill.width), (0.40, 0.88), height: Double(pill.height), (0.34, 0.90), at: now + timeline.pillShapeStart)
     }
@@ -431,7 +477,7 @@ struct LedgerIslandStage: Equatable, Sendable {
     /// Starts the expansion to the expanded size without content yet; the
     /// notice is presented `wait` seconds later, when the shape has landed.
     mutating func grow(to rows: Layout.TextRows, at now: Double) {
-        retarget(width: expandedWidth, (0.46, 0.70), height: expandedHeight(rows: rows), (0.54, 0.76), at: now)
+        retarget(width: expandedWidth, (0.46, 0.70), height: settledHeight(lines: rows.titleLines, caption: rows.caption), (0.54, 0.76), at: now)
     }
 
     func size(at now: Double) -> CGSize {
@@ -454,7 +500,7 @@ struct LedgerIslandStage: Equatable, Sendable {
         let atRest = abs(current.width - Double(pill.width)) < 2 && abs(current.height - Double(pill.height)) < 2
         guard atRest else { return 0 }
         return LedgerIslandFrameGate.preludeDelay(pillWidth: Double(pill.width), pillHeight: Double(pill.height),
-            expandedWidth: expandedWidth, expandedHeight: expandedHeight(rows: rows))
+            expandedWidth: expandedWidth, expandedHeight: settledHeight(lines: rows.titleLines, caption: rows.caption))
     }
 
     /// Entries whose content can still be visible at `now`.

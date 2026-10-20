@@ -219,15 +219,64 @@ struct LedgerIslandMotionTests {
         #expect(abs(retracted.height - cover.pill.height) < 0.5)
     }
 
-    @Test("Expanded width keeps a margin to the screen edges")
-    func expandedWidthFitsContainer() {
+    @Test("The island is sized around the camera, not the screen or the pill")
+    func expandedWidthWrapsTheCamera() {
         // A little more breathing room than a Live Activity's 22pt.
         #expect(LedgerIslandStage.screenMargin > 22)
-        #expect(LedgerIslandStage(containerWidth: 393, reduceMotion: false).expandedWidth == 393 - 2 * LedgerIslandStage.screenMargin)
-        #expect(LedgerIslandStage(containerWidth: 430, reduceMotion: false).expandedWidth == 430 - 2 * LedgerIslandStage.screenMargin)
-        // Never narrower than the hardware cutout it grows out of.
-        let pill = CGSize(width: 200, height: 38)
-        #expect(LedgerIslandStage(containerWidth: 210, reduceMotion: false, pill: pill).expandedWidth == 200)
+        // The amount keeps the same margins whether the cutout is a measured
+        // 125.3pt band or a narrower one: the island grows to make room.
+        let inset = LedgerIslandStage.Layout.inset + LedgerIslandStage.Layout.cameraGap
+        let wide = LedgerIslandStage(containerWidth: 402, reduceMotion: false,
+                                     pill: CGSize(width: 125.3, height: 36.7), flank: 36)
+        #expect(abs(wide.expandedWidth - (125.3 + 2 * 36)) < 0.01)
+        #expect(abs(wide.flankWidth - (36 - inset)) < 0.01)
+        let narrow = LedgerIslandStage(containerWidth: 402, reduceMotion: false,
+                                       pill: CGSize(width: 112, height: 36.7), flank: 43.3)
+        #expect(abs(narrow.flankWidth - (43.3 - inset)) < 0.01)
+        // The screen only bounds it, so it never runs under the bezel.
+        let cramped = LedgerIslandStage(containerWidth: 393, reduceMotion: false,
+                                        pill: CGSize(width: 126, height: 37), flank: 133.5)
+        #expect(cramped.expandedWidth == 393 - 2 * LedgerIslandStage.screenMargin)
+        // Never narrower than the cutout it grows out of.
+        #expect(narrow.expandedWidth > Double(narrow.pill.width))
+    }
+
+    @Test("Expanded content is placed against the camera, not the live shape")
+    func expandedRowsAnchorOnTheCamera() {
+        typealias L = LedgerIslandStage.Layout
+        // Cutout top 13.25, resting shape 36.7 high: the amount rides with the
+        // camera, so its row stays level however the shape grows.
+        let camera = LedgerIslandStage.Viewport(top: 13.25, pillWidth: 125.3, pillHeight: 36.7)
+        #expect(abs(L.amountCenterY(camera) - (13.25 + 36.7 / 2)) < 0.001)
+        // A short notice starts out as the resting pill; a layout measured from
+        // the live shape would pin its title to the pill's centre.
+        let idle = LedgerIslandStage(containerWidth: 402, reduceMotion: false,
+                                     pill: CGSize(width: 125.3, height: 36.7), pillTop: 13.25, flank: 36)
+        let titleRows = LedgerIslandTextLayout(title: "Synthetic context action", subtitle: "支出已记录",
+                                               totalWidth: 163).rows
+        #expect(titleRows.titleLines == 2)
+        #expect(L.titleCenterY(lines: 1) - 10 > camera.top + camera.pillHeight)
+        #expect(idle.cutout == camera)
+    }
+
+    @Test("Long titles fold at words and keep the camera band clear")
+    func titleFoldsAtWords() {
+        // "Synthetic context action" fits two lines at full size in the column
+        // between the badge and the camera; it must not be cut mid-word.
+        let layout = LedgerIslandTextLayout(title: "Synthetic context action", subtitle: "支出已记录",
+                                            totalWidth: 128)
+        #expect(layout.rows.titleLines == 2)
+        #expect(layout.scale == 1)
+        // Latin words fold between words; the folded lines never exceed the
+        // column one line of CJK would occupy.
+        let lines = LedgerIslandFonts.foldedLines("Synthetic context action", size: 16, weight: .semibold,
+                                                  count: 2, width: 128)
+        #expect(lines.count <= 2)
+        #expect(lines.allSatisfy { !$0.hasSuffix(" ") })
+        // No folded line reaches past the column.
+        #expect(lines.allSatisfy {
+            LedgerIslandFonts.width($0, size: 16, weight: .semibold) <= 128
+        })
     }
 
     @Test("Compact amount stays clear of the end cap")
