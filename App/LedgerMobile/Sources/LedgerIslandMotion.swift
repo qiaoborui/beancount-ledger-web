@@ -148,13 +148,6 @@ struct LedgerIslandTimeline: Equatable, Sendable {
     var compactContentIn: Double { toCompact + 0.2 }
 }
 
-/// Where the status caption ("已记账") sits in the expanded island: beside the
-/// subtitle, or under it when the name is long and the column narrow.
-enum LedgerIslandCaptionPlacement: Equatable, Sendable {
-    case inline
-    case below
-}
-
 enum LedgerIslandLayer: Sendable {
     case expanded
     case compact
@@ -283,109 +276,91 @@ struct LedgerIslandStage: Equatable, Sendable {
     static let defaultPill = CGSize(width: 126, height: 37)
     /// Gap between the expanded island and the screen edges.
     static let screenMargin: Double = 24
-    static let expandedHeight: Double = 108
-    /// Height when a long title needs two lines: the rows above the camera keep
-    /// their positions and the text column grows downward.
-    static let expandedHeightWithTwoLineTitle: Double = 124
     /// Expanded corners; smaller shapes use half their height, i.e. a capsule.
     static let cornerRadius: Double = 38
 
     /// Expanded layout in final-size coordinates (origin at the shape's top-left).
-    /// The badge shares its centre with the top-left corner arc, so its margin
-    /// is concentric; the amount flanks the camera and the text sits below it.
+    ///
+    /// The shape's top edge is the camera's top edge, so the camera occupies a
+    /// fixed rectangle at the top centre: `band` tall (the resting shape that
+    /// covers it) and the cutout's width across. Nothing is ever placed in that
+    /// rectangle. The island is split the way a Live Activity is:
+    ///
+    /// - the camera band, on the camera's centre line: the status caption in
+    ///   the leading flank and the amount in the trailing flank, each kept
+    ///   `cameraGap` from the camera and `inset` from the edge;
+    /// - the body, below the camera: the badge with its ring, then the title
+    ///   and subtitle across the full width.
+    ///
+    /// The 44pt ring is taller than the camera band, so it never rides beside
+    /// the camera: there it would either run into the cutout or out of the
+    /// rounded corner.
     enum Layout {
-        /// Trailing margin for the amount and the caption.
+        /// Margin to the island's leading and trailing edges.
         static let inset: Double = 22
         static let badge: Double = 36
-        /// The ring around the badge; the badge is centred inside it. Its 8pt
-        /// margin to the top and leading edge keeps the ring arc away from the
-        /// shape's own border, so the two curves never look fused.
+        /// The ring around the badge; the badge is centred inside it.
         static let ring: Double = 44
-        static var badgeCenter: CGPoint { CGPoint(x: 30, y: badgeCenterY) }
-        /// The badge rides with the camera, like the amount beside it: on the
-        /// camera's centre line, which is 30pt from the shape's top.
-        static let badgeCenterY: Double = 30
-        /// Centre of the amount beside the camera. It is measured from the top
-        /// of the shape together with the cutout, so it stays level with the
-        /// camera whatever the island grows out of.
-        static func amountCenterY(_ cutout: LedgerIslandStage.Viewport) -> Double {
-            cutout.top + cutout.pillHeight / 2
-        }
+        /// Space kept clear between flanking content and the camera.
+        static let cameraGap: Double = 8
+        /// Space between the camera's bottom edge and the body row.
+        static let bodyGap: Double = 10
+        /// Space kept under the body row.
+        static let bottomMargin: Double = 16
+        /// Space between the ring and the text column.
+        static let textGap: Double = 12
         /// Cap for the title when it has to fold; `titleLines` names it.
         static let titleLines: Int = 2
         /// A title that still overflows two lines uses this type scale.
         static let longTitleScale: Double = 0.9
         /// Gap between the title block and the subtitle.
         static let titleGap: Double = 3
-        /// Top of the subtitle row. A one-line title sits on the same row, a
-        /// two-line title grows upward from it; whichever row comes last keeps
-        /// `bottomMargin` to the shape's edge.
-        static let subtitleTop: Double = 81
-        /// Space kept under the row closest to the bottom edge.
-        static let bottomMargin: Double = 16
-        /// Room for a two-line title; one line is centred inside it.
-        static var titleBlockHeight: Double { Double(titleLines) * LedgerIslandFonts.titleLineHeight }
+
+        static var badgeCenterX: Double { inset + ring / 2 }
         /// The text column clears the ring, not just the badge.
-        static var textLeft: Double { badgeCenter.x + ring / 2 + 12 }
-        /// Space kept clear between flanking content and the camera.
-        static let cameraGap: Double = 8
-        /// Width of the "已记账" / "已入库" caption on the subtitle row.
-        static let captionWidth: Double = 48
-        static let captionGap: Double = 8
+        static var textLeft: Double { inset + ring + textGap }
 
-        /// Room for a two-line title in the camera band. The badge and the
-        /// amount share it: from just under the camera to above the subtitle.
-        static var titleBandHeight: Double {
-            subtitleTop + subtitleStepForTwoLineTitle - titleGap - (badgeCenterY + ring / 2 + 4)
-        }
-
-        /// Centre of the title block: one line sits on the subtitle's row, two
-        /// lines fill the camera band above it.
-        static func titleCenterY(lines: Int) -> Double {
-            guard lines > 1 else { return subtitleTop + LedgerIslandFonts.subtitleLineHeight / 2 }
-            return badgeCenterY + ring / 2 + 4 + titleBandHeight / 2
-        }
-
-        /// Where a title block that fills the island's height is centred.
-        static var titleBlockCenterY: Double { titleCenterY(lines: 2) }
-
-        static func subtitleCenterY(rows: TextRows) -> Double {
-            // A one-line title shares the row; a two-line title fills the band
-            // above it, so the subtitle steps down to keep `titleGap` under it.
-            subtitleTop + LedgerIslandFonts.subtitleLineHeight / 2
-                + (rows.titleLines > 1 ? subtitleStepForTwoLineTitle : 0)
-        }
-
-        /// Extra room under a two-line title.
-        static let subtitleStepForTwoLineTitle: Double = 10
-
-        /// Caption centre: on the subtitle row, or a row lower when the name
-        /// leaves no room for it beside the amount.
-        static func captionCenterY(rows: TextRows) -> Double {
-            rows.caption == .below ? subtitleCenterY(rows: rows) + captionRowHeight : subtitleCenterY(rows: rows)
-        }
-
-        /// The settled shape's height for these rows, with `bottomMargin` under
-        /// whichever row is lowest.
-        static func expandedHeight(rows: TextRows) -> Double {
-            let rowsBottom = rows.caption == .below
-                ? captionCenterY(rows: rows) + captionRowHeight / 2
-                : max(subtitleCenterY(rows: rows) + LedgerIslandFonts.subtitleLineHeight / 2,
-                      titleCenterY(lines: rows.titleLines) + Double(rows.titleLines) * LedgerIslandFonts.titleLineHeight / 2)
-            let cameraBottom = badgeCenterY + ring / 2
-            return max(rowsBottom, cameraBottom, cornerRadius + 20) + bottomMargin
-        }
-
-        /// Rows the text column needs: the title folded to one or two lines,
-        /// plus the caption row when the status text does not fit beside the
-        /// amount on the subtitle row.
+        /// Rows the text column needs: the title folded to one or two lines.
         struct TextRows: Equatable, Sendable {
             let titleLines: Int
-            let caption: LedgerIslandCaptionPlacement
         }
 
-        /// One extra row for the caption when it moves below the subtitle.
-        static let captionRowHeight: Double = 18
+        /// The camera's centre line, shared by the caption and the amount.
+        static func bandCenterY(band: Double) -> Double { band / 2 }
+
+        /// Top of the body row: under the camera, never beside it.
+        static func bodyTop(band: Double) -> Double { band + bodyGap }
+
+        /// Title lines, the gap and the subtitle.
+        static func textBlockHeight(rows: TextRows) -> Double {
+            Double(rows.titleLines) * LedgerIslandFonts.titleLineHeight + titleGap + LedgerIslandFonts.subtitleLineHeight
+        }
+
+        /// The body row is as tall as the ring or the text, whichever is taller;
+        /// the other is centred beside it.
+        static func bodyHeight(rows: TextRows) -> Double { max(ring, textBlockHeight(rows: rows)) }
+
+        static func badgeCenterY(band: Double, rows: TextRows) -> Double {
+            bodyTop(band: band) + bodyHeight(rows: rows) / 2
+        }
+
+        private static func textTop(band: Double, rows: TextRows) -> Double {
+            bodyTop(band: band) + (bodyHeight(rows: rows) - textBlockHeight(rows: rows)) / 2
+        }
+
+        static func titleCenterY(band: Double, rows: TextRows) -> Double {
+            textTop(band: band, rows: rows) + Double(rows.titleLines) * LedgerIslandFonts.titleLineHeight / 2
+        }
+
+        static func subtitleCenterY(band: Double, rows: TextRows) -> Double {
+            textTop(band: band, rows: rows) + Double(rows.titleLines) * LedgerIslandFonts.titleLineHeight
+                + titleGap + LedgerIslandFonts.subtitleLineHeight / 2
+        }
+
+        /// The settled shape's height: camera band, body row, bottom margin.
+        static func expandedHeight(band: Double, rows: TextRows) -> Double {
+            bodyTop(band: band) + bodyHeight(rows: rows) + bottomMargin
+        }
     }
 
     /// Compact layout: the leading glyph sits concentric with the end cap.
@@ -432,8 +407,9 @@ struct LedgerIslandStage: Equatable, Sendable {
     private(set) var height: LedgerIslandSpringTrack
 
     init(containerWidth: Double, reduceMotion: Bool, pill: CGSize = Self.defaultPill,
-         pillTop: Double = 0, flank: Double = 0) {
+         pillTop: Double = 0, flank: Double? = nil) {
         self.pill = pill
+        let flank = flank ?? Self.flank(screenWidth: containerWidth, cutoutWidth: Double(pill.width))
         self.flank = flank
         cutout = Viewport(top: pillTop, pillWidth: Double(pill.width), pillHeight: Double(pill.height))
         self.reduceMotion = reduceMotion
@@ -446,13 +422,33 @@ struct LedgerIslandStage: Equatable, Sendable {
         expandedWidth = min(max(Double(pill.width), cutout.pillWidth + 2 * flank), max(room, Double(pill.width)))
     }
 
+    /// Gap between the expanded island's edge and the cutout's. The caption
+    /// and the amount flank the camera, each `inset` short of the island's
+    /// edge and `cameraGap` short of the camera, so the island spans the
+    /// screen (less its margins) whatever the cutout's width. Phones without
+    /// a hardware island use the stand-in pill the same way.
+    static func flank(screenWidth: Double, cutoutWidth: Double) -> Double {
+        let wanted = cutoutWidth / 2 + Layout.inset + Layout.cameraGap
+        let room = screenWidth / 2 - screenMargin
+        return max(wanted, room) - cutoutWidth / 2
+    }
+
     /// Width of the expanded island, set in `init` from the cutout and the
     /// screen: beyond the camera by `flank` on each side.
     let expandedWidth: Double
 
+    /// Height of the camera band: the resting shape, which covers the camera.
+    var band: Double { cutout.pillHeight }
+
+    /// The camera in the settled shape's coordinates. The shape's top edge is
+    /// the camera's, and the shape grows symmetrically around it.
+    var cameraRect: CGRect {
+        CGRect(x: (expandedWidth - cutout.pillWidth) / 2, y: 0, width: cutout.pillWidth, height: band)
+    }
+
     /// Height of the settled shape for a notice's text rows.
-    func settledHeight(lines titleLines: Int, caption: LedgerIslandCaptionPlacement) -> Double {
-        Layout.expandedHeight(rows: Layout.TextRows(titleLines: titleLines, caption: caption))
+    func settledHeight(rows: Layout.TextRows) -> Double {
+        Layout.expandedHeight(band: band, rows: rows)
     }
 
     var current: LedgerIslandStageEntry? { entries.last }
@@ -462,7 +458,7 @@ struct LedgerIslandStage: Equatable, Sendable {
 
     static func cornerRadius(height: Double) -> Double { min(height / 2, cornerRadius) }
 
-    /// Width available to the amount beside the camera in the top band.
+    /// Width each flank of the camera band offers the caption and the amount.
     var flankWidth: Double {
         (expandedWidth - cutout.pillWidth) / 2 - Layout.inset - Layout.cameraGap
     }
@@ -479,7 +475,7 @@ struct LedgerIslandStage: Equatable, Sendable {
     }
 
     mutating func present(_ notice: LedgerIslandNotice, trailingTextWidth: Double,
-                          rows: Layout.TextRows = .init(titleLines: 1, caption: .inline), at now: Double) {
+                          rows: Layout.TextRows = .init(titleLines: 1), at now: Double) {
         let interrupting = current.map { now < $0.start + $0.timeline.end } ?? false
         if interrupting, var last = entries.popLast() {
             last.interruptedAt = now
@@ -496,7 +492,7 @@ struct LedgerIslandStage: Equatable, Sendable {
         let compact = compactWidth(trailingTextWidth: trailingTextWidth)
         entries.append(LedgerIslandStageEntry(notice: notice, start: now, timeline: timeline, compactWidth: compact))
 
-        retarget(width: expandedWidth, (0.46, 0.70), height: settledHeight(lines: rows.titleLines, caption: rows.caption), (0.54, 0.76), at: now)
+        retarget(width: expandedWidth, (0.46, 0.70), height: settledHeight(rows: rows), (0.54, 0.76), at: now)
         retarget(width: compact, (0.42, 0.82), height: Double(pill.height), (0.36, 0.86), at: now + timeline.compactShapeStart)
         retarget(width: Double(pill.width), (0.40, 0.88), height: Double(pill.height), (0.34, 0.90), at: now + timeline.pillShapeStart)
     }
@@ -504,7 +500,7 @@ struct LedgerIslandStage: Equatable, Sendable {
     /// Starts the expansion to the expanded size without content yet; the
     /// notice is presented `wait` seconds later, when the shape has landed.
     mutating func grow(to rows: Layout.TextRows, at now: Double) {
-        retarget(width: expandedWidth, (0.46, 0.70), height: settledHeight(lines: rows.titleLines, caption: rows.caption), (0.54, 0.76), at: now)
+        retarget(width: expandedWidth, (0.46, 0.70), height: settledHeight(rows: rows), (0.54, 0.76), at: now)
     }
 
     func size(at now: Double) -> CGSize {
@@ -527,7 +523,7 @@ struct LedgerIslandStage: Equatable, Sendable {
         let atRest = abs(current.width - Double(pill.width)) < 2 && abs(current.height - Double(pill.height)) < 2
         guard atRest else { return 0 }
         return LedgerIslandFrameGate.preludeDelay(pillWidth: Double(pill.width), pillHeight: Double(pill.height),
-            expandedWidth: expandedWidth, expandedHeight: settledHeight(lines: rows.titleLines, caption: rows.caption))
+            expandedWidth: expandedWidth, expandedHeight: settledHeight(rows: rows))
     }
 
     /// Entries whose content can still be visible at `now`.
