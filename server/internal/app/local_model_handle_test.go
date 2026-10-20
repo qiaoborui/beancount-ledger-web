@@ -275,3 +275,35 @@ func TestLocalModelHandleSnapshotRejectsSourceChangesAfterResolve(t *testing.T) 
 		})
 	}
 }
+
+func TestLocalModelStampsDetectEditAfterResolve(t *testing.T) {
+	input := localTestRequest(t)
+	handle := registerHandleFixture(t, input)
+	cfg, err := localConfig(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolveLocalModel(cfg, handle, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := resolved.localRegisteredCache
+	if !cache.stamps.matches() {
+		t.Fatal("registered fixture should be verifiable by stat stamps")
+	}
+	if _, err := cache.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	main := filepath.Join(input.WorkspaceRoot, "main.bean")
+	file, err := os.OpenFile(main, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("\n; edited\n"); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	if _, err := cache.Snapshot(); !errors.Is(err, ErrLocalModelUnavailable) {
+		t.Fatalf("edit after resolve accepted: %v", err)
+	}
+}
