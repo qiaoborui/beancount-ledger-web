@@ -12,11 +12,9 @@ expanded shape grows out of the physical island.
 ## Decisions
 - Shape top == camera top; the camera is a fixed rect (cover pill size) at top centre
   (`LedgerIslandStage.cameraRect`, `band`).
-- Camera band: status caption in the leading flank, amount in the trailing flank, both on
-  the camera's centre line, `cameraGap` from the camera and `inset` from the edge.
-  They are anchored to the camera (revealed by the clipping shape), never scaled under it.
-- Body below the camera: badge + ring, then title/subtitle across the full width. Body
-  rows map only into the part of the live shape below the band.
+- Camera band: kept empty, including beside the camera (it runs through the rounded top corners).
+- Body below the camera: badge + ring, title/subtitle, amount. Body rows map only into the
+  part of the live shape below the band.
 - The 44pt ring no longer rides beside the camera (it is taller than the 37pt band).
 - Caption placement (inline/below) removed; `TextRows` carries only title lines.
 - `LedgerIslandStage.flank(screenWidth:cutoutWidth:)` is shared by the window manager and
