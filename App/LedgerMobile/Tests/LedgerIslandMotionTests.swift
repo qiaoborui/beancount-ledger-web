@@ -103,19 +103,19 @@ struct LedgerIslandMotionTests {
 
     /// Content rectangles of the settled island, derived from the same layout
     /// the view uses. The badge rect includes the check's ripple.
-    private func contentRects(_ stage: LedgerIslandStage, rows: LedgerIslandStage.Layout.TextRows) -> [String: CGRect] {
+    private func contentRects(_ stage: LedgerIslandStage, rows: LedgerIslandStage.Layout.TextRows,
+                              amountWidth: Double = 80) -> [String: CGRect] {
         typealias L = LedgerIslandStage.Layout
         let band = stage.band
-        let mid = L.bandCenterY(band: band)
-        let right = stage.expandedWidth - L.bandInset
-        let flank = stage.flankWidth
-        let text = LedgerIslandTextLayout.columnWidth(stage: stage)
+        let right = stage.expandedWidth - L.inset
+        let amount = stage.amountColumn(amountWidth: amountWidth)
+        let amountY = L.textTop(band: band, rows: rows) + LedgerIslandFonts.titleLineHeight / 2
+        let text = LedgerIslandTextLayout.columnWidth(stage: stage, amountWidth: amountWidth)
         let ripple = L.ring + 12
         let badgeY = L.badgeCenterY(band: band, rows: rows)
         let titleHeight = Double(rows.titleLines) * LedgerIslandFonts.titleLineHeight
         return [
-            "caption": CGRect(x: L.bandInset, y: mid - 8, width: flank, height: 16),
-            "amount": CGRect(x: right - flank, y: mid - 12, width: flank, height: 24),
+            "amount": CGRect(x: right - amount, y: amountY - 12, width: amount, height: 24),
             "badge": CGRect(x: L.badgeCenterX - ripple / 2, y: badgeY - ripple / 2, width: ripple, height: ripple),
             "title": CGRect(x: L.textLeft, y: L.titleCenterY(band: band, rows: rows) - titleHeight / 2,
                             width: text, height: titleHeight),
@@ -141,11 +141,10 @@ struct LedgerIslandMotionTests {
             // The camera spans the band at the top centre of the island.
             #expect(camera.minY == 0 && abs(camera.height - Double(island.pill.height)) < 0.001)
             #expect(abs(camera.midX - stage.expandedWidth / 2) < 0.001)
-            // The island spans the screen less its margins, leaving each
-            // flank room for the caption and the amount.
+            // The island spans the screen less its margins.
             #expect(abs(stage.expandedWidth - (island.screen - 2 * LedgerIslandStage.screenMargin)) < 0.01)
-            #expect(stage.flankWidth >= 60)
-            let keepOut = camera.insetBy(dx: -L.cameraGap + 0.01, dy: 0)
+            // Nothing sits beside the camera either: the whole band is clear.
+            let keepOut = CGRect(x: 0, y: 0, width: stage.expandedWidth, height: camera.maxY)
             for lines in [1, 2] {
                 let rows = L.TextRows(titleLines: lines)
                 let height = stage.settledHeight(rows: rows)
@@ -158,23 +157,18 @@ struct LedgerIslandMotionTests {
                 }
                 // Body rows start below the camera.
                 let rects = contentRects(stage, rows: rows)
-                for name in ["badge", "title", "subtitle"] {
+                for name in ["badge", "title", "subtitle", "amount"] {
                     #expect(rects[name]!.minY > camera.maxY, "\(name) rides beside the camera")
                 }
                 // The text rows keep 20pt to the bottom edge.
                 #expect(height - rects["subtitle"]!.maxY >= 20)
-                // The band's glyphs (about 12pt and 16pt tall) stay clear of the
-                // rounded top corners.
-                let radius0 = LedgerIslandStage.cornerRadius(height: height)
-                let mid = L.bandCenterY(band: stage.band)
-                for point in [CGPoint(x: rects["caption"]!.minX, y: mid - 6),
-                              CGPoint(x: stage.expandedWidth - rects["amount"]!.maxX, y: mid - 8)] {
-                    let fromCentre = hypot(radius0 - point.x, radius0 - point.y)
-                    #expect(radius0 - fromCentre >= 8, "band content crowds the top corner on \(island.pill)")
-                }
-                // Caption and amount sit on the camera's centre line.
-                #expect(abs(rects["amount"]!.midY - camera.midY) < 0.001)
-                #expect(abs(rects["caption"]!.midY - camera.midY) < 0.001)
+                // The title column stops short of the amount, which reads
+                // level with the title's first line.
+                #expect(rects["title"]!.maxX + L.amountGap <= rects["amount"]!.minX + 0.001)
+                #expect(abs(rects["amount"]!.midY - (rects["title"]!.minY + LedgerIslandFonts.titleLineHeight / 2)) < 0.001)
+                // A very long amount is capped and scaled; the title keeps room.
+                let wide = contentRects(stage, rows: rows, amountWidth: 400)
+                #expect(wide["title"]!.width > 100)
                 // The ring stays inside the rounded bottom-leading corner.
                 let radius = LedgerIslandStage.cornerRadius(height: height)
                 let corner = CGPoint(x: radius, y: height - radius)
@@ -282,16 +276,15 @@ struct LedgerIslandMotionTests {
     func expandedWidthWrapsTheCamera() {
         // A little more breathing room than a Live Activity's 22pt.
         #expect(LedgerIslandStage.screenMargin > 22)
-        // The amount keeps the same margins whether the cutout is a measured
-        // 125.3pt band or a narrower one: the island grows to make room.
-        let inset = LedgerIslandStage.Layout.bandInset + LedgerIslandStage.Layout.cameraGap
+        // The island is the camera plus `flank` on each side.
         let wide = LedgerIslandStage(containerWidth: 402, reduceMotion: false,
                                      pill: CGSize(width: 125.3, height: 36.7), flank: 36)
         #expect(abs(wide.expandedWidth - (125.3 + 2 * 36)) < 0.01)
-        #expect(abs(wide.flankWidth - (36 - inset)) < 0.01)
         let narrow = LedgerIslandStage(containerWidth: 402, reduceMotion: false,
                                        pill: CGSize(width: 112, height: 36.7), flank: 43.3)
-        #expect(abs(narrow.flankWidth - (43.3 - inset)) < 0.01)
+        #expect(abs(narrow.expandedWidth - (112 + 2 * 43.3)) < 0.01)
+        // Even on a narrow screen the island reaches past the camera.
+        #expect(LedgerIslandStage.flank(screenWidth: 200, cutoutWidth: 126) >= LedgerIslandStage.Layout.inset)
         // The screen only bounds it, so it never runs under the bezel.
         let cramped = LedgerIslandStage(containerWidth: 393, reduceMotion: false,
                                         pill: CGSize(width: 126, height: 37), flank: 133.5)
@@ -308,13 +301,13 @@ struct LedgerIslandMotionTests {
         let idle = LedgerIslandStage(containerWidth: 402, reduceMotion: false,
                                      pill: CGSize(width: 125.3, height: 36.7), pillTop: 13.25, flank: 102)
         #expect(abs(idle.band - 36.7) < 0.001)
-        #expect(abs(L.bandCenterY(band: idle.band) - 36.7 / 2) < 0.001)
         #expect(L.bodyTop(band: idle.band) > idle.cameraRect.maxY)
-        // The text column spans the island under the camera, not beside it.
-        #expect(abs(LedgerIslandTextLayout.columnWidth(stage: idle) - (idle.expandedWidth - L.inset - L.textLeft)) < 0.001)
-        let title = LedgerIslandTextLayout(title: "Synthetic context action",
-                                           totalWidth: LedgerIslandTextLayout.columnWidth(stage: idle))
-        #expect(title.rows.titleLines == 1)
+        // The text column runs under the camera, from the ring to the amount.
+        let column = LedgerIslandTextLayout.columnWidth(stage: idle, amountWidth: 80)
+        #expect(abs(column - (idle.expandedWidth - L.inset - L.textLeft - L.amountGap - 80)) < 0.001)
+        #expect(LedgerIslandTextLayout(title: "楼下便利店", totalWidth: column).rows.titleLines == 1)
+        #expect(LedgerIslandTextLayout(title: "Synthetic context action with a long name",
+                                       totalWidth: column).rows.titleLines == 2)
     }
 
     @Test("Long titles fold at words and keep the camera band clear")

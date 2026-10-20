@@ -24,8 +24,10 @@ expanded shape grows out of the physical island.
   (previously flank width was 0 there).
 - `foldedLines` no longer leaves a trailing space at a fold.
 
-- Padding: body rows 26pt from the side edges, caption/amount 32pt (the band runs through the
-  rounded top corners), 12pt under the camera, 22pt bottom margin.
+- Fewer elements: the status caption is gone (the check and the subtitle already say it) and the
+  amount moved into the body row, level with the title's first line, so the band beside the
+  camera is empty. The row is badge | title + subtitle | amount (capped at 36% of the row).
+- Padding: body rows 26pt from the side edges, 12pt under the camera, 22pt bottom margin.
 
 ## Validation
 - `xcodebuild test -only-testing:LedgerMobileTests` on iPhone 17 Pro simulator: all passed.

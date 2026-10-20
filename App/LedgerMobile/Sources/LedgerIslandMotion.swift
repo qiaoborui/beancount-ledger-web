@@ -284,36 +284,27 @@ struct LedgerIslandStage: Equatable, Sendable {
     /// The shape's top edge is the camera's top edge, so the camera occupies a
     /// fixed rectangle at the top centre: `band` tall (the resting shape that
     /// covers it) and the cutout's width across. Nothing is ever placed in that
-    /// rectangle. The island is split the way a Live Activity is:
-    ///
-    /// - the camera band, on the camera's centre line: the status caption in
-    ///   the leading flank and the amount in the trailing flank, each kept
-    ///   `cameraGap` from the camera and `inset` from the edge;
-    /// - the body, below the camera: the badge with its ring, then the title
-    ///   and subtitle across the full width.
-    ///
-    /// The 44pt ring is taller than the camera band, so it never rides beside
-    /// the camera: there it would either run into the cutout or out of the
-    /// rounded corner.
+    /// rectangle, nor beside it: the band runs through the rounded top
+    /// corners, and the 44pt ring is taller than the band anyway. Everything
+    /// sits in one row below the camera: the badge with its ring, the title
+    /// over the subtitle, and the amount level with the title's first line.
     enum Layout {
-        /// Margin from the body row (badge, title, subtitle) to the island's
-        /// leading and trailing edges.
+        /// Margin from the row to the island's leading and trailing edges.
         static let inset: Double = 26
-        /// Margin from the caption and the amount to the island's edges. The
-        /// camera band runs through the top corners, where the edge curves in,
-        /// so it keeps more room than the body row below.
-        static let bandInset: Double = 32
         static let badge: Double = 36
         /// The ring around the badge; the badge is centred inside it.
         static let ring: Double = 44
-        /// Space kept clear between flanking content and the camera.
-        static let cameraGap: Double = 8
         /// Space between the camera's bottom edge and the body row.
         static let bodyGap: Double = 12
         /// Space kept under the body row.
         static let bottomMargin: Double = 22
         /// Space between the ring and the text column.
         static let textGap: Double = 12
+        /// Space between the text column and the amount.
+        static let amountGap: Double = 12
+        /// The amount never takes more of the row than this; a wider one is
+        /// scaled down rather than squeezing the title.
+        static let amountShare: Double = 0.36
         /// Cap for the title when it has to fold; `titleLines` names it.
         static let titleLines: Int = 2
         /// A title that still overflows two lines uses this type scale.
@@ -329,9 +320,6 @@ struct LedgerIslandStage: Equatable, Sendable {
         struct TextRows: Equatable, Sendable {
             let titleLines: Int
         }
-
-        /// The camera's centre line, shared by the caption and the amount.
-        static func bandCenterY(band: Double) -> Double { band / 2 }
 
         /// Top of the body row: under the camera, never beside it.
         static func bodyTop(band: Double) -> Double { band + bodyGap }
@@ -349,7 +337,7 @@ struct LedgerIslandStage: Equatable, Sendable {
             bodyTop(band: band) + bodyHeight(rows: rows) / 2
         }
 
-        private static func textTop(band: Double, rows: TextRows) -> Double {
+        static func textTop(band: Double, rows: TextRows) -> Double {
             bodyTop(band: band) + (bodyHeight(rows: rows) - textBlockHeight(rows: rows)) / 2
         }
 
@@ -375,6 +363,8 @@ struct LedgerIslandStage: Equatable, Sendable {
         /// Space between the amount and the end cap. The expanded island leaves
         /// a breath at the bottom, and the compact one keeps that ratio.
         static let trailingGap: Double = 3
+        /// Space kept clear between the glyph or the amount and the camera.
+        static let cameraGap: Double = 8
     }
 
     /// The hardware island as the overlay sees it: its top in overlay
@@ -427,13 +417,12 @@ struct LedgerIslandStage: Equatable, Sendable {
         expandedWidth = min(max(Double(pill.width), cutout.pillWidth + 2 * flank), max(room, Double(pill.width)))
     }
 
-    /// Gap between the expanded island's edge and the cutout's. The caption
-    /// and the amount flank the camera, each `inset` short of the island's
-    /// edge and `cameraGap` short of the camera, so the island spans the
-    /// screen (less its margins) whatever the cutout's width. Phones without
+    /// Gap between the expanded island's edge and the cutout's: the island
+    /// spans the screen (less its margins) whatever the cutout's width, and
+    /// is always wider than the camera by `inset` on each side. Phones without
     /// a hardware island use the stand-in pill the same way.
     static func flank(screenWidth: Double, cutoutWidth: Double) -> Double {
-        let wanted = cutoutWidth / 2 + Layout.bandInset + Layout.cameraGap
+        let wanted = cutoutWidth / 2 + Layout.inset
         let room = screenWidth / 2 - screenMargin
         return max(wanted, room) - cutoutWidth / 2
     }
@@ -463,9 +452,10 @@ struct LedgerIslandStage: Equatable, Sendable {
 
     static func cornerRadius(height: Double) -> Double { min(height / 2, cornerRadius) }
 
-    /// Width each flank of the camera band offers the caption and the amount.
-    var flankWidth: Double {
-        (expandedWidth - cutout.pillWidth) / 2 - Layout.bandInset - Layout.cameraGap
+    /// The amount's column at the end of the row: its own width, up to
+    /// `amountShare` of the row.
+    func amountColumn(amountWidth: Double) -> Double {
+        min(amountWidth, (expandedWidth - 2 * Layout.inset) * Layout.amountShare)
     }
 
     /// Both sides take the wider of the two so the camera stays centred and
@@ -475,7 +465,7 @@ struct LedgerIslandStage: Equatable, Sendable {
         // The end cap curves away at the top and bottom, so the amount needs
         // a little more room than its own width to clear the rounded edges.
         let trailing = CompactLayout.trailingInset + trailingTextWidth + CompactLayout.trailingGap
-        let side = max(leading, trailing) + Layout.cameraGap
+        let side = max(leading, trailing) + CompactLayout.cameraGap
         return min(expandedWidth, Double(pill.width) + 2 * side)
     }
 
