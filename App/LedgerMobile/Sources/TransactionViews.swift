@@ -4511,8 +4511,9 @@ struct CookieFastTransactionEditorBody: View {
                 transferTargetAccount = p1IsSource ? p2.account : p1.account
             }
         }
-        if initialPostings.isEmpty, let currency = commodities.first, !currency.isEmpty {
-            selectedCurrency = currency
+        if initialPostings.isEmpty {
+            selectedCurrency = TransactionEditorView.defaultCurrency(
+                valuation: session.ledger?.valuationCurrency, commodities: commodities)
         }
 
         if transferSourceAccount.isEmpty && transferTargetAccount.isEmpty {
@@ -4836,10 +4837,19 @@ struct TransactionEditorView: View {
         } else {
             fastEditorStartsBlank = prefillPayee.isEmpty && prefillNarration.isEmpty
             _postings = State(initialValue: [
-                EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Expenses:") })?.account ?? "Expenses:Other", amount: "", currency: commodities.first ?? "CNY"),
+                EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Expenses:") })?.account ?? "Expenses:Other", amount: "", currency: Self.defaultCurrency(valuation: nil, commodities: commodities)),
                 EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Assets:") })?.account ?? "Assets:Cash", amount: "", currency: "")
             ])
         }
+    }
+
+    /// The currency a blank entry starts in. `commodities` is sorted, so its
+    /// first entry is often a ticker like AAPL; prefer the ledger's valuation
+    /// currency, then a common fiat code the ledger declares, then CNY.
+    static func defaultCurrency(valuation: String?, commodities: [String]) -> String {
+        if let valuation, !valuation.isEmpty { return valuation }
+        let fiat = ["CNY", "USD", "EUR", "HKD", "JPY", "GBP"]
+        return fiat.first(where: commodities.contains) ?? "CNY"
     }
 
     private struct Draft: Equatable {
@@ -5022,7 +5032,8 @@ struct TransactionEditorView: View {
                 }
                 Section {
                     Button("添加分录") {
-                        postings.append(EditableTransactionPosting(account: "", amount: "0.00", currency: commodities.first ?? "CNY"))
+                        postings.append(EditableTransactionPosting(account: "", amount: "0.00", currency: Self.defaultCurrency(
+                            valuation: session.ledger?.valuationCurrency, commodities: commodities)))
                     }
                 }
                 Section {

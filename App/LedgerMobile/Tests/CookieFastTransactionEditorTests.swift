@@ -95,4 +95,12 @@ final class CookieFastTransactionEditorTests: XCTestCase {
             "Liabilities:CreditCard:CMB"
         )
     }
+
+    func testDefaultCurrencyNeverPicksASortedTicker() {
+        let commodities = ["AAPL", "CNY", "TSLA", "USD"]
+        XCTAssertEqual(TransactionEditorView.defaultCurrency(valuation: "USD", commodities: commodities), "USD")
+        XCTAssertEqual(TransactionEditorView.defaultCurrency(valuation: nil, commodities: commodities), "CNY")
+        XCTAssertEqual(TransactionEditorView.defaultCurrency(valuation: "", commodities: ["AAPL", "HKD"]), "HKD")
+        XCTAssertEqual(TransactionEditorView.defaultCurrency(valuation: nil, commodities: ["AAPL"]), "CNY")
+    }
 }
