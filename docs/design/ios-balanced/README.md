@@ -289,6 +289,35 @@ The widget reads a snapshot the app publishes. It never makes its own request �
 which is why it has no loading state and no spinner. It shows the last
 successful sync, or it shows nothing.
 
+### Fast entry — 记一笔
+
+The keypad sheet behind the `+` in the 概览 and 流水 app bars. It is the
+batch-1 记一笔 draft with a keypad, built from the same parts and nothing new:
+
+- **App bar `+`** is a plain `.iconbtn`: an ink glyph in a 44pt target, beside
+  the sync button. Never filled, never circled.
+- **Direction** is a `.mark` strip — 支出 / 收入 / 转账.
+- **Amount** is the `.key--total` treatment at 40px: tabular figures, the
+  currency symbol at 0.62em in `--ink-3`, the code (`CNY ⌄`) as a quiet menu on
+  the label line. The figure takes `--out` for 支出 and `--in` for 收入 — an
+  amount is one of the four places direction colour is allowed. Transfers and
+  splits stay ink. A 1px `--rule-strong` underline closes it; no double rule,
+  because a draft is not verified.
+- **Categories are words.** Four columns of labels at 14px, the active one
+  carrying the `.mark` underline; no icons, no circles, no per-category colour.
+  The last cell is 更多…, and shows the custom account's name once one is picked.
+- **Fields** are `.field-row`s: 付款账户 / 收款账户 (or 转出 + 转入), 日期,
+  商户, 备注 — label in `--ink-2`, value flush right, `--edge` chevron on rows
+  that open a picker.
+- **Footer links** — 用一句话记账 and 拆分成多条分录 — are `.link`s.
+- **Keypad** is the screen's one `.band`: square cells on `--sunken`, split by
+  1px `--rule` hairlines, edge to edge. The commit key is the only solid ink
+  cell. It still opens the preview → bean-check → append flow.
+- **Splits** are ledger rows (label over mono path, amount right). The posting
+  the keypad edits has a 2px ink edge bar and the `.mark` under its amount.
+  Balance shows as an `已配平` tag in `--in`, or `差额` in `--out` with a 配平
+  link.
+
 ### `.empty`
 
 Centred, generous vertical padding, a 1px-stroke glyph in `--ink-3`, an h3 at

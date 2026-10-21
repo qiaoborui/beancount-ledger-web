@@ -288,11 +288,12 @@ struct LedgerQuickEntryButton: View {
                 LedgerFeedback.light()
                 presented = true
             } label: {
+                // `.iconbtn`: a bare glyph in a 44pt target, like the sync
+                // button beside it. Balanced has no filled or accent controls
+                // in the app bar.
                 Image(systemName: "plus")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(BalancedPalette.page)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(BalancedPalette.ink))
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(BalancedPalette.ink)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
@@ -3321,35 +3322,37 @@ struct CookieKeypadView: View {
     let onCommit: () -> Void
 
     var body: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 6) {
+        // `.band`: the keypad is the screen's one sunken well. Keys are square
+        // cells split by 1px `--rule` hairlines rather than separate tiles.
+        VStack(spacing: 1) {
+            HStack(spacing: 1) {
                 keypadButton("7") { calculator.appendDigit("7") }
                 keypadButton("8") { calculator.appendDigit("8") }
                 keypadButton("9") { calculator.appendDigit("9") }
                 keypadDeleteButton()
             }
-            HStack(spacing: 6) {
+            HStack(spacing: 1) {
                 keypadButton("4") { calculator.appendDigit("4") }
                 keypadButton("5") { calculator.appendDigit("5") }
                 keypadButton("6") { calculator.appendDigit("6") }
                 keypadOperatorButton("+") { calculator.appendOperator("+") }
             }
-            HStack(spacing: 6) {
+            HStack(spacing: 1) {
                 keypadButton("1") { calculator.appendDigit("1") }
                 keypadButton("2") { calculator.appendDigit("2") }
                 keypadButton("3") { calculator.appendDigit("3") }
                 keypadOperatorButton("-") { calculator.appendOperator("-") }
             }
-            HStack(spacing: 6) {
+            HStack(spacing: 1) {
                 keypadButton(".") { calculator.appendDigit(".") }
                 keypadButton("0") { calculator.appendDigit("0") }
                 keypadButton("=") { calculator.evaluateToResult() }
                 keypadActionButton()
             }
         }
-        .padding(.horizontal, LedgerSpacing.md)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.top, 1)
+        .background(BalancedPalette.rule)
+        .background(BalancedPalette.sunken.ignoresSafeArea(edges: .bottom))
     }
 
     private func keypadButton(_ label: String, action: @escaping () -> Void) -> some View {
@@ -3358,12 +3361,11 @@ struct CookieKeypadView: View {
             action()
         } label: {
             Text(label)
-                .balancedFont(size: 22, weight: .medium)
+                .balancedFont(size: 22, weight: .text)
                 .monospacedDigit()
                 .foregroundStyle(BalancedPalette.ink)
-                .frame(maxWidth: .infinity, minHeight: 48)
+                .frame(maxWidth: .infinity, minHeight: 52)
                 .background(BalancedPalette.sunken)
-                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
         }
         .buttonStyle(PressScaleButtonStyle())
         .accessibilityIdentifier("keypad-\(label)")
@@ -3377,11 +3379,10 @@ struct CookieKeypadView: View {
             // U+2212 for the displayed minus (display only — the expression
             // the calculator parses stays ASCII `-`).
             Text(op == "-" ? "−" : op)
-                .balancedFont(size: 22, weight: .medium)
+                .balancedFont(size: 22, weight: .text)
                 .foregroundStyle(BalancedPalette.ink)
-                .frame(maxWidth: .infinity, minHeight: 48)
+                .frame(maxWidth: .infinity, minHeight: 52)
                 .background(BalancedPalette.sunken)
-                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
         }
         .buttonStyle(PressScaleButtonStyle())
         .accessibilityIdentifier("keypad-op-\(op)")
@@ -3395,9 +3396,8 @@ struct CookieKeypadView: View {
             Image(systemName: "delete.backward")
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(BalancedPalette.ink)
-                .frame(maxWidth: .infinity, minHeight: 48)
+                .frame(maxWidth: .infinity, minHeight: 52)
                 .background(BalancedPalette.sunken)
-                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
         }
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.4).onEnded { _ in
@@ -3421,9 +3421,8 @@ struct CookieKeypadView: View {
                         .foregroundStyle(BalancedPalette.page)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 48)
+            .frame(maxWidth: .infinity, minHeight: 52)
             .background(BalancedPalette.ink)
-            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
 
         }
         .disabled(saving)
@@ -3611,53 +3610,34 @@ struct CookieFastTransactionEditorBody: View {
                         .padding(.top, LedgerSpacing.xs)
                 }
 
-                if transaction == nil {
-                    Button {
-                        LedgerFeedback.light()
-                        naturalLanguagePresented = true
-                    } label: {
-                        Text("用一句话记账")
-                            .balancedFont(size: 12.5)
-                            .foregroundStyle(BalancedPalette.secondary)
-                            .padding(.bottom, 1)
-                            .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 4)
-                    .accessibilityIdentifier("bookkeeping-natural-entry")
-                    .padding(.top, 2)
-                    .padding(.bottom, 4)
-                }
                 typeSwitcher
                     .padding(.horizontal, LedgerSpacing.lg)
                     .padding(.top, LedgerSpacing.xs)
-                    .padding(.bottom, LedgerSpacing.sm)
 
                 heroAmountDisplay
                     .padding(.horizontal, LedgerSpacing.lg)
-                    .padding(.bottom, LedgerSpacing.xs)
+                    .padding(.top, 18)
 
                 if isSplitMode {
                     splitPostingsView
                         .frame(maxHeight: .infinity)
-                } else if kind == .transfer {
-                    transferRouteCard
-                        .padding(.horizontal, LedgerSpacing.lg)
-                        .padding(.vertical, LedgerSpacing.sm)
-                        .frame(maxHeight: .infinity, alignment: .center)
                 } else {
-                    categoryGrid
-                        .frame(maxHeight: .infinity)
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            if kind != .transfer {
+                                categoryGrid
+                            }
+                            entryFields
+                        }
+                    }
+                    .scrollDismissesKeyboard(.interactively)
+                    .frame(maxHeight: .infinity)
                 }
 
-                controlBar
+                entryFooter
                     .padding(.horizontal, LedgerSpacing.lg)
-                    .padding(.vertical, LedgerSpacing.xs)
 
                 if focusedField == nil {
-                    Divider()
-                        .overlay(LedgerPalette.line)
-
                     CookieKeypadView(
                         calculator: $calculator,
                         actionTitle: calculator.isCalculationPending ? "=" : (transaction == nil ? "保存" : "完成"),
@@ -3673,12 +3653,11 @@ struct CookieFastTransactionEditorBody: View {
                             }
                         }
                     )
-                    .background(LedgerPalette.canvas)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: focusedField != nil)
-            .background(LedgerPalette.canvas)
+            .background(BalancedPalette.page)
             .contentShape(Rectangle())
             .onTapGesture {
                 if focusedField != nil {
@@ -3707,20 +3686,20 @@ struct CookieFastTransactionEditorBody: View {
                             focusedField = .narration
                         }
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(LedgerPalette.cobalt)
+                        .foregroundStyle(BalancedPalette.ink)
                     } else if focusedField == .narration {
                         Button("切换到商户") {
                             focusedField = .payee
                         }
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(LedgerPalette.cobalt)
+                        .foregroundStyle(BalancedPalette.ink)
                     }
                     Spacer()
                     Button("收起键盘") {
                         focusedField = nil
                     }
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.cobalt)
+                    .foregroundStyle(BalancedPalette.ink)
                 }
             }
             .sheet(item: $activeAccountPickerPurpose) { purpose in
@@ -3800,212 +3779,196 @@ struct CookieFastTransactionEditorBody: View {
         }
     }
 
+    /// Direction is the one thing chroma means in Balanced, so the draft amount
+    /// takes `--out` / `--in`; a transfer or a split has no single direction.
+    private var amountColor: Color {
+        guard !isSplitMode else { return BalancedPalette.ink }
+        switch kind {
+        case .expense: return BalancedPalette.expense
+        case .income: return BalancedPalette.income
+        case .transfer: return BalancedPalette.ink
+        }
+    }
+
     private var heroAmountDisplay: some View {
-        HStack(alignment: .lastTextBaseline, spacing: 5) {
-            // Interactive Currency Picker
-            HStack(alignment: .center, spacing: 2) {
-                Text(currencySymbol)
-                    .balancedFont(size: 24, weight: .medium)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .center) {
+                Text(isSplitMode && splitPostings.indices.contains(activePostingIndex)
+                     ? "分录 \(activePostingIndex + 1) / \(splitPostings.count)" : "金额")
+                    .balancedFont(size: 12.5, weight: .medium)
+                    .tracking(0.375)
                     .foregroundStyle(BalancedPalette.meta)
+                Spacer()
+                currencyMenu
             }
-            .foregroundStyle(BalancedPalette.ink)
-            .contentShape(Rectangle())
-            .overlay {
-                Menu {
-                    ForEach(availableCurrencies, id: \.self) { curr in
-                        Button {
-                            selectedCurrency = curr
-                            LedgerFeedback.selection()
-                        } label: {
-                            if curr == selectedCurrency {
-                                Label("\(curr) (\(Self.currencySymbol(for: curr)))", systemImage: "checkmark")
-                            } else {
-                                Text("\(curr) (\(Self.currencySymbol(for: curr)))")
-                            }
-                        }
-                    }
-                } label: {
-                    Color.white.opacity(0.001)
-                        .contentShape(Rectangle())
+
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
+                // `.key--total`: the currency symbol at 0.62em in `--ink-3`, so
+                // the figure reads as a number first and a currency second.
+                Text(currencySymbol)
+                    .balancedFont(size: 25, weight: .text, relativeTo: .title)
+                    .foregroundStyle(BalancedPalette.meta)
+                // U+2212 for the displayed minus; the calculator's own expression
+                // stays ASCII so parsing is unaffected.
+                Text(calculator.displayText.replacingOccurrences(of: "-", with: "−"))
+                    .balancedFont(size: 40, weight: .medium, relativeTo: .largeTitle)
+                    .monospacedDigit()
+                    .tracking(-0.4)
+                    .foregroundStyle(amountColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                Spacer(minLength: 8)
+                if !isSplitMode, calculator.isCalculationPending, let res = calculator.evaluatedResult {
+                    Text(verbatim: "= \(res)")
+                        .balancedFont(size: 15)
+                        .monospacedDigit()
+                        .foregroundStyle(BalancedPalette.meta)
                 }
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("选择货币，当前\(selectedCurrency)")
-
-            // U+2212 for the displayed minus; the calculator's own expression
-            // stays ASCII so parsing is unaffected.
-            Text(calculator.displayText.replacingOccurrences(of: "-", with: "−"))
-                .balancedFont(size: 34, weight: .medium)
-                .monospacedDigit()
-                .foregroundStyle(BalancedPalette.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-
-            Spacer()
-
-            if isSplitMode && splitPostings.indices.contains(activePostingIndex) {
-                Text("分录 \(activePostingIndex + 1)/\(splitPostings.count)")
-                    .balancedFont(size: 12)
-                    .foregroundStyle(BalancedPalette.meta)
-            } else if calculator.isCalculationPending, let res = calculator.evaluatedResult {
-                Text(verbatim: "= \(res)")
-                    .balancedFont(size: 15)
-                    .monospacedDigit()
-                    .foregroundStyle(BalancedPalette.meta)
-            }
+            .accessibilityLabel("金额 \(calculator.displayText) \(selectedCurrency)")
         }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
+        .padding(.bottom, 12)
+        .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
     }
 
+    private var currencyMenu: some View {
+        Menu {
+            ForEach(availableCurrencies, id: \.self) { curr in
+                Button {
+                    selectedCurrency = curr
+                    LedgerFeedback.selection()
+                } label: {
+                    if curr == selectedCurrency {
+                        Label("\(curr) (\(Self.currencySymbol(for: curr)))", systemImage: "checkmark")
+                    } else {
+                        Text("\(curr) (\(Self.currencySymbol(for: curr)))")
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(selectedCurrency)
+                    .balancedFont(size: 12.5)
+                    .foregroundStyle(BalancedPalette.secondary)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(BalancedPalette.edge)
+            }
+            .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+            .contentShape(Rectangle())
+        }
+        .padding(.vertical, -10)
+        .accessibilityLabel("选择货币，当前\(selectedCurrency)")
+    }
+
+    /// Split postings as plain ledger rows: label over mono path, the amount
+    /// flush right. The active posting — the one the keypad edits — carries
+    /// the `.mark` underline on its amount and a 2px ink bar at the edge.
     private var splitPostingsView: some View {
         ScrollView {
-            VStack(spacing: 10) {
-                // Header with balance info
-                HStack {
-                    Text("拆分分录明细")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.secondary)
+            VStack(spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("分录")
+                        .balancedFont(size: 12.5, weight: .medium)
+                        .tracking(0.375)
+                        .foregroundStyle(BalancedPalette.meta)
                     Spacer()
                     let sum = splitBalanceSum
                     if abs(sum) < 0.001 {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 11))
-                            Text("借贷平衡")
-                                .font(.system(size: 11, weight: .semibold))
-                        }
-                        .foregroundStyle(LedgerPalette.success)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(LedgerPalette.success.opacity(0.12), in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
+                        BalancedTag(text: "已配平", kind: .ok)
                     } else {
-                        HStack(spacing: 6) {
-                            Text("差额: \(formattedDecimal(-sum))")
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(Color.orange)
-                            Button("配平") {
-                                autoBalanceSplit()
-                            }
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(Color.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Color.orange, in: RoundedRectangle(cornerRadius: LedgerRadius.sm))
+                        Text("差额 \(formattedDecimal(-sum))")
+                            .balancedFont(size: 12.5)
+                            .monospacedDigit()
+                            .foregroundStyle(BalancedPalette.expense)
+                        Button {
+                            autoBalanceSplit()
+                        } label: {
+                            linkLabel("配平", color: BalancedPalette.ink)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
+                .frame(minHeight: 44)
                 .padding(.horizontal, LedgerSpacing.lg)
-                .padding(.top, 4)
 
-                // Postings list
                 ForEach(Array(splitPostings.enumerated()), id: \.offset) { index, posting in
                     let isSelected = index == activePostingIndex
-                    let isPositive = !posting.amount.hasPrefix("-")
-                    let visual = TransactionVisualCategory.resolve(account: posting.account, label: accountDisplayName(posting.account))
+                    let amount = posting.amount.isEmpty ? "0.00" : posting.amount
 
-                    HStack(spacing: 10) {
-                        // Account Selector Button
+                    HStack(spacing: 12) {
                         Button {
                             LedgerFeedback.light()
                             activeAccountPickerPurpose = .splitPosting(index)
                         } label: {
-                            HStack(spacing: 8) {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                                        .fill(visual.color.opacity(0.15))
-                                        .frame(width: 32, height: 32)
-                                    Image(systemName: visual.iconName)
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(visual.color)
-                                }
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(posting.account.isEmpty ? "选择账户" : accountDisplayName(posting.account))
-                                        .font(.system(size: 13.5, weight: .medium))
-                                        .foregroundStyle(posting.account.isEmpty ? Color.orange : LedgerPalette.ink)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(posting.account.isEmpty ? "选择账户" : accountDisplayName(posting.account))
+                                    .balancedFont(size: 15, weight: .text)
+                                    .foregroundStyle(posting.account.isEmpty ? BalancedPalette.expense : BalancedPalette.ink)
+                                    .lineLimit(1)
+                                if !posting.account.isEmpty {
+                                    Text(posting.account)
+                                        .balancedMono(size: 11.5)
+                                        .foregroundStyle(BalancedPalette.meta)
                                         .lineLimit(1)
-                                    if !posting.account.isEmpty {
-                                        Text(posting.account)
-                                            .font(.system(size: 10, design: .monospaced))
-                                            .foregroundStyle(LedgerPalette.secondary)
-                                            .lineLimit(1)
-                                    }
                                 }
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(LedgerPalette.secondary)
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
 
-                        Spacer()
-
-                        // Amount Button
                         Button {
                             selectPosting(index: index)
                         } label: {
-                            Text(posting.amount.isEmpty ? "0.00" : posting.amount)
-                                .font(.system(size: 15, weight: isSelected ? .bold : .semibold, design: .monospaced).monospacedDigit())
-                                .foregroundStyle(isPositive ? LedgerPalette.ink : LedgerPalette.expense)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 5)
-                                .background(
-                                    isSelected ? kind.themeColor.opacity(0.14) : Color(uiColor: .tertiarySystemFill).opacity(0.4),
-                                    in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                                        .stroke(isSelected ? kind.themeColor : Color.clear, lineWidth: 1.5)
-                                )
+                            Text(amount.replacingOccurrences(of: "-", with: "−"))
+                                .balancedFont(size: 15, weight: isSelected ? .medium : .text)
+                                .monospacedDigit()
+                                .foregroundStyle(BalancedPalette.ink)
+                                .padding(.bottom, 5)
+                                .overlay(alignment: .bottom) {
+                                    Rectangle().fill(isSelected ? BalancedPalette.ink : Color.clear).frame(height: 2)
+                                }
+                                .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(isSelected ? .isSelected : [])
 
-                        // Delete button
                         if splitPostings.count > 2 {
                             Button {
                                 removePosting(at: index)
                             } label: {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(LedgerPalette.secondary)
-                                    .padding(4)
+                                Image(systemName: "minus.circle")
+                                    .font(.system(size: 15, weight: .regular))
+                                    .foregroundStyle(BalancedPalette.meta)
+                                    .frame(width: 32, height: 44)
+                                    .contentShape(Rectangle())
                             }
-                            .buttonStyle(PressScaleButtonStyle(pressedScale: 0.9))
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("删除第 \(index + 1) 条分录")
                         }
                     }
-                    .padding(10)
-                    .background(
-                        isSelected ? LedgerPalette.panel : Color(uiColor: .secondarySystemGroupedBackground),
-                        in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous)
-                            .stroke(isSelected ? kind.themeColor.opacity(0.4) : LedgerPalette.cardBorder, lineWidth: 0.8)
-                    )
+                    .frame(minHeight: 56)
                     .padding(.horizontal, LedgerSpacing.lg)
+                    .overlay(alignment: .leading) {
+                        if isSelected { BalancedPalette.ink.frame(width: 2) }
+                    }
+                    .overlay(alignment: .bottom) {
+                        BalancedPalette.rule.frame(height: 1).padding(.leading, LedgerSpacing.lg)
+                    }
                 }
 
-                // Add Posting Button
                 Button {
                     addSplitPosting()
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 13))
-                        Text("添加分录")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    .foregroundStyle(LedgerPalette.cobalt)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(LedgerPalette.cobalt.opacity(0.08), in: RoundedRectangle(cornerRadius: LedgerRadius.sm, style: .continuous))
+                    linkLabel("添加分录", color: BalancedPalette.ink)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(PressScaleButtonStyle(pressedScale: 0.97))
+                .buttonStyle(.plain)
                 .padding(.horizontal, LedgerSpacing.lg)
-                .padding(.top, 4)
             }
         }
     }
@@ -4105,87 +4068,52 @@ struct CookieFastTransactionEditorBody: View {
         String(format: "%.2f", NSDecimalNumber(decimal: val).doubleValue)
     }
 
+    /// Categories as words, not icons: four columns of labels, the active one
+    /// carrying the `.mark` underline. A custom account picked through 更多
+    /// takes the last cell, so the choice stays visible in the grid.
     private var categoryGrid: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 4)
+        let customName = customCategoryDisplayName
 
-        return ScrollView {
-            LazyVGrid(columns: columns, spacing: 14) {
-                ForEach(currentCategories) { cat in
-                    let isSelected = selectedCategoryID == cat.id && customExpenseAccount == nil && customIncomeAccount == nil
-                    Button {
-                        LedgerFeedback.selection()
-                        focusedField = nil
-                        withAnimation(.spring(response: 0.2, dampingFraction: 0.75)) {
-                            selectedCategoryID = cat.id
-                            customExpenseAccount = nil
-                            customIncomeAccount = nil
-                        }
-                    } label: {
-                        VStack(spacing: 6) {
-                            Image(systemName: outlineGlyph(cat.icon))
-                                .font(.system(size: 18, weight: .light))
-                                .symbolRenderingMode(.monochrome)
-                                .foregroundStyle(isSelected ? BalancedPalette.ink : BalancedPalette.secondary)
-                                .frame(width: 44, height: 44)
-                                .overlay {
-                                    if !isSelected {
-                                        Circle().stroke(BalancedPalette.edge, lineWidth: 1)
-                                    }
-                                }
-                                .overlay(alignment: .bottom) {
-                                    if isSelected {
-                                        Rectangle().fill(BalancedPalette.ink).frame(height: 2)
-                                    }
-                                }
-
-                            Text(cat.name)
-                                .balancedFont(size: 12, weight: isSelected ? .medium : .regular)
-                                .foregroundStyle(isSelected ? BalancedPalette.ink : BalancedPalette.meta)
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressScaleButtonStyle())
-                }
-
-                let isCustomActive = (kind == .expense && customExpenseAccount != nil) || (kind == .income && customIncomeAccount != nil)
+        return LazyVGrid(columns: columns, spacing: 0) {
+            ForEach(currentCategories) { cat in
+                let isSelected = customName == nil && selectedCategoryID == cat.id
                 Button {
-                    LedgerFeedback.light()
+                    LedgerFeedback.selection()
                     focusedField = nil
-                    activeAccountPickerPurpose = .customCategory
+                    selectedCategoryID = cat.id
+                    customExpenseAccount = nil
+                    customIncomeAccount = nil
                 } label: {
-                    VStack(spacing: 6) {
-                        Image(systemName: isCustomActive ? "tag" : "ellipsis")
-                            .font(.system(size: 17, weight: .light))
-                            .symbolRenderingMode(.monochrome)
-                            .foregroundStyle(isCustomActive ? BalancedPalette.ink : BalancedPalette.secondary)
-                            .frame(width: 44, height: 44)
-                            .overlay {
-                                if !isCustomActive {
-                                    Circle().stroke(BalancedPalette.edge, lineWidth: 1)
-                                }
-                            }
-                            .overlay(alignment: .bottom) {
-                                if isCustomActive {
-                                    Rectangle().fill(BalancedPalette.ink).frame(height: 2)
-                                }
-                            }
-
-                        Text(customCategoryDisplayName ?? "更多分类")
-                            .balancedFont(size: 12, weight: isCustomActive ? .medium : .regular)
-                            .foregroundStyle(isCustomActive ? BalancedPalette.ink : BalancedPalette.meta)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
+                    BalancedMark(title: cat.name, selected: isSelected, size: 14)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .bottom)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(PressScaleButtonStyle())
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 8)
+
+            Button {
+                LedgerFeedback.light()
+                focusedField = nil
+                activeAccountPickerPurpose = .customCategory
+            } label: {
+                BalancedMark(title: customName ?? "更多…", selected: customName != nil, size: 14)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .bottom)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("选择分类，当前\(currentCategoryDisplayName)")
+            .accessibilityIdentifier("CookieFastCategoryButton")
         }
-        .scrollDismissesKeyboard(.interactively)
+        .padding(.horizontal, LedgerSpacing.md)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
     }
 
     private var customCategoryDisplayName: String? {
@@ -4198,175 +4126,129 @@ struct CookieFastTransactionEditorBody: View {
         return nil
     }
 
-    private var transferRouteCard: some View {
-        VStack(spacing: 0) {
-            Button {
-                focusedField = nil
-                activeAccountPickerPurpose = .transferSource
-            } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("转出账户").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
-                        Text(accountDisplayName(transferSourceAccount))
-                            .balancedFont(size: 15, weight: .text)
-                            .foregroundStyle(BalancedPalette.ink)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(BalancedPalette.edge)
-                }
-                .frame(minHeight: 44)
-            }
-            .buttonStyle(PressScaleButtonStyle())
-            .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
-
-            Button {
-                focusedField = nil
-                activeAccountPickerPurpose = .transferTarget
-            } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("转入账户").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
-                        Text(accountDisplayName(transferTargetAccount))
-                            .balancedFont(size: 15, weight: .text)
-                            .foregroundStyle(BalancedPalette.ink)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(BalancedPalette.edge)
-                }
-                .frame(minHeight: 44)
-            }
-            .buttonStyle(PressScaleButtonStyle())
+    /// `.field-row`: the label in `--ink-2` on the left, the value flush right,
+    /// a 1px `--rule` under each row. The same rows the Balanced 记一笔 frame uses.
+    private func fieldRow<Value: View>(_ label: String, @ViewBuilder value: () -> Value) -> some View {
+        HStack(spacing: 16) {
+            Text(label)
+                .balancedFont(size: 14)
+                .foregroundStyle(BalancedPalette.secondary)
+                .fixedSize()
+            Spacer(minLength: 8)
+            value()
+        }
+        .frame(minHeight: 44)
+        .padding(.horizontal, LedgerSpacing.lg)
+        .overlay(alignment: .bottom) {
+            BalancedPalette.rule.frame(height: 1).padding(.leading, LedgerSpacing.lg)
         }
     }
 
-    private var controlBar: some View {
-        VStack(spacing: 8) {
-            // Row 1: Action pills with category and account clearly distinguished
-            HStack(spacing: 14) {
-                if !isSplitMode && kind != .transfer {
-                    Button {
-                        LedgerFeedback.light()
-                        focusedField = nil
-                        activeAccountPickerPurpose = .customCategory
-                    } label: {
-                        Text(currentCategoryDisplayName)
-                            .balancedFont(size: 12.5)
-                            .foregroundStyle(BalancedPalette.ink)
-                            .lineLimit(1)
-                            .padding(.bottom, 1)
-                            .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("选择分类，当前\(currentCategoryDisplayName)")
-                    .accessibilityIdentifier("CookieFastCategoryButton")
-
-                    Button {
-                        LedgerFeedback.light()
-                        focusedField = nil
-                        activeAccountPickerPurpose = .funding
-                    } label: {
-                        Text(kind == .expense ? "付: \(accountDisplayName(assetAccount))" : "收: \(accountDisplayName(assetAccount))")
-                            .balancedFont(size: 12.5)
-                            .foregroundStyle(BalancedPalette.ink)
-                            .lineLimit(1)
-                            .padding(.bottom, 1)
-                            .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(kind == .expense ? "选择付款账户，当前\(accountDisplayName(assetAccount))" : "选择收款账户，当前\(accountDisplayName(assetAccount))")
-                    .accessibilityIdentifier("CookieFastAccountButton")
+    private func pickerRow(_ label: String, value: String, identifier: String, accessibility: String, action: @escaping () -> Void) -> some View {
+        Button {
+            LedgerFeedback.light()
+            focusedField = nil
+            action()
+        } label: {
+            fieldRow(label) {
+                HStack(spacing: 8) {
+                    Text(value)
+                        .balancedFont(size: 15, weight: .text)
+                        .foregroundStyle(BalancedPalette.ink)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(BalancedPalette.edge)
                 }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(accessibility)，当前\(value)")
+        .accessibilityIdentifier(identifier)
+    }
 
+    private func textRow(_ label: String, text: Binding<String>, field: FocusedField, identifier: String) -> some View {
+        fieldRow(label) {
+            TextField("选填", text: text)
+                .balancedFont(size: 15, weight: .text)
+                .foregroundStyle(BalancedPalette.ink)
+                .multilineTextAlignment(.trailing)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($focusedField, equals: field)
+                .submitLabel(field == .payee ? .next : .done)
+                .onSubmit { focusedField = field == .payee ? .narration : nil }
+                .accessibilityLabel(label)
+                .accessibilityIdentifier(identifier)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { focusedField = field }
+    }
+
+    private var entryFields: some View {
+        VStack(spacing: 0) {
+            if kind == .transfer {
+                pickerRow("转出", value: accountDisplayName(transferSourceAccount),
+                          identifier: "CookieFastTransferSourceButton", accessibility: "选择转出账户") {
+                    activeAccountPickerPurpose = .transferSource
+                }
+                pickerRow("转入", value: accountDisplayName(transferTargetAccount),
+                          identifier: "CookieFastTransferTargetButton", accessibility: "选择转入账户") {
+                    activeAccountPickerPurpose = .transferTarget
+                }
+            } else {
+                pickerRow(kind == .expense ? "付款账户" : "收款账户", value: accountDisplayName(assetAccount),
+                          identifier: "CookieFastAccountButton",
+                          accessibility: kind == .expense ? "选择付款账户" : "选择收款账户") {
+                    activeAccountPickerPurpose = .funding
+                }
+            }
+            pickerRow("日期", value: dateChipLabel, identifier: "CookieFastDateButton", accessibility: "选择日期") {
+                showDatePickerSheet = true
+            }
+            textRow(kind == .income ? "付款方" : "商户", text: $payee, field: .payee, identifier: "CookieFastPayeeField")
+            textRow("备注", text: $narration, field: .narration, identifier: "CookieFastNarrationField")
+        }
+    }
+
+    /// `.link`: 12.5px text over a 1px `--rule-strong` underline.
+    private func linkLabel(_ title: String, color: Color = BalancedPalette.secondary) -> some View {
+        Text(title)
+            .balancedFont(size: 12.5)
+            .foregroundStyle(color)
+            .padding(.bottom, 1)
+            .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+    }
+
+    private var entryFooter: some View {
+        HStack(spacing: 20) {
+            if transaction == nil {
                 Button {
                     LedgerFeedback.light()
-                    focusedField = nil
-                    showDatePickerSheet = true
+                    naturalLanguagePresented = true
                 } label: {
-                    Text(dateChipLabel)
-                        .balancedFont(size: 12.5)
-                        .foregroundStyle(BalancedPalette.meta)
-                        .padding(.bottom, 1)
-                        .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                    linkLabel("用一句话记账")
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("选择日期，当前\(dateChipLabel)")
-                .accessibilityIdentifier("CookieFastDateButton")
-
-                // Split mode toggle
+                .accessibilityIdentifier("bookkeeping-natural-entry")
+            }
+            Spacer(minLength: 0)
+            if !isSplitMode {
                 Button {
                     LedgerFeedback.selection()
                     focusedField = nil
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                        toggleSplitMode()
-                    }
+                    withAnimation(.easeInOut(duration: 0.2)) { toggleSplitMode() }
                 } label: {
-                    Text(isSplitMode ? "分录 (\(splitPostings.count))" : "拆分")
-                        .balancedFont(size: 12.5, weight: isSplitMode ? .medium : .regular)
-                        .foregroundStyle(BalancedPalette.ink)
-                        .padding(.bottom, 1)
-                        .overlay(alignment: .bottom) {
-                            Rectangle().fill(isSplitMode ? BalancedPalette.ink : BalancedPalette.ruleStrong)
-                                .frame(height: isSplitMode ? 2 : 1)
-                        }
+                    linkLabel("拆分成多条分录")
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(isSplitMode ? "关闭分录拆分" : "开启分录拆分")
+                .accessibilityLabel("开启分录拆分")
                 .accessibilityIdentifier("CookieFastSplitButton")
-
-                Spacer(minLength: 0)
-            }
-
-            // Row 2: Merchant / Payee + Narration Inputs
-            HStack(spacing: 16) {
-                // Payee
-                HStack(spacing: 6) {
-                    TextField(kind == .income ? "付款方/单位" : "商户/对方", text: $payee)
-                        .balancedFont(size: 13)
-                        .textInputAutocapitalization(.never)
-                        .focused($focusedField, equals: .payee)
-                        .submitLabel(.next)
-                        .onSubmit { focusedField = .narration }
-                        .accessibilityIdentifier("CookieFastPayeeField")
-                    if !payee.isEmpty {
-                        Button { payee = "" } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(BalancedPalette.meta)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.bottom, 6)
-                .overlay(alignment: .bottom) {
-                    BalancedPalette.ruleStrong.frame(height: focusedField == .payee ? 2 : 1)
-                }
-
-                // Narration
-                HStack(spacing: 6) {
-                    TextField("备注说明", text: $narration)
-                        .balancedFont(size: 13)
-                        .textInputAutocapitalization(.never)
-                        .focused($focusedField, equals: .narration)
-                        .submitLabel(.done)
-                        .onSubmit { focusedField = nil }
-                        .accessibilityIdentifier("CookieFastNarrationField")
-                    if !narration.isEmpty {
-                        Button { narration = "" } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(BalancedPalette.meta)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.bottom, 6)
-                .overlay(alignment: .bottom) {
-                    BalancedPalette.ruleStrong.frame(height: focusedField == .narration ? 2 : 1)
-                }
             }
         }
     }
