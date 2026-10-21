@@ -33,7 +33,10 @@ cd "$project_dir"
 xcodegen generate
 build_settings=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=)
 if [[ -n "${GITHUB_RUN_NUMBER:-}" ]]; then
-  build_settings+=("CURRENT_PROJECT_VERSION=$((GITHUB_RUN_NUMBER + 3))")
+  # Offset from project.yml's build number so a CI build always sorts above a
+  # local Xcode build; a lower number would not replace the installed app.
+  base_version="$(sed -n 's/^ *CURRENT_PROJECT_VERSION: *"\{0,1\}\([0-9][0-9]*\)"\{0,1\} *$/\1/p' project.yml | head -n 1)"
+  build_settings+=("CURRENT_PROJECT_VERSION=$(( ${base_version:-0} + GITHUB_RUN_NUMBER ))")
 fi
 xcodebuild archive \
   -project LedgerMobile.xcodeproj \
