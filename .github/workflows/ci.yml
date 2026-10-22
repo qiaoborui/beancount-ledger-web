@@ -17,6 +17,10 @@ on:
       web:
         required: true
         type: boolean
+      ios:
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
 
 permissions:
@@ -33,6 +37,7 @@ jobs:
       backend: ${{ steps.changes.outputs.backend }}
       agent: ${{ steps.changes.outputs.agent }}
       web: ${{ steps.changes.outputs.web }}
+      ios: ${{ steps.changes.outputs.ios }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,11 +62,14 @@ jobs:
           INPUT_BACKEND: ${{ inputs.backend }}
           INPUT_AGENT: ${{ inputs.agent }}
           INPUT_WEB: ${{ inputs.web }}
+          INPUT_IOS: ${{ inputs.ios }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           if [[ "${INPUT_REUSABLE_CALL}" == "true" ]]; then
             backend="${INPUT_BACKEND}"
             agent="${INPUT_AGENT}"
             web="${INPUT_WEB}"
+            ios="${INPUT_IOS:-false}"
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             plan_json="$(.github/scripts/plan-components.sh --all)"
             backend="$(jq -r '.backend' <<< "$plan_json")"
@@ -73,17 +81,28 @@ jobs:
             backend="$(jq -r '.backend' <<< "$plan_json")"
             agent="$(jq -r '.agent' <<< "$plan_json")"
             web="$(jq -r '.web' <<< "$plan_json")"
+            ios="$(jq -r '.ios' <<< "$plan_json")"
+          fi
+
+          # The iOS job runs on the owner's self-hosted Mac, so fork pull
+          # requests never reach it: their code is unreviewed and a self-hosted
+          # runner would execute it with the runner's own machine access.
+          if [[ -n "${PR_HEAD_REPOSITORY}" && "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" ]]; then
+            echo "::notice::skipping the iOS job for a fork pull request"
+            ios=false
           fi
 
           echo "backend=${backend}" >> "$GITHUB_OUTPUT"
           echo "agent=${agent}" >> "$GITHUB_OUTPUT"
           echo "web=${web}" >> "$GITHUB_OUTPUT"
+          echo "ios=${ios}" >> "$GITHUB_OUTPUT"
           {
             echo "## CI plan"
             echo
             echo "- Backend: \`${backend}\`"
             echo "- Agent: \`${agent}\`"
             echo "- Web: \`${web}\`"
+            echo "- iOS: \`${ios}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   go:
@@ -184,10 +203,30 @@ jobs:
         working-directory: web
         run: pnpm run build
 
+  ios:
+    name: iOS core
+    needs: plan
+    if: ${{ needs.plan.outputs.ios == 'true' }}
+    # `swift test` needs a full Xcode; the self-hosted Mac is the only runner
+    # with one, and it is the machine the IPA is built on.
+    runs-on: [self-hosted, macOS, ARM64, ledger-ios]
+    timeout-minutes: 30
+    steps:
+      # Self-hosted runners keep the workspace between jobs, so never leave the
+      # job's credentials in its git config.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Select Xcode
+        run: bash .github/scripts/select-xcode.sh
+      - name: Test portable Swift package
+        working-directory: App/LedgerMobile
+        run: swift test
+
   gate:
     name: Gate
     if: ${{ always() }}
-    needs: [plan, go, agent, web]
+    needs: [plan, go, agent, web, ios]
     runs-on: ubuntu-latest
     env:
       PLAN_RESULT: ${{ needs.plan.result }}
@@ -197,6 +236,8 @@ jobs:
       AGENT_RESULT: ${{ needs.agent.result }}
       WEB_REQUIRED: ${{ needs.plan.outputs.web }}
       WEB_RESULT: ${{ needs.web.result }}
+      IOS_REQUIRED: ${{ needs.plan.outputs.ios }}
+      IOS_RESULT: ${{ needs.ios.result }}
     steps:
       - name: Require every planned check to pass
         shell: bash
@@ -224,3 +265,4 @@ jobs:
           check_result Backend "$BACKEND_REQUIRED" "$BACKEND_RESULT"
           check_result Agent "$AGENT_REQUIRED" "$AGENT_RESULT"
           check_result Frontend "$WEB_REQUIRED" "$WEB_RESULT"
+          check_result iOS "$IOS_REQUIRED" "$IOS_RESULT"

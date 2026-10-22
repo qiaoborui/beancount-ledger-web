@@ -194,7 +194,6 @@ services:
       dockerfile: docker/Dockerfile
       target: frontend
       args:
-        VITE_ENABLE_SPEED_INSIGHTS: "false"
         VCS_REF: "${SELFHOST_VCS_REF:-local}"
     restart: unless-stopped
     expose:

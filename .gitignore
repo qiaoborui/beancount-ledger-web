@@ -31,7 +31,6 @@ server/.build/
 web/.env
 web/.env.*
 !web/.env.example
-.vercel/
 gha-creds-*.json
 
 # Runtime state
@@ -66,6 +65,5 @@ __pycache__/
 /transactions/
 /imports/
 /ledgers/
-.vercel
 .env*
 !.env.selfhost.example

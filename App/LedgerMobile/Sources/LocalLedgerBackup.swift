@@ -475,14 +475,23 @@ actor LedgerBackupStore {
         guard FileManager.default.fileExists(atPath: rootDirectory.path) else { throw LedgerBackupError.folderUnavailable }
         var entries: [LedgerBackupEntry] = []
         guard FileManager.default.fileExists(atPath: folder.path) else { return entries }
-        try Self.coordinate(reading: folder) { url in entries = try Self.list(folder: url, ledgerID: ledgerID) }
+        try Self.coordinate(reading: folder) { url in
+            // Keep the caller's spelling of the path rather than the coordinated
+            // one, so an unchanged backup compares equal to the first result.
+            entries = try Self.list(folder: url, ledgerID: ledgerID).map { entry in
+                LedgerBackupEntry(url: folder.appendingPathComponent(entry.url.lastPathComponent),
+                    ledgerID: ledgerID, size: entry.size) ?? entry
+            }
+        }
         return entries
     }
 
     private func prune(folder: URL, ledgerID: UUID, keeping kept: LedgerBackupEntry) throws {
-        let entries = try Self.list(folder: folder, ledgerID: ledgerID).sorted { $0.createdAt > $1.createdAt }
+        let entries = try Self.list(folder: folder.standardizedFileURL, ledgerID: ledgerID)
+            .sorted { $0.createdAt > $1.createdAt }
         guard entries.count > retention else { return }
-        for entry in entries.dropFirst(retention) where entry.url != kept.url {
+        let keptName = kept.url.lastPathComponent
+        for entry in entries.dropFirst(retention) where entry.url.lastPathComponent != keptName {
             try? coordinate(writing: entry.url, options: .forDeleting) { url in
                 try FileManager.default.removeItem(at: url)
             }

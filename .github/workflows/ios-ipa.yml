@@ -23,35 +23,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Select latest installed Xcode (including beta)
-        run: |
-          python3 - <<'PY'
-          import os
-          import pathlib
-          import plistlib
-          import re
-
-          candidates = []
-          for app in pathlib.Path('/Applications').glob('Xcode*.app'):
-              developer = app / 'Contents/Developer'
-              version_file = app / 'Contents/version.plist'
-              if not version_file.is_file() or not (developer / 'usr/bin/xcodebuild').is_file():
-                  continue
-              with version_file.open('rb') as source:
-                  info = plistlib.load(source)
-              version = tuple(int(part) for part in info['CFBundleShortVersionString'].split('.'))
-              version = version + (0,) * (3 - len(version))
-              build = tuple((0, int(part)) if part.isdigit() else (1, part)
-                            for part in re.findall(r'\d+|\D+', info['ProductBuildVersion']))
-              stable = not re.search(r'\d[a-z]$', info['ProductBuildVersion'])
-              candidates.append((version, stable, build, str(developer)))
-          if not candidates:
-              raise SystemExit('Install Xcode in /Applications and complete its first launch setup.')
-          developer = max(candidates)[3]
-          with open(os.environ['GITHUB_ENV'], 'a') as target:
-              target.write(f'DEVELOPER_DIR={developer}\n')
-          print(f'Selected {developer}')
-          PY
+      - name: Select Xcode
+        run: bash .github/scripts/select-xcode.sh
 
       - name: Verify build tools
         run: |

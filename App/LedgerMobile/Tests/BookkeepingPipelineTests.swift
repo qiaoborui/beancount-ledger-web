@@ -111,6 +111,11 @@ final class BookkeepingPipelineTests: XCTestCase {
 
     @MainActor
     func testSemanticCredentialsStayLocalAndChangingEndpointRequiresFreshKey() throws {
+        // The Keychain only answers inside the signed app host; a command-line
+        // test process has no access group and may meet a locked login keychain.
+        #if !os(iOS)
+        throw XCTSkip("Runs in the iOS app host, where the Keychain is available")
+        #endif
         let namespace = "semantic-tests-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: namespace))
         let store = ClassificationKeyStore(service: namespace)

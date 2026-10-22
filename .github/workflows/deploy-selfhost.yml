@@ -204,7 +204,6 @@ jobs:
           push: true
           tags: ${{ env.FRONTEND_IMAGE }}:selfhost-sha-${{ github.sha }}
           build-args: |
-            VITE_ENABLE_SPEED_INSIGHTS=false
             VCS_REF=${{ github.sha }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}

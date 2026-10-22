@@ -124,7 +124,7 @@ GMAIL_PUBSUB_AUDIENCE=https://YOUR_LEDGER_HOST/api/integrations/gmail/pubsub
 GMAIL_PUBSUB_SERVICE_ACCOUNT=gmail-push@PROJECT_ID.iam.gserviceaccount.com
 CRON_OIDC_AUDIENCE=https://YOUR_LEDGER_HOST
 CRON_OIDC_SERVICE_ACCOUNT=ledger-web-scheduler@PROJECT_ID.iam.gserviceaccount.com
-# Transition fallback for Vercel Cron and existing secret-header jobs.
+# Legacy fallback for secret-header scheduled jobs.
 CRON_SECRET=
 
 # Tailnet/LAN deployment: outbound local scheduler only

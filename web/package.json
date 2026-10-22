@@ -21,7 +21,6 @@
     "@simplewebauthn/browser": "^13.3.0",
     "@streamdown/cjk": "^1.0.3",
     "@uiw/react-codemirror": "^4.25.11",
-    "@vercel/speed-insights": "^2.0.0",
     "ai": "^6.0.191",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -49,12 +48,13 @@
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.7.2",
-    "vite": "^8.0.16",
+    "vite": "^8.3.5",
     "vitest": "^4.1.6"
   },
   "pnpm": {
     "overrides": {
-      "browserslist": "4.28.7"
+      "browserslist": "4.28.7",
+      "source-map-js": "1.2.2"
     }
   }
 }

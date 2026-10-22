@@ -27,6 +27,9 @@ let package = Package(
                 "LedgerMobileApp.swift",
                 "LocalLedgerViews.swift",
                 "LocalLedgerStorageView.swift",
+                "LedgerLaunchView.swift",
+                "TerminalAnalysisViews.swift",
+                "LocalLedgerBackupView.swift",
                 "MoreView.swift",
                 "NativeImportFlowView.swift",
                 "OverviewView.swift",
@@ -54,14 +57,20 @@ let package = Package(
                 "ImportClassificationSettingsView.swift",
                 "LedgerIslandEntryView.swift",
             ],
-            sources: ["LedgerLocale.swift", "LedgerIslandMotion.swift", "LocalPendingScan.swift", "LocalEventReportExport.swift", "EventReportMarkdownStream.swift", "LocalEventTagReportScan.swift", "LocalEventTagSummaryScan.swift", "LocalAccountTrendScan.swift", "LocalGlobalSearchScan.swift", "LocalTransactionSelectionScan.swift", "LocalTransactionShareExport.swift", "TransactionShareFile.swift", "TransactionShareTextFormatter.swift", "LocalTransactionWindow.swift", "LocalTransactionScan.swift", "AccountPresetModels.swift", "LocalLedgerAutoSyncCoordinator.swift", "LocalLedgerWidgetPublisher.swift", "LocalLedgerBackgroundProtection.swift", "LocalLedgerBackgroundSyncService.swift", "LogicalLocalStorage.swift", "DeviceLocalStorage.swift", "GitLocalStorage.swift", "LocalGitTransport.swift", "LocalGitCredentialStore.swift", "LedgerSharedAccess.swift", "LedgerExternalRoute.swift", "LedgerSharedImportInbox.swift", "LedgerSharedImportApp.swift", "GlobalSearchModels.swift", "APIClient.swift", "BQLModels.swift", "BiometricUnlockService.swift", "CurrencyModels.swift", "ImportIndexActivityAttributes.swift", "ImportIndexActivityCoordinator.swift", "LedgerImportHistory.swift", "LedgerImportModels.swift", "LedgerModels.swift", "LedgerSession.swift", "LedgerWidgetCredentialStore.swift", "LedgerWidgetRefreshClient.swift", "LedgerWidgetSnapshot.swift", "LedgerWidgetSnapshotBuilder.swift", "LocalLedgerWorkspace.swift", "LocalLedgerBackup.swift", "LedgerSession+Backup.swift", "LocalLedgerAuthentication.swift", "LocalLedgerCatalog.swift", "LocalLedgerEngine.swift", "LocalLedgerRepository.swift", "EmbeddedBeancountValidator.swift", "MoneyText.swift", "PasskeyAuthenticationService.swift", "BookkeepingPipeline.swift", "BookkeepingSemanticParser.swift", "BookkeepingSettings.swift", "ImportClassification.swift", "ImportClassificationContext.swift", "ImportClassificationSettings.swift", "BeanTransactionParser.swift", "LedgerImportDraftStore.swift"]
+            sources: ["LedgerLocale.swift", "BalancedBucketAxis.swift", "LedgerIslandMotion.swift", "LedgerIslandTypography.swift", "LocalPendingScan.swift", "LocalEventReportExport.swift", "EventReportMarkdownStream.swift", "LocalEventTagReportScan.swift", "LocalEventTagSummaryScan.swift", "LocalAccountTrendScan.swift", "LocalGlobalSearchScan.swift", "LocalTransactionSelectionScan.swift", "LocalTransactionShareExport.swift", "TransactionShareFile.swift", "TransactionShareTextFormatter.swift", "LocalTransactionWindow.swift", "LocalTransactionScan.swift", "AccountPresetModels.swift", "LocalLedgerAutoSyncCoordinator.swift", "LocalCanonicalStreamCache.swift", "LocalModelRequestGate.swift", "LocalLedgerWidgetPublisher.swift", "LocalLedgerBackgroundProtection.swift", "LocalLedgerBackgroundSyncService.swift", "LogicalLocalStorage.swift", "DeviceLocalStorage.swift", "GitLocalStorage.swift", "LocalGitTransport.swift", "LocalGitCredentialStore.swift", "LedgerSharedAccess.swift", "LedgerExternalRoute.swift", "LedgerSharedImportInbox.swift", "LedgerSharedImportApp.swift", "GlobalSearchModels.swift", "APIClient.swift", "BQLModels.swift", "BiometricUnlockService.swift", "CurrencyModels.swift", "ImportIndexActivityAttributes.swift", "ImportIndexActivityCoordinator.swift", "LedgerImportHistory.swift", "LedgerImportModels.swift", "LedgerModels.swift", "LedgerSession.swift", "LedgerWidgetCredentialStore.swift", "LedgerWidgetRefreshClient.swift", "LedgerWidgetSnapshot.swift", "LedgerWidgetSnapshotBuilder.swift", "LocalLedgerWorkspace.swift", "LocalLedgerBackup.swift", "LedgerSession+Backup.swift", "LocalLedgerAuthentication.swift", "LocalLedgerCatalog.swift", "LocalLedgerEngine.swift", "LocalLedgerRepository.swift", "EmbeddedBeancountValidator.swift", "MoneyText.swift", "PasskeyAuthenticationService.swift", "BookkeepingPipeline.swift", "BookkeepingSemanticParser.swift", "BookkeepingSettings.swift", "ImportClassification.swift", "ImportClassificationContext.swift", "ImportClassificationSettings.swift", "BeanTransactionParser.swift", "LedgerImportDraftStore.swift"]
         ),
         .testTarget(
             name: "LedgerMobileTests",
             dependencies: ["LedgerMobile"],
             path: "Tests",
-            // UI-only tests remain part of the Xcode app-host target.
-            exclude: ["CookieFastTransactionEditorTests.swift"]
+            // These render SwiftUI, load the app bundle or need UIKit, so they
+            // stay in the Xcode app-host target instead of the portable package.
+            exclude: [
+                "CookieFastTransactionEditorTests.swift",
+                "LaunchResourceTests.swift",
+                "PerfProbeTests.swift",
+                "TransactionReceiptRenderingTests.swift",
+            ]
         ),
     ]
 )

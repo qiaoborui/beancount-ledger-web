@@ -79,13 +79,13 @@ restores, image updates, and the full configuration reference.
 
 Install `beancount==3.2.3` in the Python environment used for development and make
 `bean-check` available on `PATH`. Backend integration tests and all ledger write
-storage modes use this validator; the API and Vercel images include it.
+storage modes use this validator; the API images include it.
 
 ```bash
 cd server && go test ./... && go build ./cmd/...
 cd agent && uv sync --frozen --python 3.12 && uv run pytest
 cd web && pnpm install && pnpm run typecheck && pnpm run test && pnpm run build
-cd App/LedgerMobile && xcodegen generate && swift test
+cd App/LedgerMobile && swift test && xcodegen generate
 ```
 
 Use the ledgers in `examples/` for local development and tests. Keep your real
