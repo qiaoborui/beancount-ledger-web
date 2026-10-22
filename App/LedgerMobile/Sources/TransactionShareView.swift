@@ -42,12 +42,12 @@ struct SingleTransactionReceiptCard: View {
 
     private var kindBadgeText: String {
         if presentation.isRefund {
-            return "退款"
+            return String(localized: "退款")
         }
         switch presentation.kind {
-        case .expense: return "支出"
-        case .income: return "收入"
-        case .transfer: return "转账"
+        case .expense: return String(localized: "支出")
+        case .income: return String(localized: "收入")
+        case .transfer: return String(localized: "转账")
         }
     }
 
@@ -128,8 +128,8 @@ struct SingleTransactionReceiptCard: View {
 
             // Info rows
             VStack(spacing: 9) {
-                receiptRow(title: "交易时间", value: TransactionDateHeaderFormatter.format(transaction.date))
-                receiptRow(title: "消费分类", value: categoryVisual.categoryLabel)
+                receiptRow(title: String(localized: "交易时间"), value: TransactionDateHeaderFormatter.format(transaction.date))
+                receiptRow(title: String(localized: "消费分类"), value: categoryVisual.categoryLabel)
 
                 if !transaction.postings.isEmpty {
                     ForEach(Array(transaction.postings.prefix(4).enumerated()), id: \.offset) { _, posting in
@@ -204,7 +204,7 @@ struct CombinedTransactionStatementCard: View {
 
     private var dateSpanDescription: String {
         let dates = sortedTransactions.map(\.date)
-        guard let first = dates.last, let last = dates.first else { return "流水清单" }
+        guard let first = dates.last, let last = dates.first else { return String(localized: "流水清单") }
         if first == last {
             return TransactionDateHeaderFormatter.format(first)
         } else {
@@ -437,6 +437,13 @@ struct TransactionShareSheet: View {
         case card = "票据长图"
         case text = "文字清单"
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .card: String(localized: "票据长图")
+            case .text: String(localized: "文字清单")
+            }
+        }
     }
 
     @State private var selectedTab: ShareTab = .card
@@ -458,9 +465,9 @@ struct TransactionShareSheet: View {
 
     private var sheetTitle: String {
         if isSingle {
-            return "分享记账凭证"
+            return String(localized: "分享记账凭证")
         } else {
-            return "合并分享 · \(transactions.count) 笔流水"
+            return String(localized: "合并分享 · \(transactions.count) 笔流水")
         }
     }
 
@@ -471,7 +478,7 @@ struct TransactionShareSheet: View {
                 HStack(spacing: 0) {
                     ForEach(ShareTab.allCases) { tab in
                         Button { selectedTab = tab } label: {
-                            BalancedMark(title: tab.rawValue, selected: selectedTab == tab)
+                            BalancedMark(title: tab.title, selected: selectedTab == tab)
                                 .frame(maxWidth: .infinity, minHeight: 44)
                         }
                         .buttonStyle(.plain)
@@ -549,7 +556,7 @@ struct TransactionShareSheet: View {
                     ShareLink(
                         item: imageURL,
                         preview: SharePreview(
-                            isSingle ? "记账凭证" : "消费对账清单",
+                            isSingle ? String(localized: "记账凭证") : String(localized: "消费对账清单"),
                             icon: Image(systemName: "doc.text.image")
                         )
                     ) {
@@ -662,15 +669,15 @@ struct TransactionShareSheet: View {
         #if canImport(UIKit)
         if let image = renderedUIImage {
             UIPasteboard.general.image = image
-            showNotice("已拷贝长图到剪贴板")
+            showNotice(String(localized: "已拷贝长图到剪贴板"))
             LedgerFeedback.success()
         } else if let url = tempImageURL, let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
             UIPasteboard.general.image = img
-            showNotice("已拷贝长图到剪贴板")
+            showNotice(String(localized: "已拷贝长图到剪贴板"))
             LedgerFeedback.success()
         } else {
             renderCard()
-            showNotice("正在生成图片，请稍候")
+            showNotice(String(localized: "正在生成图片，请稍候"))
         }
         #endif
     }
@@ -678,7 +685,7 @@ struct TransactionShareSheet: View {
     private func copyText() {
         #if canImport(UIKit)
         UIPasteboard.general.string = shareText
-        showNotice("已复制文字清单到剪贴板")
+        showNotice(String(localized: "已复制文字清单到剪贴板"))
         LedgerFeedback.success()
         #endif
     }

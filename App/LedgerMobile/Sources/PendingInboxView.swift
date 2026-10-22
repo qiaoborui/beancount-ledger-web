@@ -11,6 +11,16 @@ struct PendingInboxView: View {
         case missingPayee = "缺商户"
 
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .all: String(localized: "全部")
+            case .uncategorized: String(localized: "未分类")
+            case .needsReview: String(localized: "待核对")
+            case .missingPayee: String(localized: "缺商户")
+            }
+        }
+
         var filter: LedgerPendingFilter {
             switch self {
             case .all: return .all
@@ -198,7 +208,7 @@ struct PendingInboxView: View {
                     onSave: { entry in
                         let token = feedbackGeneration
                         try await save(entry, original: tx)
-                        publishFeedback("交易修改已保存", style: .confirmed, token: token)
+                        publishFeedback(String(localized: "交易修改已保存"), style: .confirmed, token: token)
                     }
                 )
                 .ledgerPrivacyProtectedSheet()
@@ -339,7 +349,7 @@ struct PendingInboxView: View {
                     LedgerFeedback.selection()
                     withAnimation(.easeOut(duration: 0.18)) { selectedTab = tab }
                 } label: {
-                    BalancedMark(title: "\(tab.rawValue) \(count)", selected: selectedTab == tab, size: 14)
+                    BalancedMark(title: "\(tab.title) \(count)", selected: selectedTab == tab, size: 14)
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
@@ -586,7 +596,7 @@ struct PendingInboxView: View {
         do { try await session.updateLocalTransaction(action: localAction, entry: entry) }
         catch {
             fullEditorTarget = nil; editingPayeeTarget = nil; editingCategoryTarget = nil
-            publishFeedback(error.localizedDescription + " 请重新打开交易操作后再试。", style: .failure, token: token)
+            publishFeedback(error.localizedDescription + String(localized: " 请重新打开交易操作后再试。"), style: .failure, token: token)
             throw error
         }
     }
@@ -603,10 +613,10 @@ struct PendingInboxView: View {
                     || $0.account.lowercased().contains("uncategorized")
             })?.account ?? ""
             try await save(tx.entryReplacingAccount(from: unknownAcc, to: newAccount), original: tx)
-            publishFeedback("已分类为：\(newAccount.split(separator: ":").last ?? "")", style: .confirmed, token: token)
+            publishFeedback(String(localized: "已分类为：\(String(newAccount.split(separator: ":").last ?? ""))"), style: .confirmed, token: token)
             return true
         } catch {
-            publishFeedback("更新失败：\(error.localizedDescription)", style: .failure, token: token)
+            publishFeedback(String(localized: "更新失败：\(error.localizedDescription)"), style: .failure, token: token)
             return !session.isLocal
         }
     }
@@ -618,10 +628,10 @@ struct PendingInboxView: View {
         defer { updating = false }
         do {
             try await save(tx.entryUpdatingPayee(payee, narration: narration), original: tx)
-            publishFeedback("商户已更新为：\(payee)", style: .confirmed, token: token)
+            publishFeedback(String(localized: "商户已更新为：\(payee)"), style: .confirmed, token: token)
             return true
         } catch {
-            publishFeedback("更新失败：\(error.localizedDescription)", style: .failure, token: token)
+            publishFeedback(String(localized: "更新失败：\(error.localizedDescription)"), style: .failure, token: token)
             return !session.isLocal
         }
     }
@@ -633,9 +643,9 @@ struct PendingInboxView: View {
         defer { updating = false }
         do {
             try await save(tx.entryMarkingVerified(), original: tx)
-            publishFeedback("已标记为已核对", style: .confirmed, token: token)
+            publishFeedback(String(localized: "已标记为已核对"), style: .confirmed, token: token)
         } catch {
-            publishFeedback("核对失败：\(error.localizedDescription)", style: .failure, token: token)
+            publishFeedback(String(localized: "核对失败：\(error.localizedDescription)"), style: .failure, token: token)
         }
     }
 }
@@ -663,7 +673,7 @@ private struct PendingCategorySuggestionSheet: View {
         transaction.postings.first(where: { $0.account.hasPrefix("Expenses:") || $0.account.hasPrefix("Income:") })?.account
     }
     private var currentLabel: String {
-        currentAccount.flatMap { accountLabels[$0] } ?? "未分类"
+        currentAccount.flatMap { accountLabels[$0] } ?? String(localized: "未分类")
     }
 
     private func submit(_ account: String) async {
@@ -685,7 +695,7 @@ private struct PendingCategorySuggestionSheet: View {
                     .padding(.top, 8).padding(.bottom, 14)
 
                     VStack(spacing: 0) {
-                        BalancedKeyRow(label: "金额", minorUnits: presentation.minorUnits, currency: presentation.currency,
+                        BalancedKeyRow(label: String(localized: "金额"), minorUnits: presentation.minorUnits, currency: presentation.currency,
                             prefix: amountPrefix(presentation.kind), color: amountColor(presentation.kind))
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text("账户").balancedFont(size: 14).foregroundStyle(BalancedPalette.secondary)
@@ -794,18 +804,18 @@ struct QuickCategoryPickerSheet: View {
 
     private var presets: [FrequentCategory] {
         [
-            FrequentCategory(account: "Expenses:Food:Dining", label: "餐饮美食", icon: "fork.knife", color: Color.orange),
-            FrequentCategory(account: "Expenses:Food:Takeout", label: "外卖订餐", icon: "bag", color: Color.orange),
-            FrequentCategory(account: "Expenses:Food:Groceries", label: "买菜生鲜", icon: "cart", color: Color.green),
-            FrequentCategory(account: "Expenses:Shopping:Daily", label: "日用百货", icon: "basket", color: Color.pink),
-            FrequentCategory(account: "Expenses:Shopping:Digital", label: "数码科技", icon: "laptopcomputer", color: Color.blue),
-            FrequentCategory(account: "Expenses:Transport:Transit", label: "交通出行", icon: "car.fill", color: Color.blue),
-            FrequentCategory(account: "Expenses:Transport:Taxi", label: "打车出行", icon: "car.side.fill", color: Color.teal),
-            FrequentCategory(account: "Expenses:Entertainment:Recreation", label: "休闲娱乐", icon: "popcorn.fill", color: Color.purple),
-            FrequentCategory(account: "Expenses:Housing:Utilities", label: "水电物业", icon: "bolt.fill", color: Color.yellow),
-            FrequentCategory(account: "Expenses:Housing:Rent", label: "房租月结", icon: "house.fill", color: Color.indigo),
-            FrequentCategory(account: "Expenses:Health:Medical", label: "医疗健康", icon: "heart.fill", color: Color.red),
-            FrequentCategory(account: "Expenses:Communication:Phone", label: "通讯话费", icon: "phone.fill", color: Color.cyan),
+            FrequentCategory(account: "Expenses:Food:Dining", label: String(localized: "餐饮美食"), icon: "fork.knife", color: Color.orange),
+            FrequentCategory(account: "Expenses:Food:Takeout", label: String(localized: "外卖订餐"), icon: "bag", color: Color.orange),
+            FrequentCategory(account: "Expenses:Food:Groceries", label: String(localized: "买菜生鲜"), icon: "cart", color: Color.green),
+            FrequentCategory(account: "Expenses:Shopping:Daily", label: String(localized: "日用百货"), icon: "basket", color: Color.pink),
+            FrequentCategory(account: "Expenses:Shopping:Digital", label: String(localized: "数码科技"), icon: "laptopcomputer", color: Color.blue),
+            FrequentCategory(account: "Expenses:Transport:Transit", label: String(localized: "交通出行"), icon: "car.fill", color: Color.blue),
+            FrequentCategory(account: "Expenses:Transport:Taxi", label: String(localized: "打车出行"), icon: "car.side.fill", color: Color.teal),
+            FrequentCategory(account: "Expenses:Entertainment:Recreation", label: String(localized: "休闲娱乐"), icon: "popcorn.fill", color: Color.purple),
+            FrequentCategory(account: "Expenses:Housing:Utilities", label: String(localized: "水电物业"), icon: "bolt.fill", color: Color.yellow),
+            FrequentCategory(account: "Expenses:Housing:Rent", label: String(localized: "房租月结"), icon: "house.fill", color: Color.indigo),
+            FrequentCategory(account: "Expenses:Health:Medical", label: String(localized: "医疗健康"), icon: "heart.fill", color: Color.red),
+            FrequentCategory(account: "Expenses:Communication:Phone", label: String(localized: "通讯话费"), icon: "phone.fill", color: Color.cyan),
         ]
     }
 

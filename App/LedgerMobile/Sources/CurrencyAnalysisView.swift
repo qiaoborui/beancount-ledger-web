@@ -22,7 +22,7 @@ struct CurrencyAnalysisView: View {
             }
         }
         .background(LedgerPalette.canvas)
-        .ledgerNavigation("货币与汇率", isRoot: isRoot, showsTimeRange: true)
+        .ledgerNavigation(String(localized: "货币与汇率"), isRoot: isRoot, showsTimeRange: true)
     }
 
     @ViewBuilder
@@ -54,7 +54,7 @@ struct CurrencyAnalysisView: View {
     ) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: LedgerSpacing.lg) {
-                Text(snapshot.latestDate.map { "最新价格 · \($0)" } ?? "暂无价格记录")
+                Text(snapshot.latestDate.map { String(localized: "最新价格 · \($0)") } ?? String(localized: "暂无价格记录"))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -67,8 +67,8 @@ struct CurrencyAnalysisView: View {
                 if snapshot.rows.isEmpty {
                     EmptyLedgerState(
                         icon: "coloncurrencysign",
-                        title: "暂无货币",
-                        detail: "账本中还没有可用于汇率分析的货币或价格记录。"
+                        title: String(localized: "暂无货币"),
+                        detail: String(localized: "账本中还没有可用于汇率分析的货币或价格记录。")
                     )
                 } else {
                     LazyVStack(spacing: LedgerSpacing.md) {
@@ -94,7 +94,7 @@ struct CurrencyAnalysisView: View {
     private func valuationPicker(currencies: [String], selected: String) -> some View {
         VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
             HStack {
-                SectionHeading(title: "估值货币")
+                SectionHeading(title: String(localized: "估值货币"))
                 Spacer()
                 if session.isValuationCurrencyLoading {
                     ProgressView()
@@ -221,9 +221,9 @@ private struct CurrencyRateCard: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.82)
             HStack(spacing: LedgerSpacing.sm) {
-                Text(row.rate?.date ?? (row.rate?.source == .base ? "当前基准" : "暂无可用价格"))
+                Text(row.rate?.date ?? (row.rate?.source == .base ? String(localized: "当前基准") : String(localized: "暂无可用价格")))
                 Text("·")
-                Text(row.rate?.source.title ?? "无法估值")
+                Text(row.rate?.source.title ?? String(localized: "无法估值"))
             }
             .font(.system(size: 11, weight: .medium).monospacedDigit())
             .foregroundStyle(LedgerPalette.secondary)
@@ -275,8 +275,8 @@ private struct CurrencyRateBadge: View {
     }
 
     private var label: String {
-        if currency == valuationCurrency { return "基准" }
-        return rate?.source.title ?? "缺少汇率"
+        if currency == valuationCurrency { return String(localized: "基准") }
+        return rate?.source.title ?? String(localized: "缺少汇率")
     }
 
     private var foreground: Color {
@@ -405,7 +405,7 @@ private struct CurrencySparkline: View {
 private enum CurrencyRateText {
     static func value(currency: String, valuationCurrency: String, rate: CurrencyRateInfo?) -> String {
         if currency == valuationCurrency { return "1 \(currency) = 1 \(valuationCurrency)" }
-        guard let rate else { return "\(currency) → \(valuationCurrency) 暂无汇率" }
+        guard let rate else { return String(localized: "\(currency) → \(valuationCurrency) 暂无汇率") }
         return "1 \(currency) = \(number(rate.rate)) \(valuationCurrency)"
     }
 
@@ -419,7 +419,7 @@ private enum CurrencyRateText {
     }
 
     static func change(_ value: Double?) -> String {
-        guard let value else { return "暂无" }
+        guard let value else { return String(localized: "暂无") }
         return String(format: "%@%.2f%%", value > 0 ? "+" : "", value * 100)
     }
 
@@ -431,7 +431,7 @@ private enum CurrencyRateText {
     }
 
     static func accessibilityTrend(_ points: [CurrencyRatePoint]) -> String {
-        guard let first = points.first, let last = points.last else { return "暂无趋势" }
-        return "从 \(first.date) 的 \(number(first.rate)) 到 \(last.date) 的 \(number(last.rate))"
+        guard let first = points.first, let last = points.last else { return String(localized: "暂无趋势") }
+        return String(localized: "从 \(first.date) 的 \(number(first.rate)) 到 \(last.date) 的 \(number(last.rate))")
     }
 }

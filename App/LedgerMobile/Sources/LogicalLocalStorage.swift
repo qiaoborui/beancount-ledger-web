@@ -28,24 +28,24 @@ struct LocalSyncPresentation: Equatable {
         needsAttention = status?.phase == .failed || status?.phase == .conflicted
         action = !hasGit || status?.phase == .conflicted ? .storageSettings : .synchronize
         if isBusy {
-            title = "正在同步"
+            title = String(localized: "正在同步")
             indicator = .syncing
         } else if !hasGit {
-            title = "已保存到本机"
+            title = String(localized: "已保存到本机")
             indicator = .local
         } else {
             switch status?.phase {
             case .conflicted:
-                title = "同步冲突"
+                title = String(localized: "同步冲突")
                 indicator = .attention
             case .failed:
-                title = "同步失败"
+                title = String(localized: "同步失败")
                 indicator = .attention
             case .synced:
-                title = automaticEnabled ? "已同步" : "已同步，自动同步已暂停"
+                title = automaticEnabled ? String(localized: "已同步") : String(localized: "已同步，自动同步已暂停")
                 indicator = automaticEnabled ? .synced : .local
             default:
-                title = "等待同步"
+                title = String(localized: "等待同步")
                 indicator = .pending
             }
         }
@@ -65,10 +65,10 @@ protocol LogicalLocalStorage: Sendable {
 
 extension LogicalLocalStorage {
     func resolveConflicts(keepingLocal: Bool, validator: @escaping LocalLedgerWorkspace.Validator) async throws -> LocalStorageSyncStatus {
-        throw LocalStorageError.gitFailure("当前账本没有待处理的同步冲突")
+        throw LocalStorageError.gitFailure(String(localized: "当前账本没有待处理的同步冲突"))
     }
     func exportConflictVersions() async throws -> URL {
-        throw LocalStorageError.gitFailure("当前账本没有待处理的同步冲突")
+        throw LocalStorageError.gitFailure(String(localized: "当前账本没有待处理的同步冲突"))
     }
 }
 
@@ -86,13 +86,13 @@ enum LocalStorageError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case let .invalidGitConfiguration(message), let .gitFailure(message): message
-        case .synchronizationInProgress: "账本正在同步，请稍候"
-        case let .conflicts(paths): "这些文件在本机和远端均有修改：\(paths.joined(separator: "、"))。两边内容已保留，请处理冲突后再同步。"
-        case .emptyRepository: "该分支尚无账本，请先新建本地账本再连接仓库"
-        case let .unsafeFile(path): "同步目录包含不受支持的路径或文件：\(path)"
-        case .treeLimitExceeded: "同步目录超过文件数量、大小或层级限制"
-        case .corruptSyncState: "同步记录已损坏，请重新配置仓库连接；本地账本仍然可用"
-        case .gitUnavailable: "此版本缺少设备端 Git 同步引擎"
+        case .synchronizationInProgress: String(localized: "账本正在同步，请稍候")
+        case let .conflicts(paths): String(localized: "这些文件在本机和远端均有修改：\(paths.joined(separator: String(localized: "、")))。两边内容已保留，请处理冲突后再同步。")
+        case .emptyRepository: String(localized: "该分支尚无账本，请先新建本地账本再连接仓库")
+        case let .unsafeFile(path): String(localized: "同步目录包含不受支持的路径或文件：\(path)")
+        case .treeLimitExceeded: String(localized: "同步目录超过文件数量、大小或层级限制")
+        case .corruptSyncState: String(localized: "同步记录已损坏，请重新配置仓库连接；本地账本仍然可用")
+        case .gitUnavailable: String(localized: "此版本缺少设备端 Git 同步引擎")
         }
     }
 }
@@ -107,7 +107,7 @@ struct LocalGitConfiguration: Codable, Equatable, Hashable, Sendable {
             components.scheme?.lowercased() == "https", components.host?.isEmpty == false,
             components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
             let url = components.url else {
-            throw LocalStorageError.invalidGitConfiguration("请填写 HTTPS Git 仓库地址，凭据填写在独立字段中")
+            throw LocalStorageError.invalidGitConfiguration(String(localized: "请填写 HTTPS Git 仓库地址，凭据填写在独立字段中"))
         }
         let branch = branch.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !branch.isEmpty, branch.count <= 200,
@@ -115,7 +115,7 @@ struct LocalGitConfiguration: Codable, Equatable, Hashable, Sendable {
               !branch.contains(".."), !branch.contains("@{"), !branch.contains("//"),
               branch != "@", branch.split(separator: "/").allSatisfy({ !$0.hasPrefix(".") && !$0.hasSuffix(".lock") }),
               branch.unicodeScalars.allSatisfy({ $0.value > 32 && $0.value != 127 && !"~^:?*[\\".unicodeScalars.contains($0) }) else {
-            throw LocalStorageError.invalidGitConfiguration("请输入有效的 Git 分支名称")
+            throw LocalStorageError.invalidGitConfiguration(String(localized: "请输入有效的 Git 分支名称"))
         }
         self.id = id
         self.repositoryURL = url

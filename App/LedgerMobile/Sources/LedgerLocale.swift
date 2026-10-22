@@ -52,6 +52,14 @@ enum LedgerDateLabel {
         date.formatted(.dateTime.month(.wide).locale(LedgerLocale.current))
     }
 
+    /// "3月" / "Mar" for a month number (1 = January).
+    static func month(number: Int) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = LedgerLocale.current
+        let symbols = calendar.shortMonthSymbols
+        return symbols[max(0, min(symbols.count - 1, number - 1))]
+    }
+
     /// "周三" / "Wed"
     static func weekday(_ date: Date) -> String {
         date.formatted(.dateTime.weekday(.abbreviated).locale(LedgerLocale.current))

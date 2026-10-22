@@ -15,11 +15,11 @@ struct SettingsView: View {
                 Section { StatusBanner(message: error, onDismiss: session.dismissError) }
             }
             Section {
-                SettingsRow(title: "底部标签栏", value: session.compactTabDestinations.map(\.compactTitle).joined(separator: "、")) {
+                SettingsRow(title: String(localized: "底部标签栏"), value: session.compactTabDestinations.map(\.compactTitle).joined(separator: String(localized: "、"))) {
                     compactTabConfigurationPresented = true
                 }
                 .accessibilityIdentifier("settings-compact-tabs")
-            } header: { TerminalSectionLabel(text: "导航").listRowBackground(BalancedPalette.page)
+            } header: { TerminalSectionLabel(text: String(localized: "导航")).listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
 
             Section {
@@ -28,7 +28,7 @@ struct SettingsView: View {
                         get: { session.localPrivacyProtectionEnabled },
                         set: { enabled in Task { await session.setLocalPrivacyProtectionEnabled(enabled) } }
                     )) {
-                        SettingsRowLabel(title: "\(session.biometricTitle) 保护", detail: "打开账本时验证身份")
+                        SettingsRowLabel(title: String(localized: "\(session.biometricTitle) 保护"), detail: String(localized: "打开账本时验证身份"))
                     }
                     .disabled(session.isBiometricSettingBusy || session.isAuthenticationBusy)
                     .accessibilityIdentifier("settings-local-authentication")
@@ -40,7 +40,7 @@ struct SettingsView: View {
                         get: { session.localPrivacyCoverEnabled },
                         set: { session.setLocalPrivacyCoverEnabled($0) }
                     )) {
-                        SettingsRowLabel(title: "隐私遮罩", detail: "切换应用时遮住内容")
+                        SettingsRowLabel(title: String(localized: "隐私遮罩"), detail: String(localized: "切换应用时遮住内容"))
                     }
                     .disabled(session.isBiometricSettingBusy || session.isAuthenticationBusy)
                     .accessibilityIdentifier("settings-local-privacy-cover")
@@ -49,7 +49,7 @@ struct SettingsView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 } else {
-                    SettingsRowLabel(title: "使用设备密码或生物识别解锁", detail: nil)
+                    SettingsRowLabel(title: String(localized: "使用设备密码或生物识别解锁"), detail: nil)
                         .frame(minHeight: 44)
                         .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
                         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
@@ -58,7 +58,7 @@ struct SettingsView: View {
                 }
 
                 if session.localPrivacyProtectionEnabled {
-                    SettingsRow(title: "自动锁定", value: lockIntervalBinding.wrappedValue.title) {
+                    SettingsRow(title: String(localized: "自动锁定"), value: lockIntervalBinding.wrappedValue.title) {
                         showingLockIntervalPicker = true
                     }
                     Button {
@@ -74,7 +74,7 @@ struct SettingsView: View {
                     .listRowSeparator(.hidden)
                 }
             } header: {
-                TerminalSectionLabel(text: "隐私与安全").listRowBackground(BalancedPalette.page)
+                TerminalSectionLabel(text: String(localized: "隐私与安全")).listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
             } footer: {
                 Text(session.isLocal
@@ -87,27 +87,27 @@ struct SettingsView: View {
             if session.isLocal {
                 if let ledgerID = session.currentLocalLedgerDescriptor?.id {
                     Section {
-                        SettingsNavRow(title: "智能分类", value: ImportClassificationSettings.shared.isEnabled(for: ledgerID) ? "已启用" : "未配置") {
+                        SettingsNavRow(title: String(localized: "智能分类"), value: ImportClassificationSettings.shared.isEnabled(for: ledgerID) ? String(localized: "已启用") : String(localized: "未配置")) {
                             ImportClassificationSettingsView(ledgerID: ledgerID)
                         }
                         .accessibilityIdentifier("settings-classification")
-                        SettingsNavRow(title: "语义解析", value: BookkeepingSettings.shared.hasKey ? (BookkeepingSettings.shared.configuration.model.isEmpty ? "已配置" : BookkeepingSettings.shared.configuration.model) : "未配置", valueMono: true) {
+                        SettingsNavRow(title: String(localized: "语义解析"), value: BookkeepingSettings.shared.hasKey ? (BookkeepingSettings.shared.configuration.model.isEmpty ? String(localized: "已配置") : BookkeepingSettings.shared.configuration.model) : String(localized: "未配置"), valueMono: true) {
                             BookkeepingSettingsView()
                         }
                         .accessibilityIdentifier("settings-semantic-parser")
-                    } header: { TerminalSectionLabel(text: "AI 与智能记账").listRowBackground(BalancedPalette.page)
+                    } header: { TerminalSectionLabel(text: String(localized: "AI 与智能记账")).listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
                 }
                 Section {
-                    SettingsRow(title: "名称", value: session.localLedgerName, showsChevron: false) {
+                    SettingsRow(title: String(localized: "名称"), value: session.localLedgerName, showsChevron: false) {
                         editingCurrentLedger = true
                     }
                     .accessibilityIdentifier("settings-edit-current-ledger")
-                    SettingsNavRow(title: "浏览、编辑与导出文件") { LocalLedgerFilesView() }
+                    SettingsNavRow(title: String(localized: "浏览、编辑与导出文件")) { LocalLedgerFilesView() }
                         .accessibilityIdentifier("settings-local-files")
-                    SettingsNavRow(title: "存储与同步") { LocalLedgerStorageView() }
+                    SettingsNavRow(title: String(localized: "存储与同步")) { LocalLedgerStorageView() }
                         .accessibilityIdentifier("local-storage-settings")
-                } header: { TerminalSectionLabel(text: "本地账本").listRowBackground(BalancedPalette.page)
+                } header: { TerminalSectionLabel(text: String(localized: "本地账本")).listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
                 Section {
                     Button("切换账本") { session.chooseLedger() }
@@ -172,7 +172,7 @@ struct SettingsView: View {
         .background(BalancedPalette.page)
         .listStyle(.plain)
         .listSectionSeparator(.hidden, edges: .top)
-        .ledgerNavigation("设置", isRoot: isRoot)
+        .ledgerNavigation(String(localized: "设置"), isRoot: isRoot)
         .sheet(isPresented: $compactTabConfigurationPresented) {
             CompactTabConfigurationView(initialDestinations: session.compactTabDestinations) { destinations in
                 session.setCompactTabDestinations(destinations)
@@ -201,82 +201,82 @@ struct SettingsView: View {
 
     private var biometricDetail: String {
         if session.biometricKind == .unavailable {
-            return "请先在系统设置中配置生物识别"
+            return String(localized: "请先在系统设置中配置生物识别")
         }
         return session.hasBiometricUnlock
-            ? "使用生物识别快速解锁账本"
-            : "启用后可在这台设备上快速解锁"
+            ? String(localized: "使用生物识别快速解锁账本")
+            : String(localized: "启用后可在这台设备上快速解锁")
     }
 
     private var widgetRefreshStatusTitle: String {
-        if !session.hasBiometricUnlock { return "等待\(session.biometricTitle)" }
+        if !session.hasBiometricUnlock { return String(localized: "等待\(session.biometricTitle)") }
         switch session.widgetRefreshStatus.phase {
         case .waitingForBiometrics:
-            return "等待启用"
+            return String(localized: "等待启用")
         case .provisioning:
-            return "正在配置"
+            return String(localized: "正在配置")
         case .ready:
-            return "已就绪"
+            return String(localized: "已就绪")
         case .refreshing:
-            return "正在刷新"
+            return String(localized: "正在刷新")
         case .success:
-            return "运行正常"
+            return String(localized: "运行正常")
         case .credentialUnavailable:
-            return "凭据缺失"
+            return String(localized: "凭据缺失")
         case .authorizationRejected:
-            return "凭据已失效"
+            return String(localized: "凭据已失效")
         case .serverOutdated:
-            return "服务端待更新"
+            return String(localized: "服务端待更新")
         case .serverUnavailable:
-            return "服务端异常"
+            return String(localized: "服务端异常")
         case .invalidConfiguration:
-            return "配置异常"
+            return String(localized: "配置异常")
         case .invalidResponse:
-            return "响应异常"
+            return String(localized: "响应异常")
         case .networkUnavailable:
-            return "网络异常"
+            return String(localized: "网络异常")
         case .storageUnavailable:
-            return "安全存储异常"
+            return String(localized: "安全存储异常")
         }
     }
 
     private var widgetRefreshDetail: String {
         if !session.hasBiometricUnlock {
-            return "启用\(session.biometricTitle)后可更新小组件"
+            return String(localized: "启用\(session.biometricTitle)后可更新小组件")
         }
         switch session.widgetRefreshStatus.phase {
         case .waitingForBiometrics:
-            return "启用设备生物识别后自动配置"
+            return String(localized: "启用设备生物识别后自动配置")
         case .provisioning:
-            return "正在启用后台刷新"
+            return String(localized: "正在启用后台刷新")
         case .ready:
-            return "已启用后台更新，点按立即刷新"
+            return String(localized: "已启用后台更新，点按立即刷新")
         case .refreshing:
-            return "正在从 Ledger Web 获取最新小组件快照"
+            return String(localized: "正在从 Ledger Web 获取最新小组件快照")
         case .success:
             if let date = session.widgetRefreshStatus.lastSuccessAt {
-                return "上次成功：\(date.formatted(date: .abbreviated, time: .shortened))"
+                return String(localized: "上次成功：\(date.formatted(date: .abbreviated, time: .shortened))")
             }
-            return "最近一次后台刷新成功"
+            return String(localized: "最近一次后台刷新成功")
         case .credentialUnavailable:
-            return "后台刷新尚未启用，点按重试"
+            return String(localized: "后台刷新尚未启用，点按重试")
         case .authorizationRejected:
-            return "完成身份验证后点按轮换凭据"
+            return String(localized: "完成身份验证后点按轮换凭据")
         case .serverOutdated:
-            return "Ledger Web 需要部署小组件快照接口"
+            return String(localized: "Ledger Web 需要部署小组件快照接口")
         case .serverUnavailable:
             if let status = session.widgetRefreshStatus.httpStatus {
-                return "服务端返回 HTTP \(status)；点按重试"
+                return String(localized: "服务端返回 HTTP \(status)；点按重试")
             }
-            return "服务端暂时无法处理小组件刷新"
+            return String(localized: "服务端暂时无法处理小组件刷新")
         case .invalidConfiguration:
-            return "服务器地址需要使用有效的 HTTPS Origin"
+            return String(localized: "服务器地址需要使用有效的 HTTPS Origin")
         case .invalidResponse:
-            return "服务端返回了小组件无法识别的数据"
+            return String(localized: "服务端返回了小组件无法识别的数据")
         case .networkUnavailable:
-            return "检查网络后点按重试"
+            return String(localized: "检查网络后点按重试")
         case .storageUnavailable:
-            return "App 与小组件无法访问共享 Keychain 或 App Group"
+            return String(localized: "App 与小组件无法访问共享 Keychain 或 App Group")
         }
     }
 
@@ -358,7 +358,7 @@ private struct CompactTabConfigurationView: View {
                         destinations.move(fromOffsets: source, toOffset: destination)
                     }
                 } header: {
-                    TerminalSectionLabel(text: "已显示 \(destinations.count)/\(LedgerDestination.compactTabLimit)")
+                    TerminalSectionLabel(text: String(localized: "已显示 \(destinations.count)/\(LedgerDestination.compactTabLimit)"))
                         .listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 } footer: {
@@ -396,7 +396,7 @@ private struct CompactTabConfigurationView: View {
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                     }
-                } header: { TerminalSectionLabel(text: "可添加").listRowBackground(BalancedPalette.page)
+                } header: { TerminalSectionLabel(text: String(localized: "可添加")).listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
 
                 Section {

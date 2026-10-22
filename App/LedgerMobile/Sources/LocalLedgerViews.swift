@@ -37,13 +37,13 @@ struct LedgerLibraryView: View {
                 }
 
                 Section {
-                    LibraryActionRow(title: "新建本地账本", detail: "从零开始，自己写账户") { creating = true }
+                    LibraryActionRow(title: String(localized: "新建本地账本"), detail: String(localized: "从零开始，自己写账户")) { creating = true }
                         .accessibilityIdentifier("local-ledger-create")
-                    LibraryActionRow(title: "导入账本文件夹", detail: "已有 .bean 文件，直接接管") { importing = true }
+                    LibraryActionRow(title: String(localized: "导入账本文件夹"), detail: String(localized: "已有 .bean 文件，直接接管")) { importing = true }
                         .accessibilityIdentifier("local-ledger-import")
-                    LibraryActionRow(title: "从 Git 添加账本", detail: "用仓库做版本交换，多设备共用") { addingGit = true }
+                    LibraryActionRow(title: String(localized: "从 Git 添加账本"), detail: String(localized: "用仓库做版本交换，多设备共用")) { addingGit = true }
                         .accessibilityIdentifier("local-ledger-add-git")
-                } header: { TerminalSectionLabel(text: "快速操作").listRowBackground(BalancedPalette.page) }
+                } header: { TerminalSectionLabel(text: String(localized: "快速操作")).listRowBackground(BalancedPalette.page) }
                 .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
@@ -146,7 +146,7 @@ struct LedgerLibraryView: View {
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                         }
-                    } header: { TerminalSectionLabel(text: "本地账本").listRowBackground(BalancedPalette.page) }
+                    } header: { TerminalSectionLabel(text: String(localized: "本地账本")).listRowBackground(BalancedPalette.page) }
                 }
                 if let error = session.errorMessage {
                     Section { StatusBanner(message: error, onDismiss: session.dismissError) }
@@ -166,7 +166,7 @@ struct LedgerLibraryView: View {
             .background(BalancedPalette.page)
             .listStyle(.plain)
             .listSectionSpacing(8)
-            .terminalPageChrome("账本", isRoot: true, showsTimeRange: false, showsSync: false)
+            .terminalPageChrome(String(localized: "账本"), isRoot: true, showsTimeRange: false, showsSync: false)
             .disabled(session.isLocalOperationBusy)
             .task { await session.refreshLocalLedgers() }
             .sheet(isPresented: $showingWizard) { OnboardingWizardView() }
@@ -199,7 +199,7 @@ private struct LocalLedgerSetupView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dismiss) private var dismiss
     let importing: Bool
-    @State private var name = "我的账本"
+    @State private var name = String(localized: "我的账本")
     @State private var currency = "CNY"
     @State private var entrypoint = "main.bean"
     @State private var selectingFolder = false
@@ -210,7 +210,7 @@ private struct LocalLedgerSetupView: View {
             List {
                 if !importing {
                     Section {
-                        LibraryActionRow(title: "使用新手向导开账（推荐）", detail: "可视化配置微信、支付宝、银行卡与日常分类") {
+                        LibraryActionRow(title: String(localized: "使用新手向导开账（推荐）"), detail: String(localized: "可视化配置微信、支付宝、银行卡与日常分类")) {
                             showingWizard = true
                         }
                     }
@@ -232,7 +232,7 @@ private struct LocalLedgerSetupView: View {
                             .textInputAutocapitalization(.characters).autocorrectionDisabled()
                             .accessibilityIdentifier("local-ledger-currency")
                     }
-                } header: { TerminalSectionLabel(text: "账本信息").listRowBackground(BalancedPalette.page) }
+                } header: { TerminalSectionLabel(text: String(localized: "账本信息")).listRowBackground(BalancedPalette.page) }
                 Section {
                     Text("存储在这台设备 · 设备密码与生物识别保护")
                         .balancedFont(size: 13.5)
@@ -326,7 +326,7 @@ struct LocalLedgerFilesView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
-            } header: { TerminalSectionLabel(text: "账本文件").listRowBackground(BalancedPalette.page) }
+            } header: { TerminalSectionLabel(text: String(localized: "账本文件")).listRowBackground(BalancedPalette.page) }
             Section {
                 Button("准备导出账本") {
                     Task {
@@ -459,7 +459,7 @@ struct EditLedgerSheet: View {
                         .balancedMono(size: 13.5)
                         .accessibilityIdentifier("edit-ledger-entrypoint")
                 } header: {
-                    TerminalSectionLabel(text: "基本信息").listRowBackground(BalancedPalette.page)
+                    TerminalSectionLabel(text: String(localized: "基本信息")).listRowBackground(BalancedPalette.page)
                 } footer: {
                     Text("入口文件通常为 main.bean，需位于账本根目录下。")
                         .balancedFont(size: 12.5)
@@ -468,13 +468,13 @@ struct EditLedgerSheet: View {
                 }
 
                 Section {
-                    LabeledContent("存储方式", value: ledger.git == nil ? "本机独立存储" : "Git 仓库协同")
+                    LabeledContent(String(localized: "存储方式"), value: ledger.git == nil ? String(localized: "本机独立存储") : String(localized: "Git 仓库协同"))
                         .balancedFont(size: 14)
                     LabeledContent("创建时间", value: ledger.createdAt.formatted(date: .abbreviated, time: .shortened))
                         .balancedFont(size: 14)
                     LabeledContent("账本标识", value: String(ledger.id.uuidString.prefix(8)))
                         .balancedMono(size: 12.5)
-                } header: { TerminalSectionLabel(text: "账本属性").listRowBackground(BalancedPalette.page) }
+                } header: { TerminalSectionLabel(text: String(localized: "账本属性")).listRowBackground(BalancedPalette.page) }
 
                 Section {
                     Button("删除此账本") {

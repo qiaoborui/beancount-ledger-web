@@ -13,6 +13,14 @@ struct EventTagListView: View {
         case count = "交易最多"
 
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .recent: String(localized: "最新活跃")
+            case .spend: String(localized: "消费最高")
+            case .count: String(localized: "交易最多")
+            }
+        }
     }
 
     @State private var sortOrder: SortOrder = .recent
@@ -97,7 +105,7 @@ struct EventTagListView: View {
                         LedgerFeedback.selection()
                         withAnimation(.easeOut(duration: 0.18)) { sortOrder = order }
                     } label: {
-                        BalancedMark(title: order.rawValue, selected: sortOrder == order, size: 13)
+                        BalancedMark(title: order.title, selected: sortOrder == order, size: 13)
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(sortOrder == order ? .isSelected : [])
@@ -168,7 +176,7 @@ private struct EventTagSummaryRow: View {
 
             HStack {
                 if let start = summary.startDate, let end = summary.endDate {
-                    Text((start == end ? start : "\(start) ~ \(end)") + " · \(summary.daysCount)天")
+                    Text((start == end ? start : "\(start) ~ \(end)") + String(localized: " · \(summary.daysCount)天"))
                         .balancedFont(size: 12).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                 }
                 Spacer()
@@ -269,33 +277,33 @@ struct EventTagReportView: View {
         ScrollView {
             VStack(spacing: 16) {
                 if session.isLocal, let aggregateError, aggregateCurrent {
-                    EventReportInlineNotice(text: "事件汇总刷新失败：" + aggregateError, action: "重试") { reload += 1 }
+                    EventReportInlineNotice(text: String(localized: "事件汇总刷新失败：") + aggregateError, action: String(localized: "重试")) { reload += 1 }
                 }
                 if !session.isLocal || aggregateCurrent {
                     eventHeroCard
                     if !report.categoryBreakdown.isEmpty { categoryBreakdownCard }
                     if report.dailySeries.count > 1 { dailyRhythmCard }
                 } else if let aggregateError {
-                    EventReportErrorPanel(title: "事件汇总读取失败", detail: aggregateError, action: "重试汇总") { reload += 1 }
+                    EventReportErrorPanel(title: String(localized: "事件汇总读取失败"), detail: aggregateError, action: String(localized: "重试汇总")) { reload += 1 }
                 } else {
-                    EventReportLoadingPanel(title: "正在核算完整事件…")
+                    EventReportLoadingPanel(title: String(localized: "正在核算完整事件…"))
                 }
                 if session.isLocal {
                     if windowCurrent {
                         transactionsSection
                         paginationControls
                     } else if let windowError {
-                        EventReportErrorPanel(title: "事件流水读取失败", detail: windowError, action: "重试流水") { reload += 1 }
+                        EventReportErrorPanel(title: String(localized: "事件流水读取失败"), detail: windowError, action: String(localized: "重试流水")) { reload += 1 }
                     } else {
-                        EventReportLoadingPanel(title: "正在读取事件流水…")
+                        EventReportLoadingPanel(title: String(localized: "正在读取事件流水…"))
                     }
                 } else {
                     transactionsSection
                 }
                 if let message = exportError {
-                    EventReportErrorPanel(title: "完整事件文件生成失败", detail: message, action: "关闭") { exportError = nil }
+                    EventReportErrorPanel(title: String(localized: "完整事件文件生成失败"), detail: message, action: String(localized: "关闭")) { exportError = nil }
                 }
-                if exportID != nil { EventReportLoadingPanel(title: "正在生成完整事件文件…") }
+                if exportID != nil { EventReportLoadingPanel(title: String(localized: "正在生成完整事件文件…")) }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -480,19 +488,19 @@ struct EventTagReportView: View {
             // Sub-metrics grid
             HStack(spacing: 0) {
                 metricColumn(
-                    title: "总支出",
+                    title: String(localized: "总支出"),
                     value: MoneyText.format(minorUnits: report.totalExpense, currency: report.currency),
                     color: LedgerPalette.expense
                 )
                 Divider().frame(height: 30)
                 metricColumn(
-                    title: "收入 / 退款",
+                    title: String(localized: "收入 / 退款"),
                     value: MoneyText.format(minorUnits: report.totalIncome, currency: report.currency),
                     color: LedgerPalette.income
                 )
                 Divider().frame(height: 30)
                 metricColumn(
-                    title: "日均开销",
+                    title: String(localized: "日均开销"),
                     value: MoneyText.format(minorUnits: report.dailyAverage, currency: report.currency),
                     color: LedgerPalette.ink
                 )
@@ -502,7 +510,7 @@ struct EventTagReportView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "clock")
                         .font(.system(size: 11))
-                    Text(s == e ? s : "\(s) 至 \(e)")
+                    Text(s == e ? s : String(localized: "\(s) 至 \(e)"))
                         .font(.system(size: 12, design: .monospaced))
                     Text("· 共 \(report.daysCount) 天")
                         .font(.system(size: 12))
@@ -850,7 +858,7 @@ struct EventReportShareSheet: View {
 
                     if previewIsPartial, let completeTransactionCount {
                         EventReportInlineNotice(
-                            text: "长图与文本仅含前 \(report.transactions.count) 笔，共 \(completeTransactionCount) 笔。完整清单请用「导出完整 Markdown 文件」。")
+                            text: String(localized: "长图与文本仅含前 \(report.transactions.count) 笔，共 \(completeTransactionCount) 笔。完整清单请用「导出完整 Markdown 文件」。"))
                             .padding(.horizontal, 16)
                     }
 
@@ -924,20 +932,20 @@ struct EventReportShareSheet: View {
 
     private func copyMarkdown() {
         var lines: [String] = []
-        lines.append("# 事件核算报告：#\(report.tag)")
+        lines.append(String(localized: "# 事件核算报告：#\(report.tag)"))
         if let s = report.startDate, let e = report.endDate {
-            lines.append("时间跨度：\(s) ~ \(e)（共 \(report.daysCount) 天）")
+            lines.append(String(localized: "时间跨度：\(s) ~ \(e)（共 \(report.daysCount) 天）"))
         }
-        lines.append("净支出：\(MoneyText.format(minorUnits: report.netSpend, currency: report.currency))")
-        lines.append("总支出：\(MoneyText.format(minorUnits: report.totalExpense, currency: report.currency))，收入/退款：\(MoneyText.format(minorUnits: report.totalIncome, currency: report.currency))")
-        lines.append("日均消费：\(MoneyText.format(minorUnits: report.dailyAverage, currency: report.currency))")
+        lines.append(String(localized: "净支出：\(MoneyText.format(minorUnits: report.netSpend, currency: report.currency))"))
+        lines.append(String(localized: "总支出：\(MoneyText.format(minorUnits: report.totalExpense, currency: report.currency))，收入/退款：\(MoneyText.format(minorUnits: report.totalIncome, currency: report.currency))"))
+        lines.append(String(localized: "日均消费：\(MoneyText.format(minorUnits: report.dailyAverage, currency: report.currency))"))
         lines.append("")
-        lines.append("## 分类支出")
+        lines.append(String(localized: "## 分类支出"))
         for cat in report.categoryBreakdown {
-            lines.append("- \(cat.label)：\(MoneyText.format(minorUnits: cat.amount, currency: report.currency)) (\(String(format: "%.1f%%", cat.percentage * 100)))")
+            lines.append(String(localized: "- \(cat.label)：\(MoneyText.format(minorUnits: cat.amount, currency: report.currency)) (\(String(format: "%.1f%%", cat.percentage * 100)))"))
         }
         lines.append("")
-        lines.append("## 交易清单 (\(report.transactions.count) 笔)")
+        lines.append(String(localized: "## 交易清单 (\(report.transactions.count) 笔)"))
         for tx in report.transactions {
             let p = TransactionPresentation(transaction: tx)
             lines.append("- \(tx.date) | \(p.title) | \(amountPrefix(p.kind))\(MoneyText.format(minorUnits: p.minorUnits, currency: p.currency))")
@@ -992,7 +1000,7 @@ struct EventReportShareCard: View {
 
                 // Date & Days
                 if let s = report.startDate, let e = report.endDate {
-                    Text(s == e ? s : "\(s) 至 \(e) · 共 \(report.daysCount) 天 · 日均 \(MoneyText.format(minorUnits: report.dailyAverage, currency: report.currency))")
+                    Text(s == e ? s : String(localized: "\(s) 至 \(e) · 共 \(report.daysCount) 天 · 日均 \(MoneyText.format(minorUnits: report.dailyAverage, currency: report.currency))"))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(LedgerPalette.secondary)
                 }

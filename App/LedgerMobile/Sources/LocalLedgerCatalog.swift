@@ -84,7 +84,7 @@ actor LocalLedgerCatalog {
                 guard FileManager.default.fileExists(atPath: descriptorURL.path) else { return nil }
                 let descriptor = try JSONDecoder().decode(LocalLedgerDescriptor.self, from: Data(contentsOf: descriptorURL))
                 guard descriptor.id.uuidString == directory.lastPathComponent else {
-                    throw LocalLedgerError.invalidConfiguration("本地账本目录标识不一致")
+                    throw LocalLedgerError.invalidConfiguration(String(localized: "本地账本目录标识不一致"))
                 }
                 return descriptor
             }.sorted { $0.createdAt < $1.createdAt }
@@ -107,7 +107,7 @@ actor LocalLedgerCatalog {
     func configureGit(ledgerID: UUID, repositoryURL: String, branch: String = "main",
                       credential: LocalGitCredential? = nil) throws -> LocalLedgerDescriptor {
         guard let old = try list().first(where: { $0.id == ledgerID }) else {
-            throw LocalStorageError.invalidGitConfiguration("找不到要配置的本地账本")
+            throw LocalStorageError.invalidGitConfiguration(String(localized: "找不到要配置的本地账本"))
         }
         let candidate = try LocalGitConfiguration(repositoryURL: repositoryURL, branch: branch)
         let git: LocalGitConfiguration
@@ -122,7 +122,7 @@ actor LocalLedgerCatalog {
 
     func disconnectGit(ledgerID: UUID) throws -> LocalLedgerDescriptor {
         guard let old = try list().first(where: { $0.id == ledgerID }) else {
-            throw LocalStorageError.invalidGitConfiguration("找不到要配置的本地账本")
+            throw LocalStorageError.invalidGitConfiguration(String(localized: "找不到要配置的本地账本"))
         }
         if let git = old.git { try gitCredentials.remove(for: git.id) }
         let updated = LocalLedgerDescriptor(id: old.id, name: old.name, entrypoint: old.entrypoint, createdAt: old.createdAt)
@@ -145,11 +145,11 @@ actor LocalLedgerCatalog {
     @discardableResult
     func update(ledgerID: UUID, name: String, entrypoint: String? = nil) async throws -> LocalLedgerDescriptor {
         guard let old = try list().first(where: { $0.id == ledgerID }) else {
-            throw LocalLedgerError.invalidConfiguration("找不到指定的本地账本")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "找不到指定的本地账本"))
         }
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty, trimmedName.count <= 120, !trimmedName.contains("\n"), !trimmedName.contains("\r") else {
-            throw LocalLedgerError.invalidConfiguration("账本名称需要为 1–120 个字符")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "账本名称需要为 1–120 个字符"))
         }
 
         let targetEntrypoint: String
@@ -158,11 +158,11 @@ actor LocalLedgerCatalog {
             let parts = trimmedEntry.split(separator: "/", omittingEmptySubsequences: false)
             guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
                   !trimmedEntry.contains("\\"), !trimmedEntry.contains("\0"), trimmedEntry.hasSuffix(".bean") else {
-                throw LocalLedgerError.invalidConfiguration("请选择账本目录内的 .bean 入口文件")
+                throw LocalLedgerError.invalidConfiguration(String(localized: "请选择账本目录内的 .bean 入口文件"))
             }
             let fileURL = rootDirectory.appendingPathComponent(ledgerID.uuidString).appendingPathComponent(trimmedEntry)
             guard FileManager.default.fileExists(atPath: fileURL.path) else {
-                throw LocalLedgerError.invalidConfiguration("入口文件 \(trimmedEntry) 在账本目录中不存在")
+                throw LocalLedgerError.invalidConfiguration(String(localized: "入口文件 \(trimmedEntry) 在账本目录中不存在"))
             }
             targetEntrypoint = trimmedEntry
         } else {
@@ -223,7 +223,7 @@ actor LocalLedgerCatalog {
         categories: [OnboardingCategorySelection] = []
     ) async throws -> LocalLedgerDescriptor {
         guard currency.range(of: "^[A-Z][A-Z0-9._-]{0,23}$", options: .regularExpression) != nil else {
-            throw LocalLedgerError.invalidConfiguration("请输入有效的币种代码")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "请输入有效的币种代码"))
         }
         let descriptor = try makeDescriptor(name: name, entrypoint: "main.bean")
         let workspace = workspace(for: descriptor)
@@ -247,12 +247,12 @@ actor LocalLedgerCatalog {
         lines.append("")
 
         lines.append("1970-01-01 open Equity:Opening-Balances")
-        lines.append("  alias: \"期初余额\"")
+        lines.append(String(localized: "  alias: \"期初余额\""))
 
         let effectiveAccounts = accounts.isEmpty ? [
-            OnboardingAccountSelection(name: "现金", account: "Assets:Cash", currency: currency),
-            OnboardingAccountSelection(name: "银行存款", account: "Assets:Bank", currency: currency),
-            OnboardingAccountSelection(name: "信用卡", account: "Liabilities:CreditCard", currency: currency, isLiability: true)
+            OnboardingAccountSelection(name: String(localized: "现金"), account: "Assets:Cash", currency: currency),
+            OnboardingAccountSelection(name: String(localized: "银行存款"), account: "Assets:Bank", currency: currency),
+            OnboardingAccountSelection(name: String(localized: "信用卡"), account: "Liabilities:CreditCard", currency: currency, isLiability: true)
         ] : accounts
 
         for a in effectiveAccounts {
@@ -264,10 +264,10 @@ actor LocalLedgerCatalog {
         lines.append("")
 
         let effectiveCategories = categories.isEmpty ? [
-            OnboardingCategorySelection(name: "工资收入", account: "Income:Salary", currency: currency),
-            OnboardingCategorySelection(name: "餐饮美食", account: "Expenses:Food", currency: currency),
-            OnboardingCategorySelection(name: "交通出行", account: "Expenses:Transport", currency: currency),
-            OnboardingCategorySelection(name: "其他支出", account: "Expenses:Other", currency: currency)
+            OnboardingCategorySelection(name: String(localized: "工资收入"), account: "Income:Salary", currency: currency),
+            OnboardingCategorySelection(name: String(localized: "餐饮美食"), account: "Expenses:Food", currency: currency),
+            OnboardingCategorySelection(name: String(localized: "交通出行"), account: "Expenses:Transport", currency: currency),
+            OnboardingCategorySelection(name: String(localized: "其他支出"), account: "Expenses:Other", currency: currency)
         ] : categories
 
         for c in effectiveCategories {
@@ -293,11 +293,11 @@ actor LocalLedgerCatalog {
             for (acct, dec) in initialBalanceAccounts {
                 let formatted = String(format: "%.2f", NSDecimalNumber(decimal: dec).doubleValue)
                 if acct.isLiability {
-                    lines.append("\(today) * \"期初余额\" \"初始化账户欠款 - \(escape(acct.name))\"")
+                    lines.append(String(localized: "\(today) * \"期初余额\" \"初始化账户欠款 - \(escape(acct.name))\""))
                     lines.append("  \(acct.account)  -\(formatted) \(acct.currency)")
                     lines.append("  Equity:Opening-Balances  \(formatted) \(acct.currency)")
                 } else {
-                    lines.append("\(today) * \"期初余额\" \"初始化账户余额 - \(escape(acct.name))\"")
+                    lines.append(String(localized: "\(today) * \"期初余额\" \"初始化账户余额 - \(escape(acct.name))\""))
                     lines.append("  \(acct.account)  \(formatted) \(acct.currency)")
                     lines.append("  Equity:Opening-Balances  -\(formatted) \(acct.currency)")
                 }
@@ -386,12 +386,12 @@ actor LocalLedgerCatalog {
     private func makeDescriptor(name: String, entrypoint: String) throws -> LocalLedgerDescriptor {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= 120, !name.contains("\n"), !name.contains("\r") else {
-            throw LocalLedgerError.invalidConfiguration("账本名称需要为 1–120 个字符")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "账本名称需要为 1–120 个字符"))
         }
         let parts = entrypoint.split(separator: "/", omittingEmptySubsequences: false)
         guard !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
               !entrypoint.contains("\\"), !entrypoint.contains("\0"), entrypoint.hasSuffix(".bean") else {
-            throw LocalLedgerError.invalidConfiguration("请选择账本目录内的 .bean 入口文件")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "请选择账本目录内的 .bean 入口文件"))
         }
         return LocalLedgerDescriptor(id: UUID(), name: name, entrypoint: entrypoint, createdAt: Date())
     }

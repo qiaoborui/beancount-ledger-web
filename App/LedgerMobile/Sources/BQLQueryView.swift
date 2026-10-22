@@ -9,7 +9,7 @@ struct BQLQueryView: View {
             BQLWorkbench()
         }
         .background(LedgerPalette.canvas)
-        .ledgerNavigation("BQL 查询", isRoot: isRoot, showsTimeRange: true)
+        .ledgerNavigation(String(localized: "BQL 查询"), isRoot: isRoot, showsTimeRange: true)
 
     }
 }
@@ -42,7 +42,7 @@ private struct BQLWorkbench: View {
         let completed = runs.filter { $0.result != nil }.count
         let failed = runs.filter { $0.error != nil }.count
         let rows = runs.reduce(0) { $0 + ($1.result?.rowCount ?? 0) }
-        return "\(runs.count) 条查询 · \(completed) 完成 · \(failed) 失败 · \(rows) 行"
+        return String(localized: "\(runs.count) 条查询 · \(completed) 完成 · \(failed) 失败 · \(rows) 行")
     }
 
     var body: some View {
@@ -445,7 +445,7 @@ private struct BQLWorkbench: View {
         } catch is CancellationError {
             return
         } catch {
-            historyError = "查询历史暂时无法加载"
+            historyError = String(localized: "查询历史暂时无法加载")
         }
     }
 
@@ -467,7 +467,7 @@ private struct BQLWorkbench: View {
         } catch is CancellationError {
             return
         } catch {
-            historyError = "查询已完成，历史未同步"
+            historyError = String(localized: "查询已完成，历史未同步")
         }
     }
 
@@ -485,7 +485,7 @@ private struct BQLWorkbench: View {
         } catch is CancellationError {
             return
         } catch {
-            historyError = "标题保存失败"
+            historyError = String(localized: "标题保存失败")
         }
     }
 
@@ -501,7 +501,7 @@ private struct BQLWorkbench: View {
         } catch is CancellationError {
             return
         } catch {
-            historyError = "历史记录删除失败"
+            historyError = String(localized: "历史记录删除失败")
         }
     }
 
@@ -531,10 +531,10 @@ private enum BQLResultViewKind: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .table: "表格"
-        case .bar: "柱状图"
-        case .pie: "饼图"
-        case .line: "折线图"
+        case .table: String(localized: "表格")
+        case .bar: String(localized: "柱状图")
+        case .pie: String(localized: "饼图")
+        case .line: String(localized: "折线图")
         }
     }
 
@@ -797,7 +797,7 @@ private struct BQLCellText: View {
             .lineLimit(1)
             .truncationMode(.tail)
             .textSelection(.enabled)
-            .accessibilityLabel(column.type == "money" && !session.amountsVisible ? "金额已隐藏" : text)
+            .accessibilityLabel(column.type == "money" && !session.amountsVisible ? String(localized: "金额已隐藏") : text)
     }
 }
 
@@ -844,7 +844,7 @@ private struct BQLChartModel {
             if row.indices.contains(labelIndex), !row[labelIndex].plainText.isEmpty {
                 label = row[labelIndex].plainText
             } else {
-                label = "行 \(index + 1)"
+                label = String(localized: "行 \(index + 1)")
             }
             return BQLChartDatum(id: index, label: label, value: value)
         }
@@ -1133,14 +1133,16 @@ private enum BQLNumberText {
 
     static func compact(_ value: Double) -> String {
         let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = LedgerLocale.current
         formatter.numberStyle = .decimal
         formatter.maximumFractionDigits = 1
         let absolute = abs(value)
         let scaled: (Double, String)
         switch absolute {
-        case 100_000_000...: scaled = (value / 100_000_000, "亿")
-        case 10_000...: scaled = (value / 10_000, "w")
+        case 100_000_000... where LedgerLocale.usesChineseNumberUnits: scaled = (value / 100_000_000, String(localized: "亿"))
+        case 10_000... where LedgerLocale.usesChineseNumberUnits: scaled = (value / 10_000, "w")
+        case 1_000_000_000...: scaled = (value / 1_000_000_000, "B")
+        case 1_000_000...: scaled = (value / 1_000_000, "M")
         case 1_000...: scaled = (value / 1_000, "k")
         default: scaled = (value, "")
         }
@@ -1153,7 +1155,7 @@ private enum BQLNumberText {
         maximumFractionDigits: Int
     ) -> String {
         let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = LedgerLocale.current
         formatter.numberStyle = .decimal
         formatter.usesGroupingSeparator = true
         formatter.minimumFractionDigits = minimumFractionDigits
@@ -1167,11 +1169,8 @@ private enum BQLHistoryDateText {
         let input = ISO8601DateFormatter()
         input.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let date = input.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
-        guard let date else { return "刚刚运行" }
-        let output = DateFormatter()
-        output.locale = Locale(identifier: "zh_CN")
-        output.dateFormat = "M月d日 HH:mm"
-        return output.string(from: date)
+        guard let date else { return String(localized: "刚刚运行") }
+        return date.formatted(.dateTime.month(.abbreviated).day().hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).locale(LedgerLocale.current))
     }
 }
 
@@ -1199,10 +1198,10 @@ private enum BQLQueryExamples {
 
     static var all: [BQLQueryExample] {
         [
-            BQLQueryExample(id: "monthly", title: "月度分类支出", query: defaultQuery),
+            BQLQueryExample(id: "monthly", title: String(localized: "月度分类支出"), query: defaultQuery),
             BQLQueryExample(
                 id: "merchants",
-                title: "商户排行",
+                title: String(localized: "商户排行"),
                 query: """
                 SELECT payee, count(*) AS tx_count, sum(value) AS total
                 FROM transactions
@@ -1214,7 +1213,7 @@ private enum BQLQueryExamples {
             ),
             BQLQueryExample(
                 id: "income",
-                title: "收入账户",
+                title: String(localized: "收入账户"),
                 query: """
                 SELECT month, account, sum(value) AS total
                 FROM postings
@@ -1226,7 +1225,7 @@ private enum BQLQueryExamples {
             ),
             BQLQueryExample(
                 id: "compound",
-                title: "复合条件与聚合筛选",
+                title: String(localized: "复合条件与聚合筛选"),
                 query: """
                 SELECT payee, count(*) AS tx_count, sum(value) AS total
                 FROM transactions

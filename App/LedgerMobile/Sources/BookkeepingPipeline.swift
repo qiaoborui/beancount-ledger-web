@@ -43,15 +43,15 @@ struct BookkeepingDraft: Codable, Equatable, Sendable {
     }
     func validate() throws {
         guard questions.isEmpty else { throw BookkeepingError.reviewRequired(questions.joined(separator: "\n")) }
-        guard !records.isEmpty, records.count <= 5000 else { throw BookkeepingError.reviewRequired("请先补充交易。") }
+        guard !records.isEmpty, records.count <= 5000 else { throw BookkeepingError.reviewRequired(String(localized: "请先补充交易。")) }
         for record in records {
             guard LedgerDateRange.parse(record.date) != nil, record.postings.count >= 2 else {
-                throw BookkeepingError.reviewRequired("请补充日期和至少两条分录。")
+                throw BookkeepingError.reviewRequired(String(localized: "请补充日期和至少两条分录。"))
             }
             for posting in record.postings {
                 guard !posting.account.isEmpty, posting.amount.isEmpty || !posting.currency.isEmpty,
                       posting.amount.isEmpty || ExactBookkeepingAmount.parse(posting.amount) != nil else {
-                    throw BookkeepingError.reviewRequired("请核对分录的账户、金额和币种。")
+                    throw BookkeepingError.reviewRequired(String(localized: "请核对分录的账户、金额和币种。"))
                 }
             }
         }
@@ -63,9 +63,9 @@ enum BookkeepingError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .reviewRequired(let message): message
-        case .expiredPreview: "草稿或账本已变化，请重新生成预览。"
-        case .invalidModelResponse: "解析结果无法验证，请补充描述或手动编辑。"
-        case .configurationRequired: "请先配置语义解析接口、模型和 API Key。"
+        case .expiredPreview: String(localized: "草稿或账本已变化，请重新生成预览。")
+        case .invalidModelResponse: String(localized: "解析结果无法验证，请补充描述或手动编辑。")
+        case .configurationRequired: String(localized: "请先配置语义解析接口、模型和 API Key。")
         }
     }
 }

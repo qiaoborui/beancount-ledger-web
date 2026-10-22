@@ -65,7 +65,7 @@ enum LedgerShortcutNavigation {
 
     enum NavigationError: Error, LocalizedError {
         case unavailable
-        var errorDescription: String? { "暂时无法打开 Ledger，请稍后重试。" }
+        var errorDescription: String? { String(localized: "暂时无法打开 Ledger，请稍后重试。") }
     }
 }
 

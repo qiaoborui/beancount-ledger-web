@@ -8,19 +8,19 @@ struct TransactionShareTextFormatter {
     ) -> String {
         if transactions.count == 1, let tx = transactions.first {
             let p = TransactionPresentation(transaction: tx)
-            let kindStr = p.isRefund ? "退款" : (p.kind == .expense ? "支出" : (p.kind == .income ? "收入" : "转账"))
+            let kindStr = p.isRefund ? String(localized: "退款") : (p.kind == .expense ? String(localized: "支出") : (p.kind == .income ? String(localized: "收入") : String(localized: "转账")))
             let sign = p.isRefund ? "+" : (p.kind == .expense ? "-" : (p.kind == .income ? "+" : ""))
             var lines = [
-                "【Ledger 记账凭证】",
-                "类型：\(kindStr)",
-                "金额：\(sign)\(MoneyText.format(minorUnits: p.minorUnits, currency: p.currency))",
-                "时间：\(tx.date)"
+                String(localized: "【Ledger 记账凭证】"),
+                String(localized: "类型：\(kindStr)"),
+                String(localized: "金额：\(sign)\(MoneyText.format(minorUnits: p.minorUnits, currency: p.currency))"),
+                String(localized: "时间：\(tx.date)")
             ]
             let desc = tx.payee.isEmpty ? (tx.narration.isEmpty ? p.title : tx.narration) : (tx.narration.isEmpty ? tx.payee : "\(tx.payee) - \(tx.narration)")
-            lines.append("描述：\(desc)")
+            lines.append(String(localized: "描述：\(desc)"))
 
             if !tx.postings.isEmpty {
-                lines.append("分录：")
+                lines.append(String(localized: "分录："))
                 for posting in tx.postings {
                     let label = accountLabels[posting.account] ?? posting.account
                     let amt = MoneyText.format(minorUnits: abs(posting.amount), currency: posting.currency ?? p.currency)
@@ -29,10 +29,10 @@ struct TransactionShareTextFormatter {
                 }
             }
             if let tags = tx.tags, !tags.isEmpty {
-                lines.append("标签：\(tags.map { "#\($0)" }.joined(separator: " "))")
+                lines.append(String(localized: "标签：\(tags.map { "#\($0)" }.joined(separator: " "))"))
             }
             lines.append("----------------------------")
-            lines.append("由 Beancount Ledger 生成")
+            lines.append(String(localized: "由 Beancount Ledger 生成"))
             return lines.joined(separator: "\n")
         }
 
@@ -42,8 +42,8 @@ struct TransactionShareTextFormatter {
         let dateRange = dates.last == dates.first ? (dates.first ?? "") : "\(dates.last ?? "") ~ \(dates.first ?? "")"
 
         var lines = [
-            "【Ledger 流水明细】",
-            "时间：\(dateRange)（共 \(sorted.count) 笔）",
+            String(localized: "【Ledger 流水明细】"),
+            String(localized: "时间：\(dateRange)（共 \(sorted.count) 笔）"),
             "----------------------------"
         ]
 
@@ -60,7 +60,7 @@ struct TransactionShareTextFormatter {
 
         if lines.last == "" { lines.removeLast() }
         lines.append("----------------------------")
-        lines.append("由 Beancount Ledger 生成")
+        lines.append(String(localized: "由 Beancount Ledger 生成"))
         return lines.joined(separator: "\n")
     }
     static func row(_ tx: LedgerTransaction, accountLabels: [String: String]) -> String {
@@ -151,7 +151,7 @@ struct TransactionShareTextStream {
             guard count == summary.count, lastDate == summary.lastDate else { throw StreamError.countMismatch }
             if count != 1 {
                 if !started { try emit(header(), write: write) }
-                try emit("\n----------------------------\n由 Beancount Ledger 生成", write: write)
+                try emit(String(localized: "\n----------------------------\n由 Beancount Ledger 生成"), write: write)
             }
             completed = true
         } catch { failed = true; throw error }
@@ -160,7 +160,7 @@ struct TransactionShareTextStream {
     private func header() -> String {
         let first = summary.firstDate ?? "", last = summary.lastDate ?? ""
         let range = first == last ? first : "\(last) ~ \(first)"
-        return "【Ledger 流水明细】\n时间：\(range)（共 \(summary.count) 笔）\n----------------------------"
+        return String(localized: "【Ledger 流水明细】\n时间：\(range)（共 \(summary.count) 笔）\n----------------------------")
     }
 
     private func emit(_ text: String, write: (Data) throws -> Void) throws {

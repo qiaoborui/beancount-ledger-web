@@ -125,7 +125,7 @@ actor LocalLedgerRepository: LedgerRepository {
                        limit: Int = LocalTransactionWindow.listPageRows, expectedRevisionID: UUID) async throws -> LocalBootstrapPage {
         guard (1...500).contains(limit), LedgerWidgetLink.isValidDay(start),
               LedgerWidgetLink.isValidDay(end), LedgerWidgetLink.isValidDay(today), start < end else {
-            throw LocalLedgerError.invalidConfiguration("启动分页参数无效")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "启动分页参数无效"))
         }
         try Task.checkCancellation()
         let query = ["start": start, "end": end, "today": today,
@@ -174,7 +174,7 @@ actor LocalLedgerRepository: LedgerRepository {
         valuationCurrency: String, limit: Int = LocalTransactionWindow.listPageRows) async throws -> CachedStartupPresentation? {
         guard (1...500).contains(limit), LedgerWidgetLink.isValidDay(start),
               LedgerWidgetLink.isValidDay(end), LedgerWidgetLink.isValidDay(today), start < end else {
-            throw LocalLedgerError.invalidConfiguration("启动分页参数无效")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "启动分页参数无效"))
         }
         try Task.checkCancellation()
         let query = ["start": start, "end": end, "today": today,
@@ -212,7 +212,7 @@ actor LocalLedgerRepository: LedgerRepository {
               result.transactionPage.transactions.allSatisfy({ row in
                   LedgerWidgetLink.isValidDay(row.date) && row.date >= start && row.date < end && row.editableEntry == nil
               }) else {
-            throw LocalLedgerError.operationFailed("启动分页响应无效")
+            throw LocalLedgerError.operationFailed(String(localized: "启动分页响应无效"))
         }
     }
 
@@ -247,7 +247,7 @@ actor LocalLedgerRepository: LedgerRepository {
     func transactionPage(start: String = "0001-01-01", end: String = "9999-12-31",
                          query: String = "", cursor: String? = nil, limit: Int = 100,
                          account: String? = nil, tag: String? = nil, kind: String? = nil) async throws -> LedgerTransactionPage {
-        guard (1...500).contains(limit) else { throw LocalLedgerError.invalidConfiguration("分页数量必须为 1 到 500") }
+        guard (1...500).contains(limit) else { throw LocalLedgerError.invalidConfiguration(String(localized: "分页数量必须为 1 到 500")) }
         var parameters = ["start": start, "end": end, "q": query, "limit": String(limit)]
         parameters["cursor"] = cursor
         parameters["account"] = account
@@ -283,7 +283,7 @@ actor LocalLedgerRepository: LedgerRepository {
         let page = try await nativeCandidatePage(dialect: "native-pending-candidates-v1", start: start, end: end,
             cursor: cursor, limit: limit, expectedRevisionID: expectedRevisionID)
         guard page.transactions.allSatisfy({ $0.pendingReviewFlag != nil && $0.editableEntry == nil }) else {
-            throw LocalLedgerError.operationFailed("待整理分页缺少审核依据")
+            throw LocalLedgerError.operationFailed(String(localized: "待整理分页缺少审核依据"))
         }
         return page
     }
@@ -292,7 +292,7 @@ actor LocalLedgerRepository: LedgerRepository {
                                      expectedRevisionID: UUID) async throws -> LedgerTransactionPage {
         guard (1...500).contains(limit),
               cursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 }) ?? true else {
-            throw LocalLedgerError.invalidConfiguration("候选分页参数无效")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "候选分页参数无效"))
         }
         var query = ["dialect": dialect, "start": start, "end": end, "limit": String(limit)]
         query["cursor"] = cursor
@@ -302,11 +302,11 @@ actor LocalLedgerRepository: LedgerRepository {
         try Task.checkCancellation()
         let page = try response.decodeTransactionPage(maximumBytes: 1 << 20)
         guard page.sensitiveUnlocked else {
-            throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定")
+            throw LedgerAPIError.server(status: 423, message: String(localized: "账本敏感数据已锁定"))
         }
         guard !page.revision.isEmpty, page.transactions.count <= limit,
               page.nextCursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 && $0 != cursor }) ?? true else {
-            throw LocalLedgerError.operationFailed("候选分页响应无效")
+            throw LocalLedgerError.operationFailed(String(localized: "候选分页响应无效"))
         }
         // Pinning keeps the generation readable, not current: a writer can commit
         // while the engine is suspended, including on the very last page.
@@ -457,7 +457,7 @@ actor LocalLedgerRepository: LedgerRepository {
                      expectedRevisionID: UUID) async throws -> LedgerAccountPage {
         guard !account.isEmpty, !currency.isEmpty, (1...500).contains(limit),
               cursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 }) ?? true else {
-            throw LocalLedgerError.invalidConfiguration("账户分页参数无效")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "账户分页参数无效"))
         }
         var query = ["account": account, "currency": currency, "start": start, "end": end, "limit": String(limit)]
         query["cursor"] = cursor
@@ -467,7 +467,7 @@ actor LocalLedgerRepository: LedgerRepository {
             expectedRevisionID: expectedRevisionID)
         try Task.checkCancellation()
         let page = try response.decodeAccountPage()
-        guard page.sensitiveUnlocked else { throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定") }
+        guard page.sensitiveUnlocked else { throw LedgerAPIError.server(status: 423, message: String(localized: "账本敏感数据已锁定")) }
         let detail = page.detail
         guard !page.revision.isEmpty, detail.account == account, detail.currency == currency,
               detail.start ?? "" == start, detail.end ?? "" == end,
@@ -475,35 +475,35 @@ actor LocalLedgerRepository: LedgerRepository {
               let opening = detail.openingBalance, let closing = detail.closingBalance, let change = detail.periodChange,
               page.nextCursor.map({ !$0.isEmpty && $0.utf8.count <= 1_024 && $0 != cursor }) ?? true,
               page.nextCursor == nil || (!detail.rows.isEmpty && page.rowCount > detail.rows.count) else {
-            throw LocalLedgerError.operationFailed("账户分页响应无效")
+            throw LocalLedgerError.operationFailed(String(localized: "账户分页响应无效"))
         }
         if cursor == nil {
             guard (page.nextCursor != nil) == (page.rowCount > detail.rows.count),
                   page.rowCount == 0 || !detail.rows.isEmpty else {
-                throw LocalLedgerError.operationFailed("账户首页流水不完整")
+                throw LocalLedgerError.operationFailed(String(localized: "账户首页流水不完整"))
             }
             if let first = detail.rows.first {
                 if order == .asc {
                     let (balance, overflow) = opening.addingReportingOverflow(first.change)
-                    guard !overflow, balance == first.balance else { throw LocalLedgerError.operationFailed("账户期初流水余额不一致") }
-                } else if first.balance != closing { throw LocalLedgerError.operationFailed("账户期末流水余额不一致") }
+                    guard !overflow, balance == first.balance else { throw LocalLedgerError.operationFailed(String(localized: "账户期初流水余额不一致")) }
+                } else if first.balance != closing { throw LocalLedgerError.operationFailed(String(localized: "账户期末流水余额不一致")) }
             }
         }
         if page.nextCursor == nil, let last = detail.rows.last {
             if order == .asc {
-                guard last.balance == closing else { throw LocalLedgerError.operationFailed("账户期末流水余额不一致") }
+                guard last.balance == closing else { throw LocalLedgerError.operationFailed(String(localized: "账户期末流水余额不一致")) }
             } else {
                 let (balance, overflow) = last.balance.subtractingReportingOverflow(last.change)
-                guard !overflow, balance == opening else { throw LocalLedgerError.operationFailed("账户期初流水余额不一致") }
+                guard !overflow, balance == opening else { throw LocalLedgerError.operationFailed(String(localized: "账户期初流水余额不一致")) }
             }
         }
         if page.rowCount == 0 {
             guard opening == closing, detail.rows.isEmpty, page.nextCursor == nil else {
-                throw LocalLedgerError.operationFailed("空账户期间余额不一致")
+                throw LocalLedgerError.operationFailed(String(localized: "空账户期间余额不一致"))
             }
         }
         let (calculated, overflow) = closing.subtractingReportingOverflow(opening)
-        guard !overflow, calculated == change else { throw LocalLedgerError.operationFailed("账户期间余额不一致") }
+        guard !overflow, calculated == change else { throw LocalLedgerError.operationFailed(String(localized: "账户期间余额不一致")) }
         var previous: LedgerAccountDetailRow?
         var ids: Set<String> = []
         for row in detail.rows {
@@ -511,13 +511,13 @@ actor LocalLedgerRepository: LedgerRepository {
                   row.narration == row.transaction.narration, ids.insert(row.id).inserted,
                   start.isEmpty || (row.date >= start && row.date < end),
                   previous.map({ order == .asc ? $0.date <= row.date : $0.date >= row.date }) ?? true else {
-                throw LocalLedgerError.operationFailed("账户分页流水不一致")
+                throw LocalLedgerError.operationFailed(String(localized: "账户分页流水不一致"))
             }
             if let previous {
                 let (balance, overflow) = order == .asc
                     ? previous.balance.addingReportingOverflow(row.change)
                     : previous.balance.subtractingReportingOverflow(previous.change)
-                guard !overflow, balance == row.balance else { throw LocalLedgerError.operationFailed("账户流水余额不一致") }
+                guard !overflow, balance == row.balance else { throw LocalLedgerError.operationFailed(String(localized: "账户流水余额不一致")) }
             }
             previous = row
         }
@@ -623,7 +623,7 @@ actor LocalLedgerRepository: LedgerRepository {
     private static func validateOverviewCategories(_ result: LedgerOverviewCategories,
                                                    start: String, end: String) throws {
         guard result.sensitiveUnlocked else {
-            throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定")
+            throw LedgerAPIError.server(status: 423, message: String(localized: "账本敏感数据已锁定"))
         }
         guard result.start == start, result.end == end, !result.revision.isEmpty,
               result.categories.count <= 4, result.positiveTotalMinorUnits >= 0,
@@ -632,7 +632,7 @@ actor LocalLedgerRepository: LedgerRepository {
               result.categories.allSatisfy({ $0.totalMinorUnits > 0
                   && $0.totalMinorUnits <= result.positiveTotalMinorUnits
                   && $0.positiveTransactionCount > 0 }) else {
-            throw LocalLedgerError.operationFailed("概览汇总响应无效")
+            throw LocalLedgerError.operationFailed(String(localized: "概览汇总响应无效"))
         }
     }
 
@@ -648,12 +648,12 @@ actor LocalLedgerRepository: LedgerRepository {
         guard !source.file.isEmpty, !source.file.hasPrefix("/"),
               !source.file.contains("\\"), !source.file.contains("\0"),
               source.line >= 0, let hash = source.hash, !hash.isEmpty else {
-            throw LocalLedgerError.invalidConfiguration("交易来源无效")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "交易来源无效"))
         }
         var depth = 0
         for component in source.file.split(separator: "/") where component != "." {
             depth += component == ".." ? -1 : 1
-            guard depth >= 0 else { throw LocalLedgerError.invalidConfiguration("交易来源无效") }
+            guard depth >= 0 else { throw LocalLedgerError.invalidConfiguration(String(localized: "交易来源无效")) }
         }
         let (_, response) = try await readSnapshot("/api/ledger/transactions/detail",
             query: ["file": source.file, "line": String(source.line), "hash": hash],
@@ -713,7 +713,7 @@ actor LocalLedgerRepository: LedgerRepository {
             query: ["start": "0001-01-01", "end": "9999-12-31"], expectedRevisionID: expectedRevisionID)
         try Task.checkCancellation()
         let payload = try response.decode(LedgerGlobalTransactions.self)
-        guard payload.sensitiveUnlocked else { throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定") }
+        guard payload.sensitiveUnlocked else { throw LedgerAPIError.server(status: 423, message: String(localized: "账本敏感数据已锁定")) }
         let current = try await workspace.currentRevision()
         try Task.checkCancellation()
         guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
@@ -761,14 +761,14 @@ actor LocalLedgerRepository: LedgerRepository {
     /// advance the revision that authorizes writes; no legacy fallback on error.
     func reconciliationSnapshot(start: String, end: String, expectedRevisionID: UUID) async throws -> LocalReconciliationSnapshot {
         guard LedgerWidgetLink.isValidDay(start), LedgerWidgetLink.isValidDay(end), start < end else {
-            throw LocalLedgerError.invalidConfiguration("对账日期范围无效")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "对账日期范围无效"))
         }
         try Task.checkCancellation()
         let (_, response) = try await readSnapshot("/api/ledger/reconciliation/snapshot",
             query: ["start": start, "end": end], expectedRevisionID: expectedRevisionID)
         try Task.checkCancellation()
         let result = try response.decodeReconciliationSnapshot()
-        guard result.sensitiveUnlocked else { throw LedgerAPIError.server(status: 423, message: "账本敏感数据已锁定") }
+        guard result.sensitiveUnlocked else { throw LedgerAPIError.server(status: 423, message: String(localized: "账本敏感数据已锁定")) }
         guard !result.revision.isEmpty, result.start == start, result.end == end,
               result.monthPrefix == String(start.prefix(7)), result.rows.count <= 10_000,
               result.rows.allSatisfy({ row in
@@ -782,7 +782,7 @@ actor LocalLedgerRepository: LedgerRepository {
                     && (row.lastAssertion.map { assertion in
                         assertion.account == row.account && LedgerWidgetLink.isValidDay(assertion.date)
                     } ?? true)
-              }) else { throw LocalLedgerError.operationFailed("对账快照响应无效") }
+              }) else { throw LocalLedgerError.operationFailed(String(localized: "对账快照响应无效")) }
         let current = try await workspace.currentRevision()
         try Task.checkCancellation()
         guard current?.id == expectedRevisionID else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
@@ -868,15 +868,15 @@ actor LocalLedgerRepository: LedgerRepository {
         let files = try await workspace.prepare(expectedRevisionID: revision.id, mutateStage: { root in
             let main = root.appendingPathComponent(entrypoint)
             guard FileManager.default.fileExists(atPath: main.path) else {
-                throw BookkeepingError.reviewRequired("未找到入口文件：\(entrypoint)")
+                throw BookkeepingError.reviewRequired(String(localized: "未找到入口文件：\(entrypoint)"))
             }
             let raw = try Data(contentsOf: main)
             guard let content = String(data: raw, encoding: .utf8) else {
-                throw BookkeepingError.reviewRequired("入口文件编码异常")
+                throw BookkeepingError.reviewRequired(String(localized: "入口文件编码异常"))
             }
             let marker = "; import-fingerprint: " + evidence.fingerprint
             if content.contains(marker) {
-                throw BookkeepingError.reviewRequired("相同交易内容已导入，请核对现有记录。")
+                throw BookkeepingError.reviewRequired(String(localized: "相同交易内容已导入，请核对现有记录。"))
             }
             var next = content
             if !next.hasSuffix("\n") { next += "\n" }
@@ -970,7 +970,7 @@ actor LocalLedgerRepository: LedgerRepository {
                 if try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
                     let normalized = url.standardizedFileURL
                     guard normalized.path.hasPrefix(root.path + "/") else {
-                        throw LocalLedgerError.invalidConfiguration("文件路径超出当前账本")
+                        throw LocalLedgerError.invalidConfiguration(String(localized: "文件路径超出当前账本"))
                     }
                     paths.append(String(normalized.path.dropFirst(root.path.count + 1)))
                 }
@@ -982,7 +982,7 @@ actor LocalLedgerRepository: LedgerRepository {
         try validBeanPath(path)
         let snapshot = try await workspace.readFileSnapshot(at: path)
         guard let text = String(data: snapshot.data, encoding: .utf8) else {
-            throw LocalLedgerError.invalidConfiguration("文件需要使用 UTF-8 编码")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "文件需要使用 UTF-8 编码"))
         }
         return LocalLedgerFileDraft(path: path, text: text, revisionID: snapshot.revision.id)
     }
@@ -1007,7 +1007,7 @@ actor LocalLedgerRepository: LedgerRepository {
                 // reflogs and object history stay in the original local workspace.
                 guard let enumerator = FileManager.default.enumerator(at: destination,
                     includingPropertiesForKeys: nil) else {
-                    throw LocalLedgerError.operationFailed("无法读取账本导出目录")
+                    throw LocalLedgerError.operationFailed(String(localized: "无法读取账本导出目录"))
                 }
                 var metadata: [URL] = []
                 while let url = enumerator.nextObject() as? URL {
@@ -1052,14 +1052,14 @@ actor LocalLedgerRepository: LedgerRepository {
     }
     func generateBQLHistoryTitle(id: String) async throws -> BQLHistoryRecord {
         guard let record = try await bqlHistory().first(where: { $0.id == id }) else {
-            throw LocalLedgerError.operationFailed("查询记录已移除")
+            throw LocalLedgerError.operationFailed(String(localized: "查询记录已移除"))
         }
         return try await renameBQLHistory(id: id, title: String(record.query.prefix(60)))
     }
     func renameBQLHistory(id: String, title: String) async throws -> BQLHistoryRecord {
         var records = try await bqlHistory()
         guard let index = records.firstIndex(where: { $0.id == id }) else {
-            throw LocalLedgerError.operationFailed("查询记录已移除")
+            throw LocalLedgerError.operationFailed(String(localized: "查询记录已移除"))
         }
         let old = records[index]
         let record = BQLHistoryRecord(id: old.id, query: old.query, title: title, titleSource: "manual",
@@ -1091,7 +1091,7 @@ actor LocalLedgerRepository: LedgerRepository {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard path.hasSuffix(".bean"), !path.contains("\\"), !path.contains("\0"),
             parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
-            throw LocalLedgerError.invalidConfiguration("请选择账本内的 .bean 文件")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "请选择账本内的 .bean 文件"))
         }
     }
     private func read<T: Decodable>(_ path: String, method: String = "GET", query: [String: String] = [:],
@@ -1161,7 +1161,7 @@ actor LocalLedgerRepository: LedgerRepository {
             _ = try data.decode(T.self)
             await box.set(data)
         }, validator: { root in try await validator(root, entrypoint) })
-        guard let data = await box.data else { throw LocalLedgerError.operationFailed("本地修改缺少结果") }
+        guard let data = await box.data else { throw LocalLedgerError.operationFailed(String(localized: "本地修改缺少结果")) }
         presentedRevisionID = revision.id
         await storage.didCommit(revision)
         NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)

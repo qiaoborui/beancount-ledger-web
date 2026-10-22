@@ -7,6 +7,15 @@ enum ReconciliationStatusFilter: String, CaseIterable, Identifiable {
     case asserted = "已核平"
 
     var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: String(localized: "全部")
+        case .pending: String(localized: "待对账")
+        case .error: String(localized: "异常")
+        case .asserted: String(localized: "已核平")
+        }
+    }
 }
 
 enum LedgerReconciliationDates {
@@ -51,10 +60,10 @@ extension LedgerAccountStatus {
 
     var statusLabel: String {
         switch status {
-        case "green": "已核平"
-        case "red": "异常"
-        case "yellow": "待对账"
-        default: "未断言"
+        case "green": String(localized: "已核平")
+        case "red": String(localized: "异常")
+        case "yellow": String(localized: "待对账")
+        default: String(localized: "未断言")
         }
     }
 
@@ -157,8 +166,8 @@ struct ReconciliationView: View {
         let asset = filteredRows.filter { !$0.account.hasPrefix("Liabilities:") }
         let liability = filteredRows.filter { $0.account.hasPrefix("Liabilities:") }
         var groups: [(String, [LedgerReconciliationRow])] = []
-        if !asset.isEmpty { groups.append(("资产", asset)) }
-        if !liability.isEmpty { groups.append(("负债", liability)) }
+        if !asset.isEmpty { groups.append((String(localized: "资产"), asset)) }
+        if !liability.isEmpty { groups.append((String(localized: "负债"), liability)) }
         return groups
     }
 
@@ -225,8 +234,8 @@ struct ReconciliationView: View {
                 Section {
                     BalancedEmptyState(
                         glyph: "checkmark.seal",
-                        title: allRows.isEmpty ? "暂无可对账账户" : "没有匹配的账户",
-                        detail: "调整筛选条件后再试一次。"
+                        title: allRows.isEmpty ? String(localized: "暂无可对账账户") : String(localized: "没有匹配的账户"),
+                        detail: String(localized: "调整筛选条件后再试一次。")
                     )
                 }
                 .listRowBackground(Color.clear)
@@ -252,7 +261,7 @@ struct ReconciliationView: View {
         .background(BalancedPalette.page)
         .accessibilityIdentifier("reconciliation-list")
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "搜索账户名或路径")
-        .terminalPageChrome("对账", isRoot: isRoot, showsSync: false, actions: AnyView(
+        .terminalPageChrome(String(localized: "对账"), isRoot: isRoot, showsSync: false, actions: AnyView(
             Button {
                 Task { isRefreshing = true; await session.refresh(); isRefreshing = false }
             } label: {
@@ -278,9 +287,9 @@ struct ReconciliationView: View {
     /// not yet classified one way or the other), 异常 in `--out`.
     private var summaryBand: some View {
         VStack(alignment: .leading, spacing: 0) {
-            summaryRow(title: "已核平", count: summaryMetrics.asserted, color: BalancedPalette.income)
-            summaryRow(title: "待对账", count: summaryMetrics.pending, color: BalancedPalette.ink)
-            summaryRow(title: "异常", count: summaryMetrics.error, color: BalancedPalette.expense)
+            summaryRow(title: String(localized: "已核平"), count: summaryMetrics.asserted, color: BalancedPalette.income)
+            summaryRow(title: String(localized: "待对账"), count: summaryMetrics.pending, color: BalancedPalette.ink)
+            summaryRow(title: String(localized: "异常"), count: summaryMetrics.error, color: BalancedPalette.expense)
         }
         .balancedBand()
     }
@@ -298,7 +307,7 @@ struct ReconciliationView: View {
     private var statusTabs: some View {
         HStack(spacing: 20) {
             ForEach(ReconciliationStatusFilter.allCases) { filter in
-                let title = filter == .all ? filter.rawValue : "\(filter.rawValue) \(count(for: filter))"
+                let title = filter == .all ? filter.title : "\(filter.title) \(count(for: filter))"
                 Button {
                     LedgerFeedback.selection()
                     withAnimation(.easeOut(duration: 0.18)) { selectedStatus = filter }
@@ -328,14 +337,14 @@ struct ReconciliationView: View {
         let leadText: String
         let tagText: String
         if hasError, let assertionAmount = st?.assertionAmount {
-            leadText = "差异 " + MoneyText.format(minorUnits: row.ledgerBalance - assertionAmount, currency: cur, showSign: true)
-            tagText = "异常"
+            leadText = String(localized: "差异 ") + MoneyText.format(minorUnits: row.ledgerBalance - assertionAmount, currency: cur, showSign: true)
+            tagText = String(localized: "异常")
         } else if let last = row.lastAssertion {
-            leadText = "\(last.date) 断言"
-            tagText = isAsserted ? "已核平" : "待对账"
+            leadText = String(localized: "\(last.date) 断言")
+            tagText = isAsserted ? String(localized: "已核平") : String(localized: "待对账")
         } else {
-            leadText = "尚未断言"
-            tagText = "待对账"
+            leadText = String(localized: "尚未断言")
+            tagText = String(localized: "待对账")
         }
 
         return NavigationLink {
@@ -347,7 +356,7 @@ struct ReconciliationView: View {
                     HStack(spacing: 4) {
                         Text(leadText).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).lineLimit(1)
                         Text("·").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
-                        BalancedTag(text: tagText, kind: tagText == "已核平" ? .ok : .pending)
+                        BalancedTag(text: tagText, kind: tagText == String(localized: "已核平") ? .ok : .pending)
                     }
                 }
                 Spacer(minLength: 8)
@@ -467,9 +476,9 @@ struct ReconciliationFormBody: View {
     /// fixed placeholder) when one is written.
     private var noteText: String {
         guard let diff = diffCents, diff != 0 else {
-            return "账实一致，仅写入余额断言，不记任何调整分录。"
+            return String(localized: "账实一致，仅写入余额断言，不记任何调整分录。")
         }
-        return "差异会记成一笔 \(adjustmentTargetAccount) 的调整分录，不会改动已有流水。"
+        return String(localized: "差异会记成一笔 \(adjustmentTargetAccount) 的调整分录，不会改动已有流水。")
     }
 
     private var previewLines: [String] {
@@ -494,13 +503,13 @@ struct ReconciliationFormBody: View {
                 .padding(.bottom, 14)
 
             VStack(spacing: 0) {
-                BalancedKeyRow(label: "账本余额", minorUnits: row.ledgerBalance, currency: currency, color: BalancedPalette.ink)
-                BalancedKeyRow(label: "实际余额", minorUnits: actualCents ?? row.ledgerBalance, currency: currency, color: BalancedPalette.ink)
-                BalancedKeyRow(label: "差异", minorUnits: abs(diffCents ?? 0), currency: currency,
+                BalancedKeyRow(label: String(localized: "账本余额"), minorUnits: row.ledgerBalance, currency: currency, color: BalancedPalette.ink)
+                BalancedKeyRow(label: String(localized: "实际余额"), minorUnits: actualCents ?? row.ledgerBalance, currency: currency, color: BalancedPalette.ink)
+                BalancedKeyRow(label: String(localized: "差异"), minorUnits: abs(diffCents ?? 0), currency: currency,
                     prefix: (diffCents ?? 0) > 0 ? "+" : (diffCents ?? 0) < 0 ? "−" : "",
                     color: (diffCents ?? 0) == 0 ? BalancedPalette.meta : ((diffCents ?? 0) > 0 ? BalancedPalette.income : BalancedPalette.expense))
                 Rectangle().fill(BalancedPalette.rule).frame(height: 1).padding(.vertical, 12)
-                BalancedKeyRow(label: "断言后余额", minorUnits: actualCents ?? row.ledgerBalance, currency: currency,
+                BalancedKeyRow(label: String(localized: "断言后余额"), minorUnits: actualCents ?? row.ledgerBalance, currency: currency,
                     color: BalancedPalette.ink, isTotal: true, settle: true)
             }
             .balancedBand()
@@ -553,7 +562,7 @@ struct ReconciliationFormBody: View {
             }
 
             if !previewLines.isEmpty {
-                BalancedSectionLabel(text: "将写入", aside: "main.bean")
+                BalancedSectionLabel(text: String(localized: "将写入"), aside: "main.bean")
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(previewLines, id: \.self) { line in
                         Text(line).balancedMono(size: 11, weight: .regular).foregroundStyle(BalancedPalette.ink)
@@ -595,7 +604,7 @@ struct ReconciliationFormBody: View {
                 adjustmentDate: adjustmentDate
             )
             isSubmitting = false
-            let msg = diff == 0 ? "\(row.label) 余额断言已成功记录！" : "\(row.label) 平账调整与断言已成功写入！"
+            let msg = diff == 0 ? String(localized: "\(row.label) 余额断言已成功记录！") : String(localized: "\(row.label) 平账调整与断言已成功写入！")
             onReconcileSuccess(msg)
             dismiss()
         } catch {
@@ -712,7 +721,7 @@ struct SingleAccountReconciliationSheet: View {
             let rows = try await session.localReconciliationRows(start: session.selectedRange.start, end: session.selectedRange.queryEndExclusive)
             guard !Task.isCancelled, readID == id, key == readKey, readable else { return }
             guard let row = rows.first(where: { $0.account == account }) else {
-                readError = "当前账本中没有可对账的此账户。"; return
+                readError = String(localized: "当前账本中没有可对账的此账户。"); return
             }
             localRow = row; completedKey = key
         } catch {

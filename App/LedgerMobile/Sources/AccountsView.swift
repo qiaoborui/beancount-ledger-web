@@ -10,6 +10,16 @@ enum AccountFilterCategory: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var title: String {
+        switch self {
+        case .all: String(localized: "全部")
+        case .cash: String(localized: "资金")
+        case .credit: String(localized: "信用")
+        case .wealth: String(localized: "理财")
+        case .receivable: String(localized: "应收")
+        }
+    }
+
     func matches(section: AccountBalanceSection) -> Bool {
         switch self {
         case .all:
@@ -93,17 +103,17 @@ struct AccountsView: View {
                             .accessibilityLabel(session.amountsVisible ? "隐藏金额" : "显示金额")
                     }
                     BalancedKeyTotalText.value(minorUnits: totals.netWorth, currency: session.ledger?.valuationCurrency ?? "CNY", color: BalancedPalette.ink, amountsVisible: session.amountsVisible)
-                        .accessibilityLabel(session.amountsVisible ? MoneyText.format(minorUnits: totals.netWorth, currency: session.ledger?.valuationCurrency ?? "CNY") : "金额已隐藏")
+                        .accessibilityLabel(session.amountsVisible ? MoneyText.format(minorUnits: totals.netWorth, currency: session.ledger?.valuationCurrency ?? "CNY") : String(localized: "金额已隐藏"))
                     TerminalRule()
                     let metricLayout = dynamicTypeSize.isAccessibilitySize
                         ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
                         : AnyLayout(HStackLayout(spacing: 0))
                     metricLayout {
-                        accountMetric("资产", value: totals.assets, color: TerminalPalette.positive)
+                        accountMetric(String(localized: "资产"), value: totals.assets, color: TerminalPalette.positive)
                         if !dynamicTypeSize.isAccessibilitySize {
                             Rectangle().fill(TerminalPalette.line).frame(width: 1, height: 30).padding(.horizontal, 12)
                         }
-                        accountMetric("负债", value: totals.liabilities, color: TerminalPalette.negative, prefix: totals.liabilities > 0 ? "−" : "")
+                        accountMetric(String(localized: "负债"), value: totals.liabilities, color: TerminalPalette.negative, prefix: totals.liabilities > 0 ? "−" : "")
                     }
                 }
                 .padding(.horizontal, 4).padding(.vertical, 8)
@@ -123,7 +133,7 @@ struct AccountsView: View {
                         } label: {
                             VStack(spacing: 7) {
                                 HStack(spacing: 4) {
-                                    Text(filter.rawValue).balancedFont(size: 13, weight: selectedFilter == filter ? .medium : .regular).lineLimit(1)
+                                    Text(filter.title).balancedFont(size: 13, weight: selectedFilter == filter ? .medium : .regular).lineLimit(1)
                                     Text("\(count)").balancedFont(size: 11).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                                 }
                                 .foregroundStyle(selectedFilter == filter ? BalancedPalette.ink : BalancedPalette.meta)
@@ -189,7 +199,7 @@ struct AccountsView: View {
             } header: {
                 if !sections.isEmpty {
                     HStack {
-                        TerminalSectionLabel(text: "\(sections.count) 个账户组")
+                        TerminalSectionLabel(text: String(localized: "\(sections.count) 个账户组"))
                         Spacer()
                         Button(allVisibleSectionsExpanded ? "全部折叠" : "全部展开") {
                             let visibleIDs = Set(sections.map(\.id))
@@ -214,7 +224,7 @@ struct AccountsView: View {
         .listSectionSpacing(8)
         .tint(TerminalPalette.accent)
         .accessibilityIdentifier("accounts-list")
-        .terminalPageChrome("账户", isRoot: isRoot, showsTimeRange: true, actions: AnyView(
+        .terminalPageChrome(String(localized: "账户"), isRoot: isRoot, showsTimeRange: true, actions: AnyView(
             Menu {
                 Button("新建账户") { showingAddAccount = true }
                     .accessibilityIdentifier("accounts-add-button")
@@ -292,16 +302,16 @@ private enum AccountGroupSymbol {
 
     static func title(for group: String) -> String {
         switch group {
-        case "cash": "现金与支付"
-        case "credit": "信用账户"
-        case "liability": "负债"
-        case "wealth": "储蓄与资产"
-        case "receivable": "应收"
-        case "asset": "资产"
-        case "expense": "支出账户"
-        case "income": "收入账户"
-        case "equity": "权益"
-        default: "其他"
+        case "cash": String(localized: "现金与支付")
+        case "credit": String(localized: "信用账户")
+        case "liability": String(localized: "负债")
+        case "wealth": String(localized: "储蓄与资产")
+        case "receivable": String(localized: "应收")
+        case "asset": String(localized: "资产")
+        case "expense": String(localized: "支出账户")
+        case "income": String(localized: "收入账户")
+        case "equity": String(localized: "权益")
+        default: String(localized: "其他")
         }
     }
 }
@@ -369,7 +379,7 @@ struct AccountDetailView: View {
                 VStack(spacing: LedgerSpacing.lg) {
                     EmptyLedgerState(
                         icon: "exclamationmark.triangle",
-                        title: "账户详情加载失败",
+                        title: String(localized: "账户详情加载失败"),
                         detail: errorMessage
                     )
                     Button("重新加载") {
@@ -398,7 +408,7 @@ struct AccountDetailView: View {
             }
         }
         .background(LedgerPalette.canvas)
-        .terminalPageChrome(detail?.label ?? "账户详情", compactTitle: "账户详情", isRoot: false, showsTimeRange: true, actions: AnyView(
+        .terminalPageChrome(detail?.label ?? String(localized: "账户详情"), compactTitle: String(localized: "账户详情"), isRoot: false, showsTimeRange: true, actions: AnyView(
             Button { showingReconcileSheet = true } label: {
                 Image(systemName: "checkmark.seal").font(.system(size: 16))
                     .foregroundStyle(TerminalPalette.accent).frame(width: 44, height: 44)
@@ -612,7 +622,7 @@ struct AccountDetailView: View {
             self.localWindow = window
         } catch {
             if !Task.isCancelled, key == requestKey {
-                errorMessage = error is CancellationError ? "账户读取已中断，请重新加载。" : error.localizedDescription
+                errorMessage = error is CancellationError ? String(localized: "账户读取已中断，请重新加载。") : error.localizedDescription
             }
         }
     }
@@ -636,7 +646,7 @@ struct AccountDetailView: View {
             completedRequest = key
         } catch {
             if !Task.isCancelled, key == requestKey {
-                errorMessage = error is CancellationError ? "账户读取已中断，请重新加载。" : error.localizedDescription
+                errorMessage = error is CancellationError ? String(localized: "账户读取已中断，请重新加载。") : error.localizedDescription
             }
         }
     }
@@ -656,7 +666,7 @@ struct AccountDetailView: View {
         } catch {
             if !Task.isCancelled, key == trendKey {
                 completeTrend = nil
-                trendError = error is CancellationError ? "读取已中断，请重试。" : error.localizedDescription
+                trendError = error is CancellationError ? String(localized: "读取已中断，请重试。") : error.localizedDescription
             }
         }
     }
@@ -1001,7 +1011,7 @@ private struct AccountBalanceTrendPanel: View {
     }
 
     private var rangeLabel: String {
-        "\(range.start.replacingOccurrences(of: "-", with: "/")) 至 \(range.end.replacingOccurrences(of: "-", with: "/"))"
+        String(localized: "\(range.start.replacingOccurrences(of: "-", with: "/")) 至 \(range.end.replacingOccurrences(of: "-", with: "/"))")
     }
 
     private func selectionOverlay(proxy: ChartProxy) -> some View {
@@ -1032,7 +1042,7 @@ private struct AccountHistoryRow: View {
     private var title: String {
         if !row.payee.isEmpty { return row.payee }
         if !row.narration.isEmpty { return row.narration }
-        return "未命名交易"
+        return String(localized: "未命名交易")
     }
 
     var body: some View {
