@@ -47,11 +47,20 @@ struct LedgerMobileApp: App {
                         if didStartSession {
                             await session.automaticallyUnlockIfNeeded()
                         }
+                        if phase == .active {
+                            await session.runAutomaticLedgerBackupIfDue()
+                        }
                         #if os(iOS)
                         if phase == .background {
                             await session.flushBackgroundLocalSyncIfNeeded()
                         }
                         #endif
+                    }
+                }
+                .onChange(of: session.phase) { _, phase in
+                    // Unlocking finishes after the scene became active.
+                    if phase == .ready, scenePhase == .active {
+                        Task { await session.runAutomaticLedgerBackupIfDue() }
                     }
                 }
                 .onOpenURL { url in
