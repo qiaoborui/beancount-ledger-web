@@ -1284,6 +1284,16 @@
         }
       }
     },
+    "跟随系统" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
+          }
+        }
+      }
+    },
     "近12周" : {
       "localizations" : {
         "en" : {

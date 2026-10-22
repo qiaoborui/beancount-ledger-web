@@ -7,6 +7,9 @@ struct SettingsView: View {
     @State private var editingCurrentLedger = false
     @State private var confirmingDeleteCurrent = false
     @State private var showingLockIntervalPicker = false
+    @State private var showingLanguagePicker = false
+    @State private var appLanguage = LedgerAppLanguage.current()
+    @State private var languageChangePending = false
     var isRoot = true
 
     var body: some View {
@@ -21,6 +24,23 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings-compact-tabs")
             } header: { TerminalSectionLabel(text: String(localized: "导航")).listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
+
+            Section {
+                SettingsRow(title: String(localized: "语言"), value: appLanguage.title) {
+                    showingLanguagePicker = true
+                }
+                .accessibilityIdentifier("settings-app-language")
+            } header: {
+                TerminalSectionLabel(text: String(localized: "语言")).listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+            } footer: {
+                if languageChangePending {
+                    Text("完全退出并重新打开应用后生效。小组件和分享扩展跟随系统语言。")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        .listRowBackground(BalancedPalette.page)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                }
+            }
 
             Section {
                 if session.isLocal {
@@ -166,6 +186,16 @@ struct SettingsView: View {
         .confirmationDialog("自动锁定", isPresented: $showingLockIntervalPicker, titleVisibility: .visible) {
             ForEach(LedgerLockInterval.allCases) { interval in
                 Button(interval.title) { session.setLockInterval(interval) }
+            }
+        }
+        .confirmationDialog("语言", isPresented: $showingLanguagePicker, titleVisibility: .visible) {
+            ForEach(LedgerAppLanguage.allCases) { language in
+                Button(language.title) {
+                    guard language != appLanguage else { return }
+                    language.apply()
+                    appLanguage = language
+                    languageChangePending = true
+                }
             }
         }
         .scrollContentBackground(.hidden)

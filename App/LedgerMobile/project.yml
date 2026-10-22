@@ -48,6 +48,8 @@ targets:
         CFBundleDisplayName: Ledger
         # Source strings are Simplified Chinese; other languages fall back to English.
         CFBundleDevelopmentRegion: en
+        # Declare both languages to iOS whether or not the build emits a zh-Hans.lproj for the source strings.
+        CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIAppFonts:
@@ -139,6 +141,7 @@ targets:
       properties:
         CFBundleDisplayName: Ledger 小组件
         CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
@@ -170,6 +173,7 @@ targets:
       properties:
         CFBundleDisplayName: 存入 Ledger
         CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:

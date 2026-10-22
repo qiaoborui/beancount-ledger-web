@@ -85,3 +85,45 @@ enum LedgerDateLabel {
         return calendar.veryShortWeekdaySymbols
     }
 }
+
+/// The app's own language choice.
+///
+/// iOS shows its per-app language picker only when the device lists more than
+/// one preferred language, so a device set to English alone has no way back to
+/// Chinese. The app stores the choice as its own `AppleLanguages` default, which
+/// iOS reads at the next launch.
+enum LedgerAppLanguage: String, CaseIterable, Identifiable {
+    case system
+    case simplifiedChinese = "zh-Hans"
+    case english = "en"
+
+    private static let defaultsKey = "AppleLanguages"
+
+    var id: String { rawValue }
+
+    /// Language names stay in their own language so they read the same in every UI.
+    var title: String {
+        switch self {
+        case .system: String(localized: "跟随系统")
+        case .simplifiedChinese: "简体中文"
+        case .english: "English"
+        }
+    }
+
+    /// Only the app's own domain counts; `UserDefaults.standard` would also
+    /// return the device-wide list.
+    static func current(in defaults: UserDefaults = .standard) -> LedgerAppLanguage {
+        guard let identifier = Bundle.main.bundleIdentifier,
+              let languages = defaults.persistentDomain(forName: identifier)?[defaultsKey] as? [String],
+              let first = languages.first else { return .system }
+        return allCases.first { $0 != .system && first.hasPrefix($0.rawValue) } ?? .system
+    }
+
+    func apply(to defaults: UserDefaults = .standard) {
+        if self == .system {
+            defaults.removeObject(forKey: Self.defaultsKey)
+        } else {
+            defaults.set([rawValue], forKey: Self.defaultsKey)
+        }
+    }
+}

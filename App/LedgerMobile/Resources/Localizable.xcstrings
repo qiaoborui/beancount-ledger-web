@@ -6409,6 +6409,16 @@
         }
       }
     },
+    "完全退出并重新打开应用后生效。小组件和分享扩展跟随系统语言。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Takes effect after you fully quit and reopen the app. Widgets and the share extension follow the system language."
+          }
+        }
+      }
+    },
     "完成" : {
       "localizations" : {
         "en" : {
@@ -16129,6 +16139,16 @@
         }
       }
     },
+    "语言" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Language"
+          }
+        }
+      }
+    },
     "说明" : {
       "localizations" : {
         "en" : {
@@ -17575,6 +17595,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Trend granularity"
+          }
+        }
+      }
+    },
+    "跟随系统" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
           }
         }
       }
