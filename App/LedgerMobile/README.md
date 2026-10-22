@@ -111,8 +111,42 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
 
 Financial writes retain preview, validation, and confirmation. Gmail automation,
 hosted AI, and server administration are outside this local-only product.
-iCloud and S3 provider adapters remain future work; Files sharing supports
-explicit snapshot export today.
+Snapshot backups to a user-chosen folder (normally in iCloud Drive) are
+described below; an S3 provider remains future work.
+
+## Backup and restore (iCloud Drive)
+
+Settings → 本地账本 → 备份与恢复 writes complete snapshots of the open ledger
+to a folder the user picks in the system folder picker, normally one inside
+iCloud Drive. The app keeps a security-scoped bookmark to that folder, so no
+iCloud entitlement, CloudKit container, or paid Apple Developer team is
+required, and Personal Team or SideStore builds work unchanged. iCloud Drive
+itself uploads the files and makes them visible on the user's other devices.
+
+- Format: one `.ledgerbackup` file per backup (magic header, JSON manifest
+  with every file's size and SHA-256, then file bytes). `.git` metadata is
+  excluded. Extraction verifies paths, lengths, and hashes before anything
+  reaches the ledger, and the restored tree still passes the canonical
+  Beancount validation before it is published as a new revision.
+- Layout: `<folder>/<ledger ID>/<name>_<UTC time>_<digest>.ledgerbackup`.
+  Listings come from file names, so iCloud downloads a backup only when it is
+  restored. Every read and write uses `NSFileCoordinator`.
+- Conflicts: backups are immutable and uniquely named, so two devices never
+  write the same file. A tree whose content digest already exists in the
+  ledger's folder is not written again. Retention keeps the newest 30 per
+  ledger and only ever deletes files that match the backup naming scheme.
+- Restore into the current ledger first backs up the current content, then
+  replaces the whole tree as one revision; a save that landed after the user
+  confirmed makes the restore fail as stale. For a Git workspace the restored
+  tree is an ordinary local change, so a concurrent remote change goes through
+  the existing conflict review. "恢复为新账本" and the library's "从备份恢复"
+  (any `.ledgerbackup` picked in Files, e.g. on a new device) create a separate
+  ledger and never touch existing ones.
+- Automatic backup runs at most once a day per ledger while the app is open
+  and unlocked, and can be turned off per ledger.
+
+Backups in iCloud Drive are not additionally encrypted by the app; with
+Advanced Data Protection enabled Apple encrypts them end to end.
 
 ## Generate and build
 

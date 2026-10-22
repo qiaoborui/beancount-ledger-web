@@ -127,6 +127,8 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings-local-files")
                     SettingsNavRow(title: String(localized: "存储与同步")) { LocalLedgerStorageView() }
                         .accessibilityIdentifier("local-storage-settings")
+                    SettingsNavRow(title: String(localized: "备份与恢复"), value: LedgerBackupFolder.current?.displayName ?? String(localized: "未设置")) { LocalLedgerBackupView() }
+                        .accessibilityIdentifier("local-backup-settings")
                 } header: { TerminalSectionLabel(text: String(localized: "本地账本")).listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
                 Section {
