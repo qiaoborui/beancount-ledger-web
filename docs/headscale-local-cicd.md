@@ -305,19 +305,18 @@ public so the host needs no registry credential:
 - `beancount-ledger-web-agent`
 - `beancount-ledger-web-frontend`
 
-The first `main` push creates all five packages while the activation variable is
-still unset and the deploy job is skipped. Set their visibility to public and
-prove one emitted digest can be pulled without `docker login` before enabling
-deployment.
+The first manually dispatched run creates all five packages. Set their
+visibility to public and prove one emitted digest can be pulled without
+`docker login` before enabling deployment.
 
 Use a default-branch ruleset to require pull requests with zero required
 approving reviews and to prevent force pushes/deletion. Leave code-owner,
 last-push, and unattributed-change approvals disabled. Keep conversation
 resolution and the stable `CI / Gate` status check in classic branch
-protection. The workflow remains inert while repository variable
-`SELFHOST_DEPLOY_ENABLED` is unset. Only after the host, Headscale policy,
-environment protections, secrets, variables, and public GHCR visibility are
-ready, perform the final explicit activation:
+protection. The workflow only runs when dispatched by hand from `main`, and it
+remains inert while repository variable `SELFHOST_DEPLOY_ENABLED` is unset. Only
+after the host, Headscale policy, environment protections, secrets, variables,
+and public GHCR visibility are ready, perform the final explicit activation:
 
 ```bash
 gh variable set SELFHOST_DEPLOY_ENABLED --body true \

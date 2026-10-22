@@ -15,13 +15,16 @@ for file in "$deployment" "$ci" "$publisher" "$component_planner" "$tag_updater"
   fi
 done
 
-if ! grep -Fq '  push:' "$deployment" || ! grep -Fq '    branches: [main]' "$deployment"; then
-  echo "production pipeline must run directly on main pushes" >&2
+# Both deployment pipelines are manual: a merge to main must not build images or
+# touch production. `workflow_dispatch` also keeps them off `workflow_run`, so
+# no deployment can be chained to an automatic trigger.
+if ! grep -Fq '  workflow_dispatch:' "$deployment"; then
+  echo "production pipeline must stay manually dispatchable" >&2
   exit 1
 fi
 
-if grep -Fq 'workflow_run:' "$deployment"; then
-  echo "production deployment must not wait for a separate CI workflow run" >&2
+if grep -Eq '^  (push|pull_request|workflow_run|schedule):' "$deployment"; then
+  echo "production deployment must not be triggered by repository events" >&2
   exit 1
 fi
 
@@ -65,8 +68,13 @@ if grep -Fq '  push:' "$ci"; then
   exit 1
 fi
 
-if ! grep -Fq 'workflow_run:' "$publisher" || ! grep -Fq 'workflows: [Deploy Google Cloud]' "$publisher"; then
-  echo "GHCR publishing must run asynchronously after the production pipeline" >&2
+if ! grep -Fq '  workflow_dispatch:' "$publisher"; then
+  echo "GHCR publishing must stay manually dispatchable" >&2
+  exit 1
+fi
+
+if grep -Eq '^  (push|pull_request|workflow_run|schedule):' "$publisher"; then
+  echo "GHCR publishing must not run automatically after a deployment" >&2
   exit 1
 fi
 

@@ -27,8 +27,9 @@ describe("Cloud Run deployment", () => {
     expect(ciWorkflow).toContain("go test ./...");
     expect(ciWorkflow).toContain("pnpm run typecheck");
     expect(ciWorkflow).toContain("pnpm run test");
-    expect(deploymentWorkflow).toContain("push:\n    branches: [main]");
-    expect(deploymentWorkflow).not.toContain("workflow_run:");
+    // Deployment is manual: no repository event may start a build or a release.
+    expect(deploymentWorkflow).toContain("workflow_dispatch:");
+    expect(deploymentWorkflow).not.toMatch(/^ {2}(push|pull_request|workflow_run|schedule):/m);
     expect(deploymentWorkflow).toContain("uses: ./.github/workflows/ci.yml");
     expect(deploymentWorkflow).toContain("reusable_call: true");
     expect(deploymentWorkflow).toContain("needs: [plan, checks, build-standalone, build-agent, build-zip-worker]");
@@ -47,10 +48,10 @@ describe("Cloud Run deployment", () => {
     expect(deploymentWorkflow.indexOf("checks:")).toBeLessThan(deploymentWorkflow.indexOf("deploy:"));
   });
 
-  it("publishes multi-architecture GHCR images outside the deployment critical path", () => {
+  it("publishes multi-architecture GHCR images only when asked", () => {
     expect(ciWorkflow).not.toContain("name: Server image");
-    expect(imagePublishingWorkflow).toContain("workflow_run:");
-    expect(imagePublishingWorkflow).toContain("workflows: [Deploy Google Cloud]");
+    expect(imagePublishingWorkflow).toContain("workflow_dispatch:");
+    expect(imagePublishingWorkflow).not.toMatch(/^ {2}(push|pull_request|workflow_run|schedule):/m);
     expect(imagePublishingWorkflow).toContain("platforms: linux/amd64,linux/arm64");
     expect(imagePublishingWorkflow).toContain("type=raw,value=latest");
     expect(imagePublishingWorkflow).toContain("type=raw,value=sha-${{ needs.plan.outputs.short_sha }}");

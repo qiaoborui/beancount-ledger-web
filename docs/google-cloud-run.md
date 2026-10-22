@@ -36,18 +36,19 @@ start cold. See [write validation performance](write-validation-performance.md)
 for the reproducible CI budget and its measurement boundaries.
 
 The deployment workflow lives at
-`.github/workflows/deploy-google-cloud.yml`. On each `main` push it plans the
-affected components, starts reusable application checks and the required
-Artifact Registry builds in parallel, then deploys only after both sides of the
-gate succeed. Images are pushed under the commit SHA before validation and are
-never referenced by Cloud Run unless the matching checks pass. Frontend-only
-changes leave the Bub Agent and ZIP worker untouched; backend, agent, or
-container changes update only their affected services. Missing Google Cloud
-repository variables leave the build and deployment jobs skipped.
+`.github/workflows/deploy-google-cloud.yml` and runs only when dispatched by
+hand from `main`; merging a pull request builds and deploys nothing. A run plans
+the affected components since the last release, starts reusable application
+checks and the required Artifact Registry builds in parallel, then deploys only
+after both sides of the gate succeed. Images are pushed under the commit SHA
+before validation and are never referenced by Cloud Run unless the matching
+checks pass. Frontend-only changes leave the Bub Agent and ZIP worker untouched;
+backend, agent, or container changes update only their affected services.
+Missing Google Cloud repository variables leave the build and deployment jobs
+skipped.
 
-Multi-architecture GHCR images are published later by
-`.github/workflows/publish-images.yml` after the production pipeline succeeds.
-That distribution work no longer blocks the Cloud Run deployment path.
+Multi-architecture GHCR images are published by
+`.github/workflows/publish-images.yml`, which is manual for the same reason.
 
 ## Prerequisites
 
@@ -339,9 +340,9 @@ LEDGER_AI_PROVIDER=deepseek|GMAIL_CLIENT_ID=client-id.apps.googleusercontent.com
 ## First deployment
 
 Configure the builder identity, environment-scoped deploy binding, and
-repository values before merging a workflow change. Main pushes now start the
-pipeline automatically; `Deploy Google Cloud` can still be dispatched manually
-from `main` when a complete rebuild is required. The workflow deploys an IAM-protected ZIP
+repository values before merging a workflow change. The pipeline no longer
+starts on its own: dispatch `Deploy Google Cloud` from `main` when a release is
+wanted. The workflow deploys an IAM-protected ZIP
 Worker with 8 vCPU, 4 GiB memory, concurrency one, zero minimum instances, one
 maximum instance, and a 15-minute request timeout. It sets the main runtime
 service account as the Worker's only explicit `roles/run.invoker` member and

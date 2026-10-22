@@ -52,7 +52,7 @@ if grep -Fq 'restrict,from="100.64.0.0/10",command="sudo -n /usr/local/sbin/bean
 fi
 
 for required in \
-  'branches: [main]' \
+  'workflow_dispatch:' \
   'cancel-in-progress: false' \
   'uses: ./.github/workflows/ci.yml' \
   'environment: local-selfhost-production' \
@@ -106,6 +106,10 @@ if ! grep -Fq 'pull_image_with_retry()' scripts/selfhost/beancount-ledger-deploy
   exit 1
 fi
 
+if grep -Eq '^  (push|pull_request|workflow_run|schedule):' "$workflow"; then
+  echo "self-host deployment must not be triggered by repository events" >&2
+  exit 1
+fi
 if grep -Eq 'runs-on:[[:space:]]*\[?self-hosted|runs-on:[[:space:]]*mibook' "$workflow"; then
   echo "local production deployment must not run on a self-hosted runner" >&2
   exit 1

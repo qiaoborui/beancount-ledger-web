@@ -26,9 +26,6 @@ on:
 permissions:
   contents: read
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   plan:
     name: Plan checks
@@ -39,7 +36,7 @@ jobs:
       web: ${{ steps.changes.outputs.web }}
       ios: ${{ steps.changes.outputs.ios }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -54,6 +51,16 @@ jobs:
 
       - name: Verify private IPA packaging guards
         run: python3 scripts/test_ios_private_ipa.py
+
+      # Static Compose validation runs once here instead of in both the backend
+      # and agent jobs, which each repeated it.
+      - name: Validate complete self-hosted Compose
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          AUTH_SECRET: ci-auth-secret
+          APP_PASSWORD: ci-app-password
+          AGENT_SERVICE_TOKEN: ci-agent-service-token
+        run: docker compose --env-file .env.selfhost.example -f docker/docker-compose.selfhost.yml config --quiet
 
       - name: Detect changed components
         id: changes
@@ -111,12 +118,12 @@ jobs:
     if: ${{ needs.plan.outputs.backend == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Install ledger validator
@@ -132,13 +139,6 @@ jobs:
       - name: Build
         working-directory: server
         run: go build ./cmd/...
-      - name: Validate complete self-hosted Compose
-        env:
-          POSTGRES_PASSWORD: ci-postgres-password
-          AUTH_SECRET: ci-auth-secret
-          APP_PASSWORD: ci-app-password
-          AGENT_SERVICE_TOKEN: ci-agent-service-token
-        run: docker compose --env-file .env.selfhost.example -f docker/docker-compose.selfhost.yml config --quiet
 
   agent:
     name: Bub Agent
@@ -146,13 +146,13 @@ jobs:
     if: ${{ needs.plan.outputs.agent == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.8.14"
           enable-cache: true
           cache-dependency-glob: agent/uv.lock
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Install dependencies
@@ -164,13 +164,6 @@ jobs:
       - name: Compile
         working-directory: agent
         run: uv run python -m compileall -q src tests
-      - name: Validate complete self-hosted Compose
-        env:
-          POSTGRES_PASSWORD: ci-postgres-password
-          AUTH_SECRET: ci-auth-secret
-          APP_PASSWORD: ci-app-password
-          AGENT_SERVICE_TOKEN: ci-agent-service-token
-        run: docker compose --env-file .env.selfhost.example -f docker/docker-compose.selfhost.yml config --quiet
 
   web:
     name: Frontend
@@ -178,11 +171,11 @@ jobs:
     if: ${{ needs.plan.outputs.web == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 8.11.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -214,7 +207,7 @@ jobs:
     steps:
       # Self-hosted runners keep the workspace between jobs, so never leave the
       # job's credentials in its git config.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Select Xcode
