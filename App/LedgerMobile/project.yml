@@ -46,9 +46,11 @@ targets:
       path: Supporting/Info.plist
       properties:
         CFBundleDisplayName: Ledger
-        # Source strings are Simplified Chinese; other languages fall back to English.
-        CFBundleDevelopmentRegion: en
-        # Declare both languages to iOS whether or not the build emits a zh-Hans.lproj for the source strings.
+        # Must match the catalogs' source language. Xcode writes no zh-Hans
+        # Localizable.strings (keys are the Chinese text), and iOS falls back to the
+        # development region's table when one is missing; with `en` here the app
+        # showed English even when Chinese was selected.
+        CFBundleDevelopmentRegion: zh-Hans
         CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
@@ -140,7 +142,7 @@ targets:
       path: WidgetExtension/Info.plist
       properties:
         CFBundleDisplayName: Ledger 小组件
-        CFBundleDevelopmentRegion: en
+        CFBundleDevelopmentRegion: zh-Hans
         CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
@@ -172,7 +174,7 @@ targets:
       path: ShareExtension/Info.plist
       properties:
         CFBundleDisplayName: 存入 Ledger
-        CFBundleDevelopmentRegion: en
+        CFBundleDevelopmentRegion: zh-Hans
         CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
