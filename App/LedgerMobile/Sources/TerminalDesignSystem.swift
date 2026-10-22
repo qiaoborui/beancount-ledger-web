@@ -34,7 +34,7 @@ struct TerminalAmount: View {
             .foregroundStyle(color)
             .lineLimit(1)
             .minimumScaleFactor(0.35)
-            .accessibilityLabel(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency) : "金额已隐藏")
+            .accessibilityLabel(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency) : String(localized: "金额已隐藏"))
     }
 }
 
@@ -50,7 +50,7 @@ struct TerminalDateRangeButton: View {
     var body: some View {
         Button { session.presentRangePicker() } label: {
             HStack(spacing: 5) {
-                Text(session.selectedRange.preset == .custom ? "自定义" : session.selectedRange.displayTitle)
+                Text(session.selectedRange.preset == .custom ? String(localized: "自定义") : session.selectedRange.displayTitle)
                     .balancedFont(size: 13)
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
             }
@@ -61,7 +61,7 @@ struct TerminalDateRangeButton: View {
         .buttonStyle(.plain)
         .disabled(session.isRangeLoading || session.isValuationCurrencyLoading)
         .accessibilityIdentifier("navigation-time-range")
-        .accessibilityLabel("选择时间范围，当前为" + session.selectedRange.displayTitle)
+        .accessibilityLabel("选择时间范围，当前为\(session.selectedRange.displayTitle)")
     }
 }
 
@@ -345,7 +345,7 @@ struct TerminalTabBar: View {
                         VStack(spacing: 3) {
                             Image(systemName: destination == .settings ? "ellipsis" : destination.systemImage)
                                 .font(.system(size: 18, weight: .regular)).frame(height: 20)
-                            Text(destination == .transactions ? "流水" : destination.compactTitle)
+                            Text(destination == .transactions ? String(localized: "流水") : destination.compactTitle)
                                 .font(.system(size: 11, weight: selected ? .semibold : .regular))
                             Rectangle().fill(selected ? TerminalPalette.accent : .clear).frame(width: 16, height: 2)
                         }

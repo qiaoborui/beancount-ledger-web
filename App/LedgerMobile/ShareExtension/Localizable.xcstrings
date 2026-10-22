@@ -1,0 +1,158 @@
+{
+  "sourceLanguage": "zh-Hans",
+  "strings": {
+    "单个账单文件最多 10MB": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each statement file can be up to 10 MB"
+          }
+        }
+      }
+    },
+    "完成": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done"
+          }
+        }
+      }
+    },
+    "已保存 %lld 个账单文件": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Saved %lld statement file"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Saved %lld statement files"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "待导入收件箱已满，请先在 Ledger 中核对或移除文件": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The import inbox is full. Review or remove files in Ledger first"
+          }
+        }
+      }
+    },
+    "支持 CSV、Excel、PDF、邮件、HTML 和 ZIP 账单": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supports CSV, Excel, PDF, email, HTML, and ZIP statements"
+          }
+        }
+      }
+    },
+    "文件将保存在 Ledger 的待导入收件箱。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file will be saved to Ledger's import inbox."
+          }
+        }
+      }
+    },
+    "无法访问待导入收件箱，请稍后重试": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Can't access the import inbox. Try again later"
+          }
+        }
+      }
+    },
+    "未能保存账单": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't save statement"
+          }
+        }
+      }
+    },
+    "正在保存账单": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saving statement"
+          }
+        }
+      }
+    },
+    "每次请选择 1–5 个账单文件。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose 1–5 statement files at a time."
+          }
+        }
+      }
+    },
+    "该待导入文件已被移除，请重新分享": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This pending file was removed. Please share it again"
+          }
+        }
+      }
+    },
+    "请打开 Ledger，在「导入」的待导入收件箱中核对并提交。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Ledger and review and submit it from the import inbox under Import."
+          }
+        }
+      }
+    },
+    "请选择有效的账单文件": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a valid statement file"
+          }
+        }
+      }
+    },
+    "账单文件为空": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The statement file is empty"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

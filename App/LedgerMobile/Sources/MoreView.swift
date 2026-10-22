@@ -8,30 +8,30 @@ struct MoreView: View {
         List {
             Section {
                 NavigationLink { SettingsView(isRoot: false) } label: {
-                    MoreNavigationRow(index: "00", icon: "gearshape", title: "设置", detail: "\(session.localLedgerName) · 本地")
+                    MoreNavigationRow(index: "00", icon: "gearshape", title: String(localized: "设置"), detail: String(localized: "\(session.localLedgerName) · 本地"))
                 }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).listRowSeparator(.hidden).navigationLinkIndicatorVisibility(.hidden).accessibilityIdentifier("more-settings")
-            } header: { TerminalSectionLabel(text: "系统") }
+            } header: { TerminalSectionLabel(text: String(localized: "系统")) }
 
             let remaining = [LedgerDestination.overview, .transactions, .accounts]
                 .filter { !session.compactTabDestinations.contains($0) }
             if !remaining.isEmpty {
                 Section { ForEach(remaining) { destination in
                     MoreDestinationButton(destination: destination, detail: destination.title)
-                }} header: { TerminalSectionLabel(text: "账本") }
+                }} header: { TerminalSectionLabel(text: String(localized: "账本")) }
             }
             Section { ForEach(LedgerAnalysisKind.allCases, id: \.self) { kind in
                 MoreDestinationButton(destination: destination(for: kind), detail: kind.detail,
                     accessibilityIdentifier: "more-analysis-\(kind.rawValue)")
-            }} header: { TerminalSectionLabel(text: "财务分析") }
+            }} header: { TerminalSectionLabel(text: String(localized: "财务分析")) }
             Section {
-                MoreDestinationButton(destination: .search, detail: "搜索整个账本", accessibilityIdentifier: "more-search")
+                MoreDestinationButton(destination: .search, detail: String(localized: "搜索整个账本"), accessibilityIdentifier: "more-search")
                 NavigationLink { CategoriesManagementView() } label: {
-                    MoreNavigationRow(index: "02", icon: "tag", title: "分类管理", detail: "查看与新增收支分类")
+                    MoreNavigationRow(index: "02", icon: "tag", title: String(localized: "分类管理"), detail: String(localized: "查看与新增收支分类"))
                 }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).listRowSeparator(.hidden).navigationLinkIndicatorVisibility(.hidden).accessibilityIdentifier("more-categories")
-                MoreDestinationButton(destination: .imports, detail: "账单导入与归档", accessibilityIdentifier: "more-imports")
-                MoreDestinationButton(destination: .currencies, detail: "估值货币与汇率", accessibilityIdentifier: "more-currencies")
-                MoreDestinationButton(destination: .query, detail: "查询与历史", accessibilityIdentifier: "more-query")
-            } header: { TerminalSectionLabel(text: "账本工具") }
+                MoreDestinationButton(destination: .imports, detail: String(localized: "账单导入与归档"), accessibilityIdentifier: "more-imports")
+                MoreDestinationButton(destination: .currencies, detail: String(localized: "估值货币与汇率"), accessibilityIdentifier: "more-currencies")
+                MoreDestinationButton(destination: .query, detail: String(localized: "查询与历史"), accessibilityIdentifier: "more-query")
+            } header: { TerminalSectionLabel(text: String(localized: "账本工具")) }
         }
         .scrollContentBackground(.hidden)
         .background(BalancedPalette.page)
@@ -40,7 +40,7 @@ struct MoreView: View {
         .tint(TerminalPalette.accent)
         .font(.subheadline)
         .accessibilityIdentifier("more-list")
-        .terminalPageChrome("更多", isRoot: true,
+        .terminalPageChrome(String(localized: "更多"), isRoot: true,
             actions: AnyView(Button { session.primaryDestinationID = LedgerDestination.search.rawValue } label: {
                 Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
                     .foregroundStyle(TerminalPalette.accent).frame(width: 44, height: 44)

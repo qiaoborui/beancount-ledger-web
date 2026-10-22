@@ -30,6 +30,14 @@ final class LocalLedgerBackgroundSyncService {
         case appRefresh = "后台刷新"
         case processing = "夜间维护"
         case sceneFlush = "切后台同步"
+
+        var title: String {
+            switch self {
+            case .appRefresh: String(localized: "后台刷新")
+            case .processing: String(localized: "夜间维护")
+            case .sceneFlush: String(localized: "切后台同步")
+            }
+        }
     }
 
     struct ExecutionSummary: Equatable, Sendable {
@@ -43,7 +51,8 @@ final class LocalLedgerBackgroundSyncService {
         let defaults = UserDefaults.standard
         let time = defaults.double(forKey: Self.lastRunDateKey)
         guard time > 0 else { return nil }
-        let kind = defaults.string(forKey: Self.lastRunKindKey) ?? "后台刷新"
+        let kind = defaults.string(forKey: Self.lastRunKindKey)
+            .map { BackgroundTaskKind(rawValue: $0)?.title ?? $0 } ?? BackgroundTaskKind.appRefresh.title
         let success = defaults.bool(forKey: Self.lastRunSuccessKey)
         let count = defaults.integer(forKey: Self.runCountKey)
         return ExecutionSummary(

@@ -13,7 +13,7 @@ enum LedgerBiometricKind: Equatable, Sendable {
         case .faceID: "Face ID"
         case .touchID: "Touch ID"
         case .opticID: "Optic ID"
-        case .unavailable: "生物识别"
+        case .unavailable: String(localized: "生物识别")
         }
     }
 }
@@ -26,14 +26,14 @@ enum BiometricCredentialError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable:
-            return "此设备尚未设置可用的生物识别"
+            return String(localized: "此设备尚未设置可用的生物识别")
         case let .keychain(status):
             if status == errSecUserCanceled || status == errSecAuthFailed {
-                return "生物识别验证已取消"
+                return String(localized: "生物识别验证已取消")
             }
-            return "无法访问设备安全凭据（\(status)）"
+            return String(localized: "无法访问设备安全凭据（\(status)）")
         case .invalidCredential:
-            return "设备安全凭据已损坏，请使用密码重新启用"
+            return String(localized: "设备安全凭据已损坏，请使用密码重新启用")
         }
     }
 }
@@ -111,7 +111,7 @@ final class SystemBiometricCredentialStore: BiometricCredentialStore {
     func readCredential(for origin: URL, reason: String) async throws -> QuickUnlockCredential {
         guard biometricKind != .unavailable else { throw BiometricCredentialError.unavailable }
         let context = LAContext()
-        context.localizedCancelTitle = "使用密码"
+        context.localizedCancelTitle = String(localized: "使用密码")
         context.localizedReason = reason
         var query = baseQuery(for: origin)
         query[kSecReturnData as String] = true

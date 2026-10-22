@@ -18,7 +18,7 @@ final class ShareViewController: UIViewController {
         icon.heightAnchor.constraint(equalToConstant: 48).isActive = true
         statusLabel.font = .preferredFont(forTextStyle: .title2)
         statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.text = "正在保存账单"
+        statusLabel.text = String(localized: "正在保存账单")
         statusLabel.numberOfLines = 0
         statusLabel.textAlignment = .center
         detailLabel.font = .preferredFont(forTextStyle: .body)
@@ -26,9 +26,9 @@ final class ShareViewController: UIViewController {
         detailLabel.textColor = .secondaryLabel
         detailLabel.numberOfLines = 0
         detailLabel.textAlignment = .center
-        detailLabel.text = "文件将保存在 Ledger 的待导入收件箱。"
+        detailLabel.text = String(localized: "文件将保存在 Ledger 的待导入收件箱。")
         doneButton.configuration = .filled()
-        doneButton.setTitle("完成", for: .normal)
+        doneButton.setTitle(String(localized: "完成"), for: .normal)
         doneButton.isHidden = true
         doneButton.addTarget(self, action: #selector(finish), for: .touchUpInside)
         progress.startAnimating()
@@ -55,7 +55,7 @@ final class ShareViewController: UIViewController {
     private func saveAttachments() async {
         let providers = (extensionContext?.inputItems as? [NSExtensionItem] ?? []).flatMap { $0.attachments ?? [] }
         guard !providers.isEmpty, providers.count <= LedgerSharedImportInbox.maximumSharedItems else {
-            showResult(saved: 0, failure: "每次请选择 1–5 个账单文件。")
+            showResult(saved: 0, failure: String(localized: "每次请选择 1–5 个账单文件。"))
             return
         }
         var saved = 0
@@ -109,8 +109,8 @@ final class ShareViewController: UIViewController {
     private func showResult(saved: Int, failure: String?) {
         progress.stopAnimating()
         progress.isHidden = true
-        statusLabel.text = saved > 0 ? "已保存 \(saved) 个账单文件" : "未能保存账单"
-        detailLabel.text = [saved > 0 ? "请打开 Ledger，在「导入」的待导入收件箱中核对并提交。" : nil, failure]
+        statusLabel.text = saved > 0 ? String(localized: "已保存 \(saved) 个账单文件") : String(localized: "未能保存账单")
+        detailLabel.text = [saved > 0 ? String(localized: "请打开 Ledger，在「导入」的待导入收件箱中核对并提交。") : nil, failure]
             .compactMap { $0 }.joined(separator: "\n\n")
         doneButton.isHidden = false
     }

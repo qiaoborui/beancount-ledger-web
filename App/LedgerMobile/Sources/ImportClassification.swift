@@ -78,8 +78,8 @@ struct ImportClassificationSuggestion: Codable, Equatable, Sendable {
     let nature: Field
     let tags: [Tag]
 
-    static let natureLabels = ["expense": "支出", "income": "收入", "transfer": "转账",
-                               "refund": "退款", "repayment": "还款", "review": "待判断"]
+    static let natureLabels = ["expense": String(localized: "支出"), "income": String(localized: "收入"), "transfer": String(localized: "转账"),
+                               "refund": String(localized: "退款"), "repayment": String(localized: "还款"), "review": String(localized: "待判断")]
     var suggestedTags: [String] { tags.filter { $0.probability >= 0.98 }.map(\.value) }
     var uncertainTags: [Tag] { tags.filter { $0.probability >= 0.5 && $0.probability < 0.98 } }
 
@@ -133,12 +133,12 @@ enum ImportClassificationError: LocalizedError {
     case invalidConfiguration, invalidResponse, unavailable, unauthorized, quota, contextTooLarge
     var errorDescription: String? {
         switch self {
-        case .invalidConfiguration: "请先在智能分类设置中填写 TypeSafe API Key。"
-        case .invalidResponse: "判断结果无法验证，请继续手动核对。"
-        case .unavailable: "智能分类暂时不可用，你可以继续手动核对或稍后重试。"
-        case .unauthorized: "TypeSafe API Key 无效，请在设置中更新。"
-        case .quota: "智能分类额度暂时用完，请稍后重试。"
-        case .contextTooLarge: "这笔交易的账户或历史信息过多，请手动核对。"
+        case .invalidConfiguration: String(localized: "请先在智能分类设置中填写 TypeSafe API Key。")
+        case .invalidResponse: String(localized: "判断结果无法验证，请继续手动核对。")
+        case .unavailable: String(localized: "智能分类暂时不可用，你可以继续手动核对或稍后重试。")
+        case .unauthorized: String(localized: "TypeSafe API Key 无效，请在设置中更新。")
+        case .quota: String(localized: "智能分类额度暂时用完，请稍后重试。")
+        case .contextTooLarge: String(localized: "这笔交易的账户或历史信息过多，请手动核对。")
         }
     }
 }

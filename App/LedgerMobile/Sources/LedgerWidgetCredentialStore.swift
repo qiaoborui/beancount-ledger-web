@@ -278,13 +278,13 @@ enum LedgerWidgetCredentialStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable:
-            "无法访问小组件安全凭据空间"
+            String(localized: "无法访问小组件安全凭据空间")
         case let .keychain(status):
-            "无法保存小组件安全凭据（\(status)）"
+            String(localized: "无法保存小组件安全凭据（\(status)）")
         case .invalidCredential:
-            "小组件安全凭据已损坏"
+            String(localized: "小组件安全凭据已损坏")
         case .pendingRevocation:
-            "旧的小组件凭据仍在等待撤销"
+            String(localized: "旧的小组件凭据仍在等待撤销")
         }
     }
 }

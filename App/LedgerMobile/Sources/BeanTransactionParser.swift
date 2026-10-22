@@ -25,7 +25,7 @@ enum BeanTransactionParser {
         guard parsed.ok else { throw BookkeepingError.reviewRequired(parsed.diagnostics.map(\.message).joined(separator: "\n")) }
         guard let entries = parsed.result?.entries, !entries.isEmpty,
               entries.allSatisfy({ $0.kind == "transaction" }) else {
-            throw BookkeepingError.reviewRequired("此入口接收交易片段。包含账户、include 或设置的完整账本，请使用「导入本地账本」。")
+            throw BookkeepingError.reviewRequired(String(localized: "此入口接收交易片段。包含账户、include 或设置的完整账本，请使用「导入本地账本」。"))
         }
         return entries.count
         #else

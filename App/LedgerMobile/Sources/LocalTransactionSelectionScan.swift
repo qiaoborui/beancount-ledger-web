@@ -69,9 +69,9 @@ struct LocalTransactionSelectionScan {
         case noEligibleSelection, tooMany, incomplete
         var errorDescription: String? {
             switch self {
-            case .noEligibleSelection: return "所选交易缺少并发校验信息，暂无法添加标签。"
-            case .tooMany: return "一次最多为 \(TransactionTagSelectionRules.maximumCount) 笔交易添加标签。"
-            case .incomplete: return "交易选择信息不完整，请重新读取后再试。"
+            case .noEligibleSelection: return String(localized: "所选交易缺少并发校验信息，暂无法添加标签。")
+            case .tooMany: return String(localized: "一次最多为 \(TransactionTagSelectionRules.maximumCount) 笔交易添加标签。")
+            case .incomplete: return String(localized: "交易选择信息不完整，请重新读取后再试。")
             }
         }
     }

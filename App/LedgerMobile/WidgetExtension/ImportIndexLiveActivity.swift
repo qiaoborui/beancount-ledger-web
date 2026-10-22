@@ -116,9 +116,9 @@ struct ImportIndexLiveActivity: Widget {
 
     private func title(_ phase: DisplayPhase) -> String {
         switch phase {
-        case .indexing: "正在建立索引"
-        case .waiting: "等待状态确认"
-        case .indexed: "索引已完成"
+        case .indexing: String(localized: "正在建立索引")
+        case .waiting: String(localized: "等待状态确认")
+        case .indexed: String(localized: "索引已完成")
         }
     }
 
@@ -127,17 +127,17 @@ struct ImportIndexLiveActivity: Widget {
     /// island could not keep. The words match the entry island's own.
     private func badgeText(_ phase: DisplayPhase) -> String {
         switch phase {
-        case .indexing: "写入中"
-        case .waiting: "待确认"
-        case .indexed: "已入库"
+        case .indexing: String(localized: "写入中")
+        case .waiting: String(localized: "待确认")
+        case .indexed: String(localized: "已入库")
         }
     }
 
     private func compactText(_ phase: DisplayPhase) -> String {
         switch phase {
-        case .indexing: "写入中"
-        case .waiting: "待确认"
-        case .indexed: "完成"
+        case .indexing: String(localized: "写入中")
+        case .waiting: String(localized: "待确认")
+        case .indexed: String(localized: "完成")
         }
     }
 
@@ -152,15 +152,15 @@ struct ImportIndexLiveActivity: Widget {
     private func detail(_ context: ActivityViewContext<ImportIndexActivityAttributes>) -> String {
         let count = context.attributes.entryCount
         return count == 0
-            ? "\(context.attributes.providerLabel)账单已归档"
-            : "\(context.attributes.providerLabel) · \(count) 条交易"
+            ? String(localized: "\(context.attributes.providerLabel)账单已归档")
+            : String(localized: "\(context.attributes.providerLabel) · \(count) 条交易")
     }
 
     private func accessibilityLabel(
         _ context: ActivityViewContext<ImportIndexActivityAttributes>,
         phase: DisplayPhase
     ) -> String {
-        "\(title(phase))，\(detail(context))，\(badgeText(phase))"
+        String(localized: "\(title(phase))，\(detail(context))，\(badgeText(phase))")
     }
 }
 #endif

@@ -93,7 +93,7 @@ enum BQLCell: Codable, Equatable, Sendable {
 
     private static let numberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = LedgerLocale.current
         formatter.numberStyle = .decimal
         formatter.usesGroupingSeparator = true
         formatter.minimumFractionDigits = 0

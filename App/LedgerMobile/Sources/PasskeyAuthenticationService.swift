@@ -12,19 +12,19 @@ enum PasskeyAuthenticationError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .unavailable:
-            return "当前设备无法使用原生通行密钥"
+            return String(localized: "当前设备无法使用原生通行密钥")
         case .invalidChallenge:
-            return "服务器返回了无效的通行密钥挑战"
+            return String(localized: "服务器返回了无效的通行密钥挑战")
         case .invalidCredentialID:
-            return "服务器返回了无效的通行密钥凭据"
+            return String(localized: "服务器返回了无效的通行密钥凭据")
         case let .relyingPartyMismatch(expected, received):
-            return "通行密钥域名不匹配：需要 \(expected)，收到 \(received)"
+            return String(localized: "通行密钥域名不匹配：需要 \(expected)，收到 \(received)")
         case .requestInProgress:
-            return "通行密钥验证正在进行"
+            return String(localized: "通行密钥验证正在进行")
         case .cancelled:
-            return "通行密钥验证已取消"
+            return String(localized: "通行密钥验证已取消")
         case let .failed(message):
-            return "通行密钥验证失败：\(message)"
+            return String(localized: "通行密钥验证失败：\(message)")
         }
     }
 }
@@ -147,7 +147,7 @@ private final class PasskeyAuthorizationCoordinator: NSObject,
         didCompleteWithAuthorization authorization: ASAuthorization
     ) {
         guard let assertion = authorization.credential as? ASAuthorizationPlatformPublicKeyCredentialAssertion else {
-            finish(.failure(PasskeyAuthenticationError.failed("系统返回了未知凭据")))
+            finish(.failure(PasskeyAuthenticationError.failed(String(localized: "系统返回了未知凭据"))))
             return
         }
         finish(.success(PasskeyAssertion(

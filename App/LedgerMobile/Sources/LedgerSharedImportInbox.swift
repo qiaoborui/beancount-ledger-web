@@ -23,13 +23,13 @@ struct LedgerSharedImportInbox: Sendable {
 
         var errorDescription: String? {
             switch self {
-            case .unavailable: "无法访问待导入收件箱，请稍后重试"
-            case .invalidFile: "请选择有效的账单文件"
-            case .unsupported: "支持 CSV、Excel、PDF、邮件、HTML 和 ZIP 账单"
-            case .empty: "账单文件为空"
-            case .tooLarge: "单个账单文件最多 10MB"
-            case .full: "待导入收件箱已满，请先在 Ledger 中核对或移除文件"
-            case .missing: "该待导入文件已被移除，请重新分享"
+            case .unavailable: String(localized: "无法访问待导入收件箱，请稍后重试")
+            case .invalidFile: String(localized: "请选择有效的账单文件")
+            case .unsupported: String(localized: "支持 CSV、Excel、PDF、邮件、HTML 和 ZIP 账单")
+            case .empty: String(localized: "账单文件为空")
+            case .tooLarge: String(localized: "单个账单文件最多 10MB")
+            case .full: String(localized: "待导入收件箱已满，请先在 Ledger 中核对或移除文件")
+            case .missing: String(localized: "该待导入文件已被移除，请重新分享")
             }
         }
     }

@@ -490,7 +490,7 @@ struct AccountDetailView: View {
                         AccountBalanceTrendPanel(detail: completeTrend.detail, range: session.selectedRange,
                             completePoints: completeTrend.points)
                     } else if let trendError {
-                        Text("余额趋势读取失败：" + trendError).foregroundStyle(.secondary)
+                        Text("余额趋势读取失败：\(trendError)").foregroundStyle(.secondary)
                         Button("重试余额趋势") { reloadToken += 1 }
                     } else if trendLoading {
                         ProgressView("正在读取完整余额趋势…")

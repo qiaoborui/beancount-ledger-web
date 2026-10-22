@@ -223,7 +223,7 @@ struct ReconciliationView: View {
 
             if localReadable, let localError {
                 Section {
-                    Text("对账读取失败：" + localError).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                    Text("对账读取失败：\(localError)").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                     Button("重试") { Task { await loadLocalRows() } }.buttonStyle(.balanced(.quiet))
                 }
                 .listRowBackground(Color.clear)

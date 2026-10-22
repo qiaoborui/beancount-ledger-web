@@ -110,7 +110,7 @@ enum ImportClassificationContext {
         if tails.count == 1, let card = tails.first {
             let matches = accounts.filter { fourDigitTokens($0.account + " " + ($0.alias ?? "") + " " + $0.label).contains(card) }
             if matches.count == 1, matchesPaymentIdentity(entry, account: matches[0], requireKnownMethod: true) {
-                return .init(account: matches[0].account, reason: "卡尾号与支付身份唯一匹配")
+                return .init(account: matches[0].account, reason: String(localized: "卡尾号与支付身份唯一匹配"))
             }
             // A repeated tail or a missing account needs model/user review.
             return nil
@@ -124,7 +124,7 @@ enum ImportClassificationContext {
             }
         }
         if named.count == 1, matchesPaymentIdentity(entry, account: named[0]) {
-            return .init(account: named[0].account, reason: "支付方式与账户名称唯一匹配")
+            return .init(account: named[0].account, reason: String(localized: "支付方式与账户名称唯一匹配"))
         }
         let matched = history.filter { $0.date <= entry.date && samePayment(entry, $0) }
         let mapped = matched.compactMap { historyRoles($0)?.funding }
@@ -132,7 +132,7 @@ enum ImportClassificationContext {
         guard mapped.count >= 3, unique.count == 1, let account = unique.first,
               let candidate = accounts.first(where: { $0.account == account }),
               matchesPaymentIdentity(entry, account: candidate) else { return nil }
-        return .init(account: account, reason: "相同支付方式的已确认历史一致")
+        return .init(account: account, reason: String(localized: "相同支付方式的已确认历史一致"))
     }
 
     /// A suffix is only part of a card identity. Reuse the institution catalog

@@ -14,7 +14,7 @@ struct LedgerAccountEntity: AppEntity {
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(
             title: "\(label)",
-            subtitle: "\(isLiability ? "负债" : "资产") · \(currency)"
+            subtitle: "\(isLiability ? String(localized: "负债") : String(localized: "资产")) · \(currency)"
         )
     }
 
@@ -126,13 +126,13 @@ struct AccountBalanceWidgetView: View {
     var body: some View {
         Group {
             if !redactionReasons.isEmpty {
-                LedgerWidgetPrivacyView(title: "账户余额")
+                LedgerWidgetPrivacyView(title: String(localized: "账户余额"))
             } else if let account = entry.account, let snapshot = entry.snapshot {
                 content(account, updated: snapshot.updatedAt)
             } else {
                 LedgerWidgetUnavailableView(
-                    title: entry.snapshot == nil ? "等待账户数据" : "选择一个账户",
-                    detail: entry.snapshot == nil ? "打开 Ledger 并刷新一次" : "长按小组件并选择编辑小组件",
+                    title: entry.snapshot == nil ? String(localized: "等待账户数据") : String(localized: "选择一个账户"),
+                    detail: entry.snapshot == nil ? String(localized: "打开 Ledger 并刷新一次") : String(localized: "长按小组件并选择编辑小组件"),
                     symbol: "building.columns")
             }
         }
@@ -148,11 +148,11 @@ struct AccountBalanceWidgetView: View {
             Text(account.label).font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(LedgerWidgetColors.ink).lineLimit(2)
             Spacer(minLength: 0)
-            Text("\(account.isLiability ? "待还余额" : "资产余额") · \(account.currency)")
+            Text("\(account.isLiability ? String(localized: "待还余额") : String(localized: "资产余额")) · \(account.currency)")
                 .font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
             LedgerWidgetAmount(amount: amount, currency: account.currency, size: medium ? 29 : 23)
             if let valuation = account.valuation, account.currency != account.valuationCurrency {
-                Text("估值 " + MoneyText.format(minorUnits: account.isLiability ? MoneyText.magnitude(valuation) : valuation, currency: account.valuationCurrency))
+                Text("估值 \(MoneyText.format(minorUnits: account.isLiability ? MoneyText.magnitude(valuation) : valuation, currency: account.valuationCurrency))")
                     .font(.system(size: 10, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.6)
                     .foregroundStyle(LedgerWidgetColors.secondary)
             }

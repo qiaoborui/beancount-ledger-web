@@ -181,7 +181,7 @@ private struct EventTagSummaryRow: View {
                 }
                 Spacer()
                 if summary.daysCount > 1 && summary.netSpend > 0 {
-                    Text("日均 " + MoneyText.format(minorUnits: summary.dailyAverage, currency: summary.currency))
+                    Text("日均 \(MoneyText.format(minorUnits: summary.dailyAverage, currency: summary.currency))")
                         .balancedFont(size: 12).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                 }
             }

@@ -116,7 +116,7 @@ struct CategoriesManagementView: View {
                                 }
                                 Spacer(minLength: 8)
                                 if !acct.active {
-                                    BalancedTag(text: "已停用", kind: .neutral)
+                                    BalancedTag(text: String(localized: "已停用"), kind: .neutral)
                                 } else {
                                     Image(systemName: "chevron.right")
                                         .font(.system(size: 12, weight: .semibold))
@@ -136,7 +136,7 @@ struct CategoriesManagementView: View {
         .ledgerReadingList()
         .scrollContentBackground(.hidden)
         .background(BalancedPalette.page)
-        .terminalPageChrome("分类管理", isRoot: false, actions: AnyView(
+        .terminalPageChrome(String(localized: "分类管理"), isRoot: false, actions: AnyView(
             Button { showingAddCategory = true } label: {
                 Image(systemName: "plus").font(.system(size: 16)).frame(width: 44, height: 44)
                     .foregroundStyle(BalancedPalette.ink)

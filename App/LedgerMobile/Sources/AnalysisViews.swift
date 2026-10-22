@@ -1055,7 +1055,7 @@ private struct IncomeExpenseAnalysisContent: View {
             let allSummaries = eventSummaries
             if session.isLocal, let error = session.localEventTagSummaryError {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("事件汇总读取失败：" + error).foregroundStyle(.secondary)
+                    Text("事件汇总读取失败：\(error)").foregroundStyle(.secondary)
                     Button("重试事件汇总") { Task { await session.loadLocalEventTagSummaries(force: true) } }
                 }
             } else if session.isLocal && session.localEventTagSummaries == nil {

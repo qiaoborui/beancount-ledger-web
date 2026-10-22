@@ -82,6 +82,6 @@ struct ClassificationKeyStore {
     }
     private var keychainError: NSError {
         NSError(domain: "LedgerClassificationKeychain", code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "无法访问本机 API Key，请解锁设备后重试。"])
+                userInfo: [NSLocalizedDescriptionKey: String(localized: "无法访问本机 API Key，请解锁设备后重试。")])
     }
 }

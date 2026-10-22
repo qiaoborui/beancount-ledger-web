@@ -20,7 +20,7 @@ struct ExpenseTrendWidgetView: View {
     var body: some View {
         Group {
             if !redactionReasons.isEmpty {
-                LedgerWidgetPrivacyView(title: "消费趋势")
+                LedgerWidgetPrivacyView(title: String(localized: "消费趋势"))
             } else if let insights = entry.snapshot?.insights {
                 let points = LedgerWidgetDates.series(insights.history,
                     start: LedgerWidgetDates.adding(-30, to: insights.history.end), end: insights.history.end)
@@ -31,7 +31,7 @@ struct ExpenseTrendWidgetView: View {
         .containerBackground(for: .widget) { LedgerWidgetColors.panel }
     }
     private var unavailable: some View {
-        LedgerWidgetUnavailableView(title: "等待消费趋势", detail: "打开 Ledger 并刷新一次")
+        LedgerWidgetUnavailableView(title: String(localized: "等待消费趋势"), detail: String(localized: "打开 Ledger 并刷新一次"))
     }
     private func content(_ points: [LedgerWidgetDailyExpense], insights: LedgerWidgetExpenseInsights) -> some View {
         let total = points.reduce(0) { $0 + $1.amount }
@@ -40,10 +40,10 @@ struct ExpenseTrendWidgetView: View {
             end: LedgerWidgetDates.adding(-30, to: insights.history.end))
         let baseline = previous.reduce(0) { $0 + $1.amount }
         let comparison = previous.count == 30 && baseline != 0
-            ? "\(total < baseline ? "↓" : "↑") \(LedgerWidgetText.percentage(abs((Double(total) - Double(baseline)) / Double(baseline)))) · 前30天" : "暂无同期数据"
+            ? String(localized: "\(total < baseline ? "↓" : "↑") \(LedgerWidgetText.percentage(abs((Double(total) - Double(baseline)) / Double(baseline)))) · 前30天") : String(localized: "暂无同期数据")
         let peak = max(points.map(\.amount).max() ?? 0, 100)
         return VStack(alignment: .leading, spacing: 4) {
-            LedgerWidgetHeader(title: "消费趋势", detail: "近30天")
+            LedgerWidgetHeader(title: String(localized: "消费趋势"), detail: String(localized: "近30天"))
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 LedgerWidgetAmount(amount: total, currency: insights.history.currency, size: 21)
                 Spacer(minLength: 0)
@@ -71,7 +71,7 @@ struct ExpenseTrendWidgetView: View {
                 Spacer(); Text(LedgerWidgetHeat.shortDate(points[14].date))
                 Spacer(); Text(LedgerWidgetHeat.shortDate(points[29].date))
             }.font(.system(size: 8, design: .monospaced)).foregroundStyle(LedgerWidgetColors.secondary)
-            LedgerWidgetFooter(label: "退款前支出 · \(insights.history.currency)", date: insights.date, now: entry.date)
+            LedgerWidgetFooter(label: String(localized: "退款前支出 · \(insights.history.currency)"), date: insights.date, now: entry.date)
         }.privacySensitive()
     }
 }
@@ -89,12 +89,18 @@ struct ExpenseHeatmapWidget: Widget {
 }
 
 struct ExpenseHeatmapWidgetView: View {
+    /// Monday, Thursday, and Sunday rows; the grid starts on Monday.
+    private static var heatmapWeekdayLabels: [String] {
+        let symbols = LedgerDateLabel.veryShortWeekdaySymbols
+        return [symbols[1], "", "", symbols[4], "", "", symbols[0]]
+    }
+
     @Environment(\.redactionReasons) private var redactionReasons
     let entry: ExpenseCalendarEntry
     var body: some View {
         Group {
             if !redactionReasons.isEmpty {
-                LedgerWidgetPrivacyView(title: "消费热力图")
+                LedgerWidgetPrivacyView(title: String(localized: "消费热力图"))
             } else if let insights = entry.snapshot?.insights {
                 let points = LedgerWidgetDates.series(insights.history, start: insights.history.start, end: insights.history.end)
                 if (78...84).contains(points.count) { content(points, insights: insights) } else { unavailable }
@@ -103,11 +109,11 @@ struct ExpenseHeatmapWidgetView: View {
             .containerBackground(for: .widget) { LedgerWidgetColors.panel }
     }
     private var unavailable: some View {
-        LedgerWidgetUnavailableView(title: "等待消费热力图", detail: "打开 Ledger 并刷新一次")
+        LedgerWidgetUnavailableView(title: String(localized: "等待消费热力图"), detail: String(localized: "打开 Ledger 并刷新一次"))
     }
     private func content(_ points: [LedgerWidgetDailyExpense], insights: LedgerWidgetExpenseInsights) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            LedgerWidgetHeader(title: "消费热力图", detail: "近12周")
+            LedgerWidgetHeader(title: String(localized: "消费热力图"), detail: String(localized: "近12周"))
             HStack {
                 Text("\(points.filter { $0.amount > 0 }.count)个消费日")
                 Spacer(minLength: 0)
@@ -119,7 +125,7 @@ struct ExpenseHeatmapWidgetView: View {
                 HStack(spacing: 3) {
                     VStack(spacing: 2) {
                         ForEach(0..<7, id: \.self) { row in
-                            Text(["一", "", "", "四", "", "", "日"][row])
+                            Text(Self.heatmapWeekdayLabels[row])
                                 .font(.system(size: 8)).foregroundStyle(LedgerWidgetColors.secondary)
                                 .frame(width: 12, height: height)
                         }
@@ -144,9 +150,9 @@ struct ExpenseHeatmapWidgetView: View {
                     Rectangle().fill(LedgerWidgetHeat.color(amount)).frame(width: 7, height: 7)
                     Text(amount == 0 ? "0" : amount == 5_000 ? "≤50" : ">200")
                 }
-                Text(insights.history.currency + "/日")
+                Text(insights.history.currency + String(localized: "/日"))
                 Spacer(minLength: 0)
-                Text(insights.date.map { LedgerWidgetText.updated($0, now: entry.date) } ?? "尚未更新")
+                Text(insights.date.map { LedgerWidgetText.updated($0, now: entry.date) } ?? String(localized: "尚未更新"))
             }.font(.system(size: 8)).foregroundStyle(LedgerWidgetColors.secondary).lineLimit(1)
         }.privacySensitive()
     }

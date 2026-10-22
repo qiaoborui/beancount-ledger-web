@@ -1619,7 +1619,7 @@ struct WidgetDayTransactionsView: View {
                 }
             }
             if session.isLocal, let summaryError {
-                Text("支出汇总读取失败：" + summaryError).foregroundStyle(.secondary)
+                Text("支出汇总读取失败：\(summaryError)").foregroundStyle(.secondary)
                 Button("重试汇总") { reload += 1 }
             }
             if loading && transactions.isEmpty {

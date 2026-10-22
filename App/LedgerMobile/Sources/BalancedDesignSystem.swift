@@ -122,7 +122,7 @@ struct BalancedAmount: View {
         .minimumScaleFactor(0.45)
         .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(minorUnits)))
         .animation(reduceMotion ? nil : .snappy(duration: 0.32), value: minorUnits)
-        .accessibilityLabel(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency) : "金额已隐藏")
+        .accessibilityLabel(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency) : String(localized: "金额已隐藏"))
     }
 
     private func scaledCurrencyText(scale: CGFloat) -> Text {

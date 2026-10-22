@@ -2,6 +2,7 @@ name: LedgerMobile
 
 options:
   createIntermediateGroups: true
+  developmentLanguage: zh-Hans
   deploymentTarget:
     iOS: "17.0"
 
@@ -42,6 +43,8 @@ targets:
       path: Supporting/Info.plist
       properties:
         CFBundleDisplayName: Ledger
+        # Source strings are Simplified Chinese; other languages fall back to English.
+        CFBundleDevelopmentRegion: en
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIAppFonts:
@@ -108,6 +111,9 @@ targets:
         Release:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) PERSONAL_TEAM_BUILD
     scheme:
+      # Tests assert the Simplified Chinese source strings and zh_CN formatting.
+      language: zh-Hans
+      region: CN
       testTargets:
         - LedgerMobileTests
         - LedgerMobileUITests
@@ -123,11 +129,13 @@ targets:
       - path: Sources/LedgerWidgetCredentialStore.swift
       - path: Sources/LedgerWidgetRefreshClient.swift
       - path: Sources/MoneyText.swift
+      - path: Sources/LedgerLocale.swift
       - path: Sources/ImportIndexActivityAttributes.swift
     info:
       path: WidgetExtension/Info.plist
       properties:
         CFBundleDisplayName: Ledger 小组件
+        CFBundleDevelopmentRegion: en
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
@@ -158,6 +166,7 @@ targets:
       path: ShareExtension/Info.plist
       properties:
         CFBundleDisplayName: 存入 Ledger
+        CFBundleDevelopmentRegion: en
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
@@ -217,6 +226,7 @@ targets:
       - path: Sources/LedgerWidgetCredentialStore.swift
       - path: Sources/LedgerWidgetRefreshClient.swift
       - path: Sources/MoneyText.swift
+      - path: Sources/LedgerLocale.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiaoborui.ledger.mobile.widgettests

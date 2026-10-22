@@ -47,7 +47,7 @@ actor ImportIndexActivityCoordinator {
         let content = ActivityContent(
             state: ImportIndexActivityAttributes.ContentState(
                 phase: "indexing",
-                statusText: "正在更新索引",
+                statusText: String(localized: "正在更新索引"),
                 updatedAt: Date()
             ),
             staleDate: Date().addingTimeInterval(90)
@@ -77,7 +77,7 @@ actor ImportIndexActivityCoordinator {
             ActivityContent(
                 state: ImportIndexActivityAttributes.ContentState(
                     phase: "indexing",
-                    statusText: "正在更新索引",
+                    statusText: String(localized: "正在更新索引"),
                     updatedAt: Date()
                 ),
                 staleDate: Date().addingTimeInterval(90)
@@ -90,7 +90,7 @@ actor ImportIndexActivityCoordinator {
         let content = ActivityContent(
             state: ImportIndexActivityAttributes.ContentState(
                 phase: "indexed",
-                statusText: "索引已完成",
+                statusText: String(localized: "索引已完成"),
                 updatedAt: Date()
             ),
             staleDate: nil

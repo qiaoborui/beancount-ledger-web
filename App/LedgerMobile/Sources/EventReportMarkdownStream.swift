@@ -61,17 +61,17 @@ struct EventReportMarkdownStream {
     }
 
     private func header(write: (Data) throws -> Void) throws {
-        try emit("# 事件核算报告：#\(summary.tag)", write: write)
+        try emit(String(localized: "# 事件核算报告：#\(summary.tag)"), write: write)
         if let start = summary.startDate, let end = summary.endDate {
-            try emit("\n时间跨度：\(start) ~ \(end)（共 \(summary.daysCount) 天）", write: write)
+            try emit(String(localized: "\n时间跨度：\(start) ~ \(end)（共 \(summary.daysCount) 天）"), write: write)
         }
-        try emit("\n净支出：\(MoneyText.format(minorUnits: summary.netSpend, currency: summary.currency))", write: write)
-        try emit("\n总支出：\(MoneyText.format(minorUnits: summary.totalExpense, currency: summary.currency))，收入/退款：\(MoneyText.format(minorUnits: summary.totalIncome, currency: summary.currency))", write: write)
-        try emit("\n日均消费：\(MoneyText.format(minorUnits: summary.dailyAverage, currency: summary.currency))\n\n## 分类支出", write: write)
+        try emit(String(localized: "\n净支出：\(MoneyText.format(minorUnits: summary.netSpend, currency: summary.currency))"), write: write)
+        try emit(String(localized: "\n总支出：\(MoneyText.format(minorUnits: summary.totalExpense, currency: summary.currency))，收入/退款：\(MoneyText.format(minorUnits: summary.totalIncome, currency: summary.currency))"), write: write)
+        try emit(String(localized: "\n日均消费：\(MoneyText.format(minorUnits: summary.dailyAverage, currency: summary.currency))\n\n## 分类支出"), write: write)
         for category in categories {
-            try emit("\n- \(category.label)：\(MoneyText.format(minorUnits: category.amount, currency: summary.currency)) (\(String(format: "%.1f%%", category.percentage * 100)))", write: write)
+            try emit(String(localized: "\n- \(category.label)：\(MoneyText.format(minorUnits: category.amount, currency: summary.currency)) (\(String(format: "%.1f%%", category.percentage * 100)))"), write: write)
         }
-        try emit("\n\n## 交易清单 (\(summary.transactionCount) 笔)", write: write)
+        try emit(String(localized: "\n\n## 交易清单 (\(summary.transactionCount) 笔)"), write: write)
     }
     private func emit(_ text: String, write: (Data) throws -> Void) throws {
         var chunk = Data()

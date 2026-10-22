@@ -219,7 +219,7 @@ struct RootView: View {
         .sheet(isPresented: $testingSingleReconcile) {
             SingleAccountReconciliationSheet(
                 account: "Assets:Bank:Daily",
-                label: "日常账户",
+                label: String(localized: "日常账户"),
                 currency: "CNY"
             )
         }
@@ -484,7 +484,7 @@ private struct MainTabView: View {
     private var nativeTabs: some View {
         TabView(selection: compactSelection) {
             ForEach(session.compactTabDestinations) { destination in
-                Tab(destination == .transactions ? "流水" : destination.compactTitle,
+                Tab(destination == .transactions ? String(localized: "流水") : destination.compactTitle,
                     systemImage: destination.systemImage, value: destination) {
                     NavigationStack { LedgerDestinationView(destination: destination, isRoot: true) }
                 }
@@ -501,7 +501,7 @@ private struct MainTabView: View {
                 NavigationStack {
                     LedgerDestinationView(destination: destination, isRoot: true)
                 }
-                .tabItem { Label(destination == .transactions ? "流水" : destination.compactTitle, systemImage: destination.systemImage) }
+                .tabItem { Label(destination == .transactions ? String(localized: "流水") : destination.compactTitle, systemImage: destination.systemImage) }
                 .tag(destination)
             }
             NavigationStack { MoreView(overflowDestination: $moreDestination) }

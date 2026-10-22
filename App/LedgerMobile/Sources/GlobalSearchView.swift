@@ -536,7 +536,7 @@ struct GlobalSearchView: View {
         Button(action: remove) { Label(title, systemImage: "xmark.circle.fill").font(.subheadline) }
             .buttonStyle(.bordered)
             .buttonBorderShape(.capsule)
-            .accessibilityLabel("移除筛选：" + title)
+            .accessibilityLabel("移除筛选：\(title)")
     }
 
     private struct DocumentRequest: Equatable {
