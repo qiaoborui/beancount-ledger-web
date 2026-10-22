@@ -215,6 +215,15 @@ jobs:
       - name: Test portable Swift package
         working-directory: App/LedgerMobile
         run: swift test
+      # `swift test` builds for macOS, where `canImport(UIKit)` is false, so an
+      # iOS-only compile error (SwiftUI `Font`, a missing import) passes there
+      # and only fails the IPA build. Cross-compiling for the device SDK catches
+      # it in the same job.
+      - name: Build for the iOS SDK
+        working-directory: App/LedgerMobile
+        run: |
+          swift build --triple arm64-apple-ios17.0 \
+            --sdk "$(xcrun --sdk iphoneos --show-sdk-path)"
 
   gate:
     name: Gate
