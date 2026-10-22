@@ -59,6 +59,7 @@ jobs:
       backend: true
       agent: true
       web: true
+      ios: true
 
   build-server:
     name: Build self-hosted server
