@@ -7,7 +7,7 @@ extension LedgerSession {
     /// Writes a backup of the open local ledger to the chosen backup folder.
     func backupCurrentLocalLedger() async throws -> LedgerBackupStore.Outcome {
         guard phase == .ready, let repository = localRepository else {
-            throw LocalLedgerError.operationFailed("请先解锁本地账本")
+            throw LocalLedgerError.operationFailed(String(localized: "请先解锁本地账本"))
         }
         guard let folder = LedgerBackupFolder.current else { throw LedgerBackupError.folderNotConfigured }
         let descriptor = currentLocalLedgerDescriptor ?? repository.descriptor
@@ -40,7 +40,7 @@ extension LedgerSession {
     /// remote moved meanwhile, the usual conflict review applies.
     func restoreCurrentLocalLedger(from entry: LedgerBackupEntry) async throws {
         guard phase == .ready, !isStorageSyncBusy, let repository = localRepository else {
-            throw LocalLedgerError.operationFailed("请先解锁本地账本，等待当前同步结束。")
+            throw LocalLedgerError.operationFailed(String(localized: "请先解锁本地账本，等待当前同步结束。"))
         }
         guard let folder = LedgerBackupFolder.current else { throw LedgerBackupError.folderNotConfigured }
         let descriptor = currentLocalLedgerDescriptor ?? repository.descriptor
@@ -84,7 +84,7 @@ extension LedgerSession {
         defer { LedgerBackupStore.discardExtraction(extracted.directory) }
         let existingNames = Set(localLedgers.map(\.name))
         var name = extracted.manifest.ledgerName
-        if existingNames.contains(name) { name = String(name.prefix(110)) + "（恢复）" }
+        if existingNames.contains(name) { name = String(name.prefix(110)) + String(localized: "（恢复）") }
         await importLocalLedger(from: extracted.directory, name: name, entrypoint: extracted.manifest.entrypoint)
     }
 }

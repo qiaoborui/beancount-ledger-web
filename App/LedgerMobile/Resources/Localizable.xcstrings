@@ -441,6 +441,16 @@
         }
       }
     },
+    "%@ 内容不完整" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is incomplete"
+          }
+        }
+      }
+    },
     "%@ 到 %@ 的汇率趋势" : {
       "localizations" : {
         "en" : {
@@ -497,6 +507,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Asserted %@"
+          }
+        }
+      }
+    },
+    "%@ 校验失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ failed verification"
           }
         }
       }
@@ -1640,6 +1660,16 @@
     },
     "https://ledger.example.com" : {
       "shouldTranslate" : false
+    },
+    "iCloud 云盘中的备份未做额外加密；开启 iCloud 高级数据保护后由 Apple 端到端加密。恢复前会先备份当前账本，恢复内容需通过完整账本校验才会生效。已连接 Git 的账本恢复后会作为一次本地修改同步到远端；若远端同时有修改，会进入现有的冲突处理。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backups in iCloud Drive have no extra encryption; with Advanced Data Protection for iCloud turned on, Apple encrypts them end to end. Before restoring, the current ledger is backed up first, and the restored content takes effect only after it passes full ledger validation. For a ledger connected to Git, the restore syncs to the remote as a local change; if the remote changed at the same time, it goes through the usual conflict review."
+          }
+        }
+      }
     },
     "travel, trip-2026" : {
       "shouldTranslate" : false
@@ -2831,6 +2861,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Choose from list"
+          }
+        }
+      }
+    },
+    "从备份恢复" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restore from Backup"
           }
         }
       }
@@ -4091,6 +4131,16 @@
         }
       }
     },
+    "其他账本或设备的备份" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backups from Other Ledgers or Devices"
+          }
+        }
+      }
+    },
     "其他资产" : {
       "localizations" : {
         "en" : {
@@ -5021,6 +5071,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Include %@"
+          }
+        }
+      }
+    },
+    "包含无效路径 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contains an invalid path %@"
+          }
+        }
+      }
+    },
+    "包含重复路径 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contains a duplicate path %@"
           }
         }
       }
@@ -6065,6 +6135,96 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Failed statements"
+          }
+        }
+      }
+    },
+    "备份与恢复" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backup & Restore"
+          }
+        }
+      }
+    },
+    "备份中没有当前账本的入口文件 %@，请改为恢复为新账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The backup doesn’t contain this ledger’s entry file %@. Restore it as a new ledger instead"
+          }
+        }
+      }
+    },
+    "备份文件夹" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backup Folder"
+          }
+        }
+      }
+    },
+    "备份文件已损坏或不完整：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The backup file is damaged or incomplete: %@"
+          }
+        }
+      }
+    },
+    "备份是整个账本目录的完整快照，保存为单个 .ledgerbackup 文件。建议在“文件”中选择 iCloud 云盘里的文件夹，由 iCloud 负责上传和多设备可见。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A backup is a complete snapshot of the ledger folder, saved as a single .ledgerbackup file. Choose a folder in iCloud Drive in Files so iCloud uploads it and makes it available on your other devices."
+          }
+        }
+      }
+    },
+    "备份格式版本 %lld 需要更新的 App 才能恢复" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backup format version %lld needs a newer version of the app to restore"
+          }
+        }
+      }
+    },
+    "备份清单不完整" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The backup manifest is incomplete"
+          }
+        }
+      }
+    },
+    "备份清单过大" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The backup manifest is too large"
+          }
+        }
+      }
+    },
+    "备份版本信息不一致" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The backup version information doesn’t match"
           }
         }
       }
@@ -7405,6 +7565,16 @@
         }
       }
     },
+    "已备份到“%@”" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backed up to “%@”"
+          }
+        }
+      }
+    },
     "已复制并记录新流水" : {
       "localizations" : {
         "en" : {
@@ -7491,6 +7661,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ignored “%@”. Nothing was written to the ledger."
+          }
+        }
+      }
+    },
+    "已恢复 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restored %@"
           }
         }
       }
@@ -8589,6 +8769,16 @@
         }
       }
     },
+    "总大小超过限制" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Total size exceeds the limit"
+          }
+        }
+      }
+    },
     "总支出" : {
       "localizations" : {
         "en" : {
@@ -8635,6 +8825,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Total assets"
+          }
+        }
+      }
+    },
+    "恢复为新账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restore as New Ledger"
+          }
+        }
+      }
+    },
+    "恢复为新账本不会改动当前账本。替换会先把“%@”的当前内容备份到同一文件夹，再用所选备份替换全部文件。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restoring as a new ledger leaves the current ledger unchanged. Replacing first backs up the current contents of “%@” to the same folder, then replaces all files with the selected backup."
           }
         }
       }
@@ -10119,6 +10329,26 @@
         }
       }
     },
+    "文件与目录路径冲突" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A file path conflicts with a folder path"
+          }
+        }
+      }
+    },
+    "文件数量超过限制" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Too many files"
+          }
+        }
+      }
+    },
     "文件读取已中断，请重新加载文件。" : {
       "localizations" : {
         "en" : {
@@ -10135,6 +10365,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The file path is outside the current ledger"
+          }
+        }
+      }
+    },
+    "文件长度与清单不一致" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "File lengths don’t match the manifest"
           }
         }
       }
@@ -10359,6 +10599,26 @@
         }
       }
     },
+    "无法命名备份文件" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t name the backup file"
+          }
+        }
+      }
+    },
+    "无法访问备份文件夹，请重新选择。若位于 iCloud 云盘，请确认已登录 iCloud 并开启 iCloud 云盘。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t access the backup folder. Choose it again. If it’s in iCloud Drive, make sure you’re signed in to iCloud and iCloud Drive is on."
+          }
+        }
+      }
+    },
     "无法访问小组件共享空间" : {
       "localizations" : {
         "en" : {
@@ -10425,6 +10685,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Can't load transaction"
+          }
+        }
+      }
+    },
+    "无法读取备份清单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t read the backup manifest"
           }
         }
       }
@@ -11069,6 +11339,16 @@
         }
       }
     },
+    "更换备份文件夹" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change Backup Folder"
+          }
+        }
+      }
+    },
     "更新失败：%@" : {
       "localizations" : {
         "en" : {
@@ -11095,6 +11375,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Replace TypeSafe API key"
+          }
+        }
+      }
+    },
+    "替换当前账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replace Current Ledger"
           }
         }
       }
@@ -11185,6 +11475,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Last synced"
+          }
+        }
+      }
+    },
+    "最近备份" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last Backup"
           }
         }
       }
@@ -11909,6 +12209,16 @@
         }
       }
     },
+    "未设置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not set"
+          }
+        }
+      }
+    },
     "未连接" : {
       "localizations" : {
         "en" : {
@@ -12275,6 +12585,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Amount"
+          }
+        }
+      }
+    },
+    "本账本的备份" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backups of This Ledger"
           }
         }
       }
@@ -13149,6 +13469,16 @@
         }
       }
     },
+    "正在处理备份" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Processing backup"
+          }
+        }
+      }
+    },
     "正在安全恢复账本" : {
       "localizations" : {
         "en" : {
@@ -13629,6 +13959,16 @@
         }
       }
     },
+    "每天一次" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Once a day"
+          }
+        }
+      }
+    },
     "每日" : {
       "localizations" : {
         "en" : {
@@ -14075,6 +14415,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Add account"
+          }
+        }
+      }
+    },
+    "清单摘要不一致" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The manifest digest doesn’t match"
           }
         }
       }
@@ -14939,6 +15289,16 @@
         }
       }
     },
+    "立即备份" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back Up Now"
+          }
+        }
+      }
+    },
     "立即锁定" : {
       "localizations" : {
         "en" : {
@@ -15619,6 +15979,26 @@
         }
       }
     },
+    "自动备份" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatic Backup"
+          }
+        }
+      }
+    },
+    "自动备份在打开并解锁账本时运行，每天最多一次；内容未变化时不会重复写入。每个账本保留最近 30 份。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatic backup runs when you open and unlock the ledger, at most once a day, and skips unchanged content. The latest 30 backups are kept for each ledger."
+          }
+        }
+      }
+    },
     "自动识别" : {
       "localizations" : {
         "en" : {
@@ -16229,12 +16609,32 @@
         }
       }
     },
+    "请先解锁本地账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlock the local ledger first"
+          }
+        }
+      }
+    },
     "请先解锁本地账本，等待当前同步结束。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Unlock the local ledger first and wait for the current sync to finish."
+          }
+        }
+      }
+    },
+    "请先选择备份文件夹" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a backup folder first"
           }
         }
       }
@@ -17059,6 +17459,16 @@
         }
       }
     },
+    "账本内容与已有备份相同，无需重复备份" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The ledger matches an existing backup; nothing new to back up"
+          }
+        }
+      }
+    },
     "账本写入和索引更新已经完成。" : {
       "localizations" : {
         "en" : {
@@ -17239,6 +17649,16 @@
         }
       }
     },
+    "账本文件在备份期间发生变化" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A ledger file changed during the backup"
+          }
+        }
+      }
+    },
     "账本是磁盘上的一个文件夹。名字只影响这里的显示，文件名之后随时可以改。" : {
       "localizations" : {
         "en" : {
@@ -17315,6 +17735,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The ledger folder exceeds the file count, total size, or depth limit"
+          }
+        }
+      }
+    },
+    "账本目录超过备份限制" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The ledger folder exceeds the backup limit"
           }
         }
       }
@@ -17989,12 +18419,32 @@
         }
       }
     },
+    "还没有备份" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No backups yet"
+          }
+        }
+      }
+    },
     "还没有导入记录" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "No import history yet"
+          }
+        }
+      }
+    },
+    "这不是 Ledger 账本备份文件" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This isn’t a Ledger backup file"
           }
         }
       }
@@ -18279,6 +18729,16 @@
         }
       }
     },
+    "选择 iCloud 云盘或“文件”中的 .ledgerbackup" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a .ledgerbackup in iCloud Drive or Files"
+          }
+        }
+      }
+    },
     "选择%@" : {
       "localizations" : {
         "en" : {
@@ -18365,6 +18825,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Choose the full folder with the entry file and its includes. The ledger is validated on this device during import."
+          }
+        }
+      }
+    },
+    "选择备份文件夹" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Backup Folder"
           }
         }
       }
@@ -19265,6 +19735,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "(referenced by entry file)"
+          }
+        }
+      }
+    },
+    "（恢复）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " (Restored)"
           }
         }
       }

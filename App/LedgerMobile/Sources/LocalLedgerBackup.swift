@@ -35,12 +35,12 @@ enum LedgerBackupError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .folderNotConfigured: "请先选择备份文件夹"
-        case .folderUnavailable: "无法访问备份文件夹，请重新选择。若位于 iCloud 云盘，请确认已登录 iCloud 并开启 iCloud 云盘。"
-        case .notABackup: "这不是 Ledger 账本备份文件"
-        case let .unsupportedVersion(version): "备份格式版本 \(version) 需要更新的 App 才能恢复"
-        case let .corrupt(detail): "备份文件已损坏或不完整：\(detail)"
-        case let .entrypointMissing(path): "备份中没有当前账本的入口文件 \(path)，请改为恢复为新账本"
+        case .folderNotConfigured: String(localized: "请先选择备份文件夹")
+        case .folderUnavailable: String(localized: "无法访问备份文件夹，请重新选择。若位于 iCloud 云盘，请确认已登录 iCloud 并开启 iCloud 云盘。")
+        case .notABackup: String(localized: "这不是 Ledger 账本备份文件")
+        case let .unsupportedVersion(version): String(localized: "备份格式版本 \(version) 需要更新的 App 才能恢复")
+        case let .corrupt(detail): String(localized: "备份文件已损坏或不完整：\(detail)")
+        case let .entrypointMissing(path): String(localized: "备份中没有当前账本的入口文件 \(path)，请改为恢复为新账本")
         }
     }
 }
@@ -75,14 +75,14 @@ enum LedgerBackupArchive {
                 if values.isSymbolicLink == true { continue }
                 entries += 1
                 guard entries <= limits.maximumEntries, depth <= limits.maximumDepth else {
-                    throw LedgerBackupError.corrupt("账本目录超过备份限制")
+                    throw LedgerBackupError.corrupt(String(localized: "账本目录超过备份限制"))
                 }
                 if values.isDirectory == true {
                     try walk(child, prefix: path, depth: depth + 1)
                 } else if values.isRegularFile == true {
                     let (size, hash) = try hashFile(child)
                     bytes += size
-                    guard bytes <= limits.maximumBytes else { throw LedgerBackupError.corrupt("账本目录超过备份限制") }
+                    guard bytes <= limits.maximumBytes else { throw LedgerBackupError.corrupt(String(localized: "账本目录超过备份限制")) }
                     files.append(ScannedFile(source: child, entry: .init(path: path, size: size, sha256: hash)))
                 }
             }
@@ -108,7 +108,7 @@ enum LedgerBackupArchive {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         let manifestData = try encoder.encode(manifest)
-        guard manifestData.count <= maximumManifestBytes else { throw LedgerBackupError.corrupt("备份清单过大") }
+        guard manifestData.count <= maximumManifestBytes else { throw LedgerBackupError.corrupt(String(localized: "备份清单过大")) }
         guard FileManager.default.createFile(atPath: destination.path, contents: nil, attributes: protectedAttributes) else {
             throw CocoaError(.fileWriteUnknown)
         }
@@ -125,10 +125,10 @@ enum LedgerBackupArchive {
             var copied = 0
             while let chunk = try input.read(upToCount: chunkSize), !chunk.isEmpty {
                 copied += chunk.count
-                guard copied <= file.entry.size else { throw LedgerBackupError.corrupt("账本文件在备份期间发生变化") }
+                guard copied <= file.entry.size else { throw LedgerBackupError.corrupt(String(localized: "账本文件在备份期间发生变化")) }
                 try output.write(contentsOf: chunk)
             }
-            guard copied == file.entry.size else { throw LedgerBackupError.corrupt("账本文件在备份期间发生变化") }
+            guard copied == file.entry.size else { throw LedgerBackupError.corrupt(String(localized: "账本文件在备份期间发生变化")) }
         }
         try output.synchronize()
     }
@@ -166,14 +166,14 @@ enum LedgerBackupArchive {
             var remaining = file.size
             while remaining > 0 {
                 guard let chunk = try input.read(upToCount: min(chunkSize, remaining)), !chunk.isEmpty else {
-                    throw LedgerBackupError.corrupt("\(file.path) 内容不完整")
+                    throw LedgerBackupError.corrupt(String(localized: "\(file.path) 内容不完整"))
                 }
                 hasher.update(data: chunk)
                 try output.write(contentsOf: chunk)
                 remaining -= chunk.count
             }
             guard hex(hasher.finalize()) == file.sha256 else {
-                throw LedgerBackupError.corrupt("\(file.path) 校验失败")
+                throw LedgerBackupError.corrupt(String(localized: "\(file.path) 校验失败"))
             }
         }
         return manifest
@@ -191,21 +191,21 @@ enum LedgerBackupArchive {
         let manifestLength = Int(header.bigEndianUInt32(at: 12))
         guard manifestLength <= maximumManifestBytes, manifestLength <= totalLength - headerLength,
               let manifestData = try input.read(upToCount: manifestLength), manifestData.count == manifestLength else {
-            throw LedgerBackupError.corrupt("备份清单不完整")
+            throw LedgerBackupError.corrupt(String(localized: "备份清单不完整"))
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let manifest: LedgerBackupManifest
         do { manifest = try decoder.decode(LedgerBackupManifest.self, from: manifestData) }
-        catch { throw LedgerBackupError.corrupt("无法读取备份清单") }
-        guard manifest.formatVersion == version else { throw LedgerBackupError.corrupt("备份版本信息不一致") }
+        catch { throw LedgerBackupError.corrupt(String(localized: "无法读取备份清单")) }
+        guard manifest.formatVersion == version else { throw LedgerBackupError.corrupt(String(localized: "备份版本信息不一致")) }
         try validate(manifest, payloadLength: totalLength - headerLength - manifestLength)
         return manifest
     }
 
     private static func validate(_ manifest: LedgerBackupManifest, payloadLength: Int) throws {
         let limits = LocalLedgerWorkspace.TreeLimits()
-        guard manifest.files.count <= limits.maximumEntries else { throw LedgerBackupError.corrupt("文件数量超过限制") }
+        guard manifest.files.count <= limits.maximumEntries else { throw LedgerBackupError.corrupt(String(localized: "文件数量超过限制")) }
         var seen = Set<String>(), directories = Set<String>(), total = 0
         for file in manifest.files {
             let parts = file.path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
@@ -216,21 +216,21 @@ enum LedgerBackupArchive {
                   }),
                   file.size >= 0, file.sha256.count == 64,
                   file.sha256.allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else {
-                throw LedgerBackupError.corrupt("包含无效路径 \(file.path)")
+                throw LedgerBackupError.corrupt(String(localized: "包含无效路径 \(file.path)"))
             }
             // Case-insensitive volumes would merge two entries into one file.
             let key = file.path.lowercased()
             guard seen.insert(key).inserted, !directories.contains(key) else {
-                throw LedgerBackupError.corrupt("包含重复路径 \(file.path)")
+                throw LedgerBackupError.corrupt(String(localized: "包含重复路径 \(file.path)"))
             }
             for depth in 1..<parts.count { directories.insert(parts[0..<depth].joined(separator: "/").lowercased()) }
-            guard file.size <= limits.maximumBytes - total else { throw LedgerBackupError.corrupt("总大小超过限制") }
+            guard file.size <= limits.maximumBytes - total else { throw LedgerBackupError.corrupt(String(localized: "总大小超过限制")) }
             total += file.size
         }
-        guard seen.isDisjoint(with: directories) else { throw LedgerBackupError.corrupt("文件与目录路径冲突") }
-        guard total == payloadLength else { throw LedgerBackupError.corrupt("文件长度与清单不一致") }
+        guard seen.isDisjoint(with: directories) else { throw LedgerBackupError.corrupt(String(localized: "文件与目录路径冲突")) }
+        guard total == payloadLength else { throw LedgerBackupError.corrupt(String(localized: "文件长度与清单不一致")) }
         guard contentDigest(of: manifest.files) == manifest.contentDigest else {
-            throw LedgerBackupError.corrupt("清单摘要不一致")
+            throw LedgerBackupError.corrupt(String(localized: "清单摘要不一致"))
         }
     }
 
@@ -424,7 +424,7 @@ actor LedgerBackupStore {
         }
         guard let entry = LedgerBackupEntry(url: destination, ledgerID: descriptor.id,
             size: try? LedgerBackupArchive.fileLength(of: destination)) else {
-            throw LedgerBackupError.corrupt("无法命名备份文件")
+            throw LedgerBackupError.corrupt(String(localized: "无法命名备份文件"))
         }
         try prune(folder: folder, ledgerID: descriptor.id, keeping: entry)
         return .created(entry)
