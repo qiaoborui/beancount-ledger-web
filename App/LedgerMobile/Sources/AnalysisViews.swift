@@ -8,17 +8,17 @@ enum LedgerAnalysisKind: String, CaseIterable, Hashable {
 
     var title: String {
         switch self {
-        case .assets: "资产分析"
-        case .incomeExpense: "收支分析"
-        case .investments: "投资"
+        case .assets: String(localized: "资产分析")
+        case .incomeExpense: String(localized: "收支分析")
+        case .investments: String(localized: "投资")
         }
     }
 
     var detail: String {
         switch self {
-        case .assets: "资产、负债、结构与净值趋势"
-        case .incomeExpense: "收入、支出、现金流与分类洞察"
-        case .investments: "持仓市值、成本与收益"
+        case .assets: String(localized: "资产、负债、结构与净值趋势")
+        case .incomeExpense: String(localized: "收入、支出、现金流与分类洞察")
+        case .investments: String(localized: "持仓市值、成本与收益")
         }
     }
 
@@ -72,7 +72,7 @@ struct LedgerAnalysisView: View {
                     content(cached)
                 } else if let errorMessage {
                     VStack(spacing: LedgerSpacing.lg) {
-                        EmptyLedgerState(icon: "exclamationmark.triangle", title: "分析数据加载失败", detail: errorMessage)
+                        EmptyLedgerState(icon: "exclamationmark.triangle", title: String(localized: "分析数据加载失败"), detail: errorMessage)
                         Button("重新加载") { reloadToken += 1 }
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(LedgerPalette.onBrand)
@@ -335,26 +335,26 @@ private struct AssetsAnalysisContent: View {
 
     private var allocationList: [AllocationSliceItem] {
         let known = Set(data.accounts.map(\.account))
-        var totals = ["现金与存款": 0, "理财与投资": 0, "应收与借出": 0, "其他资产": 0]
+        var totals = [String(localized: "现金与存款"): 0, String(localized: "理财与投资"): 0, String(localized: "应收与借出"): 0, String(localized: "其他资产"): 0]
         for account in data.accounts where account.account.hasPrefix("Assets:") {
             let amount = valuations[account.account] ?? 0
             switch account.group {
-            case "cash": totals["现金与存款", default: 0] += amount
-            case "wealth": totals["理财与投资", default: 0] += amount
-            case "receivable": totals["应收与借出", default: 0] += amount
-            default: totals["其他资产", default: 0] += amount
+            case "cash": totals[String(localized: "现金与存款"), default: 0] += amount
+            case "wealth": totals[String(localized: "理财与投资"), default: 0] += amount
+            case "receivable": totals[String(localized: "应收与借出"), default: 0] += amount
+            default: totals[String(localized: "其他资产"), default: 0] += amount
             }
         }
-        totals["其他资产", default: 0] += valuations
+        totals[String(localized: "其他资产"), default: 0] += valuations
             .filter { $0.key.hasPrefix("Assets:") && !known.contains($0.key) }
             .values.reduce(0, +)
 
         let total = max(assets, 1)
         let configs: [(id: String, label: String, icon: String, color: Color)] = [
-            ("cash", "现金与存款", "banknote.fill", Color(red: 0.12, green: 0.68, blue: 0.36)),
-            ("wealth", "理财与投资", "chart.pie.fill", Color(red: 0.0, green: 0.48, blue: 1.0)),
-            ("receivable", "应收与借出", "arrow.uturn.backward.circle.fill", Color(red: 1.0, green: 0.58, blue: 0.0)),
-            ("other", "其他资产", "cube.box.fill", Color(red: 0.69, green: 0.32, blue: 0.87)),
+            ("cash", String(localized: "现金与存款"), "banknote.fill", Color(red: 0.12, green: 0.68, blue: 0.36)),
+            ("wealth", String(localized: "理财与投资"), "chart.pie.fill", Color(red: 0.0, green: 0.48, blue: 1.0)),
+            ("receivable", String(localized: "应收与借出"), "arrow.uturn.backward.circle.fill", Color(red: 1.0, green: 0.58, blue: 0.0)),
+            ("other", String(localized: "其他资产"), "cube.box.fill", Color(red: 0.69, green: 0.32, blue: 0.87)),
         ]
 
         return configs.compactMap { config in
@@ -405,7 +405,7 @@ private struct AssetsAnalysisContent: View {
                 currency: data.valuationCurrency
             )
 
-            AnalysisChartPanel(title: "净值走势", detail: "资产、负债与净资产的长期趋势") {
+            AnalysisChartPanel(title: String(localized: "净值走势"), detail: String(localized: "资产、负债与净资产的长期趋势")) {
                 Picker("趋势粒度", selection: $trendMode) {
                     ForEach(AssetTrendMode.allCases) { mode in
                         Text(mode.title).tag(mode)
@@ -415,7 +415,7 @@ private struct AssetsAnalysisContent: View {
                 .disabled(data.monthEndNetWorth.count <= 1)
 
                 if trendPoints.isEmpty {
-                    AnalysisEmptyContent(icon: "chart.line.uptrend.xyaxis", message: "所选范围暂无净值趋势")
+                    AnalysisEmptyContent(icon: "chart.line.uptrend.xyaxis", message: String(localized: "所选范围暂无净值趋势"))
                 } else {
                     NetWorthTrendChart(
                         points: trendPoints,
@@ -549,19 +549,19 @@ private struct AssetsHeroCard: View {
             // Bottom: Window Change metrics (Month Change, 6-Month, 12-Month)
             HStack(spacing: 8) {
                 WindowMetricBadge(
-                    title: "期间变化",
+                    title: String(localized: "期间变化"),
                     amount: windows?.monthChange,
                     currency: currency,
-                    subtitle: windows?.previousMonthEnd != nil ? "比上月末" : nil
+                    subtitle: windows?.previousMonthEnd != nil ? String(localized: "比上月末") : nil
                 )
                 WindowMetricBadge(
-                    title: "近 6 个月",
+                    title: String(localized: "近 6 个月"),
                     ratio: windows?.sixMonth.changeRatio,
                     amount: windows?.sixMonth.change,
                     currency: currency
                 )
                 WindowMetricBadge(
-                    title: "近 12 个月",
+                    title: String(localized: "近 12 个月"),
                     ratio: windows?.twelveMonth.changeRatio,
                     amount: windows?.twelveMonth.change,
                     currency: currency
@@ -590,10 +590,10 @@ private struct AssetsHeroCard: View {
     }
 
     private func debtRatioLevel(_ ratio: Double) -> String {
-        if ratio <= 0.15 { return "财务非常稳健" }
-        if ratio <= 0.30 { return "负债健康" }
-        if ratio <= 0.55 { return "负债适中" }
-        return "负债偏高"
+        if ratio <= 0.15 { return String(localized: "财务非常稳健") }
+        if ratio <= 0.30 { return String(localized: "负债健康") }
+        if ratio <= 0.55 { return String(localized: "负债适中") }
+        return String(localized: "负债偏高")
     }
 }
 
@@ -669,7 +669,7 @@ private struct AssetAllocationDonutCard: View {
             }
 
             if allocations.isEmpty || totalAssets == 0 {
-                AnalysisEmptyRow(message: "所选范围暂无资产数据")
+                AnalysisEmptyRow(message: String(localized: "所选范围暂无资产数据"))
             } else {
                 // Donut Chart
                 Chart(allocations) { slice in
@@ -786,7 +786,7 @@ private struct AssetAccountsRankingCard: View {
             }
 
             if accounts.isEmpty {
-                AnalysisEmptyRow(message: "所选范围暂无资产账户")
+                AnalysisEmptyRow(message: String(localized: "所选范围暂无资产账户"))
             } else {
                 VStack(spacing: 8) {
                     ForEach(accounts.prefix(8)) { item in
@@ -949,7 +949,7 @@ private struct LiabilitiesBreakdownCard: View {
                                         font: .system(size: 13, weight: .bold, design: .monospaced),
                                         color: LedgerPalette.expense
                                     )
-                                    Text(String(format: "占负债 %.1f%%", item.ratio * 100))
+                                    Text(String(format: String(localized: "占负债 %.1f%%"), item.ratio * 100))
                                         .font(.system(size: 10))
                                         .foregroundStyle(LedgerPalette.secondary)
                                 }
@@ -987,7 +987,7 @@ private enum AssetTrendMode: String, CaseIterable, Identifiable {
     case monthEnd
 
     var id: String { rawValue }
-    var title: String { self == .daily ? "每日" : "月末" }
+    var title: String { self == .daily ? String(localized: "每日") : String(localized: "月末") }
 }
 
 private struct IncomeExpenseAnalysisContent: View {
@@ -1013,9 +1013,9 @@ private struct IncomeExpenseAnalysisContent: View {
         VStack(spacing: LedgerSpacing.lg) {
             AnalysisMetricGrid(
                 metrics: [
-                    AnalysisMetric("期间结余", amount: statement.netIncome, color: statement.netIncome >= 0 ? LedgerPalette.ink : LedgerPalette.expense),
-                    AnalysisMetric("收入", amount: statement.totalIncome, color: LedgerPalette.income),
-                    AnalysisMetric("支出", amount: statement.totalExpense, color: LedgerPalette.expense),
+                    AnalysisMetric(String(localized: "期间结余"), amount: statement.netIncome, color: statement.netIncome >= 0 ? LedgerPalette.ink : LedgerPalette.expense),
+                    AnalysisMetric(String(localized: "收入"), amount: statement.totalIncome, color: LedgerPalette.income),
+                    AnalysisMetric(String(localized: "支出"), amount: statement.totalExpense, color: LedgerPalette.expense),
                 ],
                 currency: statement.valuationCurrency,
                 onSelect: { idx in
@@ -1027,9 +1027,9 @@ private struct IncomeExpenseAnalysisContent: View {
                 }
             )
 
-            AnalysisChartPanel(title: "现金流", detail: "按月比较收入、支出与结余") {
+            AnalysisChartPanel(title: String(localized: "现金流"), detail: String(localized: "按月比较收入、支出与结余")) {
                 if dashboard.cashflowSeries.isEmpty {
-                    AnalysisEmptyContent(icon: "chart.xyaxis.line", message: "所选范围暂无现金流趋势")
+                    AnalysisEmptyContent(icon: "chart.xyaxis.line", message: String(localized: "所选范围暂无现金流趋势"))
                 } else {
                     CashflowTrendChart(
                         points: dashboard.cashflowSeries,
@@ -1045,7 +1045,7 @@ private struct IncomeExpenseAnalysisContent: View {
             )
 
             CookieRankedCategoryPanel(
-                title: "支出分类排行",
+                title: String(localized: "支出分类排行"),
                 items: statement.expenseAnalytics,
                 totalExpense: statement.totalExpense,
                 currency: statement.valuationCurrency
@@ -1129,11 +1129,11 @@ private struct IncomeExpenseAnalysisContent: View {
 
             IncomeExpenseHighlights(statement: statement)
 
-            IncomeNodePanel(title: "收入账户", nodes: flattened(statement.income), currency: statement.valuationCurrency, color: LedgerPalette.income)
-            IncomeNodePanel(title: "支出账户", nodes: flattened(statement.expense), currency: statement.valuationCurrency, color: LedgerPalette.expense)
+            IncomeNodePanel(title: String(localized: "收入账户"), nodes: flattened(statement.income), currency: statement.valuationCurrency, color: LedgerPalette.income)
+            IncomeNodePanel(title: String(localized: "支出账户"), nodes: flattened(statement.expense), currency: statement.valuationCurrency, color: LedgerPalette.expense)
 
             if !dashboard.anomalies.isEmpty {
-                AnalysisListPanel(title: "需要留意", detail: "按金额与历史模式识别") {
+                AnalysisListPanel(title: String(localized: "需要留意"), detail: String(localized: "按金额与历史模式识别")) {
                     ForEach(Array(dashboard.anomalies.prefix(4).enumerated()), id: \.offset) { _, anomaly in
                         Button {
                             LedgerFeedback.selection()
@@ -1191,7 +1191,7 @@ private struct IncomeExpenseHighlights: View {
     var body: some View {
         VStack(spacing: LedgerSpacing.lg) {
             RankedAmountPanel(
-                title: "热门商户",
+                title: String(localized: "热门商户"),
                 rows: statement.topPayees.prefix(5).map { ($0.payee, $0.amount, $0.txCount) },
                 currency: statement.valuationCurrency,
                 color: LedgerPalette.expense,
@@ -1203,7 +1203,7 @@ private struct IncomeExpenseHighlights: View {
                 }
             )
             RankedAmountPanel(
-                title: "支付账户",
+                title: String(localized: "支付账户"),
                 rows: statement.topPaymentAccounts.prefix(5).map { ($0.label, $0.amount, $0.txCount) },
                 currency: statement.valuationCurrency,
                 color: LedgerPalette.cobalt,
@@ -1214,7 +1214,7 @@ private struct IncomeExpenseHighlights: View {
                     }
                 }
             )
-            AnalysisListPanel(title: "待整理项目", detail: "Expenses:Unknown") {
+            AnalysisListPanel(title: String(localized: "待整理项目"), detail: "Expenses:Unknown") {
                 if let unknown {
                     Button {
                         LedgerFeedback.selection()
@@ -1222,7 +1222,7 @@ private struct IncomeExpenseHighlights: View {
                     } label: {
                         AnalysisAmountRow(
                             title: unknown.label,
-                            detail: "\(unknown.txCount) 笔 · 占支出 \(percent(unknown.share))",
+                            detail: String(localized: "\(unknown.txCount) 笔 · 占支出 \(percent(unknown.share))"),
                             amount: unknown.amount,
                             currency: statement.valuationCurrency,
                             color: LedgerPalette.expense
@@ -1230,7 +1230,7 @@ private struct IncomeExpenseHighlights: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    AnalysisEmptyRow(message: "当前期间没有待整理支出")
+                    AnalysisEmptyRow(message: String(localized: "当前期间没有待整理支出"))
                 }
             }
         }
@@ -1266,14 +1266,14 @@ private struct CashflowTrendChart: View {
                         LineMark(
                             x: .value("月份", x),
                             y: .value("收入", point.income),
-                            series: .value("系列", "收入")
+                            series: .value("系列", String(localized: "收入"))
                         )
                         .foregroundStyle(LedgerPalette.income)
                         .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                         LineMark(
                             x: .value("月份", x),
                             y: .value("支出", point.expense),
-                            series: .value("系列", "支出")
+                            series: .value("系列", String(localized: "支出"))
                         )
                         .foregroundStyle(LedgerPalette.expense)
                         .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
@@ -1307,8 +1307,8 @@ private struct CashflowTrendChart: View {
             .frame(height: 190)
 
             AnalysisChartLegend(items: [
-                ("收入", LedgerPalette.income),
-                ("支出", LedgerPalette.expense),
+                (String(localized: "收入"), LedgerPalette.income),
+                (String(localized: "支出"), LedgerPalette.expense),
             ])
         }
     }
@@ -1405,14 +1405,14 @@ private struct NetWorthTrendChart: View {
                         LineMark(
                             x: .value("日期", x),
                             y: .value("资产", point.assets),
-                            series: .value("系列", "资产")
+                            series: .value("系列", String(localized: "资产"))
                         )
                         .foregroundStyle(LedgerPalette.ink)
                         .lineStyle(StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
                         LineMark(
                             x: .value("日期", x),
                             y: .value("负债", point.liabilities),
-                            series: .value("系列", "负债")
+                            series: .value("系列", String(localized: "负债"))
                         )
                         .foregroundStyle(LedgerPalette.secondary)
                         .lineStyle(StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round, dash: [5, 4]))
@@ -1455,9 +1455,9 @@ private struct NetWorthTrendChart: View {
                         Text(point.date)
                             .font(.system(size: 9, weight: .semibold).monospacedDigit())
                             .foregroundStyle(LedgerPalette.secondary)
-                        AmountLabel(minorUnits: point.netWorth, currency: currency, prefix: "净值 ", font: .system(size: 10, weight: .semibold), color: LedgerPalette.cobalt)
-                        AmountLabel(minorUnits: point.assets, currency: currency, prefix: "资产 ", font: .system(size: 9, weight: .medium), color: LedgerPalette.ink)
-                        AmountLabel(minorUnits: point.liabilities, currency: currency, prefix: "负债 ", font: .system(size: 9, weight: .medium), color: LedgerPalette.secondary)
+                        AmountLabel(minorUnits: point.netWorth, currency: currency, prefix: String(localized: "净值 "), font: .system(size: 10, weight: .semibold), color: LedgerPalette.cobalt)
+                        AmountLabel(minorUnits: point.assets, currency: currency, prefix: String(localized: "资产 "), font: .system(size: 9, weight: .medium), color: LedgerPalette.ink)
+                        AmountLabel(minorUnits: point.liabilities, currency: currency, prefix: String(localized: "负债 "), font: .system(size: 9, weight: .medium), color: LedgerPalette.secondary)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
@@ -1474,9 +1474,9 @@ private struct NetWorthTrendChart: View {
             .frame(height: 190)
 
             AnalysisChartLegend(items: [
-                ("净资产", LedgerPalette.cobalt),
-                ("资产", LedgerPalette.ink),
-                ("负债", LedgerPalette.secondary),
+                (String(localized: "净资产"), LedgerPalette.cobalt),
+                (String(localized: "资产"), LedgerPalette.ink),
+                (String(localized: "负债"), LedgerPalette.secondary),
             ])
         }
     }
@@ -1507,18 +1507,18 @@ private struct InvestmentsAnalysisContent: View {
     var body: some View {
         VStack(spacing: LedgerSpacing.lg) {
             AnalysisMetricGrid(metrics: [
-                AnalysisMetric("持仓市值", amount: data.totalMarketValueCny, color: LedgerPalette.gold),
+                AnalysisMetric(String(localized: "持仓市值"), amount: data.totalMarketValueCny, color: LedgerPalette.gold),
                 AnalysisMetric(
-                    "已实现收益",
+                    String(localized: "已实现收益"),
                     amount: data.realizedPnlCny,
-                    placeholder: "暂无记录",
+                    placeholder: String(localized: "暂无记录"),
                     color: (data.realizedPnlCny ?? 0) >= 0 ? LedgerPalette.income : LedgerPalette.expense
                 ),
             ], currency: "CNY")
 
-            AnalysisListPanel(title: "当前持仓", detail: "\(data.holdings.count) 个品种") {
+            AnalysisListPanel(title: String(localized: "当前持仓"), detail: String(localized: "\(data.holdings.count) 个品种")) {
                 if data.holdings.isEmpty {
-                    AnalysisEmptyRow(message: "暂无投资持仓")
+                    AnalysisEmptyRow(message: String(localized: "暂无投资持仓"))
                 } else {
                     ForEach(data.holdings) { holding in
                         InvestmentHoldingRow(
@@ -1542,7 +1542,7 @@ private struct AnalysisMetric {
     let placeholder: String
     let color: Color
 
-    init(_ title: String, amount: Int?, placeholder: String = "暂无数据", color: Color) {
+    init(_ title: String, amount: Int?, placeholder: String = String(localized: "暂无数据"), color: Color) {
         self.title = title
         self.amount = amount
         self.placeholder = placeholder
@@ -1722,9 +1722,9 @@ private struct InvestmentHoldingRow: View {
     private var secondaryAmount: (prefix: String, amount: Int, showSign: Bool)? {
         switch (holding.totalMarketValueCny, holding.totalCostValueCny) {
         case let (market?, cost?):
-            return ("浮动 ", market - cost, true)
+            return (String(localized: "浮动 "), market - cost, true)
         case (nil, let cost?):
-            return ("成本 ", cost, false)
+            return (String(localized: "成本 "), cost, false)
         case (_, nil):
             return nil
         }
@@ -1848,9 +1848,9 @@ private struct RankedAmountPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: LedgerSpacing.lg) {
-            SectionHeading(title: title, detail: "前 \(rows.count) 项")
+            SectionHeading(title: title, detail: String(localized: "前 \(rows.count) 项"))
             if rows.isEmpty {
-                AnalysisEmptyRow(message: "所选范围暂无支出分类")
+                AnalysisEmptyRow(message: String(localized: "所选范围暂无支出分类"))
             } else {
                 ForEach(Array(rows.enumerated()), id: \.offset) { idx, row in
                     Button {
@@ -1892,9 +1892,9 @@ private struct IncomeNodePanel: View {
     let color: Color
 
     var body: some View {
-        AnalysisListPanel(title: title, detail: "\(nodes.filter { $0.children.isEmpty }.count) 个分类") {
+        AnalysisListPanel(title: title, detail: String(localized: "\(nodes.filter { $0.children.isEmpty }.count) 个分类")) {
             if nodes.isEmpty {
-                AnalysisEmptyRow(message: "所选范围暂无\(title)")
+                AnalysisEmptyRow(message: String(localized: "所选范围暂无\(title)"))
             } else {
                 ForEach(nodes) { node in
                     Button {
@@ -1935,6 +1935,13 @@ struct CookieCategoryDonutCard: View {
         case expense = "支出"
         case income = "收入"
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .expense: String(localized: "支出")
+            case .income: String(localized: "收入")
+            }
+        }
     }
 
     @State private var selectedTab: AnalysisTab = .expense
@@ -1980,7 +1987,7 @@ struct CookieCategoryDonutCard: View {
             if remainder > 0 {
                 items.append(SliceItem(
                     id: "other_expense",
-                    label: "其他",
+                    label: String(localized: "其他"),
                     icon: "ellipsis.circle",
                     color: Color(red: 0.68, green: 0.70, blue: 0.74),
                     amount: remainder,
@@ -2011,7 +2018,7 @@ struct CookieCategoryDonutCard: View {
             if remainder > 0 {
                 items.append(SliceItem(
                     id: "other_income",
-                    label: "其他",
+                    label: String(localized: "其他"),
                     icon: "ellipsis.circle",
                     color: Color(red: 0.68, green: 0.70, blue: 0.74),
                     amount: remainder,
@@ -2036,7 +2043,7 @@ struct CookieCategoryDonutCard: View {
                                 selectedSliceID = nil
                             }
                         } label: {
-                            Text(tab.rawValue)
+                            Text(tab.title)
                                 .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
                                 .foregroundStyle(isSelected ? Color.white : LedgerPalette.ink)
                                 .padding(.horizontal, 12)
@@ -2064,7 +2071,7 @@ struct CookieCategoryDonutCard: View {
                     Image(systemName: "chart.pie")
                         .font(.system(size: 28))
                         .foregroundStyle(LedgerPalette.secondary)
-                    Text("当前期间暂无\(selectedTab.rawValue)记录")
+                    Text("当前期间暂无\(selectedTab.title)记录")
                         .font(.system(size: 13))
                         .foregroundStyle(LedgerPalette.secondary)
                 }
@@ -2204,7 +2211,7 @@ struct CookieRankedCategoryPanel: View {
             }
 
             if positiveItems.isEmpty {
-                AnalysisEmptyRow(message: "所选范围暂无支出分类")
+                AnalysisEmptyRow(message: String(localized: "所选范围暂无支出分类"))
             } else {
                 ForEach(Array(positiveItems.prefix(8).enumerated()), id: \.element.id) { index, item in
                     let visual = TransactionVisualCategory.resolve(account: item.account, label: item.label)

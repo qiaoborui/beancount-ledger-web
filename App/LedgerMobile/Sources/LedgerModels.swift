@@ -2433,7 +2433,7 @@ extension LedgerAccount {
 enum LedgerDateText {
     static func monthTitle(start: String) -> String {
         guard let date = parse(start) else { return start }
-        return date.formatted(.dateTime.year().month(.wide).locale(Locale(identifier: "zh_CN")))
+        return date.formatted(.dateTime.year().month(.wide).locale(LedgerLocale.current))
     }
 
     static func shortDate(_ raw: String) -> String {

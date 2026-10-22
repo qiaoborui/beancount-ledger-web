@@ -29,7 +29,7 @@ struct TerminalReportMetric: View {
     let amount: Int?
     let currency: String
     var value: String? = nil
-    var note: String = "所选期间"
+    var note: String = String(localized: "所选期间")
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -37,7 +37,7 @@ struct TerminalReportMetric: View {
             if let amount {
                 TerminalAmount(minorUnits: amount, currency: currency, size: 17)
             } else {
-                Text(value ?? "暂无数据").terminalFont(size: 17, weight: .medium, design: .monospaced)
+                Text(value ?? String(localized: "暂无数据")).terminalFont(size: 17, weight: .medium, design: .monospaced)
                     .foregroundStyle(TerminalPalette.ink)
             }
             Text(note).terminalFont(size: 11).foregroundStyle(TerminalPalette.secondary)
@@ -126,7 +126,7 @@ private struct TerminalReportChart: View {
                         AxisGridLine().foregroundStyle(TerminalPalette.line)
                         AxisValueLabel {
                             if let amount = value.as(Double.self) {
-                                Text(amount.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Locale(identifier: "zh_CN"))))
+                                Text(amount.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(LedgerLocale.current)))
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundStyle(TerminalPalette.secondary)
                             }
@@ -140,14 +140,14 @@ private struct TerminalReportChart: View {
                 .accessibilityIdentifier(netOnly ? "terminal-net-chart" : "terminal-cashflow-chart")
                 if !netOnly {
                     HStack(spacing: 16) {
-                        legend("收入", color: TerminalPalette.ink)
-                        legend("支出", color: TerminalPalette.accent)
+                        legend(String(localized: "收入"), color: TerminalPalette.ink)
+                        legend(String(localized: "支出"), color: TerminalPalette.accent)
                     }
                 }
                 DisclosureGroup("查看数据 · \(currency)", isExpanded: $showsData) {
                     ForEach(points) { point in
                         TerminalReportRow(title: point.month,
-                            detail: netOnly ? "结余" : "收入 / 支出",
+                            detail: netOnly ? String(localized: "结余") : String(localized: "收入 / 支出"),
                             amount: netOnly ? point.net : point.income, currency: currency,
                             annotation: netOnly ? "" : MoneyText.format(minorUnits: point.expense, currency: currency))
                     }
@@ -322,14 +322,14 @@ struct TerminalIncomeExpenseReport: View {
     private var metricsGrid: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                BalancedAnalysisMetric(title: "收入", minorUnits: statement.totalIncome, currency: currency, sub: currency + " · 所选区间")
+                BalancedAnalysisMetric(title: String(localized: "收入"), minorUnits: statement.totalIncome, currency: currency, sub: currency + String(localized: " · 所选区间"))
                     .overlay(alignment: .trailing) { BalancedPalette.rule.frame(width: 1) }
-                BalancedAnalysisMetric(title: "支出", minorUnits: statement.totalExpense, currency: currency, sub: currency + " · 所选区间")
+                BalancedAnalysisMetric(title: String(localized: "支出"), minorUnits: statement.totalExpense, currency: currency, sub: currency + String(localized: " · 所选区间"))
             }.overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
             HStack(spacing: 0) {
-                BalancedAnalysisMetric(title: "净结余", minorUnits: statement.netIncome, currency: currency, prefix: netPrefix, color: netColor, sub: "收入 − 支出")
+                BalancedAnalysisMetric(title: String(localized: "净结余"), minorUnits: statement.netIncome, currency: currency, prefix: netPrefix, color: netColor, sub: String(localized: "收入 − 支出"))
                     .overlay(alignment: .trailing) { BalancedPalette.rule.frame(width: 1) }
-                BalancedAnalysisMetric(title: "日均支出", minorUnits: dailyAverageExpense, currency: currency, sub: "\(dayCount) 天")
+                BalancedAnalysisMetric(title: String(localized: "日均支出"), minorUnits: dailyAverageExpense, currency: currency, sub: String(localized: "\(dayCount) 天"))
             }
         }
         .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
@@ -357,7 +357,7 @@ struct TerminalIncomeExpenseReport: View {
                     AxisGridLine().foregroundStyle(BalancedPalette.rule)
                     AxisValueLabel {
                         if let amount = value.as(Double.self) {
-                            Text(amount.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Locale(identifier: "zh_CN"))))
+                            Text(amount.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(LedgerLocale.current)))
                                 .balancedFont(size: 10).foregroundStyle(BalancedPalette.meta)
                         }
                     }
@@ -368,8 +368,8 @@ struct TerminalIncomeExpenseReport: View {
                 .padding(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))
                 .accessibilityLabel(BalancedBucketAxis.title(points.map(\.month))).accessibilityIdentifier("balanced-cashflow-chart")
                 HStack(spacing: 20) {
-                    legendKey("收入", color: BalancedPalette.ink)
-                    legendKey("支出", color: BalancedPalette.expense)
+                    legendKey(String(localized: "收入"), color: BalancedPalette.ink)
+                    legendKey(String(localized: "支出"), color: BalancedPalette.expense)
                 }.padding(EdgeInsets(top: 10, leading: 20, bottom: 6, trailing: 20))
                 Text(BalancedBucketAxis.footnote(points.map(\.month))).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                     .padding(EdgeInsets(top: 0, leading: 20, bottom: 4, trailing: 20))
@@ -394,7 +394,7 @@ struct TerminalIncomeExpenseReport: View {
     private var netTrendChart: some View {
         let points = data.dashboard.cashflowSeries
         return VStack(alignment: .leading, spacing: 0) {
-            balancedSechead("净结余趋势", aside: currency)
+            balancedSechead(String(localized: "净结余趋势"), aside: currency)
             if !session.amountsVisible {
                 Text("金额已隐藏").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).frame(maxWidth: .infinity, minHeight: 120)
             } else if points.isEmpty {
@@ -411,7 +411,7 @@ struct TerminalIncomeExpenseReport: View {
                     AxisGridLine().foregroundStyle(BalancedPalette.rule)
                     AxisValueLabel {
                         if let amount = value.as(Double.self) {
-                            Text(amount.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Locale(identifier: "zh_CN"))))
+                            Text(amount.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(LedgerLocale.current)))
                                 .balancedFont(size: 10).foregroundStyle(BalancedPalette.meta)
                         }
                     }
@@ -459,13 +459,13 @@ struct TerminalIncomeExpenseReport: View {
                 }
             }.padding(EdgeInsets(top: 26, leading: 20, bottom: 10, trailing: 20))
             if statement.expenseAnalytics.isEmpty {
-                empty("所选区间暂无支出")
+                empty(String(localized: "所选区间暂无支出"))
             } else {
                 BalancedAnalysisTable(rows: statement.expenseAnalytics.prefix(5).map { item in
-                    .init(id: item.id, label: item.label, detail: "\(item.txCount) 笔", minorUnits: item.amount,
+                    .init(id: item.id, label: item.label, detail: String(localized: "\(item.txCount) 笔"), minorUnits: item.amount,
                         share: item.share ?? share(item.amount, total: statement.totalExpense),
                         action: { session.navigateToTransactions(kind: .expense, account: item.account) })
-                }, currency: currency, total: ("合计", statement.totalExpense))
+                }, currency: currency, total: (String(localized: "合计"), statement.totalExpense))
             }
             Text("占比按所选区间重算，不引用历史缓存。").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                 .padding(EdgeInsets(top: 12, leading: 20, bottom: 20, trailing: 20))
@@ -474,12 +474,12 @@ struct TerminalIncomeExpenseReport: View {
 
     private var payeesSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            balancedSechead("支出商户", aside: "按金额")
+            balancedSechead(String(localized: "支出商户"), aside: String(localized: "按金额"))
             if statement.topPayees.isEmpty {
-                empty("暂无商户数据")
+                empty(String(localized: "暂无商户数据"))
             } else {
                 BalancedAnalysisTable(rows: statement.topPayees.prefix(6).map { item in
-                    .init(id: item.id, label: item.payee, detail: "\(item.txCount) 笔", minorUnits: item.amount, share: share(item.amount, total: statement.totalExpense),
+                    .init(id: item.id, label: item.payee, detail: String(localized: "\(item.txCount) 笔"), minorUnits: item.amount, share: share(item.amount, total: statement.totalExpense),
                         action: { session.navigateToTransactions(query: item.payee) })
                 }, currency: currency)
             }
@@ -488,12 +488,12 @@ struct TerminalIncomeExpenseReport: View {
 
     private var fundingSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            balancedSechead("资金来源", aside: "支出账户")
+            balancedSechead(String(localized: "资金来源"), aside: String(localized: "支出账户"))
             if statement.topPaymentAccounts.isEmpty {
-                empty("暂无支出账户数据")
+                empty(String(localized: "暂无支出账户数据"))
             } else {
                 BalancedAnalysisTable(rows: statement.topPaymentAccounts.prefix(6).map { item in
-                    .init(id: item.id, label: item.label, detail: "\(item.txCount) 笔", minorUnits: item.amount, share: share(item.amount, total: statement.totalExpense),
+                    .init(id: item.id, label: item.label, detail: String(localized: "\(item.txCount) 笔"), minorUnits: item.amount, share: share(item.amount, total: statement.totalExpense),
                         action: { session.navigateToTransactions(account: item.account) })
                 }, currency: currency)
             }
@@ -505,26 +505,26 @@ struct TerminalIncomeExpenseReport: View {
     /// `.sechead` / `.tbl` idiom rather than dropped.
     private var categoryToggleSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            balancedSechead(incomeCategories ? "收入分类" : "支出分类明细", aside: "按分类")
+            balancedSechead(incomeCategories ? String(localized: "收入分类") : String(localized: "支出分类明细"), aside: String(localized: "按分类"))
             HStack(spacing: 22) {
-                categoryTab("支出", income: false)
-                categoryTab("收入", income: true)
+                categoryTab(String(localized: "支出"), income: false)
+                categoryTab(String(localized: "收入"), income: true)
             }.padding(.horizontal, 20).overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
             if incomeCategories {
                 if statement.income.isEmpty {
-                    empty("暂无收入分类")
+                    empty(String(localized: "暂无收入分类"))
                 } else {
                     BalancedAnalysisTable(rows: statement.income.map { node in
-                        .init(id: node.id, label: node.label, detail: "\(node.txCount) 笔", minorUnits: node.amount,
+                        .init(id: node.id, label: node.label, detail: String(localized: "\(node.txCount) 笔"), minorUnits: node.amount,
                             share: share(node.amount, total: statement.totalIncome),
                             action: { session.navigateToTransactions(kind: .income, account: node.account) })
                     }, currency: currency)
                 }
             } else if statement.expenseAnalytics.isEmpty {
-                empty("暂无支出分类")
+                empty(String(localized: "暂无支出分类"))
             } else {
                 BalancedAnalysisTable(rows: statement.expenseAnalytics.map { item in
-                    .init(id: item.id, label: item.label, detail: "\(item.txCount) 笔" + categoryChange(item.changeRatio), minorUnits: item.amount,
+                    .init(id: item.id, label: item.label, detail: String(localized: "\(item.txCount) 笔") + categoryChange(item.changeRatio), minorUnits: item.amount,
                         share: share(item.amount, total: statement.totalExpense),
                         action: { session.navigateToTransactions(kind: .expense, account: item.account) })
                 }, currency: currency)
@@ -534,7 +534,7 @@ struct TerminalIncomeExpenseReport: View {
 
     private var eventsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            balancedSechead("事件与项目", aside: "独立核算")
+            balancedSechead(String(localized: "事件与项目"), aside: String(localized: "独立核算"))
             if session.isLocal, let error = session.localEventTagSummaryError {
                 Text(error).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).padding(.horizontal, 20)
                 Button("重试事件汇总") { Task { await session.loadLocalEventTagSummaries(force: true) } }
@@ -543,10 +543,10 @@ struct TerminalIncomeExpenseReport: View {
                 ProgressView("正在统计事件与项目…").padding(.horizontal, 20).padding(.vertical, 12)
             }
             if events.isEmpty {
-                empty("暂无事件与项目")
+                empty(String(localized: "暂无事件与项目"))
             } else {
                 BalancedAnalysisTable(rows: events.prefix(3).map { event in
-                    .init(id: event.tag, label: "#" + event.tag, detail: "\(event.transactionCount) 笔", minorUnits: event.netSpend, share: nil,
+                    .init(id: event.tag, label: "#" + event.tag, detail: String(localized: "\(event.transactionCount) 笔"), minorUnits: event.netSpend, share: nil,
                         action: { selectedTag = event.tag })
                 }, currency: events.first?.currency ?? currency)
             }
@@ -558,7 +558,7 @@ struct TerminalIncomeExpenseReport: View {
 
     private var accountDetailSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            balancedSechead("账户明细", aside: currency)
+            balancedSechead(String(localized: "账户明细"), aside: currency)
             accountNodes(statement.income, kind: .income)
             accountNodes(statement.expense, kind: .expense)
         }.overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
@@ -567,9 +567,9 @@ struct TerminalIncomeExpenseReport: View {
     private var anomaliesSection: some View {
         let anomalies = data.dashboard.anomalies
         return VStack(alignment: .leading, spacing: 0) {
-            balancedSechead("异常与提示", aside: "\(anomalies.count) 条")
+            balancedSechead(String(localized: "异常与提示"), aside: String(localized: "\(anomalies.count) 条"))
             if anomalies.isEmpty {
-                empty("区间内未发现异常交易")
+                empty(String(localized: "区间内未发现异常交易"))
             } else {
                 ForEach(anomalies.prefix(6)) { item in
                     Button { session.navigateToTransactions(account: item.account) } label: {
@@ -599,7 +599,7 @@ struct TerminalIncomeExpenseReport: View {
     }
     private func categoryChange(_ ratio: Double?) -> String {
         guard session.amountsVisible, let ratio, ratio.isFinite else { return "" }
-        return " · 较上期 " + ratio.formatted(.percent.precision(.fractionLength(1)).sign(strategy: .always()))
+        return String(localized: " · 较上期 ") + ratio.formatted(.percent.precision(.fractionLength(1)).sign(strategy: .always()))
     }
     private func categoryTab(_ label: String, income: Bool) -> some View {
         Button { incomeCategories = income } label: {
@@ -674,22 +674,22 @@ struct TerminalAssetsReport: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !session.amountsVisible {
-                warnBanner("金额已隐藏。金额、占比和图表同时隐藏，不会只遮住一处。")
+                warnBanner(String(localized: "金额已隐藏。金额、占比和图表同时隐藏，不会只遮住一处。"))
             } else if missing {
-                warnBanner("部分资产缺少价格，当前合计仅包含已知估值；缺价不按零估值。")
+                warnBanner(String(localized: "部分资产缺少价格，当前合计仅包含已知估值；缺价不按零估值。"))
             }
             assetsSettle
             compositionBand
             netWorthTrend
             groupChangeSection
             VStack(alignment: .leading, spacing: 0) {
-                balancedSechead("账户明细", aside: "当前 / 期间变化")
+                balancedSechead(String(localized: "账户明细"), aside: String(localized: "当前 / 期间变化"))
                 ForEach(accountNames, id: \.self) { account in
                     Button { session.navigateToTransactions(account: account) } label: { accountRow(account) }.buttonStyle(.plain)
                 }
             }.overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
             VStack(alignment: .leading, spacing: 0) {
-                balancedSechead("币种与折算", aside: currency)
+                balancedSechead(String(localized: "币种与折算"), aside: currency)
                 ForEach(Array(balances.enumerated()), id: \.offset) { _, balance in currencyRow(balance) }
                 Text("折算采用账本提供的估值。价格日期与来源未提供时不作推断；内部转账不计入收支。")
                     .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
@@ -713,15 +713,15 @@ struct TerminalAssetsReport: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text("当前估值").balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.secondary)
                 Spacer(minLength: 0)
-                Text(asOfLabel + " 收盘").balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                Text(asOfLabel + String(localized: " 收盘")).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
             }.padding(.bottom, 14)
-            settleRow("资产", amount(assets))
+            settleRow(String(localized: "资产"), amount(assets))
             // Liabilities stay ink with a sign, not `--out`, matching the
             // established 概览 precedent (OverviewView.balanceSheet) — a
             // colour with no opposed partner on the same settle is the one
             // thing batch 1's own rules call a bug, so this intentionally
             // departs from the stray `v-out` in the b07 HTML.
-            settleRow("负债", amount(debt, prefix: debt != 0 ? "−" : ""))
+            settleRow(String(localized: "负债"), amount(debt, prefix: debt != 0 ? "−" : ""))
             HStack(alignment: .firstTextBaseline, spacing: 16) {
                 Text("净值").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                 Spacer(minLength: 0)
@@ -782,11 +782,11 @@ struct TerminalAssetsReport: View {
 
     private func groupLabel(_ group: String) -> String {
         switch group {
-        case "wealth": "储蓄与投资"
-        case "cash": "现金与支付"
-        case "receivable": "应收"
-        case "credit", "liability": "信用"
-        default: "其他资产"
+        case "wealth": String(localized: "储蓄与投资")
+        case "cash": String(localized: "现金与支付")
+        case "receivable": String(localized: "应收")
+        case "credit", "liability": String(localized: "信用")
+        default: String(localized: "其他资产")
         }
     }
 
@@ -869,8 +869,8 @@ struct TerminalAssetsReport: View {
                 Text("净值走势").balancedFont(size: 15, weight: .semibold).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
                 Spacer(minLength: 0)
                 HStack(spacing: 14) {
-                    trendChoice("月末", value: true)
-                    trendChoice("每日", value: false)
+                    trendChoice(String(localized: "月末"), value: true)
+                    trendChoice(String(localized: "每日"), value: false)
                 }
                 Text(session.amountsVisible ? "月度期末 · \(currency)" : "月度期末").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             }.padding(EdgeInsets(top: 26, leading: 20, bottom: 10, trailing: 20))
@@ -902,7 +902,7 @@ struct TerminalAssetsReport: View {
                             AxisGridLine().foregroundStyle(BalancedPalette.rule)
                             AxisValueLabel {
                                 if let v = value.as(Double.self) {
-                                    Text(v.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Locale(identifier: "zh_CN"))))
+                                    Text(v.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(LedgerLocale.current)))
                                         .balancedFont(size: 9).foregroundStyle(BalancedPalette.meta)
                                 }
                             }
@@ -1055,12 +1055,12 @@ struct TerminalInvestmentsReport: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             TerminalReportGrid {
-                TerminalReportMetric(title: "持仓市值", amount: data.totalMarketValueCny, currency: "CNY", note: "当前估值 / CNY")
-                TerminalReportMetric(title: "持仓成本", amount: totalCost, currency: "CNY", note: "缺失成本时不估算")
-                TerminalReportMetric(title: "浮动收益", amount: unrealized, currency: "CNY", note: "市值减持仓成本")
-                TerminalReportMetric(title: "已实现收益", amount: data.realizedPnlCny, currency: "CNY", note: "所选期间 / CNY")
+                TerminalReportMetric(title: String(localized: "持仓市值"), amount: data.totalMarketValueCny, currency: "CNY", note: String(localized: "当前估值 / CNY"))
+                TerminalReportMetric(title: String(localized: "持仓成本"), amount: totalCost, currency: "CNY", note: String(localized: "缺失成本时不估算"))
+                TerminalReportMetric(title: String(localized: "浮动收益"), amount: unrealized, currency: "CNY", note: String(localized: "市值减持仓成本"))
+                TerminalReportMetric(title: String(localized: "已实现收益"), amount: data.realizedPnlCny, currency: "CNY", note: String(localized: "所选期间 / CNY"))
             }
-            TerminalReportSection(title: "01 / 当前持仓", detail: "\(data.holdings.count) 个品种") {
+            TerminalReportSection(title: String(localized: "01 / 当前持仓"), detail: String(localized: "\(data.holdings.count) 个品种")) {
                 if data.holdings.isEmpty {
                     Text("暂无投资持仓").terminalFont(size: 13).padding(.vertical, 24)
                 }
@@ -1076,7 +1076,7 @@ struct TerminalInvestmentsReport: View {
                                 Text("缺少估值").terminalFont(size: 12).foregroundStyle(TerminalPalette.accent)
                             }
                         }
-                        Text(holding.commodity + " · " + (session.amountsVisible ? holding.totalQuantity.formatted() : "••••") + " · \(holding.accountCount) 个账户")
+                        Text(holding.commodity + " · " + (session.amountsVisible ? holding.totalQuantity.formatted() : "••••") + String(localized: " · \(holding.accountCount) 个账户"))
                             .terminalFont(size: 11, design: .monospaced).foregroundStyle(TerminalPalette.secondary)
                         if let cost = holding.totalCostValueCny {
                             HStack {
@@ -1095,7 +1095,7 @@ struct TerminalInvestmentsReport: View {
                     TerminalRule()
                 }
             }
-            TerminalReportSection(title: "02 / 账户持仓", detail: "\(data.positions.count) 项") {
+            TerminalReportSection(title: String(localized: "02 / 账户持仓"), detail: String(localized: "\(data.positions.count) 项")) {
                 ForEach(data.positions) { position in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(position.accountLabel.isEmpty ? position.account : position.accountLabel)
@@ -1141,19 +1141,19 @@ enum BalancedBucketAxis {
     /// Section head for the bar chart, so a month range is not called 月度.
     static func title(_ labels: [String]) -> String {
         switch granularity(labels) {
-        case .day: "每日收支"
-        case .week: "每周收支"
-        case .month: "月度收支"
-        case .quarter: "季度收支"
+        case .day: String(localized: "每日收支")
+        case .week: String(localized: "每周收支")
+        case .month: String(localized: "月度收支")
+        case .quarter: String(localized: "季度收支")
         }
     }
 
     static func footnote(_ labels: [String]) -> String {
         switch granularity(labels) {
-        case .day: "按日汇总 · 转账不计收支"
-        case .week: "按周汇总 · 转账不计收支"
-        case .month: "按月汇总 · 转账不计收支"
-        case .quarter: "按季汇总 · 转账不计收支"
+        case .day: String(localized: "按日汇总 · 转账不计收支")
+        case .week: String(localized: "按周汇总 · 转账不计收支")
+        case .month: String(localized: "按月汇总 · 转账不计收支")
+        case .quarter: String(localized: "按季汇总 · 转账不计收支")
         }
     }
 
@@ -1176,8 +1176,13 @@ enum BalancedBucketAxis {
             guard parts.count == 2 else { return raw }
             return "\(parts[0].suffix(2)) \(parts[1])"
         case .month:
-            guard parts.count == 2, let month = Int(parts[1]) else { return raw }
-            return showsYear || month == 1 ? "\(parts[0].suffix(2))年\(month)月" : "\(month)月"
+            guard parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]),
+                  let date = Calendar(identifier: .gregorian).date(from: DateComponents(year: year, month: month, day: 1))
+            else { return raw }
+            let style = Date.FormatStyle(date: .omitted, time: .omitted).locale(LedgerLocale.current)
+            return showsYear || month == 1
+                ? date.formatted(style.year(.twoDigits).month(.abbreviated))
+                : date.formatted(style.month(.abbreviated))
         case .day, .week:
             let tail = parts.suffix(2)
             guard tail.count == 2, let month = Int(tail.first!), let day = Int(tail.last!) else { return raw }
