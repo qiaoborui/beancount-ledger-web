@@ -12,6 +12,9 @@ settings:
     CURRENT_PROJECT_VERSION: "36"
     MARKETING_VERSION: "0.1.0"
     TARGETED_DEVICE_FAMILY: "1,2"
+    # Let the compiler extract String(localized:) and SwiftUI keys with their real argument types.
+    SWIFT_EMIT_LOC_STRINGS: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
 
 targets:
   LedgerMobile:
