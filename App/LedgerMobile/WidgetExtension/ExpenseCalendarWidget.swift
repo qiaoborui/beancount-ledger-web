@@ -48,12 +48,6 @@ struct ExpenseCalendarWidget: Widget {
 }
 
 struct ExpenseCalendarWidgetView: View {
-    /// Monday-first single-letter weekday headers.
-    private static var weekdayHeaders: [String] {
-        let symbols = LedgerDateLabel.veryShortWeekdaySymbols
-        return Array(symbols[1...]) + [symbols[0]]
-    }
-
     @Environment(\.widgetFamily) private var family
     @Environment(\.redactionReasons) private var redactionReasons
     let entry: ExpenseCalendarEntry
@@ -109,6 +103,12 @@ struct ExpenseCalendarWidgetView: View {
 }
 
 private struct ExpenseMonthGrid: View {
+    /// Monday-first single-letter weekday headers.
+    private static var weekdayHeaders: [String] {
+        let symbols = LedgerDateLabel.veryShortWeekdaySymbols
+        return Array(symbols[1...]) + [symbols[0]]
+    }
+
     @Environment(\.colorScheme) private var colorScheme
     let layout: ExpenseCalendarLayout
     let currency: String
