@@ -289,7 +289,7 @@ During the existing-production migration, temporarily keep the old
 `APP_PASSWORD`, `LEDGER_GITHUB_TOKEN`, and AI key mappings in the same secret.
 They are filtered from the final revision automatically. Add feature-specific
 mappings for enabled integrations. Include `CRON_SECRET`
-during the Vercel rollback window because the existing Vercel Cron uses it.
+while the Gmail automation still authenticates with the legacy header secret.
 
 ## GitHub repository configuration
 
@@ -474,8 +474,7 @@ one ledger into another instance.
 Cloud Run domain mapping is available in `asia-southeast1` as a Preview
 feature. Google documents latency limitations and recommends its GA load
 balancer path for production services. Domain mapping is the explicit low-fixed-
-cost tradeoff for this personal deployment, with Vercel retained as the
-production fallback during observation.
+cost tradeoff for this personal deployment.
 
 ```bash
 export DOMAIN=beancount.borry.org
@@ -546,13 +545,10 @@ gcloud scheduler jobs create http ledger-gmail-renew \
 ```
 
 Set `CRON_OIDC_AUDIENCE` to `PUBLIC_ORIGIN` and
-`CRON_OIDC_SERVICE_ACCOUNT` to `SCHEDULER_EMAIL`. The existing `CRON_SECRET`
-path remains available during the Vercel transition.
+`CRON_OIDC_SERVICE_ACCOUNT` to `SCHEDULER_EMAIL`. The legacy `CRON_SECRET`
+header path stays available for older schedulers.
 
 ## Rollback
-
-During the migration window, restoring the previous DNS records returns traffic
-to Vercel. GitHub and Postgres remain shared throughout the migration.
 
 Cloud Run retains previous revisions for later releases:
 
@@ -568,6 +564,3 @@ gcloud run services update-traffic "$CLOUD_RUN_SERVICE" \
   --to-revisions PREVIOUS_REVISION=100
 ```
 
-After 24–48 hours of healthy production traffic, disable the Vercel deployment
-and remove its Speed Insights and deployment configuration in a focused cleanup
-change.

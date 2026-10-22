@@ -176,7 +176,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         while canonicalHandles.count > Self.canonicalHandleLimit {
             released.append(canonicalHandles.removeLast().handle)
         }
-        for old in released { release(old, request: request) }
+        for old in released { releaseHandle(old, request: request) }
     }
 
     func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
@@ -217,6 +217,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     /// `nativeResponse`, so the handle cannot be released underneath it.
     /// Returns nil when this request needs the exclusive path.
     private func concurrentResponse(_ original: LocalLedgerEngineRequest) throws -> LocalLedgerResponse? {
+        #if canImport(LedgerCore)
         let request = normalized(original)
         guard !request.staging, let cached = cachedHandle(request) else { return nil }
         var small = request
@@ -228,10 +229,15 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
             // handle and redo this request through the exclusive path, which
             // re-registers.
             forget(cached)
-            release(cached, request: request)
+            releaseHandle(cached, request: request)
             return nil
         }
         return result
+        #else
+        // The portable package build has no native core; every request takes the
+        // exclusive path, which reports `runtimeUnavailable`.
+        return nil
+        #endif
     }
 
     /// Publication validation performs a GET against a mutable stage too, so the
@@ -262,7 +268,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         // Fail stale reads safely; do not retry financial writes automatically.
         if result.modelUnavailable {
             forget(handle)
-            release(handle, request: request)
+            releaseHandle(handle, request: request)
         }
         return result
         #else
@@ -318,14 +324,21 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         let encoded = try JSONEncoder().encode(request)
         return LocalLedgerResponse(envelope: Data(MobilecoreDispatchJSON(String(decoding: encoded, as: UTF8.self)).utf8))
     }
+    #endif
 
-    private func release(_ handle: String, request: LocalLedgerEngineRequest) {
+    /// `model-release` needs the native core; without it there is no handle to
+    /// release either.
+    private func releaseHandle(_ handle: String, request: LocalLedgerEngineRequest) {
+        #if canImport(LedgerCore)
         var command = request
         command.operation = "model-release"
         command.modelHandle = handle
         command.body = nil; command.importFile = nil; command.canonical = nil
         _ = try? nativeResponse(command)
+        #endif
     }
+
+    #if canImport(LedgerCore)
 
     private func register(_ request: LocalLedgerEngineRequest) async throws -> String {
         var command = request

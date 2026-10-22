@@ -4,7 +4,6 @@
 !.agents/skills/
 !.agents/skills/**
 .codegraph
-.vercel
 gha-creds-*.json
 **/.DS_Store
 **/.env

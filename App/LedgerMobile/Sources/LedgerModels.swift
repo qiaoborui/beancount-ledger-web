@@ -184,9 +184,11 @@ struct LedgerDateRange: Equatable, Sendable {
         case .month:
             return LedgerDateLabel.yearMonth(startDate)
         case .quarter:
-            return String(localized: "\(year)年第\(((month - 1) / 3) + 1)季度")
+            return String(localized: "\(year, format: .number.grouping(.never))年第\(((month - 1) / 3) + 1)季度")
         case .year:
-            return String(localized: "\(year)年")
+            // A bare interpolated Int would be formatted with the locale's
+            // grouping separator ("2,026年"), so the year opts out of it.
+            return String(localized: "\(year, format: .number.grouping(.never))年")
         case .custom:
             return String(localized: "\(start) 至 \(end)")
         }
@@ -201,7 +203,7 @@ struct LedgerDateRange: Equatable, Sendable {
         switch preset {
         case .month: return yearPrefix + LedgerDateLabel.month(number: month)
         case .quarter: return "\(yearPrefix)Q\(((month - 1) / 3) + 1)"
-        case .year: return String(localized: "\(year)年")
+        case .year: return String(localized: "\(year, format: .number.grouping(.never))年")
         case .custom:
             if start == end {
                 return "\(yearPrefix)\(month)/\(Self.calendar.component(.day, from: startDate))"

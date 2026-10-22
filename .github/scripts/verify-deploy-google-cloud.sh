@@ -156,8 +156,8 @@ if [[ "$(jq -r '([.[]] | any) | not' <<< "$docs_plan")" != "true" ]]; then
 fi
 
 workflow_script_plan="$(printf '%s\n' '.github/scripts/plan-components.sh' | "$component_planner")"
-if [[ "$(jq -r '.backend and .agent and .web and (.deploy_any | not)' <<< "$workflow_script_plan")" != "true" ]]; then
-  echo "component planner must validate shared workflow scripts without deploying application services" >&2
+if [[ "$(jq -r '.backend and .agent and .web and .ios and (.deploy_any | not)' <<< "$workflow_script_plan")" != "true" ]]; then
+  echo "component planner must validate shared workflow scripts, including the iOS job, without deploying application services" >&2
   exit 1
 fi
 

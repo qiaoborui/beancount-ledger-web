@@ -428,7 +428,7 @@ Foundation checks from the repository root:
 
 ```sh
 (cd server && go test ./... && go build ./cmd/ledger-web)
-swift test --package-path App/LedgerMobile
+swift test --package-path App/LedgerMobile   # portable core tests, no Xcode project needed
 bash scripts/build-ledgercore-xcframework.sh
 bash scripts/build-beancount-ios.sh
 bash scripts/build-beancount-ios-smoke.sh

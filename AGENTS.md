@@ -47,7 +47,8 @@ through `LEDGER_ROOT`.
 - `docs/` contains privacy, ledger layout, self-hosting, backend architecture,
   and Ubuntu server deployment documentation.
 - `docker/` contains container/deployment examples.
-- `.github/workflows/ci.yml` runs selective backend and frontend checks.
+- `.github/workflows/ci.yml` runs selective backend, agent, frontend, and iOS
+  core checks.
 - `.github/workflows/deploy-google-cloud.yml` publishes the standalone API and
   static web image to Cloud Run when the required repository variables are
   configured.
@@ -188,11 +189,16 @@ go build ./cmd/ledger-web
 
 CI uses Node.js 24 for the frontend job and the Go version declared in
 `server/go.mod` for the backend job. The CI workflow selectively runs backend
-checks for `server/`, `examples/`, `docker/`, and CI changes, and frontend
-checks for `web/`, `docker/`, and CI changes.
+checks for `server/`, `examples/`, `docker/`, and CI changes, frontend checks
+for `web/`, `docker/`, and CI changes, and portable Swift package tests for
+`App/`, `server/`, `examples/`, and CI changes. The iOS job runs on the
+self-hosted Mac runner and selects its Xcode through
+`.github/scripts/select-xcode.sh`; it needs no Xcode project because
+`swift test` in `App/LedgerMobile` covers the portable core, while app-host
+tests (SwiftUI rendering, bundled resources) stay in the Xcode scheme.
 
 When an integration-level behavior depends on hosted infrastructure, GitHub API
-ledger storage, the Postgres read model, or Vercel runtime configuration, prefer
+ledger storage, the Postgres read model, or hosted runtime configuration, prefer
 using the dedicated test/preview environment instead of production. The public
 demo ledger repository and preview Supabase database may be used for agent-run
 integration tests, write-path smoke tests, and deployment verification. Keep
