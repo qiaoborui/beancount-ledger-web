@@ -223,7 +223,7 @@ actor GitLocalStorage: LogicalLocalStorage {
         defer { synchronizing = false }
         var state = try loadState()
         guard let attemptID = state.conflictAttemptID, let expected = state.conflictLocalRevisionID,
-              !state.conflictPaths.isEmpty else { throw LocalStorageError.gitFailure("请先同步以读取当前冲突") }
+              !state.conflictPaths.isEmpty else { throw LocalStorageError.gitFailure(String(localized: "请先同步以读取当前冲突")) }
         let attempt = attemptsRoot.appendingPathComponent(attemptID.uuidString)
         let remote = try StorageTree.read(attempt.appendingPathComponent("remote"))
         let base = try StorageTree.read(attempt.appendingPathComponent("base"))
@@ -253,7 +253,7 @@ actor GitLocalStorage: LogicalLocalStorage {
 
     func exportConflictVersions() async throws -> URL {
         let state = try loadState()
-        guard let attemptID = state.conflictAttemptID else { throw LocalStorageError.gitFailure("当前没有待处理的冲突") }
+        guard let attemptID = state.conflictAttemptID else { throw LocalStorageError.gitFailure(String(localized: "当前没有待处理的冲突")) }
         let source = attemptsRoot.appendingPathComponent(attemptID.uuidString)
         let destination = FileManager.default.temporaryDirectory.appendingPathComponent("LedgerSyncConflict-" + UUID().uuidString)
         try FileManager.default.copyItem(at: source, to: destination)
@@ -532,7 +532,7 @@ private final class SyncLease {
     init(directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         descriptor = open(directory.appendingPathComponent("sync.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW, S_IRUSR | S_IWUSR)
-        guard descriptor >= 0 else { throw LocalStorageError.gitFailure("无法锁定本地同步目录") }
+        guard descriptor >= 0 else { throw LocalStorageError.gitFailure(String(localized: "无法锁定本地同步目录")) }
         guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
             close(descriptor)
             descriptor = -1

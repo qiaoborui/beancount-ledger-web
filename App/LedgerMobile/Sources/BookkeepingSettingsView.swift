@@ -20,7 +20,7 @@ struct BookkeepingSettingsView: View {
         .init(id: "deepseek", name: "DeepSeek", baseURL: "https://api.deepseek.com/v1", model: "deepseek-chat"),
         .init(id: "openai", name: "OpenAI", baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini"),
         .init(id: "moonshot", name: "Moonshot (Kimi)", baseURL: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k"),
-        .init(id: "siliconflow", name: "硅基流动", baseURL: "https://api.siliconflow.cn/v1", model: "deepseek-ai/DeepSeek-V3")
+        .init(id: "siliconflow", name: String(localized: "硅基流动"), baseURL: "https://api.siliconflow.cn/v1", model: "deepseek-ai/DeepSeek-V3")
     ]
 
     var body: some View {

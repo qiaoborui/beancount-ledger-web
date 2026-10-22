@@ -16,19 +16,19 @@ struct OverviewView: View {
                     let categories = session.isLocal ? localSpendingCategories(accountLabels: labels) : spendingCategories(from: ledger.transactions, accountLabels: labels)
                     spending(categories, currency: ledger.summary.currency)
                     recentTransactions(ledger, accountLabels: labels)
-                } else { EmptyLedgerState(icon: "chart.line.uptrend.xyaxis", title: "暂无财务数据", detail: "下拉刷新重新读取账本。").padding(.horizontal, 20) }
+                } else { EmptyLedgerState(icon: "chart.line.uptrend.xyaxis", title: String(localized: "暂无财务数据"), detail: String(localized: "下拉刷新重新读取账本。")).padding(.horizontal, 20) }
             }.padding(.bottom, 24).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
         }
         .scrollContentBackground(.hidden).background(BalancedPalette.page)
-        .terminalPageChrome("财务概览", compactTitle: "概览", isRoot: isRoot, showsTimeRange: true,
+        .terminalPageChrome(String(localized: "财务概览"), compactTitle: String(localized: "概览"), isRoot: isRoot, showsTimeRange: true,
                             actions: AnyView(LedgerQuickEntryButton(accessibilityID: "overview-quick-entry")))
         .refreshable { await Task { await session.refresh() }.value }
         .sheet(item: $comparisonDetails) { details in
             NavigationStack {
                 List {
                     Section("当前期间") { Text("\(details.comparisons.monthOverMonth.currentRange.start) 至 \(details.comparisons.monthOverMonth.currentRange.end)") }
-                    comparisonSection("环比", value: details.comparisons.monthOverMonth, currency: details.currency)
-                    comparisonSection("同比", value: details.comparisons.yearOverYear, currency: details.currency)
+                    comparisonSection(String(localized: "环比"), value: details.comparisons.monthOverMonth, currency: details.currency)
+                    comparisonSection(String(localized: "同比"), value: details.comparisons.yearOverYear, currency: details.currency)
                     Section("计算口径") { Text("变化金额 = 本期 − 基期；变化率 = 变化金额 ÷ 基期绝对值。基期为零时不计算变化率。结余 = 收入 − 支出，转账不计收支。") }
                 }.navigationTitle("\(details.title) · 比较口径").terminalNativeChrome()
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { comparisonDetails = nil } } }
@@ -47,7 +47,7 @@ struct OverviewView: View {
     private var periodShortLabel: String {
         let range = session.selectedRange
         if range.preset == .month, let month = range.start.split(separator: "-").dropFirst().first.flatMap({ Int($0) }) {
-            return "\(month) 月"
+            return LedgerDateLabel.month(number: month)
         }
         return range.displayTitle
     }
@@ -55,11 +55,11 @@ struct OverviewView: View {
     private func balanceSheet(_ ledger: LedgerBootstrap) -> some View {
         let t = ledger.balanceSheetTotals
         let currency = ledger.valuationCurrency
-        return settle(title: "资产负债结算", aside: periodEndLabel(ledger)) {
-            settleRow("资产", amount(abs(t.assets), currency: currency, prefix: t.assets < 0 ? "−" : ""))
-            settleRow("负债", amount(abs(t.liabilities), currency: currency, prefix: t.liabilities != 0 ? "−" : ""))
+        return settle(title: String(localized: "资产负债结算"), aside: periodEndLabel(ledger)) {
+            settleRow(String(localized: "资产"), amount(abs(t.assets), currency: currency, prefix: t.assets < 0 ? "−" : ""))
+            settleRow(String(localized: "负债"), amount(abs(t.liabilities), currency: currency, prefix: t.liabilities != 0 ? "−" : ""))
         } total: {
-            settleTotal("净值", amount(abs(t.netWorth), currency: currency, prefix: t.netWorth < 0 ? "−" : "", size: 30, weight: .medium, currencySymbol: true))
+            settleTotal(String(localized: "净值"), amount(abs(t.netWorth), currency: currency, prefix: t.netWorth < 0 ? "−" : "", size: 30, weight: .medium, currencySymbol: true))
         }
     }
 
@@ -88,9 +88,9 @@ struct OverviewView: View {
                 }
             }.frame(height: 10).padding(.bottom, 12).accessibilityHidden(true)
             HStack {
-                legend("留存", value: retained, color: BalancedPalette.ink, currency: ledger.summary.currency)
+                legend(String(localized: "留存"), value: retained, color: BalancedPalette.ink, currency: ledger.summary.currency)
                 Spacer(minLength: 16)
-                legend("支出", value: ledger.summary.expense, color: BalancedPalette.expense, currency: ledger.summary.currency)
+                legend(String(localized: "支出"), value: ledger.summary.expense, color: BalancedPalette.expense, currency: ledger.summary.currency)
             }
         }
         .padding(EdgeInsets(top: 18, leading: 20, bottom: 20, trailing: 20))
@@ -103,14 +103,14 @@ struct OverviewView: View {
         // Opening net worth is the last recorded point before the period starts; the
         // row is omitted rather than estimated when the history doesn't reach back.
         let opening = ledger.netWorthHistory.filter { $0.date < ledger.start }.max { $0.date < $1.date }?.netWorth
-        return settle(title: "本期收支结算", aside: periodShortLabel) {
+        return settle(title: String(localized: "本期收支结算"), aside: periodShortLabel) {
             if let opening {
-                settleRow("期初净资产", amount(abs(opening), currency: ledger.valuationCurrency, prefix: opening < 0 ? "−" : ""))
+                settleRow(String(localized: "期初净资产"), amount(abs(opening), currency: ledger.valuationCurrency, prefix: opening < 0 ? "−" : ""))
             }
-            settleRow("收入", amount(ledger.summary.income, currency: currency, prefix: "+"))
-            settleRow("支出", amount(ledger.summary.expense, currency: currency, prefix: "−"))
+            settleRow(String(localized: "收入"), amount(ledger.summary.income, currency: currency, prefix: "+"))
+            settleRow(String(localized: "支出"), amount(ledger.summary.expense, currency: currency, prefix: "−"))
         } total: {
-            settleTotal("净结余", amount(abs(net), currency: currency, prefix: net >= 0 ? "+" : "−", size: 30, weight: .medium,
+            settleTotal(String(localized: "净结余"), amount(abs(net), currency: currency, prefix: net >= 0 ? "+" : "−", size: 30, weight: .medium,
                 color: net >= 0 ? BalancedPalette.income : BalancedPalette.expense))
         }
         .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
@@ -187,7 +187,7 @@ struct OverviewView: View {
     private func spending(_ categories: [OverviewCategorySpending], currency: String) -> some View {
         let total = categories.reduce(0) { $0 + $1.totalMinorUnits }
         return VStack(alignment: .leading, spacing: 0) {
-            sectionHead("支出分类") {
+            sectionHead(String(localized: "支出分类")) {
                 if !categories.isEmpty {
                     HStack(spacing: 4) {
                         amount(total, currency: currency, size: 12.5, weight: .regular, color: BalancedPalette.meta)
@@ -196,7 +196,7 @@ struct OverviewView: View {
                 }
             }
             if categories.isEmpty {
-                Text(session.localOverviewCategoriesError ?? (session.isLocal && session.localOverviewCategories == nil ? "正在读取支出排行…" : "所选范围暂无支出"))
+                Text(session.localOverviewCategoriesError ?? (session.isLocal && session.localOverviewCategories == nil ? String(localized: "正在读取支出排行…") : String(localized: "所选范围暂无支出")))
                     .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).padding(EdgeInsets(top: 4, leading: 20, bottom: 12, trailing: 20))
             } else {
                 spendingRow { Text("分类") } amount: { Text("金额") } share: { Text("占比") }
@@ -233,7 +233,7 @@ struct OverviewView: View {
             if groups.last?.0 == tx.date { groups[groups.count - 1].1.append(tx) } else { groups.append((tx.date, [tx])) }
         }
         return VStack(alignment: .leading, spacing: 0) {
-            sectionHead("最近流水") {
+            sectionHead(String(localized: "最近流水")) {
                 if !ledger.transactions.isEmpty {
                     Button { session.primaryDestinationID = LedgerDestination.transactions.rawValue } label: {
                         Text("全部 \(ledger.transactions.count) 笔").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
@@ -271,11 +271,10 @@ struct OverviewView: View {
         guard let date = LedgerDateRange.parse(raw) else { return (raw, "") }
         let c = LedgerDateRange.calendar.dateComponents([.month, .day, .weekday], from: date)
         guard let month = c.month, let day = c.day, let weekday = c.weekday else { return (raw, "") }
-        let weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
-        return (String(format: "%02d/%02d", month, day), weekdays[max(0, min(6, weekday - 1))])
+        return (String(format: "%02d/%02d", month, day), LedgerDateLabel.weekday(number: weekday))
     }
     private func comparisonSection(_ title: String, value: LedgerPeriodComparison, currency: String) -> some View { Section(title) { Text("对比 \(value.baselineRange.start) 至 \(value.baselineRange.end)"); if let v = value.current { LabeledContent("本期") { BalancedAmount(minorUnits: v, currency: currency) } }; if let v = value.baseline { LabeledContent("基期") { BalancedAmount(minorUnits: v, currency: currency) } }; if let v = value.delta { LabeledContent("变化金额") { BalancedAmount(minorUnits: v, currency: currency, prefix: v > 0 ? "+" : "") } }; LabeledContent("变化率", value: changeText(value)) } }
-    private func changeText(_ c: LedgerPeriodComparison?) -> String { guard session.amountsVisible else { return "••••" }; guard let c, c.delta != nil else { return "暂无数据" }; guard let p = c.percentage else { return "基期为零" }; return String(format: "%+.1f%%", p * 100) }
+    private func changeText(_ c: LedgerPeriodComparison?) -> String { guard session.amountsVisible else { return "••••" }; guard let c, c.delta != nil else { return String(localized: "暂无数据") }; guard let p = c.percentage else { return String(localized: "基期为零") }; return String(format: "%+.1f%%", p * 100) }
 
     private func localSpendingCategories(accountLabels: [String: String]) -> [OverviewCategorySpending] {
         guard let response = session.localOverviewCategories,
@@ -380,7 +379,7 @@ private struct BalancedTransactionRow: View {
             VStack(alignment: .trailing, spacing: 3) {
                 Text(amountText(p)).font(.custom(BalancedWeight.medium.sansPostscriptName, size: 15.5, relativeTo: .body)).monospacedDigit()
                     .foregroundStyle(p.kind == .income ? BalancedPalette.income : BalancedPalette.ink).lineLimit(1).minimumScaleFactor(0.6)
-                Text(p.kind == .transfer ? "转账" : visual.categoryLabel).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).lineLimit(1)
+                Text(p.kind == .transfer ? String(localized: "转账") : visual.categoryLabel).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).lineLimit(1)
             }.frame(minWidth: 104, alignment: .trailing)
         }
         .padding(.horizontal, 20).padding(.vertical, 12).frame(minHeight: 56)

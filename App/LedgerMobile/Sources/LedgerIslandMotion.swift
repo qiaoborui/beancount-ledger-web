@@ -552,10 +552,11 @@ enum LedgerIslandAmount {
         guard let value = Double(digits) else { return text }
         let body: String
         if value >= 10_000 {
-            var short = String(format: "%.2f", value / 10_000)
+            let chineseUnits = LedgerLocale.usesChineseNumberUnits
+            var short = String(format: "%.2f", value / (chineseUnits ? 10_000 : 1_000))
             while short.hasSuffix("0") { short.removeLast() }
             if short.hasSuffix(".") { short.removeLast() }
-            body = short + "万"
+            body = short + (chineseUnits ? "万" : "k")
         } else if value == value.rounded() {
             body = text[first...last].replacingOccurrences(of: ".00", with: "")
         } else {

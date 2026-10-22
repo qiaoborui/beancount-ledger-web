@@ -277,7 +277,7 @@ struct AddAccountView: View {
                                 Text("中文别名 (alias):")
                                     .font(.caption)
                                     .foregroundStyle(LedgerPalette.secondary)
-                                Text(effectiveName.isEmpty ? "（空）" : effectiveName)
+                                Text(effectiveName.isEmpty ? String(localized: "（空）") : effectiveName)
                                     .font(.caption.weight(.semibold))
                             }
 

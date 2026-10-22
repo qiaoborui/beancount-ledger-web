@@ -56,11 +56,11 @@ struct ExpenseCalendarWidgetView: View {
     var body: some View {
         Group {
             if !redactionReasons.isEmpty {
-                LedgerWidgetPrivacyView(title: "消费日历")
+                LedgerWidgetPrivacyView(title: String(localized: "消费日历"))
             } else if let snapshot = entry.snapshot {
                 content(snapshot)
             } else {
-                LedgerWidgetUnavailableView(title: "等待消费日历", detail: "打开 Ledger 并刷新一次", symbol: "calendar")
+                LedgerWidgetUnavailableView(title: String(localized: "等待消费日历"), detail: String(localized: "打开 Ledger 并刷新一次"), symbol: "calendar")
             }
         }
         .widgetURL(URL(string: "ledger://transactions"))
@@ -72,7 +72,7 @@ struct ExpenseCalendarWidgetView: View {
         let layout = ExpenseCalendarLayout(expense: expense, now: entry.date)
         let large = (familyOverride ?? family) == .systemLarge
         return VStack(alignment: .leading, spacing: large ? 12 : 6) {
-            LedgerWidgetHeader(title: "消费日历", detail: expense.periodTitle)
+            LedgerWidgetHeader(title: String(localized: "消费日历"), detail: expense.periodTitle)
             if large {
                 HStack(alignment: .firstTextBaseline) {
                     LedgerWidgetAmount(amount: expense.amount, currency: expense.currency, size: 26)
@@ -82,9 +82,9 @@ struct ExpenseCalendarWidgetView: View {
                 ExpenseMonthGrid(layout: layout, currency: expense.currency, compact: false)
                 Rectangle().fill(LedgerWidgetColors.line).frame(height: 1)
                 HStack(spacing: 4) {
-                    Text(layout.peakDay.map { "最高 \(LedgerWidgetHeat.shortDate(layout.date(for: $0))) " + MoneyText.formatWidget(minorUnits: layout.peakAmount, currency: expense.currency) } ?? "暂无消费记录")
+                    Text(layout.peakDay.map { String(localized: "最高 \(LedgerWidgetHeat.shortDate(layout.date(for: $0))) ") + MoneyText.formatWidget(minorUnits: layout.peakAmount, currency: expense.currency) } ?? String(localized: "暂无消费记录"))
                     Spacer(minLength: 0)
-                    Text("日均 " + MoneyText.formatWidget(minorUnits: expense.amount / max(layout.elapsedDayCount, 1), currency: expense.currency))
+                    Text("日均 \(MoneyText.formatWidget(minorUnits: expense.amount / max(layout.elapsedDayCount, 1), currency: expense.currency))")
                 }.font(.system(size: 9)).foregroundStyle(LedgerWidgetColors.secondary).lineLimit(1).minimumScaleFactor(0.75)
             } else {
                 HStack(spacing: 10) {
@@ -97,12 +97,18 @@ struct ExpenseCalendarWidgetView: View {
                     ExpenseMonthGrid(layout: layout, currency: expense.currency, compact: true)
                 }.frame(maxHeight: .infinity)
             }
-            LedgerWidgetFooter(label: large ? "每日金额 · \(expense.currency)" : "描边为今天", date: snapshot.updatedAt, now: entry.date)
+            LedgerWidgetFooter(label: large ? String(localized: "每日金额 · \(expense.currency)") : String(localized: "描边为今天"), date: snapshot.updatedAt, now: entry.date)
         }.privacySensitive()
     }
 }
 
 private struct ExpenseMonthGrid: View {
+    /// Monday-first single-letter weekday headers.
+    private static var weekdayHeaders: [String] {
+        let symbols = LedgerDateLabel.veryShortWeekdaySymbols
+        return Array(symbols[1...]) + [symbols[0]]
+    }
+
     @Environment(\.colorScheme) private var colorScheme
     let layout: ExpenseCalendarLayout
     let currency: String
@@ -117,7 +123,8 @@ private struct ExpenseMonthGrid: View {
             let height = max(1, (bounds.size.height - header - CGFloat(weeks) * gap) / CGFloat(weeks))
             VStack(spacing: gap) {
                 HStack(spacing: gap) {
-                    ForEach(["一", "二", "三", "四", "五", "六", "日"], id: \.self) { day in
+                    ForEach(0..<7, id: \.self) { index in
+                        let day = Self.weekdayHeaders[index]
                         Text(day).font(.system(size: 9)).foregroundStyle(LedgerWidgetColors.secondary)
                             .frame(maxWidth: .infinity).frame(height: header)
                     }

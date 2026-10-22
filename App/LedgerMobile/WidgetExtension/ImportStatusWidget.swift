@@ -55,11 +55,11 @@ struct ImportStatusWidgetView: View {
     var body: some View {
         Group {
             if !redactionReasons.isEmpty {
-                LedgerWidgetPrivacyView(title: "导入状态")
+                LedgerWidgetPrivacyView(title: String(localized: "导入状态"))
             } else if let snapshot = entry.snapshot {
                 content(snapshot)
             } else {
-                LedgerWidgetUnavailableView(title: "等待导入记录", detail: "打开 Ledger 并刷新一次", symbol: "tray.and.arrow.down")
+                LedgerWidgetUnavailableView(title: String(localized: "等待导入记录"), detail: String(localized: "打开 Ledger 并刷新一次"), symbol: "tray.and.arrow.down")
             }
         }.widgetURL(URL(string: "ledger://imports"))
             .containerBackground(for: .widget) { LedgerWidgetColors.panel }
@@ -68,7 +68,7 @@ struct ImportStatusWidgetView: View {
         let large = (familyOverride ?? family) == .systemLarge
         let items = Array(snapshot.imports.prefix(4))
         return VStack(alignment: .leading, spacing: large ? 7 : 4) {
-            LedgerWidgetHeader(title: "导入状态", detail: "\(snapshot.imports.count)个渠道")
+            LedgerWidgetHeader(title: String(localized: "导入状态"), detail: String(localized: "\(snapshot.imports.count)个渠道"))
             if items.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("暂无导入记录").font(.system(size: 13, weight: .medium))
@@ -83,7 +83,7 @@ struct ImportStatusWidgetView: View {
                 ForEach(items) { item in
                     HStack(spacing: 8) {
                         Text(item.label).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                        Text(item.latestCoverageDate.map(LedgerWidgetHeat.shortDate) ?? "未知")
+                        Text(item.latestCoverageDate.map(LedgerWidgetHeat.shortDate) ?? String(localized: "未知"))
                             .font(.system(size: 10, design: .monospaced)).frame(width: 64, alignment: .trailing)
                         Text(daysSince(item)).font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(LedgerWidgetColors.accent).frame(width: 40, alignment: .trailing)
@@ -106,19 +106,19 @@ struct ImportStatusWidgetView: View {
                         .font(.system(size: 9)).foregroundStyle(LedgerWidgetColors.secondary)
                 } else { Spacer(minLength: 0) }
             }
-            LedgerWidgetFooter(label: snapshot.imports.count > 4 ? "另有\(snapshot.imports.count - 4)个渠道" : "账单覆盖", date: snapshot.importsUpdatedAt, now: entry.date)
+            LedgerWidgetFooter(label: snapshot.imports.count > 4 ? String(localized: "另有\(snapshot.imports.count - 4)个渠道") : String(localized: "账单覆盖"), date: snapshot.importsUpdatedAt, now: entry.date)
         }.privacySensitive()
     }
     private func daysSince(_ item: LedgerWidgetImportSnapshot) -> String {
-        guard let raw = item.latestCoverageDate, let date = LedgerWidgetDates.date(raw) else { return "未知" }
+        guard let raw = item.latestCoverageDate, let date = LedgerWidgetDates.date(raw) else { return String(localized: "未知") }
         let now = Calendar.current.startOfDay(for: entry.date)
         let parts = Calendar.current.dateComponents([.year, .month, .day], from: now)
         let civil = LedgerWidgetDates.calendar.date(from: parts) ?? now
         let days = LedgerWidgetDates.calendar.dateComponents([.day], from: date, to: civil).day ?? 0
-        return days < 0 ? "未来" : "\(days)天"
+        return days < 0 ? String(localized: "未来") : String(localized: "\(days)天")
     }
     private func coverageRange(_ item: LedgerWidgetImportSnapshot) -> String {
-        guard let start = item.coverageStart, let end = item.coverageEnd else { return "账期未知" }
+        guard let start = item.coverageStart, let end = item.coverageEnd else { return String(localized: "账期未知") }
         return "\(LedgerWidgetHeat.shortDate(start))–\(LedgerWidgetHeat.shortDate(end))"
     }
 }

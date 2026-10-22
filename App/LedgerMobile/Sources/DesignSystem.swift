@@ -391,7 +391,7 @@ struct AmountLabel: View {
             .accessibilityLabel(
                 session.amountsVisible
                     ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showSign: showSign)
-                    : prefix.isEmpty ? "金额已隐藏" : prefix + "金额已隐藏"
+                    : prefix.isEmpty ? String(localized: "金额已隐藏") : prefix + String(localized: "金额已隐藏")
             )
     }
 
@@ -628,7 +628,7 @@ struct LedgerSyncToolbarButton: View {
 
     var body: some View {
         LedgerToolbarButton(action: activate,
-            accessibilityLabel: session.isLocal ? presentation.title : "刷新账本") {
+            accessibilityLabel: session.isLocal ? presentation.title : String(localized: "刷新账本")) {
             Image(systemName: indicatorSymbol)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(indicatorColor)
@@ -637,7 +637,7 @@ struct LedgerSyncToolbarButton: View {
         .disabled(presentation.isBusy || session.phase != .ready)
         .accessibilityIdentifier("ledger-sync-status")
         .accessibilityHint(session.isLocal && presentation.action == .storageSettings
-            ? "打开存储与同步设置" : "立即同步账本")
+            ? String(localized: "打开存储与同步设置") : String(localized: "立即同步账本"))
         .sheet(isPresented: $settingsPresented) {
             LedgerStorageSheet()
             .ledgerPrivacyProtectedSheet()
@@ -723,7 +723,7 @@ struct PrivacyToolbarButton: View {
                 LedgerFeedback.selection()
                 session.toggleAmounts()
             },
-            accessibilityLabel: session.amountsVisible ? "隐藏金额" : "显示金额"
+            accessibilityLabel: session.amountsVisible ? String(localized: "隐藏金额") : String(localized: "显示金额")
         ) {
             Image(systemName: session.amountsVisible ? "eye.slash" : "eye")
         }
@@ -763,11 +763,11 @@ struct LedgerAccountPicker: View {
     @State private var showingAddCategory = false
 
     private var isCategoryPicker: Bool {
-        title.contains("分类")
+        title.contains("分类") || title.localizedCaseInsensitiveContains("category")
     }
 
     private var isIncomeCategory: Bool {
-        title.contains("收入")
+        title.contains("收入") || title.localizedCaseInsensitiveContains("income")
     }
 
     private var filteredAccounts: [LedgerAccountChoice] {
@@ -832,7 +832,7 @@ struct LedgerAccountPicker: View {
         .background(BalancedPalette.page)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .ledgerSearch(text: $query, prompt: isCategoryPicker ? "搜索分类名称或路径" : "搜索账户名称或路径")
+        .ledgerSearch(text: $query, prompt: isCategoryPicker ? String(localized: "搜索分类名称或路径") : String(localized: "搜索账户名称或路径"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -877,8 +877,8 @@ struct LedgerAccountPicker: View {
             if filteredAccounts.isEmpty {
                 EmptyLedgerState(
                     icon: "magnifyingglass",
-                    title: isCategoryPicker ? "没有匹配的分类" : "没有匹配的账户",
-                    detail: isCategoryPicker ? "尝试搜索分类中文名称或完整路径。" : "尝试搜索账户中文名称或完整路径。"
+                    title: isCategoryPicker ? String(localized: "没有匹配的分类") : String(localized: "没有匹配的账户"),
+                    detail: isCategoryPicker ? String(localized: "尝试搜索分类中文名称或完整路径。") : String(localized: "尝试搜索账户中文名称或完整路径。")
                 )
             }
         }

@@ -71,11 +71,11 @@ enum LedgerWidgetRefreshError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidServer:
-            "小组件服务器地址无效"
+            String(localized: "小组件服务器地址无效")
         case .invalidResponse:
-            "小组件收到无法识别的数据"
+            String(localized: "小组件收到无法识别的数据")
         case let .server(status):
-            "小组件刷新失败（HTTP \(status)）"
+            String(localized: "小组件刷新失败（HTTP \(status)）")
         }
     }
 }

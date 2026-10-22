@@ -2,6 +2,7 @@ name: LedgerMobile
 
 options:
   createIntermediateGroups: true
+  developmentLanguage: zh-Hans
   deploymentTarget:
     iOS: "17.0"
 
@@ -11,6 +12,9 @@ settings:
     CURRENT_PROJECT_VERSION: "36"
     MARKETING_VERSION: "0.1.0"
     TARGETED_DEVICE_FAMILY: "1,2"
+    # Let the compiler extract String(localized:) and SwiftUI keys with their real argument types.
+    SWIFT_EMIT_LOC_STRINGS: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
 
 targets:
   LedgerMobile:
@@ -42,6 +46,12 @@ targets:
       path: Supporting/Info.plist
       properties:
         CFBundleDisplayName: Ledger
+        # Must match the catalogs' source language. Xcode writes no zh-Hans
+        # Localizable.strings (keys are the Chinese text), and iOS falls back to the
+        # development region's table when one is missing; with `en` here the app
+        # showed English even when Chinese was selected.
+        CFBundleDevelopmentRegion: zh-Hans
+        CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIAppFonts:
@@ -108,6 +118,9 @@ targets:
         Release:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) PERSONAL_TEAM_BUILD
     scheme:
+      # Tests assert the Simplified Chinese source strings and zh_CN formatting.
+      language: zh-Hans
+      region: CN
       testTargets:
         - LedgerMobileTests
         - LedgerMobileUITests
@@ -123,11 +136,14 @@ targets:
       - path: Sources/LedgerWidgetCredentialStore.swift
       - path: Sources/LedgerWidgetRefreshClient.swift
       - path: Sources/MoneyText.swift
+      - path: Sources/LedgerLocale.swift
       - path: Sources/ImportIndexActivityAttributes.swift
     info:
       path: WidgetExtension/Info.plist
       properties:
         CFBundleDisplayName: Ledger 小组件
+        CFBundleDevelopmentRegion: zh-Hans
+        CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
@@ -158,6 +174,8 @@ targets:
       path: ShareExtension/Info.plist
       properties:
         CFBundleDisplayName: 存入 Ledger
+        CFBundleDevelopmentRegion: zh-Hans
+        CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
@@ -217,6 +235,7 @@ targets:
       - path: Sources/LedgerWidgetCredentialStore.swift
       - path: Sources/LedgerWidgetRefreshClient.swift
       - path: Sources/MoneyText.swift
+      - path: Sources/LedgerLocale.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiaoborui.ledger.mobile.widgettests

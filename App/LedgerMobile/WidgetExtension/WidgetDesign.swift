@@ -162,18 +162,18 @@ enum LedgerWidgetVisualHelper {
     static func account(for account: LedgerWidgetAccountSnapshot) -> AccountStyle {
         let name = "\(account.account) \(account.label) \(account.group)".lowercased()
         if account.isLiability || name.contains("credit") || name.contains("信用卡") {
-            return AccountStyle(icon: "creditcard.fill", tint: LedgerWidgetColors.ink, groupLabel: "信用卡")
+            return AccountStyle(icon: "creditcard.fill", tint: LedgerWidgetColors.ink, groupLabel: String(localized: "信用卡"))
         }
         if name.contains("cash") || name.contains("现金") {
-            return AccountStyle(icon: "banknote.fill", tint: LedgerWidgetColors.ink, groupLabel: "现金资产")
+            return AccountStyle(icon: "banknote.fill", tint: LedgerWidgetColors.ink, groupLabel: String(localized: "现金资产"))
         }
         if name.contains("invest") || name.contains("fund") || name.contains("stock") || name.contains("理财") || name.contains("基金") || name.contains("证券") {
-            return AccountStyle(icon: "chart.line.uptrend.xyaxis", tint: LedgerWidgetColors.ink, groupLabel: "投资理财")
+            return AccountStyle(icon: "chart.line.uptrend.xyaxis", tint: LedgerWidgetColors.ink, groupLabel: String(localized: "投资理财"))
         }
         if name.contains("loan") || name.contains("mortgage") || name.contains("借款") || name.contains("房贷") {
-            return AccountStyle(icon: "arrow.up.right.circle.fill", tint: LedgerWidgetColors.ink, groupLabel: "负债借贷")
+            return AccountStyle(icon: "arrow.up.right.circle.fill", tint: LedgerWidgetColors.ink, groupLabel: String(localized: "负债借贷"))
         }
-        return AccountStyle(icon: "building.columns.fill", tint: LedgerWidgetColors.ink, groupLabel: "日常银行")
+        return AccountStyle(icon: "building.columns.fill", tint: LedgerWidgetColors.ink, groupLabel: String(localized: "日常银行"))
     }
 
     struct ImportStyle {
@@ -185,16 +185,16 @@ enum LedgerWidgetVisualHelper {
     static func importChannel(for item: LedgerWidgetImportSnapshot) -> ImportStyle {
         let lower = "\(item.provider) \(item.label)".lowercased()
         if lower.contains("alipay") || lower.contains("支付宝") {
-            return ImportStyle(icon: "qrcode", tint: LedgerWidgetColors.ink, displayName: "支付宝")
+            return ImportStyle(icon: "qrcode", tint: LedgerWidgetColors.ink, displayName: String(localized: "支付宝"))
         }
         if lower.contains("wechat") || lower.contains("微信") {
-            return ImportStyle(icon: "bubble.left.and.bubble.right.fill", tint: LedgerWidgetColors.ink, displayName: "微信支付")
+            return ImportStyle(icon: "bubble.left.and.bubble.right.fill", tint: LedgerWidgetColors.ink, displayName: String(localized: "微信支付"))
         }
         if lower.contains("cmb") || lower.contains("招行") || lower.contains("招商") {
-            return ImportStyle(icon: "creditcard.fill", tint: LedgerWidgetColors.ink, displayName: "招商银行")
+            return ImportStyle(icon: "creditcard.fill", tint: LedgerWidgetColors.ink, displayName: String(localized: "招商银行"))
         }
         if lower.contains("hsbc") || lower.contains("汇丰") {
-            return ImportStyle(icon: "hexagon.fill", tint: LedgerWidgetColors.ink, displayName: "汇丰银行")
+            return ImportStyle(icon: "hexagon.fill", tint: LedgerWidgetColors.ink, displayName: String(localized: "汇丰银行"))
         }
         if lower.contains("icbc") || lower.contains("工行") || lower.contains("boc") || lower.contains("中行") || lower.contains("ccb") || lower.contains("建行") || lower.contains("bank") || lower.contains("银行") {
             return ImportStyle(icon: "building.columns.fill", tint: LedgerWidgetColors.ink, displayName: item.label)
@@ -210,7 +210,7 @@ struct LedgerWidgetUnavailableView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            LedgerWidgetHeader(title: "Ledger", detail: "只读财务小组件")
+            LedgerWidgetHeader(title: "Ledger", detail: String(localized: "只读财务小组件"))
             Spacer(minLength: 0)
             Image(systemName: symbol)
                 .font(.system(size: 18, weight: .medium))
@@ -232,7 +232,7 @@ struct LedgerWidgetUnavailableView: View {
 enum LedgerWidgetText {
     static func percentage(_ value: Double) -> String {
         let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = LedgerLocale.current
         formatter.numberStyle = .percent
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 1
@@ -241,17 +241,17 @@ enum LedgerWidgetText {
 
     static func updated(_ date: Date, now: Date = Date()) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = LedgerLocale.current
         formatter.dateFormat = Calendar.current.isDate(date, inSameDayAs: now) ? "HH:mm" : "MM/dd HH:mm"
-        return formatter.string(from: date) + " 更新"
+        return String(localized: "\(formatter.string(from: date)) 更新")
     }
 
     static func checked(_ date: Date, now: Date = Date()) -> String {
-        guard date < now.addingTimeInterval(-60) else { return "刚刚检查" }
+        guard date < now.addingTimeInterval(-60) else { return String(localized: "刚刚检查") }
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = LedgerLocale.current
         formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: now) + "检查"
+        return String(localized: "\(formatter.localizedString(for: date, relativeTo: now))检查")
     }
 }
 
@@ -260,7 +260,7 @@ extension LedgerWidgetSnapshot {
         var snapshot = LedgerWidgetSnapshot(
         updatedAt: Date(),
         expense: LedgerWidgetExpenseSnapshot(
-            periodTitle: "2026年8月",
+            periodTitle: String(localized: "2026年8月"),
             start: "2026-08-01",
             end: "2026-09-01",
             currency: "CNY",
@@ -268,9 +268,9 @@ extension LedgerWidgetSnapshot {
             transactionCount: 9,
             yearOverYearPercentage: -0.126,
             categories: [
-                LedgerWidgetExpenseCategory(account: "Expenses:Housing", label: "居住", amount: 380_000),
-                LedgerWidgetExpenseCategory(account: "Expenses:Food", label: "餐饮", amount: 84_780),
-                LedgerWidgetExpenseCategory(account: "Expenses:Travel", label: "出行", amount: 57_600),
+                LedgerWidgetExpenseCategory(account: "Expenses:Housing", label: String(localized: "居住"), amount: 380_000),
+                LedgerWidgetExpenseCategory(account: "Expenses:Food", label: String(localized: "餐饮"), amount: 84_780),
+                LedgerWidgetExpenseCategory(account: "Expenses:Travel", label: String(localized: "出行"), amount: 57_600),
             ],
             dailySeries: [
                 LedgerWidgetDailyExpense(date: "2026-08-03", amount: 42_500),
@@ -283,7 +283,7 @@ extension LedgerWidgetSnapshot {
         accounts: [
             LedgerWidgetAccountSnapshot(
                 account: "Assets:Bank:Daily",
-                label: "日常账户",
+                label: String(localized: "日常账户"),
                 group: "cash",
                 currency: "CNY",
                 balance: 826_420,
@@ -292,7 +292,7 @@ extension LedgerWidgetSnapshot {
             ),
             LedgerWidgetAccountSnapshot(
                 account: "Liabilities:CreditCard",
-                label: "信用卡",
+                label: String(localized: "信用卡"),
                 group: "credit",
                 currency: "CNY",
                 balance: -289_900,
@@ -303,25 +303,25 @@ extension LedgerWidgetSnapshot {
         imports: [
             LedgerWidgetImportSnapshot(
                 provider: "alipay",
-                label: "支付宝",
+                label: String(localized: "支付宝"),
                 coverageStart: "2026-08-01",
                 coverageEnd: "2026-08-28"
             ),
             LedgerWidgetImportSnapshot(
                 provider: "wechat",
-                label: "微信支付",
+                label: String(localized: "微信支付"),
                 coverageStart: "2026-08-01",
                 coverageEnd: "2026-08-25"
             ),
             LedgerWidgetImportSnapshot(
                 provider: "cmb",
-                label: "招行信用卡",
+                label: String(localized: "招行信用卡"),
                 coverageStart: "2026-07-01",
                 coverageEnd: "2026-07-31"
             ),
             LedgerWidgetImportSnapshot(
                 provider: "hsbchk-credit",
-                label: "汇丰香港信用卡",
+                label: String(localized: "汇丰香港信用卡"),
                 coverageStart: "2026-07-01",
                 coverageEnd: "2026-07-31"
             ),
@@ -345,7 +345,7 @@ extension LedgerWidgetSnapshot {
                 LedgerWidgetExpenseCategory(account: category.account, label: category.label,
                     amount: total * [55, 30, 15][index] / 100)
             }
-            return LedgerWidgetExpenseSnapshot(periodTitle: "示例", start: start, end: end, currency: "CNY",
+            return LedgerWidgetExpenseSnapshot(periodTitle: String(localized: "示例"), start: start, end: end, currency: "CNY",
                 amount: total, transactionCount: points.filter { $0.amount > 0 }.count,
                 yearOverYearPercentage: -0.126, categories: categories, dailySeries: points)
         }
@@ -385,7 +385,7 @@ struct LedgerWidgetFooter: View {
         HStack(spacing: 4) {
             Text(label).lineLimit(1)
             Spacer(minLength: 0)
-            Text(date.map { LedgerWidgetText.updated($0, now: now) } ?? "尚未更新").lineLimit(1)
+            Text(date.map { LedgerWidgetText.updated($0, now: now) } ?? String(localized: "尚未更新")).lineLimit(1)
         }
         .font(.system(size: 9)).foregroundStyle(LedgerWidgetColors.secondary)
     }

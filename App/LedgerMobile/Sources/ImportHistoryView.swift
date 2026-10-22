@@ -60,7 +60,7 @@ struct ImportHistoryView: View {
             }
         }
         .background(BalancedPalette.page)
-        .ledgerNavigation("导入", isRoot: isRoot)
+        .ledgerNavigation(String(localized: "导入"), isRoot: isRoot)
         .fileImporter(
             isPresented: $fileImporterPresented,
             allowedContentTypes: Self.supportedFileTypes + [UTType(filenameExtension: "bean", conformingTo: .plainText)!],
@@ -165,7 +165,7 @@ struct ImportHistoryView: View {
         VStack(spacing: 20) {
             EmptyLedgerState(
                 icon: "tray.and.arrow.down",
-                title: "导入记录加载失败",
+                title: String(localized: "导入记录加载失败"),
                 detail: message
             )
             Button("重新加载") {
@@ -227,7 +227,7 @@ struct ImportHistoryView: View {
                     }
                 }
             } header: {
-                TerminalSectionLabel(text: "待导入").listRowBackground(BalancedPalette.page)
+                TerminalSectionLabel(text: String(localized: "待导入")).listRowBackground(BalancedPalette.page)
             } footer: {
                 Text("从其他 App 分享的账单，核对后导入。").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             }
@@ -296,10 +296,10 @@ struct ImportHistoryView: View {
                 .accessibilityIdentifier("import-select-file")
 
                 HStack(spacing: 14) {
-                    FormatBadge(name: "支付宝", ext: "CSV")
-                    FormatBadge(name: "微信支付", ext: "XLSX")
-                    FormatBadge(name: "银行流水", ext: "PDF")
-                    FormatBadge(name: "压缩包", ext: "ZIP")
+                    FormatBadge(name: String(localized: "支付宝"), ext: "CSV")
+                    FormatBadge(name: String(localized: "微信支付"), ext: "XLSX")
+                    FormatBadge(name: String(localized: "银行流水"), ext: "PDF")
+                    FormatBadge(name: String(localized: "压缩包"), ext: "ZIP")
                 }
             }
             .padding(.vertical, 8)
@@ -311,7 +311,7 @@ struct ImportHistoryView: View {
 
     private var gmailAutomationSection: some View {
         VStack(alignment: .leading, spacing: LedgerSpacing.sm) {
-            SectionHeading(title: "Gmail 自动账单", detail: gmailSectionDetail)
+            SectionHeading(title: String(localized: "Gmail 自动账单"), detail: gmailSectionDetail)
             LedgerPanel {
                 VStack(spacing: 0) {
                     gmailStatusContent
@@ -405,7 +405,7 @@ struct ImportHistoryView: View {
                 Label("Gmail 自动导入暂不可用", systemImage: "envelope.badge")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(LedgerPalette.ink)
-                Text(gmailErrorMessage ?? "请更新服务器后重试，文件导入和已有导入记录不受影响。")
+                Text(gmailErrorMessage ?? String(localized: "请更新服务器后重试，文件导入和已有导入记录不受影响。"))
                     .font(.caption)
                     .foregroundStyle(LedgerPalette.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -435,7 +435,7 @@ struct ImportHistoryView: View {
             Button {
                 Task { await connectGmail() }
             } label: {
-                PrimaryButtonLabel(title: "连接 Gmail", loading: gmailAction == .connect)
+                PrimaryButtonLabel(title: String(localized: "连接 Gmail"), loading: gmailAction == .connect)
             }
             .buttonStyle(PressScaleButtonStyle())
             .disabled(gmailAction != nil)
@@ -596,9 +596,9 @@ struct ImportHistoryView: View {
     }
 
     private func summaryTitle(recorded: Int, needsUpdate: Int) -> String {
-        if recorded == 0 { return "还没有导入记录" }
-        if needsUpdate > 0 { return "\(needsUpdate) 个渠道建议更新" }
-        return "已归档渠道都在建议周期内"
+        if recorded == 0 { return String(localized: "还没有导入记录") }
+        if needsUpdate > 0 { return String(localized: "\(needsUpdate) 个渠道建议更新") }
+        return String(localized: "已归档渠道都在建议周期内")
     }
 
     private var channelSection: some View {
@@ -614,7 +614,7 @@ struct ImportHistoryView: View {
             }
             .tint(BalancedPalette.ink)
         } header: {
-            TerminalSectionLabel(text: "渠道覆盖").listRowBackground(BalancedPalette.page)
+            TerminalSectionLabel(text: String(localized: "渠道覆盖")).listRowBackground(BalancedPalette.page)
         } footer: {
             if let loadedAt {
                 Text("检查于 \(loadedAt.formatted(date: .omitted, time: .shortened))")
@@ -636,7 +636,7 @@ struct ImportHistoryView: View {
                 }
             }
         } header: {
-            TerminalSectionLabel(text: "归档记录 · \(sortedDocuments.count)").listRowBackground(BalancedPalette.page)
+            TerminalSectionLabel(text: String(localized: "归档记录 · \(sortedDocuments.count)")).listRowBackground(BalancedPalette.page)
         }
     }
 
@@ -657,10 +657,10 @@ struct ImportHistoryView: View {
     }
 
     private var gmailSectionDetail: String {
-        guard let status = gmailStatus else { return "服务器处理，App 前台实时更新" }
-        guard status.connected else { return status.configured ? "等待连接" : "需要服务器配置" }
+        guard let status = gmailStatus else { return String(localized: "服务器处理，App 前台实时更新") }
+        guard status.connected else { return status.configured ? String(localized: "等待连接") : String(localized: "需要服务器配置") }
         let count = visibleGmailPending.count
-        return count == 0 ? "暂无待核对" : "\(count) 封待处理"
+        return count == 0 ? String(localized: "暂无待核对") : String(localized: "\(count) 封待处理")
     }
 
     private var gmailEventTaskID: String {
@@ -670,21 +670,21 @@ struct ImportHistoryView: View {
 
     private func gmailStatusTitle(_ status: LedgerGmailStatus) -> String {
         if status.connected {
-            return status.email.map { "已连接 \($0)" } ?? "Gmail 已连接"
+            return status.email.map { String(localized: "已连接 \($0)") } ?? String(localized: "Gmail 已连接")
         }
-        return status.configured ? "连接后自动识别账单邮件" : "服务器尚未配置 Gmail"
+        return status.configured ? String(localized: "连接后自动识别账单邮件") : String(localized: "服务器尚未配置 Gmail")
     }
 
     private func gmailDeliveryDetail(_ status: LedgerGmailStatus) -> String {
         guard status.connected else {
-            return "授权由服务器保管，账单仍需在 App 中预览确认。"
+            return String(localized: "授权由服务器保管，账单仍需在 App 中预览确认。")
         }
         if status.usesServerPush {
             return gmailRealtimeConnected
-                ? "Gmail 推送 · 当前页面已实时连接"
-                : "Gmail 推送 · 正在连接实时更新"
+                ? String(localized: "Gmail 推送 · 当前页面已实时连接")
+                : String(localized: "Gmail 推送 · 正在连接实时更新")
         }
-        return "服务器轮询 · 可点“立即同步”，当前页面仍会实时接收处理结果"
+        return String(localized: "服务器轮询 · 可点“立即同步”，当前页面仍会实时接收处理结果")
     }
 
     private func gmailPendingIcon(_ item: LedgerGmailPendingImport) -> String {
@@ -703,16 +703,16 @@ struct ImportHistoryView: View {
         let subject = item.subject.trimmingCharacters(in: .whitespacesAndNewlines)
         if !subject.isEmpty { return subject }
         let filename = item.filename.trimmingCharacters(in: .whitespacesAndNewlines)
-        return filename.isEmpty ? "邮件账单" : filename
+        return filename.isEmpty ? String(localized: "邮件账单") : filename
     }
 
     private func gmailPendingDetail(_ item: LedgerGmailPendingImport) -> String {
         if item.isRetryable, let error = item.error, !error.isEmpty { return error }
         if item.isReviewable {
             let source = item.sender.isEmpty ? item.filename : item.sender
-            return "\(source) · \(item.candidateCount) 条候选交易"
+            return String(localized: "\(source) · \(item.candidateCount) 条候选交易")
         }
-        return "服务器正在解析、去重并生成预览"
+        return String(localized: "服务器正在解析、去重并生成预览")
     }
 
     private func refreshAll(replacingContent: Bool) async {
@@ -754,7 +754,7 @@ struct ImportHistoryView: View {
             let url = try await session.connectGmail()
             guard !Task.isCancelled else { return }
             openURL(url)
-            gmailResultMessage = "已打开 Google 授权；完成后返回 App，将自动检查连接状态。"
+            gmailResultMessage = String(localized: "已打开 Google 授权；完成后返回 App，将自动检查连接状态。")
         } catch is CancellationError {
             return
         } catch {
@@ -771,16 +771,16 @@ struct ImportHistoryView: View {
             await loadGmail(replacingContent: false)
             if gmailStatus?.connected == true {
                 gmailErrorMessage = nil
-                gmailResultMessage = "Gmail 授权成功，正在接收自动账单。"
+                gmailResultMessage = String(localized: "Gmail 授权成功，正在接收自动账单。")
             } else {
                 gmailResultMessage = nil
-                gmailErrorMessage = "授权回调已返回，但服务器尚未确认连接；请刷新后重试。"
+                gmailErrorMessage = String(localized: "授权回调已返回，但服务器尚未确认连接；请刷新后重试。")
             }
         case .error:
             gmailResultMessage = nil
             gmailErrorMessage = result.reason == "cancelled"
-                ? "Google 授权已取消，未更改 Gmail 连接。"
-                : "Google 授权未完成，请重新连接。"
+                ? String(localized: "Google 授权已取消，未更改 Gmail 连接。")
+                : String(localized: "Google 授权未完成，请重新连接。")
         }
     }
 
@@ -793,8 +793,8 @@ struct ImportHistoryView: View {
         do {
             let result = try await session.syncGmail()
             gmailResultMessage = result.retryPending == true
-                ? "同步已接收，服务器会继续重试临时失败的邮件。"
-                : "同步完成，处理了 \(result.processed ?? 0) 个邮件事件。"
+                ? String(localized: "同步已接收，服务器会继续重试临时失败的邮件。")
+                : String(localized: "同步完成，处理了 \(result.processed ?? 0) 个邮件事件。")
             await loadGmail(replacingContent: false)
         } catch is CancellationError {
             return
@@ -812,7 +812,7 @@ struct ImportHistoryView: View {
         do {
             try await session.disconnectGmail()
             gmailRealtimeConnected = false
-            gmailResultMessage = "Gmail 已断开；已有导入记录保持不变。"
+            gmailResultMessage = String(localized: "Gmail 已断开；已有导入记录保持不变。")
             await loadGmail(replacingContent: false)
         } catch is CancellationError {
             return
@@ -829,7 +829,7 @@ struct ImportHistoryView: View {
         do {
             let detail = try await session.gmailPendingImport(id: item.id)
             guard let preview = detail.preview else {
-                gmailErrorMessage = "这封邮件尚未生成可核对的预览，请稍后重试。"
+                gmailErrorMessage = String(localized: "这封邮件尚未生成可核对的预览，请稍后重试。")
                 return
             }
             gmailReview = GmailImportReview(itemID: detail.item.id, preview: preview)
@@ -848,7 +848,7 @@ struct ImportHistoryView: View {
         defer { gmailAction = nil }
         do {
             _ = try await session.syncGmail(pendingID: item.id)
-            gmailResultMessage = "已重新处理“\(pendingTitle(item))”。"
+            gmailResultMessage = String(localized: "已重新处理“\(pendingTitle(item))”。")
             await loadGmail(replacingContent: false)
         } catch is CancellationError {
             return
@@ -866,7 +866,7 @@ struct ImportHistoryView: View {
         defer { gmailAction = nil }
         do {
             try await session.dismissGmailPendingImport(id: item.id)
-            gmailResultMessage = "已忽略“\(pendingTitle(item))”，未写入账本。"
+            gmailResultMessage = String(localized: "已忽略“\(pendingTitle(item))”，未写入账本。")
             await loadGmail(replacingContent: false)
         } catch is CancellationError {
             return
@@ -1046,10 +1046,10 @@ private struct ImportChannelRow: View {
     }
 
     private var channelDetail: String {
-        guard let document = status.document else { return "完成首次导入后会显示覆盖日期" }
+        guard let document = status.document else { return String(localized: "完成首次导入后会显示覆盖日期") }
         let coverage = LedgerImportHistory.coverageText(document)
         if let days = status.daysSinceCoverage {
-            return "\(coverage) · 距今 \(days) 天"
+            return String(localized: "\(coverage) · 距今 \(days) 天")
         }
         return coverage
     }
@@ -1074,10 +1074,10 @@ private struct ImportDocumentRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(provider?.label ?? "其他渠道").balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                Text(provider?.label ?? String(localized: "其他渠道")).balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink)
                 Text(LedgerImportHistory.coverageText(document)).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
             }
-            Text(document.name ?? "账单归档文件").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta).lineLimit(2)
+            Text(document.name ?? String(localized: "账单归档文件")).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta).lineLimit(2)
             HStack(spacing: 8) {
                 Text(LedgerImportHistory.fullArchivedText(document))
                 if let size = LedgerImportHistory.fileSizeText(document) {

@@ -112,27 +112,27 @@ struct GlobalSearchView: View {
                         }
                         .listRowBackground(Color.clear)
                     } else {
-                        BalancedEmptyState(glyph: "magnifyingglass", title: "搜索整个账本", detail: "查找流水、账户、标签和文件")
+                        BalancedEmptyState(glyph: "magnifyingglass", title: String(localized: "搜索整个账本"), detail: String(localized: "查找流水、账户、标签和文件"))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
                     Section {
-                        searchHintRow(label: "商户与摘要", value: "任意文字")
-                        searchHintRow(label: "账户", value: "Assets:Bank:CMB", valueMono: true)
-                        searchHintRow(label: "标签", value: "#装修")
-                        searchHintRow(label: "金额", value: "38.5 以上")
-                        searchHintRow(label: "日期", value: "2026-03")
-                    } header: { searchSectionHeader("可以搜什么") }
+                        searchHintRow(label: String(localized: "商户与摘要"), value: String(localized: "任意文字"))
+                        searchHintRow(label: String(localized: "账户"), value: "Assets:Bank:CMB", valueMono: true)
+                        searchHintRow(label: String(localized: "标签"), value: String(localized: "#装修"))
+                        searchHintRow(label: String(localized: "金额"), value: String(localized: "38.5 以上"))
+                        searchHintRow(label: String(localized: "日期"), value: "2026-03")
+                    } header: { searchSectionHeader(String(localized: "可以搜什么")) }
                     .listRowBackground(Color.clear)
                 } else if results.isEmpty && !loading && !localSearching && errorMessage == nil && documentError == nil
                             && (!session.isLocal || (localSearchCompleted &&
                                 ((session.globalSearchScope != .all && session.globalSearchScope != .documents) || documentsLoaded))) {
                     BalancedEmptyState(
                         glyph: "magnifyingglass",
-                        title: "没有符合条件的结果",
+                        title: String(localized: "没有符合条件的结果"),
                         detail: query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                             ? "试试其他搜索范围或筛选条件。"
-                             : "未找到“\(query)”的匹配结果，试试其他关键词。"
+                             ? String(localized: "试试其他搜索范围或筛选条件。")
+                             : String(localized: "未找到“\(query)”的匹配结果，试试其他关键词。")
                     )
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -145,7 +145,7 @@ struct GlobalSearchView: View {
                                         .balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
                                 }
                             }
-                        } header: { searchSectionHeader("功能") }
+                        } header: { searchSectionHeader(String(localized: "功能")) }
                     .listRowBackground(Color.clear)
                     }
                     if !results.accounts.isEmpty {
@@ -158,7 +158,7 @@ struct GlobalSearchView: View {
                                     }
                                 }
                             }
-                        } header: { searchSectionHeader("账户", aside: "\(results.accounts.count) 条") }
+                        } header: { searchSectionHeader(String(localized: "账户"), aside: String(localized: "\(results.accounts.count) 条")) }
                     .listRowBackground(Color.clear)
                     }
                     if !results.tags.isEmpty {
@@ -183,7 +183,7 @@ struct GlobalSearchView: View {
                                 .accessibilityIdentifier("global-search-tag-" + tag)
                                 .disabled(session.isLocal && localSearching)
                             }
-                        } header: { searchSectionHeader("标签") }
+                        } header: { searchSectionHeader(String(localized: "标签")) }
                     .listRowBackground(Color.clear)
                     }
                     if !results.transactions.isEmpty {
@@ -206,7 +206,7 @@ struct GlobalSearchView: View {
                             } else if results.transactions.count > limit {
                                 Button("显示更多流水") { limit += 50 }.buttonStyle(.balanced(.quiet))
                             }
-                        } header: { searchSectionHeader("流水", aside: "\(localWindow?.result.matchedCount ?? results.transactions.count) 条") }
+                        } header: { searchSectionHeader(String(localized: "流水"), aside: String(localized: "\(localWindow?.result.matchedCount ?? results.transactions.count) 条")) }
                     .listRowBackground(Color.clear)
                     }
                     if !results.documents.isEmpty {
@@ -214,8 +214,8 @@ struct GlobalSearchView: View {
                             ForEach(results.documents) { document in
                                 NavigationLink {
                                     List {
-                                        LabeledContent("文件", value: document.name ?? "账单归档")
-                                        LabeledContent("渠道", value: document.provider ?? "其他")
+                                        LabeledContent(String(localized: "文件"), value: document.name ?? String(localized: "账单归档"))
+                                        LabeledContent(String(localized: "渠道"), value: document.provider ?? String(localized: "其他"))
                                         LabeledContent("覆盖日期", value: LedgerImportHistory.coverageText(document))
                                         if let path = document.path { Text(path).font(.caption).textSelection(.enabled) }
                                         NavigationLink("查看导入记录") { ImportHistoryView() }
@@ -224,12 +224,12 @@ struct GlobalSearchView: View {
                                         .toolbar(.visible, for: .navigationBar)
                                 } label: {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(document.name ?? "账单归档").balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                                        Text(document.name ?? String(localized: "账单归档")).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
                                         Text(document.path ?? "").balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta).lineLimit(1)
                                     }
                                 }
                             }
-                        } header: { searchSectionHeader("导入文件", aside: "\(results.documents.count) 条") }
+                        } header: { searchSectionHeader(String(localized: "导入文件"), aside: String(localized: "\(results.documents.count) 条")) }
                     .listRowBackground(Color.clear)
                     }
                 }
@@ -325,7 +325,7 @@ struct GlobalSearchView: View {
         if !session.isLocal {
             do { try await session.loadGlobalTransactions(forceRefresh: forceRefresh) }
             catch is CancellationError { return }
-            catch { if activeLoadID == loadID { errorMessage = "流水加载失败：" + error.localizedDescription } }
+            catch { if activeLoadID == loadID { errorMessage = String(localized: "流水加载失败：") + error.localizedDescription } }
         } else if forceRefresh {
             localPageIndex = 0
             revision += 1
@@ -343,7 +343,7 @@ struct GlobalSearchView: View {
         }
         catch is CancellationError {
             if session.isLocal, !Task.isCancelled, activeLoadID == loadID, localReadable {
-                documentError = "文件读取已中断，请重新加载文件。"
+                documentError = String(localized: "文件读取已中断，请重新加载文件。")
             }
             return
         }
@@ -351,9 +351,9 @@ struct GlobalSearchView: View {
             if activeLoadID == loadID {
                 if session.isLocal {
                     documents = []
-                    documentError = "导入文件加载失败：" + error.localizedDescription
+                    documentError = String(localized: "导入文件加载失败：") + error.localizedDescription
                 } else {
-                    errorMessage = [errorMessage, "导入文件加载失败：" + error.localizedDescription].compactMap { $0 }.joined(separator: "\n")
+                    errorMessage = [errorMessage, String(localized: "导入文件加载失败：") + error.localizedDescription].compactMap { $0 }.joined(separator: "\n")
                 }
             }
         }
@@ -441,7 +441,7 @@ struct GlobalSearchView: View {
             errorMessage = nil
         } catch is CancellationError {
             if !Task.isCancelled, localSearchID == id, request == searchRequest, viewActive {
-                errorMessage = "搜索已中断，请重新加载。"
+                errorMessage = String(localized: "搜索已中断，请重新加载。")
             }
         }
         catch {
@@ -450,7 +450,7 @@ struct GlobalSearchView: View {
                 results.transactions = []
                 results.tags = []
                 localTags = nil
-                errorMessage = "搜索失败：" + error.localizedDescription
+                errorMessage = String(localized: "搜索失败：") + error.localizedDescription
             }
         }
     }
@@ -518,7 +518,7 @@ struct GlobalSearchView: View {
                             filterChip("#" + tag) { session.globalSearchFilters.tag = nil }
                         }
                         if session.globalSearchFilters.hasDateRange {
-                            filterChip((session.globalSearchFilters.startDate ?? "最早") + " 至 " + (session.globalSearchFilters.endDate ?? "最新")) {
+                            filterChip((session.globalSearchFilters.startDate ?? String(localized: "最早")) + String(localized: " 至 ") + (session.globalSearchFilters.endDate ?? String(localized: "最新"))) {
                                 session.globalSearchFilters.startDate = nil
                                 session.globalSearchFilters.endDate = nil
                             }
@@ -536,7 +536,7 @@ struct GlobalSearchView: View {
         Button(action: remove) { Label(title, systemImage: "xmark.circle.fill").font(.subheadline) }
             .buttonStyle(.bordered)
             .buttonBorderShape(.capsule)
-            .accessibilityLabel("移除筛选：" + title)
+            .accessibilityLabel("移除筛选：\(title)")
     }
 
     private struct DocumentRequest: Equatable {
@@ -648,7 +648,7 @@ private struct LocalSearchTagTransactionsView: View {
             guard !Task.isCancelled, captured == key, readable else { return }
             window = result
         } catch is CancellationError {
-            if !Task.isCancelled, captured == key { errorMessage = "读取已中断，请重试。" }
+            if !Task.isCancelled, captured == key { errorMessage = String(localized: "读取已中断，请重试。") }
         }
         catch { if !Task.isCancelled, captured == key { errorMessage = error.localizedDescription } }
     }

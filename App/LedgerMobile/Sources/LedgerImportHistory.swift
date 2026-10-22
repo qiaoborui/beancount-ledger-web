@@ -7,13 +7,13 @@ struct LedgerImportProvider: Identifiable, Hashable, Sendable {
     let systemImage: String
 
     static let all: [LedgerImportProvider] = [
-        LedgerImportProvider(id: "alipay", label: "支付宝", compactLabel: "支付宝", systemImage: "creditcard"),
-        LedgerImportProvider(id: "alipay-small-purse", label: "支付宝小荷包", compactLabel: "小荷包", systemImage: "person.2"),
-        LedgerImportProvider(id: "wechat", label: "微信支付", compactLabel: "微信支付", systemImage: "message"),
-        LedgerImportProvider(id: "cmb", label: "招商银行信用卡", compactLabel: "招行信用卡", systemImage: "creditcard.fill"),
-        LedgerImportProvider(id: "ccb-credit", label: "建设银行信用卡", compactLabel: "建行信用卡", systemImage: "creditcard.fill"),
-        LedgerImportProvider(id: "hsbchk-credit", label: "汇丰香港信用卡", compactLabel: "汇丰香港信用卡", systemImage: "creditcard.fill"),
-        LedgerImportProvider(id: "cmb-checking", label: "招商银行储蓄卡", compactLabel: "招行储蓄卡", systemImage: "building.columns"),
+        LedgerImportProvider(id: "alipay", label: String(localized: "支付宝"), compactLabel: String(localized: "支付宝"), systemImage: "creditcard"),
+        LedgerImportProvider(id: "alipay-small-purse", label: String(localized: "支付宝小荷包"), compactLabel: String(localized: "小荷包"), systemImage: "person.2"),
+        LedgerImportProvider(id: "wechat", label: String(localized: "微信支付"), compactLabel: String(localized: "微信支付"), systemImage: "message"),
+        LedgerImportProvider(id: "cmb", label: String(localized: "招商银行信用卡"), compactLabel: String(localized: "招行信用卡"), systemImage: "creditcard.fill"),
+        LedgerImportProvider(id: "ccb-credit", label: String(localized: "建设银行信用卡"), compactLabel: String(localized: "建行信用卡"), systemImage: "creditcard.fill"),
+        LedgerImportProvider(id: "hsbchk-credit", label: String(localized: "汇丰香港信用卡"), compactLabel: String(localized: "汇丰香港信用卡"), systemImage: "creditcard.fill"),
+        LedgerImportProvider(id: "cmb-checking", label: String(localized: "招商银行储蓄卡"), compactLabel: String(localized: "招行储蓄卡"), systemImage: "building.columns"),
     ]
 
     static func provider(_ id: String?) -> LedgerImportProvider? {
@@ -30,10 +30,10 @@ enum LedgerImportFreshness: Int, Equatable, Sendable {
 
     var title: String {
         switch self {
-        case .overdue: "需要更新"
-        case .attention: "建议更新"
-        case .current: "已更新"
-        case .missing: "暂无记录"
+        case .overdue: String(localized: "需要更新")
+        case .attention: String(localized: "建议更新")
+        case .current: String(localized: "已更新")
+        case .missing: String(localized: "暂无记录")
         }
     }
 }
@@ -114,18 +114,18 @@ enum LedgerImportHistory {
 
     static func coverageText(_ document: LedgerImportDocument) -> String {
         if let start = document.dateStart, let end = document.dateEnd, start != end {
-            return "覆盖 \(slashDate(start)) 至 \(slashDate(end))"
+            return String(localized: "覆盖 \(slashDate(start)) 至 \(slashDate(end))")
         }
         if let date = coverageDate(document) {
-            return "覆盖至 \(slashDate(date))"
+            return String(localized: "覆盖至 \(slashDate(date))")
         }
-        return "账期范围未知"
+        return String(localized: "账期范围未知")
     }
 
     static func archivedText(_ document: LedgerImportDocument, relativeTo referenceDate: Date = Date()) -> String {
         guard let date = instantDate(document.modTime) else { return document.modTime }
         let relative = RelativeDateTimeFormatter()
-        relative.locale = Locale(identifier: "zh_CN")
+        relative.locale = LedgerLocale.current
         relative.unitsStyle = .full
         return relative.localizedString(for: date, relativeTo: referenceDate)
     }
@@ -139,7 +139,7 @@ enum LedgerImportHistory {
                 .day(.twoDigits)
                 .hour(.twoDigits(amPM: .omitted))
                 .minute(.twoDigits)
-                .locale(Locale(identifier: "zh_CN"))
+                .locale(LedgerLocale.current)
         )
     }
 

@@ -14,7 +14,7 @@ struct OnboardingWizardView: View {
     }
 
     @State private var currentStep: Step = .welcome
-    @State private var ledgerName: String = "我的账本"
+    @State private var ledgerName: String = String(localized: "我的账本")
     @State private var selectedCurrency: String = "CNY"
 
     // ── 账户选择状态 ──
@@ -31,30 +31,30 @@ struct OnboardingWizardView: View {
 
     @State private var accountDrafts: [AccountDraft] = [
         // 移动支付
-        AccountDraft(id: "wechat_lq", name: "微信零钱", account: "Assets:Wallet:WeChat:LingQian", icon: "message.fill", category: .wallet, isSelected: true, initialBalance: "", isLiability: false),
-        AccountDraft(id: "alipay_bal", name: "支付宝余额", account: "Assets:Wallet:Alipay:Balance", icon: "creditcard.and.123", category: .wallet, isSelected: true, initialBalance: "", isLiability: false),
-        AccountDraft(id: "alipay_yeb", name: "余额宝", account: "Assets:Wallet:Alipay:YuEBao", icon: "chart.line.uptrend.xyaxis", category: .wallet, isSelected: true, initialBalance: "", isLiability: false),
-        AccountDraft(id: "wechat_lqt", name: "微信零钱通", account: "Assets:Wallet:WeChat:LingQianTong", icon: "arrow.triangle.swap", category: .wallet, isSelected: false, initialBalance: "", isLiability: false),
-        AccountDraft(id: "wallet_unionpay", name: "云闪付", account: "Assets:Wallet:UnionPay", icon: "creditcard", category: .wallet, isSelected: false, initialBalance: "", isLiability: false),
+        AccountDraft(id: "wechat_lq", name: String(localized: "微信零钱"), account: "Assets:Wallet:WeChat:LingQian", icon: "message.fill", category: .wallet, isSelected: true, initialBalance: "", isLiability: false),
+        AccountDraft(id: "alipay_bal", name: String(localized: "支付宝余额"), account: "Assets:Wallet:Alipay:Balance", icon: "creditcard.and.123", category: .wallet, isSelected: true, initialBalance: "", isLiability: false),
+        AccountDraft(id: "alipay_yeb", name: String(localized: "余额宝"), account: "Assets:Wallet:Alipay:YuEBao", icon: "chart.line.uptrend.xyaxis", category: .wallet, isSelected: true, initialBalance: "", isLiability: false),
+        AccountDraft(id: "wechat_lqt", name: String(localized: "微信零钱通"), account: "Assets:Wallet:WeChat:LingQianTong", icon: "arrow.triangle.swap", category: .wallet, isSelected: false, initialBalance: "", isLiability: false),
+        AccountDraft(id: "wallet_unionpay", name: String(localized: "云闪付"), account: "Assets:Wallet:UnionPay", icon: "creditcard", category: .wallet, isSelected: false, initialBalance: "", isLiability: false),
 
         // 银行储蓄卡
-        AccountDraft(id: "bank_cmb", name: "招商银行储蓄卡", account: "Assets:Bank:CMB", icon: "building.columns", category: .bank, isSelected: true, initialBalance: "", isLiability: false),
-        AccountDraft(id: "bank_icbc", name: "工商银行储蓄卡", account: "Assets:Bank:ICBC", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
-        AccountDraft(id: "bank_ccb", name: "建设银行储蓄卡", account: "Assets:Bank:CCB", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
-        AccountDraft(id: "bank_boc", name: "中国银行储蓄卡", account: "Assets:Bank:BOC", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
-        AccountDraft(id: "bank_abc", name: "农业银行储蓄卡", account: "Assets:Bank:ABC", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
-        AccountDraft(id: "bank_comm", name: "交通银行储蓄卡", account: "Assets:Bank:COMM", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
-        AccountDraft(id: "bank_psbc", name: "邮政储蓄储蓄卡", account: "Assets:Bank:PSBC", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
+        AccountDraft(id: "bank_cmb", name: String(localized: "招商银行储蓄卡"), account: "Assets:Bank:CMB", icon: "building.columns", category: .bank, isSelected: true, initialBalance: "", isLiability: false),
+        AccountDraft(id: "bank_icbc", name: String(localized: "工商银行储蓄卡"), account: "Assets:Bank:ICBC", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
+        AccountDraft(id: "bank_ccb", name: String(localized: "建设银行储蓄卡"), account: "Assets:Bank:CCB", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
+        AccountDraft(id: "bank_boc", name: String(localized: "中国银行储蓄卡"), account: "Assets:Bank:BOC", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
+        AccountDraft(id: "bank_abc", name: String(localized: "农业银行储蓄卡"), account: "Assets:Bank:ABC", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
+        AccountDraft(id: "bank_comm", name: String(localized: "交通银行储蓄卡"), account: "Assets:Bank:COMM", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
+        AccountDraft(id: "bank_psbc", name: String(localized: "邮政储蓄储蓄卡"), account: "Assets:Bank:PSBC", icon: "building.columns", category: .bank, isSelected: false, initialBalance: "", isLiability: false),
 
         // 信用卡与信用消费
-        AccountDraft(id: "credit_cmb", name: "招行信用卡", account: "Liabilities:CreditCard:CMB", icon: "creditcard.fill", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
-        AccountDraft(id: "credit_icbc", name: "工行信用卡", account: "Liabilities:CreditCard:ICBC", icon: "creditcard.fill", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
-        AccountDraft(id: "credit_huabei", name: "蚂蚁花呗", account: "Liabilities:CreditCard:Huabei", icon: "hand.tap", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
-        AccountDraft(id: "credit_baitiao", name: "京东白条", account: "Liabilities:CreditCard:Baitiao", icon: "cart.fill", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
-        AccountDraft(id: "credit_meituan", name: "美团月付", account: "Liabilities:CreditCard:MeituanYuefu", icon: "fork.knife", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
+        AccountDraft(id: "credit_cmb", name: String(localized: "招行信用卡"), account: "Liabilities:CreditCard:CMB", icon: "creditcard.fill", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
+        AccountDraft(id: "credit_icbc", name: String(localized: "工行信用卡"), account: "Liabilities:CreditCard:ICBC", icon: "creditcard.fill", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
+        AccountDraft(id: "credit_huabei", name: String(localized: "蚂蚁花呗"), account: "Liabilities:CreditCard:Huabei", icon: "hand.tap", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
+        AccountDraft(id: "credit_baitiao", name: String(localized: "京东白条"), account: "Liabilities:CreditCard:Baitiao", icon: "cart.fill", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
+        AccountDraft(id: "credit_meituan", name: String(localized: "美团月付"), account: "Liabilities:CreditCard:MeituanYuefu", icon: "fork.knife", category: .credit, isSelected: false, initialBalance: "", isLiability: true),
 
         // 现金
-        AccountDraft(id: "cash_cny", name: "人民币现金", account: "Assets:Cash:CNY", icon: "banknote", category: .cash, isSelected: true, initialBalance: "", isLiability: false)
+        AccountDraft(id: "cash_cny", name: String(localized: "人民币现金"), account: "Assets:Cash:CNY", icon: "banknote", category: .cash, isSelected: true, initialBalance: "", isLiability: false)
     ]
 
     // ── 分类选择状态（基于全面预设字典动态初始化）──
@@ -69,7 +69,7 @@ struct OnboardingWizardView: View {
     }
 
     @State private var categoryDrafts: [CategoryDraft] = CategoryPresets.sections.map { section in
-        let subnames = section.items.map(\.name).joined(separator: "、")
+        let subnames = section.items.map(\.name).joined(separator: String(localized: "、"))
         let isRecommended = ["exp_food", "exp_daily", "exp_transport", "exp_home", "exp_fun", "exp_health", "inc_career", "inc_invest"].contains(section.id)
         return CategoryDraft(
             id: section.id,
@@ -204,10 +204,10 @@ struct OnboardingWizardView: View {
 
     private var navigationTitleForCurrentStep: String {
         switch currentStep {
-        case .welcome: "开账"
-        case .accounts: "选择账户"
-        case .categories: "选择分类"
-        case .summary: "核对期初"
+        case .welcome: String(localized: "开账")
+        case .accounts: String(localized: "选择账户")
+        case .categories: String(localized: "选择分类")
+        case .summary: String(localized: "核对期初")
         }
     }
 
@@ -232,7 +232,7 @@ struct OnboardingWizardView: View {
                     .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
                     .padding(.bottom, 16)
 
-                BalancedSectionLabel(text: "记账货币")
+                BalancedSectionLabel(text: String(localized: "记账货币"))
                 VStack(spacing: 0) {
                     ForEach(AccountPresets.commonCurrencies, id: \.self) { cur in
                         Button {
@@ -271,12 +271,12 @@ struct OnboardingWizardView: View {
 
     private func currencyName(for currency: String) -> String {
         switch currency {
-        case "CNY": "人民币"
-        case "USD": "美元"
-        case "JPY": "日元"
-        case "HKD": "港币"
-        case "EUR": "欧元"
-        case "GBP": "英镑"
+        case "CNY": String(localized: "人民币")
+        case "USD": String(localized: "美元")
+        case "JPY": String(localized: "日元")
+        case "HKD": String(localized: "港币")
+        case "EUR": String(localized: "欧元")
+        case "GBP": String(localized: "英镑")
         default: currency
         }
     }
@@ -291,15 +291,15 @@ struct OnboardingWizardView: View {
                     .padding(.top, 2)
                     .padding(.bottom, 10)
 
-                accountSection(title: "移动支付", category: .wallet)
-                accountSection(title: "银行储蓄卡", category: .bank, showsMore: true)
-                accountSection(title: "信用卡与信用消费 (负债)", liabilityOnly: true, showsMore: true)
+                accountSection(title: String(localized: "移动支付"), category: .wallet)
+                accountSection(title: String(localized: "银行储蓄卡"), category: .bank, showsMore: true)
+                accountSection(title: String(localized: "信用卡与信用消费 (负债)"), liabilityOnly: true, showsMore: true)
                 Text("信用卡填的是当前待还欠款（已还清请留空）。切勿填写信用总额度，避免净资产被扣减。")
                     .balancedFont(size: 12)
                     .foregroundStyle(BalancedPalette.meta)
                     .padding(.top, 2)
                     .padding(.bottom, 8)
-                accountSection(title: "现钞与备用金", category: .cash)
+                accountSection(title: String(localized: "现钞与备用金"), category: .cash)
 
                 Button {
                     showingAddCustomAccount = true
@@ -362,11 +362,11 @@ struct OnboardingWizardView: View {
 
                 HStack(spacing: 0) {
                     Button { selectedCategoryTab = .expense } label: {
-                        BalancedMark(title: "支出分类 (\(selectedExpenseCount))", selected: selectedCategoryTab == .expense, size: 14)
+                        BalancedMark(title: String(localized: "支出分类 (\(selectedExpenseCount))"), selected: selectedCategoryTab == .expense, size: 14)
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }.buttonStyle(.plain)
                     Button { selectedCategoryTab = .income } label: {
-                        BalancedMark(title: "收入分类 (\(selectedIncomeCount))", selected: selectedCategoryTab == .income, size: 14)
+                        BalancedMark(title: String(localized: "收入分类 (\(selectedIncomeCount))"), selected: selectedCategoryTab == .income, size: 14)
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }.buttonStyle(.plain)
                 }
@@ -422,14 +422,14 @@ struct OnboardingWizardView: View {
                     .padding(.bottom, 16)
 
                 VStack(alignment: .leading, spacing: 0) {
-                    BalancedKeyRow(label: "资产", minorUnits: minorUnits(totalAssetBalance), currency: selectedCurrency)
-                    BalancedKeyRow(label: "负债", minorUnits: minorUnits(totalLiabilityBalance), currency: selectedCurrency, color: totalLiabilityBalance > 0 ? BalancedPalette.expense : BalancedPalette.ink)
+                    BalancedKeyRow(label: String(localized: "资产"), minorUnits: minorUnits(totalAssetBalance), currency: selectedCurrency)
+                    BalancedKeyRow(label: String(localized: "负债"), minorUnits: minorUnits(totalLiabilityBalance), currency: selectedCurrency, color: totalLiabilityBalance > 0 ? BalancedPalette.expense : BalancedPalette.ink)
                     BalancedPalette.rule.frame(height: 1).padding(.top, 6)
-                    BalancedKeyRow(label: "净值", minorUnits: minorUnits(netWorth), currency: selectedCurrency, isTotal: true, settle: true)
+                    BalancedKeyRow(label: String(localized: "净值"), minorUnits: minorUnits(netWorth), currency: selectedCurrency, isTotal: true, settle: true)
                 }
                 .balancedBand(lead: true)
 
-                BalancedSectionLabel(text: "将写入 accounts.bean")
+                BalancedSectionLabel(text: String(localized: "将写入 accounts.bean"))
                 ScrollView(.horizontal, showsIndicators: false) {
                     Text(accountsBeanPreview)
                         .balancedMono(size: 11.5)
@@ -550,7 +550,7 @@ struct OnboardingWizardView: View {
             List {
                 Section {
                     TextField("例如：招行二类卡、现金钱包", text: $customAccountName).balancedFont(size: 15)
-                } header: { TerminalSectionLabel(text: "账户名称") }
+                } header: { TerminalSectionLabel(text: String(localized: "账户名称")) }
                 Section {
                     Picker("类型", selection: $customAccountCategory) {
                         ForEach(AccountTypeCategory.allCases) { cat in
@@ -558,7 +558,7 @@ struct OnboardingWizardView: View {
                         }
                     }
                     .pickerStyle(.menu)
-                } header: { TerminalSectionLabel(text: "账户类型") }
+                } header: { TerminalSectionLabel(text: String(localized: "账户类型")) }
             }
             .scrollContentBackground(.hidden)
             .background(BalancedPalette.page)

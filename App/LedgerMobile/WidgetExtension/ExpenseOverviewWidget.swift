@@ -67,13 +67,13 @@ struct ExpenseOverviewWidgetView: View {
     var body: some View {
         Group {
             if !redactionReasons.isEmpty {
-                LedgerWidgetPrivacyView(title: "支出概览")
+                LedgerWidgetPrivacyView(title: String(localized: "支出概览"))
             } else if let snapshot = entry.snapshot,
                       let expense = entry.period.currentExpense(in: snapshot, now: entry.date) {
                 let updated = entry.period == .month ? snapshot.updatedAt : snapshot.insights?.date ?? snapshot.updatedAt
                 content(expense, updated: updated)
             } else {
-                LedgerWidgetUnavailableView(title: "等待消费数据", detail: "打开 Ledger 并刷新一次")
+                LedgerWidgetUnavailableView(title: String(localized: "等待消费数据"), detail: String(localized: "打开 Ledger 并刷新一次"))
             }
         }
         .widgetURL(URL(string: "ledger://overview"))
@@ -83,7 +83,7 @@ struct ExpenseOverviewWidgetView: View {
     private func content(_ expense: LedgerWidgetExpenseSnapshot, updated: Date) -> some View {
         let medium = (familyOverride ?? family) == .systemMedium
         return VStack(alignment: .leading, spacing: 8) {
-            LedgerWidgetHeader(title: "支出", detail: periodDetail(expense))
+            LedgerWidgetHeader(title: String(localized: "支出"), detail: periodDetail(expense))
             if medium {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -111,7 +111,7 @@ struct ExpenseOverviewWidgetView: View {
     }
 
     private func comparison(_ percentage: Double?) -> some View {
-        Text(percentage.map { "\($0 < 0 ? "↓" : "↑") \(LedgerWidgetText.percentage(abs($0))) · 同比" } ?? "暂无同期数据")
+        Text(percentage.map { String(localized: "\($0 < 0 ? "↓" : "↑") \(LedgerWidgetText.percentage(abs($0))) · 同比") } ?? String(localized: "暂无同期数据"))
             .font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
             .lineLimit(1).minimumScaleFactor(0.8)
     }
@@ -119,8 +119,8 @@ struct ExpenseOverviewWidgetView: View {
     private func periodDetail(_ expense: LedgerWidgetExpenseSnapshot) -> String {
         switch entry.period {
         case .month: expense.periodTitle
-        case .year: String(expense.start.prefix(4)) + "年"
-        case .week: LedgerWidgetHeat.shortDate(expense.start) + " 起"
+        case .year: String(localized: "\(String(expense.start.prefix(4)))年")
+        case .week: String(localized: "\(LedgerWidgetHeat.shortDate(expense.start)) 起")
         }
     }
 

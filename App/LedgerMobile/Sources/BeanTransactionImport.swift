@@ -85,7 +85,7 @@ struct BeanTransactionImportView: View {
             if let decoded = String(data: file.data, encoding: .utf8) {
                 text = decoded
             } else {
-                error = "请选择 UTF-8 编码的 .bean 文件。"
+                error = String(localized: "请选择 UTF-8 编码的 .bean 文件。")
             }
         }
         .sheet(item: $preview) { prepared in

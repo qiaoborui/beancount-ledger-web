@@ -15,10 +15,10 @@ enum CurrencyRateSource: String, Equatable, Sendable {
 
     var title: String {
         switch self {
-        case .base: "基准货币"
-        case .direct: "直接价格"
-        case .inverse: "反向价格"
-        case .bridge: "交叉汇率"
+        case .base: String(localized: "基准货币")
+        case .direct: String(localized: "直接价格")
+        case .inverse: String(localized: "反向价格")
+        case .bridge: String(localized: "交叉汇率")
         }
     }
 }
@@ -215,7 +215,7 @@ enum CurrencyAnalysis {
     ) -> [CurrencyRatePoint] {
         if currency == targetCurrency {
             let dates = Array(index.allDates.suffix(90))
-            return (dates.isEmpty ? ["当前"] : dates).map { CurrencyRatePoint(date: $0, rate: 1) }
+            return (dates.isEmpty ? [String(localized: "当前")] : dates).map { CurrencyRatePoint(date: $0, rate: 1) }
         }
         let dates = Array(index.allDates.suffix(90))
         return dates.compactMap { date in

@@ -28,10 +28,10 @@ enum LedgerGlobalSearchScope: String, CaseIterable, Identifiable, Hashable, Send
     var id: Self { self }
     var title: String {
         switch self {
-        case .all: "全部"
-        case .transactions: "流水"
-        case .accounts: "账户"
-        case .documents: "文件"
+        case .all: String(localized: "全部")
+        case .transactions: String(localized: "流水")
+        case .accounts: String(localized: "账户")
+        case .documents: String(localized: "文件")
         }
     }
 }
@@ -136,7 +136,7 @@ enum LedgerGlobalSearch {
         if scope == .all, filters.isEmpty {
             result.destinations = LedgerDestination.allCases.filter { destination in
                 guard destination != .search else { return false }
-                let keywords = destination == .settings ? "Face ID FaceID 密码 解锁 隐私 生物识别" : ""
+                let keywords = destination == .settings ? "Face ID FaceID 密码 解锁 隐私 生物识别 password unlock privacy biometric" : ""
                 return matches(destination.title + " " + destination.compactTitle + " " + keywords, query: query)
             }
         }

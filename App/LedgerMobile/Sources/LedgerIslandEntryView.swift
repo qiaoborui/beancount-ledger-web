@@ -44,8 +44,8 @@ struct LedgerIslandStyle {
         case .batchImport(let total):
             tint = green; accent = green
             amountColor = .white
-            pendingSubtitle = "正在写入账本…"; count = total
-            trailingText = "\(total) 笔"
+            pendingSubtitle = String(localized: "正在写入账本…"); count = total
+            trailingText = String(localized: "\(total) 笔")
         }
         // Expense and transfer keep their category tint on the icon so the
         // confirmation stays legible against the blue check bloom; transfers
@@ -154,7 +154,7 @@ enum LedgerIslandFonts {
 
     static func amountWidth(_ notice: LedgerIslandNotice, style: LedgerIslandStyle) -> Double {
         if let count = style.count {
-            return width(String(count), size: 20, weight: .bold, rounded: true) + width(" 笔", size: 13, weight: .semibold)
+            return width(String(count), size: 20, weight: .bold, rounded: true) + width(String(localized: " 笔"), size: 13, weight: .semibold)
         }
         return width(notice.amountText, size: 20, weight: .bold, rounded: true)
     }

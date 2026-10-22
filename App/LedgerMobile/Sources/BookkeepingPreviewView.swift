@@ -148,9 +148,9 @@ struct BookkeepingPreviewView: View {
             }
             let result = try await repository.commitPrepared(preview)
             if let count = result?.count, count > 0 {
-                session.triggerIslandNotice(LedgerIslandNotice.fromImport(count: count, provider: "快速记账"))
+                session.triggerIslandNotice(LedgerIslandNotice.fromImport(count: count, provider: String(localized: "快速记账")))
             } else {
-                session.triggerIslandNotice(LedgerIslandNotice.fromImport(count: 1, provider: "快速记账"))
+                session.triggerIslandNotice(LedgerIslandNotice.fromImport(count: 1, provider: String(localized: "快速记账")))
             }
             onSaved(result)
             dismiss()

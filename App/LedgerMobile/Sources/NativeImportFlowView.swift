@@ -82,9 +82,9 @@ struct NativeImportFlowView: View {
     }
 
     private var currentTitle: String {
-        if commitResult != nil { return "导入完成" }
-        if preview != nil { return "核对交易" }
-        return "导入账单"
+        if commitResult != nil { return String(localized: "导入完成") }
+        if preview != nil { return String(localized: "核对交易") }
+        return String(localized: "导入账单")
     }
 
     private var hasReviewChanges: Bool {
@@ -101,16 +101,16 @@ struct NativeImportFlowView: View {
     }
 
     private var exitConfirmationTitle: String {
-        commitOutcomeNeedsReconciliation ? "离开保存结果核对？" : "放弃本次修改？"
+        commitOutcomeNeedsReconciliation ? String(localized: "离开保存结果核对？") : String(localized: "放弃本次修改？")
     }
 
     private var exitConfirmationDetail: String {
         if commitOutcomeNeedsReconciliation {
-            return "账本可能已完成写入。离开后请先查看导入记录，确认结果再继续操作。"
+            return String(localized: "账本可能已完成写入。离开后请先查看导入记录，确认结果再继续操作。")
         }
         return pendingExit == .preparation
-            ? "返回后会清除本次核对修改，你可以重新生成预览。"
-            : "本次尚未提交的设置和核对修改将被清除，原始账单文件保留。"
+            ? String(localized: "返回后会清除本次核对修改，你可以重新生成预览。")
+            : String(localized: "本次尚未提交的设置和核对修改将被清除，原始账单文件保留。")
     }
 
     var body: some View {
@@ -248,7 +248,7 @@ struct NativeImportFlowView: View {
                     && !manuallyReviewedIDs.contains(id) && editingEntry?.id != id
             }, unsupported: { entry in
                 classificationCompletedIDs.insert(entry.id)
-                classificationManualReasons[entry.id] = "这笔交易包含复杂分录或缺少可用账户，请打开编辑核对。"
+                classificationManualReasons[entry.id] = String(localized: "这笔交易包含复杂分录或缺少可用账户，请打开编辑核对。")
                 persistDraft()
             }, accept: { job, result, updated in
                 let entry = job.entry
@@ -265,7 +265,7 @@ struct NativeImportFlowView: View {
         } catch {
             guard !Task.isCancelled else { return }
             classificationError = (error as? ImportClassificationError)?.localizedDescription
-                ?? "智能分类暂时不可用，已完成的建议保留，你可以继续核对或重试。"
+                ?? String(localized: "智能分类暂时不可用，已完成的建议保留，你可以继续核对或重试。")
         }
     }
 
@@ -325,10 +325,10 @@ struct NativeImportFlowView: View {
         if let result = classificationResults[entry.id] {
             let pending = result.pendingFields(for: entry, accepted: classificationAcceptedFields[entry.id] ?? [])
             DisclosureGroup {
-                LabeledContent("交易性质", value: ImportClassificationSuggestion.natureLabels[result.nature.value] ?? "待判断")
-                classificationAccountChoices("付款 / 收款账户", field: "funding", entry: entry,
+                LabeledContent("交易性质", value: ImportClassificationSuggestion.natureLabels[result.nature.value] ?? String(localized: "待判断"))
+                classificationAccountChoices(String(localized: "付款 / 收款账户"), field: "funding", entry: entry,
                                              current: entry.fundingAccount, decision: result.funding)
-                classificationAccountChoices("分类 / 对应账户", field: "category", entry: entry,
+                classificationAccountChoices(String(localized: "分类 / 对应账户"), field: "category", entry: entry,
                                              current: entry.categoryAccount, decision: result.category)
                 if !result.tags.isEmpty {
                     DisclosureGroup {
@@ -408,7 +408,7 @@ struct NativeImportFlowView: View {
         let allowed = importAccountChoices(for: entry).map(\.account)
         guard let updated = ImportClassificationContext.applying(category: category, funding: funding, to: entry, allowed: allowed),
               let index = reviewedEntries.firstIndex(where: { $0.id == entry.id }) else {
-            errorMessage = "资金账户和对应账户需使用不同账户，请打开编辑同时调整。"
+            errorMessage = String(localized: "资金账户和对应账户需使用不同账户，请打开编辑同时调整。")
             return
         }
         reviewedEntries[index] = updated
@@ -483,7 +483,7 @@ struct NativeImportFlowView: View {
                     }
                 }
                 .padding(.vertical, 6)
-            } header: { TerminalSectionLabel(text: "账单文件").listRowBackground(BalancedPalette.page) }
+            } header: { TerminalSectionLabel(text: String(localized: "账单文件")).listRowBackground(BalancedPalette.page) }
 
             Section {
                 Picker("账单渠道", selection: $providerOverride) {
@@ -504,7 +504,7 @@ struct NativeImportFlowView: View {
                         .balancedFont(size: 15)
                         .textContentType(.password)
                         .accessibilityIdentifier("import-archive-password")
-                } header: { TerminalSectionLabel(text: "压缩包密码").listRowBackground(BalancedPalette.page) }
+                } header: { TerminalSectionLabel(text: String(localized: "压缩包密码")).listRowBackground(BalancedPalette.page) }
             }
 
             if providerOverride == nil || providerOverride == "alipay" {
@@ -547,7 +547,7 @@ struct NativeImportFlowView: View {
     }
 
     private func friendlyAccountLabel(_ account: String) -> String {
-        if account.isEmpty { return "待指定账户" }
+        if account.isEmpty { return String(localized: "待指定账户") }
         if let match = session.ledger?.accounts.first(where: { $0.account == account }) {
             if let alias = match.alias, !alias.isEmpty { return alias }
             if !match.label.isEmpty { return match.label }
@@ -593,8 +593,8 @@ struct NativeImportFlowView: View {
                     Text("已勾选 \(selectedEntries.count) / \(reviewedEntries.count)")
                         .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                 }.padding(.bottom, 14)
-                settleRow("勾选金额合计", amountText(selectedTotal, currency: currency))
-                settleRow("重复或被排除", amountText(preview.skippedDuplicateCount, currency: "", suffix: " 行"))
+                settleRow(String(localized: "勾选金额合计"), amountText(selectedTotal, currency: currency))
+                settleRow(String(localized: "重复或被排除"), amountText(preview.skippedDuplicateCount, currency: "", suffix: String(localized: " 行")))
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
                     Text("将写入").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                     Spacer(minLength: 0)
@@ -626,10 +626,10 @@ struct NativeImportFlowView: View {
             }
 
             DisclosureGroup {
-                kvRow("识别渠道", providerLabel(preview.provider))
-                kvRow("交易区间", importRangeText(preview))
-                kvRow("候选交易", "\(preview.candidateCount) 条")
-                if preview.skippedDuplicateCount > 0 { kvRow("已跳过重复", "\(preview.skippedDuplicateCount) 条") }
+                kvRow(String(localized: "识别渠道"), providerLabel(preview.provider))
+                kvRow(String(localized: "交易区间"), importRangeText(preview))
+                kvRow(String(localized: "候选交易"), String(localized: "\(preview.candidateCount) 条"))
+                if preview.skippedDuplicateCount > 0 { kvRow(String(localized: "已跳过重复"), String(localized: "\(preview.skippedDuplicateCount) 条")) }
                 if !preview.providerDetection.reason.isEmpty {
                     Text(preview.providerDetection.reason).balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta)
                 }
@@ -783,7 +783,7 @@ struct NativeImportFlowView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } label: {
-                LabeledContent("批量标签", value: "已选 \(selectedTagEntryIDs.count) 条")
+                LabeledContent("批量标签", value: String(localized: "已选 \(selectedTagEntryIDs.count) 条"))
                     .font(.subheadline)
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("import-bulk-tags")
@@ -946,7 +946,7 @@ struct NativeImportFlowView: View {
                 Button {
                     dismiss()
                 } label: {
-                    PrimaryButtonLabel(title: "完成", loading: false)
+                    PrimaryButtonLabel(title: String(localized: "完成"), loading: false)
                 }
                 .buttonStyle(PressScaleButtonStyle())
                 .accessibilityIdentifier("import-finish")
@@ -960,12 +960,12 @@ struct NativeImportFlowView: View {
 
     private func completionDetail(_ result: LedgerImportCommitResult) -> String {
         if commitWasReconciled {
-            return "保存响应中断，但已通过导入归档确认账本写入完成。"
+            return String(localized: "保存响应中断，但已通过导入归档确认账本写入完成。")
         }
-        guard result.readModelPending == true else { return "账本和导入记录已经更新。" }
+        guard result.readModelPending == true else { return String(localized: "账本和导入记录已经更新。") }
         return session.importIndexProgress?.phase == .indexed
-            ? "账本写入和索引更新已经完成。"
-            : "账本写入完成，正在等待索引更新。"
+            ? String(localized: "账本写入和索引更新已经完成。")
+            : String(localized: "账本写入完成，正在等待索引更新。")
     }
 
     private func importAccountChoices(for entry: LedgerImportEntry) -> [LedgerAccountChoice] {
@@ -1012,14 +1012,14 @@ struct NativeImportFlowView: View {
         classificationManualReasons.removeValue(forKey: updated.id)
         if classificationNeedsReview.isEmpty { onlyClassificationReview = false }
         let name = updated.payee.trimmingCharacters(in: .whitespacesAndNewlines)
-        editedEntryStatus = "\(name.isEmpty ? "这条交易" : "“\(name)”")的修改已保存到本次预览"
+        editedEntryStatus = String(localized: "\(name.isEmpty ? String(localized: "这条交易") : "“\(name)”")的修改已保存到本次预览")
         editSaveFeedback &+= 1
         persistDraft()
     }
 
     private var selectedProviderDetail: String {
-        guard let providerOverride else { return "根据文件名和账单结构选择渠道" }
-        return providers.first(where: { $0.id == providerOverride })?.detail ?? "使用指定渠道生成预览"
+        guard let providerOverride else { return String(localized: "根据文件名和账单结构选择渠道") }
+        return providers.first(where: { $0.id == providerOverride })?.detail ?? String(localized: "使用指定渠道生成预览")
     }
 
     private var fileSizeText: String {
@@ -1027,34 +1027,34 @@ struct NativeImportFlowView: View {
     }
 
     private var commitActionTitle: String {
-        selectedEntries.isEmpty ? "仅归档账单" : "写入 \(selectedEntries.count) 条交易"
+        selectedEntries.isEmpty ? String(localized: "仅归档账单") : String(localized: "写入 \(selectedEntries.count) 条交易")
     }
 
     private var commitButtonTitle: String {
         if isCommitting {
-            return commitOutcomeNeedsReconciliation ? "正在核对保存结果" : "正在验证并写入账本"
+            return commitOutcomeNeedsReconciliation ? String(localized: "正在核对保存结果") : String(localized: "正在验证并写入账本")
         }
-        if commitOutcomeNeedsReconciliation { return "重新检查保存结果" }
-        return commitErrorMessage == nil ? commitActionTitle : "重试保存"
+        if commitOutcomeNeedsReconciliation { return String(localized: "重新检查保存结果") }
+        return commitErrorMessage == nil ? commitActionTitle : String(localized: "重试保存")
     }
 
     private var commitButtonAccessibilityValue: String {
-        if isCommitting { return "处理中" }
-        if commitOutcomeNeedsReconciliation { return "保存结果待确认" }
-        return commitErrorMessage == nil ? "可以提交" : "上次保存失败"
+        if isCommitting { return String(localized: "处理中") }
+        if commitOutcomeNeedsReconciliation { return String(localized: "保存结果待确认") }
+        return commitErrorMessage == nil ? String(localized: "可以提交") : String(localized: "上次保存失败")
     }
 
     private var commitButtonAccessibilityHint: String {
-        if isCommitting { return "请稍候，完成后会显示保存结果" }
-        if commitOutcomeNeedsReconciliation { return "只检查导入归档，不会再次提交" }
-        return "保存前会再次校验预览与账本"
+        if isCommitting { return String(localized: "请稍候，完成后会显示保存结果") }
+        if commitOutcomeNeedsReconciliation { return String(localized: "只检查导入归档，不会再次提交") }
+        return String(localized: "保存前会再次校验预览与账本")
     }
 
     private var commitConfirmationDetail: String {
         if selectedEntries.isEmpty {
-            return "原始账单会进入归档记录，交易账本保持不变。"
+            return String(localized: "原始账单会进入归档记录，交易账本保持不变。")
         }
-        return "将在这台设备校验预览和账本，写入 \(selectedEntries.count) 条交易。"
+        return String(localized: "将在这台设备校验预览和账本，写入 \(selectedEntries.count) 条交易。")
     }
 
     private func providerLabel(_ id: String) -> String {
@@ -1065,17 +1065,17 @@ struct NativeImportFlowView: View {
 
     private func confidenceText(_ confidence: String) -> String {
         switch confidence {
-        case "high": "高置信度"
-        case "medium": "中等置信度"
-        default: "需要重点核对"
+        case "high": String(localized: "高置信度")
+        case "medium": String(localized: "中等置信度")
+        default: String(localized: "需要重点核对")
         }
     }
 
     private func importRangeText(_ preview: LedgerImportPreview) -> String {
         if let start = preview.dateStart, let end = preview.dateEnd, start != end {
-            return "\(start) 至 \(end)"
+            return String(localized: "\(start) 至 \(end)")
         }
-        return preview.dateEnd ?? preview.dateStart ?? "日期范围未知"
+        return preview.dateEnd ?? preview.dateStart ?? String(localized: "日期范围未知")
     }
 
     private func toggle(_ id: String) {
@@ -1102,7 +1102,7 @@ struct NativeImportFlowView: View {
 
     private func applyBulkTags(mode: BulkTagMode) {
         guard !selectedTagEntryIDs.isEmpty else {
-            errorMessage = "请先选择需要修改标签的交易。"
+            errorMessage = String(localized: "请先选择需要修改标签的交易。")
             failureFeedback &+= 1
             return
         }
@@ -1247,7 +1247,7 @@ struct NativeImportFlowView: View {
             if LedgerImportCommitFailureDisposition(error: error) == .outcomeUnknown {
                 await reconcileCommit(preview: preview, entries: entries)
             } else {
-                commitErrorMessage = "保存失败：\(error.localizedDescription) 你的核对修改仍在，可重试。"
+                commitErrorMessage = String(localized: "保存失败：\(error.localizedDescription) 你的核对修改仍在，可重试。")
                 failureFeedback &+= 1
             }
         }
@@ -1290,7 +1290,7 @@ struct NativeImportFlowView: View {
             return
         }
         commitOutcomeNeedsReconciliation = true
-        commitErrorMessage = "保存结果待确认：操作已中断，请先重新检查导入归档，再继续记账。"
+        commitErrorMessage = String(localized: "保存结果待确认：操作已中断，请先重新检查导入归档，再继续记账。")
         failureFeedback &+= 1
     }
 }
@@ -1401,7 +1401,7 @@ private struct ImportEntryEditor: View {
                 }
                 Section {
                     NavigationLink {
-                        LedgerAccountPicker(title: "选择来源账户", accounts: accounts, selection: $fundingAccount)
+                        LedgerAccountPicker(title: String(localized: "选择来源账户"), accounts: accounts, selection: $fundingAccount)
                     } label: {
                         LabeledContent("来源账户", value: accountChoice(fundingAccount).label)
                     }
@@ -1435,7 +1435,7 @@ private struct ImportEntryEditor: View {
                     }
 
                     NavigationLink {
-                        LedgerAccountPicker(title: "选择目标账户", accounts: accounts, selection: $categoryAccount)
+                        LedgerAccountPicker(title: String(localized: "选择目标账户"), accounts: accounts, selection: $categoryAccount)
                     } label: {
                         LabeledContent("目标账户", value: accountChoice(categoryAccount).label)
                     }
@@ -1672,15 +1672,15 @@ private struct ImportEntryReviewRow: View {
                 Button(action: onToggleExpanded) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(entry.payee.isEmpty ? "未命名交易" : entry.payee)
+                            Text(entry.payee.isEmpty ? String(localized: "未命名交易") : entry.payee)
                                 .balancedFont(size: 15, weight: .medium)
                                 .foregroundStyle(included ? BalancedPalette.ink : BalancedPalette.meta)
                                 .lineLimit(1)
-                            Text("\(entry.date) · \(entry.narration.isEmpty ? "无摘要" : entry.narration)")
+                            Text("\(entry.date) · \(entry.narration.isEmpty ? String(localized: "无摘要") : entry.narration)")
                                 .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                                 .lineLimit(1)
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text("→ " + (categoryMissing ? "未选择账户" : categoryLabel))
+                                Text("→ " + (categoryMissing ? String(localized: "未选择账户") : categoryLabel))
                                     .balancedMono(size: 12).foregroundStyle(BalancedPalette.secondary).lineLimit(1)
                                 if isAIClassified {
                                     Text("AI").balancedFont(size: 10, weight: .medium).foregroundStyle(BalancedPalette.meta)
@@ -1712,7 +1712,7 @@ private struct ImportEntryReviewRow: View {
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("编辑 \(entry.payee.isEmpty ? "未命名交易" : entry.payee)")
+                .accessibilityLabel("编辑 \(entry.payee.isEmpty ? String(localized: "未命名交易") : entry.payee)")
                 .accessibilityIdentifier("import-entry-edit-\(entry.id)")
             }
 
@@ -1726,8 +1726,8 @@ private struct ImportEntryReviewRow: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(tagSelected ? "取消选择 \(entry.payee) 的标签操作" : "选择 \(entry.payee) 的标签操作")
                     .accessibilityIdentifier("import-entry-tag-toggle-\(entry.id)")
-                    ImportEntryDetailLine(label: "分类账户", value: entry.categoryAccount)
-                    ImportEntryDetailLine(label: "资金账户", value: entry.fundingAccount)
+                    ImportEntryDetailLine(label: String(localized: "分类账户"), value: entry.categoryAccount)
+                    ImportEntryDetailLine(label: String(localized: "资金账户"), value: entry.fundingAccount)
                     ForEach(Array(entry.postings.enumerated()), id: \.offset) { _, posting in
                         ImportEntryDetailLine(
                             label: posting.amount + " " + posting.currency,
@@ -1735,13 +1735,13 @@ private struct ImportEntryReviewRow: View {
                         )
                     }
                     if let method = entry.method, !method.isEmpty {
-                        ImportEntryDetailLine(label: "支付方式", value: method)
+                        ImportEntryDetailLine(label: String(localized: "支付方式"), value: method)
                     }
                     if let orderID = entry.orderID, !orderID.isEmpty {
-                        ImportEntryDetailLine(label: "订单号", value: orderID)
+                        ImportEntryDetailLine(label: String(localized: "订单号"), value: orderID)
                     }
                     if let tags = entry.tags, !tags.isEmpty {
-                        ImportEntryDetailLine(label: "标签", value: tags.map { "#\($0)" }.joined(separator: " "))
+                        ImportEntryDetailLine(label: String(localized: "标签"), value: tags.map { "#\($0)" }.joined(separator: " "))
                     }
                 }
                 .padding(.leading, 52)

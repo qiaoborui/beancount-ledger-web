@@ -11,10 +11,10 @@ enum ServerConfigurationError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .empty: return "请输入服务器地址"
-        case .invalid: return "服务器地址格式无效"
-        case .requiresHTTPS: return "服务器地址需要使用 HTTPS"
-        case .originOnly: return "请只填写服务器域名，不包含路径、查询参数或账号信息"
+        case .empty: return String(localized: "请输入服务器地址")
+        case .invalid: return String(localized: "服务器地址格式无效")
+        case .requiresHTTPS: return String(localized: "服务器地址需要使用 HTTPS")
+        case .originOnly: return String(localized: "请只填写服务器域名，不包含路径、查询参数或账号信息")
         }
     }
 }
@@ -55,15 +55,15 @@ enum LedgerAPIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
-            return "服务器返回了无法识别的响应"
+            return String(localized: "服务器返回了无法识别的响应")
         case let .incompatibleServer(message):
             return message
         case let .server(_, message):
             return message
         case let .decoding(message):
-            return "账本数据格式无法识别：\(message)"
+            return String(localized: "账本数据格式无法识别：\(message)")
         case let .transport(message):
-            return "无法连接服务器：\(message)"
+            return String(localized: "无法连接服务器：\(message)")
         }
     }
 }
@@ -146,19 +146,19 @@ protocol LedgerAPI: Sendable {
 
 extension LedgerAPI {
     func reconciliation(baseURL: URL, start: String, end: String) async throws -> LedgerReconciliationResponse {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持对账查询")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持对账查询"))
     }
 
     func reconcile(baseURL: URL, request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持对账写入")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持对账写入"))
     }
 
     func accountStatuses(baseURL: URL) async throws -> [LedgerAccountStatus] {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持账户状态查询")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持账户状态查询"))
     }
 
     func addAccount(baseURL: URL, input: LedgerAccountInput) async throws {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持添加账户")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持添加账户"))
     }
     func homeReport(
         baseURL: URL,
@@ -166,52 +166,52 @@ extension LedgerAPI {
         end: String,
         valuationCurrency: String
     ) async throws -> LedgerHomeReport {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持首页消费报告")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持首页消费报告"))
     }
 
     func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持全局搜索")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持全局搜索"))
     }
 
     func importDocuments(baseURL: URL) async throws -> [LedgerImportDocument] {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持导入记录")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持导入记录"))
     }
 
     func importProviders(baseURL: URL) async throws -> [LedgerImportProviderInfo] {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持账单导入")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持账单导入"))
     }
 
     func gmailStatus(baseURL: URL) async throws -> LedgerGmailStatus {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 Gmail 自动导入"))
     }
 
     func gmailConnect(baseURL: URL) async throws -> LedgerGmailConnectResponse {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 Gmail 自动导入"))
     }
 
     func gmailSync(baseURL: URL, pendingID: String?) async throws -> LedgerGmailSyncResult {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 Gmail 自动导入"))
     }
 
     func gmailDisconnect(baseURL: URL) async throws {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 Gmail 自动导入"))
     }
 
     func gmailPendingImports(baseURL: URL) async throws -> [LedgerGmailPendingImport] {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 Gmail 自动导入"))
     }
 
     func gmailPendingImport(baseURL: URL, id: String) async throws -> LedgerGmailPendingDetail {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 Gmail 自动导入"))
     }
 
     func dismissGmailPendingImport(baseURL: URL, id: String) async throws {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 自动导入")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 Gmail 自动导入"))
     }
 
     func gmailPendingEvents(baseURL: URL) -> AsyncThrowingStream<Void, Error> {
         AsyncThrowingStream { continuation in
-            continuation.finish(throwing: LedgerAPIError.incompatibleServer("服务器暂不支持 Gmail 实时更新"))
+            continuation.finish(throwing: LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 Gmail 实时更新")))
         }
     }
 
@@ -222,14 +222,14 @@ extension LedgerAPI {
         alipayFundRounding: Bool,
         archivePassword: String
     ) async throws -> LedgerImportPreview {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持账单导入")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持账单导入"))
     }
 
     func commitImport(
         baseURL: URL,
         request: LedgerImportCommitRequest
     ) async throws -> LedgerImportCommitResult {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持账单导入")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持账单导入"))
     }
 
     func updateTransaction(
@@ -237,11 +237,11 @@ extension LedgerAPI {
         source: TransactionSource,
         entry: LedgerTransactionEntry
     ) async throws {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持编辑交易")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持编辑交易"))
     }
 
     func deleteTransaction(baseURL: URL, source: TransactionSource, reason: String) async throws {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持删除交易")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持删除交易"))
     }
 
     func addTransactionTags(
@@ -249,47 +249,47 @@ extension LedgerAPI {
         sources: [TransactionSource],
         tags: [String]
     ) async throws {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持批量添加标签")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持批量添加标签"))
     }
 
     func indexInfo(baseURL: URL, targetGitSHA: String?) async throws -> LedgerIndexInfo {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持索引状态查询")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持索引状态查询"))
     }
 
     func dashboard(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerDashboard {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持仪表盘")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持仪表盘"))
     }
 
     func incomeStatement(baseURL: URL, start: String, end: String, valuationCurrency: String) async throws -> LedgerIncomeStatement {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持损益分析")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持损益分析"))
     }
 
     func investments(baseURL: URL) async throws -> LedgerInvestmentSummary {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持投资分析")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持投资分析"))
     }
 
     func runBQL(baseURL: URL, query: String, valuationCurrency: String) async throws -> BQLResult {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 BQL 查询")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 BQL 查询"))
     }
 
     func bqlHistory(baseURL: URL) async throws -> [BQLHistoryRecord] {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 BQL 查询历史")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 BQL 查询历史"))
     }
 
     func saveBQLHistory(baseURL: URL, query: String) async throws -> BQLHistoryRecord {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 BQL 查询历史")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 BQL 查询历史"))
     }
 
     func generateBQLHistoryTitle(baseURL: URL, id: String) async throws -> BQLHistoryRecord {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 BQL 查询历史")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 BQL 查询历史"))
     }
 
     func renameBQLHistory(baseURL: URL, id: String, title: String) async throws -> BQLHistoryRecord {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 BQL 查询历史")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 BQL 查询历史"))
     }
 
     func deleteBQLHistory(baseURL: URL, id: String) async throws {
-        throw LedgerAPIError.incompatibleServer("服务器暂不支持 BQL 查询历史")
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持 BQL 查询历史"))
     }
 }
 
@@ -799,7 +799,7 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
         #if canImport(FoundationNetworking)
         return AsyncThrowingStream { continuation in
             continuation.finish(
-                throwing: LedgerAPIError.incompatibleServer("当前平台不支持 Gmail 实时更新")
+                throwing: LedgerAPIError.incompatibleServer(String(localized: "当前平台不支持 Gmail 实时更新"))
             )
         }
         #else

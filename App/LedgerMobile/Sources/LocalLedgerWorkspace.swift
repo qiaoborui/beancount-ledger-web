@@ -156,29 +156,29 @@ actor LocalLedgerWorkspace {
         var errorDescription: String? {
             switch self {
             case .invalidRoot:
-                "无法创建本地账本目录"
+                String(localized: "无法创建本地账本目录")
             case .invalidSource:
-                "请选择有效的账本目录"
+                String(localized: "请选择有效的账本目录")
             case let .invalidRelativePath(path):
-                "账本路径无效：\(path)"
+                String(localized: "账本路径无效：\(path)")
             case let .duplicateRelativePath(path):
-                "同一次修改包含重复路径：\(path)"
+                String(localized: "同一次修改包含重复路径：\(path)")
             case let .symbolicLink(path):
-                "本地账本不接受符号链接：\(path)"
+                String(localized: "本地账本不接受符号链接：\(path)")
             case let .unsupportedItem(path):
-                "本地账本只接受目录和普通文件：\(path)"
+                String(localized: "本地账本只接受目录和普通文件：\(path)")
             case .transactionInProgress:
-                "本地账本正在保存另一项修改"
+                String(localized: "本地账本正在保存另一项修改")
             case .missingRevision:
-                "本地账本还没有可用版本"
+                String(localized: "本地账本还没有可用版本")
             case .corruptRevision:
-                "本地账本版本信息已损坏"
+                String(localized: "本地账本版本信息已损坏")
             case .staleRevision:
-                "账本已更新，请刷新预览后再确认修改"
+                String(localized: "账本已更新，请刷新预览后再确认修改")
             case .treeLimitExceeded:
-                "账本目录的文件数量、总大小或层级超过限制"
+                String(localized: "账本目录的文件数量、总大小或层级超过限制")
             case .revisionTooLarge:
-                "本次修改的版本信息超过大小限制"
+                String(localized: "本次修改的版本信息超过大小限制")
             }
         }
     }

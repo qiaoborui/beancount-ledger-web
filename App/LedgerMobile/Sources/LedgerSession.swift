@@ -18,11 +18,11 @@ enum LedgerLockInterval: Int, CaseIterable, Equatable, Sendable, Identifiable {
 
     var title: String {
         switch self {
-        case .immediately: "立即"
-        case .oneMinute: "1 分钟"
-        case .fiveMinutes: "5 分钟"
-        case .fifteenMinutes: "15 分钟"
-        case .thirtyMinutes: "30 分钟"
+        case .immediately: String(localized: "立即")
+        case .oneMinute: String(localized: "1 分钟")
+        case .fiveMinutes: String(localized: "5 分钟")
+        case .fifteenMinutes: String(localized: "15 分钟")
+        case .thirtyMinutes: String(localized: "30 分钟")
         }
     }
 }
@@ -47,9 +47,9 @@ enum LedgerTransactionMutationError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .sourceUnavailable:
-            "找不到这笔交易的最新账本来源，请刷新后重试。"
+            String(localized: "找不到这笔交易的最新账本来源，请刷新后重试。")
         case .alreadyInProgress:
-            "这笔交易正在由服务器确认，请等待同步完成后再试。"
+            String(localized: "这笔交易正在由服务器确认，请等待同步完成后再试。")
         }
     }
 }
@@ -169,7 +169,7 @@ final class LedgerSession: ObservableObject {
         return localLedgers.first(where: { $0.id == id })
     }
     @Published private(set) var localLedgers: [LocalLedgerDescriptor] = []
-    @Published private(set) var localLedgerName = "本地账本"
+    @Published private(set) var localLedgerName = String(localized: "本地账本")
     @Published private(set) var isLocalOperationBusy = false
     @Published var serverInput: String
     @Published var password = ""
@@ -575,7 +575,7 @@ final class LedgerSession: ObservableObject {
                           revision?.id != self.localPresentation?.revisionID else { return }
                     self.resetLocalTransactionWindow()
                     self.invalidateOverviewCategories()
-                    self.localOverviewCategoriesError = "账本已更新，请刷新概览汇总"
+                    self.localOverviewCategoriesError = String(localized: "账本已更新，请刷新概览汇总")
                 }
             }
         widgetRefreshStatusObserver = LedgerWidgetRefreshStatusObserver(
@@ -642,7 +642,7 @@ final class LedgerSession: ObservableObject {
     }
 
     var biometricTitle: String {
-        if isLocal, biometricKind == .unavailable { return "设备密码" }
+        if isLocal, biometricKind == .unavailable { return String(localized: "设备密码") }
         return biometricKind.title
     }
 
@@ -703,7 +703,7 @@ final class LedgerSession: ObservableObject {
 
     func saveServer() async {
         guard !localOnly else {
-            errorMessage = "此版本使用本地账本，请选择本地目录或 Git 存储。"
+            errorMessage = String(localized: "此版本使用本地账本，请选择本地目录或 Git 存储。")
             return
         }
         guard case .configuration = phase else { return }
@@ -947,7 +947,7 @@ final class LedgerSession: ObservableObject {
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
             guard case let .local(id) = location,
                   let descriptor = localLedgers.first(where: { $0.id == id }) else {
-                throw LedgerRepositoryError.capabilityUnavailable("找不到本地账本，请重新选择")
+                throw LedgerRepositoryError.capabilityUnavailable(String(localized: "找不到本地账本，请重新选择"))
             }
             try await activateLocalLedger(descriptor, deferDerivedRefreshes: coldStartup)
         } catch {
@@ -1065,7 +1065,7 @@ final class LedgerSession: ObservableObject {
 
     func configureLocalGit(repositoryURL: String, branch: String, credential: LocalGitCredential?) async throws {
         guard phase == .ready, applicationActive, !isStorageSyncBusy, case let .local(id) = location, let localCatalog else {
-            throw LocalLedgerError.operationFailed("请先解锁本地账本，等待当前同步结束。")
+            throw LocalLedgerError.operationFailed(String(localized: "请先解锁本地账本，等待当前同步结束。"))
         }
         isStorageSyncBusy = true
         defer { isStorageSyncBusy = false }
@@ -1082,7 +1082,7 @@ final class LedgerSession: ObservableObject {
 
     func disconnectLocalGit() async throws {
         guard phase == .ready, applicationActive, !isStorageSyncBusy, case let .local(id) = location, let localCatalog else {
-            throw LocalLedgerError.operationFailed("请先解锁本地账本，等待当前同步结束。")
+            throw LocalLedgerError.operationFailed(String(localized: "请先解锁本地账本，等待当前同步结束。"))
         }
         isStorageSyncBusy = true
         defer { isStorageSyncBusy = false }
@@ -1099,7 +1099,7 @@ final class LedgerSession: ObservableObject {
 
     func synchronizeLocalStorage() async throws -> LocalStorageSyncStatus {
         guard phase == .ready, applicationActive, !isStorageSyncBusy, let repository = localRepository else {
-            throw LocalLedgerError.operationFailed("请先解锁本地账本，等待当前同步结束。")
+            throw LocalLedgerError.operationFailed(String(localized: "请先解锁本地账本，等待当前同步结束。"))
         }
         isStorageSyncBusy = true
         let epoch = sessionEpoch
@@ -1146,7 +1146,7 @@ final class LedgerSession: ObservableObject {
 
     func resolveLocalStorageConflicts(keepingLocal: Bool) async throws -> LocalStorageSyncStatus {
         guard phase == .ready, applicationActive, !isStorageSyncBusy, let repository = localRepository else {
-            throw LocalLedgerError.operationFailed("请先解锁本地账本，等待当前同步结束。")
+            throw LocalLedgerError.operationFailed(String(localized: "请先解锁本地账本，等待当前同步结束。"))
         }
         isStorageSyncBusy = true
         let epoch = sessionEpoch
@@ -1239,7 +1239,7 @@ final class LedgerSession: ObservableObject {
         } catch {
             guard epoch == sessionEpoch else { return }
             localSyncStatus = .init(mode: .git, phase: .failed,
-                message: "后台同步准备失败：\(error.localizedDescription)")
+                message: String(localized: "后台同步准备失败：\(error.localizedDescription)"))
         }
     }
 
@@ -1429,7 +1429,7 @@ final class LedgerSession: ObservableObject {
         openingBalance: String? = nil
     ) async throws {
         guard phase == .ready else {
-            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+            throw LedgerAPIError.incompatibleServer(String(localized: "当前账本会话不可用"))
         }
         let input = LedgerAccountInput(date: date, account: account, alias: alias, currency: currency)
         let epoch = sessionEpoch
@@ -1449,7 +1449,7 @@ final class LedgerSession: ObservableObject {
                     date: date,
                     flag: "*",
                     payee: "",
-                    narration: "期初余额",
+                    narration: String(localized: "期初余额"),
                     tags: [],
                     links: [],
                     postings: [
@@ -1475,7 +1475,7 @@ final class LedgerSession: ObservableObject {
         adjustmentDate: String
     ) async throws -> LedgerReconciliationResult {
         guard phase == .ready else {
-            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+            throw LedgerAPIError.incompatibleServer(String(localized: "当前账本会话不可用"))
         }
         let request = LedgerReconcileRequest(
             account: account,
@@ -1504,7 +1504,7 @@ final class LedgerSession: ObservableObject {
 
     func fetchReconciliationRows(start: String, end: String) async throws -> [LedgerReconciliationRow] {
         guard phase == .ready else {
-            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+            throw LedgerAPIError.incompatibleServer(String(localized: "当前账本会话不可用"))
         }
         let response = try await performSensitiveRequest { repository in
             try await repository.reconciliation(start: start, end: end)
@@ -1526,7 +1526,7 @@ final class LedgerSession: ObservableObject {
               !isAuthenticationBusy else { return }
         let candidate = password
         guard !candidate.isEmpty else {
-            errorMessage = "请输入账本密码"
+            errorMessage = String(localized: "请输入账本密码")
             return
         }
 
@@ -1627,7 +1627,7 @@ final class LedgerSession: ObservableObject {
                 defer { systemAuthenticationInProgress = false }
                 credential = try await biometricStore.readCredential(
                     for: contextURL,
-                    reason: "使用 \(biometricTitle) 解锁账本金额"
+                    reason: String(localized: "使用 \(biometricTitle) 解锁账本金额")
                 )
             }
             guard generation == requestGeneration else { return }
@@ -1672,7 +1672,7 @@ final class LedgerSession: ObservableObject {
             if case .locked = phase {
                 setLocallyLocked(true, for: contextURL)
                 if quickUnlockFailed {
-                    errorMessage = "Face ID 已通过，但服务器会话已过期，请输入密码重新连接"
+                    errorMessage = String(localized: "Face ID 已通过，但服务器会话已过期，请输入密码重新连接")
                 }
             } else {
                 if requiresCredentialMigration, serverAccessConfirmed {
@@ -1681,7 +1681,7 @@ final class LedgerSession: ObservableObject {
                         replacingDeviceID: usesLocalMarker ? nil : credential.deviceID
                     )
                 } else if quickUnlockFailed {
-                    errorMessage = "Face ID 已解锁本机数据；服务器暂未同步，刷新后可使用密码重新连接"
+                    errorMessage = String(localized: "Face ID 已解锁本机数据；服务器暂未同步，刷新后可使用密码重新连接")
                 }
                 if serverAccessConfirmed, phase == .ready, let ledger {
                     await ensureWidgetCredential(for: contextURL, valuationCurrency: ledger.valuationCurrency)
@@ -1723,7 +1723,7 @@ final class LedgerSession: ObservableObject {
                     await ensureWidgetCredential(for: contextURL, valuationCurrency: ledger.valuationCurrency)
                 }
             } catch {
-                errorMessage = "\(biometricTitle) 启用失败：\(error.localizedDescription)"
+                errorMessage = String(localized: "\(biometricTitle) 启用失败：\(error.localizedDescription)")
             }
             return
         }
@@ -1735,7 +1735,7 @@ final class LedgerSession: ObservableObject {
                 defer { systemAuthenticationInProgress = false }
                 credential = try await biometricStore.readCredential(
                     for: contextURL,
-                    reason: "验证后停用 \(biometricTitle) 快速解锁"
+                    reason: String(localized: "验证后停用 \(biometricTitle) 快速解锁")
                 )
             }
             guard phase == .ready, self.contextURL == contextURL else { return }
@@ -1754,7 +1754,7 @@ final class LedgerSession: ObservableObject {
             biometricStore.deleteCredential(for: contextURL)
             recordWidgetRefreshStatus(.waitingForBiometrics)
         } catch {
-            errorMessage = "\(biometricTitle) 停用失败：\(error.localizedDescription)"
+            errorMessage = String(localized: "\(biometricTitle) 停用失败：\(error.localizedDescription)")
         }
     }
 
@@ -1841,7 +1841,7 @@ final class LedgerSession: ObservableObject {
             return true
         } catch {
             guard generation == requestGeneration else { return false }
-            errorMessage = "Face ID 已解锁本机数据；服务器同步失败：\(error.localizedDescription)"
+            errorMessage = String(localized: "Face ID 已解锁本机数据；服务器同步失败：\(error.localizedDescription)")
             return false
         }
     }
@@ -1873,7 +1873,7 @@ final class LedgerSession: ObservableObject {
 
     func accountDetail(for account: String, currency: String) async throws -> LedgerAccountDetail {
         guard phase == .ready, let contextURL else {
-            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+            throw LedgerAPIError.incompatibleServer(String(localized: "当前账本会话不可用"))
         }
         let generation = requestGeneration
         let range = selectedRange
@@ -1915,7 +1915,7 @@ final class LedgerSession: ObservableObject {
 
     func analysisResource(_ kind: LedgerAnalysisResourceKind, forceRefresh: Bool = false) async throws -> LedgerAnalysisResource {
         guard phase == .ready, !privacyShielded, let contextURL else {
-            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+            throw LedgerAPIError.incompatibleServer(String(localized: "当前账本会话不可用"))
         }
         let generation = requestGeneration
         let range = selectedRange
@@ -1946,7 +1946,7 @@ final class LedgerSession: ObservableObject {
             switch kind {
             case .assets:
                 guard let ledger else {
-                    throw LedgerAPIError.incompatibleServer("当前账本数据不可用")
+                    throw LedgerAPIError.incompatibleServer(String(localized: "当前账本数据不可用"))
                 }
                 resource = .assets(
                     LedgerAssetsAnalysis(
@@ -2099,7 +2099,7 @@ final class LedgerSession: ObservableObject {
 
     func gmailPendingEvents() throws -> AsyncThrowingStream<Void, Error> {
         guard phase == .ready, let contextURL else {
-            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+            throw LedgerAPIError.incompatibleServer(String(localized: "当前账本会话不可用"))
         }
         return try remoteRepository(at: contextURL).gmailPendingEvents()
     }
@@ -2147,7 +2147,7 @@ final class LedgerSession: ObservableObject {
             return
         }
         guard phase == .ready, contextURL != nil else {
-            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+            throw LedgerAPIError.incompatibleServer(String(localized: "当前账本会话不可用"))
         }
         guard let original = knownTransaction(source) else {
             throw LedgerTransactionMutationError.sourceUnavailable
@@ -2184,7 +2184,7 @@ final class LedgerSession: ObservableObject {
             return
         }
         guard phase == .ready, contextURL != nil else {
-            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+            throw LedgerAPIError.incompatibleServer(String(localized: "当前账本会话不可用"))
         }
         guard source.hash?.isEmpty == false,
               let original = knownTransaction(source) else {
@@ -2224,7 +2224,7 @@ final class LedgerSession: ObservableObject {
             return
         }
         guard phase == .ready, contextURL != nil else {
-            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+            throw LedgerAPIError.incompatibleServer(String(localized: "当前账本会话不可用"))
         }
         let originals = sources.compactMap { source in
             knownTransaction(source)
@@ -2299,7 +2299,7 @@ final class LedgerSession: ObservableObject {
                 try await self.validateHistoryRead(epoch: epoch, generation: generation)
                 let page = try await repository.classificationHistoryPage(cursor: cursor)
                 guard page.sensitiveUnlocked, revision == nil || revision == page.revision else {
-                    throw LedgerAPIError.server(status: 409, message: "历史记录已变化，请重试")
+                    throw LedgerAPIError.server(status: 409, message: String(localized: "历史记录已变化，请重试"))
                 }
                 try await self.validateHistoryRead(epoch: epoch, generation: generation)
                 revision = page.revision
@@ -2322,7 +2322,7 @@ final class LedgerSession: ObservableObject {
                 try await self.validateHistoryRead(epoch: epoch, generation: generation)
                 let page = try await repository.classificationHistoryPage(cursor: cursor)
                 guard page.sensitiveUnlocked, revision == nil || revision == page.revision else {
-                    throw LedgerAPIError.server(status: 409, message: "历史记录已变化，请重试")
+                    throw LedgerAPIError.server(status: 409, message: String(localized: "历史记录已变化，请重试"))
                 }
                 try await self.validateHistoryRead(epoch: epoch, generation: generation)
                 revision = page.revision
@@ -2364,7 +2364,7 @@ final class LedgerSession: ObservableObject {
             payload = try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
                 let payload = try await repository.globalTransactions()
                 guard payload.sensitiveUnlocked else {
-                    throw LedgerAPIError.server(status: 423, message: "服务器敏感数据已锁定")
+                    throw LedgerAPIError.server(status: 423, message: String(localized: "服务器敏感数据已锁定"))
                 }
                 return payload
             }
@@ -2637,7 +2637,7 @@ final class LedgerSession: ObservableObject {
             }
         } catch {
             guard phase == .ready, self.contextURL == contextURL else { return }
-            errorMessage = "\(biometricTitle) 快速解锁升级失败，请保持登录后重试"
+            errorMessage = String(localized: "\(biometricTitle) 快速解锁升级失败，请保持登录后重试")
         }
     }
 
@@ -3225,7 +3225,7 @@ final class LedgerSession: ObservableObject {
             if let account = ledger?.accounts.first(where: { $0.account == path }) {
                 externalAccount = LedgerExternalAccount(account: path, currency: currency.isEmpty ? account.currency : currency)
             } else {
-                errorMessage = "当前账本中找不到这个账户"
+                errorMessage = String(localized: "当前账本中找不到这个账户")
             }
         case let .transactions(day):
             if let date = LedgerExternalRoute.date(day) {
@@ -3306,7 +3306,7 @@ final class LedgerSession: ObservableObject {
     /// windows rather than accumulating history. Complete counts load separately.
     func localWidgetDayWindow(_ day: String, index: Int = 0) async throws -> LocalTransactionWindow.Window {
         guard LedgerWidgetLink.isValidDay(day), (0..<10_000).contains(index) else {
-            throw LedgerAPIError.incompatibleServer("无效的消费日期或分页")
+            throw LedgerAPIError.incompatibleServer(String(localized: "无效的消费日期或分页"))
         }
         let context = try localReadContext()
         guard let repository = localRepository else { throw CancellationError() }
@@ -3322,7 +3322,7 @@ final class LedgerSession: ObservableObject {
                 if index > 0 {
                     for _ in 0..<index {
                         try validateLocalRead(context)
-                        guard !window.isComplete else { throw LocalLedgerError.operationFailed("支出分页已变化，请返回第一页") }
+                        guard !window.isComplete else { throw LocalLedgerError.operationFailed(String(localized: "支出分页已变化，请返回第一页")) }
                         window = try await reader.nextWindow()
                     }
                 }
@@ -3346,7 +3346,7 @@ final class LedgerSession: ObservableObject {
     }
 
     func localWidgetDaySummary(_ day: String) async throws -> LocalTransactionScan.Result {
-        guard LedgerWidgetLink.isValidDay(day) else { throw LedgerAPIError.incompatibleServer("无效的消费日期") }
+        guard LedgerWidgetLink.isValidDay(day) else { throw LedgerAPIError.incompatibleServer(String(localized: "无效的消费日期")) }
         let context = try localReadContext()
         guard let repository = localRepository else { throw CancellationError() }
         let dayRange = LedgerDateRange(start: day, end: day, preset: .custom)
@@ -3372,7 +3372,7 @@ final class LedgerSession: ObservableObject {
     /// A day drill-down owns its payload and never replaces the global range or ledger.
     func widgetDayLedger(_ day: String) async throws -> LedgerBootstrap {
         guard LedgerWidgetLink.isValidDay(day) else {
-            throw LedgerAPIError.incompatibleServer("无效的消费日期")
+            throw LedgerAPIError.incompatibleServer(String(localized: "无效的消费日期"))
         }
         let range = LedgerDateRange(start: day, end: day, preset: .custom)
         let today = LedgerDateRange.today(now: ledgerNow())
@@ -3383,7 +3383,7 @@ final class LedgerSession: ObservableObject {
                 today: today, valuationCurrency: currency
             )
             guard payload.sensitiveUnlocked else {
-                throw LedgerAPIError.server(status: 423, message: "服务器敏感数据已锁定")
+                throw LedgerAPIError.server(status: 423, message: String(localized: "服务器敏感数据已锁定"))
             }
             return payload
         }
@@ -3464,7 +3464,7 @@ final class LedgerSession: ObservableObject {
             presentationRevision = restoredStartup.revisionID
         } else if let local {
             guard let revision = try await local.workspace.currentRevision() else {
-                throw LocalLedgerError.operationFailed("账本版本尚未就绪")
+                throw LocalLedgerError.operationFailed(String(localized: "账本版本尚未就绪"))
             }
             let page = try await local.bootstrapPage(start: targetRange.start,
                 end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency,
@@ -3479,7 +3479,7 @@ final class LedgerSession: ObservableObject {
         guard generation == requestGeneration else { return }
         guard payload.sensitiveUnlocked else {
             if preserveCachedLedgerOnSensitiveLock, ledger != nil {
-                throw LedgerAPIError.server(status: 423, message: "服务器敏感数据已锁定")
+                throw LedgerAPIError.server(status: 423, message: String(localized: "服务器敏感数据已锁定"))
             }
             _ = invalidateSession()
             clearTransactionMutations()
@@ -3947,7 +3947,7 @@ final class LedgerSession: ObservableObject {
         _ operation: @Sendable (any LedgerRepository) async throws -> Value
     ) async throws -> Value {
         guard phase == .ready, let contextURL else {
-            throw LedgerAPIError.incompatibleServer("当前账本会话不可用")
+            throw LedgerAPIError.incompatibleServer(String(localized: "当前账本会话不可用"))
         }
         let generation = requestGeneration
         let epoch = sessionEpoch
@@ -4290,7 +4290,7 @@ final class LedgerSession: ObservableObject {
     /// bounded window; replay earlier pages instead of collecting every tagged row.
     /// Reads all history so a tag spanning several months is never clipped.
     func localEventTagWindow(_ tag: String, index: Int = 0) async throws -> LocalTransactionWindow.Window {
-        guard (0..<10_000).contains(index) else { throw LocalLedgerError.invalidConfiguration("事件分页无效") }
+        guard (0..<10_000).contains(index) else { throw LocalLedgerError.invalidConfiguration(String(localized: "事件分页无效")) }
         let context = try localReadContext()
         guard let repository = localRepository else { throw CancellationError() }
         eventWindowTask?.cancel()
@@ -4305,7 +4305,7 @@ final class LedgerSession: ObservableObject {
                 if index > 0 {
                     for _ in 0..<index {
                         try validateLocalRead(context)
-                        guard !window.isComplete else { throw LocalLedgerError.operationFailed("事件分页已变化，请返回第一页") }
+                        guard !window.isComplete else { throw LocalLedgerError.operationFailed(String(localized: "事件分页已变化，请返回第一页")) }
                         window = try await reader.nextWindow()
                     }
                 }
@@ -4367,7 +4367,7 @@ final class LedgerSession: ObservableObject {
                 try validateLocalRead(context)
                 guard current?.id == context.revisionID else {
                     localEventTagSummaries = nil
-                    localEventTagSummaryError = "账本已变化，请刷新后重试。"
+                    localEventTagSummaryError = String(localized: "账本已变化，请刷新后重试。")
                     return
                 }
                 return
@@ -4450,16 +4450,16 @@ final class LedgerSession: ObservableObject {
             closingBalance: header.closingBalance, periodChange: header.periodChange)
         let consumed = try LocalTransactionScan.add(continuation?.consumed ?? 0, page.detail.rows.count)
         guard consumed <= page.rowCount, (page.nextCursor != nil) == (consumed < page.rowCount) else {
-            throw LocalLedgerError.operationFailed("账户分页总数不一致")
+            throw LocalLedgerError.operationFailed(String(localized: "账户分页总数不一致"))
         }
         if let continuation {
             guard page.revision == continuation.revision, page.rowCount == continuation.count,
                   header == continuation.header, let first = page.detail.rows.first,
-                  (order == .asc ? continuation.lastDate <= first.date : continuation.lastDate >= first.date) else { throw LocalLedgerError.operationFailed("账户分页上下文已变化") }
+                  (order == .asc ? continuation.lastDate <= first.date : continuation.lastDate >= first.date) else { throw LocalLedgerError.operationFailed(String(localized: "账户分页上下文已变化")) }
             let (balance, overflow) = order == .asc
                 ? continuation.lastBalance.addingReportingOverflow(first.change)
                 : continuation.lastBalance.subtractingReportingOverflow(continuation.lastChange)
-            guard !overflow, balance == first.balance else { throw LocalLedgerError.operationFailed("账户分页余额不连续") }
+            guard !overflow, balance == first.balance else { throw LocalLedgerError.operationFailed(String(localized: "账户分页余额不连续")) }
         }
         let current = try await repository.workspace.currentRevision()
         try validateLocalRead(sequence.context)

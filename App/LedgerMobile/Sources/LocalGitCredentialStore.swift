@@ -59,6 +59,6 @@ struct DeviceLocalGitCredentialStore: LocalGitCredentialStoring {
          kSecAttrAccount: id.uuidString, kSecAttrSynchronizable: false]
     }
     private func credentialError() -> LocalStorageError {
-        .gitFailure("无法访问本机 Git 凭据，请解锁设备并重新填写访问令牌")
+        .gitFailure(String(localized: "无法访问本机 Git 凭据，请解锁设备并重新填写访问令牌"))
     }
 }

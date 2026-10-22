@@ -63,7 +63,7 @@ struct EmbeddedLocalGitTransport: LocalGitTransport {
         let envelope = try JSONDecoder().decode(Envelope.self, from: Data(response.utf8))
         guard envelope.ok else {
             throw LocalGitTransportFailure(code: envelope.error?.code ?? "git.failed",
-                message: envelope.error?.message ?? "Git 同步失败")
+                message: envelope.error?.message ?? String(localized: "Git 同步失败"))
         }
         return try JSONEncoder().encode(envelope.result ?? .null)
         #else

@@ -31,7 +31,7 @@ struct LocalCanonicalStreamCache {
 
     private func names(for sourceVersion: String) throws -> (stream: URL, entry: URL) {
         guard sourceVersion.count == 64, sourceVersion.allSatisfy({ "0123456789abcdef".contains($0) }) else {
-            throw LocalLedgerError.invalidConfiguration("模型缓存键无效")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "模型缓存键无效"))
         }
         return (directory.appendingPathComponent(sourceVersion + ".records"),
                 directory.appendingPathComponent(sourceVersion + ".json"))
@@ -161,7 +161,7 @@ struct LocalCanonicalStreamCache {
         let parent = directory.deletingLastPathComponent()
         guard parent.standardizedFileURL.path == parent.resolvingSymlinksInPath().standardizedFileURL.path,
               directory.standardizedFileURL.path == directory.resolvingSymlinksInPath().standardizedFileURL.path else {
-            throw LocalLedgerError.invalidConfiguration("模型缓存目录不允许符号链接")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "模型缓存目录不允许符号链接"))
         }
         #if os(iOS)
         try fileManager.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: parent.path)

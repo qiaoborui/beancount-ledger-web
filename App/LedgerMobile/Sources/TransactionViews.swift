@@ -21,8 +21,6 @@ private enum TransactionAmountParser {
 }
 
 enum TransactionDateHeaderFormatter {
-    private static let weekdaySymbols = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
-
     static func format(_ dateString: String) -> String {
         guard let date = LedgerDateRange.parse(dateString) else { return dateString }
         let cal = LedgerDateRange.calendar
@@ -31,26 +29,24 @@ enum TransactionDateHeaderFormatter {
         let isToday = cal.isDateInToday(date)
         let isYesterday = cal.isDateInYesterday(date)
 
-        let comp = cal.dateComponents([.year, .month, .day, .weekday], from: date)
+        let comp = cal.dateComponents([.year, .weekday], from: date)
         let currentYear = cal.component(.year, from: now)
 
-        guard let month = comp.month, let day = comp.day, let weekday = comp.weekday,
-              weekday >= 1 && weekday <= 7 else {
+        guard let weekday = comp.weekday, weekday >= 1 && weekday <= 7 else {
             return dateString
         }
 
-        let weekdayStr = weekdaySymbols[weekday - 1]
+        let weekdayStr = LedgerDateLabel.weekday(number: weekday)
 
         if isToday {
-            return "今天 · \(month)月\(day)日"
+            return String(localized: "今天 · \(LedgerDateLabel.monthDay(date))")
         } else if isYesterday {
-            return "昨天 · \(month)月\(day)日"
+            return String(localized: "昨天 · \(LedgerDateLabel.monthDay(date))")
         } else if comp.year == currentYear {
-            return "\(month)月\(day)日 · \(weekdayStr)"
-        } else if let year = comp.year {
-            return "\(year)年\(month)月\(day)日 · \(weekdayStr)"
+            return "\(LedgerDateLabel.monthDay(date)) · \(weekdayStr)"
+        } else {
+            return "\(LedgerDateLabel.yearMonthDay(date)) · \(weekdayStr)"
         }
-        return dateString
     }
 }
 
@@ -67,7 +63,7 @@ enum LedgerTransactionCopySummary {
         let labels = TransactionCategoryPresentation.accountLabels(accounts)
         let amount = amountsVisible
             ? amountPrefix(presentation.kind) + MoneyText.format(minorUnits: presentation.minorUnits, currency: presentation.currency)
-            : "金额已隐藏"
+            : String(localized: "金额已隐藏")
         var lines = [transaction.date, presentation.title]
         if !presentation.subtitle.isEmpty { lines.append(presentation.subtitle) }
         lines.append(amount)
@@ -203,7 +199,7 @@ private struct LedgerTransactionActions: ViewModifier {
         // that silently borrows authority for a potentially newer original.
         action = nil
         cancelPreparation()
-        preparationError = error.localizedDescription + " 请重新打开交易操作，核对最新内容后再试。"
+        preparationError = error.localizedDescription + String(localized: " 请重新打开交易操作，核对最新内容后再试。")
     }
 
     private func cancelPreparation() {
@@ -499,7 +495,7 @@ private struct BalancedLedgerTransactionRow: View {
                     .monospacedDigit()
                     .foregroundStyle(presentation.kind == .income ? BalancedPalette.income : BalancedPalette.ink)
                     .lineLimit(1).minimumScaleFactor(0.6)
-                Text(presentation.kind == .transfer ? "转账" : visual.categoryLabel).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                Text(presentation.kind == .transfer ? String(localized: "转账") : visual.categoryLabel).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
             }
         }
         .padding(.vertical, 11)
@@ -661,8 +657,7 @@ struct TransactionsView: View {
         guard let date = LedgerDateRange.parse(raw) else { return (raw, "") }
         let components = LedgerDateRange.calendar.dateComponents([.month, .day, .weekday], from: date)
         guard let month = components.month, let day = components.day, let weekday = components.weekday else { return (raw, "") }
-        let weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
-        return (String(format: "%02d/%02d", month, day), weekdays[max(0, min(6, weekday - 1))])
+        return (String(format: "%02d/%02d", month, day), LedgerDateLabel.weekday(number: weekday))
     }
 
     /// Only shown in the unfiltered (全部) tab — once a kind filter narrows the
@@ -683,9 +678,9 @@ struct TransactionsView: View {
             case .transfer: transfers = true
             }
         }
-        if income > 0 { return "收入 \(MoneyText.format(minorUnits: income, currency: session.ledger?.summary.currency ?? "CNY", showsCurrency: false))" }
-        if expense > 0 { return "支出 \(MoneyText.format(minorUnits: expense, currency: session.ledger?.summary.currency ?? "CNY", showsCurrency: false))" }
-        return transfers ? "转账，不计收支" : ""
+        if income > 0 { return String(localized: "收入 \(MoneyText.format(minorUnits: income, currency: session.ledger?.summary.currency ?? "CNY", showsCurrency: false))") }
+        if expense > 0 { return String(localized: "支出 \(MoneyText.format(minorUnits: expense, currency: session.ledger?.summary.currency ?? "CNY", showsCurrency: false))") }
+        return transfers ? String(localized: "转账，不计收支") : ""
     }
 
     /// `.settle` filter-result block (b04) — only once a kind filter narrows
@@ -805,7 +800,7 @@ struct TransactionsView: View {
         if session.isLocal {
             guard let revision = session.localTransactionPresentationRevision else {
                 actionMessageStyle = .failure
-                actionMessage = "账本版本尚未就绪，请刷新后重试。"
+                actionMessage = String(localized: "账本版本尚未就绪，请刷新后重试。")
                 return
             }
             var selection = LocalTransactionSelection(revisionID: revision,
@@ -875,7 +870,7 @@ struct TransactionsView: View {
                     .padding(.bottom, 14)
                     BalancedTransactionFilterBar(kindFilter: $filters.kind, counts: kindCounts)
                     HStack {
-                        Text((filters.account.flatMap { labels[$0] ?? $0 } ?? "全部账户") + " · " + (displayedCount.map { "\($0) 笔" } ?? "统计中"))
+                        Text((filters.account.flatMap { labels[$0] ?? $0 } ?? String(localized: "全部账户")) + " · " + (displayedCount.map { String(localized: "\($0) 笔") } ?? String(localized: "统计中")))
                             .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                         Spacer(minLength: 8)
                         Button("筛选", systemImage: "line.3.horizontal.decrease") { filterPresented = true }
@@ -1018,12 +1013,12 @@ struct TransactionsView: View {
     /// `.note` under the list — the filtered tab points at the settle block
     /// above it instead of repeating the "fully loaded" footnote.
     private var balancedListFootnote: String {
-        guard filters.kind == .all else { return "筛选只作用于当前区间，其余账目未被隐藏。" }
+        guard filters.kind == .all else { return String(localized: "筛选只作用于当前区间，其余账目未被隐藏。") }
         let count = displayedTransactions.count
         if session.isLocal, session.localTransactionReachedRowCap {
-            return "已加载 \(count) 笔，收窄时间范围可以看得更远。长按可多选，左滑显示改分类与对账。"
+            return String(localized: "已加载 \(count) 笔，收窄时间范围可以看得更远。长按可多选，左滑显示改分类与对账。")
         }
-        return "已全部加载 \(count) 笔。长按可多选，左滑显示改分类与对账。"
+        return String(localized: "已全部加载 \(count) 笔。长按可多选，左滑显示改分类与对账。")
     }
 
     private var navigationContent: some View {
@@ -1033,7 +1028,7 @@ struct TransactionsView: View {
         .listStyle(.plain)
         .listSectionSpacing(0)
         .tint(TerminalPalette.accent)
-        .terminalPageChrome("流水", isRoot: isRoot, showsTimeRange: true, actions: AnyView(transactionActions), balanced: true)
+        .terminalPageChrome(String(localized: "流水"), isRoot: isRoot, showsTimeRange: true, actions: AnyView(transactionActions), balanced: true)
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await session.refresh() }
         .task(id: windowRequestKey) {
@@ -1089,7 +1084,7 @@ struct TransactionsView: View {
                     },
                     onSave: { entry in
                         try await session.addLocalTransaction(entry)
-                        actionMessage = "已复制并记录新流水"
+                        actionMessage = String(localized: "已复制并记录新流水")
                         actionMessageStyle = .confirmed
                         confirmationFeedback &+= 1
                     }
@@ -1109,7 +1104,7 @@ struct TransactionsView: View {
                         } else {
                             try await session.updateTransaction(source: transaction.source, entry: entry)
                         }
-                        actionMessage = "交易修改已保存"
+                        actionMessage = String(localized: "交易修改已保存")
                         actionMessageStyle = .confirmed
                         confirmationFeedback &+= 1
                     }
@@ -1119,7 +1114,7 @@ struct TransactionsView: View {
             .sheet(item: $deletionTarget, onDismiss: revokeListAction) { transaction in
                 TransactionDeleteSheet(transaction: transaction, localAction: localAction,
                     onFailed: { error in if localAction != nil { failListAction(error) } }) {
-                    actionMessage = "交易已从账本删除"
+                    actionMessage = String(localized: "交易已从账本删除")
                     actionMessageStyle = .confirmed
                     confirmationFeedback &+= 1
                 }
@@ -1190,7 +1185,7 @@ struct TransactionsView: View {
                             selectedCount: selectedCount,
                             totalCount: session.isLocal ? (session.localTransactionSummary?.matchedCount ?? 0) : filteredTransactions.count,
                             allSelected: allVisibleSelected,
-                            allSelectedTitle: session.isLocal ? "取消当前" : "清空",
+                            allSelectedTitle: session.isLocal ? String(localized: "取消当前") : String(localized: "清空"),
                             isCounting: session.isLocal && currentLocalSelection?.hasDecisions == true
                                 && currentLocalSelection?.explicitSelectedCount == nil && localSelectionFacts == nil,
                             canToggleAll: !session.isLocal || (session.localTransactionSummary != nil
@@ -1211,14 +1206,14 @@ struct TransactionsView: View {
                 if session.isLocal && isSelecting {
                     endSelection()
                     actionMessageStyle = .failure
-                    actionMessage = "账本已更新，多选已清空，请重新选择。"
+                    actionMessage = String(localized: "账本已更新，多选已清空，请重新选择。")
                 }
             }
             .onChange(of: session.selectedRange) { _, _ in
                 if session.isLocal && isSelecting {
                     endSelection()
                     actionMessageStyle = .failure
-                    actionMessage = "时间范围已更改，多选已清空，请重新选择。"
+                    actionMessage = String(localized: "时间范围已更改，多选已清空，请重新选择。")
                 }
             }
             .onChange(of: selectionReadKey) { _, _ in localSelectionFacts = nil }
@@ -1390,7 +1385,7 @@ struct TransactionsView: View {
     private func failListAction(_ error: Error) {
         clearListActionPresentation()
         actionMessageStyle = .failure
-        actionMessage = error.localizedDescription + " 请重新打开交易操作，核对最新内容后再试。"
+        actionMessage = error.localizedDescription + String(localized: " 请重新打开交易操作，核对最新内容后再试。")
     }
 
     private func prepareListAction(_ rows: [LedgerTransaction], kind: LedgerSession.LocalTransactionActionKind) {
@@ -1474,12 +1469,12 @@ struct TransactionsView: View {
         let eligible = selectedTransactions.filter(isTagEligible)
         if eligible.isEmpty {
             actionMessageStyle = .failure
-            actionMessage = "所选交易缺少并发校验信息，暂无法添加标签。"
+            actionMessage = String(localized: "所选交易缺少并发校验信息，暂无法添加标签。")
             return
         }
         if eligible.count > TransactionTagSelectionRules.maximumCount {
             actionMessageStyle = .failure
-            actionMessage = "一次最多为 \(TransactionTagSelectionRules.maximumCount) 笔交易添加标签。"
+            actionMessage = String(localized: "一次最多为 \(TransactionTagSelectionRules.maximumCount) 笔交易添加标签。")
             return
         }
         tagEditorPresented = true
@@ -1560,7 +1555,7 @@ struct TransactionsView: View {
         endSelection()
         confirmationFeedback &+= 1
         actionMessageStyle = .confirmed
-        actionMessage = "已验证，并为 \(appliedCount) 条交易添加标签。"
+        actionMessage = String(localized: "已验证，并为 \(appliedCount) 条交易添加标签。")
     }
 }
 
@@ -1624,7 +1619,7 @@ struct WidgetDayTransactionsView: View {
                 }
             }
             if session.isLocal, let summaryError {
-                Text("支出汇总读取失败：" + summaryError).foregroundStyle(.secondary)
+                Text("支出汇总读取失败：\(summaryError)").foregroundStyle(.secondary)
                 Button("重试汇总") { reload += 1 }
             }
             if loading && transactions.isEmpty {
@@ -1648,9 +1643,9 @@ struct WidgetDayTransactionsView: View {
             } header: {
                 Group {
                     if session.isLocal {
-                        if completedSummary == summaryRequest, let summary { TerminalSectionLabel(text: "全部支出 · \(summary.matchedCount) 笔") }
-                        else if summaryLoading { TerminalSectionLabel(text: "正在统计全部支出…") }
-                    } else if !transactions.isEmpty { TerminalSectionLabel(text: "全部支出 · \(transactions.count) 笔") }
+                        if completedSummary == summaryRequest, let summary { TerminalSectionLabel(text: String(localized: "全部支出 · \(summary.matchedCount) 笔")) }
+                        else if summaryLoading { TerminalSectionLabel(text: String(localized: "正在统计全部支出…")) }
+                    } else if !transactions.isEmpty { TerminalSectionLabel(text: String(localized: "全部支出 · \(transactions.count) 笔")) }
                 }
                 .listRowBackground(BalancedPalette.page)
             }
@@ -1854,7 +1849,7 @@ private struct TransactionFilterSheet: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                } header: { TerminalSectionLabel(text: "交易类型").listRowBackground(BalancedPalette.page) }
+                } header: { TerminalSectionLabel(text: String(localized: "交易类型")).listRowBackground(BalancedPalette.page) }
 
                 Section {
                     Picker("账户", selection: $account) {
@@ -1863,7 +1858,7 @@ private struct TransactionFilterSheet: View {
                             Text(value).tag(Optional(value))
                         }
                     }
-                } header: { TerminalSectionLabel(text: "账户").listRowBackground(BalancedPalette.page) }
+                } header: { TerminalSectionLabel(text: String(localized: "账户")).listRowBackground(BalancedPalette.page) }
 
                 Section {
                     HStack(spacing: 8) {
@@ -2092,9 +2087,9 @@ private struct TransactionMutationBadge: View {
 
     private var presentation: (title: String, image: String, color: Color) {
         switch phase {
-        case .pending: ("正在验证并保存", "clock.arrow.circlepath", LedgerPalette.cobalt)
-        case .confirmed: ("已保存 · 正在更新", "checkmark.circle", LedgerPalette.success)
-        case .failed: ("未保存 · 已恢复", "arrow.uturn.backward.circle", LedgerPalette.risk)
+        case .pending: (String(localized: "正在验证并保存"), "clock.arrow.circlepath", LedgerPalette.cobalt)
+        case .confirmed: (String(localized: "已保存 · 正在更新"), "checkmark.circle", LedgerPalette.success)
+        case .failed: (String(localized: "未保存 · 已恢复"), "arrow.uturn.backward.circle", LedgerPalette.risk)
         }
     }
 
@@ -2115,7 +2110,7 @@ private struct TransactionSelectableCard: View {
         TransactionRow(transaction: transaction, accountLabels: accountLabels, selectionState: selected)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityLabel("\(selected ? "已选择" : "未选择")，\(transaction.payee)")
+        .accessibilityLabel("\(selected ? String(localized: "已选择") : String(localized: "未选择"))，\(transaction.payee)")
     }
 }
 
@@ -2123,7 +2118,7 @@ private struct TransactionBatchActionBar: View {
     let selectedCount: Int
     let totalCount: Int
     let allSelected: Bool
-    var allSelectedTitle = "清空"
+    var allSelectedTitle = String(localized: "清空")
     var isCounting = false
     var canToggleAll = true
     let onToggleAll: () -> Void
@@ -2134,7 +2129,7 @@ private struct TransactionBatchActionBar: View {
 
     var body: some View {
         HStack(spacing: LedgerSpacing.sm) {
-            Button(allSelected ? allSelectedTitle : "全选") { onToggleAll() }
+            Button(allSelected ? allSelectedTitle : String(localized: "全选")) { onToggleAll() }
                 .font(.system(.caption, design: .default, weight: .semibold))
                 .foregroundStyle(LedgerPalette.cobalt)
                 .frame(minWidth: 44, minHeight: 40)
@@ -2240,7 +2235,7 @@ private struct TransactionTagEditorSheet: View {
                     .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
 
                     if !typedTags.isEmpty {
-                        BalancedSectionLabel(text: "将应用")
+                        BalancedSectionLabel(text: String(localized: "将应用"))
                         ForEach(typedTags, id: \.self) { tag in
                             HStack {
                                 Text("#" + tag)
@@ -2256,7 +2251,7 @@ private struct TransactionTagEditorSheet: View {
                         }
                     }
 
-                    BalancedSectionLabel(text: "新建标签")
+                    BalancedSectionLabel(text: String(localized: "新建标签"))
                     TextField("#", text: $input)
                         .balancedMono(size: 15)
                         .textInputAutocapitalization(.never)
@@ -2307,7 +2302,7 @@ private struct TransactionTagEditorSheet: View {
             try await onApply(tags)
             dismiss()
         } catch {
-            errorMessage = "添加失败，已恢复原有显示。请检查后重试：\(error.localizedDescription)"
+            errorMessage = String(localized: "添加失败，已恢复原有显示。请检查后重试：\(error.localizedDescription)")
             failureFeedback &+= 1
         }
         applying = false
@@ -2381,13 +2376,13 @@ struct TransactionMoneyFlowView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("资金流向").balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.meta)
                 HStack(alignment: .top, spacing: 12) {
-                    column("来源", legs: flow.fromLegs)
+                    column(String(localized: "来源"), legs: flow.fromLegs)
                     Image(systemName: "arrow.right")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(BalancedPalette.edge)
                         .padding(.top, 38)
                         .accessibilityHidden(true)
-                    column("去向", legs: flow.toLegs)
+                    column(String(localized: "去向"), legs: flow.toLegs)
                 }
             }
             .accessibilityIdentifier("transaction-money-flow")
@@ -2397,12 +2392,12 @@ struct TransactionMoneyFlowView: View {
                         Section {
                             Text(leg.label).balancedFont(size: 15)
                             Text(leg.account).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta).textSelection(.enabled)
-                        } header: { TerminalSectionLabel(text: "账户") }
+                        } header: { TerminalSectionLabel(text: String(localized: "账户")) }
                         Section {
                             AmountLabel(minorUnits: leg.amount, currency: leg.currency,
                                 font: .custom(BalancedWeight.text.sansPostscriptName, size: 15))
                                 .monospacedDigit()
-                        } header: { TerminalSectionLabel(text: "本笔金额") }
+                        } header: { TerminalSectionLabel(text: String(localized: "本笔金额")) }
                     }
                     .navigationTitle("资金分录")
                     .terminalNativeChrome()
@@ -2594,7 +2589,7 @@ struct TransactionDetailView: View {
 
                     // Info Rows
                     VStack(spacing: 10) {
-                        receiptInfoRow(title: "交易时间", value: TransactionDateHeaderFormatter.format(transaction.date))
+                        receiptInfoRow(title: String(localized: "交易时间"), value: TransactionDateHeaderFormatter.format(transaction.date))
 
                         if let tags = transaction.tags, !tags.isEmpty {
                             HStack(alignment: .center) {
@@ -2622,7 +2617,7 @@ struct TransactionDetailView: View {
                 .padding(.bottom, 18)
 
                 // Double Entry Breakdown
-                BalancedSectionLabel(text: "复式分录", aside: nil)
+                BalancedSectionLabel(text: String(localized: "复式分录"), aside: nil)
                 HStack {
                     Spacer()
                     HStack(spacing: 4) {
@@ -2841,7 +2836,7 @@ struct TransactionDetailView: View {
                     transaction = transaction.projecting(entry: entry)
                     synchronizeTransaction(with: session.ledger)
                     confirmationFeedback &+= 1
-                    savedMessage = "已验证并保存，正在更新账本。"
+                    savedMessage = String(localized: "已验证并保存，正在更新账本。")
                 }
             )
             .ledgerPrivacyProtectedSheet()
@@ -2901,7 +2896,7 @@ struct TransactionDetailView: View {
         editorPresented = false
         deletionPresented = false
         revokeAction()
-        detailError = error.localizedDescription + " 请重新打开交易操作，核对最新内容后再试。"
+        detailError = error.localizedDescription + String(localized: " 请重新打开交易操作，核对最新内容后再试。")
     }
 
     private func hydrateDetail() async {
@@ -2963,12 +2958,12 @@ struct TransactionDetailView: View {
 
     private func kindBadgeText(_ presentation: TransactionPresentation) -> String {
         if presentation.isRefund {
-            return "退款"
+            return String(localized: "退款")
         }
         switch presentation.kind {
-        case .expense: return "支出"
-        case .income: return "收入"
-        case .transfer: return "转账"
+        case .expense: return String(localized: "支出")
+        case .income: return String(localized: "收入")
+        case .transfer: return String(localized: "转账")
         }
     }
 
@@ -3020,7 +3015,7 @@ private struct TransactionDeleteSheet: View {
                 Section {
                     TransactionRow(transaction: transaction)
                 } header: {
-                    TerminalSectionLabel(text: "确认删除这笔交易").listRowBackground(BalancedPalette.page)
+                    TerminalSectionLabel(text: String(localized: "确认删除这笔交易")).listRowBackground(BalancedPalette.page)
                 } footer: {
                     Text("确认后从流水和统计中移除，原交易会作为注释保留在账本文件中。")
                         .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
@@ -3030,7 +3025,7 @@ private struct TransactionDeleteSheet: View {
                     TextField("例如：重复导入", text: $reason, axis: .vertical)
                         .balancedFont(size: 15)
                         .lineLimit(2...4)
-                } header: { TerminalSectionLabel(text: "删除原因（可选）").listRowBackground(BalancedPalette.page) }
+                } header: { TerminalSectionLabel(text: String(localized: "删除原因（可选）")).listRowBackground(BalancedPalette.page) }
                 if let errorMessage {
                     Section { StatusBanner(message: errorMessage) { self.errorMessage = nil } }
                 }
@@ -3138,6 +3133,14 @@ enum CookieEntryKind: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var title: String {
+        switch self {
+        case .expense: String(localized: "支出")
+        case .income: String(localized: "收入")
+        case .transfer: String(localized: "转账")
+        }
+    }
+
     var themeColor: Color {
         switch self {
         case .expense: LedgerPalette.expense
@@ -3155,23 +3158,23 @@ struct CookieCategoryItem: Identifiable, Equatable {
     let defaultAccountPrefix: String
 
     static let expenseCategories: [CookieCategoryItem] = [
-        CookieCategoryItem(id: "food", name: "餐饮", icon: "fork.knife", color: Color(red: 0.96, green: 0.55, blue: 0.18), defaultAccountPrefix: "Expenses:Food"),
-        CookieCategoryItem(id: "transport", name: "交通", icon: "car.fill", color: Color(red: 0.16, green: 0.54, blue: 0.95), defaultAccountPrefix: "Expenses:Transport"),
-        CookieCategoryItem(id: "shopping", name: "购物", icon: "bag.fill", color: Color(red: 0.92, green: 0.32, blue: 0.55), defaultAccountPrefix: "Expenses:Shopping"),
-        CookieCategoryItem(id: "daily", name: "居家日常", icon: "house.fill", color: Color(red: 0.12, green: 0.66, blue: 0.72), defaultAccountPrefix: "Expenses:Housing"),
-        CookieCategoryItem(id: "digital", name: "数码电子", icon: "antenna.radiowaves.left.and.right", color: Color(red: 0.35, green: 0.45, blue: 0.88), defaultAccountPrefix: "Expenses:Digital"),
-        CookieCategoryItem(id: "entertainment", name: "休闲娱乐", icon: "popcorn.fill", color: Color(red: 0.65, green: 0.36, blue: 0.88), defaultAccountPrefix: "Expenses:Entertainment"),
-        CookieCategoryItem(id: "health", name: "医疗健康", icon: "heart.fill", color: Color(red: 0.92, green: 0.28, blue: 0.28), defaultAccountPrefix: "Expenses:Health"),
-        CookieCategoryItem(id: "education", name: "学习提升", icon: "book.fill", color: Color(red: 0.72, green: 0.48, blue: 0.28), defaultAccountPrefix: "Expenses:Education"),
-        CookieCategoryItem(id: "other", name: "其它支出", icon: "cart.fill", color: Color(red: 0.95, green: 0.45, blue: 0.22), defaultAccountPrefix: "Expenses:Other")
+        CookieCategoryItem(id: "food", name: String(localized: "餐饮"), icon: "fork.knife", color: Color(red: 0.96, green: 0.55, blue: 0.18), defaultAccountPrefix: "Expenses:Food"),
+        CookieCategoryItem(id: "transport", name: String(localized: "交通"), icon: "car.fill", color: Color(red: 0.16, green: 0.54, blue: 0.95), defaultAccountPrefix: "Expenses:Transport"),
+        CookieCategoryItem(id: "shopping", name: String(localized: "购物"), icon: "bag.fill", color: Color(red: 0.92, green: 0.32, blue: 0.55), defaultAccountPrefix: "Expenses:Shopping"),
+        CookieCategoryItem(id: "daily", name: String(localized: "居家日常"), icon: "house.fill", color: Color(red: 0.12, green: 0.66, blue: 0.72), defaultAccountPrefix: "Expenses:Housing"),
+        CookieCategoryItem(id: "digital", name: String(localized: "数码电子"), icon: "antenna.radiowaves.left.and.right", color: Color(red: 0.35, green: 0.45, blue: 0.88), defaultAccountPrefix: "Expenses:Digital"),
+        CookieCategoryItem(id: "entertainment", name: String(localized: "休闲娱乐"), icon: "popcorn.fill", color: Color(red: 0.65, green: 0.36, blue: 0.88), defaultAccountPrefix: "Expenses:Entertainment"),
+        CookieCategoryItem(id: "health", name: String(localized: "医疗健康"), icon: "heart.fill", color: Color(red: 0.92, green: 0.28, blue: 0.28), defaultAccountPrefix: "Expenses:Health"),
+        CookieCategoryItem(id: "education", name: String(localized: "学习提升"), icon: "book.fill", color: Color(red: 0.72, green: 0.48, blue: 0.28), defaultAccountPrefix: "Expenses:Education"),
+        CookieCategoryItem(id: "other", name: String(localized: "其它支出"), icon: "cart.fill", color: Color(red: 0.95, green: 0.45, blue: 0.22), defaultAccountPrefix: "Expenses:Other")
     ]
 
     static let incomeCategories: [CookieCategoryItem] = [
-        CookieCategoryItem(id: "salary", name: "工资薪水", icon: "banknote.fill", color: Color(red: 0.12, green: 0.68, blue: 0.36), defaultAccountPrefix: "Income:Salary"),
-        CookieCategoryItem(id: "investment", name: "理财收益", icon: "chart.line.uptrend.xyaxis", color: Color(red: 0.08, green: 0.68, blue: 0.55), defaultAccountPrefix: "Income:Investment"),
-        CookieCategoryItem(id: "bonus", name: "奖金福利", icon: "gift.fill", color: Color(red: 0.92, green: 0.28, blue: 0.28), defaultAccountPrefix: "Income:Bonus"),
-        CookieCategoryItem(id: "reimbursement", name: "报销返还", icon: "arrow.uturn.left.circle.fill", color: Color(red: 0.16, green: 0.54, blue: 0.95), defaultAccountPrefix: "Income:Reimbursement"),
-        CookieCategoryItem(id: "other_income", name: "其它收入", icon: "arrow.down.circle.fill", color: Color(red: 0.12, green: 0.68, blue: 0.36), defaultAccountPrefix: "Income:Other")
+        CookieCategoryItem(id: "salary", name: String(localized: "工资薪水"), icon: "banknote.fill", color: Color(red: 0.12, green: 0.68, blue: 0.36), defaultAccountPrefix: "Income:Salary"),
+        CookieCategoryItem(id: "investment", name: String(localized: "理财收益"), icon: "chart.line.uptrend.xyaxis", color: Color(red: 0.08, green: 0.68, blue: 0.55), defaultAccountPrefix: "Income:Investment"),
+        CookieCategoryItem(id: "bonus", name: String(localized: "奖金福利"), icon: "gift.fill", color: Color(red: 0.92, green: 0.28, blue: 0.28), defaultAccountPrefix: "Income:Bonus"),
+        CookieCategoryItem(id: "reimbursement", name: String(localized: "报销返还"), icon: "arrow.uturn.left.circle.fill", color: Color(red: 0.16, green: 0.54, blue: 0.95), defaultAccountPrefix: "Income:Reimbursement"),
+        CookieCategoryItem(id: "other_income", name: String(localized: "其它收入"), icon: "arrow.down.circle.fill", color: Color(red: 0.12, green: 0.68, blue: 0.36), defaultAccountPrefix: "Income:Other")
     ]
 }
 
@@ -3492,7 +3495,7 @@ struct CookieFastTransactionEditorBody: View {
             if let item = CookieCategoryItem.expenseCategories.first(where: { $0.id == selectedCategoryID }) {
                 return item.name
             }
-            return "支出分类"
+            return String(localized: "支出分类")
         } else if kind == .income {
             if let custom = customIncomeAccount, !custom.isEmpty {
                 return accounts.first(where: { $0.account == custom })?.displayLabel ?? custom.components(separatedBy: ":").last ?? custom
@@ -3500,9 +3503,9 @@ struct CookieFastTransactionEditorBody: View {
             if let item = CookieCategoryItem.incomeCategories.first(where: { $0.id == selectedCategoryID }) {
                 return item.name
             }
-            return "收入分类"
+            return String(localized: "收入分类")
         }
-        return "分类"
+        return String(localized: "分类")
     }
 
     private enum AccountPickerPurpose: Identifiable, Equatable {
@@ -3640,7 +3643,7 @@ struct CookieFastTransactionEditorBody: View {
                 if focusedField == nil {
                     CookieKeypadView(
                         calculator: $calculator,
-                        actionTitle: calculator.isCalculationPending ? "=" : (transaction == nil ? "保存" : "完成"),
+                        actionTitle: calculator.isCalculationPending ? "=" : (transaction == nil ? String(localized: "保存") : String(localized: "完成")),
                         actionColor: kind.themeColor,
                         saving: saving,
                         onCommit: {
@@ -3768,7 +3771,7 @@ struct CookieFastTransactionEditorBody: View {
                                 }
                             }
                         } label: {
-                            BalancedMark(title: entryKind.rawValue, selected: kind == entryKind)
+                            BalancedMark(title: entryKind.title, selected: kind == entryKind)
                                 .frame(maxWidth: .infinity, minHeight: 36)
                         }
                         .buttonStyle(.plain)
@@ -3876,7 +3879,7 @@ struct CookieFastTransactionEditorBody: View {
                     Spacer()
                     let sum = splitBalanceSum
                     if abs(sum) < 0.001 {
-                        BalancedTag(text: "已配平", kind: .ok)
+                        BalancedTag(text: String(localized: "已配平"), kind: .ok)
                     } else {
                         Text("差额 \(formattedDecimal(-sum))")
                             .balancedFont(size: 12.5)
@@ -3885,7 +3888,7 @@ struct CookieFastTransactionEditorBody: View {
                         Button {
                             autoBalanceSplit()
                         } label: {
-                            linkLabel("配平", color: BalancedPalette.ink)
+                            linkLabel(String(localized: "配平"), color: BalancedPalette.ink)
                         }
                         .buttonStyle(.plain)
                     }
@@ -3903,7 +3906,7 @@ struct CookieFastTransactionEditorBody: View {
                             activeAccountPickerPurpose = .splitPosting(index)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(posting.account.isEmpty ? "选择账户" : accountDisplayName(posting.account))
+                                Text(posting.account.isEmpty ? String(localized: "选择账户") : accountDisplayName(posting.account))
                                     .balancedFont(size: 15, weight: .text)
                                     .foregroundStyle(posting.account.isEmpty ? BalancedPalette.expense : BalancedPalette.ink)
                                     .lineLimit(1)
@@ -3963,7 +3966,7 @@ struct CookieFastTransactionEditorBody: View {
                 Button {
                     addSplitPosting()
                 } label: {
-                    linkLabel("添加分录", color: BalancedPalette.ink)
+                    linkLabel(String(localized: "添加分录"), color: BalancedPalette.ink)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                 }
@@ -4100,7 +4103,7 @@ struct CookieFastTransactionEditorBody: View {
                 focusedField = nil
                 activeAccountPickerPurpose = .customCategory
             } label: {
-                BalancedMark(title: customName ?? "更多…", selected: customName != nil, size: 14)
+                BalancedMark(title: customName ?? String(localized: "更多…"), selected: customName != nil, size: 14)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .bottom)
@@ -4189,26 +4192,26 @@ struct CookieFastTransactionEditorBody: View {
     private var entryFields: some View {
         VStack(spacing: 0) {
             if kind == .transfer {
-                pickerRow("转出", value: accountDisplayName(transferSourceAccount),
-                          identifier: "CookieFastTransferSourceButton", accessibility: "选择转出账户") {
+                pickerRow(String(localized: "转出"), value: accountDisplayName(transferSourceAccount),
+                          identifier: "CookieFastTransferSourceButton", accessibility: String(localized: "选择转出账户")) {
                     activeAccountPickerPurpose = .transferSource
                 }
-                pickerRow("转入", value: accountDisplayName(transferTargetAccount),
-                          identifier: "CookieFastTransferTargetButton", accessibility: "选择转入账户") {
+                pickerRow(String(localized: "转入"), value: accountDisplayName(transferTargetAccount),
+                          identifier: "CookieFastTransferTargetButton", accessibility: String(localized: "选择转入账户")) {
                     activeAccountPickerPurpose = .transferTarget
                 }
             } else {
-                pickerRow(kind == .expense ? "付款账户" : "收款账户", value: accountDisplayName(assetAccount),
+                pickerRow(kind == .expense ? String(localized: "付款账户") : String(localized: "收款账户"), value: accountDisplayName(assetAccount),
                           identifier: "CookieFastAccountButton",
-                          accessibility: kind == .expense ? "选择付款账户" : "选择收款账户") {
+                          accessibility: kind == .expense ? String(localized: "选择付款账户") : String(localized: "选择收款账户")) {
                     activeAccountPickerPurpose = .funding
                 }
             }
-            pickerRow("日期", value: dateChipLabel, identifier: "CookieFastDateButton", accessibility: "选择日期") {
+            pickerRow(String(localized: "日期"), value: dateChipLabel, identifier: "CookieFastDateButton", accessibility: String(localized: "选择日期")) {
                 showDatePickerSheet = true
             }
-            textRow(kind == .income ? "付款方" : "商户", text: $payee, field: .payee, identifier: "CookieFastPayeeField")
-            textRow("备注", text: $narration, field: .narration, identifier: "CookieFastNarrationField")
+            textRow(kind == .income ? String(localized: "付款方") : String(localized: "商户"), text: $payee, field: .payee, identifier: "CookieFastPayeeField")
+            textRow(String(localized: "备注"), text: $narration, field: .narration, identifier: "CookieFastNarrationField")
         }
     }
 
@@ -4228,7 +4231,7 @@ struct CookieFastTransactionEditorBody: View {
                     LedgerFeedback.light()
                     naturalLanguagePresented = true
                 } label: {
-                    linkLabel("用一句话记账")
+                    linkLabel(String(localized: "用一句话记账"))
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                 }
@@ -4242,7 +4245,7 @@ struct CookieFastTransactionEditorBody: View {
                     focusedField = nil
                     withAnimation(.easeInOut(duration: 0.2)) { toggleSplitMode() }
                 } label: {
-                    linkLabel("拆分成多条分录")
+                    linkLabel(String(localized: "拆分成多条分录"))
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                 }
@@ -4289,11 +4292,11 @@ struct CookieFastTransactionEditorBody: View {
 
         let title: String = {
             switch purpose {
-            case .funding: return kind == .expense ? "选择付款账户" : "选择收款账户"
-            case .transferSource: return "选择转出账户"
-            case .transferTarget: return "选择转入账户"
-            case .customCategory: return kind == .expense ? "选择支出分类" : "选择收入分类"
-            case .splitPosting(let idx): return "选择第 \(idx + 1) 条分录账户"
+            case .funding: return kind == .expense ? String(localized: "选择付款账户") : String(localized: "选择收款账户")
+            case .transferSource: return String(localized: "选择转出账户")
+            case .transferTarget: return String(localized: "选择转入账户")
+            case .customCategory: return kind == .expense ? String(localized: "选择支出分类") : String(localized: "选择收入分类")
+            case .splitPosting(let idx): return String(localized: "选择第 \(idx + 1) 条分录账户")
             }
         }()
 
@@ -4351,9 +4354,9 @@ struct CookieFastTransactionEditorBody: View {
         NavigationStack {
             VStack(spacing: 16) {
                 HStack(spacing: 12) {
-                    quickDateButton(title: "今天", targetDate: Date())
-                    quickDateButton(title: "昨天", targetDate: Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date())
-                    quickDateButton(title: "前天", targetDate: Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date())
+                    quickDateButton(title: String(localized: "今天"), targetDate: Date())
+                    quickDateButton(title: String(localized: "昨天"), targetDate: Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date())
+                    quickDateButton(title: String(localized: "前天"), targetDate: Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date())
                 }
                 .padding(.top, 16)
 
@@ -4406,17 +4409,13 @@ struct CookieFastTransactionEditorBody: View {
 
     private var dateChipLabel: String {
         let cal = Calendar.current
-        if cal.isDateInToday(date) { return "今天" }
-        if cal.isDateInYesterday(date) { return "昨天" }
-        let comp = cal.dateComponents([.month, .day], from: date)
-        if let m = comp.month, let d = comp.day {
-            return "\(m)月\(d)日"
-        }
-        return Self.formatDate(date)
+        if cal.isDateInToday(date) { return String(localized: "今天") }
+        if cal.isDateInYesterday(date) { return String(localized: "昨天") }
+        return LedgerDateLabel.monthDay(date)
     }
 
     private func accountDisplayName(_ path: String) -> String {
-        guard !path.isEmpty else { return "选择账户" }
+        guard !path.isEmpty else { return String(localized: "选择账户") }
         return accounts.first(where: { $0.account == path })?.displayLabel ?? path.components(separatedBy: ":").last ?? path
     }
 
@@ -4424,7 +4423,7 @@ struct CookieFastTransactionEditorBody: View {
         date = initialDate
         if CookieCategoryItem.expenseCategories.contains(where: { $0.name == initialPayee })
             || CookieCategoryItem.incomeCategories.contains(where: { $0.name == initialPayee })
-            || initialPayee == "记账" || initialPayee == "拆分账单" || initialPayee == "转账" {
+            || initialPayee == String(localized: "记账") || initialPayee == String(localized: "拆分账单") || initialPayee == String(localized: "转账") {
             payee = ""
             if initialNarration.isEmpty {
                 narration = initialPayee
@@ -4589,12 +4588,12 @@ struct CookieFastTransactionEditorBody: View {
         // If neither payee nor narration was entered, provide a default narration based on category/type
         if cleanPayee.isEmpty && cleanNarration.isEmpty {
             if isSplitMode {
-                cleanNarration = "拆分账单"
+                cleanNarration = String(localized: "拆分账单")
             } else if kind == .transfer {
-                cleanNarration = "转账"
+                cleanNarration = String(localized: "转账")
             } else {
                 let item = currentCategories.first(where: { $0.id == selectedCategoryID })
-                cleanNarration = item?.name ?? (kind == .expense ? "支出" : "收入")
+                cleanNarration = item?.name ?? (kind == .expense ? String(localized: "支出") : String(localized: "收入"))
             }
         }
 
@@ -4606,14 +4605,14 @@ struct CookieFastTransactionEditorBody: View {
             updateActivePostingAmount()
             for (idx, p) in splitPostings.enumerated() {
                 if p.account.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    errorMessage = "第 \(idx + 1) 条分录请选择账户"
+                    errorMessage = String(localized: "第 \(idx + 1) 条分录请选择账户")
                     failureFeedback &+= 1
                     return
                 }
             }
             let sum = splitBalanceSum
             if abs(sum) >= 0.01 {
-                errorMessage = "分录尚未平衡，借贷差额为 \(formattedDecimal(sum))，请点击「配平」"
+                errorMessage = String(localized: "分录尚未平衡，借贷差额为 \(formattedDecimal(sum))，请点击「配平」")
                 failureFeedback &+= 1
                 return
             }
@@ -4626,7 +4625,7 @@ struct CookieFastTransactionEditorBody: View {
             }
         } else {
             guard let amountVal = calculator.evaluatedResult, amountVal > 0 else {
-                errorMessage = "请输入有效金额"
+                errorMessage = String(localized: "请输入有效金额")
                 failureFeedback &+= 1
                 return
             }
@@ -4635,7 +4634,7 @@ struct CookieFastTransactionEditorBody: View {
             let negativeAmountText = ExactBookkeepingAmount.text(-amountVal)
 
             if kind == .transfer && transferSourceAccount == transferTargetAccount {
-                errorMessage = "转出和转入账户不能相同"
+                errorMessage = String(localized: "转出和转入账户不能相同")
                 failureFeedback &+= 1
                 return
             }
@@ -4719,13 +4718,13 @@ private enum TransactionEditorError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .payeeRequired: "请输入交易说明或交易对方"
-        case .metadataInvalid: "元数据需要使用 JSON 对象格式"
-        case let .metadataKeyInvalid(key): "元数据键 \(key) 格式无效"
-        case .postingsRequired: "交易至少需要两条分录"
-        case let .accountRequired(index): "第 \(index + 1) 条分录缺少账户"
-        case let .amountInvalid(index): "第 \(index + 1) 条分录金额格式无效"
-        case let .currencyInvalid(index): "第 \(index + 1) 条分录币种格式无效"
+        case .payeeRequired: String(localized: "请输入交易说明或交易对方")
+        case .metadataInvalid: String(localized: "元数据需要使用 JSON 对象格式")
+        case let .metadataKeyInvalid(key): String(localized: "元数据键 \(key) 格式无效")
+        case .postingsRequired: String(localized: "交易至少需要两条分录")
+        case let .accountRequired(index): String(localized: "第 \(index + 1) 条分录缺少账户")
+        case let .amountInvalid(index): String(localized: "第 \(index + 1) 条分录金额格式无效")
+        case let .currencyInvalid(index): String(localized: "第 \(index + 1) 条分录币种格式无效")
         }
     }
 }
@@ -4964,13 +4963,13 @@ struct TransactionEditorView: View {
 
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 8) {
-                            quickDateChip(title: "今天", targetDate: Date())
+                            quickDateChip(title: String(localized: "今天"), targetDate: Date())
                             quickDateChip(
-                                title: "昨天",
+                                title: String(localized: "昨天"),
                                 targetDate: Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
                             )
                             quickDateChip(
-                                title: "前天",
+                                title: String(localized: "前天"),
                                 targetDate: Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date()
                             )
                         }
@@ -4994,7 +4993,7 @@ struct TransactionEditorView: View {
                     Section("分录 \(index + 1)") {
                         NavigationLink {
                             LedgerAccountPicker(
-                                title: "选择账户",
+                                title: String(localized: "选择账户"),
                                 accounts: accountChoices.map {
                                     LedgerAccountChoice(account: $0.account, label: $0.displayLabel, group: $0.group, active: $0.active)
                                 },
@@ -5104,7 +5103,7 @@ struct TransactionEditorView: View {
                         LabeledContent("交易对方", value: entry.payee)
                         LabeledContent("说明", value: entry.narration)
                         ForEach(Array(entry.postings.enumerated()), id: \.offset) { _, posting in
-                            LabeledContent(posting.account, value: posting.amount.isEmpty ? "自动配平" : "\(posting.amount) \(posting.currency)")
+                            LabeledContent(posting.account, value: posting.amount.isEmpty ? String(localized: "自动配平") : "\(posting.amount) \(posting.currency)")
                                 .font(.subheadline.monospaced())
                         }
                         if !entry.tags.isEmpty { Text(entry.tags.map { "#" + $0 }.joined(separator: " ")) }
@@ -5149,7 +5148,7 @@ struct TransactionEditorView: View {
             try await onSave(entry)
             dismiss()
         } catch {
-            errorMessage = "保存失败，账本保留原版本：\(error.localizedDescription)"
+            errorMessage = String(localized: "保存失败，账本保留原版本：\(error.localizedDescription)")
             failureFeedback &+= 1
         }
         saving = false

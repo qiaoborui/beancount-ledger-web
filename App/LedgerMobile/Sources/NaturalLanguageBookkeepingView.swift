@@ -56,11 +56,11 @@ struct NaturalLanguageBookkeepingView: View {
     // (docs/design/ios-balanced/README.md), so a per-example accent colour
     // would be the one thing the language reserves for in/out.
     private let examplePrompts: [ExamplePrompt] = [
-        .init(emoji: "🍱", title: "美团外卖", text: "中午在美团外卖点餐 35 元，微信零钱支付。"),
-        .init(emoji: "🚇", title: "地铁出行", text: "今早乘坐地铁 7 元，支付宝花呗扣款。"),
-        .init(emoji: "☕️", title: "咖啡饮品", text: "下午买了一杯星巴克 32 元，招行信用卡付款。"),
-        .init(emoji: "📚", title: "买书分账", text: "昨天用招行信用卡买书 128 元，其中 48 元替同事垫付。"),
-        .init(emoji: "💳", title: "信用卡还款", text: "从工行储蓄卡转账 3000 元还招商银行信用卡。")
+        .init(emoji: "🍱", title: String(localized: "美团外卖"), text: String(localized: "中午在美团外卖点餐 35 元，微信零钱支付。")),
+        .init(emoji: "🚇", title: String(localized: "地铁出行"), text: String(localized: "今早乘坐地铁 7 元，支付宝花呗扣款。")),
+        .init(emoji: "☕️", title: String(localized: "咖啡饮品"), text: String(localized: "下午买了一杯星巴克 32 元，招行信用卡付款。")),
+        .init(emoji: "📚", title: String(localized: "买书分账"), text: String(localized: "昨天用招行信用卡买书 128 元，其中 48 元替同事垫付。")),
+        .init(emoji: "💳", title: String(localized: "信用卡还款"), text: String(localized: "从工行储蓄卡转账 3000 元还招商银行信用卡。"))
     ]
 
     var body: some View {
@@ -257,7 +257,7 @@ struct NaturalLanguageBookkeepingView: View {
                         Image(systemName: "sparkle")
                             .font(.system(size: 11, weight: .regular))
                             .foregroundStyle(BalancedPalette.meta)
-                        Text(settings.configuration.model.isEmpty ? "语义解析设置" : settings.configuration.model)
+                        Text(settings.configuration.model.isEmpty ? String(localized: "语义解析设置") : settings.configuration.model)
                             .balancedMono(size: 12)
                             .foregroundStyle(BalancedPalette.meta)
                             .lineLimit(1)
@@ -321,7 +321,7 @@ struct NaturalLanguageBookkeepingView: View {
     /// sentence to borrow, so it reads as a row with a `.link`-style action.
     private var inspirationSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            BalancedSectionLabel(text: "快捷灵感示例")
+            BalancedSectionLabel(text: String(localized: "快捷灵感示例"))
 
             ForEach(examplePrompts) { prompt in
                 Button {
@@ -416,13 +416,13 @@ struct NaturalLanguageBookkeepingView: View {
                     let titleText: String = {
                         if hasPayee { return currentRecord.payee }
                         if !currentRecord.narration.isEmpty { return currentRecord.narration }
-                        return visual.categoryLabel.isEmpty ? "日常支出" : visual.categoryLabel
+                        return visual.categoryLabel.isEmpty ? String(localized: "日常支出") : visual.categoryLabel
                     }()
                     let subtitleText: String = {
                         if hasPayee {
-                            return currentRecord.narration.isEmpty ? (visual.categoryLabel.isEmpty ? "日常交易" : visual.categoryLabel) : currentRecord.narration
+                            return currentRecord.narration.isEmpty ? (visual.categoryLabel.isEmpty ? String(localized: "日常交易") : visual.categoryLabel) : currentRecord.narration
                         }
-                        return visual.categoryLabel.isEmpty ? "未分类" : visual.categoryLabel
+                        return visual.categoryLabel.isEmpty ? String(localized: "未分类") : visual.categoryLabel
                     }()
 
                     Text(titleText)
@@ -516,7 +516,7 @@ struct NaturalLanguageBookkeepingView: View {
     private func twoPostingWorkflowView(record: Binding<Record>, recordIndex: Int) -> some View {
         VStack(spacing: 0) {
             accountSelectionBlock(
-                title: "支出/收入分类",
+                title: String(localized: "支出/收入分类"),
                 record: record,
                 recordIndex: recordIndex,
                 postingIndex: 0,
@@ -537,7 +537,7 @@ struct NaturalLanguageBookkeepingView: View {
             .padding(.vertical, 6)
 
             accountSelectionBlock(
-                title: "扣款/收款账户",
+                title: String(localized: "扣款/收款账户"),
                 record: record,
                 recordIndex: recordIndex,
                 postingIndex: 1,
@@ -567,7 +567,7 @@ struct NaturalLanguageBookkeepingView: View {
                 openAccountPicker(
                     recordIndex: recordIndex,
                     postingIndex: postingIndex,
-                    title: "选择\(title)",
+                    title: String(localized: "选择\(title)"),
                     isFunding: isFunding
                 )
             } label: {
@@ -577,7 +577,7 @@ struct NaturalLanguageBookkeepingView: View {
                         .foregroundStyle(BalancedPalette.secondary)
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(currentAccount.isEmpty ? "未选择" : displayLabel)
+                        Text(currentAccount.isEmpty ? String(localized: "未选择") : displayLabel)
                             .balancedFont(size: 14, weight: .text)
                             .foregroundStyle(currentAccount.isEmpty ? BalancedPalette.expense : BalancedPalette.ink)
                             .lineLimit(1)
@@ -596,7 +596,7 @@ struct NaturalLanguageBookkeepingView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(title)，当前\(currentAccount.isEmpty ? "未选择" : displayLabel)")
+            .accessibilityLabel("\(title)，当前\(currentAccount.isEmpty ? String(localized: "未选择") : displayLabel)")
             .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
 
             // Candidate accounts: the shared `.mark` device, horizontally.
@@ -648,12 +648,12 @@ struct NaturalLanguageBookkeepingView: View {
                             openAccountPicker(
                                 recordIndex: recordIndex,
                                 postingIndex: postingIndex,
-                                title: "选择分录账户",
+                                title: String(localized: "选择分录账户"),
                                 isFunding: isNegative
                             )
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(posting.account.isEmpty ? "选择账户" : displayLabel)
+                                Text(posting.account.isEmpty ? String(localized: "选择账户") : displayLabel)
                                     .balancedFont(size: 14, weight: .text)
                                     .foregroundStyle(posting.account.isEmpty ? BalancedPalette.expense : BalancedPalette.ink)
                                     .lineLimit(1)
@@ -841,7 +841,7 @@ struct NaturalLanguageBookkeepingView: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 0) {
                 if records.indices.contains(editingRecordIndex) {
-                    BalancedSectionLabel(text: "商户与用途")
+                    BalancedSectionLabel(text: String(localized: "商户与用途"))
                     TextField("商户 / 交易对方（选填）", text: $records[editingRecordIndex].payee)
                         .balancedFont(size: 15)
                         .foregroundStyle(BalancedPalette.ink)
@@ -1062,7 +1062,7 @@ struct NaturalLanguageBookkeepingView: View {
                 records = finalRecords
 
                 if result.records.isEmpty {
-                    error = "请补充交易日期、金额、币种和用途，再重新解析。"
+                    error = String(localized: "请补充交易日期、金额、币种和用途，再重新解析。")
                 }
             } catch is CancellationError {
             } catch {
@@ -1078,7 +1078,7 @@ struct NaturalLanguageBookkeepingView: View {
         next.revision = UUID()
         next.questions = []
         guard next.records.allSatisfy({ $0.postings.allSatisfy { !$0.amount.isEmpty && !$0.account.isEmpty } }) else {
-            error = "请补充每条分录的账户和金额。"
+            error = String(localized: "请补充每条分录的账户和金额。")
             return
         }
         busy = true

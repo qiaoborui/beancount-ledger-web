@@ -20,33 +20,33 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
 
     var title: String {
         switch self {
-        case .overview: "财务概览"
-        case .assets: "资产分析"
-        case .incomeExpense: "收支分析"
-        case .investments: "投资"
-        case .currencies: "货币与汇率"
-        case .query: "查询"
-        case .imports: "导入"
-        case .transactions: "交易账本"
-        case .accounts: "账户"
-        case .settings: "设置"
-        case .search: "搜索"
+        case .overview: String(localized: "财务概览")
+        case .assets: String(localized: "资产分析")
+        case .incomeExpense: String(localized: "收支分析")
+        case .investments: String(localized: "投资")
+        case .currencies: String(localized: "货币与汇率")
+        case .query: String(localized: "查询")
+        case .imports: String(localized: "导入")
+        case .transactions: String(localized: "交易账本")
+        case .accounts: String(localized: "账户")
+        case .settings: String(localized: "设置")
+        case .search: String(localized: "搜索")
         }
     }
 
     var compactTitle: String {
         switch self {
-        case .overview: "概览"
-        case .assets: "资产分析"
-        case .incomeExpense: "收支"
-        case .investments: "投资"
-        case .currencies: "货币"
-        case .query: "查询"
-        case .imports: "导入"
-        case .transactions: "交易"
-        case .accounts: "账户"
-        case .settings: "更多"
-        case .search: "搜索"
+        case .overview: String(localized: "概览")
+        case .assets: String(localized: "资产分析")
+        case .incomeExpense: String(localized: "收支")
+        case .investments: String(localized: "投资")
+        case .currencies: String(localized: "货币")
+        case .query: String(localized: "查询")
+        case .imports: String(localized: "导入")
+        case .transactions: String(localized: "交易")
+        case .accounts: String(localized: "账户")
+        case .settings: String(localized: "更多")
+        case .search: String(localized: "搜索")
         }
     }
 
@@ -99,10 +99,10 @@ enum LedgerDateRangePreset: String, CaseIterable, Equatable, Sendable {
 
     var title: String {
         switch self {
-        case .month: "本月"
-        case .quarter: "本季度"
-        case .year: "本年"
-        case .custom: "自定义"
+        case .month: String(localized: "本月")
+        case .quarter: String(localized: "本季度")
+        case .year: String(localized: "本年")
+        case .custom: String(localized: "自定义")
         }
     }
 }
@@ -182,13 +182,13 @@ struct LedgerDateRange: Equatable, Sendable {
 
         switch preset {
         case .month:
-            return "\(year)年\(month)月"
+            return LedgerDateLabel.yearMonth(startDate)
         case .quarter:
-            return "\(year)年第\(((month - 1) / 3) + 1)季度"
+            return String(localized: "\(year)年第\(((month - 1) / 3) + 1)季度")
         case .year:
-            return "\(year)年"
+            return String(localized: "\(year)年")
         case .custom:
-            return "\(start) 至 \(end)"
+            return String(localized: "\(start) 至 \(end)")
         }
     }
 
@@ -199,23 +199,23 @@ struct LedgerDateRange: Equatable, Sendable {
         let month = components.month ?? 1
         let yearPrefix = year == Self.calendar.component(.year, from: now) ? "" : "\(year)/"
         switch preset {
-        case .month: return "\(yearPrefix)\(month)月"
+        case .month: return yearPrefix + LedgerDateLabel.month(number: month)
         case .quarter: return "\(yearPrefix)Q\(((month - 1) / 3) + 1)"
-        case .year: return "\(year)年"
+        case .year: return String(localized: "\(year)年")
         case .custom:
             if start == end {
                 return "\(yearPrefix)\(month)/\(Self.calendar.component(.day, from: startDate))"
             }
-            return "自定义"
+            return String(localized: "自定义")
         }
     }
 
     var metricScope: String {
         switch preset {
-        case .month: "月度"
-        case .quarter: "季度"
-        case .year: "年度"
-        case .custom: "范围"
+        case .month: String(localized: "月度")
+        case .quarter: String(localized: "季度")
+        case .year: String(localized: "年度")
+        case .custom: String(localized: "范围")
         }
     }
 
@@ -298,11 +298,11 @@ struct HealthStatus: Decodable, Equatable {
 
     func validateForMobileClient() throws {
         guard apiVersion == 1 else {
-            throw LedgerAPIError.incompatibleServer("服务器 API 版本不兼容（需要版本 1）")
+            throw LedgerAPIError.incompatibleServer(String(localized: "服务器 API 版本不兼容（需要版本 1）"))
         }
         let available = Set(capabilities)
         guard available.contains("cookie-auth"), available.contains("full-backend") else {
-            throw LedgerAPIError.incompatibleServer("服务器缺少 iOS 客户端所需的登录或账本能力")
+            throw LedgerAPIError.incompatibleServer(String(localized: "服务器缺少 iOS 客户端所需的登录或账本能力"))
         }
     }
 }
@@ -835,7 +835,7 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
         let titleText: String = {
             if !entry.payee.isEmpty { return entry.payee }
             if !entry.narration.isEmpty { return entry.narration }
-            return "日常记账"
+            return String(localized: "日常记账")
         }()
 
         let mainPosting = entry.postings.first(where: {
@@ -863,13 +863,13 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
         if isTransfer {
             let fromAccount = entry.postings.first(where: { $0.amount.hasPrefix("-") })?.account
             let toAccount = entry.postings.first(where: { !$0.amount.hasPrefix("-") })?.account
-            let fromLabel = fromAccount.map { accountLabels[$0] ?? ($0.components(separatedBy: ":").last ?? $0) } ?? "转出"
-            let toLabel = toAccount.map { accountLabels[$0] ?? ($0.components(separatedBy: ":").last ?? $0) } ?? "转入"
+            let fromLabel = fromAccount.map { accountLabels[$0] ?? ($0.components(separatedBy: ":").last ?? $0) } ?? String(localized: "转出")
+            let toLabel = toAccount.map { accountLabels[$0] ?? ($0.components(separatedBy: ":").last ?? $0) } ?? String(localized: "转入")
 
             return LedgerIslandNotice(
                 type: .transfer,
                 title: "\(fromLabel) ➔ \(toLabel)",
-                subtitle: "资金划转",
+                subtitle: String(localized: "资金划转"),
                 amountText: formattedAmount,
                 iconName: "arrow.left.arrow.right",
                 iconColorHex: 0x0055D4
@@ -878,7 +878,7 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
             return LedgerIslandNotice(
                 type: .income,
                 title: titleText,
-                subtitle: "收入入账",
+                subtitle: String(localized: "收入入账"),
                 amountText: "+\(formattedAmount)",
                 iconName: "banknote.fill",
                 iconColorHex: 0x107C41
@@ -887,7 +887,7 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
             return LedgerIslandNotice(
                 type: .expense,
                 title: titleText,
-                subtitle: "支出已记录",
+                subtitle: String(localized: "支出已记录"),
                 amountText: "-\(formattedAmount)",
                 iconName: "fork.knife",
                 iconColorHex: 0xF59E0B
@@ -896,12 +896,12 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
     }
 
     static func fromImport(count: Int, provider: String? = nil) -> LedgerIslandNotice {
-        let providerName = provider?.isEmpty == false ? provider! : "账单文件"
+        let providerName = provider?.isEmpty == false ? provider! : String(localized: "账单文件")
         return LedgerIslandNotice(
             type: .batchImport(count: count),
-            title: "\(providerName)导入",
-            subtitle: "已归档至账本",
-            amountText: "\(count) 笔已归档",
+            title: String(localized: "\(providerName)导入"),
+            subtitle: String(localized: "已归档至账本"),
+            amountText: String(localized: "\(count) 笔已归档"),
             iconName: "tray.and.arrow.down.fill",
             iconColorHex: 0x16A34A
         )
@@ -1125,9 +1125,9 @@ enum LedgerTagValidationError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .empty: "请输入至少一个标签"
-        case .tooMany: "标签总数最多 50 个"
-        case let .invalid(tag): "标签 #\(tag) 格式无效，仅支持字母、数字、下划线和连字符"
+        case .empty: String(localized: "请输入至少一个标签")
+        case .tooMany: String(localized: "标签总数最多 50 个")
+        case let .invalid(tag): String(localized: "标签 #\(tag) 格式无效，仅支持字母、数字、下划线和连字符")
         }
     }
 }
@@ -1615,7 +1615,7 @@ struct LedgerChartAxis: Equatable, Sendable {
                 year: parts[0],
                 month: parts[1],
                 day: 1,
-                shortLabel: "\(parts[1])月",
+                shortLabel: LedgerDateLabel.month(number: parts[1]),
                 explicitYear: true
             )
         case 2:
@@ -1633,7 +1633,7 @@ struct LedgerChartAxis: Equatable, Sendable {
                 year: inferredYear,
                 month: parts[0],
                 day: 1,
-                shortLabel: "\(parts[0])月",
+                shortLabel: LedgerDateLabel.month(number: parts[0]),
                 explicitYear: false
             )
         default:
@@ -1954,10 +1954,10 @@ enum TransactionKindFilter: String, CaseIterable, Equatable, Identifiable, Senda
 
     var title: String {
         switch self {
-        case .all: "全部"
-        case .expense: "支出"
-        case .income: "收入"
-        case .transfer: "转账"
+        case .all: String(localized: "全部")
+        case .expense: String(localized: "支出")
+        case .income: String(localized: "收入")
+        case .transfer: String(localized: "转账")
         }
     }
 }
@@ -2086,15 +2086,15 @@ struct TransactionCategoryPresentation: Equatable {
 
         switch key {
         case .multiple:
-            label = "多分类"
+            label = String(localized: "多分类")
         case .category(let account):
             label = displayName(account)
         case .transfer(let from, let to):
-            label = "\(from.map(displayName) ?? "多个账户") → \(to.map(displayName) ?? "多个账户")"
+            label = String(localized: "\(from.map(displayName) ?? String(localized: "多个账户")) → \(to.map(displayName) ?? String(localized: "多个账户"))")
         case .equity:
-            label = "权益调整"
+            label = String(localized: "权益调整")
         case .uncategorized:
-            label = "未分类"
+            label = String(localized: "未分类")
         }
     }
 
@@ -2196,7 +2196,7 @@ struct TransactionPresentation: Equatable {
 
     init(transaction: LedgerTransaction) {
         title = transaction.payee.isEmpty
-            ? (transaction.narration.isEmpty ? "未命名交易" : transaction.narration)
+            ? (transaction.narration.isEmpty ? String(localized: "未命名交易") : transaction.narration)
             : transaction.payee
 
         if !transaction.payee.isEmpty, !transaction.narration.isEmpty {
@@ -2309,9 +2309,9 @@ enum AccountBalanceCategory: String, CaseIterable, Equatable, Identifiable {
 
     var title: String {
         switch self {
-        case .all: "全部"
-        case .assets: "资产"
-        case .liabilities: "负债"
+        case .all: String(localized: "全部")
+        case .assets: String(localized: "资产")
+        case .liabilities: String(localized: "负债")
         }
     }
 
@@ -2400,16 +2400,16 @@ extension LedgerBootstrap {
 
     private static func groupTitle(_ group: String) -> String {
         switch group {
-        case "cash": return "现金与支付"
-        case "credit": return "信用账户"
-        case "liability": return "负债"
-        case "wealth": return "储蓄与资产"
-        case "receivable": return "应收"
-        case "asset": return "资产"
-        case "expense": return "支出账户"
-        case "income": return "收入账户"
-        case "equity": return "权益"
-        default: return "其他"
+        case "cash": return String(localized: "现金与支付")
+        case "credit": return String(localized: "信用账户")
+        case "liability": return String(localized: "负债")
+        case "wealth": return String(localized: "储蓄与资产")
+        case "receivable": return String(localized: "应收")
+        case "asset": return String(localized: "资产")
+        case "expense": return String(localized: "支出账户")
+        case "income": return String(localized: "收入账户")
+        case "equity": return String(localized: "权益")
+        default: return String(localized: "其他")
         }
     }
 
@@ -2433,7 +2433,7 @@ extension LedgerAccount {
 enum LedgerDateText {
     static func monthTitle(start: String) -> String {
         guard let date = parse(start) else { return start }
-        return date.formatted(.dateTime.year().month(.wide).locale(Locale(identifier: "zh_CN")))
+        return date.formatted(.dateTime.year().month(.wide).locale(LedgerLocale.current))
     }
 
     static func shortDate(_ raw: String) -> String {
@@ -2471,22 +2471,22 @@ enum PendingTransactionReason: Hashable, Identifiable, Sendable {
         switch self {
         case .uncategorized(let acc):
             let short = acc.replacingOccurrences(of: "Expenses:", with: "").replacingOccurrences(of: "Income:", with: "")
-            return "分类未明确 (\(short))"
+            return String(localized: "分类未明确 (\(short))")
         case .needsReviewFlag:
-            return "标记待核对 (!)"
+            return String(localized: "标记待核对 (!)")
         case .pendingTag(let tag):
-            return "带有 #\(tag) 标签"
+            return String(localized: "带有 #\(tag) 标签")
         case .missingPayee:
-            return "缺少商户信息"
+            return String(localized: "缺少商户信息")
         }
     }
 
     var badgeText: String {
         switch self {
-        case .uncategorized: return "未分类"
-        case .needsReviewFlag: return "待核对"
-        case .pendingTag: return "待确认"
-        case .missingPayee: return "缺商户"
+        case .uncategorized: return String(localized: "未分类")
+        case .needsReviewFlag: return String(localized: "待核对")
+        case .pendingTag: return String(localized: "待确认")
+        case .missingPayee: return String(localized: "缺商户")
         }
     }
 }

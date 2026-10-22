@@ -26,11 +26,11 @@ struct LocalLedgerStorageView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 0) {
-                    StorageKeyRow(label: "账本", value: session.localLedgerName)
-                    StorageKeyRow(label: "存储提供方", value: session.localGitConfiguration == nil ? "本机目录" : "Git 工作区")
-                    StorageKeyRow(label: "状态", value: statusTitle, color: statusColor)
-                    if let date = status?.lastSyncedAt { StorageKeyRow(label: "最近同步", value: date.formatted()) }
-                    if let commit = status?.baseCommit { StorageKeyRow(label: "同步版本", value: String(commit.prefix(12)), mono: true) }
+                    StorageKeyRow(label: String(localized: "账本"), value: session.localLedgerName)
+                    StorageKeyRow(label: String(localized: "存储提供方"), value: session.localGitConfiguration == nil ? String(localized: "本机目录") : String(localized: "Git 工作区"))
+                    StorageKeyRow(label: String(localized: "状态"), value: statusTitle, color: statusColor)
+                    if let date = status?.lastSyncedAt { StorageKeyRow(label: String(localized: "最近同步"), value: date.formatted()) }
+                    if let commit = status?.baseCommit { StorageKeyRow(label: String(localized: "同步版本"), value: String(commit.prefix(12)), mono: true) }
                 }
                 .balancedBand(lead: true)
                 .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 18, trailing: 20))
@@ -73,7 +73,7 @@ struct LocalLedgerStorageView: View {
                             .buttonStyle(.balanced(.quiet))
                             .listRowBackground(Color.clear).listRowSeparator(.hidden)
                     }
-                } header: { TerminalSectionLabel(text: "需要处理的文件").listRowBackground(BalancedPalette.page).listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
+                } header: { TerminalSectionLabel(text: String(localized: "需要处理的文件")).listRowBackground(BalancedPalette.page).listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
             }
             Section {
                 VStack(alignment: .leading, spacing: 2) {
@@ -128,7 +128,7 @@ struct LocalLedgerStorageView: View {
                     .disabled(repositoryURL.isEmpty || branch.isEmpty)
                     .accessibilityIdentifier("local-git-save")
                     .listRowBackground(Color.clear).listRowSeparator(.hidden)
-            } header: { TerminalSectionLabel(text: "Git 存储").listRowBackground(BalancedPalette.page)
+            } header: { TerminalSectionLabel(text: String(localized: "Git 存储")).listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
             footer: {
                 Text("填写 HTTPS 仓库地址。令牌仅存于此设备的钥匙串。保存后将按自动同步设置交换本地与远端变更，请确认仓库和分支。")
@@ -193,15 +193,15 @@ struct LocalLedgerStorageView: View {
     }
 
     private var statusTitle: String {
-        if busy || session.isStorageSyncBusy { return "正在处理" }
+        if busy || session.isStorageSyncBusy { return String(localized: "正在处理") }
         switch status?.phase {
-        case .localOnly: return "已保存到本机"
-        case .pending: return "本机可用 · 等待同步"
-        case .synchronizing: return "正在同步"
-        case .synced: return "已同步备份"
-        case .conflicted: return "需要处理冲突"
-        case .failed: return "同步失败 · 本机可用"
-        case nil: return "读取状态中"
+        case .localOnly: return String(localized: "已保存到本机")
+        case .pending: return String(localized: "本机可用 · 等待同步")
+        case .synchronizing: return String(localized: "正在同步")
+        case .synced: return String(localized: "已同步备份")
+        case .conflicted: return String(localized: "需要处理冲突")
+        case .failed: return String(localized: "同步失败 · 本机可用")
+        case nil: return String(localized: "读取状态中")
         }
     }
 
@@ -269,7 +269,7 @@ struct LocalLedgerStorageView: View {
 struct GitLedgerSetupView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dismiss) private var dismiss
-    @State private var name = "我的账本"
+    @State private var name = String(localized: "我的账本")
     @State private var repositoryURL = ""
     @State private var branch = "main"
     @State private var entrypoint = "main.bean"
@@ -285,7 +285,7 @@ struct GitLedgerSetupView: View {
                     TextField("入口文件", text: $entrypoint)
                         .balancedMono(size: 13.5)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                } header: { TerminalSectionLabel(text: "账本").listRowBackground(BalancedPalette.page).listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
+                } header: { TerminalSectionLabel(text: String(localized: "账本")).listRowBackground(BalancedPalette.page).listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
                 Section {
                     TextField("HTTPS 仓库地址", text: $repositoryURL)
                         .balancedMono(size: 13)
@@ -301,7 +301,7 @@ struct GitLedgerSetupView: View {
                     SecureField("访问令牌（私有仓库）", text: $token)
                         .balancedMono(size: 13)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                } header: { TerminalSectionLabel(text: "Git 仓库").listRowBackground(BalancedPalette.page).listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
+                } header: { TerminalSectionLabel(text: String(localized: "Git 仓库")).listRowBackground(BalancedPalette.page).listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
                 Section {
                     Text("下载工作区并在此设备上校验。之后所有账本功能都使用本地文件；本次添加只读取远端仓库。")
                         .balancedFont(size: 12.5)

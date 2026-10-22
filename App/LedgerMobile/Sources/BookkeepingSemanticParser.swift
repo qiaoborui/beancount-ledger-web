@@ -45,14 +45,14 @@ struct SemanticBookkeepingResponse: Codable, Sendable {
             guard record.postings.count <= 30, record.narration.count <= 2000, record.payee.count <= 200,
                   record.postings.allSatisfy({ $0.terms.count <= 20 }) else { throw BookkeepingError.invalidModelResponse }
             let postings = try record.postings.enumerated().map { postingIndex, posting in
-                if posting.terms.isEmpty { issues.append("第 \(index + 1) 笔第 \(postingIndex + 1) 条分录需要补充金额。") }
+                if posting.terms.isEmpty { issues.append(String(localized: "第 \(index + 1) 笔第 \(postingIndex + 1) 条分录需要补充金额。")) }
                 guard !posting.evidence.isEmpty, input.text.contains(posting.evidence),
                       posting.terms.allSatisfy({ values.contains($0.value) && posting.evidence.contains($0.value) }) else {
                     throw BookkeepingError.invalidModelResponse
                 }
                 let amount = posting.terms.isEmpty ? "" : try ExactBookkeepingAmount.sum(posting.terms.map { ($0.value, $0.sign) })
                 if !accountSet.contains(posting.account) {
-                    issues.append("第 \(index + 1) 笔第 \(postingIndex + 1) 条分录需要选择账户。")
+                    issues.append(String(localized: "第 \(index + 1) 笔第 \(postingIndex + 1) 条分录需要选择账户。"))
                 }
                 return LedgerTransactionEntryPosting(account: accountSet.contains(posting.account) ? posting.account : "",
                     amount: amount, currency: posting.currency)
@@ -121,7 +121,7 @@ struct CompatibleBookkeepingParser: BookkeepingSemanticParser {
         let (bytes, response) = try await session.bytes(for: request)
         defer { bytes.task.cancel() }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw BookkeepingError.reviewRequired("语义解析服务调用失败，请检查接口、模型、Key 和额度。")
+            throw BookkeepingError.reviewRequired(String(localized: "语义解析服务调用失败，请检查接口、模型、Key 和额度。"))
         }
         var data = Data()
         for try await byte in bytes {

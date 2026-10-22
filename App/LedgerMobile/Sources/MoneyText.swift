@@ -107,7 +107,7 @@ enum MoneyText {
         let absoluteValue = abs(value)
         let unit: (divisor: Double, suffix: String)?
 
-        if currencyCode == "CNY" {
+        if currencyCode == "CNY" && LedgerLocale.usesChineseNumberUnits {
             if absoluteValue >= 100_000_000 {
                 unit = (100_000_000, "亿")
             } else if absoluteValue >= 10_000 {
@@ -172,7 +172,7 @@ enum MoneyText {
             let formatter = NumberFormatter()
             formatter.numberStyle = .currency
             formatter.currencyCode = currency
-            formatter.locale = Locale(identifier: "zh_CN")
+            formatter.locale = LedgerLocale.current
             let symbol = formatter.currencySymbol ?? currency
             return symbol == currency ? "\(currency) " : symbol
         }
@@ -185,7 +185,7 @@ enum MoneyText {
             let formatter = NumberFormatter()
             formatter.numberStyle = .currency
             formatter.currencyCode = key.currencyCode
-            formatter.locale = Locale(identifier: "zh_CN")
+            formatter.locale = LedgerLocale.current
             formatter.usesGroupingSeparator = true
             if !key.showsCurrency { formatter.currencySymbol = "" }
             if key.showSign {

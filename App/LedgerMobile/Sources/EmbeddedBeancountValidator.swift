@@ -45,7 +45,7 @@ actor EmbeddedBeancountValidator {
     func canonicalModel(workspace: URL, entryFile: String = "main.bean") throws -> Data {
         let result = try load(workspace: workspace, entryFile: entryFile, includeCanonical: true)
         guard let canonical = result.canonical else {
-            throw ValidationError(message: "本地 Beancount 运行时缺少完整读取模型，请重新构建运行时")
+            throw ValidationError(message: String(localized: "本地 Beancount 运行时缺少完整读取模型，请重新构建运行时"))
         }
         return canonical
     }
@@ -67,14 +67,14 @@ actor EmbeddedBeancountValidator {
         let target = parent.appendingPathComponent(output.lastPathComponent)
         guard parent != root, !parent.path.hasPrefix(root.path + "/"),
               !FileManager.default.fileExists(atPath: target.path) else {
-            throw ValidationError(message: "模型导出必须使用账本外的独立临时文件")
+            throw ValidationError(message: String(localized: "模型导出必须使用账本外的独立临时文件"))
         }
         let pointer = root.path.withCString { root in
             entryFile.withCString { entry in
                 target.path.withCString { BRExportCanonical(root, entry, $0) }
             }
         }
-        guard let pointer else { throw ValidationError(message: "本地导出内存不足") }
+        guard let pointer else { throw ValidationError(message: String(localized: "本地导出内存不足")) }
         defer { BRFree(pointer) }
         struct Reply: Decodable {
             let errors: [Result.Diagnostic]
@@ -87,11 +87,11 @@ actor EmbeddedBeancountValidator {
         guard let descriptor = reply.stream, descriptor.version == 1,
               descriptor.bytes > 0, descriptor.bytes <= 256 * 1024 * 1024,
               descriptor.entries >= 0, descriptor.sha256.count == 64 else {
-            throw ValidationError(message: "本地模型导出描述无效")
+            throw ValidationError(message: String(localized: "本地模型导出描述无效"))
         }
         return descriptor
         #else
-        throw ValidationError(message: "此构建缺少本地 Beancount 校验运行时")
+        throw ValidationError(message: String(localized: "此构建缺少本地 Beancount 校验运行时"))
         #endif
     }
 
@@ -113,7 +113,7 @@ actor EmbeddedBeancountValidator {
             initialized = true
         }
         #else
-        throw ValidationError(message: "此构建缺少本地 Beancount 校验运行时")
+        throw ValidationError(message: String(localized: "此构建缺少本地 Beancount 校验运行时"))
         #endif
     }
 
@@ -125,13 +125,13 @@ actor EmbeddedBeancountValidator {
                 includeCanonical ? BRValidate(root, entry) : BRValidateOnly(root, entry)
             }
         }
-        guard let pointer else { throw ValidationError(message: "本地校验器内存不足") }
+        guard let pointer else { throw ValidationError(message: String(localized: "本地校验器内存不足")) }
         defer { BRFree(pointer) }
         let result = try Result(data: Data(String(cString: pointer).utf8), includeCanonical: includeCanonical)
         guard result.errors.isEmpty else { throw ValidationError(message: Self.message(for: result.errors)) }
         return result
         #else
-        throw ValidationError(message: "此构建缺少本地 Beancount 校验运行时")
+        throw ValidationError(message: String(localized: "此构建缺少本地 Beancount 校验运行时"))
         #endif
     }
 }

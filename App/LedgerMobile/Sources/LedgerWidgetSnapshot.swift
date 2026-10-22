@@ -94,7 +94,20 @@ struct LedgerWidgetExpenseInsights: Codable, Equatable, Sendable {
 enum LedgerWidgetPeriod: String, Codable, CaseIterable, Sendable {
     case week, month, year
     var title: String {
-        switch self { case .week: "本周消费"; case .month: "本月消费"; case .year: "本年消费" }
+        switch self {
+        case .week: String(localized: "本周消费")
+        case .month: String(localized: "本月消费")
+        case .year: String(localized: "本年消费")
+        }
+    }
+
+    /// Period name without "spending", for the circular Lock Screen widget.
+    var shortTitle: String {
+        switch self {
+        case .week: String(localized: "本周")
+        case .month: String(localized: "本月")
+        case .year: String(localized: "本年")
+        }
     }
 
     func expense(in snapshot: LedgerWidgetSnapshot) -> LedgerWidgetExpenseSnapshot? {
@@ -353,7 +366,7 @@ enum LedgerWidgetSnapshotStoreError: LocalizedError {
     case unavailable
 
     var errorDescription: String? {
-        "无法访问小组件共享空间"
+        String(localized: "无法访问小组件共享空间")
     }
 }
 

@@ -41,7 +41,7 @@ struct ExpenseLockScreenWidgetView: View {
             Text("\(entry.period.title) \(amount)").font(.system(size: 11, design: .monospaced))
         case .accessoryCircular:
             VStack(spacing: 3) {
-                Text(entry.period.title.replacingOccurrences(of: "消费", with: ""))
+                Text(entry.period.shortTitle)
                     .font(.system(size: 10))
                 Text(MoneyText.formatWidget(minorUnits: expense.amount, currency: expense.currency))
                     .font(.system(size: 16, weight: .semibold, design: .monospaced))

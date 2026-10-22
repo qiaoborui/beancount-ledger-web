@@ -106,7 +106,7 @@ struct AddCategoryView: View {
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                     }
-                } header: { TerminalSectionLabel(text: "上级科目").listRowBackground(BalancedPalette.page) }
+                } header: { TerminalSectionLabel(text: String(localized: "上级科目")).listRowBackground(BalancedPalette.page) }
 
                 // ── 3. 二级子分类选择 / 自定义 ──
                 Section {
@@ -174,7 +174,7 @@ struct AddCategoryView: View {
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
-                } header: { TerminalSectionLabel(text: "子分类").listRowBackground(BalancedPalette.page) }
+                } header: { TerminalSectionLabel(text: String(localized: "子分类")).listRowBackground(BalancedPalette.page) }
 
                 // ── 4. 将创建 ──
                 Section {
@@ -196,7 +196,7 @@ struct AddCategoryView: View {
                     }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
-                } header: { TerminalSectionLabel(text: "将创建").listRowBackground(BalancedPalette.page) }
+                } header: { TerminalSectionLabel(text: String(localized: "将创建")).listRowBackground(BalancedPalette.page) }
 
                 // ── 5. 高级设置 ──
                 Section {
@@ -217,7 +217,7 @@ struct AddCategoryView: View {
                                 Text("分类中文名 (alias):")
                                     .balancedFont(size: 12)
                                     .foregroundStyle(BalancedPalette.meta)
-                                Text(effectiveName.isEmpty ? "（空）" : effectiveName)
+                                Text(effectiveName.isEmpty ? String(localized: "（空）") : effectiveName)
                                     .balancedFont(size: 12, weight: .medium)
                                     .foregroundStyle(BalancedPalette.ink)
                             }

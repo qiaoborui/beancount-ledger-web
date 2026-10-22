@@ -191,13 +191,13 @@ enum LedgerImportFileValidationError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .empty:
-            "账单文件为空"
+            String(localized: "账单文件为空")
         case .notRegularFile:
-            "请选择单个账单文件"
+            String(localized: "请选择单个账单文件")
         case .tooLarge:
-            "账单文件超过 10MB"
+            String(localized: "账单文件超过 10MB")
         case let .unsupported(fileExtension):
-            "暂不支持 \(fileExtension.isEmpty ? "该文件类型" : fileExtension)"
+            String(localized: "暂不支持 \(fileExtension.isEmpty ? String(localized: "该文件类型") : fileExtension)")
         }
     }
 }

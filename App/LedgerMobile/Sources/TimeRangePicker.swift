@@ -194,7 +194,7 @@ private struct LedgerTimeRangeSheet: View {
 
                     Spacer()
 
-                    Text(verbatim: "\(selectedYear)年")
+                    Text(verbatim: String(localized: "\(selectedYear)年"))
                         .font(.system(.subheadline, design: .monospaced, weight: .bold))
                         .foregroundStyle(LedgerPalette.ink)
 
@@ -225,7 +225,7 @@ private struct LedgerTimeRangeSheet: View {
                             LedgerFeedback.selection()
                             session.setDraftRange(LedgerDateRange.month(year: selectedYear, month: month))
                         } label: {
-                            Text("\(month)月")
+                            Text(LedgerDateLabel.month(number: month))
                                 .balancedFont(size: 14, weight: isSelected ? .medium : .regular)
                                 .monospacedDigit()
                                 .foregroundStyle(isSelected ? BalancedPalette.ink : BalancedPalette.secondary)
@@ -267,7 +267,7 @@ private struct LedgerTimeRangeSheet: View {
 
                     Spacer()
 
-                    Text(verbatim: "\(selectedYear)年")
+                    Text(verbatim: String(localized: "\(selectedYear)年"))
                         .font(.system(.subheadline, design: .monospaced, weight: .bold))
                         .foregroundStyle(LedgerPalette.ink)
 
@@ -335,7 +335,7 @@ private struct LedgerTimeRangeSheet: View {
                         LedgerFeedback.selection()
                         session.setDraftRange(LedgerDateRange.year(year: y))
                     } label: {
-                        Text(verbatim: "\(y)年")
+                        Text(verbatim: String(localized: "\(y)年"))
                             .balancedFont(size: 14, weight: isSelected ? .medium : .regular)
                             .monospacedDigit()
                             .foregroundStyle(isSelected ? BalancedPalette.ink : BalancedPalette.secondary)
@@ -361,9 +361,9 @@ private struct LedgerTimeRangeSheet: View {
         Section {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    customPresetChip(title: "近 7 天", days: 7)
-                    customPresetChip(title: "近 30 天", days: 30)
-                    customPresetChip(title: "近 90 天", days: 90)
+                    customPresetChip(title: String(localized: "近 7 天"), days: 7)
+                    customPresetChip(title: String(localized: "近 30 天"), days: 30)
+                    customPresetChip(title: String(localized: "近 90 天"), days: 90)
                     Button {
                         applyYearToDate()
                     } label: {
@@ -415,10 +415,10 @@ private struct LedgerTimeRangeSheet: View {
 
     private func quarterMonthsLabel(_ quarter: Int) -> String {
         switch quarter {
-        case 1: "1月 – 3月"
-        case 2: "4月 – 6月"
-        case 3: "7月 – 9月"
-        case 4: "10月 – 12月"
+        case 1: String(localized: "1月 – 3月")
+        case 2: String(localized: "4月 – 6月")
+        case 3: String(localized: "7月 – 9月")
+        case 4: String(localized: "10月 – 12月")
         default: ""
         }
     }

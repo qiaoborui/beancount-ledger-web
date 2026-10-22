@@ -12,10 +12,10 @@ enum LocalLedgerError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .runtimeUnavailable: "此版本缺少设备端账本引擎，请安装完整的本地账本版本"
+        case .runtimeUnavailable: String(localized: "此版本缺少设备端账本引擎，请安装完整的本地账本版本")
         case let .invalidConfiguration(message), let .operationFailed(message): message
-        case .staleTransactionCursor: "账本版本已变更，请重新加载交易列表"
-        case .previewRequired: "请刷新账本并预览修改后再保存"
+        case .staleTransactionCursor: String(localized: "账本版本已变更，请重新加载交易列表")
+        case .previewRequired: String(localized: "请刷新账本并预览修改后再保存")
         }
     }
 }
@@ -79,7 +79,7 @@ struct LocalLedgerResponse: Sendable {
     /// JSON decoding. The native page encoder reserves envelope headroom.
     func decodeTransactionPage(maximumBytes: Int? = nil) throws -> LedgerTransactionPage {
         if let maximumBytes, maximumBytes < 0 || data.count > maximumBytes {
-            throw LocalLedgerError.operationFailed("交易分页响应超过容量限制")
+            throw LocalLedgerError.operationFailed(String(localized: "交易分页响应超过容量限制"))
         }
         do { return try decode(LedgerTransactionPage.self) }
         catch let error as LocalLedgerError {
@@ -98,7 +98,7 @@ struct LocalLedgerResponse: Sendable {
         // The native result reserves 4KiB for the bridge envelope. Bound the
         // entire response here so a valid near-limit enveloped result still fits.
         guard (0...(1 << 20)).contains(maximumBytes), data.count <= maximumBytes else {
-            throw LocalLedgerError.operationFailed("启动分页响应超过容量限制")
+            throw LocalLedgerError.operationFailed(String(localized: "启动分页响应超过容量限制"))
         }
         do { return try decode(LocalBootstrapPage.self) }
         catch let error as LocalLedgerError {
@@ -112,13 +112,13 @@ struct LocalLedgerResponse: Sendable {
     }
 
     func decodeReconciliationSnapshot() throws -> LocalReconciliationSnapshot {
-        guard data.count <= 1 << 20 else { throw LocalLedgerError.operationFailed("对账快照响应超过容量限制") }
+        guard data.count <= 1 << 20 else { throw LocalLedgerError.operationFailed(String(localized: "对账快照响应超过容量限制")) }
         return try decode(LocalReconciliationSnapshot.self)
     }
 
     func decodeAccountPage() throws -> LedgerAccountPage {
         guard data.count <= 1 << 20 else {
-            throw LocalLedgerError.operationFailed("账户分页响应超过容量限制")
+            throw LocalLedgerError.operationFailed(String(localized: "账户分页响应超过容量限制"))
         }
         do { return try decode(LedgerAccountPage.self) }
         catch let error as LocalLedgerError {
@@ -301,7 +301,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         let directory = runtime.appendingPathComponent("canonical-stream")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard directory.standardizedFileURL.path == directory.resolvingSymlinksInPath().standardizedFileURL.path else {
-            throw LocalLedgerError.invalidConfiguration("模型导出目录不允许符号链接")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "模型导出目录不允许符号链接"))
         }
         let output = directory.appendingPathComponent(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + ".records")
         defer { try? FileManager.default.removeItem(at: output) }
@@ -337,7 +337,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         let directory = runtime.appendingPathComponent("canonical-stream")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard directory.standardizedFileURL.path == directory.resolvingSymlinksInPath().standardizedFileURL.path else {
-            throw LocalLedgerError.invalidConfiguration("模型导出目录不允许符号链接")
+            throw LocalLedgerError.invalidConfiguration(String(localized: "模型导出目录不允许符号链接"))
         }
         // All exporter/ingestion work is serialized by the process-wide gate.
         // Only exact owned scratch names are removed; imports/receipts untouched.
@@ -348,7 +348,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
                   token.allSatisfy({ "0123456789abcdef".contains($0) }) else { continue }
             let attributes = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
             guard attributes.isRegularFile == true, attributes.isSymbolicLink != true else {
-                throw LocalLedgerError.invalidConfiguration("模型临时文件无效")
+                throw LocalLedgerError.invalidConfiguration(String(localized: "模型临时文件无效"))
             }
             try FileManager.default.removeItem(at: file)
         }
@@ -409,7 +409,7 @@ enum LocalLedgerJSON {
                 let failure = try? container.decode(Failure.self, forKey: .result)
                 throw LocalLedgerError.operationFailed(failure?.error
                     ?? diagnostics?.map(\.message).joined(separator: "\n")
-                    ?? "本地账本操作失败")
+                    ?? String(localized: "本地账本操作失败"))
             }
             // superDecoder supplies null for an absent result, matching the
             // legacy resultData path; Optional<T> can decode it, concrete T fails.
@@ -437,7 +437,7 @@ enum LocalLedgerJSON {
             let result = object?["result"] as? [String: Any]
             let message = result?["error"] as? String
                 ?? envelope.diagnostics?.map(\.message).joined(separator: "\n")
-                ?? "本地账本操作失败"
+                ?? String(localized: "本地账本操作失败")
             throw LocalLedgerError.operationFailed(message)
         }
         return try JSONSerialization.data(withJSONObject: object?["result"] ?? NSNull(), options: [.fragmentsAllowed])
