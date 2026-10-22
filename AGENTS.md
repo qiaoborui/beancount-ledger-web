@@ -65,8 +65,10 @@ through `LEDGER_ROOT`.
 - After completing feature work, make sure a pull request exists. After opening
   or updating a PR, check the PR status, mergeability, and conflict state; if
   conflicts are reported, resolve them before handing the work back.
-- Pull requests trigger the Ubuntu server preview deployment workflow when the
-  PR is not a draft.
+- Deployment is manual. `deploy-selfhost.yml`, `deploy-google-cloud.yml` and
+  `publish-images.yml` are `workflow_dispatch` only, so merging to `main`
+  builds and deploys nothing. Do not add `push` triggers back without an
+  explicit request.
 - Production Google Cloud deployment uses Workload Identity Federation,
   Artifact Registry, Cloud Run, Secret Manager, and Cloud Scheduler. Keep
   deployment configuration aligned with
@@ -74,8 +76,7 @@ through `LEDGER_ROOT`.
 - When several dependent features must land serially, use Graphite stacked PRs
   instead of mixing the work into one large branch.
 - Avoid starting the local dev server by default. Prefer static checks, tests,
-  builds, or PR preview deployment unless the user explicitly asks for local
-  runtime testing.
+  and builds unless the user explicitly asks for local runtime testing.
 - Preserve unrelated worktree changes. Never reset, checkout, or revert user
   changes unless explicitly requested.
 

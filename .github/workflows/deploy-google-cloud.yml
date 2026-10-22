@@ -1,15 +1,14 @@
 name: Deploy Google Cloud
 
+# Manual only. A merge to main no longer builds or deploys anything; run this
+# workflow by hand when a release is actually wanted.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   GCP_REGION: ${{ vars.GCP_REGION || 'asia-southeast1' }}
   ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY || 'beancount-ledger-web' }}
@@ -36,29 +35,20 @@ jobs:
       zip_worker: ${{ steps.changes.outputs.zip_worker }}
       deploy_any: ${{ steps.changes.outputs.deploy_any }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Verify deployment workflow guards
         run: bash .github/scripts/verify-deploy-google-cloud.sh
 
-      - name: Detect changed components
+      # A release is always a deliberate, complete rebuild: without a push
+      # event there is no "previous commit" to diff against, and a manual run
+      # should never leave one service on an older image than the others.
+      - name: Plan release components
         id: changes
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            files=""
-          elif [[ "${{ github.event.before }}" =~ ^0+$ ]]; then
-            files="$(git diff-tree --no-commit-id --name-only -r "${{ github.sha }}")"
-          else
-            files="$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")"
-          fi
-
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            plan_json="$(.github/scripts/plan-components.sh --all)"
-          else
-            plan_json="$(printf '%s\n' "$files" | .github/scripts/plan-components.sh)"
-          fi
+          plan_json="$(.github/scripts/plan-components.sh --all)"
 
           backend="$(jq -r '.backend' <<< "$plan_json")"
           agent="$(jq -r '.agent' <<< "$plan_json")"
@@ -123,7 +113,7 @@ jobs:
       image: ${{ steps.image.outputs.name }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -132,7 +122,7 @@ jobs:
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Resolve image name
         id: image
         run: |
@@ -140,7 +130,7 @@ jobs:
           echo "name=${base}/${CLOUD_RUN_SERVICE}" >> "$GITHUB_OUTPUT"
       - name: Build and push standalone image
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: docker/Dockerfile
@@ -168,7 +158,7 @@ jobs:
       image: ${{ steps.image.outputs.name }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -177,7 +167,7 @@ jobs:
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Resolve image name
         id: image
         run: |
@@ -185,7 +175,7 @@ jobs:
           echo "name=${base}/${AGENT_SERVICE}" >> "$GITHUB_OUTPUT"
       - name: Build and push Bub Agent image
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: docker/Dockerfile
@@ -213,7 +203,7 @@ jobs:
       image: ${{ steps.image.outputs.name }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -222,7 +212,7 @@ jobs:
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
       - name: Configure Artifact Registry authentication
         run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Resolve image name
         id: image
         run: |
@@ -230,7 +220,7 @@ jobs:
           echo "name=${base}/${ZIP_WORKER_SERVICE}" >> "$GITHUB_OUTPUT"
       - name: Build and push ZIP worker image
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: docker/Dockerfile
@@ -283,7 +273,7 @@ jobs:
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: ${{ steps.freshness.outputs.proceed == 'true' }}
 
       - name: Authenticate to Google Cloud
