@@ -9,20 +9,13 @@ import UIKit
 ///
 /// The layout maths in `LedgerIslandMotion.swift` and the portable tests both
 /// need these numbers, so they live beside the motion code instead of the
-/// SwiftUI island view. Text is measured with Core Text on every platform;
-/// `UIFont` only supplies the weight it resolves for the system font.
+/// SwiftUI island view. Text is measured with Core Text on every platform, so
+/// this file stays importable from the portable package; the SwiftUI `Font`
+/// constants live with the view that draws them.
 enum LedgerIslandFonts {
     static let titleSize: CGFloat = 16
     static let titleLineHeight: CGFloat = 20
     static let subtitleLineHeight: CGFloat = 16
-
-    #if canImport(UIKit)
-    static let title = Font.system(size: titleSize, weight: .semibold)
-    static let subtitle = Font.system(size: 12.5, weight: .medium)
-    static let amount = Font.system(size: 20, weight: .bold, design: .rounded).monospacedDigit()
-    static let unit = Font.system(size: 13, weight: .semibold)
-    static let compact = Font.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit()
-    #endif
 
     /// Weight of the system font at `size`, as UIKit would pick it.
     static func weight(_ weight: FontWeight) -> CTFont? {

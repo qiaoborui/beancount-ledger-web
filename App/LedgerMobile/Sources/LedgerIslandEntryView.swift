@@ -59,6 +59,14 @@ struct LedgerIslandStyle {
 }
 
 extension LedgerIslandFonts {
+    /// SwiftUI faces for the island. They stay in this file because `Font` needs
+    /// SwiftUI, which the portable package does not import.
+    static let title = Font.system(size: titleSize, weight: .semibold)
+    static let subtitle = Font.system(size: 12.5, weight: .medium)
+    static let amount = Font.system(size: 20, weight: .bold, design: .rounded).monospacedDigit()
+    static let unit = Font.system(size: 13, weight: .semibold)
+    static let compact = Font.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit()
+
     /// Width of the amount column: the count for imports, the compact amount
     /// otherwise. `笔` is the localized counter used in the compact island.
     static func amountWidth(_ notice: LedgerIslandNotice, style: LedgerIslandStyle) -> Double {

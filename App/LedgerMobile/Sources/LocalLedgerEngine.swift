@@ -260,7 +260,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
             handle = try await register(request)
             if !request.staging { remember(handle, request: request) }
         }
-        defer { if request.staging { release(handle, request: request) } }
+        defer { if request.staging { releaseHandle(handle, request: request) } }
         var small = request
         small.canonical = nil
         small.modelHandle = handle
