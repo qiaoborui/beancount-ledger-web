@@ -8,6 +8,7 @@ struct LedgerLibraryView: View {
     @State private var creating = false
     @State private var importing = false
     @State private var addingGit = false
+    @State private var restoringBackup = false
     @State private var editingLedger: LocalLedgerDescriptor?
     @State private var deletingLedger: LocalLedgerDescriptor?
     @State private var confirmingDelete = false
@@ -43,6 +44,8 @@ struct LedgerLibraryView: View {
                         .accessibilityIdentifier("local-ledger-import")
                     LibraryActionRow(title: "从 Git 添加账本", detail: "用仓库做版本交换，多设备共用") { addingGit = true }
                         .accessibilityIdentifier("local-ledger-add-git")
+                    LibraryActionRow(title: "从备份恢复", detail: "选择 iCloud 云盘或“文件”中的 .ledgerbackup") { restoringBackup = true }
+                        .accessibilityIdentifier("local-ledger-restore-backup")
                 } header: { TerminalSectionLabel(text: "快速操作").listRowBackground(BalancedPalette.page) }
                 .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 .listRowBackground(Color.clear)
@@ -173,6 +176,12 @@ struct LedgerLibraryView: View {
             .sheet(isPresented: $creating) { LocalLedgerSetupView(importing: false) }
             .sheet(isPresented: $importing) { LocalLedgerSetupView(importing: true) }
             .sheet(isPresented: $addingGit) { GitLedgerSetupView() }
+            .fileImporter(isPresented: $restoringBackup, allowedContentTypes: [.item]) { result in
+                switch result {
+                case let .success(url): Task { await session.restoreLedgerBackupAsNew(fileAt: url) }
+                case let .failure(error): session.errorMessage = error.localizedDescription
+                }
+            }
             .sheet(item: $editingLedger) { ledger in
                 EditLedgerSheet(ledger: ledger)
             }

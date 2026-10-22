@@ -997,6 +997,23 @@ actor LocalLedgerRepository: LedgerRepository {
         await storage.didCommit(revision)
         NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
     }
+    /// Replaces the whole tree with an extracted backup as one new revision.
+    /// The usual canonical validation gates publication, and a revision saved
+    /// after the user confirmed the restore makes it fail as stale.
+    func restoreBackup(from directory: URL, expectedRevisionID: UUID?) async throws {
+        let entry = descriptor.entrypoint
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent(entry).path) else {
+            throw LedgerBackupError.entrypointMissing(entry)
+        }
+        let validator = validator
+        let revision = try await workspace.importLedger(from: directory, expectedRevisionID: expectedRevisionID) { root in
+            try await validator(root, entry)
+        }
+        presentedRevisionID = revision.id
+        await storage.didCommit(revision)
+        NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
+    }
+
     func exportLedger() async throws -> URL {
         try await workspace.withCurrentSnapshot { _, root in
             let destination = FileManager.default.temporaryDirectory
