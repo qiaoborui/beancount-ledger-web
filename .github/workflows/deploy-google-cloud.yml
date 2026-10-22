@@ -30,6 +30,7 @@ jobs:
       backend: ${{ steps.changes.outputs.backend }}
       agent: ${{ steps.changes.outputs.agent }}
       web: ${{ steps.changes.outputs.web }}
+      ios: ${{ steps.changes.outputs.ios }}
       cloud_run: ${{ steps.changes.outputs.cloud_run }}
       agent_service: ${{ steps.changes.outputs.agent_service }}
       zip_worker: ${{ steps.changes.outputs.zip_worker }}
@@ -62,6 +63,7 @@ jobs:
           backend="$(jq -r '.backend' <<< "$plan_json")"
           agent="$(jq -r '.agent' <<< "$plan_json")"
           web="$(jq -r '.web' <<< "$plan_json")"
+          ios="$(jq -r '.ios' <<< "$plan_json")"
           cloud_run="$(jq -r '.cloud_run' <<< "$plan_json")"
           agent_service="$(jq -r '.agent_service' <<< "$plan_json")"
           zip_worker="$(jq -r '.zip_worker' <<< "$plan_json")"
@@ -70,6 +72,7 @@ jobs:
           echo "backend=${backend}" >> "$GITHUB_OUTPUT"
           echo "agent=${agent}" >> "$GITHUB_OUTPUT"
           echo "web=${web}" >> "$GITHUB_OUTPUT"
+          echo "ios=${ios}" >> "$GITHUB_OUTPUT"
           echo "cloud_run=${cloud_run}" >> "$GITHUB_OUTPUT"
           echo "agent_service=${agent_service}" >> "$GITHUB_OUTPUT"
           echo "zip_worker=${zip_worker}" >> "$GITHUB_OUTPUT"
@@ -86,6 +89,7 @@ jobs:
             echo "- Backend checks: \`${backend}\`"
             echo "- Agent checks: \`${agent}\`"
             echo "- Web checks: \`${web}\`"
+            echo "- iOS checks: \`${ios}\`"
             echo "- Cloud Run app: \`${cloud_run}\`"
             echo "- Bub Agent service: \`${agent_service}\`"
             echo "- ZIP worker: \`${zip_worker}\`"
@@ -100,6 +104,7 @@ jobs:
       backend: ${{ needs.plan.outputs.backend == 'true' }}
       agent: ${{ needs.plan.outputs.agent == 'true' }}
       web: ${{ needs.plan.outputs.web == 'true' }}
+      ios: ${{ needs.plan.outputs.ios == 'true' }}
 
   build-standalone:
     name: Build Cloud Run app
