@@ -62,18 +62,36 @@ The iOS app is the shipped product, so its version number must keep moving.
 Widget, Share) through the shared `MARKETING_VERSION` and
 `CURRENT_PROJECT_VERSION` settings.
 
-- `CURRENT_PROJECT_VERSION` (CFBundleVersion) is a monotonic build number. Bump
-  it in **every** change that alters shipped behavior, UI, or bundled resources.
-  Documentation-only or test-only changes do not need a bump.
-- Do not reuse or lower a build number: SideStore and AltStore compare it to
-  decide whether a renewal actually installed a new build.
-- `MARKETING_VERSION` (CFBundleShortVersionString) only moves for a user-facing
-  release of a notable milestone, in `MAJOR.MINOR.PATCH` form. A bug fix moves
-  PATCH; new capability moves MINOR. While the app is pre-1.0, a large batch of
-  new capability may move 0.x → 0.(x+1).
+**Every iOS development task must compute both numbers**, even when the answer
+is "unchanged". At the start of the task, read the current pair from
+`App/LedgerMobile/project.yml` and decide both values using the table below;
+when you report back or open a PR, state the decision explicitly, for example
+`版本 0.2.0 (38)，build +1，marketing 不变` or
+`版本 0.2.0 (37) 不变，本次只改文档`.
+
+| The change | `CURRENT_PROJECT_VERSION` | `MARKETING_VERSION` |
+| --- | --- | --- |
+| Changes shipped behavior, UI, bundled resources, or the app's runtime | +1, always | unchanged unless the rule below applies |
+| Fixes a user-visible defect in an already released capability | +1 | +PATCH (`0.2.0` → `0.2.1`) |
+| Adds a user-facing capability | +1 | +MINOR (`0.2.1` → `0.3.0`, patch resets to 0) |
+| Shrinks or removes shipped behavior | +1 | +MINOR unless removing it is itself a fix |
+| Only documentation, agent instructions, tests, CI config, or screenshots | unchanged | unchanged |
+
+Rules that hold in every case:
+
+- The build number is monotonic per shipped change. Do not reuse or lower it:
+  SideStore and AltStore compare it to decide whether a renewal actually
+  installed a new build, and two different builds must never share a number.
+- One PR that ships several capabilities still moves `MARKETING_VERSION` once.
+  A PR that mixes a release-worthy capability with unrelated fixes takes the
+  single highest bump.
+- Pre-1.0, MINOR is the release number, so `0.x.0` marks a capability release.
+  Reserve `1.0.0` for the first publicly distributed build.
+- Do not let the decision drift from reality. If a merge brings in shipped code
+  that skipped a bump, advance the numbers in the same follow-up and say so.
 - Keep `docs/design/`, screenshots, and handoff notes out of the version
   decision; they are not shipped artifacts.
-- When a change bumps either number, say so in the PR body. The IPA filename
+- Say the version line in the PR body. The IPA filename
   (`LedgerMobile-<version>-<build>-SideStore.ipa`) and `build-info.txt` derive
   from these values, so a stale number makes two different builds
   indistinguishable on device.

@@ -1,7 +1,7 @@
 # 20261023-ios-docs-and-version
 
 - Status: active (PR open; branch `codex/ios-docs-and-version`)
-- Last updated: 2026-10-23 19:45 +08:00
+- Last updated: 2026-10-23 20:05 +08:00
 - Base: `main` @ `149c848` (branch merged `origin/main` after opening the PR)
 - PR: https://github.com/qiaoborui/beancount-ledger-web/pull/538
 
@@ -76,6 +76,31 @@ feature: multi-device sync through an iCloud Drive folder (`FolderLocalStorage.s
   (shipped behaviour) and `MARKETING_VERSION` 0.1.0 → **0.2.0** (new capability,
   pre-1.0 MINOR bump). Both are in `App/LedgerMobile/project.yml`.
 - The merge resolved with no conflicts.
+
+## Follow-up: the version rule became a per-task obligation
+
+The user asked that every iOS development task compute the version and build
+number, not only the tasks that change shipped behaviour. `AGENTS.md` now opens
+the *iOS App Version* section with that obligation and a decision table:
+
+| The change | Build | Marketing |
+| --- | --- | --- |
+| Shipped behaviour, UI, resources, runtime | +1 | unchanged unless below |
+| User-visible defect in a released capability | +1 | +PATCH |
+| New user-facing capability | +1 | +MINOR |
+| Shrinks or removes shipped behaviour | +1 | +MINOR unless it is a fix |
+| Docs, agent instructions, tests, CI, screenshots | unchanged | unchanged |
+
+The task report and the PR body must state the outcome even when nothing moves,
+with an example line such as `版本 0.2.0 (37) 不变，本次只改文档`.
+`.agents/rules/project.md` and `.agents/knowledge/project.md` carry the same
+obligation.
+
+### This change's own decision
+
+`版本 0.2.0 (37) 不变` — agent instructions and one handoff note only, which the
+table exempts. The bump already landed in the previous commit (0.1.0 (36) →
+0.2.0 (37)).
 
 ## Decisions
 

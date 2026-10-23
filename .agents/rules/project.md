@@ -11,9 +11,12 @@
   change touches ledger data.
 - For GitHub pull requests, use a focused branch and include validation results
   in the PR body.
-- Advance `App/LedgerMobile/project.yml`'s `CURRENT_PROJECT_VERSION` in every
-  change that ships behavior, and state the new version in the PR body.
-  Documentation-only and test-only changes do not bump it.
+- Compute the iOS version at the start of **every** iOS task: read
+  `App/LedgerMobile/project.yml`'s `MARKETING_VERSION` and
+  `CURRENT_PROJECT_VERSION`, decide both values from the table in the "iOS App
+  Version" section of `AGENTS.md`, and state the decision in the report and PR
+  body even when it stays unchanged. Shipped behavior always advances the build
+  number; a user-visible defect advances PATCH, a new capability advances MINOR.
 - Keep `App/LedgerMobile/FEATURE_PARITY.md` truthful: ship or remove a capability
   and the same change updates it. Never list planned work as available.
 

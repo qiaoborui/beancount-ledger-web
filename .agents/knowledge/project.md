@@ -38,8 +38,11 @@ iOS app (the shipped product):
   `DESIGN.md` is the visual spec, and `FEATURE_PARITY.md` records what the app
   actually implements today.
 - `App/LedgerMobile/project.yml` owns `MARKETING_VERSION` and
-  `CURRENT_PROJECT_VERSION`. The build number must advance for every shipped
-  behavior change; see the "iOS App Version" section of `AGENTS.md`.
+  `CURRENT_PROJECT_VERSION`. Every iOS task computes both numbers from the table
+  in the "iOS App Version" section of `AGENTS.md` and states the decision:
+  shipped behavior always advances the build number, a user-visible defect
+  advances PATCH, a new capability advances MINOR, and documentation, tests, and
+  CI changes leave both alone.
 
 Deployment:
 
