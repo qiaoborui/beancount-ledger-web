@@ -158,6 +158,31 @@ itself uploads the files and makes them visible on the user's other devices.
 Backups in iCloud Drive are not additionally encrypted by the app; with
 Advanced Data Protection enabled Apple encrypts them end to end.
 
+## Multi-device sync (iCloud Drive folder)
+
+Settings → 存储与同步 → 选择 iCloud 云盘文件夹 turns a ledger into a synced
+ledger, as an alternative to Git storage. Other devices join it from the
+library with "从 iCloud 云盘加入账本" and the same folder. Like backups this
+uses a picked folder and a bookmark, not CloudKit or a ubiquity container, so
+Personal Team and SideStore builds can use it. The cost is that there is no
+push: a device picks up changes when it saves, returns to the foreground, runs
+its periodic or background sync, or the user taps 立即同步, and only after
+iCloud Drive has downloaded the other device's files.
+
+- Layout: `ledger-sync.json` (name and entry file),
+  `snapshots/<content digest>.ledgerbackup` (immutable trees in the backup
+  format), and `devices/<configuration ID>.json`, one head per device with the
+  digests it has incorporated, newest first.
+- Each device only writes its own head, so iCloud never has two writers for
+  one file. A head can arrive before its snapshot; that peer is skipped until
+  the snapshot is there.
+- Merge: every unseen peer head is merged into the local tree with the same
+  three-way file merge as Git storage, against the newest digest both sides
+  have seen. Conflicting files use the existing review (keep this device's or
+  the other device's version). The merge is symmetric, so devices that merge
+  each other at the same time publish the same digest and stop.
+- Snapshots no head's last 16 entries reference are pruned after three days.
+
 ## Generate and build
 
 Build all three native dependencies before generating or building the Xcode

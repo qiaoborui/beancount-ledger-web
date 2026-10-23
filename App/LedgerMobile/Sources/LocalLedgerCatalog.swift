@@ -6,14 +6,21 @@ struct LocalLedgerDescriptor: Codable, Equatable, Hashable, Identifiable, Sendab
     let entrypoint: String
     let createdAt: Date
     let git: LocalGitConfiguration?
+    /// Set instead of `git` for a ledger synced through an iCloud Drive folder.
+    let folder: LocalFolderSyncConfiguration?
 
-    init(id: UUID, name: String, entrypoint: String, createdAt: Date, git: LocalGitConfiguration? = nil) {
+    init(id: UUID, name: String, entrypoint: String, createdAt: Date, git: LocalGitConfiguration? = nil,
+         folder: LocalFolderSyncConfiguration? = nil) {
         self.id = id
         self.name = name
         self.entrypoint = entrypoint
         self.createdAt = createdAt
         self.git = git
+        self.folder = folder
     }
+
+    /// Names this ledger's sync state and automatic-sync preferences.
+    var syncConfigurationID: UUID? { git?.id ?? folder?.id }
 }
 
 public struct OnboardingAccountSelection: Codable, Equatable, Sendable {
@@ -52,10 +59,13 @@ actor LocalLedgerCatalog {
     private let engine: any LocalLedgerEngine
     private let gitTransport: any LocalGitTransport
     private let gitCredentials: any LocalGitCredentialStoring
+    /// Tests resolve folder configurations to plain directories.
+    private let folderLocation: (@Sendable (LocalFolderSyncConfiguration) -> FolderSyncLocation)?
 
     init(rootDirectory: URL, engine: any LocalLedgerEngine = EmbeddedLocalLedgerEngine.shared,
          gitTransport: any LocalGitTransport = EmbeddedLocalGitTransport(),
          gitCredentials: any LocalGitCredentialStoring = DeviceLocalGitCredentialStore(),
+         folderLocation: (@Sendable (LocalFolderSyncConfiguration) -> FolderSyncLocation)? = nil,
          validator: Validator? = nil) {
         self.rootDirectory = rootDirectory.standardizedFileURL
         self.engine = engine
@@ -67,6 +77,7 @@ actor LocalLedgerCatalog {
         }
         self.gitTransport = gitTransport
         self.gitCredentials = gitCredentials
+        self.folderLocation = folderLocation
     }
 
     static func appManaged() throws -> LocalLedgerCatalog {
@@ -100,7 +111,78 @@ actor LocalLedgerCatalog {
         if let git = descriptor.git {
             return GitLocalStorage(workspace: workspace, configuration: git, transport: gitTransport, credentials: gitCredentials)
         }
+        if let folder = descriptor.folder {
+            return FolderLocalStorage(workspace: workspace, configuration: folder, ledger: descriptor,
+                location: folderLocation?(folder))
+        }
         return DeviceLocalStorage(workspace: workspace)
+    }
+
+    /// Connects a ledger to a folder returned by the system folder picker. The
+    /// session schedules synchronization after publication.
+    func configureFolder(ledgerID: UUID, folder url: URL, deviceName: String) throws -> LocalLedgerDescriptor {
+        guard let old = try list().first(where: { $0.id == ledgerID }) else {
+            throw LocalStorageError.invalidGitConfiguration(String(localized: "找不到要配置的本地账本"))
+        }
+        guard old.git == nil else {
+            throw LocalStorageError.invalidGitConfiguration(String(localized: "请先断开 Git 同步，再改用 iCloud 云盘同步"))
+        }
+        let folder = try makeFolderConfiguration(url, deviceName: deviceName) { marker in
+            if let marker, marker.entrypoint != old.entrypoint {
+                throw LocalStorageError.invalidGitConfiguration(String(localized: "该同步文件夹属于入口文件为 \(marker.entrypoint) 的账本"))
+            }
+        }
+        let updated = LocalLedgerDescriptor(id: old.id, name: old.name, entrypoint: old.entrypoint,
+            createdAt: old.createdAt, folder: folder)
+        try persist(updated)
+        return updated
+    }
+
+    func disconnectFolder(ledgerID: UUID) throws -> LocalLedgerDescriptor {
+        guard let old = try list().first(where: { $0.id == ledgerID }) else {
+            throw LocalStorageError.invalidGitConfiguration(String(localized: "找不到要配置的本地账本"))
+        }
+        let updated = LocalLedgerDescriptor(id: old.id, name: old.name, entrypoint: old.entrypoint,
+            createdAt: old.createdAt, git: old.git)
+        try persist(updated)
+        return updated
+    }
+
+    /// Adds the ledger another device shares in `url` as a new local ledger.
+    func importFolder(_ url: URL, deviceName: String) async throws -> LocalLedgerDescriptor {
+        var found: FolderSyncLayout.Marker?
+        let folder = try makeFolderConfiguration(url, deviceName: deviceName) { marker in
+            guard let marker else { throw LocalStorageError.emptySyncFolder }
+            found = marker
+        }
+        guard let marker = found else { throw LocalStorageError.emptySyncFolder }
+        let names = Set(try list().map(\.name))
+        let name = names.contains(marker.ledgerName) ? String(marker.ledgerName.prefix(110)) + String(localized: "（iCloud）") : marker.ledgerName
+        let plain = try makeDescriptor(name: name, entrypoint: marker.entrypoint)
+        let descriptor = LocalLedgerDescriptor(id: plain.id, name: plain.name, entrypoint: plain.entrypoint,
+            createdAt: plain.createdAt, folder: folder)
+        let provider = storage(for: descriptor)
+        let validate = publicationValidator(for: descriptor)
+        do {
+            _ = try await provider.synchronize { root in try await validate(root, descriptor.entrypoint) }
+            try Task.checkCancellation()
+            try persist(descriptor)
+            return descriptor
+        } catch {
+            try? FileManager.default.removeItem(at: rootDirectory.appendingPathComponent(descriptor.id.uuidString))
+            throw error
+        }
+    }
+
+    private func makeFolderConfiguration(_ url: URL, deviceName: String,
+                                         check: (FolderSyncLayout.Marker?) throws -> Void) throws -> LocalFolderSyncConfiguration {
+        let granted = url.startAccessingSecurityScopedResource()
+        defer { if granted { url.stopAccessingSecurityScopedResource() } }
+        guard FileManager.default.fileExists(atPath: url.path) else { throw LedgerBackupError.folderUnavailable }
+        try check(FolderSyncLayout.readMarker(in: url))
+        let bookmark = try FolderSyncLocation.makeBookmark(for: url)
+        return LocalFolderSyncConfiguration(id: UUID(), bookmark: bookmark,
+            folderName: FileManager.default.displayName(atPath: url.path), deviceName: deviceName)
     }
 
     /// Saves configuration; the session schedules synchronization after publication.
@@ -108,6 +190,9 @@ actor LocalLedgerCatalog {
                       credential: LocalGitCredential? = nil) throws -> LocalLedgerDescriptor {
         guard let old = try list().first(where: { $0.id == ledgerID }) else {
             throw LocalStorageError.invalidGitConfiguration(String(localized: "找不到要配置的本地账本"))
+        }
+        guard old.folder == nil else {
+            throw LocalStorageError.invalidGitConfiguration(String(localized: "请先关闭 iCloud 云盘同步，再连接 Git 仓库"))
         }
         let candidate = try LocalGitConfiguration(repositoryURL: repositoryURL, branch: branch)
         let git: LocalGitConfiguration
@@ -125,7 +210,8 @@ actor LocalLedgerCatalog {
             throw LocalStorageError.invalidGitConfiguration(String(localized: "找不到要配置的本地账本"))
         }
         if let git = old.git { try gitCredentials.remove(for: git.id) }
-        let updated = LocalLedgerDescriptor(id: old.id, name: old.name, entrypoint: old.entrypoint, createdAt: old.createdAt)
+        let updated = LocalLedgerDescriptor(id: old.id, name: old.name, entrypoint: old.entrypoint,
+            createdAt: old.createdAt, folder: old.folder)
         try persist(updated)
         return updated
     }
@@ -174,7 +260,8 @@ actor LocalLedgerCatalog {
             name: trimmedName,
             entrypoint: targetEntrypoint,
             createdAt: old.createdAt,
-            git: old.git
+            git: old.git,
+            folder: old.folder
         )
 
         if targetEntrypoint != old.entrypoint {

@@ -1671,6 +1671,36 @@
         }
       }
     },
+    "iCloud 云盘同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud Drive Sync"
+          }
+        }
+      }
+    },
+    "iCloud 云盘文件夹" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud Drive folder"
+          }
+        }
+      }
+    },
+    "iCloud 云盘文件夹同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud Drive folder sync"
+          }
+        }
+      }
+    },
     "travel, trip-2026" : {
       "shouldTranslate" : false
     },
@@ -2845,6 +2875,16 @@
         }
       }
     },
+    "从 iCloud 云盘加入账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Join a Ledger from iCloud Drive"
+          }
+        }
+      }
+    },
     "从其他 App 分享的账单，核对后导入。" : {
       "localizations" : {
         "en" : {
@@ -3465,6 +3505,16 @@
         }
       }
     },
+    "保留本地账本并停止同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep the Local Ledger and Stop Syncing"
+          }
+        }
+      }
+    },
     "保留本地账本并断开 Git" : {
       "localizations" : {
         "en" : {
@@ -4067,6 +4117,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Close"
+          }
+        }
+      }
+    },
+    "关闭 iCloud 云盘同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn Off iCloud Drive Sync"
+          }
+        }
+      }
+    },
+    "关闭 iCloud 云盘同步？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn off iCloud Drive sync?"
           }
         }
       }
@@ -5619,6 +5689,16 @@
         }
       }
     },
+    "同步文件夹" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync folder"
+          }
+        }
+      }
+    },
     "同步未完成" : {
       "localizations" : {
         "en" : {
@@ -5985,6 +6065,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Searches transactions, accounts, tags, and files in Ledger. Results appear only in the unlocked app."
+          }
+        }
+      }
+    },
+    "在“文件”中新建或选择一个 iCloud 云盘文件夹，每个账本单独使用一个。其他设备在账本库中选择“从 iCloud 云盘加入账本”并选同一个文件夹即可多设备同步。两台设备改了同一个文件时，会在这里让你选择保留哪一边。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create or choose a folder in iCloud Drive, one per ledger. On your other devices, choose “Join a Ledger from iCloud Drive” in the library and pick the same folder. If two devices change the same file, you choose which version to keep here."
           }
         }
       }
@@ -8709,6 +8799,16 @@
         }
       }
     },
+    "快照摘要与文件名不一致" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The snapshot's digest doesn't match its file name"
+          }
+        }
+      }
+    },
     "快速操作" : {
       "localizations" : {
         "en" : {
@@ -10685,6 +10785,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Can't load transaction"
+          }
+        }
+      }
+    },
+    "无法读取其他设备的同步记录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't read another device's sync record"
+          }
+        }
+      }
+    },
+    "无法读取同步文件夹信息" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't read the sync folder's details"
           }
         }
       }
@@ -16469,6 +16589,16 @@
         }
       }
     },
+    "该同步文件夹属于入口文件为 %@ 的账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This sync folder belongs to a ledger whose entry file is %@"
+          }
+        }
+      }
+    },
     "该待导入文件已被移除，请重新分享" : {
       "localizations" : {
         "en" : {
@@ -16549,6 +16679,16 @@
         }
       }
     },
+    "请先关闭 iCloud 云盘同步，再连接 Git 仓库" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn off iCloud Drive sync before connecting a Git repository"
+          }
+        }
+      }
+    },
     "请先同步以读取当前冲突" : {
       "localizations" : {
         "en" : {
@@ -16595,6 +16735,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Set up biometrics in Settings first"
+          }
+        }
+      }
+    },
+    "请先断开 Git 同步，再改用 iCloud 云盘同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disconnect Git sync before switching to iCloud Drive sync"
           }
         }
       }
@@ -17639,6 +17789,16 @@
         }
       }
     },
+    "账本文件和本地历史会保留。iCloud 云盘文件夹保持原状，其他设备仍可继续使用它同步。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your ledger files and local history are kept. The iCloud Drive folder stays as it is, and other devices can keep syncing with it."
+          }
+        }
+      }
+    },
     "账本文件和本地历史会保留。远端仓库保持原状。" : {
       "localizations" : {
         "en" : {
@@ -18449,6 +18609,16 @@
         }
       }
     },
+    "这个文件夹里还没有同步的账本。请先在已有账本的设备上开启 iCloud 云盘同步，等待上传完成后再试。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This folder doesn't hold a synced ledger yet. Turn on iCloud Drive sync on the device that has the ledger, wait for the upload to finish, then try again."
+          }
+        }
+      }
+    },
     "这个账户暂无关联流水。" : {
       "localizations" : {
         "en" : {
@@ -18739,6 +18909,16 @@
         }
       }
     },
+    "选择 iCloud 云盘文件夹" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose an iCloud Drive Folder"
+          }
+        }
+      }
+    },
     "选择%@" : {
       "localizations" : {
         "en" : {
@@ -18825,6 +19005,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Choose the full folder with the entry file and its includes. The ledger is validated on this device during import."
+          }
+        }
+      }
+    },
+    "选择另一台设备已开启同步的文件夹" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick the folder another device syncs to"
           }
         }
       }
@@ -19725,6 +19915,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "High confidence"
+          }
+        }
+      }
+    },
+    "（iCloud）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " (iCloud)"
           }
         }
       }

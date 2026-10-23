@@ -9,6 +9,7 @@ struct LedgerLibraryView: View {
     @State private var importing = false
     @State private var addingGit = false
     @State private var restoringBackup = false
+    @State private var joiningFolder = false
     @State private var editingLedger: LocalLedgerDescriptor?
     @State private var deletingLedger: LocalLedgerDescriptor?
     @State private var confirmingDelete = false
@@ -44,6 +45,15 @@ struct LedgerLibraryView: View {
                         .accessibilityIdentifier("local-ledger-import")
                     LibraryActionRow(title: String(localized: "从 Git 添加账本"), detail: String(localized: "用仓库做版本交换，多设备共用")) { addingGit = true }
                         .accessibilityIdentifier("local-ledger-add-git")
+                    // A second importer on the list would replace the backup one, so this row owns it.
+                    LibraryActionRow(title: String(localized: "从 iCloud 云盘加入账本"), detail: String(localized: "选择另一台设备已开启同步的文件夹")) { joiningFolder = true }
+                        .accessibilityIdentifier("local-ledger-join-folder")
+                        .fileImporter(isPresented: $joiningFolder, allowedContentTypes: [.folder]) { result in
+                            switch result {
+                            case let .success(url): Task { await session.importFolderLedger(url) }
+                            case let .failure(error): session.errorMessage = error.localizedDescription
+                            }
+                        }
                     LibraryActionRow(title: String(localized: "从备份恢复"), detail: String(localized: "选择 iCloud 云盘或“文件”中的 .ledgerbackup")) { restoringBackup = true }
                         .accessibilityIdentifier("local-ledger-restore-backup")
                 } header: { TerminalSectionLabel(text: String(localized: "快速操作")).listRowBackground(BalancedPalette.page) }
@@ -64,7 +74,7 @@ struct LedgerLibraryView: View {
                                                 .balancedFont(size: 15, weight: .text)
                                                 .foregroundStyle(BalancedPalette.ink)
                                             HStack(spacing: 4) {
-                                                Text(ledger.git != nil ? "Git 同步" : "仅本机")
+                                                Text(ledger.folder != nil ? "iCloud 云盘同步" : ledger.git != nil ? "Git 同步" : "仅本机")
                                                     .balancedFont(size: 12)
                                                 Text("·").balancedFont(size: 12)
                                                 Text(ledger.entrypoint).balancedMono(size: 11.5)
@@ -477,7 +487,7 @@ struct EditLedgerSheet: View {
                 }
 
                 Section {
-                    LabeledContent(String(localized: "存储方式"), value: ledger.git == nil ? String(localized: "本机独立存储") : String(localized: "Git 仓库协同"))
+                    LabeledContent(String(localized: "存储方式"), value: ledger.folder != nil ? String(localized: "iCloud 云盘文件夹同步") : ledger.git == nil ? String(localized: "本机独立存储") : String(localized: "Git 仓库协同"))
                         .balancedFont(size: 14)
                     LabeledContent("创建时间", value: ledger.createdAt.formatted(date: .abbreviated, time: .shortened))
                         .balancedFont(size: 14)

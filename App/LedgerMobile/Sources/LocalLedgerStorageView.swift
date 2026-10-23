@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LocalLedgerStorageView: View {
     @EnvironmentObject private var session: LedgerSession
@@ -14,6 +15,12 @@ struct LocalLedgerStorageView: View {
     @State private var conflictChoice: Bool?
     @State private var confirmingResolution = false
     @State private var conflictExport: URL?
+    @State private var choosingFolder = false
+
+    private var providerTitle: String {
+        if session.localFolderConfiguration != nil { return String(localized: "iCloud 云盘文件夹") }
+        return session.localGitConfiguration == nil ? String(localized: "本机目录") : String(localized: "Git 工作区")
+    }
 
     private var matchesConfiguration: Bool {
         guard let config = session.localGitConfiguration else { return false }
@@ -27,7 +34,10 @@ struct LocalLedgerStorageView: View {
             Section {
                 VStack(alignment: .leading, spacing: 0) {
                     StorageKeyRow(label: String(localized: "账本"), value: session.localLedgerName)
-                    StorageKeyRow(label: String(localized: "存储提供方"), value: session.localGitConfiguration == nil ? String(localized: "本机目录") : String(localized: "Git 工作区"))
+                    StorageKeyRow(label: String(localized: "存储提供方"), value: providerTitle)
+                    if let folder = session.localFolderConfiguration {
+                        StorageKeyRow(label: String(localized: "同步文件夹"), value: folder.folderName)
+                    }
                     StorageKeyRow(label: String(localized: "状态"), value: statusTitle, color: statusColor)
                     if let date = status?.lastSyncedAt { StorageKeyRow(label: String(localized: "最近同步"), value: date.formatted()) }
                     if let commit = status?.baseCommit { StorageKeyRow(label: String(localized: "同步版本"), value: String(commit.prefix(12)), mono: true) }
@@ -75,68 +85,92 @@ struct LocalLedgerStorageView: View {
                     }
                 } header: { TerminalSectionLabel(text: String(localized: "需要处理的文件")).listRowBackground(BalancedPalette.page).listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
             }
-            Section {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("仓库地址").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-                    TextField("https://git.example.com/owner/ledger.git", text: $repositoryURL)
-                        .balancedMono(size: 15)
-                        .foregroundStyle(BalancedPalette.ink)
-                        .padding(.bottom, 10)
-                        .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
-                        .textContentType(.URL).keyboardType(.URL)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .accessibilityIdentifier("local-git-url")
+            if session.localGitConfiguration == nil {
+                Section {
+                    if session.localFolderConfiguration == nil {
+                        Button("选择 iCloud 云盘文件夹") { choosingFolder = true }
+                            .buttonStyle(.balanced(.primary))
+                            .accessibilityIdentifier("local-folder-choose")
+                            .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    } else {
+                        Button("关闭 iCloud 云盘同步") { confirmingDisconnect = true }
+                            .buttonStyle(.balanced(.quiet))
+                            .accessibilityIdentifier("local-folder-disconnect")
+                            .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    }
+                } header: { TerminalSectionLabel(text: String(localized: "iCloud 云盘同步")).listRowBackground(BalancedPalette.page)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
+                footer: {
+                    Text("在“文件”中新建或选择一个 iCloud 云盘文件夹，每个账本单独使用一个。其他设备在账本库中选择“从 iCloud 云盘加入账本”并选同一个文件夹即可多设备同步。两台设备改了同一个文件时，会在这里让你选择保留哪一边。")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        .listRowBackground(BalancedPalette.page)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 }
-                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 10, trailing: 20))
-                .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("分支").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-                    TextField("分支", text: $branch)
-                        .balancedMono(size: 15)
-                        .foregroundStyle(BalancedPalette.ink)
-                        .padding(.bottom, 10)
-                        .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .accessibilityIdentifier("local-git-branch")
-                }
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 10, trailing: 20))
-                .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Git 用户名（可选）").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-                    TextField("Git 用户名（可选）", text: $username)
-                        .balancedFont(size: 15)
-                        .foregroundStyle(BalancedPalette.ink)
-                        .padding(.bottom, 10)
-                        .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                }
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 10, trailing: 20))
-                .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("访问令牌").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-                    SecureField("访问令牌（留空保留已有凭据）", text: $token)
-                        .balancedMono(size: 15)
-                        .foregroundStyle(BalancedPalette.ink)
-                        .padding(.bottom, 10)
-                        .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
-                        .textContentType(.password)
-                }
-                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
-                .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                Button("保存存储设置") { Task { await saveConfiguration() } }
-                    .buttonStyle(.balanced(.outline, disabled: repositoryURL.isEmpty || branch.isEmpty))
-                    .disabled(repositoryURL.isEmpty || branch.isEmpty)
-                    .accessibilityIdentifier("local-git-save")
-                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
-            } header: { TerminalSectionLabel(text: String(localized: "Git 存储")).listRowBackground(BalancedPalette.page)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
-            footer: {
-                Text("填写 HTTPS 仓库地址。令牌仅存于此设备的钥匙串。保存后将按自动同步设置交换本地与远端变更，请确认仓库和分支。")
-                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-                    .listRowBackground(BalancedPalette.page)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
             }
-            if session.localGitConfiguration != nil {
+            if session.localFolderConfiguration == nil {
+                Section {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("仓库地址").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        TextField("https://git.example.com/owner/ledger.git", text: $repositoryURL)
+                            .balancedMono(size: 15)
+                            .foregroundStyle(BalancedPalette.ink)
+                            .padding(.bottom, 10)
+                            .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                            .textContentType(.URL).keyboardType(.URL)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .accessibilityIdentifier("local-git-url")
+                    }
+                    .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 10, trailing: 20))
+                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("分支").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        TextField("分支", text: $branch)
+                            .balancedMono(size: 15)
+                            .foregroundStyle(BalancedPalette.ink)
+                            .padding(.bottom, 10)
+                            .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .accessibilityIdentifier("local-git-branch")
+                    }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 10, trailing: 20))
+                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Git 用户名（可选）").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        TextField("Git 用户名（可选）", text: $username)
+                            .balancedFont(size: 15)
+                            .foregroundStyle(BalancedPalette.ink)
+                            .padding(.bottom, 10)
+                            .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 10, trailing: 20))
+                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("访问令牌").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        SecureField("访问令牌（留空保留已有凭据）", text: $token)
+                            .balancedMono(size: 15)
+                            .foregroundStyle(BalancedPalette.ink)
+                            .padding(.bottom, 10)
+                            .overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                            .textContentType(.password)
+                    }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
+                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    Button("保存存储设置") { Task { await saveConfiguration() } }
+                        .buttonStyle(.balanced(.outline, disabled: repositoryURL.isEmpty || branch.isEmpty))
+                        .disabled(repositoryURL.isEmpty || branch.isEmpty)
+                        .accessibilityIdentifier("local-git-save")
+                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                } header: { TerminalSectionLabel(text: String(localized: "Git 存储")).listRowBackground(BalancedPalette.page)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
+                footer: {
+                    Text("填写 HTTPS 仓库地址。令牌仅存于此设备的钥匙串。保存后将按自动同步设置交换本地与远端变更，请确认仓库和分支。")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        .listRowBackground(BalancedPalette.page)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                }
+            }
+            if session.hasLocalRemoteSync {
                 Section {
                     Toggle("自动同步", isOn: Binding(get: { session.localAutomaticSyncEnabled }, set: { enabled in
                         Task { await session.setLocalAutomaticSyncEnabled(enabled); await reloadStatus() }
@@ -144,14 +178,18 @@ struct LocalLedgerStorageView: View {
                     .balancedFont(size: 15)
                     .accessibilityIdentifier("local-git-auto-sync")
                     .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                    Button("立即同步") { confirmingSync = true }
-                        .buttonStyle(.balanced(.outline, disabled: !matchesConfiguration))
-                        .disabled(!matchesConfiguration)
+                    Button("立即同步") {
+                        if session.localFolderConfiguration != nil { Task { await synchronize() } } else { confirmingSync = true }
+                    }
+                        .buttonStyle(.balanced(.outline, disabled: !canSynchronize))
+                        .disabled(!canSynchronize)
                         .accessibilityIdentifier("local-git-sync")
                         .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                    Button("改用本机存储") { confirmingDisconnect = true }
-                        .buttonStyle(.balanced(.quiet))
-                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    if session.localGitConfiguration != nil {
+                        Button("改用本机存储") { confirmingDisconnect = true }
+                            .buttonStyle(.balanced(.quiet))
+                            .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    }
                 } footer: {
                     Text("保存后自动同步，联网及回到前台时自动重试。后台同步由 iOS 调度；设备首次解锁后可在锁屏时运行。冲突或凭据失效时暂停，账本仍保存在本机。")
                         .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
@@ -181,9 +219,26 @@ struct LocalLedgerStorageView: View {
         .confirmationDialog("同步这个 Git 工作区？", isPresented: $confirmingSync, titleVisibility: .visible) {
             Button("拉取、校验并推送") { Task { await synchronize() } }
         } message: { Text("\(repositoryURL)\n分支：\(branch)\n本地和远端已保存的变更将交换并校验。") }
-        .confirmationDialog("改用本机存储？", isPresented: $confirmingDisconnect, titleVisibility: .visible) {
-            Button("保留本地账本并断开 Git") { Task { await disconnect() } }
-        } message: { Text("账本文件和本地历史会保留。远端仓库保持原状。") }
+        .confirmationDialog(session.localFolderConfiguration != nil ? Text("关闭 iCloud 云盘同步？") : Text("改用本机存储？"),
+                            isPresented: $confirmingDisconnect, titleVisibility: .visible) {
+            if session.localFolderConfiguration != nil {
+                Button("保留本地账本并停止同步") { Task { await disconnect() } }
+            } else {
+                Button("保留本地账本并断开 Git") { Task { await disconnect() } }
+            }
+        } message: {
+            if session.localFolderConfiguration != nil {
+                Text("账本文件和本地历史会保留。iCloud 云盘文件夹保持原状，其他设备仍可继续使用它同步。")
+            } else {
+                Text("账本文件和本地历史会保留。远端仓库保持原状。")
+            }
+        }
+        .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
+            switch result {
+            case let .success(url): Task { await connectFolder(url) }
+            case let .failure(error): self.error = error.localizedDescription
+            }
+        }
         .confirmationDialog("确认处理上面列出的冲突文件？", isPresented: $confirmingResolution, titleVisibility: .visible) {
             Button(conflictChoice == true ? "保留本机版本并校验" : "采用远端版本并校验") {
                 if let choice = conflictChoice { Task { await resolveConflicts(keepingLocal: choice) } }
@@ -217,6 +272,20 @@ struct LocalLedgerStorageView: View {
         }
     }
 
+    private var canSynchronize: Bool {
+        session.localFolderConfiguration != nil || matchesConfiguration
+    }
+
+    private func connectFolder(_ url: URL) async {
+        busy = true
+        defer { busy = false }
+        do {
+            try await session.configureLocalFolder(url)
+            error = nil
+            await reloadStatus()
+        } catch { self.error = error.localizedDescription }
+    }
+
     private func reloadStatus() async {
         do { status = try await session.localRepository?.storageStatus() }
         catch { self.error = error.localizedDescription }
@@ -244,7 +313,11 @@ struct LocalLedgerStorageView: View {
         busy = true
         defer { busy = false }
         do {
-            try await session.disconnectLocalGit()
+            if session.localFolderConfiguration != nil {
+                try await session.disconnectLocalFolder()
+            } else {
+                try await session.disconnectLocalGit()
+            }
             repositoryURL = ""; token = ""; username = ""; conflictExport = nil
             error = nil
             await reloadStatus()
