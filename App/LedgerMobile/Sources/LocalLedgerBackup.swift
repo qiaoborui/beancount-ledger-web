@@ -103,13 +103,14 @@ enum LedgerBackupArchive {
     }
 
     /// Writes a complete archive to `destination`, which must not exist.
-    static func write(_ scanned: [ScannedFile], manifest: LedgerBackupManifest, to destination: URL) throws {
+    static func write(_ scanned: [ScannedFile], manifest: LedgerBackupManifest, to destination: URL,
+                      attributes: [FileAttributeKey: Any]? = protectedAttributes) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         let manifestData = try encoder.encode(manifest)
         guard manifestData.count <= maximumManifestBytes else { throw LedgerBackupError.corrupt(String(localized: "备份清单过大")) }
-        guard FileManager.default.createFile(atPath: destination.path, contents: nil, attributes: protectedAttributes) else {
+        guard FileManager.default.createFile(atPath: destination.path, contents: nil, attributes: attributes) else {
             throw CocoaError(.fileWriteUnknown)
         }
         let output = try FileHandle(forWritingTo: destination)
@@ -142,22 +143,23 @@ enum LedgerBackupArchive {
     /// Extracts into `directory` (created, must not exist) after verifying every
     /// path, length, and hash. Nothing in the archive can escape `directory`.
     @discardableResult
-    static func extract(_ url: URL, to directory: URL) throws -> LedgerBackupManifest {
+    static func extract(_ url: URL, to directory: URL,
+                        attributes: [FileAttributeKey: Any]? = protectedAttributes) throws -> LedgerBackupManifest {
         let input = try FileHandle(forReadingFrom: url)
         defer { try? input.close() }
         let manifest = try readManifest(from: input, totalLength: fileLength(of: url))
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: protectedAttributes)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: attributes)
         for file in manifest.files {
             let components = file.path.split(separator: "/").map(String.init)
             var parent = directory
             for component in components.dropLast() {
                 parent.appendPathComponent(component, isDirectory: true)
                 if !FileManager.default.fileExists(atPath: parent.path) {
-                    try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false, attributes: protectedAttributes)
+                    try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false, attributes: attributes)
                 }
             }
             let target = parent.appendingPathComponent(components.last!)
-            guard FileManager.default.createFile(atPath: target.path, contents: nil, attributes: protectedAttributes) else {
+            guard FileManager.default.createFile(atPath: target.path, contents: nil, attributes: attributes) else {
                 throw CocoaError(.fileWriteUnknown)
             }
             let output = try FileHandle(forWritingTo: target)
@@ -257,6 +259,15 @@ enum LedgerBackupArchive {
     static var protectedAttributes: [FileAttributeKey: Any]? {
         #if os(iOS)
         [.protectionKey: FileProtectionType.complete]
+        #else
+        nil
+        #endif
+    }
+
+    /// Sync runs in the background after first unlock, like Git storage.
+    static var syncAttributes: [FileAttributeKey: Any]? {
+        #if os(iOS)
+        [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
         #else
         nil
         #endif

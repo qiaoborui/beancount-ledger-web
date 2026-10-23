@@ -730,8 +730,8 @@ final class LedgerSession: ObservableObject {
             if case let .local(id) = location, let descriptor = localLedgers.first(where: { $0.id == id }) {
                 localLedgerName = descriptor.name
             }
-            localAutomaticSyncEnabled = localGitConfiguration.map {
-                !defaults.bool(forKey: Self.automaticSyncDisabledPrefix + $0.id.uuidString)
+            localAutomaticSyncEnabled = localSyncConfigurationID.map {
+                !defaults.bool(forKey: Self.automaticSyncDisabledPrefix + $0.uuidString)
             } ?? true
             updateLocalSyncEligibility()
         } catch {
@@ -1044,6 +1044,85 @@ final class LedgerSession: ObservableObject {
         return localLedgers.first(where: { $0.id == id })?.git
     }
 
+    var localFolderConfiguration: LocalFolderSyncConfiguration? {
+        guard case let .local(id) = location else { return nil }
+        return localLedgers.first(where: { $0.id == id })?.folder
+    }
+
+    /// True when the open ledger exchanges versions with Git or an iCloud Drive folder.
+    var hasLocalRemoteSync: Bool { localSyncConfigurationID != nil }
+
+    private var localSyncConfigurationID: UUID? {
+        guard case let .local(id) = location else { return nil }
+        return localLedgers.first(where: { $0.id == id })?.syncConfigurationID
+    }
+
+    private static func syncMode(of descriptor: LocalLedgerDescriptor?) -> LocalStorageSyncStatus.Mode {
+        if descriptor?.folder != nil { return .folder }
+        return descriptor?.git == nil ? .device : .git
+    }
+
+    static var localDeviceName: String {
+        #if canImport(UIKit)
+        UIDevice.current.name
+        #else
+        Host.current().localizedName ?? "Mac"
+        #endif
+    }
+
+    /// Adds the ledger shared in an iCloud Drive folder by another device.
+    func importFolderLedger(_ url: URL) async {
+        guard !isLocalOperationBusy, !isAuthenticationBusy, let localCatalog else { return }
+        isLocalOperationBusy = true
+        errorMessage = nil
+        let epoch = sessionEpoch
+        let expectedLocation = location
+        defer { isLocalOperationBusy = false }
+        do {
+            try await authenticateLocalLedger(epoch: epoch, location: expectedLocation)
+            let descriptor = try await localCatalog.importFolder(url, deviceName: Self.localDeviceName)
+            try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
+            await refreshLocalLedgers()
+            try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
+            try await activateLocalLedger(descriptor)
+        } catch is CancellationError { } catch { errorMessage = error.localizedDescription }
+    }
+
+    func configureLocalFolder(_ url: URL) async throws {
+        guard phase == .ready, applicationActive, !isStorageSyncBusy, case let .local(id) = location, let localCatalog else {
+            throw LocalLedgerError.operationFailed(String(localized: "请先解锁本地账本，等待当前同步结束。"))
+        }
+        isStorageSyncBusy = true
+        defer { isStorageSyncBusy = false }
+        let epoch = sessionEpoch
+        let descriptor = try await localCatalog.configureFolder(ledgerID: id, folder: url, deviceName: Self.localDeviceName)
+        try requireCurrentLocalOperation(epoch: epoch, location: .local(id))
+        repositories[.local(id)] = localCatalog.repository(for: descriptor)
+        await refreshLocalLedgers()
+        if let configurationID = descriptor.syncConfigurationID {
+            defaults.removeObject(forKey: Self.automaticSyncPausedPrefix + configurationID.uuidString)
+        }
+        localSyncCoordinator?.resume()
+        await prepareLocalAutomaticSync()
+    }
+
+    func disconnectLocalFolder() async throws {
+        guard phase == .ready, applicationActive, !isStorageSyncBusy, case let .local(id) = location, let localCatalog else {
+            throw LocalLedgerError.operationFailed(String(localized: "请先解锁本地账本，等待当前同步结束。"))
+        }
+        isStorageSyncBusy = true
+        defer { isStorageSyncBusy = false }
+        let epoch = sessionEpoch
+        let descriptor = try await localCatalog.disconnectFolder(ledgerID: id)
+        try requireCurrentLocalOperation(epoch: epoch, location: .local(id))
+        repositories[.local(id)] = localCatalog.repository(for: descriptor)
+        defaults.removeObject(forKey: Self.backgroundGitAuthorizationKey)
+        localSyncCoordinator?.setEligible(false)
+        LocalLedgerBackgroundSyncService.shared.setEnabled(false)
+        localSyncStatus = nil
+        await refreshLocalLedgers()
+    }
+
     func importGitLedger(repositoryURL: String, branch: String, name: String,
                          entrypoint: String, credential: LocalGitCredential?) async {
         guard !isLocalOperationBusy, !isAuthenticationBusy, let localCatalog else { return }
@@ -1123,7 +1202,7 @@ final class LedgerSession: ObservableObject {
             if latest?.phase == .conflicted {
                 localSyncStatus = latest
             } else {
-                localSyncStatus = .init(mode: latest?.mode ?? (repository.descriptor.git == nil ? .device : .git),
+                localSyncStatus = .init(mode: latest?.mode ?? Self.syncMode(of: repository.descriptor),
                     phase: .failed, lastSyncedAt: latest?.lastSyncedAt, baseCommit: latest?.baseCommit,
                     message: latest?.message ?? error.localizedDescription)
             }
@@ -1131,8 +1210,8 @@ final class LedgerSession: ObservableObject {
         }
         guard epoch == sessionEpoch, location == expectedLocation else { throw CancellationError() }
         localSyncStatus = status
-        if let config = localGitConfiguration {
-            defaults.removeObject(forKey: Self.automaticSyncPausedPrefix + config.id.uuidString)
+        if let configurationID = localSyncConfigurationID {
+            defaults.removeObject(forKey: Self.automaticSyncPausedPrefix + configurationID.uuidString)
         }
         succeeded = true
         let currentRevisionID = try? await repository.workspace.currentRevision()?.id
@@ -1162,8 +1241,8 @@ final class LedgerSession: ObservableObject {
         let status = try await repository.resolveSyncConflicts(keepingLocal: keepingLocal)
         guard epoch == sessionEpoch, location == expectedLocation else { throw CancellationError() }
         localSyncStatus = status
-        if let config = localGitConfiguration {
-            defaults.removeObject(forKey: Self.automaticSyncPausedPrefix + config.id.uuidString)
+        if let configurationID = localSyncConfigurationID {
+            defaults.removeObject(forKey: Self.automaticSyncPausedPrefix + configurationID.uuidString)
         }
         succeeded = true
         if epoch == sessionEpoch, location == expectedLocation, phase == .ready, applicationActive {
@@ -1206,11 +1285,11 @@ final class LedgerSession: ObservableObject {
     }
 
     func setLocalAutomaticSyncEnabled(_ enabled: Bool) async {
-        guard let config = localGitConfiguration else { return }
-        defaults.set(!enabled, forKey: Self.automaticSyncDisabledPrefix + config.id.uuidString)
+        guard let configurationID = localSyncConfigurationID else { return }
+        defaults.set(!enabled, forKey: Self.automaticSyncDisabledPrefix + configurationID.uuidString)
         localAutomaticSyncEnabled = enabled
         if enabled {
-            defaults.removeObject(forKey: Self.automaticSyncPausedPrefix + config.id.uuidString)
+            defaults.removeObject(forKey: Self.automaticSyncPausedPrefix + configurationID.uuidString)
             await prepareLocalAutomaticSync()
             localSyncCoordinator?.resume()
         } else {
@@ -1221,14 +1300,16 @@ final class LedgerSession: ObservableObject {
 
     private func prepareLocalAutomaticSync() async {
         guard automaticLocalSyncServicesEnabled, let repository = localRepository,
-              let config = repository.descriptor.git, phase == .ready else { return }
+              repository.descriptor.syncConfigurationID != nil, phase == .ready else { return }
         startLocalAutomaticSyncServices()
         let epoch = sessionEpoch
         let authorization = backgroundAuthorization(for: repository.descriptor)
         do {
             if defaults.string(forKey: Self.backgroundGitAuthorizationKey) != authorization {
+                // Folder sync has no Keychain credential; only the workspace needs preparing.
                 try await LocalLedgerBackgroundProtection.prepareForBackgroundSync(
-                    rootDirectory: repository.workspace.rootDirectory, configurationID: config.id)
+                    rootDirectory: repository.workspace.rootDirectory,
+                    configurationID: repository.descriptor.git?.id)
             }
             let status = try await repository.storageStatus()
             guard epoch == sessionEpoch, location == .local(repository.descriptor.id), phase == .ready else { return }
@@ -1238,28 +1319,30 @@ final class LedgerSession: ObservableObject {
             updateLocalSyncEligibility()
         } catch {
             guard epoch == sessionEpoch else { return }
-            localSyncStatus = .init(mode: .git, phase: .failed,
+            localSyncStatus = .init(mode: Self.syncMode(of: repository.descriptor), phase: .failed,
                 message: String(localized: "后台同步准备失败：\(error.localizedDescription)"))
         }
     }
 
     private func backgroundAuthorization(for descriptor: LocalLedgerDescriptor) -> String {
-        descriptor.id.uuidString + ":" + (descriptor.git?.id.uuidString ?? "")
+        descriptor.id.uuidString + ":" + (descriptor.syncConfigurationID?.uuidString ?? "")
     }
 
     private func allowsAutomaticSync(_ descriptor: LocalLedgerDescriptor) -> Bool {
-        guard automaticLocalSyncServicesEnabled, let config = descriptor.git else { return false }
+        guard automaticLocalSyncServicesEnabled, let configurationID = descriptor.syncConfigurationID else { return false }
         return defaults.string(forKey: Self.activeLocalLedgerKey) == descriptor.id.uuidString
             && defaults.string(forKey: Self.backgroundGitAuthorizationKey) == backgroundAuthorization(for: descriptor)
-            && !defaults.bool(forKey: Self.automaticSyncDisabledPrefix + config.id.uuidString)
-            && !defaults.bool(forKey: Self.automaticSyncPausedPrefix + config.id.uuidString)
+            && !defaults.bool(forKey: Self.automaticSyncDisabledPrefix + configurationID.uuidString)
+            && !defaults.bool(forKey: Self.automaticSyncPausedPrefix + configurationID.uuidString)
     }
 
     private func updateLocalSyncEligibility() {
         guard automaticLocalSyncServicesEnabled else { return }
         let descriptor = localLedgers.first { location == .local($0.id) }
         let authorized = descriptor.map(allowsAutomaticSync) ?? false
-        localSyncCoordinator?.setEligible(authorized && applicationActive && phase == .ready && localNetworkAvailable)
+        // Folder sync writes to the local iCloud Drive copy, which uploads on its own once online.
+        let reachable = localNetworkAvailable || descriptor?.folder != nil
+        localSyncCoordinator?.setEligible(authorized && applicationActive && phase == .ready && reachable)
         LocalLedgerBackgroundSyncService.shared.setEnabled(authorized)
     }
 
@@ -1331,7 +1414,7 @@ final class LedgerSession: ObservableObject {
             try Task.checkCancellation()
             guard epoch == sessionEpoch, allowsAutomaticSync(active) else { return .paused }
             if location == .local(active.id) {
-                localSyncStatus = .init(mode: .git, phase: .synchronizing,
+                localSyncStatus = .init(mode: Self.syncMode(of: active), phase: .synchronizing,
                     lastSyncedAt: previous.lastSyncedAt, baseCommit: previous.baseCommit)
             }
             let status = try await current.synchronize()
@@ -1380,12 +1463,12 @@ final class LedgerSession: ObservableObject {
             guard !Task.isCancelled, epoch == sessionEpoch else { return .retryableFailure }
             if repository != nil { localSyncStatus = status }
             let pause = Self.automaticSyncRequiresAttention(error)
-            if let config = descriptor?.git, pause {
-                defaults.set(true, forKey: Self.automaticSyncPausedPrefix + config.id.uuidString)
+            if let configurationID = descriptor?.syncConfigurationID, pause {
+                defaults.set(true, forKey: Self.automaticSyncPausedPrefix + configurationID.uuidString)
                 LocalLedgerBackgroundSyncService.shared.setEnabled(false)
             }
             if let descriptor, location == .local(descriptor.id), localSyncStatus?.phase != .conflicted {
-                localSyncStatus = .init(mode: .git, phase: .failed,
+                localSyncStatus = .init(mode: Self.syncMode(of: descriptor), phase: .failed,
                     lastSyncedAt: localSyncStatus?.lastSyncedAt, baseCommit: localSyncStatus?.baseCommit,
                     message: error.localizedDescription)
             }
@@ -1397,7 +1480,7 @@ final class LedgerSession: ObservableObject {
         if let error = error as? LocalStorageError {
             switch error {
             case .conflicts, .invalidGitConfiguration, .unsafeFile, .treeLimitExceeded,
-                 .corruptSyncState, .emptyRepository, .gitUnavailable: return true
+                 .corruptSyncState, .emptyRepository, .emptySyncFolder, .gitUnavailable: return true
             case .synchronizationInProgress: return false
             case .gitFailure: break
             }

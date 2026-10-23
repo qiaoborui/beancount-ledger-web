@@ -621,7 +621,7 @@ struct LedgerSyncToolbarButton: View {
 
     private var presentation: LocalSyncPresentation {
         LocalSyncPresentation(status: session.localSyncStatus ?? initialStatus,
-            hasGit: session.localGitConfiguration != nil,
+            hasGit: session.hasLocalRemoteSync,
             busy: session.isStorageSyncBusy || requested,
             automaticEnabled: session.localAutomaticSyncEnabled)
     }

@@ -391,7 +391,7 @@ actor GitLocalStorage: LogicalLocalStorage {
     }
 }
 
-private enum StorageTree {
+enum StorageTree {
     struct File: Sendable {
         let url: URL
         let digest: Data
@@ -527,7 +527,7 @@ private enum StorageTree {
 }
 
 /// Serializes explicit sync operations across independently opened providers.
-private final class SyncLease {
+final class SyncLease {
     private var descriptor: Int32
     init(directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
