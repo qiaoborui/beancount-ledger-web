@@ -55,6 +55,32 @@ through `LEDGER_ROOT`.
 - `.agents/` contains Agent4MD config, durable rules, project knowledge, and
   domain skills.
 
+## iOS App Version
+
+The iOS app is the shipped product, so its version number must keep moving.
+`App/LedgerMobile/project.yml` owns both numbers for all three targets (app,
+Widget, Share) through the shared `MARKETING_VERSION` and
+`CURRENT_PROJECT_VERSION` settings.
+
+- `CURRENT_PROJECT_VERSION` (CFBundleVersion) is a monotonic build number. Bump
+  it in **every** change that alters shipped behavior, UI, or bundled resources.
+  Documentation-only or test-only changes do not need a bump.
+- Do not reuse or lower a build number: SideStore and AltStore compare it to
+  decide whether a renewal actually installed a new build.
+- `MARKETING_VERSION` (CFBundleShortVersionString) only moves for a user-facing
+  release of a notable milestone, in `MAJOR.MINOR.PATCH` form. A bug fix moves
+  PATCH; new capability moves MINOR. While the app is pre-1.0, a large batch of
+  new capability may move 0.x → 0.(x+1).
+- Keep `docs/design/`, screenshots, and handoff notes out of the version
+  decision; they are not shipped artifacts.
+- When a change bumps either number, say so in the PR body. The IPA filename
+  (`LedgerMobile-<version>-<build>-SideStore.ipa`) and `build-info.txt` derive
+  from these values, so a stale number makes two different builds
+  indistinguishable on device.
+- `FEATURE_PARITY.md` next to the Xcode project records what the app actually
+  implements. Update it in the same change that ships or removes a capability.
+  Do not list planned work as if it were available.
+
 ## Development Workflow
 
 - For new feature development, create a focused branch first and open a pull

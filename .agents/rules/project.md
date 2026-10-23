@@ -11,4 +11,9 @@
   change touches ledger data.
 - For GitHub pull requests, use a focused branch and include validation results
   in the PR body.
+- Advance `App/LedgerMobile/project.yml`'s `CURRENT_PROJECT_VERSION` in every
+  change that ships behavior, and state the new version in the PR body.
+  Documentation-only and test-only changes do not bump it.
+- Keep `App/LedgerMobile/FEATURE_PARITY.md` truthful: ship or remove a capability
+  and the same change updates it. Never list planned work as available.
 
