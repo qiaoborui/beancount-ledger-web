@@ -1,8 +1,9 @@
 # 20261023-ios-docs-and-version
 
-- Status: active (PR opening; branch `codex/ios-docs-and-version`)
-- Last updated: 2026-10-23 19:20 +08:00
-- Base: `main` @ `2f50051`
+- Status: active (PR open; branch `codex/ios-docs-and-version`)
+- Last updated: 2026-10-23 19:45 +08:00
+- Base: `main` @ `149c848` (branch merged `origin/main` after opening the PR)
+- PR: https://github.com/qiaoborui/beancount-ledger-web/pull/538
 
 ## Goal
 
@@ -63,11 +64,25 @@ Verified against the source, not against the old docs:
 - **`.agents/rules/project.md`** gained two durable rules mirroring the
   version and parity requirements.
 
+## Follow-up after merging origin/main
+
+`origin/main` moved to `149c848` while the PR was open and brought a new iOS
+feature: multi-device sync through an iCloud Drive folder (`FolderLocalStorage.swift`,
+`13bd46f`). That commit shipped behaviour without advancing
+`project.yml`, which is exactly the drift this task targets.
+
+- `FEATURE_PARITY.md` gained an *iCloud Drive folder sync* row in the same change.
+- The version advanced per the new rule: `CURRENT_PROJECT_VERSION` 36 → **37**
+  (shipped behaviour) and `MARKETING_VERSION` 0.1.0 → **0.2.0** (new capability,
+  pre-1.0 MINOR bump). Both are in `App/LedgerMobile/project.yml`.
+- The merge resolved with no conflicts.
+
 ## Decisions
 
-- The version bump is **not** applied in this change. It touches documentation
-  and agent instructions only, which the new rule explicitly exempts. Applying
-  it here would contradict the rule shipped in the same commit.
+- The first commit of this task (documentation and agent instructions only) did
+  **not** bump the version, which the rule exempts. The bump arrives in the
+  second commit together with the new parity row, so the change that touches
+  shipped capability carries it.
 - The `DESIGN.md` ↔ Accounts contradiction is recorded as a gap instead of
   silently editing either side. Deciding which one is correct is a product
   decision: either the filter bar is intended and the DESIGN sentence is stale,
@@ -80,9 +95,13 @@ Verified against the source, not against the old docs:
 ## Validation
 
 - `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test` in
-  `App/LedgerMobile`: 21 tests in 2 suites passed. (The default
-  `swift` on this machine is CommandLineTools and cannot build the package;
-  set `DEVELOPER_DIR` first.)
+  `App/LedgerMobile`: 21 tests in 2 suites passed, both before and after the
+  `origin/main` merge. (The default `swift` on this machine is CommandLineTools
+  and cannot build the package; set `DEVELOPER_DIR` first.)
+- `swift build` after the merge: build complete. The merged
+  `FolderLocalStorageTests` and the portable target both compile.
+- PR 538 checks at the first revision: Plan, Bub Agent, iOS core, and Gate all
+  SUCCESS; Backend and Frontend skipped by design.
 - Relative markdown links in `README.md` and `FEATURE_PARITY.md` resolve
   (`DESIGN.md`, `Runtime/THIRD_PARTY.md`).
 - Not run: the Xcode scheme tests and UI suite. No Swift source changed, so the
@@ -99,5 +118,5 @@ Verified against the source, not against the old docs:
 
 ## Next concrete action
 
-Open the PR for this branch, state in the body that no version bump applies
-(documentation-only) and quote the `swift test` result.
+PR 538 is open and green. Remaining: wait for the re-run after the merge commit
+and the 0.2.0 (37) bump, then merge.

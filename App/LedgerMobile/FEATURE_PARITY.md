@@ -31,6 +31,7 @@ push — stay out of scope by design, not as pending work.
 | Natural-language bookkeeping | One-sentence drafts through an OpenAI-compatible endpoint the user configures, edited and confirmed before writing | Network opt-in | `NaturalLanguageBookkeepingView.swift`, `BookkeepingSettings.swift` |
 | Backup and restore | iCloud Drive (or any folder) snapshots with hash verification, restore into the current ledger or as a new one, daily automatic backup | Local read/write | `LocalLedgerBackup*.swift` |
 | Git synchronization | HTTPS remote, branch, Keychain credentials, pull/validate/push, conflict review and resolution, automatic sync | Network | `GitLocalStorage.swift`, `LocalLedgerAutoSyncCoordinator.swift` |
+| iCloud Drive folder sync | Third storage provider beside device-only and Git: a picked folder holds immutable content-addressed snapshots plus one head file per device; peers merge three-way and reuse the conflict review; no push, so peers are picked up on save, foreground, periodic or background sync, or 立即同步 | Local read/write over iCloud Drive | `FolderLocalStorage.swift`, `LocalLedgerStorageView.swift` |
 | App Intents and URL routes | Open a page, search, `ledger://` deep links, Dynamic Island entry notice | Read | `LedgerAppIntents.swift`, `LedgerExternalRoute.swift` |
 
 ## Deliberately out of scope
