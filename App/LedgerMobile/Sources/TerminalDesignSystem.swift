@@ -89,7 +89,7 @@ struct TerminalPageChrome: ViewModifier {
 
     @ViewBuilder private var trailingControls: some View {
         if showsTimeRange { TerminalDateRangeButton().fixedSize(horizontal: true, vertical: false) }
-        if showsSync && (!session.isLocal || session.localGitConfiguration != nil) {
+        if showsSync && (!session.isLocal || session.hasLocalRemoteSync) {
             TerminalSyncButton()
         }
         actions
@@ -112,7 +112,7 @@ struct TerminalPageChrome: ViewModifier {
                     ToolbarItem(placement: .topBarTrailing) {
                         HStack(spacing: 8) {
                             if showsTimeRange { TerminalDateRangeButton() }
-                            if showsSync && (!session.isLocal || session.localGitConfiguration != nil) { TerminalSyncButton() }
+                            if showsSync && (!session.isLocal || session.hasLocalRemoteSync) { TerminalSyncButton() }
                             actions
                         }
                     }
@@ -273,7 +273,7 @@ private struct TerminalSyncButton: View {
 
     private var presentation: LocalSyncPresentation {
         LocalSyncPresentation(status: session.localSyncStatus,
-            hasGit: session.localGitConfiguration != nil,
+            hasGit: session.hasLocalRemoteSync,
             busy: session.isStorageSyncBusy,
             automaticEnabled: session.localAutomaticSyncEnabled)
     }

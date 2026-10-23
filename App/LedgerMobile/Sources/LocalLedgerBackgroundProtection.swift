@@ -6,13 +6,13 @@ import Foundation
 enum LocalLedgerBackgroundProtection {
     static func prepareForBackgroundSync(
         rootDirectory: URL,
-        configurationID: UUID,
+        configurationID: UUID?,
         credentials: any LocalGitCredentialStoring = DeviceLocalGitCredentialStore()
     ) async throws {
         let task = Task.detached(priority: .utility) {
             try migrateTree(at: rootDirectory)
             try Task.checkCancellation()
-            try credentials.prepareForBackgroundSync(for: configurationID)
+            if let configurationID { try credentials.prepareForBackgroundSync(for: configurationID) }
         }
         try await withTaskCancellationHandler {
             try await task.value
