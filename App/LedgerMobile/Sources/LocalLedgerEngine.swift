@@ -401,9 +401,9 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     }
 
     /// Apply the native Go soft heap limit (GOMEMLIMIT) from the shell's
-    /// available-memory reading. Called once at launch; a zero reading (unknown,
-    /// or unsupported on the simulator) keeps the runtime default. The limit is
-    /// soft: it targets GC rather than capping allocations.
+    /// available-memory reading. Called once at launch; a zero or unknown
+    /// reading keeps the runtime default. The limit is soft: it targets GC
+    /// rather than capping allocations.
     static func configureNativeMemoryLimit(availableBytes: Int64) {
         #if canImport(LedgerCore)
         _ = try? nativeControlResponse(
@@ -413,8 +413,10 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
 
     /// Report os_proc_available_memory() during launch, before the first model
     /// registration, when the reading is closest to the process's full budget.
+    /// The simulator does not model the device's jetsam budget, so it keeps the
+    /// runtime default just like an unknown reading does.
     static func configureNativeMemoryLimitFromSystem() {
-        #if os(iOS) && canImport(LedgerCore)
+        #if os(iOS) && !targetEnvironment(simulator) && canImport(LedgerCore)
         configureNativeMemoryLimit(availableBytes: Int64(os_proc_available_memory()))
         #endif
     }
