@@ -21,7 +21,7 @@
 
 ## 已完成与验证
 
-- Python：`PYTHONPATH=. /Users/qiaoborui/Developer/beancount/.shared-tools/py312/bin/python -m unittest test_ledger_validator`（集成分支 32 tests OK，含新增 golden SHA-256、投影前拒绝、等价性与计时测试）。
+- Python（需要 beancount 3.2.3 的 3.12 解释器，解释器路径属本机环境，见本地 checkpoint）：`PYTHONPATH=. python3 -m unittest test_ledger_validator`（集成分支 32 tests OK，含新增 golden SHA-256、投影前拒绝、等价性与计时测试）。
 - Go：集成分支 `go test ./...` 全绿、`go build ./cmd/...` OK；新增 commit/test 覆盖 promote/adopt 拒绝矩阵、release-idle、二分起点与翻页完整性。
 - Swift：集成分支 `swift test` 745+ tests，仅 2 个本机既有环境失败（见下）；`swift build --triple arm64-apple-ios17.0 --sdk …` OK；`Package.swift` 只把新增 `LocalLedgerPerformance.swift` 加入 portable sources。
 - 关键数字（宿主 macOS arm64，非真机）：预检 0.639s→0.039s；预算检查 1.58s→0.64s、隔离导出 3.66s→2.50s（字节不变）；窄区间首页扫描 100,501→501 行；100k 一次写 Go 导入 2→1 次（约 −7.8s），adopt 浅拷贝 44ms，发布后首读 12s→4.2s。
