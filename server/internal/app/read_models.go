@@ -24,7 +24,8 @@ type BootstrapResult struct {
 	MonthEndNetWorth   []NetWorthPoint          `json:"monthEndNetWorth"`
 	NetWorthWindows    *NetWorthWindows         `json:"netWorthWindows"`
 	CreditCards        []CreditCardAnalytics    `json:"creditCards"`
-	Investments        InvestmentSummary        `json:"investments"`
+	// Null on the native bootstrap page, which has its own investments endpoint.
+	Investments        *InvestmentSummary       `json:"investments,omitempty"`
 	Transactions       []Transaction            `json:"transactions"`
 	ReconciliationRows []ReconciliationRow      `json:"reconciliationRows"`
 	Accounts           []Account                `json:"accounts"`

@@ -642,3 +642,12 @@ func status(ok bool, yes, no int) int {
 	}
 	return no
 }
+
+// statusInvestments keeps the legacy bootstrap's investment summary on the wire
+// while letting the native page omit it entirely.
+func statusInvestments(unlocked bool, summary InvestmentSummary, include bool) *InvestmentSummary {
+	if !unlocked || !include {
+		return nil
+	}
+	return &summary
+}

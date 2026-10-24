@@ -44,7 +44,7 @@ func localBootstrapPageResponse(cfg Config, snapshot *LedgerSnapshot, query map[
 	if err != nil || status != http.StatusOK {
 		return status, nil, err
 	}
-	summary := buildLedgerBootstrap(snapshot, start, end, true, query["valuationCurrency"], today, false)
+	summary := buildLedgerBootstrap(snapshot, start, end, true, query["valuationCurrency"], today, false, false)
 	payload := localBootstrapPage{Bootstrap: summary, TransactionPage: page}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

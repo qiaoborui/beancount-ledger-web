@@ -148,7 +148,7 @@ func TestBootstrapResultJSONContract(t *testing.T) {
 		NetWorthHistory:    []NetWorthPoint{},
 		MonthEndNetWorth:   []NetWorthPoint{},
 		CreditCards:        []CreditCardAnalytics{},
-		Investments:        InvestmentSummary{},
+		Investments:        &InvestmentSummary{},
 		Transactions:       []Transaction{},
 		ReconciliationRows: []ReconciliationRow{},
 		Accounts:           []Account{},
