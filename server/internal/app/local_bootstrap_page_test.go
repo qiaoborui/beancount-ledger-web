@@ -206,7 +206,7 @@ func TestLocalBootstrapPageCombinedEnvelopeBudget(t *testing.T) {
 	if status != 200 || err != nil || len(page) > localTransactionPageBytes {
 		t.Fatal("page alone must fit", status, err)
 	}
-	accounting, _ := json.Marshal(buildLedgerBootstrap(snapshot, q["start"], q["end"], true, "CNY", q["today"], false, false))
+	accounting, _ := json.Marshal(buildLedgerBootstrap(snapshot, q["start"], q["end"], true, "CNY", q["today"], false, false, true))
 	if len(accounting) > localTransactionPageBytes-4096 {
 		t.Fatal("accounting alone must fit")
 	}

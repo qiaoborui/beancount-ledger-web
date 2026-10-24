@@ -283,7 +283,7 @@ func (s *LedgerReadService) IncomeStatement(start, end string, unlocked bool, ra
 }
 
 func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency, today string) BootstrapResult {
-	return buildLedgerBootstrap(snapshot, start, end, unlocked, rawValuationCurrency, today, true, true)
+	return buildLedgerBootstrap(snapshot, start, end, unlocked, rawValuationCurrency, today, true, true, false)
 }
 
 // Native bounded bootstrap uses the same complete accounting projections but
@@ -293,7 +293,9 @@ func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 // (LedgerBootstrap) has no investment member and the app fetches that detail
 // from /api/ledger/investments, so building it only spent the page byte budget.
 // The legacy bootstrap keeps including it because the web client reads it.
-func buildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency, today string, includeTransactions, includeInvestments bool) BootstrapResult {
+// scopePrices is true for the native page, which needs only the rates inside the
+// visible range plus one anchor per currency pair rather than the whole history.
+func buildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency, today string, includeTransactions, includeInvestments, scopePrices bool) BootstrapResult {
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards, allNetWorthRows := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
@@ -329,7 +331,7 @@ func buildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 		ReconciliationRows: reconciliationRows,
 		Accounts:           snapshot.Accounts,
 		Commodities:        snapshot.Commodities,
-		Prices:             snapshot.Prices,
+		Prices:             bootstrapPrices(snapshot, start, end, scopePrices),
 		ValuationCurrency:  valuationCurrency,
 		IncomeStatement:    incomeStatement,
 		AccountStatuses:    accountStatuses,
