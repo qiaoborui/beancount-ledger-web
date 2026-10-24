@@ -57,10 +57,20 @@ actor EmbeddedBeancountValidator {
         let entries: Int
         let bytes: Int
         let sha256: String
+        /// Per-stage loader milliseconds (parse/booking/plugins/validate).
+        /// Present only when the Python timing sink was explicitly enabled;
+        /// older exporters omit it and decoding stays compatible.
+        var timings: [String: Double]? = nil
     }
 
     func exportCanonical(workspace: URL, entryFile: String = "main.bean", to output: URL) throws -> StreamDescriptor {
         #if canImport(BeancountRuntime)
+        // Ask the Python loader for its stage breakdown for this export only.
+        // The canonical records themselves are unaffected; the timings ride in
+        // the reply descriptor, never in the stream.
+        LocalLedgerPerformance.preparePythonTimings()
+        let interval = LocalLedgerPerformance.begin(.pythonExport)
+        defer { LocalLedgerPerformance.end(interval) }
         try initializeIfNeeded()
         let root = workspace.resolvingSymlinksInPath().standardizedFileURL
         let parent = output.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
@@ -88,6 +98,9 @@ actor EmbeddedBeancountValidator {
               descriptor.bytes > 0, descriptor.bytes <= 256 * 1024 * 1024,
               descriptor.entries >= 0, descriptor.sha256.count == 64 else {
             throw ValidationError(message: String(localized: "本地模型导出描述无效"))
+        }
+        if let timings = descriptor.timings {
+            LocalLedgerPerformance.recordPythonTimings(timings)
         }
         return descriptor
         #else
@@ -119,6 +132,8 @@ actor EmbeddedBeancountValidator {
 
     private func load(workspace: URL, entryFile: String, includeCanonical: Bool) throws -> Result {
         #if canImport(BeancountRuntime)
+        let interval = LocalLedgerPerformance.begin(.pythonLoad)
+        defer { LocalLedgerPerformance.end(interval) }
         try initializeIfNeeded()
         let pointer = workspace.path.withCString { root in
             entryFile.withCString { entry in

@@ -223,6 +223,8 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         var small = request
         small.canonical = nil
         small.modelHandle = cached
+        let pageInterval = LocalLedgerPerformance.begin(.goPage)
+        defer { LocalLedgerPerformance.end(pageInterval) }
         let result = try nativeResponse(small)
         guard !result.modelUnavailable else {
             // The generation moved or the core evicted the model. Drop the stale
@@ -264,6 +266,8 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         var small = request
         small.canonical = nil
         small.modelHandle = handle
+        let pageInterval = LocalLedgerPerformance.begin(.goPage)
+        defer { LocalLedgerPerformance.end(pageInterval) }
         let result = try nativeResponse(small)
         // Fail stale reads safely; do not retry financial writes automatically.
         if result.modelUnavailable {
@@ -296,6 +300,8 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
 
     private func serializedValidateCanonical(workspaceRoot: String, runtimeRoot: String, entrypoint: String) async throws {
         #if canImport(LedgerCore)
+        let interval = LocalLedgerPerformance.begin(.canonicalValidate)
+        defer { LocalLedgerPerformance.end(interval) }
         var command = LocalLedgerEngineRequest(workspaceRoot: workspaceRoot, runtimeRoot: runtimeRoot,
             entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
         command.operation = "model-source"
@@ -341,6 +347,8 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     #if canImport(LedgerCore)
 
     private func register(_ request: LocalLedgerEngineRequest) async throws -> String {
+        let interval = LocalLedgerPerformance.begin(.goRegister)
+        defer { LocalLedgerPerformance.end(interval) }
         var command = request
         command.operation = "model-source"
         command.body = nil; command.importFile = nil; command.canonical = nil; command.modelHandle = nil
@@ -384,6 +392,8 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         command.sourceVersion = version.sourceVersion
         command.streamFile = filename
         struct Registration: Decodable { let handle: String }
+        let registerInterval = LocalLedgerPerformance.begin(.goModelRegister)
+        defer { LocalLedgerPerformance.end(registerInterval) }
         return try nativeResponse(command).decode(Registration.self).handle
     }
     #endif
