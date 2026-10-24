@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -17,6 +18,150 @@ func pageFixture(n int) (Config, *LedgerSnapshot) {
 	}
 	prepareLedgerSnapshot(snapshot)
 	return cfg, snapshot
+}
+
+// datedPageFixture builds a pageFixture whose transactions use the provided
+// dates in insertion order, then rebuilds both sorted views. Source lines stay
+// 1..len(dates), so pagination order is observable through Source.Line.
+func datedPageFixture(dates []string) (Config, *LedgerSnapshot) {
+	cfg, snapshot := pageFixture(len(dates))
+	for i, date := range dates {
+		snapshot.Transactions[i].Date = date
+	}
+	snapshot.transactionsAsc, snapshot.transactionsDesc = sortedTransactionIndices(snapshot.Transactions)
+	return cfg, snapshot
+}
+
+func firstTransactionIndexBeforeLinear(txns transactionOrder, end string) int {
+	for index := 0; index < txns.Len(); index++ {
+		if txns.At(index).Date < end {
+			return index
+		}
+	}
+	return txns.Len()
+}
+
+// The descending scan must begin exactly at the first row older than the range
+// end, and never move a continuation cursor backwards.
+func TestLocalTransactionScanStartMatchesLinearDefinition(t *testing.T) {
+	dates := make([]string, 0, 100_000)
+	for i := 0; i < 90_000; i++ {
+		dates = append(dates, "2026-09-01")
+	}
+	for i := 0; i < 5_000; i++ {
+		dates = append(dates, "2025-01-15")
+	}
+	for i := 0; i < 5_000; i++ {
+		dates = append(dates, "2024-01-15")
+	}
+	_, snapshot := datedPageFixture(dates)
+	txns := snapshotTransactionsDesc(snapshot)
+	for _, end := range []string{
+		"0001-01-01", "2024-01-14", "2024-01-15", "2024-01-16", "2024-06-01",
+		"2025-01-14", "2025-01-15", "2025-01-16", "2025-02-01",
+		"2026-08-31", "2026-09-01", "2026-09-02", "9999-12-31",
+	} {
+		if got, want := firstTransactionIndexBefore(txns, end), firstTransactionIndexBeforeLinear(txns, end); got != want {
+			t.Fatalf("binary start for end %s = %d, linear scan = %d", end, got, want)
+		}
+	}
+	const firstInRange = 90_000
+	if got := localTransactionScanStart(txns, 0, "2025-02-01"); got != firstInRange {
+		t.Fatalf("fresh narrow page starts at %d, want first in-range row %d", got, firstInRange)
+	}
+	// A continuation cursor inside the range keeps its absolute position.
+	if got := localTransactionScanStart(txns, firstInRange+700, "2025-02-01"); got != firstInRange+700 {
+		t.Fatalf("continuation moved to %d, want %d", got, firstInRange+700)
+	}
+	// Even a cursor hypothetically inside the skipped prefix is only advanced.
+	if got := localTransactionScanStart(txns, firstInRange/2, "2025-02-01"); got != firstInRange {
+		t.Fatalf("prefix offset was not advanced to the range start: %d", got)
+	}
+}
+
+// A narrow page must not walk the newer transactions it cannot return. The
+// probe counts rows the production loop examines, so this fails loudly if the
+// scan ever starts from the head again.
+func TestLocalPageNarrowRangeSkipsNewerPrefixWithoutOmission(t *testing.T) {
+	const prefix, inRange = 100_000, 2_000
+	dates := make([]string, 0, prefix+inRange)
+	for i := 0; i < prefix; i++ {
+		dates = append(dates, "2026-09-01")
+	}
+	for i := 0; i < inRange; i++ {
+		dates = append(dates, "2025-01-15")
+	}
+	cfg, snapshot := datedPageFixture(dates)
+	var scanned atomic.Int64
+	localPageScanProbe = &scanned
+	t.Cleanup(func() { localPageScanProbe = nil })
+
+	query := map[string]string{"start": "2025-01-01", "end": "2025-02-01", "limit": "500"}
+	seen := map[int]bool{}
+	for pageIndex := 0; pageIndex < 4; pageIndex++ {
+		scanned.Store(0)
+		status, raw, err := localTransactionPageResponse(cfg, snapshot, query)
+		if status != http.StatusOK || err != nil {
+			t.Fatalf("page %d status=%d err=%v", pageIndex, status, err)
+		}
+		// 500 rows plus the row that proves the page is full; the 100k newer
+		// prefix must not be visited at all.
+		if got := scanned.Load(); got > 501 {
+			t.Fatalf("page %d examined %d rows, want at most 501 (newer prefix rescanned)", pageIndex, got)
+		}
+		var page localTransactionPage
+		if err := json.Unmarshal(raw, &page); err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range page.Transactions {
+			if seen[row.Source.Line] {
+				t.Fatalf("duplicate row %d", row.Source.Line)
+			}
+			seen[row.Source.Line] = true
+			if row.Source.Line <= prefix || row.Source.Line > prefix+inRange {
+				t.Fatalf("out-of-range row %d", row.Source.Line)
+			}
+		}
+		if pageIndex == 0 {
+			decoded, err := decodeLocalCursor(page.NextCursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The absolute index stays in the full descending order.
+			if want := prefix + 500; decoded.Offset != want {
+				t.Fatalf("cursor offset = %d, want absolute %d", decoded.Offset, want)
+			}
+		}
+		if (page.NextCursor == "") != (pageIndex == 3) {
+			t.Fatalf("page %d continuation = %q", pageIndex, page.NextCursor)
+		}
+		query["cursor"] = page.NextCursor
+	}
+	if len(seen) != inRange {
+		t.Fatalf("narrow range returned %d rows, want %d", len(seen), inRange)
+	}
+	for line := prefix + 1; line <= prefix+inRange; line++ {
+		if !seen[line] {
+			t.Fatalf("row %d omitted", line)
+		}
+	}
+}
+
+// An empty intersected query range must stay empty (the date terms cancel out).
+func TestLocalPageEmptyFilteredDateRangeStaysEmpty(t *testing.T) {
+	cfg, snapshot := datedPageFixture([]string{"2024-06-01", "2025-06-01", "2026-06-01"})
+	query := map[string]string{"q": "date>2026-01-01 date<2025-01-01", "limit": "500"}
+	status, raw, err := localTransactionPageResponse(cfg, snapshot, query)
+	if status != http.StatusOK || err != nil {
+		t.Fatalf("status=%d err=%v", status, err)
+	}
+	var page localTransactionPage
+	if err := json.Unmarshal(raw, &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Transactions) != 0 || page.NextCursor != "" {
+		t.Fatalf("empty range returned %d rows cursor=%q", len(page.Transactions), page.NextCursor)
+	}
 }
 
 func TestLocalPage100kHasCompleteStablePagination(t *testing.T) {
