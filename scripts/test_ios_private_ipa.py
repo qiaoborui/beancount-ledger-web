@@ -1,4 +1,5 @@
 """Host-independent guards for private-only IPA packaging (stdlib only)."""
+import json
 import os
 from pathlib import Path
 import re
@@ -102,6 +103,41 @@ class PrivateIPATests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/ios-ipa.yml").read_text()
         self.assertIn("fetch-depth: 0", workflow,
                       "packaging reads the release tag, so the checkout needs tag history")
+
+    def test_ios_workflow_does_not_trigger_every_component(self):
+        """An iOS-only workflow change must not run the backend, agent or web jobs.
+
+        Treating every workflow edit as a change to everything let an unrelated
+        upstream advisory block an iOS pull request that never touched them.
+        """
+        plan = plan_components(".github/workflows/ios-ipa.yml")
+        self.assertEqual(plan["ios"], True)
+        self.assertEqual(plan["backend"], False)
+        self.assertEqual(plan["agent"], False)
+        self.assertEqual(plan["web"], False)
+
+    def test_shared_workflows_still_trigger_every_job(self):
+        """Workflows that build several components must keep doing so."""
+        for workflow in ("ci.yml", "deploy-selfhost.yml"):
+            plan = plan_components(f".github/workflows/{workflow}")
+            for component in ("backend", "agent", "web", "ios"):
+                self.assertEqual(plan[component], True, f"{workflow} / {component}")
+
+    def test_publish_images_keeps_its_components_but_skips_ios(self):
+        plan = plan_components(".github/workflows/publish-images.yml")
+        self.assertEqual(plan["backend"], True)
+        self.assertEqual(plan["agent"], True)
+        self.assertEqual(plan["web"], True)
+        self.assertEqual(plan["ios"], False)
+
+
+def plan_components(*paths):
+    """Run the planner for the given changed paths and return its JSON result."""
+    result = subprocess.run(
+        ["bash", str(ROOT / ".github/scripts/plan-components.sh")],
+        input="\n".join(paths) + "\n", capture_output=True, text=True, check=True,
+    )
+    return json.loads(result.stdout)
 
 
 if __name__ == "__main__":

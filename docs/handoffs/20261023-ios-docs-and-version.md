@@ -1,7 +1,7 @@
 # 20261023-ios-docs-and-version
 
 - Status: active (PR open; branch `codex/ios-docs-and-version`)
-- Last updated: 2026-10-24 10:55 +08:00
+- Last updated: 2026-10-24 11:15 +08:00
 - Base: `main` @ `149c848` (branch merged `origin/main` after opening the PR)
 - PR: https://github.com/qiaoborui/beancount-ledger-web/pull/538
 
@@ -63,6 +63,32 @@ Verified against the source, not against the old docs:
   where the three docs live, where the version lives).
 - **`.agents/rules/project.md`** gained two durable rules mirroring the
   version and parity requirements.
+
+## Follow-up: an unrelated advisory blocked the PR
+
+CI flipped to failure after the packaging change. The failing job was
+*Frontend*, on an iOS-only pull request. Two separate problems:
+
+1. **Upstream advisories.** `pnpm audit --audit-level=high` reported a critical
+   DOMPurify SAFE_FOR_TEMPLATES bypass (`dompurify` 3.4.7, patched in 3.4.17)
+   plus high findings in `zod` (patched 4.6.6) and `undici` (patched 8.12.2).
+   The same job passed on the previous commit, so the advisories were published
+   in between. Fixed with `pnpm.overrides` in `web/package.json`, the mechanism
+   the repo already uses for `browserslist` and `source-map-js`. Audit is now
+   3 low and 7 moderate, below the threshold.
+2. **Over-broad planning.** `.github/scripts/plan-components.sh` mapped every
+   `.github/workflows/*` change to backend, agent, web and iOS, so touching
+   `ios-ipa.yml` ran the whole suite. Now `ios-ipa.yml` triggers only iOS,
+   `publish-images.yml` keeps backend/agent/web (it builds those images) but no
+   longer iOS, and other workflows keep their previous behaviour. Three
+   regression tests in `scripts/test_ios_private_ipa.py` pin this, and that
+   file already runs in the Plan checks job.
+
+Local frontend checks: `pnpm typecheck` passes. `pnpm test` reports 16 failures
+in `writeReliability.test.tsx` that reproduce on a stashed baseline too: this
+machine runs Node 26, which exposes its own experimental `localStorage` and
+collides with the test's jsdom environment. CI uses Node 24, where the same job
+has been green. Not a regression from this change.
 
 ## Follow-up: releases are tags, builds are automatic
 
