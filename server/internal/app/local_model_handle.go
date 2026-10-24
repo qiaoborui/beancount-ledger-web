@@ -111,6 +111,26 @@ func localModelLedgerKey(root string) string {
 	return root
 }
 
+// localModelLedgerRoot maps both managed layouts to the ledger that owns them:
+// <ledger>/generations/<id>/workspace and <ledger>/staging/<id>/workspace both
+// belong to <ledger>. Promotion/adoption cross from one layout to the other, so
+// they must agree on the ledger even though the roots differ.
+func localModelLedgerRoot(root string) string {
+	if container := filepath.Dir(filepath.Dir(root)); filepath.Base(container) == "generations" ||
+		filepath.Base(container) == "staging" {
+		return filepath.Dir(container)
+	}
+	return root
+}
+
+func newLocalModelHandle() (string, error) {
+	token := make([]byte, 24)
+	if _, err := rand.Read(token); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(token), nil
+}
+
 // Caller holds localModels.
 func insertCommittedLocalModel(registered *localRegisteredModel) {
 	ledger := localModelLedgerKey(registered.root)
@@ -216,21 +236,15 @@ func RegisterLocalModel(input LocalRequest, streamName, expectedVersion string) 
 	if after.Version != expectedVersion {
 		return "", errors.New("source changed during canonical registration")
 	}
-	token := make([]byte, 24)
-	if _, err := rand.Read(token); err != nil {
+	handle, err := newLocalModelHandle()
+	if err != nil {
 		return "", err
 	}
-	handle := hex.EncodeToString(token)
-	cfg.localCanonical = model
 	// ReadLocalCanonicalStream created this model exclusively for this cache.
 	// Unlike caller-supplied legacy JSON, its arrays may become the primary
 	// normalized semantic entries without retaining another rich copy.
-	cfg.localCanonicalOwned = true
-	cfg.localCanonicalVersion = expectedVersion
-	cache := NewLedgerCache(cfg)
-	cache.stamps, cache.stampVersion = stamps, after
-	registered := &localRegisteredModel{handle: handle, root: cfg.LedgerRoot, entrypoint: cfg.localEntrypoint, version: expectedVersion,
-		model: model, cache: cache, stamps: stamps, staging: input.Staging, estimate: opened.Size() * localModelEstimateFactor}
+	registered := bindLocalRegisteredModel(cfg, model, handle, expectedVersion, stamps, after,
+		input.Staging, opened.Size()*localModelEstimateFactor)
 	localModels.Lock()
 	defer localModels.Unlock()
 	if input.Staging {
@@ -239,6 +253,210 @@ func RegisterLocalModel(input LocalRequest, streamName, expectedVersion string) 
 		insertCommittedLocalModel(registered)
 	}
 	return handle, nil
+}
+
+// bindLocalRegisteredModel builds the per-root cache and registry entry for a
+// canonical model that is already known to match `version` at cfg.LedgerRoot.
+// The model must be exclusively owned by the returned registration.
+func bindLocalRegisteredModel(cfg Config, model *LocalCanonicalModel, handle, version string,
+	stamps *localSourceStamps, stampVersion LedgerVersion, staging bool, estimate int64) *localRegisteredModel {
+	cfg.localCanonical = model
+	cfg.localCanonicalOwned = true
+	cfg.localCanonicalVersion = version
+	cache := NewLedgerCache(cfg)
+	cache.stamps, cache.stampVersion = stamps, stampVersion
+	return &localRegisteredModel{handle: handle, root: cfg.LedgerRoot, entrypoint: cfg.localEntrypoint, version: version,
+		model: model, cache: cache, stamps: stamps, staging: staging, estimate: estimate}
+}
+
+// PromoteLocalModel turns a retained stage registration into the committed
+// model for a just-published generation. Stage and generation must hold
+// byte-identical sources (the same sourceVersion); generation layout, ledger,
+// entrypoint and handle lifetime are rechecked here, and every mismatch fails
+// closed so the caller can fall back to a full registration.
+func PromoteLocalModel(input LocalRequest, handle, expectedVersion string) (string, error) {
+	if input.Canonical != nil || input.ModelHandle != "" || handle == "" || expectedVersion == "" {
+		return "", errors.New("invalid model promotion")
+	}
+	cfg, err := localConfig(input)
+	if err != nil {
+		return "", err
+	}
+	if input.Staging || filepath.Base(filepath.Dir(filepath.Dir(cfg.LedgerRoot))) != "generations" {
+		return "", errors.New("model promotion target must be a committed generation")
+	}
+	stamps := &localSourceStamps{}
+	version, err := ledgerVersionStamped(cfg, stamps)
+	if err != nil {
+		return "", err
+	}
+	if version.Version != expectedVersion {
+		return "", errors.New("promoted model source does not match the generation")
+	}
+	localModels.Lock()
+	defer localModels.Unlock()
+	stage := localModels.staged
+	if stage == nil || stage.handle != handle {
+		return "", errors.New("stage model is no longer registered")
+	}
+	if !stage.staging || stage.version != expectedVersion || stage.entrypoint != cfg.localEntrypoint ||
+		stage.root == cfg.LedgerRoot || localModelLedgerRoot(stage.root) != localModelLedgerRoot(cfg.LedgerRoot) {
+		return "", errors.New("stage model does not belong to this generation")
+	}
+	// The version above is a full content hash of the target; the stamps prove
+	// the same bytes are still in place unless glob includes make that
+	// unprovable, in which case registration relies on the hash alone.
+	if !stamps.unusable && !stamps.matches() {
+		return "", errors.New("generation source changed during promotion")
+	}
+	if err := rebindLocalCanonicalModelRoot(stage.model, stage.root, cfg.LedgerRoot); err != nil {
+		return "", err
+	}
+	promotedHandle, err := newLocalModelHandle()
+	if err != nil {
+		return "", err
+	}
+	promoted := bindLocalRegisteredModel(cfg, stage.model, promotedHandle, expectedVersion, stamps, version,
+		false, stage.estimate)
+	localModels.staged = nil
+	insertCommittedLocalModel(promoted)
+	return promotedHandle, nil
+}
+
+// AdoptLocalModel creates the one-shot stage registration for a staging request
+// from an equivalent committed model. Both roots must belong to the same ledger
+// and hold byte-identical sources, and the committed model must still be
+// registered. The returned registration owns a fresh cache and its own copy of
+// the canonical entry and posting arrays, so no mutable state is shared with the
+// committed model; releasing or mutating it cannot affect that model.
+func AdoptLocalModel(input LocalRequest, sourceHandle, expectedVersion string) (string, error) {
+	if input.Canonical != nil || input.ModelHandle != "" || sourceHandle == "" || expectedVersion == "" {
+		return "", errors.New("invalid model adoption")
+	}
+	if !input.Staging {
+		return "", errors.New("model adoption requires a staging workspace")
+	}
+	cfg, err := localConfig(input)
+	if err != nil {
+		return "", err
+	}
+	if filepath.Base(filepath.Dir(filepath.Dir(cfg.LedgerRoot))) != "staging" {
+		return "", errors.New("model adoption target must be a staging workspace")
+	}
+	stamps := &localSourceStamps{}
+	version, err := ledgerVersionStamped(cfg, stamps)
+	if err != nil {
+		return "", err
+	}
+	if version.Version != expectedVersion {
+		return "", errors.New("staging source does not match the committed model")
+	}
+	localModels.Lock()
+	source := committedLocalModel(sourceHandle)
+	usable := source != nil && !source.staging && source.version == expectedVersion &&
+		source.entrypoint == cfg.localEntrypoint &&
+		localModelLedgerRoot(source.root) == localModelLedgerRoot(cfg.LedgerRoot)
+	localModels.Unlock()
+	if !usable {
+		return "", errors.New("committed model does not match the staging workspace")
+	}
+	// Snapshot builds normalize the committed model's owned entry arrays under
+	// its cache mutex. Copy under that mutex so a concurrent first read can never
+	// observe a half-normalized model.
+	source.cache.mu.Lock()
+	clone, err := cloneLocalCanonicalModelForWorkspace(source.model)
+	source.cache.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	handle, err := newLocalModelHandle()
+	if err != nil {
+		return "", err
+	}
+	localModels.Lock()
+	defer localModels.Unlock()
+	// Recheck the source after the copy: it must still be the registered model.
+	if current := committedLocalModel(sourceHandle); current != source || current.version != expectedVersion {
+		return "", errors.New("committed model changed during adoption")
+	}
+	if !stamps.unusable && !stamps.matches() {
+		return "", errors.New("staging source changed during adoption")
+	}
+	adopted := bindLocalRegisteredModel(cfg, clone, handle, expectedVersion, stamps, version, true, source.estimate)
+	localModels.staged = adopted
+	return handle, nil
+}
+
+// cloneLocalCanonicalModelForWorkspace copies an owned canonical model so it can
+// be normalized against another workspace root. Entry structs, posting arrays
+// and source path strings are copied; the immutable option/commodity catalogs
+// and metadata values are shared. Callers must hold the source cache mutex.
+func cloneLocalCanonicalModelForWorkspace(model *LocalCanonicalModel) (*LocalCanonicalModel, error) {
+	if model == nil {
+		return nil, errors.New("canonical model is missing")
+	}
+	root := model.normalizedRoot
+	entries := make([]BeanEntry, len(model.Entries))
+	for index, entry := range model.Entries {
+		clone := entry
+		file := entry.File
+		switch {
+		case file == "":
+		case root == "" && filepath.IsAbs(file):
+			return nil, errors.New("canonical ledger source must be relative")
+		case root != "":
+			relative, err := filepath.Rel(root, file)
+			if err != nil || filepath.IsAbs(relative) || relative == ".." ||
+				strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				return nil, errors.New("canonical ledger source escapes its workspace")
+			}
+			file = relative
+		}
+		clone.File = filepath.ToSlash(file)
+		if len(entry.Postings) > 0 {
+			clone.Postings = append([]parsedPosting(nil), entry.Postings...)
+		}
+		entries[index] = clone
+	}
+	return &LocalCanonicalModel{Version: model.Version, Entries: entries,
+		Options: model.Options, Commodities: model.Commodities}, nil
+}
+
+// rebindLocalCanonicalModelRoot rewrites a normalized model's absolute source
+// paths from the workspace it was normalized for onto a workspace holding the
+// same bytes. A model that was never normalized keeps relative paths and needs
+// no rewrite; anything unexpected fails closed.
+func rebindLocalCanonicalModelRoot(model *LocalCanonicalModel, oldRoot, newRoot string) error {
+	if model == nil {
+		return errors.New("canonical model is missing")
+	}
+	if model.normalizedRoot == "" {
+		for _, entry := range model.Entries {
+			if entry.File != "" && filepath.IsAbs(entry.File) {
+				return errors.New("canonical ledger source must be relative")
+			}
+		}
+		return nil
+	}
+	if model.normalizedRoot != oldRoot {
+		return errors.New("canonical model belongs to another workspace")
+	}
+	prefix := oldRoot + string(filepath.Separator)
+	for index := range model.Entries {
+		file := model.Entries[index].File
+		if file == "" {
+			continue
+		}
+		if !filepath.IsAbs(file) {
+			return errors.New("canonical ledger source must be absolute once normalized")
+		}
+		if !strings.HasPrefix(file, prefix) {
+			return errors.New("canonical ledger source escapes its workspace")
+		}
+		model.Entries[index].File = filepath.Join(newRoot, strings.TrimPrefix(file, prefix))
+	}
+	model.normalizedRoot = newRoot
+	return nil
 }
 
 func resolveLocalModel(cfg Config, handle string, staging bool) (Config, error) {

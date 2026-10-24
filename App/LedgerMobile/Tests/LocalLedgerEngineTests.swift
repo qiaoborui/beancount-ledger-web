@@ -158,9 +158,9 @@ final class LocalLedgerEngineTests: XCTestCase {
     func testCanonicalHandleCacheReleasesIdleModelsOnMemoryPressure() {
         var cache = LocalCanonicalHandleCache()
         let current = LocalCanonicalHandle(workspace: "/ledger/generations/two/workspace",
-            entrypoint: "main.bean", handle: "current")
+            entrypoint: "main.bean", handle: "current", version: "v1")
         let idle = LocalCanonicalHandle(workspace: "/older/generations/one/workspace",
-            entrypoint: "main.bean", handle: "idle")
+            entrypoint: "main.bean", handle: "idle", version: "v1")
         _ = cache.remember(idle)
         _ = cache.remember(current)
         XCTAssertEqual(cache.handles, [current, idle])
@@ -169,7 +169,7 @@ final class LocalLedgerEngineTests: XCTestCase {
         XCTAssertEqual(plan.keep, "current")
         XCTAssertEqual(plan.released, ["idle"])
         XCTAssertEqual(cache.handles, [current])
-        XCTAssertEqual(cache.handle(workspace: current.workspace, entrypoint: current.entrypoint), "current")
+        XCTAssertEqual(cache.handle(workspace: current.workspace, entrypoint: current.entrypoint)?.handle, "current")
         XCTAssertNil(cache.handle(workspace: idle.workspace, entrypoint: idle.entrypoint))
 
         var empty = LocalCanonicalHandleCache()
@@ -181,9 +181,9 @@ final class LocalLedgerEngineTests: XCTestCase {
     func testCanonicalHandleCacheTouchKeepsTheLedgerBeingViewed() {
         var cache = LocalCanonicalHandleCache()
         let first = LocalCanonicalHandle(workspace: "/first/generations/one/workspace",
-            entrypoint: "main.bean", handle: "one")
+            entrypoint: "main.bean", handle: "one", version: "v1")
         let second = LocalCanonicalHandle(workspace: "/second/generations/two/workspace",
-            entrypoint: "main.bean", handle: "two")
+            entrypoint: "main.bean", handle: "two", version: "v1")
         _ = cache.remember(first)
         _ = cache.remember(second)
         XCTAssertEqual(cache.handles, [second, first])
@@ -191,7 +191,7 @@ final class LocalLedgerEngineTests: XCTestCase {
         // A committed read is evidence of the ledger being viewed, not of the
         // registration order: switching back must move the hit to the front so
         // memory pressure keeps it.
-        XCTAssertEqual(cache.touch(workspace: first.workspace, entrypoint: first.entrypoint), "one")
+        XCTAssertEqual(cache.touch(workspace: first.workspace, entrypoint: first.entrypoint)?.handle, "one")
         XCTAssertEqual(cache.handles, [first, second])
         let plan = cache.releaseIdleModels()
         XCTAssertEqual(plan.keep, "one")
@@ -206,22 +206,22 @@ final class LocalLedgerEngineTests: XCTestCase {
     func testCanonicalHandleCacheSupersedesGenerationsAndEvictsByRecency() {
         var cache = LocalCanonicalHandleCache()
         let olderGeneration = LocalCanonicalHandle(workspace: "/ledger/generations/one/workspace",
-            entrypoint: "main.bean", handle: "one")
+            entrypoint: "main.bean", handle: "one", version: "v1")
         let newerGeneration = LocalCanonicalHandle(workspace: "/ledger/generations/two/workspace",
-            entrypoint: "main.bean", handle: "two")
+            entrypoint: "main.bean", handle: "two", version: "v1")
         _ = cache.remember(olderGeneration)
         XCTAssertEqual(cache.remember(newerGeneration), ["one"])
         XCTAssertEqual(cache.handles, [newerGeneration])
 
         let entries = (0..<(LocalCanonicalHandleCache.limit + 1)).map { index in
             LocalCanonicalHandle(workspace: "/ledger\(index)/generations/one/workspace",
-                entrypoint: "main.bean", handle: "h\(index)")
+                entrypoint: "main.bean", handle: "h\(index)", version: "v1")
         }
         var released: [String] = []
         for entry in entries { released += cache.remember(entry) }
         XCTAssertEqual(released, [newerGeneration.handle, "h0"])
         XCTAssertEqual(cache.handles.map(\.handle), ["h4", "h3", "h2", "h1"])
-        XCTAssertEqual(cache.handle(workspace: entries[4].workspace, entrypoint: "main.bean"), "h4")
+        XCTAssertEqual(cache.handle(workspace: entries[4].workspace, entrypoint: "main.bean")?.handle, "h4")
         cache.forget("h3")
         XCTAssertNil(cache.handle(workspace: entries[3].workspace, entrypoint: "main.bean"))
     }

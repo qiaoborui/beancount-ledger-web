@@ -225,6 +225,14 @@ final class LocalLedgerRepositoryTests: XCTestCase {
         var mutationText = "; accepted\n"
         var mutationResponse = Data("{\"ok\":true}".utf8)
         var readabilityError: String?
+        var promotedGenerations: [String] = []
+        var discardedStages = 0
+        func promoteRetainedStageModel(ledgerRoot: URL, runtimeRoot: URL, entrypoint: String, generationRoot: URL) async {
+            promotedGenerations.append(generationRoot.path)
+        }
+        func discardRetainedStageModel(ledgerRoot: URL, entrypoint: String) async {
+            discardedStages += 1
+        }
         func rejectReadability(_ message: String) { readabilityError = message }
         func configure(text: String, response: Data = Data("{\"ok\":true}".utf8)) {
             mutationText = text
@@ -270,6 +278,53 @@ final class LocalLedgerRepositoryTests: XCTestCase {
     private func validator(_ root: URL, _ entry: String) async throws {
         let text = try String(contentsOf: root.appendingPathComponent(entry), encoding: .utf8)
         if text.contains("INVALID") { throw LocalLedgerError.operationFailed("canonical validation rejected fixture") }
+    }
+
+    func testSuccessfulWritePromotesTheRetainedStageModelIntoItsGeneration() async throws {
+        let engine = Engine()
+        let workspace = LocalLedgerWorkspace(rootDirectory: try root())
+        _ = try await workspace.commit(changes: [.write(Data("; synthetic\n".utf8), to: "main.bean")]) { _ in }
+        let descriptor = LocalLedgerDescriptor(id: UUID(), name: "Promotion", entrypoint: "main.bean", createdAt: Date())
+        let repository = LocalLedgerRepository(descriptor: descriptor, workspace: workspace, engine: engine,
+            validator: { _, _ in }, writeValidator: { _, _ in })
+        let baseValue = try await workspace.currentRevision()
+        let base = try XCTUnwrap(baseValue)
+        let entry = LedgerTransactionEntry(date: "2026-09-30", payee: "", narration: "promote",
+            postings: [.init(account: "Expenses:Food", amount: "1", currency: "CNY"),
+                       .init(account: "Assets:Cash", amount: "-1", currency: "CNY")])
+        _ = try await repository.updateTransaction(source: .init(file: "main.bean", line: 1, hash: "synthetic"),
+            entry: entry, expectedRevisionID: base.id)
+        let current = try await workspace.currentRevision()
+        let revision = try XCTUnwrap(current)
+        let generation = try await workspace.publishedWorkspaceRoot(for: revision)
+        let promotions = await engine.promotedGenerations
+        XCTAssertEqual(promotions, [generation.path])
+        let discards = await engine.discardedStages
+        XCTAssertEqual(discards, 0)
+    }
+
+    func testFailedWriteDiscardsTheRetainedStageModelWithoutPromoting() async throws {
+        let engine = Engine()
+        let workspace = LocalLedgerWorkspace(rootDirectory: try root())
+        let before = try await workspace.commit(changes: [.write(Data("; synthetic\n".utf8), to: "main.bean")]) { _ in }
+        let descriptor = LocalLedgerDescriptor(id: UUID(), name: "Promotion rollback", entrypoint: "main.bean", createdAt: Date())
+        let repository = LocalLedgerRepository(descriptor: descriptor, workspace: workspace, engine: engine,
+            validator: { _, _ in }, writeValidator: { _, _ in
+                throw LocalLedgerError.operationFailed("Synthetic canonical rejection")
+            })
+        let entry = LedgerTransactionEntry(date: "2026-09-30", payee: "", narration: "reject",
+            postings: [.init(account: "Expenses:Food", amount: "1", currency: "CNY")])
+        do {
+            _ = try await repository.updateTransaction(source: .init(file: "main.bean", line: 1, hash: "synthetic"),
+                entry: entry, expectedRevisionID: before.id)
+            XCTFail("rejected write published")
+        } catch {}
+        let after = try await workspace.currentRevision()
+        XCTAssertEqual(after?.id, before.id)
+        let promotions = await engine.promotedGenerations
+        XCTAssertTrue(promotions.isEmpty)
+        let discards = await engine.discardedStages
+        XCTAssertEqual(discards, 1)
     }
 
     func testCatalogPersistsRealEmptyLedgerAndExportsCurrentGeneration() async throws {

@@ -81,3 +81,28 @@ func TestDispatchControlOperationsNeedNoLedgerRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestDispatchModelPromotionOperationsAreRouted(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "generations", "initial", "workspace")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.bean"), []byte("option \"operating_currency\" \"CNY\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"model-promote", "model-adopt"} {
+		request, err := json.Marshal(map[string]any{"version": 1, "operation": operation,
+			"workspaceRoot": root, "modelHandle": "unknown", "sourceVersion": "version"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response dispatchResponseV1
+		if err := json.Unmarshal([]byte(DispatchJSON(string(request))), &response); err != nil {
+			t.Fatal(err)
+		}
+		if response.OK || response.Status != 400 || len(response.Diagnostics) != 1 ||
+			response.Diagnostics[0].Code != "model.operation_failed" {
+			t.Fatalf("%s accepted an unusable request: %+v", operation, response)
+		}
+	}
+}

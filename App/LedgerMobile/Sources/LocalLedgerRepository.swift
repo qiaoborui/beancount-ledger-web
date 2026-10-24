@@ -13,6 +13,9 @@ actor LocalLedgerRepository: LedgerRepository {
     nonisolated let storage: any LogicalLocalStorage
     private let engine: any LocalLedgerEngine
     private let validator: LocalLedgerCatalog.Validator
+    /// Publication validator for writes: it also retains the validated stage
+    /// model so the commit can promote it instead of importing it again.
+    private let writeValidator: LocalLedgerCatalog.Validator
     private(set) var presentedRevisionID: UUID?
     private var importRevisionIDs: [String: UUID] = [:]
     private var importPreviewDates: [String: Date] = [:]
@@ -29,12 +32,14 @@ actor LocalLedgerRepository: LedgerRepository {
          engine: any LocalLedgerEngine = EmbeddedLocalLedgerEngine.shared,
          validator: @escaping LocalLedgerCatalog.Validator = { root, entry in
              try await EmbeddedBeancountValidator.shared.validate(workspace: root, entryFile: entry)
-         }) {
+         },
+         writeValidator: LocalLedgerCatalog.Validator? = nil) {
         self.descriptor = descriptor
         self.workspace = workspace
         self.storage = DeviceLocalStorage(workspace: workspace)
         self.engine = engine
         self.validator = validator
+        self.writeValidator = writeValidator ?? validator
         importAuthorizationURL = Self.importAuthorizationURL(for: descriptor.id)
         let restored = Self.loadImportAuthorizations(from: importAuthorizationURL)
         importRevisionIDs = restored.revisions
@@ -43,12 +48,14 @@ actor LocalLedgerRepository: LedgerRepository {
 
     init(descriptor: LocalLedgerDescriptor, storage: any LogicalLocalStorage,
          engine: any LocalLedgerEngine = EmbeddedLocalLedgerEngine.shared,
-         validator: @escaping LocalLedgerCatalog.Validator) {
+         validator: @escaping LocalLedgerCatalog.Validator,
+         writeValidator: LocalLedgerCatalog.Validator? = nil) {
         self.descriptor = descriptor
         self.storage = storage
         self.workspace = storage.workspace
         self.engine = engine
         self.validator = validator
+        self.writeValidator = writeValidator ?? validator
         importAuthorizationURL = Self.importAuthorizationURL(for: descriptor.id)
         let restored = Self.loadImportAuthorizations(from: importAuthorizationURL)
         importRevisionIDs = restored.revisions
@@ -913,7 +920,31 @@ actor LocalLedgerRepository: LedgerRepository {
         return preview
     }
 
-    func discardPrepared(_ preview: PreparedBookkeepingChange) { preparedOperations.removeValue(forKey: preview.id) }
+    func discardPrepared(_ preview: PreparedBookkeepingChange) async {
+        preparedOperations.removeValue(forKey: preview.id)
+        // A preview never retains a stage model, but a commit that failed after
+        // validation may have left one behind; drop it so it cannot be promoted
+        // for a different tree later.
+        await discardRetainedStageModel()
+    }
+
+    /// Offers the just-published generation to the engine so it can promote the
+    /// stage model the write validator retained. Best effort: a failure leaves
+    /// the generation to register through the full path on its first read.
+    private func promotePublishedGeneration(_ revision: LocalLedgerWorkspace.Revision) async {
+        guard let generation = try? await workspace.publishedWorkspaceRoot(for: revision) else {
+            await discardRetainedStageModel()
+            return
+        }
+        await engine.promoteRetainedStageModel(ledgerRoot: workspace.rootDirectory,
+            runtimeRoot: workspace.rootDirectory.appendingPathComponent("runtime"),
+            entrypoint: descriptor.entrypoint, generationRoot: generation)
+    }
+
+    private func discardRetainedStageModel() async {
+        await engine.discardRetainedStageModel(ledgerRoot: workspace.rootDirectory,
+            entrypoint: descriptor.entrypoint)
+    }
 
     /// The opaque token resolves to repository-owned bytes. Confirming never
     /// reruns inference or rendering against a different source revision.
@@ -922,10 +953,17 @@ actor LocalLedgerRepository: LedgerRepository {
               preview.ledgerID == descriptor.id, Date().timeIntervalSince(operation.preview.createdAt) < 900 else {
             throw BookkeepingError.expiredPreview
         }
-        let validator = validator, entrypoint = descriptor.entrypoint
-        let revision = try await workspace.commit(expectedRevisionID: operation.preview.files.revisionID,
-            changes: operation.preview.files.changes, consumingImportID: operation.importID,
-            validator: { root in try await validator(root, entrypoint) })
+        let validator = writeValidator, entrypoint = descriptor.entrypoint
+        let revision: LocalLedgerWorkspace.Revision
+        do {
+            revision = try await workspace.commit(expectedRevisionID: operation.preview.files.revisionID,
+                changes: operation.preview.files.changes, consumingImportID: operation.importID,
+                validator: { root in try await validator(root, entrypoint) })
+        } catch {
+            await discardRetainedStageModel()
+            throw error
+        }
+        await promotePublishedGeneration(revision)
         presentedRevisionID = revision.id
         if let importID = operation.importID {
             importRevisionIDs.removeValue(forKey: importID)
@@ -988,11 +1026,18 @@ actor LocalLedgerRepository: LedgerRepository {
     }
     func saveFile(_ draft: LocalLedgerFileDraft, text: String) async throws {
         try validBeanPath(draft.path)
-        let validator = validator, entry = descriptor.entrypoint
-        let revision = try await workspace.commit(expectedRevisionID: draft.revisionID,
-            changes: [.write(Data(text.utf8), to: draft.path)]) { root in
-                try await validator(root, entry)
-            }
+        let validator = writeValidator, entry = descriptor.entrypoint
+        let revision: LocalLedgerWorkspace.Revision
+        do {
+            revision = try await workspace.commit(expectedRevisionID: draft.revisionID,
+                changes: [.write(Data(text.utf8), to: draft.path)]) { root in
+                    try await validator(root, entry)
+                }
+        } catch {
+            await discardRetainedStageModel()
+            throw error
+        }
+        await promotePublishedGeneration(revision)
         presentedRevisionID = revision.id
         await storage.didCommit(revision)
         NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
@@ -1005,10 +1050,17 @@ actor LocalLedgerRepository: LedgerRepository {
         guard FileManager.default.fileExists(atPath: directory.appendingPathComponent(entry).path) else {
             throw LedgerBackupError.entrypointMissing(entry)
         }
-        let validator = validator
-        let revision = try await workspace.importLedger(from: directory, expectedRevisionID: expectedRevisionID) { root in
-            try await validator(root, entry)
+        let validator = writeValidator
+        let revision: LocalLedgerWorkspace.Revision
+        do {
+            revision = try await workspace.importLedger(from: directory, expectedRevisionID: expectedRevisionID) { root in
+                try await validator(root, entry)
+            }
+        } catch {
+            await discardRetainedStageModel()
+            throw error
         }
+        await promotePublishedGeneration(revision)
         presentedRevisionID = revision.id
         await storage.didCommit(revision)
         NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
@@ -1167,17 +1219,24 @@ actor LocalLedgerRepository: LedgerRepository {
     private func mutateWithRevision<T: Decodable & Sendable>(_ path: String, method: String, body: BQLCell,
         expected: UUID? = nil, consumingImportID: String? = nil) async throws -> CommittedResult<T> {
         guard let revisionID = expected ?? presentedRevisionID else { throw LocalLedgerError.previewRequired }
-        let engine = engine, validator = validator, entrypoint = descriptor.entrypoint
+        let engine = engine, validator = writeValidator, entrypoint = descriptor.entrypoint
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
         let box = ResultBox()
-        let revision = try await workspace.commit(expectedRevisionID: revisionID, changes: [],
-            consumingImportID: consumingImportID, mutateStage: { root in
-            let data = try await engine.response(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
-                entrypoint: entrypoint, method: method, path: path, body: body, staging: true))
-            // Decode before publication; malformed replies cannot produce a successful financial write.
-            _ = try data.decode(T.self)
-            await box.set(data)
-        }, validator: { root in try await validator(root, entrypoint) })
+        let revision: LocalLedgerWorkspace.Revision
+        do {
+            revision = try await workspace.commit(expectedRevisionID: revisionID, changes: [],
+                consumingImportID: consumingImportID, mutateStage: { root in
+                let data = try await engine.response(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+                    entrypoint: entrypoint, method: method, path: path, body: body, staging: true))
+                // Decode before publication; malformed replies cannot produce a successful financial write.
+                _ = try data.decode(T.self)
+                await box.set(data)
+            }, validator: { root in try await validator(root, entrypoint) })
+        } catch {
+            await discardRetainedStageModel()
+            throw error
+        }
+        await promotePublishedGeneration(revision)
         guard let data = await box.data else { throw LocalLedgerError.operationFailed(String(localized: "本地修改缺少结果")) }
         presentedRevisionID = revision.id
         await storage.didCommit(revision)
