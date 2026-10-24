@@ -259,6 +259,17 @@ func TestLocalModelPromoteFailsClosedOnMismatchAndBadLifetime(t *testing.T) {
 			t.Fatal("unmanaged root promoted")
 		}
 	})
+	t.Run("replaced-by-newer-stage", func(t *testing.T) {
+		first := stageClone(t, generation)
+		handle, version := registerStreamHandleFixture(t, first, stream)
+		// A second staging request (another preview) registers its own stage and
+		// displaces this one; the old handle must never be promoted afterwards.
+		second := stageClone(t, generation)
+		registerStreamHandleFixture(t, second, stream)
+		if _, err := PromoteLocalModel(generation, handle, version); err == nil {
+			t.Fatal("displaced stage handle promoted")
+		}
+	})
 	t.Run("released-handle", func(t *testing.T) {
 		stage := stageClone(t, generation)
 		handle, version := registerStreamHandleFixture(t, stage, stream)
