@@ -486,7 +486,7 @@ actor LocalLedgerCatalog {
     private func persist(_ descriptor: LocalLedgerDescriptor) throws {
         let destination = rootDirectory.appendingPathComponent(descriptor.id.uuidString).appendingPathComponent("ledger.json")
         #if os(iOS)
-        try JSONEncoder().encode(descriptor).write(to: destination, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try JSONEncoder().encode(descriptor).write(to: destination, options: .ledgerProtectedUntilFirstUserAuthentication)
         #else
         try JSONEncoder().encode(descriptor).write(to: destination, options: .atomic)
         #endif
