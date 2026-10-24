@@ -1,6 +1,6 @@
 # iOS 大账本扩展方案：从“按 10 万笔建”到“按改动量付费”
 
-- 任务 `20261024-ios-large-ledger-scaling`；方案已定稿，2026-10-24。尚未改动任何代码，第一阶段等待确认后开工。
+- 任务 `20261024-ios-large-ledger-scaling`；方案已定稿，2026-10-24。第一阶段 6 项已实现并通过集成验证，等待评审合入；交付记录见文末。
 - 基线：`main` @ `e4de9be`。
 - 前置文档：`docs/plans/20260923-ios-100k-no-db.md`、`docs/handoffs/20260923-ios-100k-no-db.md`、`docs/handoffs/20261019-ios-model-gate-and-cache.md`。
 
@@ -89,12 +89,12 @@
 
 每项一个独立 PR，都不改变校验结果，都能单独回滚。
 
-- [ ] **容量基准入仓**：把合成账本生成器和分段计时做成 opt-in 的 Go/Python 基准；App 内用 os_signpost 记录 parse/booking/导出/注册/快照各段，并记录 phys_footprint 峰值。以后每一步都用它做前后对比。风险：无。
-- [ ] **内存核算改实测**：`localModelEstimateFactor` 从 3 改到实测系数（先取 6，等真机数据校准）；mobilecore 启动时按可用内存设 Go 软上限 `debug.SetMemoryLimit`；收到内存告警时释放非当前账本的模型。风险：低，软上限设太紧会频繁 GC，用基准挑值。
-- [ ] **预检不再重复解析**：`_preflight` 现在对每个文件调 `parser.parse_file`，紧接着 loader 又解析一遍。改为只按行扫描 include/plugin/option/document 指令做策略检查，或复用一次解析结果。前提：确认 Go 侧 include 走查已经在 Python 之前做了同样的路径约束。用对照测试保证放行/拒绝结果不变。收益约 9%。风险：低到中，这是安全门，要单独评审。
-- [ ] **流导出提速**：`_check_export_value` 的递归 isinstance 和逐记录 `json.dumps` 占导出大头，改成一次编码后按字节数判界。输出必须逐字节不变（SHA-256 一致即可验证）。收益约 7%。风险：低。
-- [ ] **只做一次 Go 注册**：预览时已有的 stage 模型在发布后直接升为已提交模型，不再从同一份流重新导入。难点是模型里的源路径是 stage 的绝对路径，需要改为相对路径存储。收益约 15%，提交阶段收益最大。风险：中低，放在本阶段最后。
-- [ ] **日期范围二分定位**：分页时在已排序索引上二分到 end 日期，不再从头跳过更新的行；游标格式不变。风险：低。
+- [x] **容量基准入仓**：把合成账本生成器和分段计时做成 opt-in 的 Go/Python 基准；App 内用 os_signpost 记录 parse/booking/导出/注册/快照各段，并记录 phys_footprint 峰值。以后每一步都用它做前后对比。风险：无。
+- [x] **内存核算改实测**：`localModelEstimateFactor` 从 3 改到实测系数（先取 6，等真机数据校准）；mobilecore 启动时按可用内存设 Go 软上限 `debug.SetMemoryLimit`；收到内存告警时释放非当前账本的模型。风险：低，软上限设太紧会频繁 GC，用基准挑值。
+- [x] **预检不再重复解析**：`_preflight` 现在对每个文件调 `parser.parse_file`，紧接着 loader 又解析一遍。改为只按行扫描 include/plugin/option/document 指令做策略检查，或复用一次解析结果。前提：确认 Go 侧 include 走查已经在 Python 之前做了同样的路径约束。用对照测试保证放行/拒绝结果不变。收益约 9%。风险：低到中，这是安全门，要单独评审。
+- [x] **流导出提速**：`_check_export_value` 的递归 isinstance 和逐记录 `json.dumps` 占导出大头，改成一次编码后按字节数判界。输出必须逐字节不变（SHA-256 一致即可验证）。收益约 7%。风险：低。
+- [x] **只做一次 Go 注册**：预览时已有的 stage 模型在发布后直接升为已提交模型，不再从同一份流重新导入。难点是模型里的源路径是 stage 的绝对路径，需要改为相对路径存储。收益约 15%，提交阶段收益最大。风险：中低，放在本阶段最后。
+- [x] **日期范围二分定位**：分页时在已排序索引上二分到 end 日期，不再从头跳过更新的行；游标格式不变。风险：低。
 
 ## 风险与迁移方式
 
