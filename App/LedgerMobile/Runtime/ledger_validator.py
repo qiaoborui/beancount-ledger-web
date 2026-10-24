@@ -165,12 +165,37 @@ def _canonical_posting(posting):
 STREAM_RECORD_LIMIT = 1 << 20
 STREAM_TOTAL_LIMIT = 256 << 20
 
+# Fields _canonical_entry projects from the raw directive. Which of them exist
+# is a property of the directive class, so _ENTRY_FIELD_MAP resolves it once;
+# this replaces seventeen hasattr probes per record. Unknown directive kinds
+# fall back to probing every name, matching the previous behavior.
+_EXPORT_ENTRY_FIELDS = (
+    "account", "source_account", "currency", "flag", "payee", "narration",
+    "comment", "name", "query_string", "description", "filename", "currencies",
+    "tags", "links", "type", "amount", "tolerance",
+)
+_METADATA_UNEXPORTED = frozenset({"filename", "lineno"})
+
+
+def _entry_field_map():
+    return {
+        cls: tuple(name for name in _EXPORT_ENTRY_FIELDS if hasattr(cls, name))
+        for cls in (data.Open, data.Close, data.Commodity, data.Pad,
+                    data.Balance, data.Transaction, data.Note, data.Event,
+                    data.Query, data.Price, data.Document, data.Custom)
+    }
+
+
+_ENTRY_FIELD_MAP = _entry_field_map()
+
 
 def _check_export_value(value, budget):
     """Conservative pre-allocation bound, including worst-case JSON escaping.
 
     This deliberately rejects pathological single records rather than building
     huge projected dicts/strings to discover that they exceed the wire limit.
+    It stays the generic path for metadata values, options, and the small
+    constant records; entries and postings have specialized checks below.
     """
     if budget < 0:
         raise ValueError("Canonical export record exceeds byte budget")
@@ -202,24 +227,138 @@ def _check_export_value(value, budget):
     return budget - cost
 
 
+def _check_export_metadata(meta, budget):
+    """Generic metadata dict walk with the common scalar values inlined.
+
+    Mirrors _check_export_value's dict branch exactly: container cost, a
+    two-byte key offset, then each key and value cost. Posting metadata is
+    present on every booked posting, so this walk is on the per-posting path.
+    """
+    budget -= 2
+    for key, value in meta.items():
+        if type(key) is str:
+            budget -= 6 * len(key) + 4
+        else:
+            budget = _check_export_value(key, budget - 2)
+        if type(value) is str:
+            budget -= 6 * len(value) + 2
+        elif type(value) is int:
+            budget -= max(128, value.bit_length() // 3 + 4)
+        elif value is None or isinstance(value, (bool, float, date)):
+            budget -= 128
+        else:
+            budget = _check_export_value(value, budget)
+    return budget
+
+
 def _check_export_entry(entry):
+    """Bound one raw directive before _canonical_entry projects a dict.
+
+    The cost model is exactly the generic one, specialized to the fields that
+    are actually projected: scalar strings and string containers are costed
+    inline and only metadata values, Amounts, Custom values, and None-valued
+    fields take the generic walk. Oversized narration or metadata is therefore
+    still rejected before any projected record exists.
+    """
     budget = STREAM_RECORD_LIMIT - 4096
-    # Check only projected fields. Open.booking and Custom ValueType.dtype are
-    # canonical internal objects, not exported metadata values.
-    for key in ("account", "source_account", "currency", "flag", "payee", "narration",
-                "comment", "name", "query_string", "description", "filename",
-                "currencies", "tags", "links", "type", "amount", "tolerance"):
-        if hasattr(entry, key):
-            budget = _check_export_value(getattr(entry, key), budget)
-    for key, value in (entry.meta or {}).items():
-        if key not in {"filename", "lineno"} and not key.startswith("__"):
+    meta = entry.meta or {}
+    for key, value in meta.items():
+        if isinstance(key, str) and (key in _METADATA_UNEXPORTED or key.startswith("__")):
+            continue
+        if type(key) is str:
+            budget -= 6 * len(key) + 2
+        else:
             budget = _check_export_value(key, budget)
+        if type(value) is str:
+            budget -= 6 * len(value) + 2
+        elif type(value) is int:
+            budget -= max(128, value.bit_length() // 3 + 4)
+        elif value is None or isinstance(value, (bool, float, date)):
+            budget -= 128
+        else:
             budget = _check_export_value(value, budget)
     # File is projected separately from source metadata.
-    budget = _check_export_value((entry.meta or {}).get("filename", ""), budget)
+    filename = meta.get("filename", "")
+    if type(filename) is str:
+        budget -= 6 * len(filename) + 2
+    else:
+        budget = _check_export_value(filename, budget)
+    fields = _ENTRY_FIELD_MAP.get(type(entry))
+    if fields is None:
+        # Unknown directive kind: probe exactly like the generic version did.
+        fields = tuple(name for name in _EXPORT_ENTRY_FIELDS if hasattr(entry, name))
+    for field in fields:
+        value = getattr(entry, field)
+        if type(value) is str:
+            budget -= 6 * len(value) + 2
+        elif type(value) in (list, set, frozenset):
+            budget -= 2
+            for child in value:
+                if type(child) is str:
+                    budget -= 6 * len(child) + 3
+                else:
+                    budget = _check_export_value(child, budget - 1)
+        else:
+            budget = _check_export_value(value, budget)
     if isinstance(entry, data.Custom):
         for value in entry.values:
             budget = _check_export_value(value.value, budget)
+    if budget < 0:
+        raise ValueError("Canonical export record exceeds byte budget")
+
+
+def _check_export_posting(posting):
+    """Bound one raw posting with the same total as the generic tuple walk.
+
+    The generic walk charges a container offset for the posting namedtuple and
+    for Amount/Cost (both tuples), so those offsets are kept here to leave
+    every accept/reject decision identical; only the per-field function calls
+    and isinstance chains are removed.
+    """
+    budget = STREAM_RECORD_LIMIT - 4096 - 2
+    account = posting.account
+    if type(account) is str:
+        budget -= 6 * len(account) + 3  # tuple child offset plus string cost
+    else:
+        budget = _check_export_value(account, budget - 1)
+    units = posting.units
+    if isinstance(units, Amount) and type(units.number) is Decimal and type(units.currency) is str:
+        # Child offset + Amount container + one offset and cost per child.
+        budget -= 5 + 6 * len(units.currency) + 2 + len(units.number.as_tuple().digits) + 128
+    else:
+        budget = _check_export_value(units, budget - 1)
+    flag = posting.flag
+    if flag is None:
+        budget -= 129
+    elif type(flag) is str:
+        budget -= 6 * len(flag) + 3
+    else:
+        budget = _check_export_value(flag, budget - 1)
+    cost = posting.cost
+    if cost is None:
+        budget -= 129
+    else:
+        # Child offset + Cost container + one offset per field.
+        budget -= 7
+        budget -= len(cost.number.as_tuple().digits) + 128
+        budget -= 6 * len(cost.currency) + 2
+        budget -= 128  # date, or None, both cost a fixed 128
+        label = cost.label
+        budget -= 128 if label is None else 6 * len(label) + 2
+    price = posting.price
+    if price is None:
+        budget -= 129
+    elif isinstance(price, Amount) and type(price.number) is Decimal and type(price.currency) is str:
+        budget -= 5 + 6 * len(price.currency) + 2 + len(price.number.as_tuple().digits) + 128
+    else:
+        budget = _check_export_value(price, budget - 1)
+    meta = posting.meta
+    if meta is None:
+        budget -= 129
+    else:
+        budget = _check_export_metadata(meta, budget - 1)
+    if budget < 0:
+        raise ValueError("Canonical export record exceeds byte budget")
 
 
 # The stream must depend only on source bytes so that it can be reused for
@@ -256,6 +395,11 @@ def _relative_option_path(root, value):
     return value
 
 
+# The terminator is a constant record; the encoded-length check remains the
+# authority for it, so it does not need a per-entry recursive bound.
+_END_ENTRY_RECORD = {"type": "end_entry"}
+
+
 def _write_canonical_stream(root, entries, options, output):
     """One bounded record at a time; never serialize an all-entry array.
 
@@ -285,8 +429,10 @@ def _write_canonical_stream(root, entries, options, output):
                 # before encoding, so a single C-accelerated encode cannot
                 # build an over-budget string; chunked iterencode runs the
                 # pure-Python encoder and dominated export time. Entries and
-                # postings were already bounded field by field before they
-                # were projected, so they skip a second recursive walk.
+                # postings were already bounded from their raw fields before
+                # they were projected, and the terminator is constant, so they
+                # skip a second recursive walk; the encoded length below stays
+                # the authority.
                 if not prechecked:
                     _check_export_value(record, STREAM_RECORD_LIMIT)
                 encoded = encoder.encode(record).encode("utf-8") + b"\n"
@@ -311,9 +457,9 @@ def _write_canonical_stream(root, entries, options, output):
                 emit({"type": "entry", "entry": _canonical_entry(root, entry, include_postings=False)}, prechecked=True)
                 if isinstance(entry, data.Transaction):
                     for posting in entry.postings:
-                        _check_export_value(posting, STREAM_RECORD_LIMIT - 4096)
+                        _check_export_posting(posting)
                         emit({"type": "posting", "posting": _canonical_posting(posting)}, prechecked=True)
-                emit({"type": "end_entry"})
+                emit(_END_ENTRY_RECORD, prechecked=True)
                 count += 1
             checksum = digest.hexdigest()
             emit({"type": "footer", "entries": count, "sha256": checksum}, hashed=False)
