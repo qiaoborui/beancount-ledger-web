@@ -31,6 +31,10 @@ func TestLocalBootstrapPageMatchesCompleteLegacyAccountingAndExplicitPage(t *tes
 		t.Fatal("fixture must span pages")
 	}
 	legacy.Transactions = []Transaction{}
+	// The native page also omits investment detail: Swift's LedgerBootstrap has no
+	// member for it and the app fetches /api/ledger/investments separately. Every
+	// other accounting field must stay byte-identical to the legacy contract.
+	legacy.Investments = nil
 	// JSON parity avoids map number representation differences in metadata.
 	wantJSON, _ := json.Marshal(legacy)
 	var nativeLegacy any
@@ -202,7 +206,7 @@ func TestLocalBootstrapPageCombinedEnvelopeBudget(t *testing.T) {
 	if status != 200 || err != nil || len(page) > localTransactionPageBytes {
 		t.Fatal("page alone must fit", status, err)
 	}
-	accounting, _ := json.Marshal(buildLedgerBootstrap(snapshot, q["start"], q["end"], true, "CNY", q["today"], false))
+	accounting, _ := json.Marshal(buildLedgerBootstrap(snapshot, q["start"], q["end"], true, "CNY", q["today"], false, false))
 	if len(accounting) > localTransactionPageBytes-4096 {
 		t.Fatal("accounting alone must fit")
 	}

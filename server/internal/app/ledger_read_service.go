@@ -283,13 +283,17 @@ func (s *LedgerReadService) IncomeStatement(start, end string, unlocked bool, ra
 }
 
 func BuildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency, today string) BootstrapResult {
-	return buildLedgerBootstrap(snapshot, start, end, unlocked, rawValuationCurrency, today, true)
+	return buildLedgerBootstrap(snapshot, start, end, unlocked, rawValuationCurrency, today, true, true)
 }
 
 // Native bounded bootstrap uses the same complete accounting projections but
 // omits the legacy full-range transaction materialization. HTTP callers retain
 // the original contract through BuildLedgerBootstrap above.
-func buildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency, today string, includeTransactions bool) BootstrapResult {
+// includeInvestments is false for the native bootstrap page: its Swift model
+// (LedgerBootstrap) has no investment member and the app fetches that detail
+// from /api/ledger/investments, so building it only spent the page byte budget.
+// The legacy bootstrap keeps including it because the web client reads it.
+func buildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked bool, rawValuationCurrency, today string, includeTransactions, includeInvestments bool) BootstrapResult {
 	valuationCurrency := ValidValuationCurrency(rawValuationCurrency, snapshot.Commodities)
 	summary := scopedLedgerSummary(snapshot, start, end, unlocked, valuationCurrency)
 	netWorthRows, monthEndRows, windows, creditCards, allNetWorthRows := scopedNetWorthSummary(snapshot, start, end, unlocked, valuationCurrency)
@@ -300,7 +304,9 @@ func buildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 	if unlocked {
 		reconciliationRows = buildReconciliationRows(snapshot, start, end)
 		accountStatuses = AccountStatusIndicators(snapshot.Transactions, snapshot.BalanceAssertions, snapshot.Accounts)
-		investments = BuildInvestmentSummaryFromSnapshot(snapshot)
+		if includeInvestments {
+			investments = BuildInvestmentSummaryFromSnapshot(snapshot)
+		}
 	}
 	incomeStatement := buildLedgerIncomeStatementFields(snapshot, start, end, unlocked, valuationCurrency)
 	transactions := []Transaction{}
@@ -318,7 +324,7 @@ func buildLedgerBootstrap(snapshot *LedgerSnapshot, start, end string, unlocked 
 		MonthEndNetWorth:   monthEndRows,
 		NetWorthWindows:    windows,
 		CreditCards:        creditCards,
-		Investments:        investments,
+		Investments:        statusInvestments(unlocked, investments, includeInvestments),
 		Transactions:       transactions,
 		ReconciliationRows: reconciliationRows,
 		Accounts:           snapshot.Accounts,
@@ -358,7 +364,7 @@ func BuildLedgerBootstrapLite(snapshot *LedgerSnapshot, start, end string, unloc
 		MonthEndNetWorth:   []NetWorthPoint{},
 		NetWorthWindows:    nil,
 		CreditCards:        []CreditCardAnalytics{},
-		Investments:        InvestmentSummary{},
+		Investments:        &InvestmentSummary{},
 		Transactions:       filterLedgerTransactionsDesc(snapshotTransactionsDesc(snapshotWithDrafts(snapshot, unlocked)), start, end, unlocked, nil),
 		ReconciliationRows: []ReconciliationRow{},
 		Accounts:           snapshot.Accounts,
