@@ -102,6 +102,13 @@ actor EmbeddedBeancountValidator {
         if let timings = descriptor.timings {
             LocalLedgerPerformance.recordPythonTimings(timings)
         }
+        // Opt-in measurement recording only (a no-op otherwise): this is the one
+        // place where the exporter reports the canonical entry count, stream
+        // bytes and stream digest, and the report quotes them from here rather
+        // than re-reading the stream cache.
+        LocalLedgerPerformance.recorder.recordLedgerIdentity(
+            .init(canonicalEntries: descriptor.entries, streamBytes: descriptor.bytes,
+                  streamSha256: descriptor.sha256))
         return descriptor
         #else
         throw ValidationError(message: String(localized: "此构建缺少本地 Beancount 校验运行时"))

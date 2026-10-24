@@ -905,6 +905,13 @@ final class LedgerSession: ObservableObject {
         location = .local(descriptor.id)
         localLedgerName = descriptor.name
         repositories[.local(descriptor.id)] = localCatalog.repository(for: descriptor)
+        // Opt-in measurement recording only (a no-op otherwise): this ledger is
+        // what the next runs belong to. `LocalLedgerPerformanceRecording`
+        // attaches the committed generation whose files the source-tree digest
+        // covers once one exists.
+        LocalLedgerPerformanceRecorder.shared.attachLedger(
+            rootDirectory: localCatalog.rootDirectory.appendingPathComponent(descriptor.id.uuidString),
+            entrypoint: descriptor.entrypoint)
         defaults.set(descriptor.id.uuidString, forKey: Self.activeLocalLedgerKey)
         defaults.set("local", forKey: Self.storageModeKey)
         passkeyAvailable = false

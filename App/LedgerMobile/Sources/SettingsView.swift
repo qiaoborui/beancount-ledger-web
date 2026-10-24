@@ -129,6 +129,11 @@ struct SettingsView: View {
                         .accessibilityIdentifier("local-storage-settings")
                     SettingsNavRow(title: String(localized: "备份与恢复"), value: LedgerBackupFolder.current?.displayName ?? String(localized: "未设置")) { LocalLedgerBackupView() }
                         .accessibilityIdentifier("local-backup-settings")
+                    SettingsNavRow(title: String(localized: "性能录制"),
+                                   value: LocalLedgerPerformanceRecording.shared.isEnabled ? String(localized: "已开启") : String(localized: "未开启")) {
+                        LocalLedgerPerformanceRecordingView()
+                    }
+                    .accessibilityIdentifier("settings-performance-recording")
                 } header: { TerminalSectionLabel(text: String(localized: "本地账本")).listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
                 Section {

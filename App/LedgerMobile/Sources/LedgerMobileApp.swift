@@ -10,6 +10,10 @@ struct LedgerMobileApp: App {
     @State private var didStartSession = false
 
     init() {
+        // Opt-in measurement recording must exist before the first ledger work
+        // so a cold-start run is captured. Without `--ledger-perf-record` (and
+        // without a stored opt-in) this changes nothing.
+        LocalLedgerPerformanceRecording.configureLaunch()
         let session = LedgerSession.appSession()
         _session = StateObject(wrappedValue: session)
         LocalLedgerBackgroundSyncService.shared.configure { [weak session] in
