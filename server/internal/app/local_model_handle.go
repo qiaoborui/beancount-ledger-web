@@ -288,25 +288,36 @@ func ReleaseLocalModel(handle string) {
 	}
 }
 
-// ReleaseIdleLocalModels drops every committed model except keepHandle so an iOS
-// memory warning can reclaim idle ledgers before the process is killed. The kept
-// handle stays resolvable, and requests already in flight own their pointers, so
-// dropping a registry reference cannot free a model underneath a reader. Stages
-// are left alone: they belong to the request publishing them. An empty keep
-// releases every committed model. It returns how many models were dropped.
+// ReleaseIdleLocalModels drops every committed model except the current ledger
+// so an iOS memory warning can reclaim idle ledgers before the process is killed.
+// The current ledger is keepHandle when it is still registered; otherwise the
+// most recently resolved model is kept, because a stale or missing shell handle
+// must not drop the ledger the visible view is reading. Requests already in
+// flight own their pointers, so dropping a registry reference cannot free a
+// model underneath a reader. Stages are left alone: they belong to the request
+// publishing them. It returns how many models were dropped.
 func ReleaseIdleLocalModels(keepHandle string) int {
 	localModels.Lock()
 	defer localModels.Unlock()
-	kept := make([]*localRegisteredModel, 0, len(localModels.committed))
-	released := 0
-	for _, model := range localModels.committed {
+	keep := -1
+	for index, model := range localModels.committed {
 		if model.handle == keepHandle {
-			kept = append(kept, model)
-		} else {
-			released++
+			keep = index
+			break
 		}
 	}
+	if keep < 0 && len(localModels.committed) > 0 {
+		keep = 0
+	}
+	if keep < 0 {
+		released := len(localModels.committed)
+		clear(localModels.committed)
+		localModels.committed = nil
+		return released
+	}
+	released := len(localModels.committed) - 1
+	kept := localModels.committed[keep]
 	clear(localModels.committed)
-	localModels.committed = kept
+	localModels.committed = []*localRegisteredModel{kept}
 	return released
 }

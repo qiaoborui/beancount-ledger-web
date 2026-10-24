@@ -166,6 +166,21 @@ struct LocalCanonicalHandleCache {
         handles.first { $0.workspace == workspace && $0.entrypoint == entrypoint }?.handle
     }
 
+    /// A committed read is the evidence that its ledger is the one being viewed:
+    /// move the hit to the front so a memory warning keeps it and drops the
+    /// other ledgers. Registration order alone is stale after switching back to
+    /// an already-registered ledger.
+    mutating func touch(workspace: String, entrypoint: String) -> String? {
+        guard let index = handles.firstIndex(where: { $0.workspace == workspace && $0.entrypoint == entrypoint }) else {
+            return nil
+        }
+        if index > 0 {
+            let hit = handles.remove(at: index)
+            handles.insert(hit, at: 0)
+        }
+        return handles[0].handle
+    }
+
     mutating func forget(_ handle: String) {
         handles.removeAll { $0.handle == handle }
     }
@@ -214,8 +229,11 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     // the few most recently used ledgers (the core holds a bounded LRU of the
     // same size and may evict earlier); mutable stages always load their
     // current contents independently. Most recently registered first.
+    /// Resolving a committed read also marks that ledger most recently used, so
+    /// the memory-pressure eviction keeps the ledger the user is viewing rather
+    /// than the one that happened to be registered last.
     private func cachedHandle(_ request: LocalLedgerEngineRequest) -> String? {
-        canonicalHandles.handle(workspace: request.workspaceRoot, entrypoint: request.entrypoint)
+        canonicalHandles.touch(workspace: request.workspaceRoot, entrypoint: request.entrypoint)
     }
 
     private func forget(_ handle: String) {

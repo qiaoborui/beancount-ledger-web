@@ -178,6 +178,31 @@ final class LocalLedgerEngineTests: XCTestCase {
         XCTAssertEqual(none.released, [])
     }
 
+    func testCanonicalHandleCacheTouchKeepsTheLedgerBeingViewed() {
+        var cache = LocalCanonicalHandleCache()
+        let first = LocalCanonicalHandle(workspace: "/first/generations/one/workspace",
+            entrypoint: "main.bean", handle: "one")
+        let second = LocalCanonicalHandle(workspace: "/second/generations/two/workspace",
+            entrypoint: "main.bean", handle: "two")
+        _ = cache.remember(first)
+        _ = cache.remember(second)
+        XCTAssertEqual(cache.handles, [second, first])
+
+        // A committed read is evidence of the ledger being viewed, not of the
+        // registration order: switching back must move the hit to the front so
+        // memory pressure keeps it.
+        XCTAssertEqual(cache.touch(workspace: first.workspace, entrypoint: first.entrypoint), "one")
+        XCTAssertEqual(cache.handles, [first, second])
+        let plan = cache.releaseIdleModels()
+        XCTAssertEqual(plan.keep, "one")
+        XCTAssertEqual(plan.released, ["two"])
+        XCTAssertEqual(cache.handles, [first])
+
+        // A miss neither reorders nor invents a handle.
+        XCTAssertNil(cache.touch(workspace: "/other/generations/x/workspace", entrypoint: "main.bean"))
+        XCTAssertEqual(cache.handles, [first])
+    }
+
     func testCanonicalHandleCacheSupersedesGenerationsAndEvictsByRecency() {
         var cache = LocalCanonicalHandleCache()
         let olderGeneration = LocalCanonicalHandle(workspace: "/ledger/generations/one/workspace",

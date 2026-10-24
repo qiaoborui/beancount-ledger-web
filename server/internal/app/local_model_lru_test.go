@@ -203,10 +203,30 @@ func TestLocalModelReleaseIdleKeepsCurrentLedgerAndStage(t *testing.T) {
 	if !staged.resolves(t) {
 		t.Fatal("memory pressure released the staged model")
 	}
-	if released := ReleaseIdleLocalModels(""); released != 1 {
-		t.Fatalf("released %d models for an empty keep handle, want 1", released)
+	// A missing/stale shell handle must keep the most recently used ledger: it is
+	// the one the visible view is reading when the shell's own bookkeeping is
+	// out of date.
+	if released := ReleaseIdleLocalModels(""); released != 0 {
+		t.Fatalf("released %d models for a missing keep handle, want 0", released)
 	}
-	if current.resolves(t) {
-		t.Fatal("empty keep handle retained a committed model")
+	if !current.resolves(t) {
+		t.Fatal("missing keep handle dropped the most recently used ledger")
+	}
+	recent := registerLRULedger(t, localTestRequest(t))
+	idle := registerLRULedger(t, localTestRequest(t))
+	// Resolving marks the recent ledger most recently used.
+	if !recent.resolves(t) {
+		t.Fatal("recent ledger did not resolve")
+	}
+	if released := ReleaseIdleLocalModels("stale-handle"); released != 2 {
+		t.Fatalf("released %d models for a stale keep handle, want 2", released)
+	}
+	if !recent.resolves(t) {
+		t.Fatal("stale keep handle dropped the most recently used ledger")
+	}
+	for _, idleLedger := range []lruLedger{idle, current} {
+		if idleLedger.resolves(t) {
+			t.Fatal("stale keep handle retained an idle ledger")
+		}
 	}
 }
