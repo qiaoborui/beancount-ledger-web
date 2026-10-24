@@ -21,23 +21,58 @@ elif [[ -z "${DEVELOPER_DIR:-}" && -d "/Applications/Xcode.app/Contents/Develope
 fi
 output_dir="$(cd "$output_dir" && pwd)"
 build_dir="$(mktemp -d "${TMPDIR:-/tmp}/ledger-ios-ipa.XXXXXX")"
-trap 'rm -rf "$build_dir"' EXIT
 project_dir="$repo_root/App/LedgerMobile"
 archive="$build_dir/LedgerMobile.xcarchive"
+# Set once the version bump below is on disk; only then may the exit trap undo
+# it, so an early failure never touches the worktree.
+version_file_dirty=0
+finish() {
+  rm -rf "$build_dir"
+  if [[ "$version_file_dirty" == 1 ]]; then
+    git -C "$repo_root" checkout -- App/LedgerMobile/project.yml 2>/dev/null || true
+  fi
+}
+trap finish EXIT
 
 # Build generated inputs from this checkout, including a fresh Python bridge.
 bash "$repo_root/scripts/build-ledgercore-xcframework.sh"
 bash "$repo_root/scripts/build-beancount-ios.sh"
 
 cd "$project_dir"
-xcodegen generate
-build_settings=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=)
-if [[ -n "${GITHUB_RUN_NUMBER:-}" ]]; then
-  # Offset from project.yml's build number so a CI build always sorts above a
-  # local Xcode build; a lower number would not replace the installed app.
-  base_version="$(sed -n 's/^ *CURRENT_PROJECT_VERSION: *"\{0,1\}\([0-9][0-9]*\)"\{0,1\} *$/\1/p' project.yml | head -n 1)"
-  build_settings+=("CURRENT_PROJECT_VERSION=$(( ${base_version:-0} + GITHUB_RUN_NUMBER ))")
+
+# The marketing version is the highest release tag, not whatever a PR last wrote
+# into project.yml. Without an exact vX.Y.Z tag the build stops here, so no IPA
+# can ship under a version nobody declared. Tags are compared as version numbers
+# rather than by commit date: re-tagging an older commit must never move the
+# shipped version backwards.
+stored_version="$(sed -n 's/^ *MARKETING_VERSION: *"\{0,1\}\([0-9][0-9.]*\)"\{0,1\} *$/\1/p' project.yml | head -n 1)"
+release_version="$(git -C "$repo_root" tag --list 'v[0-9]*.[0-9]*.[0-9]*' \
+  | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)"
+if [[ -z "$release_version" ]]; then
+  echo "No release tag found. Create one with 'git tag -a v<MAJOR>.<MINOR>.0' and rebuild." >&2
+  exit 1
 fi
+marketing_version="$release_version"
+if [[ "$marketing_version" != "$stored_version" ]]; then
+  echo "Newest release tag v$release_version disagrees with project.yml MARKETING_VERSION $stored_version. Refresh project.yml from the tag before packaging." >&2
+  exit 1
+fi
+current_build="$(sed -n 's/^ *CURRENT_PROJECT_VERSION: *"\{0,1\}\([0-9][0-9]*\)"\{0,1\} *$/\1/p' project.yml | head -n 1)"
+build_number="$(( ${current_build:-0} + 1 ))"
+
+# The build number is per binary artifact, so every package advances it and
+# writes that change back. Leaving it behind would let the next package reuse a
+# number an installed app already reports, and SideStore would not renew it.
+build_settings=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
+  "CURRENT_PROJECT_VERSION=$build_number" "MARKETING_VERSION=$marketing_version")
+sed -i '' "s/^\( *CURRENT_PROJECT_VERSION: *\)\"\{0,1\}[0-9][0-9]*\"\{0,1\} *$/\1\"$build_number\"/" project.yml
+if ! grep -q "^ *CURRENT_PROJECT_VERSION: *\"$build_number\" *$" project.yml; then
+  echo "Could not advance CURRENT_PROJECT_VERSION in project.yml." >&2
+  exit 1
+fi
+version_file_dirty=1
+echo "Packaging version $marketing_version, build $build_number."
+
 xcodebuild archive \
   -project LedgerMobile.xcodeproj \
   -scheme LedgerMobile \

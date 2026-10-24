@@ -22,6 +22,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The marketing version is read from the newest release tag, so the
+          # checkout needs tag history and not just the packaging commit.
+          fetch-depth: 0
 
       - name: Select Xcode
         run: bash .github/scripts/select-xcode.sh

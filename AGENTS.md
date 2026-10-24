@@ -55,6 +55,56 @@ through `LEDGER_ROOT`.
 - `.agents/` contains Agent4MD config, durable rules, project knowledge, and
   domain skills.
 
+## iOS App Version
+
+The iOS app is the shipped product. It carries two independent numbers, and
+they answer different questions:
+
+- `MARKETING_VERSION` is the **release**. It belongs to a batch of work and is
+  declared by an annotated Git tag `v<MAJOR>.<MINOR>.<PATCH>`; the packaging
+  script reads the highest tag, so one release covers however many PRs it took.
+- `CURRENT_PROJECT_VERSION` is the **binary build number**. It identifies one
+  packaged artifact and advances every time a package is produced, because
+  SideStore and AltStore compare it to decide whether a renewal actually
+  installed something new.
+
+Both live in `App/LedgerMobile/project.yml` and apply to the app, Widget, and
+Share targets.
+
+### What a task does
+
+Feature work **never** changes `MARKETING_VERSION`. A PR that adds one
+capability is not a release; several such PRs land and one release collects
+them. Touching the line per PR only guarantees merge conflicts. Leave both
+numbers alone in feature, fix, documentation, test, and CI PRs, and state in the
+PR body that a release is needed (`需要发版：新增 <capability>`) so the release is
+not forgotten.
+
+Cutting a release is its own step, when a batch is ready:
+
+1. Refresh `MARKETING_VERSION` in `project.yml` to the version being released
+   (+MINOR for a capability release, +PATCH for a fix-only release; pre-1.0,
+   `0.x.0` marks a capability release, and `1.0.0` is reserved for the first
+   publicly distributed build).
+2. `git tag -a v<version> -m "<one-line summary>"` and push the tag.
+3. Package. `scripts/build-ios-ipa.sh` refuses to run without a tag, refuses
+   when the tag and `project.yml` disagree, and advances the build number by one
+   on every package, so no two IPAs share a number.
+4. Commit the build-number bump the packaging script leaves behind.
+
+`project.yml` and the tags must never disagree: the build stops rather than ship
+a version nobody declared.
+
+Other rules:
+
+- Never reuse or lower a build number, and never move a tag to a different
+  commit. Retracting a release means a new tag, not an edited one.
+- Tags are compared as version numbers, not by commit date, so re-tagging an
+  older commit cannot move the shipped version backwards.
+- `FEATURE_PARITY.md` next to the Xcode project records what the app actually
+  implements. Update it in the same change that ships or removes a capability.
+  Do not list planned work as if it were available.
+
 ## Development Workflow
 
 - For new feature development, create a focused branch first and open a pull

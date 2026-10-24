@@ -25,6 +25,24 @@ Important implementation areas:
 - `web/src/app/api/ledger/summary/route.ts`: summary, balances, net-worth
   history, and credit-card analytics API.
 
+iOS app (the shipped product):
+
+- `App/LedgerMobile/` is a local-first native SwiftUI app. It runs the Go engine
+  and an embedded CPython Beancount validator in-process; no server is required.
+- `project.yml` is the XcodeGen source of truth for the app, Widget, and Share
+  targets. `LedgerMobile.xcodeproj` is generated.
+- `Sources/LedgerSession.swift` owns observable state and mutations,
+  `LocalLedgerRepository`/`LocalLedgerWorkspace` own staging and atomic
+  publication, and `LedgerExternalRoute.swift` owns `ledger://` deep links.
+- `App/LedgerMobile/README.md` is the build and device-install guide,
+  `DESIGN.md` is the visual spec, and `FEATURE_PARITY.md` records what the app
+  actually implements today.
+- `App/LedgerMobile/project.yml` owns `MARKETING_VERSION` (the release, declared
+  by an annotated `v<X.Y.Z>` tag) and `CURRENT_PROJECT_VERSION` (the binary build
+  number). Feature PRs change neither: the release tag collects a batch of PRs,
+  and `scripts/build-ios-ipa.sh` advances the build number on every package.
+  See the "iOS App Version" section of `AGENTS.md`.
+
 Deployment:
 
 - CI runs on pushes to `main` and on pull requests.

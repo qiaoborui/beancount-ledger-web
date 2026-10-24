@@ -9,7 +9,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    CURRENT_PROJECT_VERSION: "36"
+    CURRENT_PROJECT_VERSION: "37"
     MARKETING_VERSION: "0.1.0"
     TARGETED_DEVICE_FAMILY: "1,2"
     # Let the compiler extract String(localized:) and SwiftUI keys with their real argument types.

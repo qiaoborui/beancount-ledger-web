@@ -25,11 +25,16 @@ destinations push in that stack and preserve the system back gesture. The iPad
 shell uses a system sidebar and keeps its visibility when changing destinations.
 Overview, transactions, accounts, and More use compact, continuous system lists;
 settings and editing retain grouped forms. All pages use inline navigation titles.
-Range-scoped pages keep the calendar and current period in the navigation bar,
-with a floating bottom search control on iPhone and toolbar search on iPad on iOS 26 and later. Period stepping stays in the date picker until confirmation.
-Transactions show categories beside notes, with native search, date sections, and swipe actions for tags and confirmed deletion;
-accounts have search and expandable groups. Editing and import preparation use
-system forms, searchable account selection, and navigation-bar confirmation.
+Range-scoped pages keep the calendar and current period in the navigation bar.
+The transactions page carries its own search field above the kind filter bar;
+whole-ledger search is its own destination with a native navigation search
+field. Period stepping stays in the date picker until confirmation.
+Transactions show categories beside notes, with date sections and swipe actions
+for tags and confirmed deletion. Accounts show a category filter bar
+(全部/资金/信用/理财/应收) over expandable groups; keyword search on that page is
+not implemented yet, and `FEATURE_PARITY.md` records it as a known gap.
+Editing and import preparation use system forms, searchable account selection,
+and navigation-bar confirmation.
 See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy rules.
 
 ## Current scope
@@ -42,6 +47,8 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
 - Validate local writes with canonical Beancount checks. Includes and documents
   stay inside the local workspace; supported plugins are explicitly allowlisted.
   Unsupported plugins and validation failures prevent publication of the change.
+  A ledger whose plugin list is not allowlisted therefore cannot be opened at
+  all, even read-only; `FEATURE_PARITY.md` tracks that as a known gap.
 - Configure HTTPS Git storage with device-only Keychain credentials, pull and
   validate remote changes, and push local revisions with a non-forced ref update.
   Review file conflicts and export both versions before choosing a resolution.
@@ -110,9 +117,12 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
   through the Debug-only visual QA mode.
 
 Financial writes retain preview, validation, and confirmation. Gmail automation,
-hosted AI, and server administration are outside this local-only product.
-Snapshot backups to a user-chosen folder (normally in iCloud Drive) are
-described below; an S3 provider remains future work.
+the hosted agent workspace, remote server authentication, and server
+administration are outside this local-only product. The optional natural-language
+drafting and Jev account classification call a user-configured HTTPS endpoint
+with a key the user supplies; every ledger read, validation, and write still runs
+on the device. Snapshot backups to a user-chosen folder (normally in iCloud
+Drive) are described below.
 
 ## Backup and restore (iCloud Drive)
 
