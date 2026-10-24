@@ -1,7 +1,7 @@
 # 20261023-ios-docs-and-version
 
 - Status: active (PR open; branch `codex/ios-docs-and-version`)
-- Last updated: 2026-10-23 20:05 +08:00
+- Last updated: 2026-10-24 10:55 +08:00
 - Base: `main` @ `149c848` (branch merged `origin/main` after opening the PR)
 - PR: https://github.com/qiaoborui/beancount-ledger-web/pull/538
 
@@ -64,6 +64,47 @@ Verified against the source, not against the old docs:
 - **`.agents/rules/project.md`** gained two durable rules mirroring the
   version and parity requirements.
 
+## Follow-up: releases are tags, builds are automatic
+
+The user rejected the earlier framing. A per-PR marketing-version bump made no
+sense: one release legitimately contains several features. They then directed
+that the major version be declared by a tag.
+
+Final model, now in `AGENTS.md`:
+
+- `MARKETING_VERSION` is the **release**, declared by the highest annotated
+  `v<MAJOR>.<MINOR>.<PATCH>` tag. One tag collects however many PRs the batch
+  took. Feature, fix, documentation, test, and CI PRs never touch it; they say
+  `需要发版：<capability>` in the body instead, so the release is not forgotten.
+- `CURRENT_PROJECT_VERSION` is the **binary build number**.
+  `scripts/build-ios-ipa.sh` advances it by one on every package.
+
+What the packaging script now does (`scripts/build-ios-ipa.sh`):
+
+1. Resolves the release version from tags, compared **as version numbers**
+   (`sort -t. -k1,1n -k2,2n -k3,3n`), not by commit date. `git describe` was
+   rejected after testing showed that tagging an older commit silently moved
+   the shipped version backwards (`v0.9.5` on a newer commit beat `v0.10.0`).
+2. Refuses to package when no tag exists, or when the tag and
+   `MARKETING_VERSION` disagree.
+3. Computes `build + 1`, passes it to `xcodebuild`, and writes it back to
+   `project.yml`. The bump must be committed so the next package starts above
+   it. An exit trap restores the file only after the bump is on disk, so an
+   early failure never modifies the worktree.
+4. Drops the old `GITHUB_RUN_NUMBER` offset: the increment covers local and
+   hosted packages alike, so CI and a local build can no longer collide.
+
+`.github/workflows/ios-ipa.yml` now checks out with `fetch-depth: 0`, because
+the release version comes from tags.
+
+The premature `MARKETING_VERSION: 0.2.0` from the previous commit was reverted
+to `0.1.0` (the last released number). `CURRENT_PROJECT_VERSION` stayed at 37:
+it already advanced and build numbers never go backwards.
+
+`scripts/test_ios_private_ipa.py` gained four guards: version comes from a tag,
+`git describe` is not used, build always advances and is written back, and the
+workflow fetches tags in a way that keeps the tag comparison honest.
+
 ## Follow-up after merging origin/main
 
 `origin/main` moved to `149c848` while the PR was open and brought a new iOS
@@ -125,6 +166,16 @@ table exempts. The bump already landed in the previous commit (0.1.0 (36) →
   and cannot build the package; set `DEVELOPER_DIR` first.)
 - `swift build` after the merge: build complete. The merged
   `FolderLocalStorageTests` and the portable target both compile.
+- `python3 scripts/test_ios_private_ipa.py`: 8 tests passed, including the new
+  tag and build-number guards. The tag guard failed first and caught a real
+  omission: the workflow did not fetch tags, which is now fixed.
+- Tag resolution was exercised in throwaway repositories: no tag, a single tag,
+  and tags applied out of commit order (`v0.10.0`, `v0.9.5`, `v0.3.1`, `v0.2.0`)
+  all resolve to `0.10.0`.
+- The build-number write-back was exercised on a copy of `project.yml`:
+  37 → 38 → 39, with `MARKETING_VERSION` untouched.
+- Not run: a real IPA package. It needs the release tag, plus 45 minutes of
+  Xcode, Go, and Python framework builds on the runner.
 - PR 538 checks at the first revision: Plan, Bub Agent, iOS core, and Gate all
   SUCCESS; Backend and Frontend skipped by design.
 - Relative markdown links in `README.md` and `FEATURE_PARITY.md` resolve

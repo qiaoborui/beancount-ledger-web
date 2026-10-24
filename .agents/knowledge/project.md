@@ -37,12 +37,11 @@ iOS app (the shipped product):
 - `App/LedgerMobile/README.md` is the build and device-install guide,
   `DESIGN.md` is the visual spec, and `FEATURE_PARITY.md` records what the app
   actually implements today.
-- `App/LedgerMobile/project.yml` owns `MARKETING_VERSION` and
-  `CURRENT_PROJECT_VERSION`. Every iOS task computes both numbers from the table
-  in the "iOS App Version" section of `AGENTS.md` and states the decision:
-  shipped behavior always advances the build number, a user-visible defect
-  advances PATCH, a new capability advances MINOR, and documentation, tests, and
-  CI changes leave both alone.
+- `App/LedgerMobile/project.yml` owns `MARKETING_VERSION` (the release, declared
+  by an annotated `v<X.Y.Z>` tag) and `CURRENT_PROJECT_VERSION` (the binary build
+  number). Feature PRs change neither: the release tag collects a batch of PRs,
+  and `scripts/build-ios-ipa.sh` advances the build number on every package.
+  See the "iOS App Version" section of `AGENTS.md`.
 
 Deployment:
 

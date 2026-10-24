@@ -57,44 +57,50 @@ through `LEDGER_ROOT`.
 
 ## iOS App Version
 
-The iOS app is the shipped product, so its version number must keep moving.
-`App/LedgerMobile/project.yml` owns both numbers for all three targets (app,
-Widget, Share) through the shared `MARKETING_VERSION` and
-`CURRENT_PROJECT_VERSION` settings.
+The iOS app is the shipped product. It carries two independent numbers, and
+they answer different questions:
 
-**Every iOS development task must compute both numbers**, even when the answer
-is "unchanged". At the start of the task, read the current pair from
-`App/LedgerMobile/project.yml` and decide both values using the table below;
-when you report back or open a PR, state the decision explicitly, for example
-`版本 0.2.0 (38)，build +1，marketing 不变` or
-`版本 0.2.0 (37) 不变，本次只改文档`.
-
-| The change | `CURRENT_PROJECT_VERSION` | `MARKETING_VERSION` |
-| --- | --- | --- |
-| Changes shipped behavior, UI, bundled resources, or the app's runtime | +1, always | unchanged unless the rule below applies |
-| Fixes a user-visible defect in an already released capability | +1 | +PATCH (`0.2.0` → `0.2.1`) |
-| Adds a user-facing capability | +1 | +MINOR (`0.2.1` → `0.3.0`, patch resets to 0) |
-| Shrinks or removes shipped behavior | +1 | +MINOR unless removing it is itself a fix |
-| Only documentation, agent instructions, tests, CI config, or screenshots | unchanged | unchanged |
-
-Rules that hold in every case:
-
-- The build number is monotonic per shipped change. Do not reuse or lower it:
+- `MARKETING_VERSION` is the **release**. It belongs to a batch of work and is
+  declared by an annotated Git tag `v<MAJOR>.<MINOR>.<PATCH>`; the packaging
+  script reads the highest tag, so one release covers however many PRs it took.
+- `CURRENT_PROJECT_VERSION` is the **binary build number**. It identifies one
+  packaged artifact and advances every time a package is produced, because
   SideStore and AltStore compare it to decide whether a renewal actually
-  installed a new build, and two different builds must never share a number.
-- One PR that ships several capabilities still moves `MARKETING_VERSION` once.
-  A PR that mixes a release-worthy capability with unrelated fixes takes the
-  single highest bump.
-- Pre-1.0, MINOR is the release number, so `0.x.0` marks a capability release.
-  Reserve `1.0.0` for the first publicly distributed build.
-- Do not let the decision drift from reality. If a merge brings in shipped code
-  that skipped a bump, advance the numbers in the same follow-up and say so.
-- Keep `docs/design/`, screenshots, and handoff notes out of the version
-  decision; they are not shipped artifacts.
-- Say the version line in the PR body. The IPA filename
-  (`LedgerMobile-<version>-<build>-SideStore.ipa`) and `build-info.txt` derive
-  from these values, so a stale number makes two different builds
-  indistinguishable on device.
+  installed something new.
+
+Both live in `App/LedgerMobile/project.yml` and apply to the app, Widget, and
+Share targets.
+
+### What a task does
+
+Feature work **never** changes `MARKETING_VERSION`. A PR that adds one
+capability is not a release; several such PRs land and one release collects
+them. Touching the line per PR only guarantees merge conflicts. Leave both
+numbers alone in feature, fix, documentation, test, and CI PRs, and state in the
+PR body that a release is needed (`需要发版：新增 <capability>`) so the release is
+not forgotten.
+
+Cutting a release is its own step, when a batch is ready:
+
+1. Refresh `MARKETING_VERSION` in `project.yml` to the version being released
+   (+MINOR for a capability release, +PATCH for a fix-only release; pre-1.0,
+   `0.x.0` marks a capability release, and `1.0.0` is reserved for the first
+   publicly distributed build).
+2. `git tag -a v<version> -m "<one-line summary>"` and push the tag.
+3. Package. `scripts/build-ios-ipa.sh` refuses to run without a tag, refuses
+   when the tag and `project.yml` disagree, and advances the build number by one
+   on every package, so no two IPAs share a number.
+4. Commit the build-number bump the packaging script leaves behind.
+
+`project.yml` and the tags must never disagree: the build stops rather than ship
+a version nobody declared.
+
+Other rules:
+
+- Never reuse or lower a build number, and never move a tag to a different
+  commit. Retracting a release means a new tag, not an edited one.
+- Tags are compared as version numbers, not by commit date, so re-tagging an
+  older commit cannot move the shipped version backwards.
 - `FEATURE_PARITY.md` next to the Xcode project records what the app actually
   implements. Update it in the same change that ships or removes a capability.
   Do not list planned work as if it were available.
