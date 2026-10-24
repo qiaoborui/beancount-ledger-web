@@ -68,6 +68,35 @@ class CanonicalValidationTests(unittest.TestCase):
         self.assertTrue(self.validate('option "insert_pythonpath" "TRUE"\n'))
         self.assertTrue(self.validate('option "documents" "../"\n'))
 
+    def test_preflight_parses_only_files_that_can_carry_policy_directives(self):
+        root = self.root.resolve()
+        (root / "plain.bean").write_text("2000-01-01 open Assets:Cash CNY\n")
+        (root / "transactions.bean").write_text(
+            '2026-01-01 * "Shop" "Lunch"\n  Assets:Cash -1 CNY\n  Expenses:Food 1 CNY\n')
+        (root / "policy.bean").write_text('plugin "beancount.plugins.auto_accounts"\n')
+        (root / "main.bean").write_text('include "*.bean"\n')
+        with mock.patch.object(ledger_validator.parser, "parse_file",
+                               wraps=ledger_validator.parser.parse_file) as parse:
+            ledger_validator._preflight(root, root / "main.bean")
+        parsed = sorted(pathlib.Path(call.args[0]).name for call in parse.call_args_list)
+        self.assertEqual(parsed, ["main.bean", "policy.bean"])
+
+    def test_preflight_policy_rejections_still_fire_for_directive_files(self):
+        cases = [
+            ('plugin "os"\n', "不支持插件"),
+            ('option "insert_pythonpath" "TRUE"\n', "insert_pythonpath"),
+            ('option "documents" "../"\n', "账本引用超出本地目录"),
+            ('2026-01-01 document Assets:Cash "../outside.pdf"\n', "账本引用超出本地目录"),
+        ]
+        for text, message in cases:
+            (self.root / "child.bean").write_text(text)
+            errors = self.validate('include "child.bean"\n')
+            self.assertTrue(errors, text)
+            self.assertIn(message, errors[0]["message"])
+        (self.root / "child.bean").write_text('include "secret.gpg"\n')
+        (self.root / "secret.gpg").write_bytes(b"encrypted ledger")
+        self.assertIn("请先解密账本再导入", self.validate('include "child.bean"\n')[0]["message"])
+
     def test_imported_pickle_is_never_loaded_or_removed(self):
         cache = self.root / ".main.bean.picklecache"
         content = b"untrusted pickle cache"
@@ -200,6 +229,32 @@ plugin "beancount.plugins.implicit_prices"
         self.assertEqual(options["filename"], "main.bean")
         self.assertEqual(options["include"], "tx/a.bean")
         self.assertNotIn("input_hash", options)
+
+    def test_stream_sha256_is_unchanged_for_the_canonical_fixture(self):
+        # Golden bytes captured from origin/main @ 150b552 (beancount 3.2.3)
+        # before the preflight duplicate parse was skipped. A mismatch means
+        # the canonical bytes changed, not merely the speed of producing them.
+        files = {
+            "main.bean": 'option "operating_currency" "CNY"\ninclude "tx/a.bean"\n'
+                         '2026-01-01 open Assets:Cash\n2026-01-01 open Expenses:Food\n',
+            "tx/a.bean": '2026-01-02 * "Shop" "Lunch"\n  Expenses:Food 12.00 CNY\n  Assets:Cash\n',
+        }
+        for name, text in files.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        with tempfile.TemporaryDirectory() as output_dir:
+            output = pathlib.Path(output_dir).resolve() / "model.records"
+            reply = json.loads(ledger_validator.export_canonical_json(
+                str(self.root), "main.bean", str(output)))
+            self.assertEqual(reply["errors"], [])
+            self.assertEqual(reply["stream"], {
+                "version": 1, "entries": 3, "bytes": 2002,
+                "sha256": "d954978294bf74672e5e52541258834e4e36f011be2fa068c846dd27c50c69fd",
+            })
+            self.assertEqual(
+                hashlib.sha256(output.read_bytes()).hexdigest(),
+                "378bd0f9f35ae6d20a1318433094f5b5c32844b050e1f50f8108d5ed24330f43")
 
     def test_stream_export_matches_canonical_without_whole_model_response(self):
         text = '''plugin "beancount.plugins.auto_accounts"

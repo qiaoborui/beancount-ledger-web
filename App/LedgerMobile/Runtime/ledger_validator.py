@@ -49,6 +49,25 @@ def _confined(root, path):
     return candidate
 
 
+# A file that can yield a policy-relevant directive contains at least one of
+# these lowercase beancount keywords. The parser recognizes lowercase directive
+# keywords only (an uppercase word is a flag or a syntax error), so a file
+# without any of these bytes cannot hide an include, plugin, option, or
+# Document. "document" also covers the "documents" option; "option" already
+# covers insert_pythonpath values, which is listed anyway for reviewability.
+# Any keyword hit keeps the parse-based policy checks below exactly as they
+# were: this screen only removes a duplicate parse for files with nothing to
+# check.
+_POLICY_KEYWORDS = (
+    b"include", b"plugin", b"option", b"document", b"insert_pythonpath",
+)
+
+
+def _may_declare_policy(filename):
+    content = filename.read_bytes()
+    return any(keyword in content for keyword in _POLICY_KEYWORDS)
+
+
 def _preflight(root, entry):
     pending, seen = [entry], set()
     while pending:
@@ -60,6 +79,12 @@ def _preflight(root, entry):
             raise ValueError("账本引用文件数量超过限制")
         if filename.suffix.lower() in {".gpg", ".asc"}:
             raise ValueError("请先解密账本再导入")
+        if not _may_declare_policy(filename):
+            # The canonical loader below parses every file once; a file
+            # without directive keywords has no options, plugin declarations,
+            # includes, or Documents for preflight to check, so parsing it
+            # here would only duplicate that work.
+            continue
         entries, errors, options = parser.parse_file(str(filename))
         # Parser errors are returned by the canonical full load below; options
         # recovered by the parser still receive the same policy checks.
