@@ -61,7 +61,7 @@ func TestLocalBootstrapPageOmitsInvestmentDetail(t *testing.T) {
 // (`useLedgerData.ts` caches `data.investments`), so it must keep the field.
 func TestLegacyBootstrapKeepsInvestmentDetail(t *testing.T) {
 	cfg, snapshot := investmentHeavySnapshot(t, 400)
-	result := buildLedgerBootstrap(snapshot, "2026-09-01", "2026-10-01", true, "", "2026-09-15", true, true)
+	result := buildLedgerBootstrap(snapshot, "2026-09-01", "2026-10-01", true, "", "2026-09-15", true, true, false)
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
