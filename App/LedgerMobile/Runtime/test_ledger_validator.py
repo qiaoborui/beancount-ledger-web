@@ -325,6 +325,64 @@ plugin "beancount.plugins.implicit_prices"
                 str(self.root), "main.bean", str(inside)))["errors"])
             self.assertFalse((self.root / inside.name).exists())
 
+    def test_stream_sha256_is_unchanged_for_the_rich_fixture(self):
+        # Golden bytes captured from origin/main @ 150b552 before the export
+        # path was specialized (beancount 3.2.3). A mismatch means the
+        # canonical wire format changed, not just how fast it is produced.
+        files = {
+            "main.bean": 'option "operating_currency" "CNY"\n'
+                         'option "title" "Rich fixture"\n'
+                         'plugin "beancount.plugins.auto_accounts"\n'
+                         'plugin "beancount.plugins.implicit_prices"\n'
+                         'include "tx/*.bean"\n'
+                         '2000-01-01 open Assets:Cash CNY,USD\n'
+                         '2000-01-01 open Assets:Stock HOOL "FIFO"\n'
+                         '2000-01-01 open Expenses:Food CNY\n'
+                         '2000-01-01 open Equity:Opening CNY\n'
+                         '2000-01-02 pad Assets:Cash Equity:Opening\n'
+                         '2000-01-03 balance Assets:Cash 100.00 CNY\n'
+                         '2019-01-01 commodity HOOL\n',
+            "tx/a.bean": '2020-01-01 * "Shop" "Lunch & tea" #food ^trip-1\n'
+                         '  category: "food"\n'
+                         '  note: "escaped \\"quote\\" and 中文"\n'
+                         '  count: 3\n'
+                         '  ratio: 1.5\n'
+                         '  budget: 100.00 CNY\n'
+                         '  reviewed: 2020-01-05\n'
+                         '  Assets:Cash -12.50 CNY\n'
+                         '  Expenses:Food 12.50 CNY\n'
+                         '2020-01-02 ! "Shop" "Manual"\n'
+                         '  Assets:Cash -3 CNY\n'
+                         '  Expenses:Food 3 CNY\n'
+                         '2020-02-01 * "Buy"\n'
+                         '  Assets:Stock 2 HOOL {10.00 USD}\n'
+                         '  Assets:Cash -20.00 USD\n'
+                         '2020-02-02 * "Buy more"\n'
+                         '  Assets:Stock 2 HOOL {12.00 USD}\n'
+                         '  Assets:Cash -24.00 USD\n'
+                         '2020-02-03 * "Sell"\n'
+                         '  Assets:Stock -3 HOOL {}\n'
+                         '  Assets:Cash 32.00 USD\n'
+                         '2020-03-01 price HOOL 10.50 USD\n'
+                         '2020-03-02 event "location" "Beijing"\n'
+                         '2020-03-03 note Assets:Cash "note with 中文"\n'
+                         '2020-03-05 custom "budget" Expenses:Food "monthly" 100.00 CNY 2020-03-01 TRUE\n',
+        }
+        for name, text in files.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory).resolve() / "stream"
+            reply = json.loads(ledger_validator.export_canonical_json(str(self.root), "main.bean", str(output)))
+            self.assertEqual(reply["errors"], [])
+            self.assertEqual(reply["stream"], {
+                "version": 1, "entries": 19, "bytes": 6708,
+                "sha256": "23bcce0b054c3f374a7cb90fb2612288914c8b992ea2180e018443ef533642fd",
+            })
+            self.assertEqual(hashlib.sha256(output.read_bytes()).hexdigest(),
+                             "d317aae6bc668a9f4ac71c817a2a0e2bbf257a037c5c633047fc8fe384c5182c")
+
     def test_stream_rejects_huge_projection_before_canonical_entry_allocation(self):
         from beancount.core import data as bean_data
         from datetime import date
@@ -339,6 +397,167 @@ plugin "beancount.plugins.implicit_prices"
                         ledger_validator._write_canonical_stream(root, [entry], {}, output)
                     project.assert_not_called()
                 self.assertFalse(output.exists())
+
+    def test_stream_rejects_oversized_posting_before_projection(self):
+        from beancount.core import data as bean_data
+        from beancount.core.amount import Amount
+        from datetime import date
+        from decimal import Decimal
+        root = self.root.resolve()
+        oversized = "Assets:" + "A" * ledger_validator.STREAM_RECORD_LIMIT
+        posting = bean_data.Posting(oversized, Amount(Decimal("1"), "CNY"), None, None, None, None)
+        entry = bean_data.Transaction({"filename": "main.bean", "lineno": 1}, date(2026, 1, 1),
+                                      "*", "Synthetic", "small", frozenset(), frozenset(), [posting])
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory).resolve() / "stream"
+            with mock.patch.object(ledger_validator, "_canonical_posting", side_effect=AssertionError("projection should not run")) as project:
+                with self.assertRaisesRegex(ValueError, "byte budget"):
+                    ledger_validator._write_canonical_stream(root, [entry], {}, output)
+                project.assert_not_called()
+            self.assertFalse(output.exists())
+
+    def test_stream_rejects_oversized_posting_metadata_before_projection(self):
+        from beancount.core import data as bean_data
+        from beancount.core.amount import Amount
+        from datetime import date
+        from decimal import Decimal
+        root = self.root.resolve()
+        meta = {"filename": "main.bean", "lineno": 2,
+                "note": "n" * ledger_validator.STREAM_RECORD_LIMIT}
+        posting = bean_data.Posting("Assets:Cash", Amount(Decimal("1"), "CNY"), None, None, None, meta)
+        entry = bean_data.Transaction({"filename": "main.bean", "lineno": 1}, date(2026, 1, 1),
+                                      "*", "Synthetic", "small", frozenset(), frozenset(), [posting])
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory).resolve() / "stream"
+            with mock.patch.object(ledger_validator, "_canonical_posting", side_effect=AssertionError("projection should not run")) as project:
+                with self.assertRaisesRegex(ValueError, "byte budget"):
+                    ledger_validator._write_canonical_stream(root, [entry], {}, output)
+                project.assert_not_called()
+            self.assertFalse(output.exists())
+
+    def test_stream_accepts_large_narration_under_budget(self):
+        from beancount.core import data as bean_data
+        from datetime import date
+        root = self.root.resolve()
+        narration = "x" * 100000
+        entry = bean_data.Transaction({"filename": "main.bean", "lineno": 1}, date(2026, 1, 1),
+                                      "*", "Synthetic", narration, frozenset(), frozenset(), [])
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory).resolve() / "stream"
+            reply = ledger_validator._write_canonical_stream(root, [entry], {}, output)
+            self.assertEqual(reply["entries"], 1)
+            records = [json.loads(line) for line in output.read_bytes().splitlines()]
+            self.assertEqual(records[1]["entry"]["Narration"], narration)
+
+    def test_posting_bound_agrees_with_generic_walk(self):
+        # _check_export_value stays the reference cost model; the specialized
+        # posting check must make identical accept/reject decisions.
+        from beancount.core import data as bean_data
+        from beancount.core.amount import Amount
+        from beancount.core.position import Cost
+        from datetime import date
+        from decimal import Decimal
+        limit = ledger_validator.STREAM_RECORD_LIMIT
+        huge = "x" * limit
+        ordinary = bean_data.Posting("Assets:Cash", Amount(Decimal("-12.50"), "CNY"), None, None, None,
+                                     {"filename": "main.bean", "lineno": 2})
+        cases = [
+            ordinary,
+            bean_data.Posting("Assets:Cash", Amount(Decimal("1"), "CNY"), None, None, None, None),
+            bean_data.Posting("Assets:Stock", Amount(Decimal("2"), "HOOL"),
+                              Cost(Decimal("10.00"), "USD", date(2020, 2, 1), None), None, "*", None),
+            bean_data.Posting("Assets:Stock", Amount(Decimal("2"), "HOOL"),
+                              Cost(Decimal("10.00"), "USD", date(2020, 2, 1), "lot"),
+                              Amount(Decimal("11.00"), "USD"), "!", {}),
+            bean_data.Posting("Assets:Cash", Amount(Decimal("1" + "0" * 5000), "CNY"), None, None, None, None),
+            bean_data.Posting(huge, Amount(Decimal("1"), "CNY"), None, None, None, None),
+            bean_data.Posting("Assets:Cash", Amount(Decimal("1"), huge), None, None, None, None),
+            bean_data.Posting("Assets:Cash", Amount(Decimal("1"), "CNY"), None, None, huge, None),
+            bean_data.Posting("Assets:Cash", Amount(Decimal("1"), "CNY"), None, None, None,
+                              {"filename": "main.bean", "lineno": 1, "note": huge}),
+            bean_data.Posting("Assets:Cash", Amount(Decimal("1"), "CNY"),
+                              Cost(Decimal("1"), "USD", None, huge), None, None, None),
+        ]
+        for posting in cases:
+            generic = specialized = None
+            try:
+                ledger_validator._check_export_value(posting, limit - 4096)
+            except ValueError as error:
+                generic = str(error)
+            try:
+                ledger_validator._check_export_posting(posting)
+            except ValueError as error:
+                specialized = str(error)
+            self.assertEqual(generic, specialized, posting)
+
+    def test_entry_bound_agrees_with_pre_change_cost_model(self):
+        # Reference: the exact pre-specialization entry check. Its metadata
+        # loop walked meta.items() and costed each key with _check_export_value
+        # directly, so that path has no dict-container offsets. A record with
+        # thousands of tiny metadata keys is the edge where a different key
+        # cost would show up; the specialized check must land on the same
+        # accept/reject boundary and cost container fields identically.
+        from beancount.core import data as bean_data
+        from beancount.parser.grammar import ValueType
+        from datetime import date
+        limit = 4096 + 50000
+        keys = [chr(0x4E00 + i) for i in range(3300)]
+
+        def reference_budget(entry):
+            try:
+                budget = limit - 4096
+                for name in ("account", "source_account", "currency", "flag", "payee",
+                             "narration", "comment", "name", "query_string", "description",
+                             "filename", "currencies", "tags", "links", "type", "amount",
+                             "tolerance"):
+                    if hasattr(entry, name):
+                        budget = ledger_validator._check_export_value(getattr(entry, name), budget)
+                for key, value in (entry.meta or {}).items():
+                    if key not in {"filename", "lineno"} and not key.startswith("__"):
+                        budget = ledger_validator._check_export_value(key, budget)
+                        budget = ledger_validator._check_export_value(value, budget)
+                budget = ledger_validator._check_export_value((entry.meta or {}).get("filename", ""), budget)
+                if isinstance(entry, bean_data.Custom):
+                    for value in entry.values:
+                        budget = ledger_validator._check_export_value(value.value, budget)
+                return budget
+            except ValueError:
+                return -1
+
+        def accepts(entry):
+            try:
+                with mock.patch.object(ledger_validator, "STREAM_RECORD_LIMIT", limit):
+                    ledger_validator._check_export_entry(entry)
+                return True
+            except ValueError:
+                return False
+
+        def many_keys(count):
+            return bean_data.Transaction({key: "v" for key in keys[:count]},
+                                         date(2026, 1, 1), "*", "Synthetic", "small",
+                                         frozenset(), frozenset(), [])
+
+        sweep = [accepts(many_keys(count)) for count in range(3000, 3200)]
+        self.assertIn(True, sweep)
+        self.assertIn(False, sweep)
+        for count in range(3000, 3200):
+            entry = many_keys(count)
+            self.assertEqual(accepts(entry), reference_budget(entry) >= 0, count)
+        # Projected containers and Custom values keep their generic costs too.
+        containers = []
+        for count in (0, 2, 5):
+            tags = frozenset("t{}".format(i) for i in range(count))
+            containers.append(bean_data.Transaction({"filename": "main.bean", "lineno": 1},
+                                                    date(2026, 1, 1), "*", "Synthetic", "small",
+                                                    tags, tags, []))
+            containers.append(bean_data.Open({"filename": "main.bean", "lineno": 1},
+                                             date(2026, 1, 1), "Assets:Cash",
+                                             ["C{}".format(i) for i in range(count)], None))
+            containers.append(bean_data.Custom({"filename": "main.bean", "lineno": 1},
+                                               date(2026, 1, 1), "kind",
+                                               [ValueType("v{}".format(i), None) for i in range(count)]))
+        for entry in containers:
+            self.assertEqual(accepts(entry), reference_budget(entry) >= 0, entry)
 
     def test_stream_supports_booking_modes_and_custom_typed_values(self):
         self.assertEqual(self.validate('''2000-01-01 open Assets:Stock HOOL "FIFO"
