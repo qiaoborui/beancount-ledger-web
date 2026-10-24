@@ -508,6 +508,13 @@ actor LocalLedgerWorkspace {
         return revision
     }
 
+    /// The workspace a revision was published as. Publication has just written
+    /// and validated this generation, so only its directory boundaries are
+    /// rechecked instead of walking and validating the whole tree again.
+    func publishedWorkspaceRoot(for revision: Revision) throws -> URL {
+        try workspaceLocation(for: revision)
+    }
+
     func readFile(at relativePath: String) throws -> Data {
         try readFileSnapshot(at: relativePath).data
     }

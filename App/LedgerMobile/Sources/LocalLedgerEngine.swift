@@ -43,13 +43,25 @@ struct LocalLedgerEngineRequest: Encodable, Sendable {
 protocol LocalLedgerEngine: Sendable {
     func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data
     func response(_ request: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse
+    /// Best-effort publication hook. The publish validator retains the stage
+    /// model it registered; promotion re-binds that model to the new immutable
+    /// generation so the first read does not import the canonical stream again.
+    /// Implementations must be silent on failure: the caller always keeps the
+    /// full re-registration path.
+    func promoteRetainedStageModel(ledgerRoot: URL, runtimeRoot: URL, entrypoint: String, generationRoot: URL) async
+    /// Releases the retained stage model when a publish is cancelled or fails.
+    func discardRetainedStageModel(ledgerRoot: URL, entrypoint: String) async
 }
 
 extension LocalLedgerEngine {
-    // Existing engines/mocks keep returning result-only JSON.
     func response(_ request: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse {
         LocalLedgerResponse(result: try await dispatch(request))
     }
+
+    // Engines that cannot retain native models still serve every request; the
+    // generation then registers through the normal path on its first read.
+    func promoteRetainedStageModel(ledgerRoot: URL, runtimeRoot: URL, entrypoint: String, generationRoot: URL) async {}
+    func discardRetainedStageModel(ledgerRoot: URL, entrypoint: String) async {}
 }
 
 /// Retain the native envelope until the caller knows its result type. Only the
@@ -137,13 +149,37 @@ struct LocalLedgerResponse: Sendable {
     }
 }
 
-/// One committed generation's native model handle. Committed generation
-/// directories are immutable, so a handle stays valid until it is released or
-/// the core evicts it.
-struct LocalCanonicalHandle: Equatable, Sendable {
+/// One committed generation registration remembered by the engine. Committed
+/// generation directories are immutable, so a handle stays valid until it is
+/// released or the core evicts it.
+struct LocalCanonicalHandle: Sendable, Equatable {
     let workspace: String
     let entrypoint: String
     let handle: String
+    let version: String
+}
+
+/// Pure path/registration matching for the model handles. Managed layouts nest
+/// <ledger>/generations/<id>/workspace and <ledger>/staging/<id>/workspace, so a
+/// staging request and the committed generation it was cloned from share a
+/// ledger root but never a workspace path.
+enum LocalModelHandleMatching {
+    /// The ledger that owns either managed layout; roots outside them map to
+    /// themselves. This matches the Go `localModelLedgerRoot` key.
+    static func ledgerRoot(_ workspace: String) -> String {
+        let container = URL(fileURLWithPath: workspace).deletingLastPathComponent().deletingLastPathComponent()
+        return container.lastPathComponent == "generations" || container.lastPathComponent == "staging"
+            ? container.deletingLastPathComponent().path : workspace
+    }
+
+    /// The committed registration a staging request may adopt its model from:
+    /// same ledger, same entrypoint. Handles are most-recently-used first, so
+    /// the first match is the generation currently serving reads.
+    static func adoptionSource(in handles: [LocalCanonicalHandle], entrypoint: String,
+                               stagingRoot: String) -> LocalCanonicalHandle? {
+        let ledger = ledgerRoot(stagingRoot)
+        return handles.first { $0.entrypoint == entrypoint && ledgerRoot($0.workspace) == ledger }
+    }
 }
 
 /// Native control operations configure the runtime or drop cached models. They
@@ -162,34 +198,19 @@ struct LocalCanonicalHandleCache {
     private(set) var handles: [LocalCanonicalHandle] = []
     static let limit = 4
 
-    func handle(workspace: String, entrypoint: String) -> String? {
-        handles.first { $0.workspace == workspace && $0.entrypoint == entrypoint }?.handle
-    }
-
-    /// A committed read is the evidence that its ledger is the one being viewed:
-    /// move the hit to the front so a memory warning keeps it and drops the
-    /// other ledgers. Registration order alone is stale after switching back to
-    /// an already-registered ledger.
-    mutating func touch(workspace: String, entrypoint: String) -> String? {
-        guard let index = handles.firstIndex(where: { $0.workspace == workspace && $0.entrypoint == entrypoint }) else {
-            return nil
-        }
-        if index > 0 {
-            let hit = handles.remove(at: index)
-            handles.insert(hit, at: 0)
-        }
-        return handles[0].handle
-    }
-
-    mutating func forget(_ handle: String) {
-        handles.removeAll { $0.handle == handle }
-    }
-
     /// One ledger across its immutable generations
     /// (<ledger>/generations/<id>/workspace); other roots key by themselves.
     static func ledgerKey(_ workspace: String) -> String {
         let generations = URL(fileURLWithPath: workspace).deletingLastPathComponent().deletingLastPathComponent()
         return generations.lastPathComponent == "generations" ? generations.path : workspace
+    }
+
+    func handle(workspace: String, entrypoint: String) -> LocalCanonicalHandle? {
+        handles.first { $0.workspace == workspace && $0.entrypoint == entrypoint }
+    }
+
+    mutating func forget(_ handle: String) {
+        handles.removeAll { $0.handle == handle }
     }
 
     /// Insert a newly registered handle and return the handles it supersedes or
@@ -221,30 +242,81 @@ struct LocalCanonicalHandleCache {
     }
 }
 
+/// Tracks the stage model a publish validation retained so promotion can reuse
+/// it instead of importing the same canonical stream again. One registration is
+/// kept per ledger/entrypoint; retaining again returns the handles the caller
+/// must release, so a replaced stage can never be promoted later.
+struct LocalStageRetention: Sendable, Equatable {
+    struct Entry: Sendable, Equatable {
+        let handle: String
+        let workspace: String
+        let sourceVersion: String
+    }
+
+    /// Bounded across ledgers; the publish in progress is always the newest.
+    static let limit = 2
+
+    private(set) var entries: [String: Entry] = [:]
+    private(set) var order: [String] = []
+
+    static func key(ledgerRoot: String, entrypoint: String) -> String {
+        ledgerRoot + "\u{0}" + entrypoint
+    }
+
+    func entry(for key: String) -> Entry? { entries[key] }
+
+    /// Records `entry` for `key` and returns every handle that was replaced or
+    /// evicted and must therefore be released.
+    mutating func retain(_ entry: Entry, for key: String) -> [String] {
+        var released: [String] = []
+        if let previous = entries[key] {
+            released.append(previous.handle)
+            order.removeAll { $0 == key }
+        }
+        entries[key] = entry
+        order.append(key)
+        while order.count > Self.limit {
+            let evicted = order.removeFirst()
+            if let stale = entries.removeValue(forKey: evicted) { released.append(stale.handle) }
+        }
+        return released
+    }
+
+    /// Removes and returns the retained stage for `key`, if any.
+    mutating func take(_ key: String) -> Entry? {
+        order.removeAll { $0 == key }
+        return entries.removeValue(forKey: key)
+    }
+}
+
 actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     static let shared = EmbeddedLocalLedgerEngine()
-    private var canonicalHandles = LocalCanonicalHandleCache()
-
     // Committed generation directories are immutable. Keep a handle for each of
     // the few most recently used ledgers (the core holds a bounded LRU of the
     // same size and may evict earlier); mutable stages always load their
     // current contents independently. Most recently registered first.
-    /// Resolving a committed read also marks that ledger most recently used, so
-    /// the memory-pressure eviction keeps the ledger the user is viewing rather
-    /// than the one that happened to be registered last.
-    private func cachedHandle(_ request: LocalLedgerEngineRequest) -> String? {
-        canonicalHandles.touch(workspace: request.workspaceRoot, entrypoint: request.entrypoint)
+    private var canonicalHandles = LocalCanonicalHandleCache()
+    // Stage registrations retained by a publish validation, awaiting promotion.
+    private var retainedStages = LocalStageRetention()
+
+    private func cachedHandle(_ request: LocalLedgerEngineRequest) -> LocalCanonicalHandle? {
+        canonicalHandles.handle(workspace: request.workspaceRoot, entrypoint: request.entrypoint)
     }
 
     private func forget(_ handle: String) {
         canonicalHandles.forget(handle)
     }
+    /// Both retention and promotion derive this key with the same helper, so a
+    /// validator's runtime root and the repository's ledger root cannot disagree.
+    private static func retentionKey(ledgerRoot: String, entrypoint: String) -> String {
+        LocalStageRetention.key(ledgerRoot: LocalModelHandleMatching.ledgerRoot(ledgerRoot), entrypoint: entrypoint)
+    }
 
     /// Record a new committed handle, releasing the one it supersedes (an older
     /// generation of the same ledger) and any beyond the limit.
-    private func remember(_ handle: String, request: LocalLedgerEngineRequest) {
+    private func remember(_ handle: String, version: String, request: LocalLedgerEngineRequest) {
         let entry = LocalCanonicalHandle(workspace: request.workspaceRoot,
-            entrypoint: request.entrypoint, handle: handle)
+            entrypoint: request.entrypoint, handle: handle, version: version)
         for old in canonicalHandles.remember(entry) { releaseHandle(old, request: request) }
     }
 
@@ -291,7 +363,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         guard !request.staging, let cached = cachedHandle(request) else { return nil }
         var small = request
         small.canonical = nil
-        small.modelHandle = cached
+        small.modelHandle = cached.handle
         let pageInterval = LocalLedgerPerformance.begin(.goPage)
         defer { LocalLedgerPerformance.end(pageInterval) }
         let result = try nativeResponse(small)
@@ -299,8 +371,8 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
             // The generation moved or the core evicted the model. Drop the stale
             // handle and redo this request through the exclusive path, which
             // re-registers.
-            forget(cached)
-            releaseHandle(cached, request: request)
+            forget(cached.handle)
+            releaseHandle(cached.handle, request: request)
             return nil
         }
         return result
@@ -326,10 +398,17 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         let request = normalized(original)
         let handle: String
         if !request.staging, let cached = cachedHandle(request) {
-            handle = cached
+            handle = cached.handle
+        } else if request.staging, let adopted = adoptStageModel(request) {
+            // The staged tree is a byte-identical clone of the committed parent
+            // generation, so one shallow copy of that model serves this request
+            // instead of importing the whole canonical stream again. The adopted
+            // registration is one-shot and released below like any stage.
+            handle = adopted
         } else {
-            handle = try await register(request)
-            if !request.staging { remember(handle, request: request) }
+            let registered = try await register(request)
+            handle = registered.handle
+            if !request.staging { remember(registered.handle, version: registered.version, request: request) }
         }
         defer { if request.staging { releaseHandle(handle, request: request) } }
         var small = request
@@ -353,13 +432,18 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     /// is a successful validation, so the export is kept: the generation this
     /// tree becomes then registers without a second Python pass, and a tree
     /// whose exact bytes were already validated skips the loader entirely.
-    func validateCanonical(workspaceRoot: String, runtimeRoot: String, entrypoint: String) async throws {
+    /// `retainForPromotion` is only for a tree that is about to be published;
+    /// the retained model is then promoted into the generation after commit so
+    /// the first read reuses it instead of importing the stream again.
+    func validateCanonical(workspaceRoot: String, runtimeRoot: String, entrypoint: String,
+                           retainForPromotion: Bool = false) async throws {
         // Export writes the shared scratch directory and can replace the cached
         // stream, so it takes the gate exclusively.
         await LocalModelRequestGate.shared.acquireWrite()
         do {
             try Task.checkCancellation()
-            try await serializedValidateCanonical(workspaceRoot: workspaceRoot, runtimeRoot: runtimeRoot, entrypoint: entrypoint)
+            try await serializedValidateCanonical(workspaceRoot: workspaceRoot, runtimeRoot: runtimeRoot,
+                entrypoint: entrypoint, retainForPromotion: retainForPromotion)
             await LocalModelRequestGate.shared.releaseWrite()
         } catch {
             await LocalModelRequestGate.shared.releaseWrite()
@@ -367,7 +451,8 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         }
     }
 
-    private func serializedValidateCanonical(workspaceRoot: String, runtimeRoot: String, entrypoint: String) async throws {
+    private func serializedValidateCanonical(workspaceRoot: String, runtimeRoot: String, entrypoint: String,
+                                             retainForPromotion: Bool) async throws {
         #if canImport(LedgerCore)
         let interval = LocalLedgerPerformance.begin(.canonicalValidate)
         defer { LocalLedgerPerformance.end(interval) }
@@ -378,17 +463,25 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         let version = try nativeResponse(command).decode(Version.self)
         let runtime = URL(fileURLWithPath: runtimeRoot)
         let cache = LocalCanonicalStreamCache(runtimeRoot: runtime)
-        if cache.contains(version.sourceVersion) { return }
-        let directory = runtime.appendingPathComponent("canonical-stream")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        guard directory.standardizedFileURL.path == directory.resolvingSymlinksInPath().standardizedFileURL.path else {
-            throw LocalLedgerError.invalidConfiguration(String(localized: "模型导出目录不允许符号链接"))
+        if !cache.contains(version.sourceVersion) {
+            let directory = runtime.appendingPathComponent("canonical-stream")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            guard directory.standardizedFileURL.path == directory.resolvingSymlinksInPath().standardizedFileURL.path else {
+                throw LocalLedgerError.invalidConfiguration(String(localized: "模型导出目录不允许符号链接"))
+            }
+            let output = directory.appendingPathComponent(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + ".records")
+            defer { try? FileManager.default.removeItem(at: output) }
+            let descriptor = try await EmbeddedBeancountValidator.shared.exportCanonical(
+                workspace: URL(fileURLWithPath: workspaceRoot), entryFile: entrypoint, to: output)
+            cache.store(output, sourceVersion: version.sourceVersion, descriptor: descriptor)
         }
-        let output = directory.appendingPathComponent(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + ".records")
-        defer { try? FileManager.default.removeItem(at: output) }
-        let descriptor = try await EmbeddedBeancountValidator.shared.exportCanonical(
-            workspace: URL(fileURLWithPath: workspaceRoot), entryFile: entrypoint, to: output)
-        cache.store(output, sourceVersion: version.sourceVersion, descriptor: descriptor)
+        if retainForPromotion {
+            // Retention is an optimization only: a failure must never block the
+            // publication the validator is gating. The generation then simply
+            // registers through the full path on its first read.
+            try? await retainStageModel(workspaceRoot: workspaceRoot, runtimeRoot: runtimeRoot,
+                entrypoint: entrypoint, version: version.sourceVersion)
+        }
         #else
         throw LocalLedgerError.runtimeUnavailable
         #endif
@@ -467,22 +560,42 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
 
     #if canImport(LedgerCore)
 
-    private func register(_ request: LocalLedgerEngineRequest) async throws -> String {
+    private func register(_ request: LocalLedgerEngineRequest) async throws -> (handle: String, version: String) {
         let interval = LocalLedgerPerformance.begin(.goRegister)
         defer { LocalLedgerPerformance.end(interval) }
         var command = request
         command.operation = "model-source"
         command.body = nil; command.importFile = nil; command.canonical = nil; command.modelHandle = nil
         struct Version: Decodable { let sourceVersion: String }
-        let version = try nativeResponse(command).decode(Version.self)
-        let runtime = URL(fileURLWithPath: request.runtimeRoot)
+        let version = try nativeResponse(command).decode(Version.self).sourceVersion
+        let scratch = try await canonicalStreamScratch(workspaceRoot: request.workspaceRoot,
+            runtimeRoot: request.runtimeRoot, entrypoint: request.entrypoint, version: version)
+        defer { try? FileManager.default.removeItem(at: scratch.url) }
+        try Task.checkCancellation()
+        command.operation = "model-register"
+        command.sourceVersion = version
+        command.streamFile = scratch.name
+        struct Registration: Decodable { let handle: String }
+        return (try nativeResponse(command).decode(Registration.self).handle, version)
+    }
+
+    struct CanonicalStreamScratch {
+        let name: String
+        let url: URL
+    }
+
+    /// Links (or exports) the canonical stream for `version` into the owned
+    /// scratch directory. All exporter/ingestion work is serialized by the
+    /// process-wide gate. Only exact owned scratch names are removed;
+    /// imports/receipts stay untouched.
+    private func canonicalStreamScratch(workspaceRoot: String, runtimeRoot: String, entrypoint: String,
+                                        version: String) async throws -> CanonicalStreamScratch {
+        let runtime = URL(fileURLWithPath: runtimeRoot)
         let directory = runtime.appendingPathComponent("canonical-stream")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard directory.standardizedFileURL.path == directory.resolvingSymlinksInPath().standardizedFileURL.path else {
             throw LocalLedgerError.invalidConfiguration(String(localized: "模型导出目录不允许符号链接"))
         }
-        // All exporter/ingestion work is serialized by the process-wide gate.
-        // Only exact owned scratch names are removed; imports/receipts untouched.
         for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey]) {
             let name = file.lastPathComponent
             let token = String(name.prefix(32))
@@ -497,27 +610,109 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         #if os(iOS)
         try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: directory.path)
         #endif
-        let filename = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + ".records"
-        let output = directory.appendingPathComponent(filename)
-        defer { try? FileManager.default.removeItem(at: output) }
+        let name = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + ".records"
+        let output = directory.appendingPathComponent(name)
         // Same source bytes, same bundled runtime: reuse the earlier export
         // instead of re-running the Python loader over the whole ledger.
         let cache = LocalCanonicalStreamCache(runtimeRoot: runtime)
-        if !cache.restore(version.sourceVersion, to: output) {
+        if !cache.restore(version, to: output) {
             let descriptor = try await EmbeddedBeancountValidator.shared.exportCanonical(
-                workspace: URL(fileURLWithPath: request.workspaceRoot), entryFile: request.entrypoint, to: output)
-            cache.store(output, sourceVersion: version.sourceVersion, descriptor: descriptor)
+                workspace: URL(fileURLWithPath: workspaceRoot), entryFile: entrypoint, to: output)
+            cache.store(output, sourceVersion: version, descriptor: descriptor)
         }
-        try Task.checkCancellation()
+        return CanonicalStreamScratch(name: name, url: output)
+    }
+
+    /// Adopts the committed parent generation's model as this staging request's
+    /// one-shot model when both trees provably hold the same bytes. Any missing
+    /// precondition returns nil and the caller registers from scratch.
+    private func adoptStageModel(_ request: LocalLedgerEngineRequest) -> String? {
+        guard let committed = LocalModelHandleMatching.adoptionSource(in: canonicalHandles.handles,
+            entrypoint: request.entrypoint, stagingRoot: request.workspaceRoot) else { return nil }
+        var command = request
+        command.operation = "model-adopt"
+        command.modelHandle = committed.handle
+        command.sourceVersion = committed.version
+        command.staging = true
+        command.canonical = nil; command.body = nil; command.importFile = nil
+        struct Adoption: Decodable { let handle: String }
+        guard let adopted = try? nativeResponse(command).decode(Adoption.self) else { return nil }
+        return adopted.handle
+    }
+
+    /// Registers the publish candidate's final staged content and keeps it until
+    /// publication promotes it. Only stage trees qualify: a generation tree is
+    /// already committed, and a preview that is never confirmed discards it.
+    private func retainStageModel(workspaceRoot: String, runtimeRoot: String, entrypoint: String,
+                                  version: String) async throws {
+        let container = URL(fileURLWithPath: workspaceRoot)
+            .deletingLastPathComponent().deletingLastPathComponent().lastPathComponent
+        guard container == "staging" else { return }
+        // Same ledger root the repository passes to promotion/discard
+        // (workspace.rootDirectory); retentionKey normalizes both sides.
+        let ledgerRoot = LocalModelHandleMatching.ledgerRoot(workspaceRoot)
+        let key = Self.retentionKey(ledgerRoot: ledgerRoot, entrypoint: entrypoint)
+        if let existing = retainedStages.entry(for: key),
+           existing.workspace == workspaceRoot, existing.sourceVersion == version {
+            return
+        }
+        let scratch = try await canonicalStreamScratch(workspaceRoot: workspaceRoot, runtimeRoot: runtimeRoot,
+            entrypoint: entrypoint, version: version)
+        defer { try? FileManager.default.removeItem(at: scratch.url) }
+        var command = LocalLedgerEngineRequest(workspaceRoot: workspaceRoot, runtimeRoot: runtimeRoot,
+            entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
         command.operation = "model-register"
-        command.sourceVersion = version.sourceVersion
-        command.streamFile = filename
+        command.staging = true
+        command.sourceVersion = version
+        command.streamFile = scratch.name
         struct Registration: Decodable { let handle: String }
         let registerInterval = LocalLedgerPerformance.begin(.goModelRegister)
         defer { LocalLedgerPerformance.end(registerInterval) }
-        return try nativeResponse(command).decode(Registration.self).handle
+        let handle = try nativeResponse(command).decode(Registration.self).handle
+        let entry = LocalStageRetention.Entry(handle: handle, workspace: workspaceRoot, sourceVersion: version)
+        for released in retainedStages.retain(entry, for: key) {
+            releaseHandle(released, request: command)
+        }
     }
     #endif
+
+    /// Promotes the retained stage model into the just-published generation.
+    /// Every failure releases the retained stage and leaves the generation to
+    /// register through the full path; callers never observe an error.
+    func promoteRetainedStageModel(ledgerRoot: URL, runtimeRoot: URL, entrypoint: String, generationRoot: URL) async {
+        #if canImport(LedgerCore)
+        await LocalModelRequestGate.shared.acquireWrite()
+        let key = Self.retentionKey(ledgerRoot: ledgerRoot.path, entrypoint: entrypoint)
+        if let retained = retainedStages.take(key) {
+            var command = LocalLedgerEngineRequest(workspaceRoot: generationRoot.path, runtimeRoot: runtimeRoot.path,
+                entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
+            command.operation = "model-promote"
+            command.modelHandle = retained.handle
+            command.sourceVersion = retained.sourceVersion
+            struct Registration: Decodable { let handle: String }
+            if let promoted = try? nativeResponse(command).decode(Registration.self) {
+                remember(promoted.handle, version: retained.sourceVersion, request: command)
+            } else {
+                releaseHandle(retained.handle, request: command)
+            }
+        }
+        await LocalModelRequestGate.shared.releaseWrite()
+        #endif
+    }
+
+    func discardRetainedStageModel(ledgerRoot: URL, entrypoint: String) async {
+        #if canImport(LedgerCore)
+        await LocalModelRequestGate.shared.acquireWrite()
+        let key = Self.retentionKey(ledgerRoot: ledgerRoot.path, entrypoint: entrypoint)
+        if let retained = retainedStages.take(key) {
+            let command = LocalLedgerEngineRequest(workspaceRoot: ledgerRoot.path,
+                runtimeRoot: ledgerRoot.appendingPathComponent("runtime").path,
+                entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
+            releaseHandle(retained.handle, request: command)
+        }
+        await LocalModelRequestGate.shared.releaseWrite()
+        #endif
+    }
 
 }
 

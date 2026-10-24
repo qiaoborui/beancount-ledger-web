@@ -103,7 +103,10 @@ actor LocalLedgerCatalog {
 
     nonisolated func repository(for descriptor: LocalLedgerDescriptor) -> LocalLedgerRepository {
         LocalLedgerRepository(descriptor: descriptor, storage: storage(for: descriptor),
-            engine: engine, validator: publicationValidator(for: descriptor))
+            engine: engine, validator: publicationValidator(for: descriptor),
+            // Only write commits retain the validated stage model for promotion;
+            // sync and catalog imports keep the plain validation path.
+            writeValidator: publicationValidator(for: descriptor, retainingStage: true))
     }
 
     private nonisolated func storage(for descriptor: LocalLedgerDescriptor) -> any LogicalLocalStorage {
@@ -449,7 +452,10 @@ actor LocalLedgerCatalog {
 
     /// Canonical validity and the application's read limits must both hold
     /// before an immutable generation becomes the active ledger.
-    private nonisolated func publicationValidator(for descriptor: LocalLedgerDescriptor) -> Validator {
+    /// `retainingStage` additionally registers the validated stage model so the
+    /// publication can promote it instead of importing the stream once more.
+    private nonisolated func publicationValidator(for descriptor: LocalLedgerDescriptor,
+                                                  retainingStage: Bool = false) -> Validator {
         let canonical = validator, engine = engine
         let cached = usesCanonicalStreamCache ? engine as? EmbeddedLocalLedgerEngine : nil
         // Use the workspace's exact normalized path for both sides of the
@@ -461,7 +467,8 @@ actor LocalLedgerCatalog {
                 // `model-source` inside validateCanonical runs the same Go
                 // workspace confinement and source walk as /api/ledger/version,
                 // without registering (ingesting) a model just to read it.
-                try await cached.validateCanonical(workspaceRoot: root.path, runtimeRoot: runtimeRoot, entrypoint: entry)
+                try await cached.validateCanonical(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+                    entrypoint: entry, retainForPromotion: retainingStage)
                 return
             }
             try await canonical(root, entry)
