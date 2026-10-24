@@ -101,6 +101,20 @@ func dispatchModelOperation(request dispatchRequestV1) string {
 		var handle string
 		handle, err = app.RegisterLocalModel(request.LocalRequest, request.StreamFile, request.SourceVersion)
 		result = map[string]string{"handle": handle}
+	case "model-promote":
+		// The handle names the retained stage registration, not a request model.
+		input := request.LocalRequest
+		input.ModelHandle = ""
+		var handle string
+		handle, err = app.PromoteLocalModel(input, request.ModelHandle, request.SourceVersion)
+		result = map[string]string{"handle": handle}
+	case "model-adopt":
+		// The handle names the committed model to copy; adoption never consumes it.
+		input := request.LocalRequest
+		input.ModelHandle = ""
+		var handle string
+		handle, err = app.AdoptLocalModel(input, request.ModelHandle, request.SourceVersion)
+		result = map[string]string{"handle": handle}
 	case "model-release":
 		app.ReleaseLocalModel(request.ModelHandle)
 		result = map[string]bool{"released": true}
