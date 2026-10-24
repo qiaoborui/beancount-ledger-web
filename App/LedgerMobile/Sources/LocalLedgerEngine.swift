@@ -335,6 +335,10 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     private func remember(_ handle: String, version: String, request: LocalLedgerEngineRequest) {
         let entry = LocalCanonicalHandle(workspace: request.workspaceRoot,
             entrypoint: request.entrypoint, handle: handle, version: version)
+        // Opt-in measurement recording only (a no-op otherwise): `version` is the
+        // digest the native core computed over the ledger sources, which is the
+        // ledger identity the report quotes next to the source-tree digest.
+        LocalLedgerPerformance.recorder.recordLedgerIdentity(.init(sourceVersion: version))
         for old in canonicalHandles.remember(entry) { releaseHandle(old, request: request) }
     }
 

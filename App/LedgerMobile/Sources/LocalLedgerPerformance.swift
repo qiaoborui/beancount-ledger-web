@@ -59,6 +59,23 @@ enum LocalLedgerPerformance {
             default: return nil
             }
         }
+
+        /// Stable key for the opt-in recorder's aggregate; matches the signpost
+        /// name so Instruments and the JSON report agree on segment identity.
+        var key: String {
+            switch self {
+            case .canonicalValidate: return "canonical-validate"
+            case .pythonLoad: return "python-load"
+            case .pythonExport: return "python-export"
+            case .pythonParse: return "python-parse"
+            case .pythonBooking: return "python-booking"
+            case .pythonPlugins: return "python-plugins"
+            case .pythonValidate: return "python-validate"
+            case .goRegister: return "go-register"
+            case .goModelRegister: return "go-model-register"
+            case .goPage: return "go-page"
+            }
+        }
     }
 
     struct MemorySample: Sendable, Equatable {
@@ -83,6 +100,10 @@ enum LocalLedgerPerformance {
     private static let memoryPeakName: StaticString = "memory-peak"
     private static let state = MemoryState()
     private static let clock = ContinuousClock()
+    /// Opt-in JSON recording of the same intervals; see
+    /// `LocalLedgerPerformanceRecorder`. Every call into it is a cheap no-op
+    /// while recording is off.
+    static let recorder = LocalLedgerPerformanceRecorder.shared
 
     // MARK: - Python loader breakdown
 
@@ -103,6 +124,8 @@ enum LocalLedgerPerformance {
         for (stage, milliseconds) in timings.sorted(by: { $0.key < $1.key }) {
             guard let segment = Segment(pythonStage: stage) else { continue }
             emit(segment.signpostName, "duration_ms=\(millisecondsString(milliseconds))")
+            // Opt-in recording only; a no-op while recording is off.
+            recorder.recordInterval(milliseconds: milliseconds, segment: segment.key)
         }
     }
 
@@ -110,6 +133,10 @@ enum LocalLedgerPerformance {
 
     static func begin(_ segment: Segment) -> Interval {
         let name = segment.signpostName
+        // The recorder opens its interval first: `state.begin()` takes the
+        // sampler's first memory reading immediately, and an opt-in run must
+        // already be inside an interval when that reading arrives.
+        recorder.beginInterval()
         let signpostState = signposter.beginInterval(name, id: signposter.makeSignpostID())
         _ = state.begin()
         return Interval(segment: segment, name: name, signpostState: signpostState,
@@ -135,6 +162,16 @@ enum LocalLedgerPerformance {
                  "peak_footprint_mb=\(megabytesString(peak))"
                  + (summary.latest?.availableBytes.map { " available_mb=\(megabytesString($0))" } ?? ""))
         }
+        // The opt-in recorder additionally stores this interval's duration and
+        // the process-wide reading taken at the same moment. Recording stays off
+        // unless the app asked for it, so the default path keeps only the
+        // signposts; `summary.peakFootprint` is set only when the outermost
+        // interval just ended.
+        recorder.recordInterval(milliseconds: milliseconds, segment: interval.segment.key)
+        let global = recorder.isRecording ? memorySample() : nil
+        recorder.finishInterval(globalFootprintBytes: global?.footprintBytes,
+                                globalAvailableBytes: global?.availableBytes,
+                                runPeakAtEnd: summary.peakFootprint)
     }
 
     /// Current `phys_footprint` and (iOS only) process memory headroom.
@@ -238,6 +275,11 @@ enum LocalLedgerPerformance {
             guard let sample else { return nil }
             latest = sample
             peak = max(peak, sample.footprintBytes)
+            // Recording is off in normal launches; the recorder drops the sample
+            // without allocating. Kept inside the lock so an opt-in run and the
+            // signpost summary observe the same sample.
+            LocalLedgerPerformance.recorder.sampleMemory(
+                footprintBytes: sample.footprintBytes, availableBytes: sample.availableBytes)
             return sample
         }
 
