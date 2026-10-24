@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,6 +40,32 @@ var localCursorKey = func() []byte {
 	}
 	return key
 }()
+
+// localPageScanProbe is a test hook: when non-nil it counts the transactions the
+// native page loop examines. Tests use it to prove that a narrow date range
+// skips the newer prefix instead of scanning it; production leaves it nil.
+var localPageScanProbe *atomic.Int64
+
+// firstTransactionIndexBefore returns the first index in a date-descending order
+// whose date precedes end. The order is non-increasing by date, so the predicate
+// is monotonic and binary search replaces a linear skip over every newer row.
+func firstTransactionIndexBefore(txns transactionOrder, end string) int {
+	return sort.Search(txns.Len(), func(index int) bool {
+		return txns.At(index).Date < end
+	})
+}
+
+// localTransactionScanStart positions one transaction page loop. The signed
+// cursor offset stays authoritative, but a fresh page (offset 0) of a narrow
+// date range must not walk every newer transaction: descending order puts those
+// rows in a prefix the binary search can skip. The result never precedes the
+// offset, so a continuation resumes exactly where the previous page stopped.
+func localTransactionScanStart(txns transactionOrder, offset int, effectiveEnd string) int {
+	if first := firstTransactionIndexBefore(txns, effectiveEnd); first > offset {
+		return first
+	}
+	return offset
+}
 
 type localTransactionCursor struct {
 	Scope  string `json:"scope"`
@@ -169,12 +197,21 @@ func localTransactionPageProjection(cfg Config, snapshot *LedgerSnapshot, query 
 	if offset > txns.Len() {
 		return 400, nil, errors.New("invalid transaction cursor position")
 	}
+	scanStart := localTransactionScanStart(txns, offset, effectiveEnd)
 	page := localTransactionPage{Revision: modelRevision, Transactions: make([]Transaction, 0, limit), SensitiveUnlocked: true}
 	// Reserve enough for revision/cursor/envelope fields; exact final size checked.
 	used := 4096
-	for index := offset; index < txns.Len(); index++ {
+	for index := scanStart; index < txns.Len(); index++ {
+		if localPageScanProbe != nil {
+			localPageScanProbe.Add(1)
+		}
 		txn := txns.At(index)
-		if txn.Date < effectiveStart || txn.Date >= effectiveEnd || (filter != nil && !filter.Matches(txn)) {
+		if txn.Date < effectiveStart {
+			// Descending order: every later row is older still, so the range
+			// start ends the scan without visiting the tail.
+			break
+		}
+		if filter != nil && !filter.Matches(txn) {
 			continue
 		}
 		if !candidates {
