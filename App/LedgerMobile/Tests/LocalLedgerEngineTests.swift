@@ -154,4 +154,95 @@ final class LocalLedgerEngineTests: XCTestCase {
         let expected = try JSONSerialization.data(withJSONObject: JSONSerialization.jsonObject(with: canonical), options: .sortedKeys)
         XCTAssertEqual(actual, expected)
     }
+
+    func testCanonicalHandleCacheReleasesIdleModelsOnMemoryPressure() {
+        var cache = LocalCanonicalHandleCache()
+        let current = LocalCanonicalHandle(workspace: "/ledger/generations/two/workspace",
+            entrypoint: "main.bean", handle: "current")
+        let idle = LocalCanonicalHandle(workspace: "/older/generations/one/workspace",
+            entrypoint: "main.bean", handle: "idle")
+        _ = cache.remember(idle)
+        _ = cache.remember(current)
+        XCTAssertEqual(cache.handles, [current, idle])
+
+        let plan = cache.releaseIdleModels()
+        XCTAssertEqual(plan.keep, "current")
+        XCTAssertEqual(plan.released, ["idle"])
+        XCTAssertEqual(cache.handles, [current])
+        XCTAssertEqual(cache.handle(workspace: current.workspace, entrypoint: current.entrypoint), "current")
+        XCTAssertNil(cache.handle(workspace: idle.workspace, entrypoint: idle.entrypoint))
+
+        var empty = LocalCanonicalHandleCache()
+        let none = empty.releaseIdleModels()
+        XCTAssertNil(none.keep)
+        XCTAssertEqual(none.released, [])
+    }
+
+    func testCanonicalHandleCacheTouchKeepsTheLedgerBeingViewed() {
+        var cache = LocalCanonicalHandleCache()
+        let first = LocalCanonicalHandle(workspace: "/first/generations/one/workspace",
+            entrypoint: "main.bean", handle: "one")
+        let second = LocalCanonicalHandle(workspace: "/second/generations/two/workspace",
+            entrypoint: "main.bean", handle: "two")
+        _ = cache.remember(first)
+        _ = cache.remember(second)
+        XCTAssertEqual(cache.handles, [second, first])
+
+        // A committed read is evidence of the ledger being viewed, not of the
+        // registration order: switching back must move the hit to the front so
+        // memory pressure keeps it.
+        XCTAssertEqual(cache.touch(workspace: first.workspace, entrypoint: first.entrypoint), "one")
+        XCTAssertEqual(cache.handles, [first, second])
+        let plan = cache.releaseIdleModels()
+        XCTAssertEqual(plan.keep, "one")
+        XCTAssertEqual(plan.released, ["two"])
+        XCTAssertEqual(cache.handles, [first])
+
+        // A miss neither reorders nor invents a handle.
+        XCTAssertNil(cache.touch(workspace: "/other/generations/x/workspace", entrypoint: "main.bean"))
+        XCTAssertEqual(cache.handles, [first])
+    }
+
+    func testCanonicalHandleCacheSupersedesGenerationsAndEvictsByRecency() {
+        var cache = LocalCanonicalHandleCache()
+        let olderGeneration = LocalCanonicalHandle(workspace: "/ledger/generations/one/workspace",
+            entrypoint: "main.bean", handle: "one")
+        let newerGeneration = LocalCanonicalHandle(workspace: "/ledger/generations/two/workspace",
+            entrypoint: "main.bean", handle: "two")
+        _ = cache.remember(olderGeneration)
+        XCTAssertEqual(cache.remember(newerGeneration), ["one"])
+        XCTAssertEqual(cache.handles, [newerGeneration])
+
+        let entries = (0..<(LocalCanonicalHandleCache.limit + 1)).map { index in
+            LocalCanonicalHandle(workspace: "/ledger\(index)/generations/one/workspace",
+                entrypoint: "main.bean", handle: "h\(index)")
+        }
+        var released: [String] = []
+        for entry in entries { released += cache.remember(entry) }
+        XCTAssertEqual(released, [newerGeneration.handle, "h0"])
+        XCTAssertEqual(cache.handles.map(\.handle), ["h4", "h3", "h2", "h1"])
+        XCTAssertEqual(cache.handle(workspace: entries[4].workspace, entrypoint: "main.bean"), "h4")
+        cache.forget("h3")
+        XCTAssertNil(cache.handle(workspace: entries[3].workspace, entrypoint: "main.bean"))
+    }
+
+    func testNativeControlRequestsMatchTheGoDispatcherContract() throws {
+        // The Go dispatcher rejects unknown JSON fields, so these standalone
+        // requests must carry exactly version/operation plus one control field.
+        func encoded(_ request: LocalModelControlRequest) throws -> [String: Any] {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        }
+        let memory = try encoded(.init(operation: "memory-limit", availableBytes: 1_610_612_736))
+        XCTAssertEqual(memory["version"] as? Int, 1)
+        XCTAssertEqual(memory["operation"] as? String, "memory-limit")
+        XCTAssertEqual((memory["availableBytes"] as? NSNumber)?.int64Value, 1_610_612_736)
+        XCTAssertNil(memory["modelHandle"])
+        XCTAssertEqual(Set(memory.keys), ["version", "operation", "availableBytes"])
+
+        let release = try encoded(.init(operation: "model-release-idle", modelHandle: "handle"))
+        XCTAssertEqual(release["operation"] as? String, "model-release-idle")
+        XCTAssertEqual(release["modelHandle"] as? String, "handle")
+        XCTAssertNil(release["availableBytes"])
+        XCTAssertEqual(Set(release.keys), ["version", "operation", "modelHandle"])
+    }
 }
