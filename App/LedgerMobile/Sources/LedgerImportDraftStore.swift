@@ -173,9 +173,9 @@ struct LedgerImportDraftStore {
         var metadataDraft = draft
         metadataDraft.fileData = Data()
         let metadata = try JSONEncoder().encode(metadataDraft)
-        try metadata.write(to: metadataURL, options: [.atomic, .completeFileProtection])
+        try metadata.write(to: metadataURL, options: .ledgerProtected)
         if shouldWriteSource {
-            try draft.fileData.write(to: sourceURL(for: draft.ledgerID), options: [.atomic, .completeFileProtection])
+            try draft.fileData.write(to: sourceURL(for: draft.ledgerID), options: .ledgerProtected)
         }
     }
 
