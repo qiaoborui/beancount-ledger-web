@@ -30,7 +30,7 @@
 
 1. 真机验收数据未采集：10k/50k/100k/200k Release 包的 signpost 分段与 `phys_footprint` 峰值、jetsam 次数；`GOMEMLIMIT` 边界、estimate 系数 6 待真机校准。
 2. 打包前需重跑 `scripts/build-ledgercore-xcframework.sh`（新增 4 个 Go 操作）；`scripts/build-ios-ipa.sh` 已包含。
-3. `ImportHistoryTests` 2 个用例本机因 `.completeFileProtection` 原子写 `mktemp` EPERM 失败（macOS 27 / Xcode 27 对 data-protection class 写入返回 EPERM），已在 pristine `main` 复现，会挡住任何改动 `App/` 的 PR；已单独提交前置修复 PR #547（`codex/ios-macos-file-protection`，macOS 测试构建省略 protection class，iOS App 行为不变），合入后其余 PR 重跑 CI 即绿。`TestGitHubWriteValidationLargeLedgerPerformance` 对负载敏感（安静时通过），同属既有环境问题。
+3. `ImportHistoryTests` 2 个用例本机因 `.completeFileProtection` 原子写 `mktemp` EPERM 失败（macOS 27 / Xcode 27 对 data-protection class 写入返回 EPERM），已在 pristine `main` 复现，会挡住任何改动 `App/` 的 PR；已由前置修复 #547（`codex/ios-macos-file-protection`）修复并合入 `main` @ `64bed5c`：macOS 测试构建省略 protection class，iOS App 行为不变；修复后 6 项 PR + docs PR 的 CI 全绿。`TestGitHubWriteValidationLargeLedgerPerformance` 对负载敏感（安静时通过），同属既有环境问题。
 4. 既有 bug（超出本阶段范围）：`document` 指令 `Filename` 导出为绝对路径，规范流不满足跨目录字节一致；item ⑤ promote 只重绑 `File`，未处理 `Filename`。建议单独评估。
 5. item ⑤ 在 commit 校验期保留 stage 模型，两个 Go 模型 + Python RSS 可能重叠；软上限不保证不 OOM，真机峰值是验收门。
 6. 快照未跨 root 迁移（item ⑤ 只省导入、不省快照）；计划里的“省一次快照 4.2s”仍待做。

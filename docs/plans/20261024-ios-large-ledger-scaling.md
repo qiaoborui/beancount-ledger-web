@@ -132,3 +132,27 @@
 2. **第一阶段开工**：是否按上面 6 项开始，先做“容量基准入仓”和“内存核算”。
 3. **写队列的交互**（第三阶段）：是否接受“保存中”的临时行，以及批量里一笔出错时整批暂不发布。
 4. **检查点方案**（第四阶段）：是否接受“在证明等价的子集内不再跑全量 beancount”这一语义变化。这是唯一会碰到“每次写都完整校验”这条规则的一步。
+
+## 第一阶段交付记录（2026-10-24）
+
+6 项各自一个独立分支/PR，基线 `main` @ `150b552`；每项都未改 `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION`，未加依赖，未改校验结果、错误文案或 64MiB/256MiB/1MiB 上限。
+
+| 项 | 分支 / HEAD | 主要改动 | 本机验证数字（宿主，非真机） |
+| --- | --- | --- | --- |
+| ① 基准与分段计时 | `codex/ios-ledger-perf-baseline` @ `5c36c52` | opt-in 生成器/基准（`scripts/large_ledger_bench.py`、`BenchmarkLocalScaleStages`）、App signpost + phys_footprint、Python 可选 `log_timings` | 100k 导出 9.34s（loader 6.85s，booking 4.41s）；Go 导入 723ms、注册 705ms、首屏 1.65s、活堆 361MiB |
+| ② 内存核算 | `codex/ios-model-memory-accounting` @ `cf763ca` | estimate 3→6、`debug.SetMemoryLimit`（可用内存一半，clamp 512MiB–1GiB）、内存告警原子裁剪空闲模型 | 单 100k 模型 ~282MiB 仍驻留、第二个被预算挤出；告警不动 staged/在途模型 |
+| ③ 预检去重 | `codex/ios-preflight-scan` @ `d4f96b6` | 无策略关键字文件跳过 `parser.parse_file`，loader 成为唯一解析方；命中关键字仍走原检查（fail-closed） | `_preflight` 0.639s→0.039s/100k；流 SHA-256 不变 |
+| ④ 流导出提速 | `codex/ios-export-encode-once` @ `2edc7b5` | 预算检查改为直接检查原始 entry/posting 字段，保留投影前拒绝与编码长度兜底 | 预算检查 1.58s→0.64s（−59%）；隔离导出 3.66s→2.50s；字节不变 |
+| ⑤ 只注册一次 | `codex/ios-single-model-registration` @ `b138576` | 新增 `model-adopt`（committed→一次性 stage 浅拷贝）与 `model-promote`（发布后 stage→generation，含摘要/布局/路径重绑），Swift 保留/提升/回退矩阵 | 100k 一次写 2 次 Go 导入→1 次（省约 7.8s）；adopt 浅拷贝 44ms；发布后首读 12s→4.2s；快照仍重建 |
+| ⑥ 日期二分 | `codex/ios-date-range-bisect` @ `5222937` | `sort.Search` 定位首个 `Date < effectiveEnd`，`scanStart=max(cursor, first)`，越界即 break | 窄区间首页扫描 100,501→501 行；本地 4.3–6.5ms→1.3ms |
+
+集成验证：合并 6 项（含已合入 main 的 #547）的分支 `codex/ios-large-ledger-scaling-integration` 已通过 Python 32 tests、`go test ./...`、`go build ./cmd/...`、`swift test`（0 failures）、`swift build --triple arm64-apple-ios17.0`；7 个 PR（6 项 + docs）CI 全绿。冲突解决集中在 `LocalLedgerEngine.swift`（handles/signpost）与 `dispatch_test.go`（两组控制操作测试）。
+
+### 第一阶段已知问题与未覆盖项
+
+- **CI 前置修复已合入**：本机 macOS 27 / Xcode 27 对 `.completeFileProtection` 写入返回 EPERM，导致 `ImportHistoryTests` 两个用例在 pristine `main` 上就失败，会挡住任何改动 `App/` 的 PR。#547（`codex/ios-macos-file-protection`）已合入 `main` @ `64bed5c`：macOS 测试构建省略 protection class，iOS App 行为不变。`TestGitHubWriteValidationLargeLedgerPerformance` 对机器负载敏感（安静时通过），属既有环境问题。
+- **既有 bug（未修，超出范围）**：`document` 指令的 `Filename` 以绝对路径导出，规范流因此不满足“不同目录拷贝字节相同”；会影响规范流缓存跨 stage/generation 复用。建议单独评估（item ⑤ 的 promote 只重绑 `File`，不重绑 `Filename`）。
+- **item ⑤ 峰值内存**：发布校验会保留 stage 模型，commit 期间两个 Go 模型与 Python RSS 可能重叠；GOMEMLIMIT 是软上限。真机 `phys_footprint` 峰值仍是第一阶段验收门。
+- **打包**：新增 Go 操作（`model-adopt`/`model-promote`/`model-release-idle`/`memory-limit`）需要重跑 `scripts/build-ledgercore-xcframework.sh` 生成新的 `LedgerCore.xcframework`（`scripts/build-ios-ipa.sh` 已包含该步骤）；CI 的 `swift test`/iOS SDK 交叉编译不编译 `canImport(LedgerCore)` 分支。
+- **真机数据**：10k/50k/100k/200k Release 包的 signpost 与 phys_footprint 峰值尚未采集；GOMEMLIMIT 边界与 estimate 系数待真机校准。
+- 待决定第 2 项（第一阶段开工）已执行；第 1、3、4 项（目标体量、写队列交互、检查点语义）仍未决。
