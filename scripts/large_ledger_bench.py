@@ -6,10 +6,26 @@ come from a fixed PRNG seed, so a tier is reproducible and contains no real
 ledger data or machine-specific paths.
 
     # Generate one tier (10k / 50k / 100k transactions, 240 month files).
+    # Writes the ledger plus manifest.json next to it.
     python3 scripts/large_ledger_bench.py generate --tier 100k --output /tmp/ledger-100k
+
+    # Assemble an importable directory for a physical device and check that
+    # regenerating the tier is byte-reproducible.
+    python3 scripts/large_ledger_bench.py assemble --tier 10k --workdir /tmp/blw-tiers
+    python3 scripts/large_ledger_bench.py verify --tier 10k --workdir /tmp/blw-tiers
 
     # Generate all tiers and measure the real pipeline segments.
     python3 scripts/large_ledger_bench.py bench --tiers 10k,50k,100k
+
+`generate` also writes `manifest.json` next to the ledger (transaction count,
+directive counts by kind, source files, source bytes, expected canonical entry
+count and stream bytes, and the sha256 of the generated source tree). The
+manifest is the identity of the workload a measurement run claims to measure:
+`verify` regenerates the same tier from the same seed and fails unless every
+byte matches. `assemble` copies a tier into a directory the app accepts through
+its catalog import path, deliberately leaving `manifest.json` out of it.
+
+See docs/ios-large-ledger-measurement-protocol.md for the device procedure.
 
 `bench` runs the real `App/LedgerMobile/Runtime/ledger_validator.py` export with
 `LEDGER_VALIDATION_TIMINGS=1` (so the stream descriptor carries the
@@ -45,6 +61,18 @@ TIERS = {"10k": 10_000, "50k": 50_000, "100k": 100_000}
 DEFAULT_SEED = 20261024
 MONTHS = 240
 START_YEAR = 2006
+
+MANIFEST_NAME = "manifest.json"
+# Version of the manifest layout below. Bump it when keys are renamed or
+# removed so a stale manifest is rejected instead of being read as current.
+MANIFEST_VERSION = 1
+SOURCE_TREE_DIGEST_PREFIX = "sha256:"
+
+# The app's catalog import copies the chosen directory into a staging
+# generation before validating it, and LocalLedgerWorkspace.TreeLimits caps
+# that tree at 10,000 entries (files and directories), 256 MiB of file bytes
+# and a path depth of 32. `assemble` refuses a tier that would not fit.
+IMPORT_TREE_LIMITS = {"entries": 10_000, "bytes": 256 * 1024 * 1024, "depth": 32}
 
 # Synthetic Chinese payees and narrations. A real ledger never appears here.
 PAYEES = (
@@ -144,6 +172,11 @@ def generate(workspace, transactions, *, seed=DEFAULT_SEED, months=MONTHS, start
     month_files = []
     transaction_index = 0
     written = 0
+    # Directive counts by kind: what each generated file actually contains.
+    # `auto_accounts` opens accounts on load, so the synthetic source never
+    # carries `open` lines for the expense accounts it uses.
+    directives = {"open": 0, "commodity": 0, "price": 0, "plugin": 0,
+                  "option": 0, "include": 0, "transaction": 0}
     for month_index in range(months):
         year = start_year + month_index // 12
         month = month_index % 12 + 1
@@ -252,12 +285,21 @@ def generate(workspace, transactions, *, seed=DEFAULT_SEED, months=MONTHS, start
         'include "transactions/*.bean"\n',
     ]
     write("main.bean", "".join(main))
+
+    directives["open"] = len(OPENED_ACCOUNTS)
+    directives["commodity"] = len(COMMODITIES)
+    directives["price"] = len(price_lines)
+    directives["plugin"] = sum(1 for line in main if line.startswith("plugin "))
+    directives["option"] = sum(1 for line in main if line.startswith("option "))
+    directives["include"] = sum(1 for line in main if line.startswith("include "))
+    directives["transaction"] = written
     return {
         "transactions": written,
         "monthFiles": len(month_files),
         "months": months,
         "sourceFiles": len(month_files) + 4,
         "seed": seed,
+        "directives": dict(directives),
     }
 
 
@@ -269,6 +311,227 @@ def _require_imports():
         raise SystemExit(
             "benchmark needs beancount 3.2.3 in this interpreter: {}".format(error))
     return ledger_validator
+
+
+# --- Manifest -----------------------------------------------------------------
+#
+# A tier is only a usable measurement workload if it can be re-identified later:
+# "the 100k run" says nothing about which seed, which generator and which bytes
+# produced that number. The manifest records the source tree digest and one
+# canonical stream digest, and `verify` re-derives both from a fresh generation.
+
+
+def _source_files(workspace):
+    """Every regular file under `workspace` as relative POSIX paths.
+
+    The generator's own manifest is excluded: it lives next to the ledger, but
+    it describes the tree and must never be part of what it describes, or the
+    digest would change the moment the manifest is written.
+    """
+    workspace = Path(workspace)
+    found = []
+    for path in workspace.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        relative = path.relative_to(workspace).as_posix()
+        if relative == MANIFEST_NAME:
+            continue
+        found.append(relative)
+    return sorted(found)
+
+
+def _source_tree_sha256(workspace):
+    """Digest the source tree by path, size and content, independent of mtime.
+
+    The digest covers the Beancount sources only; the manifest itself is never
+    an input, so writing it does not change the identity of the workload.
+    """
+    workspace = Path(workspace)
+    digest = hashlib.sha256()
+    files = []
+    total_bytes = 0
+    for relative in _source_files(workspace):
+        data = (workspace / relative).read_bytes()
+        total_bytes += len(data)
+        file_digest = hashlib.sha256(data).hexdigest()
+        files.append({"path": relative, "bytes": len(data), "sha256": file_digest})
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(file_digest.encode("ascii"))
+        digest.update(b"\n")
+    return SOURCE_TREE_DIGEST_PREFIX + digest.hexdigest(), files, total_bytes
+
+
+def _stream_metrics(ledger_validator, workspace, entry="main.bean"):
+    """Canonical entry count and stream bytes for this exact source tree.
+
+    Uses the real export path the app uses, so the expected values match what a
+    device run will register. The stream file is temporary and removed.
+    """
+    root = Path(workspace).resolve()
+    with tempfile.TemporaryDirectory(prefix="blw-manifest-") as runtime:
+        stream = Path(runtime) / "stream.records"
+        payload = json.loads(ledger_validator.export_canonical_json(
+            str(root), entry, str(stream)))
+        if payload.get("errors"):
+            raise SystemExit("synthetic ledger did not validate: {}".format(payload["errors"][:3]))
+        descriptor = payload["stream"]
+    return {
+        "canonicalEntries": descriptor["entries"],
+        "streamBytes": descriptor["bytes"],
+        "streamSha256": descriptor["sha256"],
+    }
+
+
+def build_manifest(workspace, summary, stream=None, tier=None):
+    """Describe one generated tier; `stream` is None when beancount is absent."""
+    workspace = Path(workspace)
+    tree_digest, files, total_bytes = _source_tree_sha256(workspace)
+    manifest = {
+        "manifestVersion": MANIFEST_VERSION,
+        "generator": "scripts/large_ledger_bench.py",
+        "seed": summary["seed"],
+        "tier": tier,
+        "transactions": summary["transactions"],
+        "months": summary["months"],
+        "monthFiles": summary["monthFiles"],
+        "directiveCounts": summary["directives"],
+        "sourceFileCount": len(files),
+        "sourceBytes": total_bytes,
+        "sourceTreeSha256": tree_digest,
+        "sourceFiles": files,
+        "canonical": None,
+        "note": ("synthetic data generated from a fixed seed; no real ledger data. "
+                 "Regenerate with the recorded seed to reproduce every digest here."),
+    }
+    if stream is not None:
+        manifest["canonical"] = {
+            "entrypoint": "main.bean",
+            "entries": stream["canonicalEntries"],
+            "streamBytes": stream["streamBytes"],
+            "streamSha256": stream["streamSha256"],
+        }
+    return manifest
+
+
+def _write_json(path, payload):
+    Path(path).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8")
+
+
+def _check_importable(workspace, entry="main.bean"):
+    """Fail early on trees the app's catalog import would reject.
+
+    Mirrors the rules in `LocalLedgerWorkspace.importLedger`: a directory (not a
+    link) entrypoint, no symbolic links, no filesystems objects other than
+    regular files and directories, the TreeLimits budget, and case-insensitive
+    path uniqueness. The app re-checks all of it on the device; this only turns
+    a confusing import error into a local one.
+    """
+    workspace = Path(workspace)
+    problems = []
+    if workspace.is_symlink():
+        problems.append("the tier directory is a symbolic link")
+    if not (workspace / entry).is_file():
+        problems.append("missing entrypoint {!r}".format(entry))
+    entries = 0
+    total_bytes = 0
+    aliases = set()
+    for path in sorted(workspace.rglob("*")):
+        relative = path.relative_to(workspace).as_posix()
+        entries += 1
+        if path.is_symlink():
+            problems.append("symbolic link: {}".format(relative))
+            continue
+        if not path.is_file() and not path.is_dir():
+            problems.append("unsupported item: {}".format(relative))
+            continue
+        if len(relative.split("/")) > IMPORT_TREE_LIMITS["depth"]:
+            problems.append("path too deep: {}".format(relative))
+        if path.is_file():
+            total_bytes += path.stat().st_size
+        folded = relative.casefold()
+        if folded in aliases:
+            problems.append("case-insensitive duplicate path: {}".format(relative))
+        aliases.add(folded)
+    if entries + 1 > IMPORT_TREE_LIMITS["entries"]:
+        problems.append("{} entries exceeds the {} entry limit".format(
+            entries + 1, IMPORT_TREE_LIMITS["entries"]))
+    if total_bytes > IMPORT_TREE_LIMITS["bytes"]:
+        problems.append("{} bytes exceeds the {} byte limit".format(
+            total_bytes, IMPORT_TREE_LIMITS["bytes"]))
+    if problems:
+        raise SystemExit("tier is not importable:\n  " + "\n  ".join(problems))
+    return {"entries": entries + 1, "bytes": total_bytes}
+
+
+def _manifest_diff(expected, actual, path=""):
+    """Differences between two manifests, ignoring the fields `--transactions` changes."""
+    differences = []
+    for key in sorted(set(expected) | set(actual)):
+        left, right = expected.get(key), actual.get(key)
+        where = path + key
+        if isinstance(left, dict) and isinstance(right, dict):
+            differences.extend(_manifest_diff(left, right, where + "."))
+        elif left != right:
+            differences.append("{}: {} != {}".format(where, _short(left), _short(right)))
+    return differences
+
+
+def _short(value, limit=96):
+    text = json.dumps(value, ensure_ascii=False, sort_keys=True) if not isinstance(value, str) else value
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+# --- Tiers on disk ------------------------------------------------------------
+
+
+def tier_directory(workdir, tier):
+    """`<workdir>/<tier>/ledger` holds the generated source, `<workdir>/<tier>` the records."""
+    return Path(workdir) / tier / "ledger"
+
+
+def device_directory(workdir, tier):
+    """`<workdir>/<tier>/device` is the directory copied to the device."""
+    return Path(workdir) / tier / "device"
+
+
+def importable_files(workspace):
+    """Source files the app should see: everything except the generator's manifest."""
+    return [name for name in _source_files(workspace) if name != MANIFEST_NAME]
+
+
+def _generate_tier(workdir, tier, seed, count=None):
+    ledger = tier_directory(workdir, tier)
+    summary = generate(ledger, count if count is not None else TIERS[tier], seed=seed)
+    try:
+        ledger_validator = _require_imports()
+    except SystemExit:
+        if count is not None:
+            raise
+        sys.stderr.write("beancount 3.2.3 is not importable here; manifest without canonical metrics\n")
+        stream = None
+    else:
+        stream = _stream_metrics(ledger_validator, ledger)
+    manifest = build_manifest(ledger, summary, stream=stream, tier=tier if count is None else None)
+    _write_json(ledger / MANIFEST_NAME, manifest)
+    return summary, manifest
+
+
+def _print_manifest(tier, workdir, manifest):
+    canonical = manifest["canonical"] or {}
+    print("{}: {} transactions, {} month files, {} source files, {} source bytes".format(
+        tier, manifest["transactions"], manifest["monthFiles"],
+        manifest["sourceFileCount"], manifest["sourceBytes"]))
+    print("  directives: {}".format(", ".join(
+        "{} {}".format(kind, manifest["directiveCounts"][kind])
+        for kind in sorted(manifest["directiveCounts"]))))
+    print("  source tree: {}".format(manifest["sourceTreeSha256"]))
+    if canonical:
+        print("  canonical: {} entries, {} bytes, stream {}".format(
+            canonical["entries"], canonical["streamBytes"], canonical["streamSha256"]))
+    print("  manifest:   {}".format(tier_directory(workdir, tier) / MANIFEST_NAME))
 
 
 def _timed(call):
@@ -454,6 +717,189 @@ def bench(args):
     return 0
 
 
+# --- Device tier workflow -----------------------------------------------------
+
+
+def verify(args):
+    """Regenerate a tier from its recorded seed and require identical bytes."""
+    ledger = tier_directory(args.workdir, args.tier)
+    manifest_path = ledger / MANIFEST_NAME
+    if not manifest_path.is_file():
+        raise SystemExit("no manifest at {}; run `generate` or `assemble` first".format(manifest_path))
+    expected = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if expected.get("manifestVersion") != MANIFEST_VERSION:
+        raise SystemExit("manifest version {} is not {}; regenerate the tier".format(
+            expected.get("manifestVersion"), MANIFEST_VERSION))
+    # The files actually sitting in the tier must still be the ones the
+    # manifest describes; otherwise a hand edit would go unnoticed, because the
+    # regeneration below never reads the existing tier.
+    on_disk_digest, on_disk_files, _ = _source_tree_sha256(ledger)
+    problems = []
+    if on_disk_digest != expected["sourceTreeSha256"]:
+        problems.append("the files in {} no longer match the manifest "
+                        "(on disk {}, manifest {})".format(
+                            ledger, on_disk_digest, expected["sourceTreeSha256"]))
+    elif len(on_disk_files) != expected["sourceFileCount"]:
+        problems.append("{} files on disk, {} in the manifest".format(
+            len(on_disk_files), expected["sourceFileCount"]))
+    if problems:
+        raise SystemExit("cannot verify {}:\n  {}".format(args.tier, "\n  ".join(problems)))
+    with tempfile.TemporaryDirectory(prefix="blw-verify-") as temporary:
+        regenerated = Path(temporary) / "ledger"
+        summary = generate(regenerated, expected["transactions"], seed=expected["seed"])
+        actual = build_manifest(regenerated, summary, stream=None, tier=expected.get("tier"))
+        # The original manifest carries canonical metrics that need beancount;
+        # the source-tree part is what byte reproducibility means here.
+        differences = []
+        for key in ("sourceTreeSha256", "sourceBytes", "sourceFileCount", "sourceFiles",
+                    "transactions", "directiveCounts"):
+            if expected.get(key) != actual.get(key):
+                differences.append(key)
+        if not differences:
+            try:
+                ledger_validator = _require_imports()
+            except SystemExit:
+                pass
+            else:
+                stream = _stream_metrics(ledger_validator, regenerated)
+                recorded = expected.get("canonical")
+                if not recorded:
+                    print("note: the original manifest has no canonical metrics; "
+                          "re-run assemble on a machine with beancount to record them")
+                elif (recorded.get("entries"), recorded.get("streamBytes"),
+                      recorded.get("streamSha256")) != (
+                          stream["canonicalEntries"], stream["streamBytes"],
+                          stream["streamSha256"]):
+                    differences.append("canonical")
+                actual["canonical"] = {
+                    "entrypoint": "main.bean",
+                    "entries": stream["canonicalEntries"],
+                    "streamBytes": stream["streamBytes"],
+                    "streamSha256": stream["streamSha256"],
+                }
+        if differences:
+            for difference in _manifest_diff(expected, actual):
+                print("  differs: {}".format(difference))
+            raise SystemExit("{} is not reproducible: {}".format(args.tier, ", ".join(differences)))
+    print("{} is reproducible: {} files, {} bytes, tree {} (seed {})".format(
+        args.tier, expected["sourceFileCount"], expected["sourceBytes"],
+        expected["sourceTreeSha256"], expected["seed"]))
+    if expected.get("canonical"):
+        print("  canonical stream {} entries, {} bytes, {}".format(
+            expected["canonical"]["entries"], expected["canonical"]["streamBytes"],
+            expected["canonical"]["streamSha256"]))
+    return 0
+
+
+def assemble(args):
+    """Produce the directory that gets copied to the device, and check it."""
+    ledger = _copy_source_tier(args)
+    destination = device_directory(args.workdir, args.tier)
+    allowed = set(importable_files(ledger))
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True)
+    for relative in sorted(allowed):
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Never link: the app's import opens the source with O_NOFOLLOW and
+        # rejects symbolic links anywhere in the tree.
+        shutil.copyfile(ledger / relative, target)
+    budget = _check_importable(destination)
+    manifest_path = ledger / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    _print_manifest(args.tier, args.workdir, manifest)
+    print("  device dir: {}".format(destination))
+    print("  import budget: {} entries (limit {}), {} bytes (limit {}), depth {}".format(
+        budget["entries"], IMPORT_TREE_LIMITS["entries"], budget["bytes"],
+        IMPORT_TREE_LIMITS["bytes"], IMPORT_TREE_LIMITS["depth"]))
+    print("  the device directory must not contain {}".format(MANIFEST_NAME))
+    return 0
+
+
+def _copy_source_tier(args):
+    """Return the tier's ledger directory, generating it when it is missing."""
+    ledger = tier_directory(args.workdir, args.tier)
+    manifest_path = ledger / MANIFEST_NAME
+    if manifest_path.is_file():
+        recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if args.seed is not None and recorded.get("seed") != args.seed:
+            raise SystemExit("{} was generated with seed {}; refusing a different workload".format(
+                args.tier, recorded.get("seed")))
+        return ledger
+    if ledger.exists():
+        shutil.rmtree(ledger)
+    print("generating {} in {} (seed {})".format(args.tier, ledger, args.seed or DEFAULT_SEED))
+    _generate_tier(args.workdir, args.tier, args.seed if args.seed is not None else DEFAULT_SEED)
+    return ledger
+
+
+def _read_notes(path):
+    files = {}
+    if path is not None:
+        for name in sorted(Path(path).glob("*.json")):
+            files[name.name] = json.loads(name.read_text(encoding="utf-8"))
+    return files
+
+
+def record(args):
+    """Collect app recordings against a tier, refusing mismatched workloads."""
+    ledger = tier_directory(args.workdir, args.tier)
+    manifest_path = ledger / MANIFEST_NAME
+    if not manifest_path.is_file():
+        raise SystemExit("no manifest at {}; run assemble first".format(manifest_path))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    recordings = {}
+    failures = []
+    for path in sorted(Path(args.input).glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        workload = payload.get("workload") if isinstance(payload, dict) else None
+        if not isinstance(workload, dict) or "sourceTreeSha256" not in workload:
+            failures.append("{}: no workload.sourceTreeSha256".format(path.name))
+        elif workload["sourceTreeSha256"] != manifest["sourceTreeSha256"]:
+            failures.append("{}: measured a different ledger ({})".format(
+                path.name, workload["sourceTreeSha256"]))
+        else:
+            recordings[path.name] = payload
+    bundle = {
+        "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "tier": args.tier,
+        "manifest": manifest,
+        "notes": _read_notes(args.notes),
+        "recordings": recordings,
+        "rejected": failures,
+    }
+    output = Path(args.output) if args.output else ledger / "measurement.json"
+    _write_json(output, bundle)
+    for failure in failures:
+        print("  rejected: {}".format(failure))
+    if failures:
+        raise SystemExit("{} recording(s) do not match this tier's manifest".format(len(failures)))
+    print("{} recording(s) matched the {} manifest".format(len(recordings), args.tier))
+    print("wrote {}".format(output))
+    return 0
+
+
+def validate(args):
+    """Load a ledger the way the app does and report its canonical metrics.
+
+    This is the pre-flight for a device run: it is the same
+    `ledger_validator.export_canonical_json` the app calls, so a ledger that
+    passes here passes the device's import validation. It also prints the
+    source-tree digest that a later recording must quote.
+    """
+    source = Path(args.source)
+    tree_digest, files, total_bytes = _source_tree_sha256(source)
+    ledger_validator = _require_imports()
+    stream = _stream_metrics(ledger_validator, source, entry=args.entrypoint)
+    print("{}: {} files, {} bytes, source tree {}".format(
+        source, len(files), total_bytes, tree_digest))
+    print("  entrypoint {}: {} canonical entries, {} stream bytes, stream {}".format(
+        args.entrypoint, stream["canonicalEntries"], stream["streamBytes"],
+        stream["streamSha256"]))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -474,13 +920,69 @@ def main():
                               help="discarded warm-up exports per tier (default 1)")
     bench_parser.add_argument("--no-go", action="store_true", help="skip the Go stage benchmark")
 
+    verify_parser = subcommands.add_parser(
+        "verify", help="regenerate a tier from its manifest seed and compare digests")
+    verify_parser.add_argument("--tier", choices=sorted(TIERS), required=True)
+    verify_parser.add_argument("--workdir", type=Path, required=True,
+                               help="directory holding <tier>/ledger/manifest.json")
+
+    assemble_parser = subcommands.add_parser(
+        "assemble", help="write the directory to copy to a device and check its import budget")
+    assemble_parser.add_argument("--tier", choices=sorted(TIERS), required=True)
+    assemble_parser.add_argument("--workdir", type=Path, required=True)
+    assemble_parser.add_argument("--seed", type=int, default=None,
+                                 help="generate the tier with this seed when it is missing")
+
+    validate_parser = subcommands.add_parser(
+        "validate", help="load a ledger through the app's export path and report its digests")
+    validate_parser.add_argument("--source", type=Path, required=True,
+                                 help="ledger directory; no --transactions needed")
+    validate_parser.add_argument("--entrypoint", default="main.bean",
+                                 help="entry file inside the directory (default: main.bean)")
+
+    record_parser = subcommands.add_parser(
+        "record", help="bundle app recordings that match this tier's manifest")
+    record_parser.add_argument("--tier", choices=sorted(TIERS), required=True)
+    record_parser.add_argument("--workdir", type=Path, required=True)
+    record_parser.add_argument("--input", type=Path, required=True,
+                               help="directory of recordings exported by the app")
+    record_parser.add_argument("--notes", type=Path, default=None,
+                               help="directory of session note JSON files")
+    record_parser.add_argument("--output", type=Path, default=None,
+                               help="bundle path (default: <tier>/ledger/measurement.json)")
+
     args = parser.parse_args()
     if args.command == "generate":
         count = args.transactions if args.transactions is not None else TIERS[args.tier]
         summary = generate(args.output, count, seed=args.seed)
-        print(json.dumps({"output": str(args.output), **summary}, ensure_ascii=False, indent=2))
+        try:
+            ledger_validator = _require_imports()
+        except SystemExit:
+            sys.stderr.write("beancount 3.2.3 is not importable here; "
+                             "manifest without canonical metrics\n")
+            stream = None
+        else:
+            stream = _stream_metrics(ledger_validator, args.output)
+        # `--transactions N` no longer names one of the fixed tiers.
+        manifest = build_manifest(args.output, summary, stream=stream,
+                                  tier=args.tier if args.transactions is None else None)
+        _write_json(Path(args.output) / MANIFEST_NAME, manifest)
+        print(json.dumps({"output": str(args.output), **summary,
+                          "manifest": manifest["sourceTreeSha256"],
+                          "canonicalEntries": (manifest["canonical"] or {}).get("entries"),
+                          "streamBytes": (manifest["canonical"] or {}).get("streamBytes")},
+                         ensure_ascii=False, indent=2))
         return 0
-    return bench(args)
+    if args.command == "bench":
+        return bench(args)
+    if args.command == "verify":
+        return verify(args)
+    if args.command == "assemble":
+        return assemble(args)
+    if args.command == "validate":
+        return validate(args)
+    return record(args)
+
 
 
 if __name__ == "__main__":
