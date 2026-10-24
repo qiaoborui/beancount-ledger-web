@@ -15,6 +15,9 @@ type dispatchRequestV1 struct {
 	app.LocalRequest
 	StreamFile    string `json:"streamFile,omitempty"`
 	SourceVersion string `json:"sourceVersion,omitempty"`
+	// AvailableBytes is the process memory reading reported by the shell for
+	// the memory-limit control operation. It is meaningless for ledger requests.
+	AvailableBytes int64 `json:"availableBytes,omitempty"`
 }
 
 type dispatchResponseV1 struct {
@@ -101,6 +104,13 @@ func dispatchModelOperation(request dispatchRequestV1) string {
 	case "model-release":
 		app.ReleaseLocalModel(request.ModelHandle)
 		result = map[string]bool{"released": true}
+	case "model-release-idle":
+		// One atomic trim keeps the shell's current handle resolvable and drops
+		// every other committed model, so a memory warning cannot leave the LRU
+		// half-evicted between individual releases.
+		result = map[string]int{"released": app.ReleaseIdleLocalModels(request.ModelHandle)}
+	case "memory-limit":
+		result = map[string]int64{"memoryLimit": app.ConfigureLocalMemoryLimit(request.AvailableBytes)}
 	default:
 		return encodeDispatchResponse(dispatchResponseV1{Version: 1, Operation: request.Operation, Status: 400, Diagnostics: []diagnosticV1{{Code: "request.unsupported_operation", Severity: "error", Message: "unsupported local operation"}}})
 	}

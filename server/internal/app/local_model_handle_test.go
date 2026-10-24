@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -305,5 +306,75 @@ func TestLocalModelStampsDetectEditAfterResolve(t *testing.T) {
 	file.Close()
 	if _, err := cache.Snapshot(); !errors.Is(err, ErrLocalModelUnavailable) {
 		t.Fatalf("edit after resolve accepted: %v", err)
+	}
+}
+
+func TestLocalModelEstimateUsesMeasuredResidentCost(t *testing.T) {
+	input := localTestRequest(t)
+	handle := registerHandleFixture(t, input)
+	localModels.Lock()
+	registered := committedLocalModel(handle)
+	localModels.Unlock()
+	if registered == nil {
+		t.Fatal("registered model missing from the committed LRU")
+	}
+	streamBytes := int64(len(canonicalStreamFixture(t, 2)))
+	if want := streamBytes * localModelEstimateFactor; registered.estimate != want {
+		t.Fatalf("estimate = %d, want %d (stream bytes x factor)", registered.estimate, want)
+	}
+	if localModelEstimateFactor < 5 {
+		t.Fatalf("estimate factor %d still undercounts the measured 5-8x live heap", localModelEstimateFactor)
+	}
+	// At the measured cost one 100k ledger (47MB stream) still fits the budget
+	// alone, but two do not. The budget, not a lucky estimate, decides residency.
+	measured100k := int64(47 << 20)
+	if one := measured100k * localModelEstimateFactor; one > localModelBudget {
+		t.Fatalf("one 100k estimate %d exceeds the %d budget, so it could never stay resident", one, localModelBudget)
+	}
+	if two := 2 * measured100k * localModelEstimateFactor; two <= localModelBudget {
+		t.Fatalf("two 100k ledgers fit the %d budget at factor %d", localModelBudget, localModelEstimateFactor)
+	}
+}
+
+func TestLocalMemoryLimitLeavesHeadroomAndDefaults(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		available int64
+		want      int64
+	}{
+		{"unknown reading keeps the runtime default", 0, 0},
+		{"invalid reading keeps the runtime default", -1, 0},
+		{"tight device keeps the measured-heap floor", 600 << 20, localMemoryLimitFloor},
+		{"half of available memory", 1536 << 20, 768 << 20},
+		{"large device is capped for jetsam", 8 << 30, localMemoryLimitCeiling},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := localMemoryLimitFor(test.available); got != test.want {
+				t.Fatalf("localMemoryLimitFor(%d) = %d, want %d", test.available, got, test.want)
+			}
+		})
+	}
+	// The floor must stay above the measured 365MB peak live heap; a soft limit
+	// below the working set makes the runtime collect continuously.
+	if localMemoryLimitFloor <= 365<<20 {
+		t.Fatalf("memory limit floor %d does not exceed the measured 365MB live heap", localMemoryLimitFloor)
+	}
+}
+
+func TestConfigureLocalMemoryLimitAppliesSoftLimit(t *testing.T) {
+	previous := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(previous) })
+	if applied := ConfigureLocalMemoryLimit(1536 << 20); applied != 768<<20 {
+		t.Fatalf("applied limit = %d, want %d", applied, 768<<20)
+	}
+	if current := debug.SetMemoryLimit(-1); current != 768<<20 {
+		t.Fatalf("runtime limit = %d, want %d", current, 768<<20)
+	}
+	// An unknown reading must not silently change the configured limit.
+	if applied := ConfigureLocalMemoryLimit(0); applied != 0 {
+		t.Fatalf("unknown reading applied %d", applied)
+	}
+	if current := debug.SetMemoryLimit(-1); current != 768<<20 {
+		t.Fatalf("unknown reading changed the runtime limit to %d", current)
 	}
 }

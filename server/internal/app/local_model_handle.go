@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -34,11 +35,64 @@ type localRegisteredModel struct {
 // registry's reference and cannot free a model underneath a reader.
 const (
 	localModelLRULimit = 4
-	// A decoded model plus its LedgerCache costs a few times the stream bytes.
-	localModelEstimateFactor = 3
+	// A decoded model plus its LedgerCache costs several times the stream bytes.
+	// Measured on the repository's 100,591-entry synthetic ledger (47MB canonical
+	// stream): 237-365MB of live Go heap, i.e. 5-8x. Six is the conservative
+	// midpoint until real-device numbers calibrate it. The budget below stays the
+	// cap: at this factor one such model costs ~282MB of the 384MiB budget, so
+	// large ledgers keep only the current model resident instead of silently
+	// assuming a third of the real cost.
+	localModelEstimateFactor = 6
 )
 
 var localModelBudget int64 = 384 << 20
+
+// The Go heap shares the iOS process's single jetsam budget with the Python
+// loader, the canonical stream buffers and Swift, so it may target at most half
+// of the memory os_proc_available_memory reports, within bounds:
+//
+//   - Floor: the measured 100k ledger keeps 237-365MB of live heap. A soft limit
+//     below that peak makes the runtime collect continuously around the working
+//     set, so never target less than 512MiB (~1.4x the measured peak). A device
+//     that reports less than twice the floor is already close to its jetsam
+//     limit; the floor still bounds the default 2x growth without adding thrash.
+//   - Ceiling: the 200k projection is roughly twice the 100k heap, and a single
+//     app heap beyond 1GiB is a jetsam risk on every supported phone, so cap
+//     there even when the device reports more memory.
+const (
+	localMemoryLimitFloor   = 512 << 20
+	localMemoryLimitCeiling = 1 << 30
+)
+
+// localMemoryLimitFor maps an available-memory reading to the Go soft heap
+// limit. Zero means the reading is unknown and the runtime default is kept.
+func localMemoryLimitFor(availableBytes int64) int64 {
+	if availableBytes <= 0 {
+		return 0
+	}
+	limit := availableBytes / 2
+	if limit < localMemoryLimitFloor {
+		return localMemoryLimitFloor
+	}
+	if limit > localMemoryLimitCeiling {
+		return localMemoryLimitCeiling
+	}
+	return limit
+}
+
+// ConfigureLocalMemoryLimit applies the soft Go heap limit (GOMEMLIMIT) derived
+// from the process's available memory. The mobile shell calls it once at launch,
+// before the first model registration; an unknown reading (zero) keeps the
+// runtime default. It returns the applied limit in bytes, or zero when the
+// default was kept. A soft limit targets the heap rather than capping it, so it
+// cannot turn a transient allocation into a failed request.
+func ConfigureLocalMemoryLimit(availableBytes int64) int64 {
+	limit := localMemoryLimitFor(availableBytes)
+	if limit > 0 {
+		debug.SetMemoryLimit(limit)
+	}
+	return limit
+}
 
 var localModels struct {
 	sync.Mutex
@@ -232,4 +286,27 @@ func ReleaseLocalModel(handle string) {
 	if localModels.staged != nil && localModels.staged.handle == handle {
 		localModels.staged = nil
 	}
+}
+
+// ReleaseIdleLocalModels drops every committed model except keepHandle so an iOS
+// memory warning can reclaim idle ledgers before the process is killed. The kept
+// handle stays resolvable, and requests already in flight own their pointers, so
+// dropping a registry reference cannot free a model underneath a reader. Stages
+// are left alone: they belong to the request publishing them. An empty keep
+// releases every committed model. It returns how many models were dropped.
+func ReleaseIdleLocalModels(keepHandle string) int {
+	localModels.Lock()
+	defer localModels.Unlock()
+	kept := make([]*localRegisteredModel, 0, len(localModels.committed))
+	released := 0
+	for _, model := range localModels.committed {
+		if model.handle == keepHandle {
+			kept = append(kept, model)
+		} else {
+			released++
+		}
+	}
+	clear(localModels.committed)
+	localModels.committed = kept
+	return released
 }

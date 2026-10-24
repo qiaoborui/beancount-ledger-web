@@ -174,3 +174,39 @@ func TestLocalModelLRULeavesStageSingleAndOneShot(t *testing.T) {
 		t.Fatal("stage handle reused")
 	}
 }
+
+func TestLocalModelReleaseIdleKeepsCurrentLedgerAndStage(t *testing.T) {
+	current := registerLRULedger(t, localTestRequest(t))
+	older := registerLRULedger(t, localTestRequest(t))
+	oldest := registerLRULedger(t, localTestRequest(t))
+	// A staged model belongs to the request publishing it and must survive a
+	// memory warning; only idle committed ledgers are reclaimable.
+	input := localTestRequest(t)
+	stage := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(input.WorkspaceRoot))), "staging", "proposal", "workspace")
+	if err := os.CopyFS(stage, os.DirFS(input.WorkspaceRoot)); err != nil {
+		t.Fatal(err)
+	}
+	input.WorkspaceRoot, input.Staging = stage, true
+	staged := registerLRULedger(t, input)
+
+	if released := ReleaseIdleLocalModels(current.handle); released != 2 {
+		t.Fatalf("released %d idle models, want 2", released)
+	}
+	if !current.resolves(t) {
+		t.Fatal("memory pressure released the current ledger")
+	}
+	for _, idle := range []lruLedger{older, oldest} {
+		if idle.resolves(t) {
+			t.Fatal("idle ledger survived memory pressure")
+		}
+	}
+	if !staged.resolves(t) {
+		t.Fatal("memory pressure released the staged model")
+	}
+	if released := ReleaseIdleLocalModels(""); released != 1 {
+		t.Fatalf("released %d models for an empty keep handle, want 1", released)
+	}
+	if current.resolves(t) {
+		t.Fatal("empty keep handle retained a committed model")
+	}
+}

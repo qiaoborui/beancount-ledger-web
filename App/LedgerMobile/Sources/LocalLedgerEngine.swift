@@ -137,46 +137,97 @@ struct LocalLedgerResponse: Sendable {
     }
 }
 
-actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
-    static let shared = EmbeddedLocalLedgerEngine()
-    // Committed generation directories are immutable. Keep a handle for each of
-    // the few most recently used ledgers (the core holds a bounded LRU of the
-    // same size and may evict earlier); mutable stages always load their
-    // current contents independently. Most recently registered first.
-    private typealias CanonicalHandle = (workspace: String, entrypoint: String, handle: String)
-    private static let canonicalHandleLimit = 4
-    private var canonicalHandles: [CanonicalHandle] = []
+/// One committed generation's native model handle. Committed generation
+/// directories are immutable, so a handle stays valid until it is released or
+/// the core evicts it.
+struct LocalCanonicalHandle: Equatable, Sendable {
+    let workspace: String
+    let entrypoint: String
+    let handle: String
+}
 
-    private func cachedHandle(_ request: LocalLedgerEngineRequest) -> String? {
-        canonicalHandles.first { $0.workspace == request.workspaceRoot && $0.entrypoint == request.entrypoint }?.handle
+/// Native control operations configure the runtime or drop cached models. They
+/// carry no ledger data, so they are valid standalone requests; the Go
+/// dispatcher rejects unknown fields, hence the exact property list.
+struct LocalModelControlRequest: Encodable, Sendable {
+    let version = 1
+    let operation: String
+    var modelHandle: String? = nil
+    var availableBytes: Int64? = nil
+}
+
+/// Recency-ordered committed handles. Pure value logic, so the eviction and
+/// memory-pressure policy stays testable without the native core.
+struct LocalCanonicalHandleCache {
+    private(set) var handles: [LocalCanonicalHandle] = []
+    static let limit = 4
+
+    func handle(workspace: String, entrypoint: String) -> String? {
+        handles.first { $0.workspace == workspace && $0.entrypoint == entrypoint }?.handle
     }
 
-    private func forget(_ handle: String) {
-        canonicalHandles.removeAll { $0.handle == handle }
+    mutating func forget(_ handle: String) {
+        handles.removeAll { $0.handle == handle }
     }
 
     /// One ledger across its immutable generations
     /// (<ledger>/generations/<id>/workspace); other roots key by themselves.
-    private static func ledgerKey(_ workspace: String) -> String {
+    static func ledgerKey(_ workspace: String) -> String {
         let generations = URL(fileURLWithPath: workspace).deletingLastPathComponent().deletingLastPathComponent()
         return generations.lastPathComponent == "generations" ? generations.path : workspace
+    }
+
+    /// Insert a newly registered handle and return the handles it supersedes or
+    /// pushes beyond the limit.
+    mutating func remember(_ handle: LocalCanonicalHandle) -> [String] {
+        var released: [String] = []
+        handles.removeAll { cached in
+            let superseded = cached.entrypoint == handle.entrypoint
+                && Self.ledgerKey(cached.workspace) == Self.ledgerKey(handle.workspace)
+            if superseded { released.append(cached.handle) }
+            return superseded
+        }
+        handles.insert(handle, at: 0)
+        while handles.count > Self.limit {
+            released.append(handles.removeLast().handle)
+        }
+        return released
+    }
+
+    /// A memory warning only drops idle ledgers: the current (most recently
+    /// used) committed ledger is what the visible view is reading, and dropping
+    /// it would force an expensive re-register. Returns the kept handle and the
+    /// ones the native core must release.
+    mutating func releaseIdleModels() -> (keep: String?, released: [String]) {
+        guard let current = handles.first else { return (nil, []) }
+        let released = handles.dropFirst().map(\.handle)
+        handles = [current]
+        return (current.handle, Array(released))
+    }
+}
+
+actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
+    static let shared = EmbeddedLocalLedgerEngine()
+    private var canonicalHandles = LocalCanonicalHandleCache()
+
+    // Committed generation directories are immutable. Keep a handle for each of
+    // the few most recently used ledgers (the core holds a bounded LRU of the
+    // same size and may evict earlier); mutable stages always load their
+    // current contents independently. Most recently registered first.
+    private func cachedHandle(_ request: LocalLedgerEngineRequest) -> String? {
+        canonicalHandles.handle(workspace: request.workspaceRoot, entrypoint: request.entrypoint)
+    }
+
+    private func forget(_ handle: String) {
+        canonicalHandles.forget(handle)
     }
 
     /// Record a new committed handle, releasing the one it supersedes (an older
     /// generation of the same ledger) and any beyond the limit.
     private func remember(_ handle: String, request: LocalLedgerEngineRequest) {
-        let ledger = Self.ledgerKey(request.workspaceRoot)
-        var released: [String] = []
-        canonicalHandles.removeAll { cached in
-            let superseded = cached.entrypoint == request.entrypoint && Self.ledgerKey(cached.workspace) == ledger
-            if superseded { released.append(cached.handle) }
-            return superseded
-        }
-        canonicalHandles.insert((request.workspaceRoot, request.entrypoint, handle), at: 0)
-        while canonicalHandles.count > Self.canonicalHandleLimit {
-            released.append(canonicalHandles.removeLast().handle)
-        }
-        for old in released { releaseHandle(old, request: request) }
+        let entry = LocalCanonicalHandle(workspace: request.workspaceRoot,
+            entrypoint: request.entrypoint, handle: handle)
+        for old in canonicalHandles.remember(entry) { releaseHandle(old, request: request) }
     }
 
     func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
@@ -323,6 +374,56 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     private func nativeResponse(_ request: LocalLedgerEngineRequest) throws -> LocalLedgerResponse {
         let encoded = try JSONEncoder().encode(request)
         return LocalLedgerResponse(envelope: Data(MobilecoreDispatchJSON(String(decoding: encoded, as: UTF8.self)).utf8))
+    }
+
+    private static func nativeControlResponse(_ request: LocalModelControlRequest) throws -> LocalLedgerResponse {
+        let encoded = try JSONEncoder().encode(request)
+        return LocalLedgerResponse(envelope: Data(MobilecoreDispatchJSON(String(decoding: encoded, as: UTF8.self)).utf8))
+    }
+    #endif
+
+    /// Reclaim committed models after an iOS memory warning. The exclusive gate
+    /// keeps an in-flight read from observing a released handle, and the current
+    /// (most recently used) ledger stays registered so the visible view keeps
+    /// serving without a canonical re-register. The native side trims its LRU in
+    /// one atomic operation instead of a per-handle release loop, so it cannot be
+    /// observed half-evicted; staged models are intentionally left alone.
+    func releaseIdleModelsForMemoryPressure() async {
+        await LocalModelRequestGate.shared.acquireWrite()
+        let plan = canonicalHandles.releaseIdleModels()
+        #if canImport(LedgerCore)
+        _ = try? Self.nativeControlResponse(
+            LocalModelControlRequest(operation: "model-release-idle", modelHandle: plan.keep))
+        #else
+        _ = plan
+        #endif
+        await LocalModelRequestGate.shared.releaseWrite()
+    }
+
+    /// Apply the native Go soft heap limit (GOMEMLIMIT) from the shell's
+    /// available-memory reading. Called once at launch; a zero reading (unknown,
+    /// or unsupported on the simulator) keeps the runtime default. The limit is
+    /// soft: it targets GC rather than capping allocations.
+    static func configureNativeMemoryLimit(availableBytes: Int64) {
+        #if canImport(LedgerCore)
+        _ = try? nativeControlResponse(
+            LocalModelControlRequest(operation: "memory-limit", availableBytes: availableBytes))
+        #endif
+    }
+
+    /// Report os_proc_available_memory() during launch, before the first model
+    /// registration, when the reading is closest to the process's full budget.
+    static func configureNativeMemoryLimitFromSystem() {
+        #if os(iOS) && canImport(LedgerCore)
+        configureNativeMemoryLimit(availableBytes: Int64(os_proc_available_memory()))
+        #endif
+    }
+
+    #if os(iOS)
+    /// The app delegate forwards UIApplication.didReceiveMemoryWarning here:
+    /// drop idle ledgers while the current one keeps working.
+    static func handleMemoryPressure() {
+        Task { await shared.releaseIdleModelsForMemoryPressure() }
     }
     #endif
 
