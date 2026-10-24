@@ -86,7 +86,10 @@ enum LocalLedgerPerformance {
 
     // MARK: - Python loader breakdown
 
-    /// Explicitly opts this process into `loader.log_timings` collection.
+    /// Enables `loader.log_timings` collection for this process. The app calls
+    /// this on every export so the signposts carry the loader breakdown; the
+    /// Python module itself stays silent unless this (or the tool) turns it on,
+    /// and `LEDGER_VALIDATION_TIMINGS=0` keeps the default off.
     static func preparePythonTimings() {
         #if canImport(Darwin)
         guard ProcessInfo.processInfo.environment[pythonTimingsEnvironment] == nil else { return }

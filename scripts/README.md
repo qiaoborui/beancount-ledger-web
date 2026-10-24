@@ -2,14 +2,16 @@
 
 通用账本辅助脚本、部署/打包脚本，以及本目录下的性能基准工具。
 
-## 大账本性能基准（opt-in）
+## 大账本性能基准（脚本 opt-in；App 内计时默认开启）
 
 `large_ledger_bench.py` 是 iOS 大账本扩展方案第一阶段第一项的度量工具：
 合成账本生成器 + 分段计时基准。**全部数据都是合成数据**（固定 seed 的
 中文 payee、metadata、tag、多币种、带 FIFO 成本批次的股票买卖、
 `auto_accounts` / `implicit_prices` 插件），不读取真实账本，不写机器私有路径。
 
-它不会从 `go test`、`swift test` 或 CI 自动运行，必须显式调用。
+基准脚本本身是 opt-in：不会从 `go test`、`swift test` 或 CI 自动运行，必须显式调用。
+App 内的 signpost 与 Python 计时是产品默认开启的（用于真机验收；可通过
+`LEDGER_VALIDATION_TIMINGS=0` 关闭 Python 侧计时）。
 
 ### 前置条件
 
@@ -82,8 +84,10 @@ LOCAL_LEDGER_SCALE_RESULT=/tmp/blw-scale-bench/100k/go-stages.json \
 
 - `python-load` / `python-export`：Python 校验/导出总段；
 - `python-parse` / `python-booking` / `python-plugins` / `python-validate`：从
-  stream descriptor 的 timings 拆出的 beancount 内核四段（App 在导出前显式设置
-  `LEDGER_VALIDATION_TIMINGS=1`；Python 自己未设置时保持默认静默、输出字节不变）；
+  stream descriptor 的 timings 拆出的 beancount 内核四段。App 在每次导出前显式
+  设置 `LEDGER_VALIDATION_TIMINGS=1`（这是 App 的默认行为，不是 opt-in；设成
+  `0`/`false` 可关掉）；直接跑 `ledger_validator.py` 的脚本/基准默认静默、输出
+  字节不变；
 - `canonical-validate`：一次“用导出代替校验”的完整发布前校验；
 - `go-register` / `go-model-register` / `go-page`：Go 注册与分页/首屏；
 - `memory-peak`：最外层区间内 `phys_footprint` 的峰值；区间结束时还会带
