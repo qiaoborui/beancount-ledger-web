@@ -1,5 +1,32 @@
 import Foundation
 
+extension Data.WritingOptions {
+    /// Atomic write with an iOS data-protection class.
+    ///
+    /// Data protection classes apply to the shipped iOS app. The portable Swift
+    /// package is built for macOS only to run tests, and macOS 27 rejects a
+    /// protection class at write time (the atomic temp file fails with EPERM),
+    /// so the macOS build keeps the atomic flag alone. The iOS app build is
+    /// unchanged.
+    static var ledgerProtected: Data.WritingOptions {
+        #if os(iOS)
+        [.atomic, .completeFileProtection]
+        #else
+        [.atomic]
+        #endif
+    }
+
+    /// Atomic write with `completeUntilFirstUserAuthentication` on iOS; see
+    /// `ledgerProtected` for why the macOS test build omits the class.
+    static var ledgerProtectedUntilFirstUserAuthentication: Data.WritingOptions {
+        #if os(iOS)
+        [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        #else
+        [.atomic]
+        #endif
+    }
+}
+
 /// Prepares an existing, app-private workspace after foreground authentication.
 /// Includes catalog metadata, immutable generations, runtime files and Git caches.
 /// The caller records background authorization only after this operation succeeds.
