@@ -354,7 +354,7 @@ actor GitLocalStorage: LogicalLocalStorage {
     private func saveState(_ state: State) throws {
         try FileManager.default.createDirectory(at: syncRoot, withIntermediateDirectories: true)
         #if os(iOS)
-        try JSONEncoder().encode(state).write(to: stateURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try JSONEncoder().encode(state).write(to: stateURL, options: .ledgerProtectedUntilFirstUserAuthentication)
         #else
         try JSONEncoder().encode(state).write(to: stateURL, options: .atomic)
         #endif
