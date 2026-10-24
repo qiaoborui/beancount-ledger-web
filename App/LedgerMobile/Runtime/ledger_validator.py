@@ -259,6 +259,10 @@ def _check_export_entry(entry):
     inline and only metadata values, Amounts, Custom values, and None-valued
     fields take the generic walk. Oversized narration or metadata is therefore
     still rejected before any projected record exists.
+    Metadata keys deliberately carry no dict-container offset here: the
+    pre-specialization loop walked meta.items() directly, so its key cost was
+    the bare string cost. Only posting metadata (which used to go through the
+    generic dict walk) keeps the two-byte key offset in _check_export_metadata.
     """
     budget = STREAM_RECORD_LIMIT - 4096
     meta = entry.meta or {}

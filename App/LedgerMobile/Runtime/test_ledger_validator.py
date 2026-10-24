@@ -435,6 +435,75 @@ plugin "beancount.plugins.implicit_prices"
                 specialized = str(error)
             self.assertEqual(generic, specialized, posting)
 
+    def test_entry_bound_agrees_with_pre_change_cost_model(self):
+        # Reference: the exact pre-specialization entry check. Its metadata
+        # loop walked meta.items() and costed each key with _check_export_value
+        # directly, so that path has no dict-container offsets. A record with
+        # thousands of tiny metadata keys is the edge where a different key
+        # cost would show up; the specialized check must land on the same
+        # accept/reject boundary and cost container fields identically.
+        from beancount.core import data as bean_data
+        from beancount.parser.grammar import ValueType
+        from datetime import date
+        limit = 4096 + 50000
+        keys = [chr(0x4E00 + i) for i in range(3300)]
+
+        def reference_budget(entry):
+            try:
+                budget = limit - 4096
+                for name in ("account", "source_account", "currency", "flag", "payee",
+                             "narration", "comment", "name", "query_string", "description",
+                             "filename", "currencies", "tags", "links", "type", "amount",
+                             "tolerance"):
+                    if hasattr(entry, name):
+                        budget = ledger_validator._check_export_value(getattr(entry, name), budget)
+                for key, value in (entry.meta or {}).items():
+                    if key not in {"filename", "lineno"} and not key.startswith("__"):
+                        budget = ledger_validator._check_export_value(key, budget)
+                        budget = ledger_validator._check_export_value(value, budget)
+                budget = ledger_validator._check_export_value((entry.meta or {}).get("filename", ""), budget)
+                if isinstance(entry, bean_data.Custom):
+                    for value in entry.values:
+                        budget = ledger_validator._check_export_value(value.value, budget)
+                return budget
+            except ValueError:
+                return -1
+
+        def accepts(entry):
+            try:
+                with mock.patch.object(ledger_validator, "STREAM_RECORD_LIMIT", limit):
+                    ledger_validator._check_export_entry(entry)
+                return True
+            except ValueError:
+                return False
+
+        def many_keys(count):
+            return bean_data.Transaction({key: "v" for key in keys[:count]},
+                                         date(2026, 1, 1), "*", "Synthetic", "small",
+                                         frozenset(), frozenset(), [])
+
+        sweep = [accepts(many_keys(count)) for count in range(3000, 3200)]
+        self.assertIn(True, sweep)
+        self.assertIn(False, sweep)
+        for count in range(3000, 3200):
+            entry = many_keys(count)
+            self.assertEqual(accepts(entry), reference_budget(entry) >= 0, count)
+        # Projected containers and Custom values keep their generic costs too.
+        containers = []
+        for count in (0, 2, 5):
+            tags = frozenset("t{}".format(i) for i in range(count))
+            containers.append(bean_data.Transaction({"filename": "main.bean", "lineno": 1},
+                                                    date(2026, 1, 1), "*", "Synthetic", "small",
+                                                    tags, tags, []))
+            containers.append(bean_data.Open({"filename": "main.bean", "lineno": 1},
+                                             date(2026, 1, 1), "Assets:Cash",
+                                             ["C{}".format(i) for i in range(count)], None))
+            containers.append(bean_data.Custom({"filename": "main.bean", "lineno": 1},
+                                               date(2026, 1, 1), "kind",
+                                               [ValueType("v{}".format(i), None) for i in range(count)]))
+        for entry in containers:
+            self.assertEqual(accepts(entry), reference_budget(entry) >= 0, entry)
+
     def test_stream_supports_booking_modes_and_custom_typed_values(self):
         self.assertEqual(self.validate('''2000-01-01 open Assets:Stock HOOL "FIFO"
 2026-01-01 custom "budget" Assets:Stock "monthly" 100 USD
