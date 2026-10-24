@@ -295,6 +295,50 @@ plugin "beancount.plugins.implicit_prices"
             self.assertEqual(reply["errors"], [])
             self.assertEqual(reply["stream"]["entries"], 2)
 
+    def test_stream_timings_are_opt_in_and_keep_stream_bytes_identical(self):
+        import os
+        ledger = '''2000-01-01 open Assets:Cash CNY
+2000-01-01 open Expenses:Food CNY
+2026-01-01 * "Lunch"
+  Assets:Cash -10 CNY
+  Expenses:Food 10 CNY
+'''
+        (self.root / "main.bean").write_text(ledger)
+        results = {}
+        with tempfile.TemporaryDirectory() as directory:
+            for enabled in (False, True):
+                output = pathlib.Path(directory).resolve() / ("timed.records" if enabled else "plain.records")
+                environment = {"LEDGER_VALIDATION_TIMINGS": "1"} if enabled else {"LEDGER_VALIDATION_TIMINGS": ""}
+                with mock.patch.dict(os.environ, environment):
+                    reply = json.loads(ledger_validator.export_canonical_json(
+                        str(self.root), "main.bean", str(output)))
+                self.assertEqual(reply["errors"], [])
+                results[enabled] = (reply["stream"], output.read_bytes())
+        plain, timed = results[False][0], results[True][0]
+        # Default export keeps its exact descriptor shape and stream bytes.
+        self.assertNotIn("timings", plain)
+        timings = timed.pop("timings")
+        self.assertEqual(set(timings), {"parse", "booking", "plugins", "validate"})
+        self.assertTrue(all(isinstance(value, (int, float)) and value >= 0
+                            for value in timings.values()))
+        self.assertEqual(timed, plain)
+        self.assertEqual(results[True][1], results[False][1])
+
+    def test_timings_do_not_change_validation_payloads(self):
+        import os
+        ledger = '''2000-01-01 open Assets:Cash CNY
+2000-01-01 open Expenses:Food CNY
+2026-01-01 * "Lunch"
+  Assets:Cash -10 CNY
+  Expenses:Food 10 CNY
+'''
+        (self.root / "main.bean").write_text(ledger)
+        with mock.patch.dict(os.environ, {"LEDGER_VALIDATION_TIMINGS": "1"}):
+            full = json.loads(validate_json(str(self.root)))
+            diagnostics = json.loads(validate_only_json(str(self.root)))
+        self.assertEqual(diagnostics, {"errors": full["errors"]})
+        self.assertNotIn("timings", full)
+
     def test_stream_fdopen_failure_closes_descriptor_and_removes_owned_file(self):
         import os
         with tempfile.TemporaryDirectory() as directory:

@@ -8,6 +8,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -17,6 +18,41 @@ from beancount.core import data
 from beancount.core.amount import Amount
 from beancount.ops import validation
 from beancount.parser import parser
+
+
+# Optional per-stage loader timings for the opt-in scale benchmark and the app's
+# os_signpost instrumentation. Off by default: unset means the loader runs with
+# log_timings=None and every payload keeps its original bytes. The app sets this
+# variable before a canonical export, then reads the breakdown from the stream
+# descriptor; the exported records themselves never change.
+TIMINGS_ENVIRONMENT = "LEDGER_VALIDATION_TIMINGS"
+_TIMING_LINE = re.compile(r"^Operation: '([^']+)'\s+Time:\s+([0-9.]+) ms$")
+# Sum only the top-level loader stages. beancount's log_time nests per-file and
+# per-validation-function entries under these, so counting nested lines too
+# would bill the same milliseconds more than once.
+_TIMED_LOAD_STAGES = {
+    "parse": "parse",
+    "booking": "booking",
+    "run_transformations": "plugins",
+    "beancount.ops.validate": "validate",
+}
+
+
+def _load_timings_enabled():
+    return os.environ.get(TIMINGS_ENVIRONMENT, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _timing_breakdown(lines):
+    """Fold beancount's log_timings lines into per-stage milliseconds."""
+    totals = {"parse": 0.0, "booking": 0.0, "plugins": 0.0, "validate": 0.0}
+    for line in lines:
+        match = _TIMING_LINE.match(line)
+        if match is None:
+            continue
+        stage = _TIMED_LOAD_STAGES.get(match.group(1))
+        if stage is not None:
+            totals[stage] += float(match.group(2))
+    return {stage: round(value, 3) for stage, value in totals.items()}
 
 
 ALLOWED_PLUGINS = frozenset({
@@ -352,8 +388,10 @@ def _validate_json(workspace, entry_file, *, export_canonical, stream_output=Non
         _preflight(root, entry)
         # The uncached entry point avoids loading or removing any imported
         # pickle cache. This is the same loader pipeline used by bean-check.
+        timing_lines = [] if _load_timings_enabled() else None
         entries, errors, options = loader._uncached_load_file(
-            str(entry), None, validation.HARDCORE_VALIDATIONS, None
+            str(entry), timing_lines.append if timing_lines is not None else None,
+            validation.HARDCORE_VALIDATIONS, None
         )
         result = []
         for error in errors:
@@ -366,6 +404,8 @@ def _validate_json(workspace, entry_file, *, export_canonical, stream_output=Non
         payload = {"errors": result}
         if not result and stream_output is not None:
             payload["stream"] = _write_canonical_stream(root, entries, options, stream_output)
+            if timing_lines is not None:
+                payload["stream"]["timings"] = _timing_breakdown(timing_lines)
         if not result and export_canonical:
             option_values = _exported_options(root, options)
             payload["canonical"] = {"version": 1,
