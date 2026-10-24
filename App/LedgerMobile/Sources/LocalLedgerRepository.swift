@@ -98,7 +98,7 @@ actor LocalLedgerRepository: LedgerRepository {
                 withIntermediateDirectories: true
             )
             let data = try JSONEncoder().encode(persisted)
-            try data.write(to: importAuthorizationURL, options: [.atomic, .completeFileProtection])
+            try data.write(to: importAuthorizationURL, options: .ledgerProtected)
         } catch {
             // The in-memory authorization remains valid for the current process.
         }
@@ -1093,7 +1093,7 @@ actor LocalLedgerRepository: LedgerRepository {
     private func saveHistory(_ records: [BQLHistoryRecord]) throws {
         try FileManager.default.createDirectory(at: historyURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         #if os(iOS)
-        try JSONEncoder().encode(records).write(to: historyURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try JSONEncoder().encode(records).write(to: historyURL, options: .ledgerProtectedUntilFirstUserAuthentication)
         #else
         try JSONEncoder().encode(records).write(to: historyURL, options: .atomic)
         #endif
@@ -1278,7 +1278,7 @@ private struct BootstrapPresentationCache: Sendable {
         guard let data = try? JSONEncoder().encode(record), data.count <= Self.maximumBytes else { return }
         do {
             #if os(iOS)
-            try data.write(to: url, options: [.atomic, .completeFileProtection])
+            try data.write(to: url, options: .ledgerProtected)
             #else
             try data.write(to: url, options: .atomic)
             #endif
