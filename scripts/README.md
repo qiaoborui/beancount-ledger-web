@@ -28,6 +28,43 @@ python3 scripts/large_ledger_bench.py generate --tier 100k --output /tmp/blw-led
 档位为 `10k` / `50k` / `100k`（`--transactions N` 可自定义）。生成 20 年、
 240 个月文件、`main.bean` 及 `accounts/commodities/prices.bean`。
 
+生成完成后，`<output>/manifest.json` 记录这一档工作负载的身份：
+
+| 字段 | 含义 |
+| --- | --- |
+| `transactions` / `monthFiles` / `months` | 交易笔数、月文件数、覆盖月数 |
+| `directiveCounts` | 按 kind 的指令计数（open/commodity/price/plugin/option/include/transaction） |
+| `sourceFiles` | 每个源文件的相对路径、字节数、sha256 |
+| `sourceFileCount` / `sourceBytes` | 源文件数与源字节总量 |
+| `sourceTreeSha256` | 整棵源树的 sha256（按路径+内容，不含 mtime，也不含 manifest 自身） |
+| `canonical.entries` / `canonical.streamBytes` / `canonical.streamSha256` | 用真实 `ledger_validator` 导出得到的预期规范流指标（解释器没有 beancount 时为 `null`） |
+| `seed` | 生成用 seed；同 seed 重新生成应逐字节一致 |
+
+### 真机档位：组装、复现性校验、证据包
+
+真机测量的完整步骤见 [docs/ios-large-ledger-measurement-protocol.md](../docs/ios-large-ledger-measurement-protocol.md)，
+这里只列命令：
+
+```bash
+# 组装成可以直接在 App 里导入的目录（<workdir>/<tier>/device），并检查导入预算
+python3 scripts/large_ledger_bench.py assemble --tier 10k --workdir /tmp/blw-tiers --seed 20261024
+
+# 同 seed 重新生成并与 manifest 逐项比对（源树 sha256、规范流 sha256 等）
+python3 scripts/large_ledger_bench.py verify --tier 10k --workdir /tmp/blw-tiers
+
+# 上设备前用 App 同一条导出路径验一遍，打印该目录的 sourceTreeSha256
+python3 scripts/large_ledger_bench.py validate --source /tmp/blw-tiers/10k/device
+
+# 把 App 导出的录制 JSON 收进证据包；摘要对不上会整体失败
+python3 scripts/large_ledger_bench.py record --tier 10k --workdir /tmp/blw-tiers \
+  --input /tmp/blw-recordings/10k
+```
+
+`assemble` 只复制账本源文件，**不把 `manifest.json` 放进 `device/`**：导入目录受
+`LocalLedgerWorkspace.TreeLimits`（10,000 条目 / 256 MiB / 深度 32）约束，而且目录里
+多出来的文件没有任何用途。三档都是 240 个月文件 + 4 个根文件，条目数约 246，主要增长
+的是字节。`assemble` 发现符号链接、非普通文件或超限会直接失败。
+
 ### 跑完整分段基准
 
 ```bash
