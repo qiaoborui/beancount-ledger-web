@@ -1,6 +1,6 @@
 # iOS 大账本扩展方案：从“按 10 万笔建”到“按改动量付费”
 
-- 任务 `20261024-ios-large-ledger-scaling`；方案已定稿，2026-10-24。第一阶段 6 项已实现并通过集成验证，等待评审合入；交付记录见文末。
+- 任务 `20261024-ios-large-ledger-scaling`；方案已定稿，2026-10-24。第一阶段 6 项已实现、通过集成验证并全部合入 `main`（PR #541–#546，文档 #540，前置修复 #547）；交付记录见文末。
 - 基线：`main` @ `e4de9be`。
 - 前置文档：`docs/plans/20260923-ios-100k-no-db.md`、`docs/handoffs/20260923-ios-100k-no-db.md`、`docs/handoffs/20261019-ios-model-gate-and-cache.md`。
 
@@ -146,7 +146,7 @@
 | ⑤ 只注册一次 | `codex/ios-single-model-registration` @ `b138576` | 新增 `model-adopt`（committed→一次性 stage 浅拷贝）与 `model-promote`（发布后 stage→generation，含摘要/布局/路径重绑），Swift 保留/提升/回退矩阵 | 100k 一次写 2 次 Go 导入→1 次（省约 7.8s）；adopt 浅拷贝 44ms；发布后首读 12s→4.2s；快照仍重建 |
 | ⑥ 日期二分 | `codex/ios-date-range-bisect` @ `5222937` | `sort.Search` 定位首个 `Date < effectiveEnd`，`scanStart=max(cursor, first)`，越界即 break | 窄区间首页扫描 100,501→501 行；本地 4.3–6.5ms→1.3ms |
 
-集成验证：合并 6 项（含已合入 main 的 #547）的分支 `codex/ios-large-ledger-scaling-integration` 已通过 Python 32 tests、`go test ./...`、`go build ./cmd/...`、`swift test`（0 failures）、`swift build --triple arm64-apple-ios17.0`；7 个 PR（6 项 + docs）CI 全绿。冲突解决集中在 `LocalLedgerEngine.swift`（handles/signpost）与 `dispatch_test.go`（两组控制操作测试）。
+合入与集成验证：6 项按 #541→#542→#543→#544→#545→#546 顺序合入（#546 以 rebase 方式重放到 #545 之后），文档 #540 最后合入，`main` @ `ecbebb5`。每个 PR 的 CI 都通过；合入后复核 Python 32 tests、`go test ./...`、`go build ./cmd/...`、`swift test`（0 failures）、`swift build --triple arm64-apple-ios17.0`，以及带基线 `LedgerCore.xcframework` 的 `canImport(LedgerCore)` 分支编译，全部通过。冲突解决集中在 `LocalLedgerEngine.swift`（handles/signpost）与 `dispatch_test.go`（两组控制操作测试）。
 
 ### 第一阶段已知问题与未覆盖项
 

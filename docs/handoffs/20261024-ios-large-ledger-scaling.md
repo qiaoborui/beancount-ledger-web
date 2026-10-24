@@ -1,6 +1,6 @@
 # iOS 大账本扩展：第一阶段交付
 
-- 任务 `20261024-ios-large-ledger-scaling`；状态 `active`（代码与验证已完成，等待评审/合入）；更新于 2026-10-24T13:20:00+08:00。
+- 任务 `20261024-ios-large-ledger-scaling`；状态 `completed`（2026-10-24 第一阶段 6 项与文档已全部合入 `main`）；更新于 2026-10-24T17:20:00+08:00。
 - 用户目标：按 `docs/plans/20261024-ios-large-ledger-scaling.md` 的第一阶段 6 项落地，每项独立 PR、不改变校验语义、不放宽上限、不加数据库/依赖。
 - 基线：`main` @ `150b552`。计划文档、方案对比与后续阶段见该 plan。
 
@@ -36,8 +36,26 @@
 6. 快照未跨 root 迁移（item ⑤ 只省导入、不省快照）；计划里的“省一次快照 4.2s”仍待做。
 7. 待决定第 1、3、4 项（目标体量、写队列交互、关账期检查点语义）未动。
 
+## 合入记录（2026-10-24）
+
+按顺序合入，全部 PR 的 CI 通过后再合并；#546 以 rebase 方式重放到 #545 之后（无 merge commit），docs 分支同样 rebase：
+
+| PR | 内容 | main merge commit |
+| --- | --- | --- |
+| #547 | macOS 测试环境 file-protection 修复（前置，独立合入） | `64bed5c` |
+| #541 | ③ 预检去重 | `7873b6c` |
+| #542 | ④ 流导出提速 | `4c03654` |
+| #543 | ⑥ 日期二分 | `6da355d` |
+| #544 | ① 基准 + signpost | `82066b2` |
+| #545 | ② 内存核算 + 告警驱逐（含"按正在查看的账本保留"修复） | `0180e50` |
+| #546 | ⑤ 只做一次 Go 注册（rebase 后） | `afd0779` |
+| #540 | 计划勾选 + 本文档 | `ecbebb5` |
+
+合入后 `main` @ `ecbebb5` 复核：Python 32 tests、`go test ./...`、`go build ./cmd/...`、`swift test`（0 failures）、`swift build --triple arm64-apple-ios17.0`，以及带基线 `LedgerCore.xcframework` 的 `canImport(LedgerCore)` 分支编译，全部通过。
+
 ## 下一步
 
-1. 评审/合入 6 个代码 PR（建议顺序：③④（同文件、无交互）→ ① → ② → ⑥ → ⑤；`codex/ios-large-ledger-scaling-integration` 是已验证的合并结果，可直接参考冲突解决）。
-2. 合入后重建 `LedgerCore.xcframework` 并用 Release 包在真机采集第一阶段验收数据。
-3. 按真机数据校准 estimate 系数与 GOMEMLIMIT，再决定是否进入第二阶段（二进制规范快照）。
+1. 重建 `LedgerCore.xcframework`（`scripts/build-ios-ipa.sh` 会做）并用 Release 包在真机采集第一阶段验收数据。
+2. 按真机数据校准 estimate 系数与 GOMEMLIMIT，再决定是否进入第二阶段（二进制规范快照）。
+3. 跟进 `document` `Filename` 绝对路径问题（issue #548）。
+4. 评估在 CI 里增加一次 `canImport(LedgerCore)` 分支编译（stub 或基线 xcframework），避免只在该分支出现的类型错误漏到打包阶段。
