@@ -42,17 +42,28 @@ actor EmbeddedBeancountValidator {
     ///
     /// Canonical workspaces live under a generation
     /// (`<ledger>/generations/<id>/workspace`), which is published and must not
-    /// be written. The writable sibling is the ledger root's own `runtime`
-    /// directory, so walk up until an ancestor provides one. The Python side
-    /// refuses any directory this app did not create, so a root that cannot
-    /// offer a cache simply runs uncached. Cache file names are a digest of
-    /// every source file, so different content cannot reuse an entry.
+    /// The cache belongs at the ledger root, not under a generation:
+    /// `LocalLedgerWorkspace` drops every generation's `runtime` directory when
+    /// a transaction starts, which would throw the cache away after each write.
+    /// The ledger root keeps its own `runtime` (that is where the Go side already
+    /// stores canonical-stream artifacts), and generations live beneath it as
+    /// `generations/<id>/workspace`. The Python side refuses any directory this
+    /// app did not create, so a layout it does not recognise runs uncached.
     static func prepareLoaderCache(workspace: URL) {
         #if canImport(Darwin)
         var candidate = workspace.resolvingSymlinksInPath().standardizedFileURL
         for _ in 0..<4 {
             candidate = candidate.deletingLastPathComponent()
             if candidate.path == "/" || candidate.path.isEmpty { return }
+            // The workspace lives at `<ledger>/generations/<generation>/workspace`.
+            // Neither the generation directory nor the `generations` container is
+            // a stable home: the workspace drops a generation's runtime on every
+            // transaction. Identify the ledger root structurally: it is the
+            // directory that owns `generations`, and a ledger's own identifier is
+            // also a UUID, so the name alone cannot distinguish the two.
+            let isGenerationLayout = candidate.lastPathComponent == "generations"
+                || candidate.deletingLastPathComponent().lastPathComponent == "generations"
+            if isGenerationLayout { continue }
             let directory = candidate.appendingPathComponent("runtime", isDirectory: true)
                 .appendingPathComponent("loader-cache", isDirectory: true)
             if (try? FileManager.default.createDirectory(at: directory,
