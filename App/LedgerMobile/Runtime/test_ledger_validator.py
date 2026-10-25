@@ -655,8 +655,14 @@ class LoadCacheTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def environment(self, value):
-        return mock.patch.dict("os.environ", {ledger_validator.LOAD_CACHE_ENVIRONMENT: str(value)})
+    def environment(self, value, runtime="build-a"):
+        values = {ledger_validator.LOAD_CACHE_ENVIRONMENT: str(value)}
+        if runtime is not None:
+            values[ledger_validator.LOAD_CACHE_RUNTIME_ENVIRONMENT] = runtime
+        return mock.patch.dict("os.environ", values)
+
+    def cached_names(self):
+        return {path.name for path in self.cache.iterdir()}
 
     def test_cache_directory_is_optional(self):
         # Without the variable the loader keeps its uncached binding.
@@ -710,6 +716,50 @@ class LoadCacheTests(unittest.TestCase):
             payload = json.loads(validate_only_json(str(self.root)))
         self.assertEqual(payload, {"errors": []})
         self.assertEqual(list(target.iterdir()), [])
+
+    def test_cache_without_runtime_fingerprint_stays_off(self):
+        with mock.patch.object(ledger_validator.loader, "PICKLE_CACHE_THRESHOLD", 0.0):
+            with self.environment(self.cache, runtime=None):
+                os.environ.pop(ledger_validator.LOAD_CACHE_RUNTIME_ENVIRONMENT, None)
+                payload = json.loads(validate_only_json(str(self.root)))
+        self.assertEqual(payload, {"errors": []})
+        self.assertEqual(self.cached_names(), set())
+
+    def test_another_build_uses_a_different_cache_file(self):
+        with mock.patch.object(ledger_validator.loader, "PICKLE_CACHE_THRESHOLD", 0.0):
+            with self.environment(self.cache, runtime="build-a"):
+                validate_only_json(str(self.root))
+            first = self.cached_names()
+            with self.environment(self.cache, runtime="build-b"):
+                validate_only_json(str(self.root))
+            second = self.cached_names()
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 2, "a pickle from another build must never be read back")
+
+    def test_editing_an_included_file_uses_a_different_cache_file(self):
+        # Includes resolve against the including file's directory, not the
+        # ledger root; the cache key must cover the file the loader reads.
+        (self.root / "books").mkdir()
+        (self.root / "books" / "index.bean").write_text('include "2026.bean"\n')
+        (self.root / "books" / "2026.bean").write_text(
+            '2026-01-02 * "Dinner"\n  Assets:Cash -5 CNY\n  Expenses:Food 5 CNY\n')
+        (self.root / "main.bean").write_text(self.LEDGER + 'include "books/index.bean"\n')
+        with mock.patch.object(ledger_validator.loader, "PICKLE_CACHE_THRESHOLD", 0.0):
+            with self.environment(self.cache):
+                self.assertEqual(json.loads(validate_only_json(str(self.root))), {"errors": []})
+                first = self.cached_names()
+                # Same size and mtime, so beancount's own staleness check cannot
+                # notice the edit; only the content digest can.
+                included = self.root / "books" / "2026.bean"
+                stat = included.stat()
+                included.write_text(
+                    '2026-01-02 * "Dinner"\n  Assets:Cash -5 CNY\n  Expenses:Food 4 CNY\n')
+                os.utime(included, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+                edited = json.loads(validate_only_json(str(self.root)))
+                second = self.cached_names()
+        self.assertTrue(edited["errors"], "the edited include must be re-validated, not served from cache")
+        self.assertEqual(len(first), 1)
+        self.assertLessEqual(first, second)
 
     def test_missing_cache_directory_still_validates(self):
         with self.environment(pathlib.Path(self.temporary.name) / "absent"):

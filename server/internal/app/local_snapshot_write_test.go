@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -130,5 +131,51 @@ func TestLoadAcceptsPlainStream(t *testing.T) {
 	}
 	if len(model.Entries) == 0 {
 		t.Fatal("stream produced no entries")
+	}
+}
+
+// The app keeps the snapshot a registration wrote and later links it back under
+// a fresh scratch name. That name must register to the same model, and a
+// damaged copy must fail registration so the app falls back to the stream.
+func TestHarvestedSnapshotRegistersUnderFreshName(t *testing.T) {
+	input := localTestRequest(t)
+	first := registerHandleFixture(t, input)
+	localModels.Lock()
+	registered := committedLocalModel(first)
+	entries := len(registered.model.Entries)
+	directory := filepath.Join(registered.cache.cfg.RuntimeDir, "canonical-stream")
+	localModels.Unlock()
+	written, err := os.ReadFile(filepath.Join(directory, strings.Repeat("a", 32)+"."+snapshotFormatTag))
+	if err != nil {
+		t.Fatalf("registration left no snapshot at the stream's stem: %v", err)
+	}
+	version, err := LocalModelSourceVersion(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	name := strings.Repeat("b", 32) + "." + snapshotFormatTag
+	if err := os.WriteFile(filepath.Join(directory, name), written, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handle, err := RegisterLocalModel(input, name, version)
+	if err != nil {
+		t.Fatalf("snapshot registration: %v", err)
+	}
+	t.Cleanup(func() { ReleaseLocalModel(handle) })
+	localModels.Lock()
+	reloaded := committedLocalModel(handle)
+	localModels.Unlock()
+	if reloaded == nil || len(reloaded.model.Entries) != entries {
+		t.Fatalf("snapshot registration produced a different model")
+	}
+
+	damaged := strings.Repeat("c", 32) + "." + snapshotFormatTag
+	if err := os.WriteFile(filepath.Join(directory, damaged), written[:len(written)/2], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if handle, err := RegisterLocalModel(input, damaged, version); err == nil {
+		ReleaseLocalModel(handle)
+		t.Fatal("a truncated snapshot must fail registration")
 	}
 }
