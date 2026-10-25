@@ -309,7 +309,11 @@ func TestLocalModelStampsDetectEditAfterResolve(t *testing.T) {
 	}
 }
 
-func TestLocalModelEstimateUsesMeasuredResidentCost(t *testing.T) {
+// The estimate must track the decoded model, not the file that carried it: a
+// binary snapshot is ~6x smaller than the equivalent stream while costing the
+// same heap, so a file-size estimate would let several large models stay
+// resident past the budget.
+func TestLocalModelEstimateUsesResidentModelCost(t *testing.T) {
 	input := localTestRequest(t)
 	handle := registerHandleFixture(t, input)
 	localModels.Lock()
@@ -318,21 +322,30 @@ func TestLocalModelEstimateUsesMeasuredResidentCost(t *testing.T) {
 	if registered == nil {
 		t.Fatal("registered model missing from the committed LRU")
 	}
-	streamBytes := int64(len(canonicalStreamFixture(t, 2)))
-	if want := streamBytes * localModelEstimateFactor; registered.estimate != want {
-		t.Fatalf("estimate = %d, want %d (stream bytes x factor)", registered.estimate, want)
+	want := int64(len(registered.model.Entries)) * localModelEstimateBytesPerEntry
+	if registered.estimate != want {
+		t.Fatalf("estimate = %d, want %d (entries x bytes per entry)", registered.estimate, want)
 	}
-	if localModelEstimateFactor < 5 {
-		t.Fatalf("estimate factor %d still undercounts the measured 5-8x live heap", localModelEstimateFactor)
+	// A snapshot does not make the model cheaper, so the estimate must not shrink
+	// with the cache file.
+	smallerFile := localModelMemoryEstimate(registered.model, 1<<10)
+	if smallerFile != want {
+		t.Fatalf("estimate depends on file size: %d for a small file, want %d", smallerFile, want)
 	}
-	// At the measured cost one 100k ledger (47MB stream) still fits the budget
-	// alone, but two do not. The budget, not a lucky estimate, decides residency.
-	measured100k := int64(47 << 20)
-	if one := measured100k * localModelEstimateFactor; one > localModelBudget {
-		t.Fatalf("one 100k estimate %d exceeds the %d budget, so it could never stay resident", one, localModelBudget)
+	if localModelEstimateBytesPerEntry < 2151 {
+		t.Fatalf("estimate %d bytes/entry undercounts the measured 2,151 on the 100k tier",
+			localModelEstimateBytesPerEntry)
 	}
-	if two := 2 * measured100k * localModelEstimateFactor; two <= localModelBudget {
-		t.Fatalf("two 100k ledgers fit the %d budget at factor %d", localModelBudget, localModelEstimateFactor)
+	// One 100k ledger (110,563 entries) fits the budget alone; two do not. The
+	// budget, not a lucky estimate, decides residency.
+	measured100k := int64(110_563) * localModelEstimateBytesPerEntry
+	if measured100k > localModelBudget {
+		t.Fatalf("one 100k estimate %d exceeds the %d budget, so it could never stay resident",
+			measured100k, localModelBudget)
+	}
+	if two := 2 * measured100k; two <= localModelBudget {
+		t.Fatalf("two 100k ledgers fit the %d budget at %d bytes/entry",
+			localModelBudget, localModelEstimateBytesPerEntry)
 	}
 }
 
