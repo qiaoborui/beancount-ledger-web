@@ -40,18 +40,27 @@ actor EmbeddedBeancountValidator {
     /// same source reuses beancount's pickled result instead of repeating the
     /// parse and booking stages. On a 100k ledger that is ~27s down to ~2s.
     ///
-    /// The directory is derived from the workspace and must already be owned by
-    /// this app; the Python side refuses anything else, so a workspace that
-    /// cannot offer a cache simply runs uncached. The file name there is a
-    /// digest of every source file, so different content cannot reuse an entry.
+    /// Canonical workspaces live under a generation
+    /// (`<ledger>/generations/<id>/workspace`), which is published and must not
+    /// be written. The writable sibling is the ledger root's own `runtime`
+    /// directory, so walk up until an ancestor provides one. The Python side
+    /// refuses any directory this app did not create, so a root that cannot
+    /// offer a cache simply runs uncached. Cache file names are a digest of
+    /// every source file, so different content cannot reuse an entry.
     static func prepareLoaderCache(workspace: URL) {
         #if canImport(Darwin)
-        let root = workspace.resolvingSymlinksInPath().standardizedFileURL
-        let directory = root.appendingPathComponent("runtime", isDirectory: true)
-            .appendingPathComponent("loader-cache", isDirectory: true)
-        guard (try? FileManager.default.createDirectory(at: directory,
-            withIntermediateDirectories: true)) != nil else { return }
-        _ = setenv(loaderCacheEnvironment, directory.path, 1)
+        var candidate = workspace.resolvingSymlinksInPath().standardizedFileURL
+        for _ in 0..<4 {
+            candidate = candidate.deletingLastPathComponent()
+            if candidate.path == "/" || candidate.path.isEmpty { return }
+            let directory = candidate.appendingPathComponent("runtime", isDirectory: true)
+                .appendingPathComponent("loader-cache", isDirectory: true)
+            if (try? FileManager.default.createDirectory(at: directory,
+                withIntermediateDirectories: true)) != nil {
+                _ = setenv(loaderCacheEnvironment, directory.path, 1)
+                return
+            }
+        }
         #endif
     }
 
