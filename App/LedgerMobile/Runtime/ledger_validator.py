@@ -554,6 +554,106 @@ def validate_only_json(workspace, entry_file="main.bean"):
     return _validate_json(workspace, entry_file, export_canonical=False)
 
 
+# beancount's loader can reuse a pickled (entries, errors, options) triple across
+# processes, which on a 100k ledger replaces ~27s of parse+booking with a ~2s
+# unpickle. Two reasons it is not enabled unconditionally here:
+#
+#  - Unpickling executes whatever the file says, so this module only ever reads a
+#    cache file it can prove belongs to the current source version and that this
+#    process created in a directory the caller handed us.
+#  - beancount decides staleness from file mtimes. An app generation is written
+#    to a new directory on every publish, so a mtime check alone would happily
+#    reuse a cache for different content. The source version goes in the file
+#    name instead: different content means a different cache file.
+LOAD_CACHE_ENVIRONMENT = "LEDGER_LOAD_CACHE_DIR"
+
+
+def _load_cache_path(root, entry):
+    """Return this call's cache file, or None when caching is off or unsafe.
+
+    The caller opts in by setting LOAD_CACHE_ENVIRONMENT to a directory it owns
+    and wrote itself. Anything surprising about that directory (missing, a
+    symlink, not a directory) disables the cache rather than risking a read of a
+    file this process did not create.
+    """
+    raw = os.environ.get(LOAD_CACHE_ENVIRONMENT, "").strip()
+    if not raw:
+        return None
+    directory = Path(os.path.abspath(raw))
+    try:
+        info = os.lstat(directory)
+    except OSError:
+        return None
+    import stat as _stat
+    if not _stat.S_ISDIR(info.st_mode) or _stat.S_ISLNK(info.st_mode):
+        return None
+    if info.st_uid != os.getuid():
+        return None
+    # Identity of the content this load covers: the entry path plus every
+    # source file's path and digest, so a moved or edited ledger cannot alias an
+    # older cache. _preflight already bounded the file set.
+    digest = hashlib.sha256()
+    digest.update(str(entry.resolve()).encode("utf-8"))
+    for filename in sorted(_source_files(root, entry)):
+        relative = filename.relative_to(root).as_posix()
+        digest.update(relative.encode("utf-8"))
+        with open(filename, "rb") as handle:
+            file_digest = hashlib.sha256()
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                file_digest.update(chunk)
+        digest.update(file_digest.digest())
+    return directory / (digest.hexdigest() + ".picklecache")
+
+
+def _source_files(root, entry):
+    """Every file the loader will read, mirroring _preflight's traversal."""
+    pending, seen = [entry], []
+    visited = set()
+    while pending:
+        filename = _confined(root, pending.pop())
+        if filename in visited:
+            continue
+        visited.add(filename)
+        seen.append(filename)
+        try:
+            with open(filename, "r", encoding="utf-8", errors="strict") as handle:
+                for line in handle:
+                    stripped = line.strip()
+                    if stripped.startswith("include "):
+                        pattern = stripped[len("include "):].strip().strip('"')
+                        if pattern:
+                            for match in glob.glob(str(root / pattern)):
+                                pending.append(Path(match))
+        except (OSError, UnicodeDecodeError):
+            continue
+    return seen
+
+
+def _load_with_optional_cache(root, entry, log_timings):
+    cache_path = _load_cache_path(root, entry)
+    if cache_path is None:
+        # No cache directory offered: keep the original uncached pipeline.
+        return loader._uncached_load_file(str(entry), log_timings, validation.HARDCORE_VALIDATIONS, None)
+    # loader binds its cache getter when the module is imported, so the variable
+    # has to be set before initialize() rebinds it; changing the environment
+    # afterwards has no effect.
+    previous = os.environ.get("BEANCOUNT_LOAD_CACHE_FILENAME")
+    os.environ["BEANCOUNT_LOAD_CACHE_FILENAME"] = str(cache_path)
+    try:
+        loader.initialize(True, str(cache_path))
+        # Only our own file name can be in this directory, and it is derived from
+        # the content digest above, so load_file reads nothing we did not write.
+        return loader.load_file(str(entry), log_timings, validation.HARDCORE_VALIDATIONS, None)
+    finally:
+        if previous is None:
+            os.environ.pop("BEANCOUNT_LOAD_CACHE_FILENAME", None)
+        else:
+            os.environ["BEANCOUNT_LOAD_CACHE_FILENAME"] = previous
+        # Restore the uncached binding so a later call without a cache directory
+        # cannot inherit this one's file.
+        loader.initialize(False)
+
+
 def _validate_json(workspace, entry_file, *, export_canonical, stream_output=None):
     try:
         root = Path(workspace).resolve(strict=True)
@@ -561,12 +661,13 @@ def _validate_json(workspace, entry_file, *, export_canonical, stream_output=Non
             raise ValueError("账本入口路径无效")
         entry = _confined(root, root / entry_file)
         _preflight(root, entry)
-        # The uncached entry point avoids loading or removing any imported
-        # pickle cache. This is the same loader pipeline used by bean-check.
+        # Caching stays off unless the caller hands us a directory it owns; in
+        # that case the same loader pipeline runs but reuses this source
+        # version's unpickled result. bean-check semantics are unchanged either
+        # way: posting/booking/validation all run before anything is cached.
         timing_lines = [] if _load_timings_enabled() else None
-        entries, errors, options = loader._uncached_load_file(
-            str(entry), timing_lines.append if timing_lines is not None else None,
-            validation.HARDCORE_VALIDATIONS, None
+        entries, errors, options = _load_with_optional_cache(
+            root, entry, timing_lines.append if timing_lines is not None else None
         )
         result = []
         for error in errors:
