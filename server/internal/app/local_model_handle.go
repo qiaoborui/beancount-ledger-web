@@ -43,6 +43,19 @@ const (
 	// large ledgers keep only the current model resident instead of silently
 	// assuming a third of the real cost.
 	localModelEstimateFactor = 6
+	// The same model costs the same heap whether it arrived as a stream or as a
+	// binary snapshot: only the file shrank (54MB stream vs 8.4MB snapshot on the
+	// 100k tier), while the decoded entries and their LedgerCache are identical.
+	// Estimating from file bytes therefore under-counts a snapshot by ~6x and
+	// lets the LRU keep several large models resident, so the size of the decoded
+	// model is what this budget must track.
+	//
+	// Measured with Go's HeapAlloc after decoding and building the cache, GC
+	// forced before and after: 2,069 bytes/entry on the 10k tier (23MB total) and
+	// 2,151 bytes/entry on the 100k tier (226MB total). This is the smaller of
+	// the two rounded up, so the estimate stays conservative for a ledger whose
+	// metadata is denser than these synthetic ones.
+	localModelEstimateBytesPerEntry = 2304
 )
 
 var localModelBudget int64 = 384 << 20
@@ -193,10 +206,7 @@ func RegisterLocalModel(input LocalRequest, streamName, expectedVersion string) 
 	if (filepath.Base(filepath.Dir(filepath.Dir(cfg.LedgerRoot))) == "staging") != input.Staging {
 		return "", errors.New("model scope must match workspace generation/stage")
 	}
-	if len(streamName) != 40 || !strings.HasSuffix(streamName, ".records") {
-		return "", errors.New("invalid canonical stream name")
-	}
-	if _, err := hex.DecodeString(strings.TrimSuffix(streamName, ".records")); err != nil {
+	if _, ok := localCanonicalStem(streamName); !ok {
 		return "", errors.New("invalid canonical stream name")
 	}
 	directory := filepath.Join(cfg.RuntimeDir, "canonical-stream")
@@ -224,7 +234,10 @@ func RegisterLocalModel(input LocalRequest, streamName, expectedVersion string) 
 	if err != nil || !os.SameFile(info, opened) {
 		return "", errors.New("canonical stream identity changed")
 	}
-	model, err := ReadLocalCanonicalStream(file)
+	// The file may be the exporter stream or a binary snapshot written by an
+	// earlier registration; both decode to the same model, and a snapshot that
+	// cannot be trusted falls back to the stream.
+	model, err := loadCanonicalModel(file, opened, expectedVersion)
 	if err != nil {
 		return "", err
 	}
@@ -244,7 +257,11 @@ func RegisterLocalModel(input LocalRequest, streamName, expectedVersion string) 
 	// Unlike caller-supplied legacy JSON, its arrays may become the primary
 	// normalized semantic entries without retaining another rich copy.
 	registered := bindLocalRegisteredModel(cfg, model, handle, expectedVersion, stamps, after,
-		input.Staging, opened.Size()*localModelEstimateFactor)
+		input.Staging, localModelMemoryEstimate(model, opened.Size()))
+	// Cache this model as a snapshot so the next registration skips stream
+	// parsing. Best effort: the model above is already complete, so a failure
+	// here must not fail the registration.
+	_, _ = writeCanonicalSnapshot(cfg, model, streamName, expectedVersion, snapshotExporterID(), "")
 	localModels.Lock()
 	defer localModels.Unlock()
 	if input.Staging {
