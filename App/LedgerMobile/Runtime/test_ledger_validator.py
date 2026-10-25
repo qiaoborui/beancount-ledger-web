@@ -1,4 +1,5 @@
 import json
+import os
 import hashlib
 import pathlib
 import tempfile
@@ -631,3 +632,86 @@ plugin "beancount.plugins.implicit_prices"
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LoadCacheTests(unittest.TestCase):
+    """The opt-in pickle cache must never change results, only reuse them."""
+
+    LEDGER = '''2000-01-01 open Assets:Cash CNY
+2000-01-01 open Expenses:Food CNY
+2026-01-01 * "Lunch"
+  Assets:Cash -10 CNY
+  Expenses:Food 10 CNY
+'''
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.temporary.name) / "ledger"
+        self.root.mkdir()
+        (self.root / "main.bean").write_text(self.LEDGER)
+        self.cache = pathlib.Path(self.temporary.name) / "cache"
+        self.cache.mkdir()
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def environment(self, value):
+        return mock.patch.dict("os.environ", {ledger_validator.LOAD_CACHE_ENVIRONMENT: str(value)})
+
+    def test_cache_directory_is_optional(self):
+        # Without the variable the loader keeps its uncached binding.
+        with mock.patch.dict("os.environ", {}, clear=False):
+            os.environ.pop(ledger_validator.LOAD_CACHE_ENVIRONMENT, None)
+            payload = json.loads(validate_only_json(str(self.root)))
+        self.assertEqual(payload, {"errors": []})
+        self.assertEqual(list(self.cache.iterdir()), [])
+
+    def test_enabled_cache_returns_identical_diagnostics(self):
+        # beancount only writes a cache when a load costs more than its
+        # threshold, so a fixture this small never produces one. Force the write
+        # to exercise the path/identity logic that is ours.
+        uncached = json.loads(validate_only_json(str(self.root)))
+        with mock.patch.object(ledger_validator.loader, "PICKLE_CACHE_THRESHOLD", 0.0):
+            with self.environment(self.cache):
+                first = json.loads(validate_only_json(str(self.root)))
+                second = json.loads(validate_only_json(str(self.root)))
+        self.assertEqual(first, uncached)
+        self.assertEqual(second, uncached)
+        entries = list(self.cache.iterdir())
+        self.assertEqual(len(entries), 1, entries)
+        self.assertTrue(entries[0].name.endswith(".picklecache"))
+
+    def test_editing_the_ledger_uses_a_different_cache_file(self):
+        with mock.patch.object(ledger_validator.loader, "PICKLE_CACHE_THRESHOLD", 0.0):
+          with self.environment(self.cache):
+              validate_only_json(str(self.root))
+              first = {path.name for path in self.cache.iterdir()}
+              (self.root / "main.bean").write_text(self.LEDGER.replace("10 CNY\n  Expenses:Food", "11 CNY\n  Expenses:Food"))
+              validate_only_json(str(self.root))
+              second = {path.name for path in self.cache.iterdir()}
+          self.assertNotEqual(first, second)
+          # A stale cache must not survive as the only entry.
+          self.assertEqual(len(second), 2)
+
+    def test_invalid_ledger_is_never_cached_as_valid(self):
+        (self.root / "main.bean").write_text(self.LEDGER.replace("Food 10", "Food 9"))
+        with self.environment(self.cache):
+            first = json.loads(validate_only_json(str(self.root)))
+            second = json.loads(validate_only_json(str(self.root)))
+        self.assertTrue(first["errors"])
+        self.assertEqual(first, second)
+
+    def test_symlinked_cache_directory_is_refused(self):
+        target = pathlib.Path(self.temporary.name) / "elsewhere"
+        target.mkdir()
+        link = pathlib.Path(self.temporary.name) / "link"
+        link.symlink_to(target)
+        with self.environment(link):
+            payload = json.loads(validate_only_json(str(self.root)))
+        self.assertEqual(payload, {"errors": []})
+        self.assertEqual(list(target.iterdir()), [])
+
+    def test_missing_cache_directory_still_validates(self):
+        with self.environment(pathlib.Path(self.temporary.name) / "absent"):
+            payload = json.loads(validate_only_json(str(self.root)))
+        self.assertEqual(payload, {"errors": []})

@@ -36,6 +36,27 @@ actor EmbeddedBeancountValidator {
         }
     }
 
+    /// Points the Python loader at a per-ledger cache so a second load of the
+    /// same source reuses beancount's pickled result instead of repeating the
+    /// parse and booking stages. On a 100k ledger that is ~27s down to ~2s.
+    ///
+    /// The directory is derived from the workspace and must already be owned by
+    /// this app; the Python side refuses anything else, so a workspace that
+    /// cannot offer a cache simply runs uncached. The file name there is a
+    /// digest of every source file, so different content cannot reuse an entry.
+    static func prepareLoaderCache(workspace: URL) {
+        #if canImport(Darwin)
+        let root = workspace.resolvingSymlinksInPath().standardizedFileURL
+        let directory = root.appendingPathComponent("runtime", isDirectory: true)
+            .appendingPathComponent("loader-cache", isDirectory: true)
+        guard (try? FileManager.default.createDirectory(at: directory,
+            withIntermediateDirectories: true)) != nil else { return }
+        _ = setenv(loaderCacheEnvironment, directory.path, 1)
+        #endif
+    }
+
+    static let loaderCacheEnvironment = "LEDGER_LOAD_CACHE_DIR"
+
     func validate(workspace: URL, entryFile: String = "main.bean") throws {
         _ = try load(workspace: workspace, entryFile: entryFile, includeCanonical: false)
     }
@@ -69,6 +90,7 @@ actor EmbeddedBeancountValidator {
         // The canonical records themselves are unaffected; the timings ride in
         // the reply descriptor, never in the stream.
         LocalLedgerPerformance.preparePythonTimings()
+        Self.prepareLoaderCache(workspace: workspace)
         let interval = LocalLedgerPerformance.begin(.pythonExport)
         defer { LocalLedgerPerformance.end(interval) }
         try initializeIfNeeded()
@@ -141,6 +163,7 @@ actor EmbeddedBeancountValidator {
         #if canImport(BeancountRuntime)
         let interval = LocalLedgerPerformance.begin(.pythonLoad)
         defer { LocalLedgerPerformance.end(interval) }
+        Self.prepareLoaderCache(workspace: workspace)
         try initializeIfNeeded()
         let pointer = workspace.path.withCString { root in
             entryFile.withCString { entry in
