@@ -120,6 +120,106 @@ final class LocalCanonicalStreamCacheTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: cache.directory.path))
     }
 
+    /// Go writes a `.snap1` beside the stream it registered; the cache keeps it
+    /// so the next registration links the snapshot instead of the stream.
+    func testStoresAndRestoresSnapshotBesideStream() throws {
+        let root = try makeRoot()
+        let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
+        let (source, descriptor) = try stream("{\"type\":\"header\"}\n", in: root)
+        cache.store(source, sourceVersion: version, descriptor: descriptor)
+        XCTAssertFalse(cache.contains(version, format: .snapshot))
+
+        let snapshot = root.appendingPathComponent(UUID().uuidString + ".snap1")
+        try Data("BRSNAP01 binary model".utf8).write(to: snapshot)
+        cache.storeSnapshot(snapshot, sourceVersion: version)
+        XCTAssertTrue(cache.contains(version, format: .snapshot))
+        XCTAssertTrue(cache.contains(version, format: .records), "the stream stays as the fallback")
+
+        let output = root.appendingPathComponent("restored.snap1")
+        XCTAssertTrue(cache.restore(version, format: .snapshot, to: output))
+        XCTAssertEqual(try Data(contentsOf: output), try Data(contentsOf: snapshot))
+    }
+
+    func testRemovingRejectedSnapshotKeepsStream() throws {
+        let root = try makeRoot()
+        let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
+        let (source, descriptor) = try stream("x\n", in: root)
+        cache.store(source, sourceVersion: version, descriptor: descriptor)
+        let snapshot = root.appendingPathComponent("model.snap1")
+        try Data("snapshot".utf8).write(to: snapshot)
+        cache.storeSnapshot(snapshot, sourceVersion: version)
+
+        cache.remove(version, format: .snapshot)
+        XCTAssertFalse(cache.contains(version, format: .snapshot))
+        XCTAssertTrue(cache.contains(version))
+        XCTAssertTrue(cache.restore(version, to: root.appendingPathComponent("fallback.records")))
+    }
+
+    func testTamperedSnapshotIsDroppedInsteadOfRestored() throws {
+        let root = try makeRoot()
+        let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
+        let snapshot = root.appendingPathComponent("model.snap1")
+        try Data("original".utf8).write(to: snapshot)
+        cache.storeSnapshot(snapshot, sourceVersion: version)
+        let cached = cache.directory.appendingPathComponent(version + ".snap1")
+        try FileManager.default.removeItem(at: cached)
+        try Data("tampered".utf8).write(to: cached)
+        let output = root.appendingPathComponent("restored.snap1")
+        XCTAssertFalse(cache.restore(version, format: .snapshot, to: output))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+        XCTAssertFalse(cache.contains(version))
+    }
+
+    /// A snapshot alone also proves the source passed canonical validation.
+    func testSnapshotOnlyEntryCountsAsValidated() throws {
+        let root = try makeRoot()
+        let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
+        let snapshot = root.appendingPathComponent("model.snap1")
+        try Data("snapshot".utf8).write(to: snapshot)
+        cache.storeSnapshot(snapshot, sourceVersion: version)
+        XCTAssertTrue(cache.contains(version))
+        XCTAssertFalse(cache.contains(version, format: .records))
+    }
+
+    /// A version's stream and snapshot are one cache entry, evicted together.
+    func testEvictionCountsStreamAndSnapshotAsOneEntry() throws {
+        let root = try makeRoot()
+        let cache = LocalCanonicalStreamCache(runtimeRoot: root, fingerprint: "build-a")
+        let capacity = LocalCanonicalStreamCache.capacity
+        let versions = (0..<(capacity + 1)).map {
+            String(format: "%02d", $0) + String(repeating: "0", count: 62)
+        }
+        for version in versions {
+            let (source, descriptor) = try stream(version + "\n", in: root)
+            cache.store(source, sourceVersion: version, descriptor: descriptor)
+            let snapshot = root.appendingPathComponent(version + ".snap1")
+            try Data(version.utf8).write(to: snapshot)
+            cache.storeSnapshot(snapshot, sourceVersion: version)
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        XCTAssertFalse(cache.contains(versions[0]), "the oldest version loses both files")
+        for version in versions.dropFirst() {
+            XCTAssertTrue(cache.contains(version, format: .records), "recent streams must survive")
+            XCTAssertTrue(cache.contains(version, format: .snapshot), "recent snapshots must survive")
+        }
+    }
+
+    /// Only committed generations get a pickle cache; a stage is moved into
+    /// `generations` after one validation, so its pickle could never be reused.
+    func testLoaderCacheIsOnlyOfferedToGenerations() throws {
+        let ledger = try makeRoot().appendingPathComponent("ledger-id")
+        let generation = ledger.appendingPathComponent("generations/0001/workspace")
+        let stage = ledger.appendingPathComponent("staging/0002/workspace")
+        for directory in [generation, stage] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        let expected = ledger.appendingPathComponent("runtime/loader-cache").resolvingSymlinksInPath().standardizedFileURL
+        XCTAssertEqual(EmbeddedBeancountValidator.loaderCacheDirectory(for: generation)?
+            .resolvingSymlinksInPath().standardizedFileURL.path, expected.path)
+        XCTAssertNil(EmbeddedBeancountValidator.loaderCacheDirectory(for: stage))
+        XCTAssertNil(EmbeddedBeancountValidator.loaderCacheDirectory(for: ledger))
+    }
+
     /// End to end through the bundled runtimes: an invalid ledger is still
     /// rejected with its location, and the published generation reuses the
     /// stream its validation exported.

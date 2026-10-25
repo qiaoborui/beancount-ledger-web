@@ -590,15 +590,43 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         command.body = nil; command.importFile = nil; command.canonical = nil; command.modelHandle = nil
         struct Version: Decodable { let sourceVersion: String }
         let version = try nativeResponse(command).decode(Version.self).sourceVersion
-        let scratch = try await canonicalStreamScratch(workspaceRoot: request.workspaceRoot,
-            runtimeRoot: request.runtimeRoot, entrypoint: request.entrypoint, version: version)
-        defer { try? FileManager.default.removeItem(at: scratch.url) }
-        try Task.checkCancellation()
+        return (try await registerCanonicalModel(command, version: version), version)
+    }
+
+    /// Registers `version` from its cached snapshot when there is one, and
+    /// otherwise from the canonical stream (cached or freshly exported). After a
+    /// stream registration Go leaves an equivalent `<stem>.snap1` next to it;
+    /// that is kept in the build-scoped cache so the next registration of the
+    /// same source skips NDJSON parsing. A snapshot Go refuses is dropped and the
+    /// stream path runs as before, so the snapshot can only ever save time.
+    private func registerCanonicalModel(_ request: LocalLedgerEngineRequest, version: String) async throws -> String {
+        struct Registration: Decodable { let handle: String }
+        var command = request
         command.operation = "model-register"
         command.sourceVersion = version
+        command.body = nil; command.importFile = nil; command.canonical = nil; command.modelHandle = nil
+        let cache = LocalCanonicalStreamCache(runtimeRoot: URL(fileURLWithPath: request.runtimeRoot))
+        if let snapshot = try canonicalSnapshotScratch(runtimeRoot: request.runtimeRoot, version: version, cache: cache) {
+            defer { try? FileManager.default.removeItem(at: snapshot.url) }
+            try Task.checkCancellation()
+            command.streamFile = snapshot.name
+            if let handle = try? nativeResponse(command).decode(Registration.self).handle {
+                return handle
+            }
+            cache.remove(version, format: .snapshot)
+        }
+        let scratch = try await canonicalStreamScratch(workspaceRoot: request.workspaceRoot,
+            runtimeRoot: request.runtimeRoot, entrypoint: request.entrypoint, version: version)
+        let written = scratch.url.deletingPathExtension().appendingPathExtension(LocalCanonicalStreamCache.Format.snapshot.rawValue)
+        defer {
+            try? FileManager.default.removeItem(at: scratch.url)
+            try? FileManager.default.removeItem(at: written)
+        }
+        try Task.checkCancellation()
         command.streamFile = scratch.name
-        struct Registration: Decodable { let handle: String }
-        return (try nativeResponse(command).decode(Registration.self).handle, version)
+        let handle = try nativeResponse(command).decode(Registration.self).handle
+        cache.storeSnapshot(written, sourceVersion: version)
+        return handle
     }
 
     struct CanonicalStreamScratch {
@@ -606,12 +634,28 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         let url: URL
     }
 
-    /// Links (or exports) the canonical stream for `version` into the owned
-    /// scratch directory. All exporter/ingestion work is serialized by the
-    /// process-wide gate. Only exact owned scratch names are removed;
-    /// imports/receipts stay untouched.
-    private func canonicalStreamScratch(workspaceRoot: String, runtimeRoot: String, entrypoint: String,
-                                        version: String) async throws -> CanonicalStreamScratch {
+    /// Links the cached snapshot for `version` into the owned scratch directory,
+    /// or returns nil when there is none.
+    private func canonicalSnapshotScratch(runtimeRoot: String, version: String,
+                                          cache: LocalCanonicalStreamCache) throws -> CanonicalStreamScratch? {
+        guard cache.contains(version, format: .snapshot) else { return nil }
+        let directory = try canonicalScratchDirectory(runtimeRoot: runtimeRoot)
+        let name = Self.scratchToken() + "." + LocalCanonicalStreamCache.Format.snapshot.rawValue
+        let output = directory.appendingPathComponent(name)
+        guard cache.restore(version, format: .snapshot, to: output) else { return nil }
+        return CanonicalStreamScratch(name: name, url: output)
+    }
+
+    private static func scratchToken() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    }
+
+    /// The owned `canonical-stream` scratch directory, emptied of earlier
+    /// scratch files. All exporter/ingestion work is serialized by the
+    /// process-wide gate. Only exact owned scratch names (`<32 hex>.records` and
+    /// the `<32 hex>.snap1` Go writes beside them) are removed; imports/receipts
+    /// stay untouched.
+    private func canonicalScratchDirectory(runtimeRoot: String) throws -> URL {
         let runtime = URL(fileURLWithPath: runtimeRoot)
         let directory = runtime.appendingPathComponent("canonical-stream")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -621,7 +665,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey]) {
             let name = file.lastPathComponent
             let token = String(name.prefix(32))
-            guard name.count == 40, name.hasSuffix(".records"),
+            guard (name.count == 40 && name.hasSuffix(".records")) || (name.count == 38 && name.hasSuffix(".snap1")),
                   token.allSatisfy({ "0123456789abcdef".contains($0) }) else { continue }
             let attributes = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
             guard attributes.isRegularFile == true, attributes.isSymbolicLink != true else {
@@ -632,7 +676,16 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         #if os(iOS)
         try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: directory.path)
         #endif
-        let name = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + ".records"
+        return directory
+    }
+
+    /// Links (or exports) the canonical stream for `version` into the owned
+    /// scratch directory.
+    private func canonicalStreamScratch(workspaceRoot: String, runtimeRoot: String, entrypoint: String,
+                                        version: String) async throws -> CanonicalStreamScratch {
+        let runtime = URL(fileURLWithPath: runtimeRoot)
+        let directory = try canonicalScratchDirectory(runtimeRoot: runtimeRoot)
+        let name = Self.scratchToken() + ".records"
         let output = directory.appendingPathComponent(name)
         // Same source bytes, same bundled runtime: reuse the earlier export
         // instead of re-running the Python loader over the whole ledger.
@@ -678,19 +731,14 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
            existing.workspace == workspaceRoot, existing.sourceVersion == version {
             return
         }
-        let scratch = try await canonicalStreamScratch(workspaceRoot: workspaceRoot, runtimeRoot: runtimeRoot,
-            entrypoint: entrypoint, version: version)
-        defer { try? FileManager.default.removeItem(at: scratch.url) }
         var command = LocalLedgerEngineRequest(workspaceRoot: workspaceRoot, runtimeRoot: runtimeRoot,
             entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
-        command.operation = "model-register"
         command.staging = true
-        command.sourceVersion = version
-        command.streamFile = scratch.name
-        struct Registration: Decodable { let handle: String }
         let registerInterval = LocalLedgerPerformance.begin(.goModelRegister)
         defer { LocalLedgerPerformance.end(registerInterval) }
-        let handle = try nativeResponse(command).decode(Registration.self).handle
+        let handle = try await registerCanonicalModel(command, version: version)
+        command.operation = "model-register"
+        command.sourceVersion = version
         let entry = LocalStageRetention.Entry(handle: handle, workspace: workspaceRoot, sourceVersion: version)
         for released in retainedStages.retain(entry, for: key) {
             releaseHandle(released, request: command)

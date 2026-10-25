@@ -40,8 +40,6 @@ actor EmbeddedBeancountValidator {
     /// same source reuses beancount's pickled result instead of repeating the
     /// parse and booking stages. On a 100k ledger that is ~27s down to ~2s.
     ///
-    /// Canonical workspaces live under a generation
-    /// (`<ledger>/generations/<id>/workspace`), which is published and must not
     /// The cache belongs at the ledger root, not under a generation:
     /// `LocalLedgerWorkspace` drops every generation's `runtime` directory when
     /// a transaction starts, which would throw the cache away after each write.
@@ -49,33 +47,42 @@ actor EmbeddedBeancountValidator {
     /// stores canonical-stream artifacts), and generations live beneath it as
     /// `generations/<id>/workspace`. The Python side refuses any directory this
     /// app did not create, so a layout it does not recognise runs uncached.
+    ///
+    /// Only committed generations are cached. A staging tree is validated once
+    /// and then moved into `generations`, so its pickle (8.6s and 28MB at 100k)
+    /// could never be read back under the entry path it was keyed by. Any other
+    /// workspace, staging included, clears the variables so it cannot inherit
+    /// the previous call's directory.
     static func prepareLoaderCache(workspace: URL) {
         #if canImport(Darwin)
-        var candidate = workspace.resolvingSymlinksInPath().standardizedFileURL
-        for _ in 0..<4 {
-            candidate = candidate.deletingLastPathComponent()
-            if candidate.path == "/" || candidate.path.isEmpty { return }
-            // The workspace lives at `<ledger>/generations/<generation>/workspace`.
-            // Neither the generation directory nor the `generations` container is
-            // a stable home: the workspace drops a generation's runtime on every
-            // transaction. Identify the ledger root structurally: it is the
-            // directory that owns `generations`, and a ledger's own identifier is
-            // also a UUID, so the name alone cannot distinguish the two.
-            let isGenerationLayout = candidate.lastPathComponent == "generations"
-                || candidate.deletingLastPathComponent().lastPathComponent == "generations"
-            if isGenerationLayout { continue }
-            let directory = candidate.appendingPathComponent("runtime", isDirectory: true)
-                .appendingPathComponent("loader-cache", isDirectory: true)
-            if (try? FileManager.default.createDirectory(at: directory,
-                withIntermediateDirectories: true)) != nil {
-                _ = setenv(loaderCacheEnvironment, directory.path, 1)
-                return
-            }
+        if let directory = loaderCacheDirectory(for: workspace),
+           (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil {
+            _ = setenv(loaderCacheEnvironment, directory.path, 1)
+            // The pickle holds objects of the bundled Python and Beancount, so
+            // it is keyed by this build as well as by the source bytes.
+            _ = setenv(loaderCacheRuntimeEnvironment, LocalCanonicalStreamCache.runtimeFingerprint, 1)
+        } else {
+            _ = unsetenv(loaderCacheEnvironment)
+            _ = unsetenv(loaderCacheRuntimeEnvironment)
         }
         #endif
     }
 
+    /// `<ledger>/runtime/loader-cache` for `<ledger>/generations/<id>/workspace`,
+    /// nil for every other layout.
+    static func loaderCacheDirectory(for workspace: URL) -> URL? {
+        let workspace = workspace.resolvingSymlinksInPath().standardizedFileURL
+        let generation = workspace.deletingLastPathComponent()
+        let container = generation.deletingLastPathComponent()
+        let ledger = container.deletingLastPathComponent()
+        guard workspace.lastPathComponent == "workspace", container.lastPathComponent == "generations",
+              !generation.lastPathComponent.isEmpty, ledger.path != "/", !ledger.path.isEmpty else { return nil }
+        return ledger.appendingPathComponent("runtime", isDirectory: true)
+            .appendingPathComponent("loader-cache", isDirectory: true)
+    }
+
     static let loaderCacheEnvironment = "LEDGER_LOAD_CACHE_DIR"
+    static let loaderCacheRuntimeEnvironment = "LEDGER_LOAD_CACHE_RUNTIME"
 
     func validate(workspace: URL, entryFile: String = "main.bean") throws {
         _ = try load(workspace: workspace, entryFile: entryFile, includeCanonical: false)

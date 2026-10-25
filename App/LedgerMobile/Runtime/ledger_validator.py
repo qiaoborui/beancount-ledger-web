@@ -105,6 +105,7 @@ def _may_declare_policy(filename):
 
 
 def _preflight(root, entry):
+    """Check every file the loader will read and return that file set."""
     pending, seen = [entry], set()
     while pending:
         filename = _confined(root, pending.pop())
@@ -138,6 +139,7 @@ def _preflight(root, entry):
             pattern = _confined(root, filename.parent / include)
             # Check each glob result before the loader can open it.
             pending.extend(_confined(root, path) for path in glob.glob(str(pattern)))
+    return seen
 
 
 def _amount(value):
@@ -566,18 +568,41 @@ def validate_only_json(workspace, entry_file="main.bean"):
 #    reuse a cache for different content. The source version goes in the file
 #    name instead: different content means a different cache file.
 LOAD_CACHE_ENVIRONMENT = "LEDGER_LOAD_CACHE_DIR"
+# A pickle holds beancount's own objects, so one written by another app build
+# (different Python, beancount, plugins or this module) must never be read back.
+# The caller passes its build fingerprint; without one the cache stays off.
+LOAD_CACHE_RUNTIME_ENVIRONMENT = "LEDGER_LOAD_CACHE_RUNTIME"
 
 
-def _load_cache_path(root, entry):
+@functools.lru_cache(maxsize=1)
+def _load_cache_runtime_identity():
+    import sys
+    import beancount
+    digest = hashlib.sha256()
+    digest.update(sys.version.encode("utf-8"))
+    digest.update(str(getattr(beancount, "__version__", "")).encode("utf-8"))
+    try:
+        digest.update(Path(__file__).read_bytes())
+    except (NameError, OSError):
+        return None
+    return digest.digest()
+
+
+def _load_cache_path(root, entry, files):
     """Return this call's cache file, or None when caching is off or unsafe.
 
     The caller opts in by setting LOAD_CACHE_ENVIRONMENT to a directory it owns
-    and wrote itself. Anything surprising about that directory (missing, a
-    symlink, not a directory) disables the cache rather than risking a read of a
-    file this process did not create.
+    and wrote itself, and LOAD_CACHE_RUNTIME_ENVIRONMENT to its build
+    fingerprint. Anything surprising about that directory (missing, a symlink,
+    not a directory) disables the cache rather than risking a read of a file
+    this process did not create.
     """
     raw = os.environ.get(LOAD_CACHE_ENVIRONMENT, "").strip()
-    if not raw:
+    runtime = os.environ.get(LOAD_CACHE_RUNTIME_ENVIRONMENT, "").strip()
+    if not raw or not runtime:
+        return None
+    identity = _load_cache_runtime_identity()
+    if identity is None:
         return None
     directory = Path(os.path.abspath(raw))
     try:
@@ -589,12 +614,15 @@ def _load_cache_path(root, entry):
         return None
     if info.st_uid != os.getuid():
         return None
-    # Identity of the content this load covers: the entry path plus every
-    # source file's path and digest, so a moved or edited ledger cannot alias an
-    # older cache. _preflight already bounded the file set.
+    # Identity of the content this load covers: the runtime that produced it,
+    # the entry path, and every source file's path and digest, so a moved or
+    # edited ledger or a different build cannot alias an older cache. `files` is
+    # _preflight's result, i.e. exactly the include set the loader resolves.
     digest = hashlib.sha256()
+    digest.update(runtime.encode("utf-8") + b"\0")
+    digest.update(identity)
     digest.update(str(entry.resolve()).encode("utf-8"))
-    for filename in sorted(_source_files(root, entry)):
+    for filename in sorted(files):
         relative = filename.relative_to(root).as_posix()
         digest.update(relative.encode("utf-8"))
         with open(filename, "rb") as handle:
@@ -605,32 +633,8 @@ def _load_cache_path(root, entry):
     return directory / (digest.hexdigest() + ".picklecache")
 
 
-def _source_files(root, entry):
-    """Every file the loader will read, mirroring _preflight's traversal."""
-    pending, seen = [entry], []
-    visited = set()
-    while pending:
-        filename = _confined(root, pending.pop())
-        if filename in visited:
-            continue
-        visited.add(filename)
-        seen.append(filename)
-        try:
-            with open(filename, "r", encoding="utf-8", errors="strict") as handle:
-                for line in handle:
-                    stripped = line.strip()
-                    if stripped.startswith("include "):
-                        pattern = stripped[len("include "):].strip().strip('"')
-                        if pattern:
-                            for match in glob.glob(str(root / pattern)):
-                                pending.append(Path(match))
-        except (OSError, UnicodeDecodeError):
-            continue
-    return seen
-
-
-def _load_with_optional_cache(root, entry, log_timings):
-    cache_path = _load_cache_path(root, entry)
+def _load_with_optional_cache(root, entry, files, log_timings):
+    cache_path = _load_cache_path(root, entry, files)
     if cache_path is None:
         # No cache directory offered: keep the original uncached pipeline.
         return loader._uncached_load_file(str(entry), log_timings, validation.HARDCORE_VALIDATIONS, None)
@@ -660,14 +664,14 @@ def _validate_json(workspace, entry_file, *, export_canonical, stream_output=Non
         if not root.is_dir() or Path(entry_file).is_absolute():
             raise ValueError("账本入口路径无效")
         entry = _confined(root, root / entry_file)
-        _preflight(root, entry)
+        files = _preflight(root, entry)
         # Caching stays off unless the caller hands us a directory it owns; in
         # that case the same loader pipeline runs but reuses this source
         # version's unpickled result. bean-check semantics are unchanged either
         # way: posting/booking/validation all run before anything is cached.
         timing_lines = [] if _load_timings_enabled() else None
         entries, errors, options = _load_with_optional_cache(
-            root, entry, timing_lines.append if timing_lines is not None else None
+            root, entry, files, timing_lines.append if timing_lines is not None else None
         )
         result = []
         for error in errors:
