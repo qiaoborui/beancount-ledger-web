@@ -262,6 +262,10 @@ func RegisterLocalModel(input LocalRequest, streamName, expectedVersion string) 
 	// parsing. Best effort: the model above is already complete, so a failure
 	// here must not fail the registration.
 	_, _ = writeCanonicalSnapshot(cfg, model, streamName, expectedVersion, snapshotExporterID(), "")
+	// Bound the caches this registration just wrote and looked at. Every source
+	// version produces a new entry, so without this a frequently edited ledger
+	// keeps one snapshot and one pickle per version forever.
+	trimRuntimeCaches(cfg.RuntimeDir)
 	localModels.Lock()
 	defer localModels.Unlock()
 	if input.Staging {
