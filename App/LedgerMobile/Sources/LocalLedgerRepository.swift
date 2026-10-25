@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct LocalLedgerFileDraft: Sendable {
@@ -166,7 +167,8 @@ actor LocalLedgerRepository: LedgerRepository {
         // Widget one-row pages must not evict the app's validated startup page.
         let suffix = limit == LocalTransactionWindow.listPageRows ? "" : "-\(limit)"
         return BootstrapPresentationCache(ledgerID: descriptor.id, entrypoint: descriptor.entrypoint,
-            url: workspace.rootDirectory.appendingPathComponent(".bootstrap-page-presentation\(suffix).json"))
+            directory: workspace.rootDirectory.appendingPathComponent(".bootstrap-page-presentation\(suffix)", isDirectory: true),
+            legacyURL: workspace.rootDirectory.appendingPathComponent(".bootstrap-page-presentation\(suffix).json"))
     }
 
     struct CachedStartupPresentation: Sendable {
@@ -231,7 +233,8 @@ actor LocalLedgerRepository: LedgerRepository {
         query["today"] = today
         let cacheQuery = query
         let cache = BootstrapPresentationCache(ledgerID: descriptor.id, entrypoint: descriptor.entrypoint,
-            url: workspace.rootDirectory.appendingPathComponent(".bootstrap-presentation.json"))
+            directory: workspace.rootDirectory.appendingPathComponent(".bootstrap-presentation", isDirectory: true),
+            legacyURL: workspace.rootDirectory.appendingPathComponent(".bootstrap-presentation.json"))
         if let restored = try await workspace.withCurrentSnapshot({ revision, _ in
             cache.load(revisionID: revision.id, query: cacheQuery)
         }) {
@@ -624,7 +627,8 @@ actor LocalLedgerRepository: LedgerRepository {
 
     private var overviewCache: BootstrapPresentationCache {
         BootstrapPresentationCache(ledgerID: descriptor.id, entrypoint: descriptor.entrypoint,
-            url: workspace.rootDirectory.appendingPathComponent(".overview-categories-presentation.json"))
+            directory: workspace.rootDirectory.appendingPathComponent(".overview-categories-presentation", isDirectory: true),
+            legacyURL: workspace.rootDirectory.appendingPathComponent(".overview-categories-presentation.json"))
     }
 
     private static func validateOverviewCategories(_ result: LedgerOverviewCategories,
@@ -1251,8 +1255,13 @@ actor LocalLedgerRepository: LedgerRepository {
 private struct BootstrapPresentationCache: Sendable {
     let ledgerID: UUID
     let entrypoint: String
-    let url: URL
+    /// Directory holding one file per query. A single slot would make every
+    /// range switch a guaranteed miss, and prefetching a neighbour would evict
+    /// the page that is currently on screen.
+    let directory: URL
+    let legacyURL: URL?
     private static let maximumBytes = 16 * 1_024 * 1_024
+    private static let maximumSlots = 3
     // Bump this when the bootstrap read model changes incompatibly. A signing
     // build number alone does not change the cached financial projection.
     private static let formatVersion = 1
@@ -1278,6 +1287,18 @@ private struct BootstrapPresentationCache: Sendable {
         let payload: Data
     }
 
+    /// File for one exact query. The digest keeps the name stable across runs
+    /// while separating the current range from a prefetched neighbour.
+    private func fileURL(for query: [String: String]) -> URL {
+        let canonical = query.sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: "&")
+        var hasher = SHA256()
+        hasher.update(data: Data(canonical.utf8))
+        let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        return directory.appendingPathComponent("page-\(digest.prefix(32)).json")
+    }
+
     struct Restored: Sendable {
         let revisionID: UUID
         let payload: LedgerBootstrap
@@ -1286,9 +1307,7 @@ private struct BootstrapPresentationCache: Sendable {
     func load(revisionID: UUID, query: [String: String]) -> Restored? {
         // The workspace has checked its managed root and current generation.
         // Cache failures are misses, so damaged or unsupported data is rebuilt.
-        guard let stat = try? PosixStat.at(url), stat.isRegularFile,
-              stat.size <= Self.maximumBytes,
-              let data = try? Data(contentsOf: url),
+        guard let data = cachedRecordData(for: query),
               let record = try? JSONDecoder().decode(Record.self, from: data),
               record.formatVersion == Self.formatVersion,
               Self.compatibleApplicationVersion(record.applicationVersion),
@@ -1300,9 +1319,7 @@ private struct BootstrapPresentationCache: Sendable {
     }
 
     func loadPage(revisionID: UUID, query: [String: String]) -> LocalBootstrapPage? {
-        guard let stat = try? PosixStat.at(url), stat.isRegularFile,
-              stat.size <= Self.maximumBytes,
-              let data = try? Data(contentsOf: url),
+        guard let data = cachedRecordData(for: query),
               let record = try? JSONDecoder().decode(Record.self, from: data),
               record.formatVersion == Self.formatVersion,
               Self.compatibleApplicationVersion(record.applicationVersion),
@@ -1315,9 +1332,7 @@ private struct BootstrapPresentationCache: Sendable {
     }
 
     func loadOverview(revisionID: UUID, query: [String: String]) -> LedgerOverviewCategories? {
-        guard let stat = try? PosixStat.at(url), stat.isRegularFile,
-              stat.size <= Self.maximumBytes,
-              let data = try? Data(contentsOf: url),
+        guard let data = cachedRecordData(for: query),
               let record = try? JSONDecoder().decode(Record.self, from: data),
               record.formatVersion == Self.formatVersion,
               Self.compatibleApplicationVersion(record.applicationVersion),
@@ -1331,23 +1346,56 @@ private struct BootstrapPresentationCache: Sendable {
 
     func save(_ payload: Data, revisionID: UUID, query: [String: String]) {
         guard payload.count <= Self.maximumBytes else { return }
-        if let stat = try? PosixStat.at(url), !stat.isRegularFile { return }
+        if let stat = try? PosixStat.at(directory), !stat.isDirectory { return }
         let record = Record(formatVersion: Self.formatVersion, applicationVersion: Self.applicationVersion,
             ledgerID: ledgerID, revisionID: revisionID, entrypoint: entrypoint, query: query, payload: payload)
         guard let data = try? JSONEncoder().encode(record), data.count <= Self.maximumBytes else { return }
+        let target = fileURL(for: query)
         do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             #if os(iOS)
-            try data.write(to: url, options: .ledgerProtected)
+            try data.write(to: target, options: .ledgerProtected)
             #else
-            try data.write(to: url, options: .atomic)
+            try data.write(to: target, options: .atomic)
             #endif
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            var cacheURL = url
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+            var cacheURL = target
             var values = URLResourceValues()
             values.isExcludedFromBackup = true
             try cacheURL.setResourceValues(values)
+            trim(keeping: target)
         } catch {
             // This disposable read model never determines financial write success.
+        }
+    }
+
+    /// Reads the record for this query, falling back to the single-file layout an
+    /// older build wrote so an upgrade keeps its startup page.
+    private func cachedRecordData(for query: [String: String]) -> Data? {
+        if let data = Self.readBounded(fileURL(for: query)) { return data }
+        guard let legacyURL else { return nil }
+        return Self.readBounded(legacyURL)
+    }
+
+    private static func readBounded(_ url: URL) -> Data? {
+        guard let stat = try? PosixStat.at(url), stat.isRegularFile,
+              stat.size <= maximumBytes else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    /// Keeps the current page plus a small window of prefetched neighbours.
+    private func trim(keeping current: URL) {
+        guard let items = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        let pages = items.filter { $0.lastPathComponent.hasPrefix("page-") }
+        guard pages.count > Self.maximumSlots else { return }
+        let ordered = pages.sorted { lhs, rhs in
+            let left = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            let right = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            return left > right
+        }
+        for page in ordered.dropFirst(Self.maximumSlots) where page != current {
+            try? FileManager.default.removeItem(at: page)
         }
     }
 }

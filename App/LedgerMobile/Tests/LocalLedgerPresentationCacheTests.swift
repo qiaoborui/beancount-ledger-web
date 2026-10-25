@@ -166,11 +166,21 @@ final class LocalLedgerPresentationCacheTests: XCTestCase {
         XCTAssertEqual(changedCalls, 5)
     }
 
+
+    /// The cache keeps one file per query, so tests resolve the entry instead of
+    /// assuming the old single-file name.
+    private func singleCacheEntry(in workspace: LocalLedgerWorkspace, named directoryName: String) throws -> URL {
+        let directory = workspace.rootDirectory.appendingPathComponent(directoryName, isDirectory: true)
+        let items = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("page-") }
+        return try XCTUnwrap(items.first, "expected a cached page in \(directoryName)")
+    }
+
     func testCorruptMismatchedAndUnsupportedRecordsFallBackToTheLedger() async throws {
         let (descriptor, workspace, engine) = try await fixture()
         let repository = LocalLedgerRepository(descriptor: descriptor, workspace: workspace, engine: engine, validator: { _, _ in })
-        let path = workspace.rootDirectory.appendingPathComponent(".bootstrap-presentation.json")
         _ = try await load(repository)
+        let path = try singleCacheEntry(in: workspace, named: ".bootstrap-presentation")
         let valid = try Data(contentsOf: path)
         try Data("truncated".utf8).write(to: path)
         _ = try await load(repository)
@@ -189,16 +199,16 @@ final class LocalLedgerPresentationCacheTests: XCTestCase {
     func testLockedPayloadIsNeverPersistedAndCacheStaysOutsideExport() async throws {
         let (descriptor, workspace, engine) = try await fixture()
         let repository = LocalLedgerRepository(descriptor: descriptor, workspace: workspace, engine: engine, validator: { _, _ in })
-        let path = workspace.rootDirectory.appendingPathComponent(".bootstrap-presentation.json")
+        let directory = workspace.rootDirectory.appendingPathComponent(".bootstrap-presentation", isDirectory: true)
         await engine.configure(unlocked: false)
         _ = try await load(repository)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: path.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
         await engine.configure()
         _ = try await load(repository)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: path.path))
+        let path = try singleCacheEntry(in: workspace, named: ".bootstrap-presentation")
         let exported = try await repository.exportLedger()
         defer { try? FileManager.default.removeItem(at: exported) }
-        XCTAssertFalse(FileManager.default.fileExists(atPath: exported.appendingPathComponent(path.lastPathComponent).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: exported.appendingPathComponent(".bootstrap-presentation").path))
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: exported.path), ["main.bean"])
     }
 

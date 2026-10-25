@@ -3095,11 +3095,35 @@ final class LedgerSession: ObservableObject {
             guard generation == requestGeneration else { return }
             isRangeLoading = false
             startTransactionReconciliationIfNeeded()
+            prefetchNeighbouringRanges(around: range, generation: generation, contextURL: contextURL)
         } catch {
             guard generation == requestGeneration else { return }
             isRangeLoading = false
             errorMessage = error.localizedDescription
             startTransactionReconciliationIfNeeded()
+        }
+    }
+
+    /// Warms the page cache for the ranges a user is most likely to move to next,
+    /// so the following switch renders from disk instead of waiting for a round
+    /// trip. Purely speculative: failures are ignored and it never publishes.
+    private func prefetchNeighbouringRanges(around range: LedgerDateRange, generation: Int, contextURL: URL) {
+        guard let local = localRepository, isLocal else { return }
+        let currency = storedValuationCurrency(for: contextURL)
+        let today = LedgerDateRange.today(now: ledgerNow())
+        Task(priority: .utility) { [weak self] in
+            guard let revision = try? await local.workspace.currentRevision() else { return }
+            for delta in [1, -1] {
+                guard let self else { return }
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    guard generation == self.requestGeneration, self.phase == .ready else { return }
+                }
+                let neighbour = range.shifted(by: delta)
+                _ = try? await local.bootstrapPage(start: neighbour.start,
+                    end: neighbour.queryEndExclusive, today: today,
+                    valuationCurrency: currency, expectedRevisionID: revision.id)
+            }
         }
     }
 

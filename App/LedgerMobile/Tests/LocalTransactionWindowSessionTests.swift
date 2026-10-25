@@ -251,7 +251,13 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
     func testBootstrapPageCacheSurvivesCompatibleBuildNumber() async throws {
         let (session, engine, repository) = try await fixture()
         defer { session.chooseLedger() }
-        let cache = repository.workspace.rootDirectory.appendingPathComponent(".bootstrap-page-presentation.json")
+        // One file per query now, so resolve the entry the session just wrote.
+        let cacheDirectory = repository.workspace.rootDirectory
+            .appendingPathComponent(".bootstrap-page-presentation", isDirectory: true)
+        let cache = try XCTUnwrap(
+            try FileManager.default.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil)
+                .first { $0.lastPathComponent.hasPrefix("page-") },
+            "expected a cached bootstrap page")
         var record = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: cache)) as? [String: Any])
         let version = try XCTUnwrap(record["applicationVersion"] as? String)
         let release = try XCTUnwrap(version.split(separator: "/").first)
