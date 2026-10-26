@@ -1013,7 +1013,8 @@ include "tx/*.bean"
             decode.assert_called_once()
             stored = self.stored()
             self.assertEqual(stored["closing"], datetime.date(2026, 9, 1))
-            self.assertEqual(stored["order"], ["tx/2025.bean", "tx/2026.bean"])
+            # Parse order follows the include glob, which the filesystem orders.
+            self.assertEqual(sorted(stored["order"]), ["tx/2025.bean", "tx/2026.bean"])
             with self.count_reuse() as decode:
                 self.assert_same_as_beancount()
             decode.assert_called_once()
