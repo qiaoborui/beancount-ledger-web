@@ -176,3 +176,27 @@
 - **打包**：新增 Go 操作（`model-adopt`/`model-promote`/`model-release-idle`/`memory-limit`）需要重跑 `scripts/build-ledgercore-xcframework.sh` 生成新的 `LedgerCore.xcframework`（`scripts/build-ios-ipa.sh` 已包含该步骤）；CI 的 `swift test`/iOS SDK 交叉编译不编译 `canImport(LedgerCore)` 分支。
 - **真机数据**：10k/50k/100k/200k Release 包的 signpost 与 phys_footprint 峰值尚未采集；GOMEMLIMIT 边界与 estimate 系数待真机校准。
 - 待决定第 2 项（第一阶段开工）已执行；第 1、3、4 项（目标体量、写队列交互、检查点语义）仍未决。
+
+## 第四阶段：关账期 booking 检查点（2026-10-26）
+
+范围：只把 **booking** 换成检查点；documents、12 个白名单插件、pad、balance 和全部校验仍对全量条目跑。第三阶段（写队列）未动。
+
+- **原理**：beancount booking 是按排序后条目的左折叠，状态只有各账户的持仓批次，`booking_full.book` 本身接受 `initial_balances`。检查点保存关账日之前的 booking 结果和关账日时刻的持仓，之后只 booking 尾部。前缀输入相同、持仓相同 → 尾部逐条相同，这一点不依赖插件局部性证明。
+- **关账日**：`min(今天, 最后一条目日期)` 往前两个整月的月初（`CLOSED_MONTHS = 2`）。日期前移时从旧检查点续算一个月再写新的。
+- **键 / 失效**：关账日前的 Transaction（按文件，含 meta 与行号，忽略目录和 booking 写回的 `__automatic__`）；贡献这些交易的文件顺序；booking 读的 5 个选项和所有账户的 booking 方法；Python + beancount 版本 + 格式版本。**不含 App 构建号**，换包后仍命中。任何不符、前缀有 booking 错误、整次加载有错误，都回退全量 booking；非交易指令（balance/pad/price/document）不入检查点，始终取自新解析。
+- **存储**：`<ledger>/runtime/booking-checkpoint/<entry 哈希>.bookcp`，staging 与 generation 共用；交易存为“相对解析结果的改动”（保留的 posting 下标，或补全的 units/cost/price），100k 约 6MB。直接 pickle 已 booking 交易需要约 6s 反序列化，与重新 booking 相当，所以不用。
+- **保护**：beancount 不是 3.2.3 时整套关闭；测试锁定 booking 读到的选项集合；随机账本 × 随机改动的对照测试比较 entries、errors、options 与 beancount 自己的 loader 完全一致；新 CI job `iOS Beancount runtime` 跑 Python 测试。
+
+本机 100k（`scripts/large_ledger_bench.py checkpoint`，4 核 x86 容器，只看比例；每次都是新 stage 目录）：
+
+| 场景 | 导出总耗时 | booking |
+| --- | --- | --- |
+| 在开放月份追加一笔，无检查点 | 35.7–36.2s | 24.0–24.2s |
+| 首次加载，建检查点 | 38.4s | 26.2s |
+| 在开放月份追加一笔，命中 | **14.6–15.8s** | **2.7–2.9s** |
+| 改关账月份的一笔（回退并重建） | 42.6s | 29.3s |
+| 重建后再追加 | 16.0s | 2.8s |
+
+追加场景的规范流 SHA-256 与无检查点时一致。剩余开销是 parse（约 3s）、插件 + 校验（约 4s）和流导出；插件/校验只跑尾部属于语义变化，未做。
+
+未覆盖：Swift 部分在 `canImport(Darwin)` 下，需真机/模拟器确认环境变量生效；真机耗时尚未采集。
