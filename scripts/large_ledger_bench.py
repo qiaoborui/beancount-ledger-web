@@ -17,6 +17,9 @@ ledger data or machine-specific paths.
     # Generate all tiers and measure the real pipeline segments.
     python3 scripts/large_ledger_bench.py bench --tiers 10k,50k,100k
 
+    # Measure the closed-period booking checkpoint on a generated tier.
+    python3 scripts/large_ledger_bench.py checkpoint --source /tmp/ledger-100k
+
 `generate` also writes `manifest.json` next to the ledger (transaction count,
 directive counts by kind, source files, source bytes, expected canonical entry
 count and stream bytes, and the sha256 of the generated source tree). The
@@ -717,6 +720,115 @@ def bench(args):
     return 0
 
 
+# --- Closed-period booking checkpoint -----------------------------------------
+#
+# A write previews a fresh copy of the ledger (a stage), so every scenario
+# exports a new directory. The ledger ends in December of its last year; the
+# checkpoint closes two whole months before that, so the appended transaction
+# lands in an open month and the edited one in a closed month.
+
+_APPENDED = '{day} * "基准" "检查点追加"\n  Expenses:Home:Utilities  12.00 CNY\n  Assets:Bank:Checking\n'
+
+
+def _checkpoint_export(ledger_validator, workspace, runtime_dir, checkpoint_dir, label):
+    reused = []
+    original = ledger_validator._checkpoint_prefix
+
+    def spy(*arguments):
+        end = original(*arguments)
+        reused.append(end is not None)
+        return end
+
+    environment = {ledger_validator.TIMINGS_ENVIRONMENT: "1"}
+    if checkpoint_dir is not None:
+        environment[ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT] = str(checkpoint_dir)
+    saved = {name: os.environ.get(name) for name in
+             (ledger_validator.TIMINGS_ENVIRONMENT, ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT)}
+    os.environ.pop(ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT, None)
+    os.environ.update(environment)
+    ledger_validator._checkpoint_prefix = spy
+    try:
+        run = _load_stages(ledger_validator, workspace, runtime_dir, label, keep_stream=False)
+    finally:
+        ledger_validator._checkpoint_prefix = original
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    run["checkpointReused"] = any(reused)
+    return run
+
+
+def checkpoint(args):
+    ledger_validator = _require_imports()
+    source = args.source.resolve()
+    workdir = args.workdir or Path(tempfile.mkdtemp(prefix="blw-checkpoint-"))
+    workdir.mkdir(parents=True, exist_ok=True)
+    checkpoint_dir = workdir / "runtime" / "booking-checkpoint"
+    shutil.rmtree(checkpoint_dir, ignore_errors=True)
+    checkpoint_dir.mkdir(parents=True)
+    runtime_dir = workdir / "runtime"
+    month_files = sorted((source / "transactions").glob("*.bean"))
+    if not month_files:
+        raise SystemExit("expected a generated tier with transactions/<month>.bean files")
+    last, first = month_files[-1].name, month_files[0].name
+
+    generation = [0]
+
+    def stage(edit=None):
+        generation[0] += 1
+        workspace = workdir / "staging" / str(generation[0]) / "workspace"
+        shutil.rmtree(workspace.parent, ignore_errors=True)
+        shutil.copytree(source, workspace, ignore=shutil.ignore_patterns(MANIFEST_NAME))
+        if edit is not None:
+            edit(workspace)
+        return workspace
+
+    def append(workspace):
+        path = workspace / "transactions" / last
+        day = last[:-len(".bean")] + "-28"
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(_APPENDED.format(day=day))
+
+    def edit_closed(workspace):
+        path = workspace / "transactions" / first
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace('source: "synthetic"', 'source: "edited"', 1), encoding="utf-8")
+
+    scenarios = []
+
+    def measure(name, workspace, checkpoint_dir_or_none):
+        run = _checkpoint_export(ledger_validator, workspace, runtime_dir, checkpoint_dir_or_none, name)
+        scenarios.append({"scenario": name, **run})
+        print("   {:<34} export {:>9}  booking {:>9}  reused {}".format(
+            name, _format_ms(run["exportMs"]), _format_ms(run["stages"]["booking"]),
+            run["checkpointReused"]))
+        return run
+
+    print("workdir: {}".format(workdir))
+    print("-- checkpoint scenarios ({} repeat) --".format(max(args.repeat, 1)))
+    _checkpoint_export(ledger_validator, stage(), runtime_dir, None, "warm-up")
+    for attempt in range(max(args.repeat, 1)):
+        baseline = measure("append, no checkpoint", stage(append), None)
+    measure("first load, builds checkpoint", stage(), checkpoint_dir)
+    for attempt in range(max(args.repeat, 1)):
+        appended = measure("append in open month, new stage", stage(append), checkpoint_dir)
+    if appended["streamSha256"] != baseline["streamSha256"]:
+        raise SystemExit("checkpointed export differs from the full load")
+    measure("edit closed month (rebuild)", stage(edit_closed), checkpoint_dir)
+    measure("append after rebuild", stage(lambda workspace: (edit_closed(workspace), append(workspace))),
+            checkpoint_dir)
+    files = list(checkpoint_dir.iterdir())
+    result = {"source": str(source), "checkpointBytes": sum(path.stat().st_size for path in files),
+              "scenarios": scenarios}
+    print("checkpoint file: {:.1f} MB; append stream identical to the full load".format(
+        result["checkpointBytes"] / 1e6))
+    _write_json(workdir / "checkpoint.json", result)
+    print("wrote {}".format(workdir / "checkpoint.json"))
+    return 0
+
+
 # --- Device tier workflow -----------------------------------------------------
 
 
@@ -940,6 +1052,14 @@ def main():
     validate_parser.add_argument("--entrypoint", default="main.bean",
                                  help="entry file inside the directory (default: main.bean)")
 
+    checkpoint_parser = subcommands.add_parser(
+        "checkpoint", help="measure the closed-period booking checkpoint on a generated tier")
+    checkpoint_parser.add_argument("--source", type=Path, required=True,
+                                   help="a ledger written by `generate`")
+    checkpoint_parser.add_argument("--workdir", type=Path, help="artifact directory (default: temp dir)")
+    checkpoint_parser.add_argument("--repeat", type=int, default=1,
+                                   help="runs of the with/without-checkpoint append scenarios")
+
     record_parser = subcommands.add_parser(
         "record", help="bundle app recordings that match this tier's manifest")
     record_parser.add_argument("--tier", choices=sorted(TIERS), required=True)
@@ -981,6 +1101,8 @@ def main():
         return assemble(args)
     if args.command == "validate":
         return validate(args)
+    if args.command == "checkpoint":
+        return checkpoint(args)
     return record(args)
 
 

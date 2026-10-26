@@ -225,10 +225,29 @@ jobs:
           swift build --triple arm64-apple-ios17.0 \
             --sdk "$(xcrun --sdk iphoneos --show-sdk-path)"
 
+  ios-runtime:
+    name: iOS Beancount runtime
+    needs: plan
+    if: ${{ needs.plan.outputs.ios == 'true' }}
+    # The app's Python validator (preflight, canonical export, loader cache and
+    # booking checkpoint) only needs CPython and the pinned Beancount, so it
+    # runs on a hosted runner rather than the self-hosted Mac.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install ledger validator
+        run: python -m pip install beancount==3.2.3
+      - name: Test
+        working-directory: App/LedgerMobile/Runtime
+        run: python -m unittest -v test_ledger_validator
+
   gate:
     name: Gate
     if: ${{ always() }}
-    needs: [plan, go, agent, web, ios]
+    needs: [plan, go, agent, web, ios, ios-runtime]
     runs-on: ubuntu-latest
     env:
       PLAN_RESULT: ${{ needs.plan.result }}
@@ -240,6 +259,7 @@ jobs:
       WEB_RESULT: ${{ needs.web.result }}
       IOS_REQUIRED: ${{ needs.plan.outputs.ios }}
       IOS_RESULT: ${{ needs.ios.result }}
+      IOS_RUNTIME_RESULT: ${{ needs.ios-runtime.result }}
     steps:
       - name: Require every planned check to pass
         shell: bash
@@ -268,3 +288,4 @@ jobs:
           check_result Agent "$AGENT_REQUIRED" "$AGENT_RESULT"
           check_result Frontend "$WEB_REQUIRED" "$WEB_RESULT"
           check_result iOS "$IOS_REQUIRED" "$IOS_RESULT"
+          check_result "iOS runtime" "$IOS_REQUIRED" "$IOS_RUNTIME_RESULT"

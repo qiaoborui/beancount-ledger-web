@@ -13,11 +13,12 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+import beancount
 from beancount import loader
 from beancount.core import data
 from beancount.core.amount import Amount
 from beancount.ops import validation
-from beancount.parser import parser
+from beancount.parser import booking, booking_full, parser
 
 
 # Optional per-stage loader timings for the opt-in scale benchmark and the app's
@@ -604,15 +605,8 @@ def _load_cache_path(root, entry, files):
     identity = _load_cache_runtime_identity()
     if identity is None:
         return None
-    directory = Path(os.path.abspath(raw))
-    try:
-        info = os.lstat(directory)
-    except OSError:
-        return None
-    import stat as _stat
-    if not _stat.S_ISDIR(info.st_mode) or _stat.S_ISLNK(info.st_mode):
-        return None
-    if info.st_uid != os.getuid():
+    directory = _owned_directory(raw)
+    if directory is None:
         return None
     # Identity of the content this load covers: the runtime that produced it,
     # the entry path, and every source file's path and digest, so a moved or
@@ -634,28 +628,431 @@ def _load_cache_path(root, entry, files):
 
 
 def _load_with_optional_cache(root, entry, files, log_timings):
+    load = functools.partial(_checkpointed_load, root, _booking_checkpoint_path(root, entry))
     cache_path = _load_cache_path(root, entry, files)
     if cache_path is None:
         # No cache directory offered: keep the original uncached pipeline.
-        return loader._uncached_load_file(str(entry), log_timings, validation.HARDCORE_VALIDATIONS, None)
-    # loader binds its cache getter when the module is imported, so the variable
-    # has to be set before initialize() rebinds it; changing the environment
-    # afterwards has no effect.
-    previous = os.environ.get("BEANCOUNT_LOAD_CACHE_FILENAME")
-    os.environ["BEANCOUNT_LOAD_CACHE_FILENAME"] = str(cache_path)
+        return load(str(entry), log_timings, validation.HARDCORE_VALIDATIONS, None)
+    # Wrap the same pipeline in beancount's own pickle memoizer. Only our own
+    # file name can be in this directory, and it is derived from the content
+    # digest above, so it reads nothing we did not write. The threshold is read
+    # per call so tests can force a write.
+    cached = loader.pickle_cache_function(
+        lambda _filename: str(cache_path), loader.PICKLE_CACHE_THRESHOLD, load)
+    return cached(str(entry), log_timings, validation.HARDCORE_VALIDATIONS, None)
+
+
+# Closed-period booking checkpoint.
+#
+# beancount's booking is a left fold over the date-sorted entries whose only
+# state is each account's inventory (lots with cost, date and label); its own
+# API accepts that state as `initial_balances`. So the booked transactions
+# before a closing date, together with the inventories at that date, are a
+# complete substitute for re-booking that prefix, as long as the prefix the
+# fold would see is the same. Everything after booking (documents, the
+# allowlisted plugins, pad, balance, and every validation) still runs over the
+# whole ledger, so diagnostics and the exported model are those of a full load.
+#
+# What "the same prefix" covers, and why each part is in the key:
+#  - the Transactions dated before the closing date, file by file, including
+#    metadata and line numbers (they end up in the booked output); other
+#    directives are taken from the fresh parse and never stored;
+#  - the order of the files that contribute them (stable-sort tie-break);
+#  - the five options booking reads and every account's booking method;
+#  - the Python and beancount builds that produced the pickled objects.
+# The app build is deliberately not in the key: booking is beancount's code, so
+# a checkpoint survives an app update that keeps the same Python and beancount.
+# Bump CHECKPOINT_FORMAT whenever the digest or the stored layout changes.
+BOOKING_CHECKPOINT_ENVIRONMENT = "LEDGER_BOOKING_CHECKPOINT_DIR"
+CHECKPOINT_FORMAT = 1
+# The loader stages are re-composed below from beancount internals; any other
+# version runs the stock loader until the composition is re-verified.
+_CHECKPOINT_BEANCOUNT_VERSION = "3.2.3"
+# Every options_map key read by booking.book / booking_full / interpolate.
+_BOOKING_OPTIONS = ("booking_method", "use_precise_interpolation", "infer_tolerance_from_cost",
+                    "tolerance_multiplier", "inferred_tolerance_default")
+# The closing date is the first day of the month this many whole months before
+# the current one, so the current and the previous CLOSED_MONTHS months stay
+# open for edits without invalidating the checkpoint.
+CLOSED_MONTHS = 2
+
+
+def _today():
+    return date.today()
+
+
+@functools.lru_cache(maxsize=1)
+def _checkpoint_runtime_identity():
+    import sys
+    return "\0".join((str(CHECKPOINT_FORMAT), sys.version, str(getattr(beancount, "__version__", ""))))
+
+
+def _owned_directory(raw):
+    """Return `raw` as a directory this process owns, or None."""
+    if not raw:
+        return None
+    directory = Path(os.path.abspath(raw))
     try:
-        loader.initialize(True, str(cache_path))
-        # Only our own file name can be in this directory, and it is derived from
-        # the content digest above, so load_file reads nothing we did not write.
-        return loader.load_file(str(entry), log_timings, validation.HARDCORE_VALIDATIONS, None)
-    finally:
-        if previous is None:
-            os.environ.pop("BEANCOUNT_LOAD_CACHE_FILENAME", None)
+        info = os.lstat(directory)
+    except OSError:
+        return None
+    import stat as _stat
+    if not _stat.S_ISDIR(info.st_mode) or _stat.S_ISLNK(info.st_mode) or info.st_uid != os.getuid():
+        return None
+    return directory
+
+
+def _booking_checkpoint_path(root, entry):
+    if getattr(beancount, "__version__", "") != _CHECKPOINT_BEANCOUNT_VERSION:
+        return None
+    directory = _owned_directory(os.environ.get(BOOKING_CHECKPOINT_ENVIRONMENT, "").strip())
+    if directory is None:
+        return None
+    # One checkpoint per entry file; generations and staging copies of the same
+    # ledger share it, which is the point.
+    name = hashlib.sha256(entry.relative_to(root).as_posix().encode("utf-8")).hexdigest()[:32]
+    return directory / (name + ".bookcp")
+
+
+def _closing_date(entries, today):
+    # Anchor on the last entry when the ledger stops before today, so a ledger
+    # that is not kept up to date still has open months at its end.
+    anchor = min(today, entries[-1].date) if entries else today
+    month = anchor.year * 12 + anchor.month - 1 - CLOSED_MONTHS
+    return date(month // 12, month % 12 + 1, 1)
+
+
+def _booking_key(options, methods):
+    values = [(name, options[name]) for name in _BOOKING_OPTIONS]
+    values.append(sorted((account, method) for account, method in methods.items()))
+    return hashlib.sha256(repr(values).encode("utf-8")).hexdigest()
+
+
+# Booking marks interpolated postings by adding this key to the parsed
+# posting's own metadata dict, in place. The parser cannot produce it (metadata
+# keys start with a lowercase letter), so leaving it out keeps a digest of the
+# parsed input the same whether or not that input has been booked already.
+_AUTOMATIC_META = "__automatic__"
+
+
+def _source_meta(meta):
+    return tuple((key, value) for key, value in (meta or {}).items()
+                 if key != "filename" and key != _AUTOMATIC_META)
+
+
+def _transaction_digest(transactions):
+    """Digest parsed (unbooked) transactions independent of the ledger directory."""
+    digest = hashlib.sha256()
+    for entry in transactions:
+        item = (entry.date, entry.flag, entry.payee, entry.narration,
+                tuple(sorted(entry.tags or ())), tuple(sorted(entry.links or ())),
+                _source_meta(entry.meta),
+                tuple((posting.account, posting.units, posting.cost, posting.price, posting.flag,
+                       _source_meta(posting.meta)) for posting in entry.postings))
+        digest.update(repr(item).encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _prefix_transactions_by_file(entries, end, file_order):
+    """Group the transactions in entries[:end] by source file, in parse order."""
+    groups = {}
+    for entry in entries[:end]:
+        if isinstance(entry, data.Transaction):
+            groups.setdefault(entry.meta.get("filename"), []).append(entry)
+    if len(groups) != sum(name in groups for name in file_order):
+        raise ValueError("transaction outside the parsed file set")
+    return [(name, groups[name]) for name in file_order if name in groups]
+
+
+def _prefix_order(root, groups):
+    return [Path(name).relative_to(root).as_posix() for name, _ in groups]
+
+
+def _source_digest(filename, cache):
+    digest = cache.get(filename)
+    if digest is None:
+        file_digest = hashlib.sha256()
+        with open(filename, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                file_digest.update(chunk)
+        digest = cache[filename] = file_digest.hexdigest()
+    return digest
+
+
+def _prefix_files(root, groups, stored_files, file_digests):
+    """Return {relative: (source sha256, transaction digest, count)} for the prefix.
+
+    A file whose bytes match the stored ones parses to the same transactions,
+    so when it also contributes as many of them as it did for the stored
+    closing date (which is never later than this one), it contributes the same
+    ones and its stored digest is reused instead of recomputed. That keeps a hit
+    cheap when only open months' files changed, and moving the closing date
+    forward only digests the files that gained closed transactions.
+    """
+    result = {}
+    for filename, transactions in groups:
+        relative = Path(filename).relative_to(root).as_posix()
+        source = _source_digest(filename, file_digests)
+        stored = stored_files.get(relative)
+        if stored is not None and stored[0] == source and stored[2] == len(transactions):
+            result[relative] = stored
         else:
-            os.environ["BEANCOUNT_LOAD_CACHE_FILENAME"] = previous
-        # Restore the uncached binding so a later call without a cache directory
-        # cannot inherit this one's file.
-        loader.initialize(False)
+            result[relative] = (source, _transaction_digest(transactions), len(transactions))
+    return result
+
+
+_CHECKPOINT_KEYS = frozenset({"runtime", "closing", "booking", "order", "files", "transactions", "balances"})
+
+
+def _read_checkpoint(path):
+    if path is None:
+        return None
+    import pickle
+    try:
+        with open(path, "rb") as handle:
+            stored = pickle.load(handle)
+    except Exception:
+        # Missing, truncated or written by something else: rebuild it.
+        return None
+    if not isinstance(stored, dict) or stored.get("runtime") != _checkpoint_runtime_identity():
+        return None
+    if not _CHECKPOINT_KEYS <= stored.keys():
+        return None
+    return stored
+
+
+def _write_checkpoint(path, checkpoint):
+    import pickle
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        with open(temporary, "wb") as handle:
+            pickle.dump(checkpoint, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(temporary, path)
+    except OSError:
+        # A checkpoint is an optimisation; failing to store one changes nothing.
+        temporary.unlink(missing_ok=True)
+
+
+def _encode_booked(parsed, booked):
+    """Describe booked transactions as edits of their parsed counterparts.
+
+    Unpickling 100k booked transactions costs about as much as booking them, so
+    the checkpoint stores only what booking changed: per transaction, the
+    automatic tolerances (interned; they are immutable and few) and, per booked
+    posting, either the index of the parsed posting it kept as is, or that
+    index plus the units, cost and price booking filled in and whether booking
+    marked it interpolated. booking_full only ever derives postings with
+    Posting._replace, which keeps the parsed posting's metadata object, so that
+    object identifies the source posting; the interpolation mark is written
+    into that shared dict, so decoding writes it into the fresh parse's.
+    Returns None when a transaction does not fit this shape, and the caller
+    then stores no checkpoint.
+    """
+    from beancount.core import interpolate
+    tolerance_index, tolerances, patches = {}, [], []
+    for source, result in zip(parsed, booked):
+        by_meta = {id(posting.meta): index for index, posting in enumerate(source.postings)}
+        spec = []
+        for posting in result.postings:
+            index = by_meta.get(id(posting.meta))
+            if index is None:
+                return None
+            original = source.postings[index]
+            if posting is original:
+                spec.append(index)
+            elif posting.account == original.account and posting.flag == original.flag:
+                spec.append((index, posting.units, posting.cost, posting.price,
+                             bool(posting.meta.get(_AUTOMATIC_META))))
+            else:
+                return None
+        tolerance = result.meta.get(interpolate.AUTOMATIC_TOLERANCES)
+        key = repr((getattr(tolerance, "default", None), sorted((tolerance or {}).items())))
+        if key not in tolerance_index:
+            tolerance_index[key] = len(tolerances)
+            tolerances.append(tolerance)
+        patches.append((tolerance_index[key], tuple(spec)))
+    encoded = (tolerances, patches)
+    if _decode_booked(parsed, encoded) != booked:
+        return None
+    return encoded
+
+
+def _decode_booked(parsed, encoded):
+    from beancount.core import interpolate
+    tolerances, patches = encoded
+    booked, marked = [], []
+    for source, (tolerance, spec) in zip(parsed, patches, strict=True):
+        postings = source.postings
+        meta = source.meta.copy()
+        meta[interpolate.AUTOMATIC_TOLERANCES] = tolerances[tolerance]
+        result = []
+        for item in spec:
+            if type(item) is int:
+                result.append(postings[item])
+                continue
+            original = postings[item[0]]
+            if item[4]:
+                marked.append(original.meta)
+            result.append(original._replace(units=item[1], cost=item[2], price=item[3]))
+        booked.append(source._replace(meta=meta, postings=result))
+    # Everything that can fail has run; only now touch the parsed metadata, so
+    # a failed decode leaves the parse fit for a full booking.
+    for meta in marked:
+        meta[_AUTOMATIC_META] = True
+    return booked
+
+
+def _checkpoint_prefix(root, entries, dates, file_order, stored, file_digests):
+    """Return the length of the prefix `stored` was booked from, or None.
+
+    It matches only when this parse has exactly the stored closed
+    transactions, in the same file order, so booking them would reproduce the
+    stored result.
+    """
+    import bisect
+    end = bisect.bisect_left(dates, stored["closing"])
+    groups = _prefix_transactions_by_file(entries, end, file_order)
+    if _prefix_order(root, groups) != stored["order"]:
+        return None
+    # The source digest only short-cuts the comparison; a file whose bytes
+    # changed outside its closed transactions (a later entry, a balance, a
+    # comment at the end) still matches on its transactions.
+    current = _prefix_files(root, groups, stored["files"], file_digests)
+    if {name: value[1:] for name, value in current.items()} != {
+            name: value[1:] for name, value in stored["files"].items()}:
+        return None
+    if sum(len(group) for _, group in groups) != len(stored["transactions"][1]):
+        return None
+    return end
+
+
+def _book_with_checkpoint(root, entries, options, file_order, checkpoint_path):
+    """booking.book(entries, options), reusing and refreshing a checkpoint.
+
+    Returns (booked entries, errors, checkpoint to store or None). The errors
+    are in booking.book's order: every booking error, then every
+    incomplete-posting error.
+    """
+    import bisect
+    import collections
+    import pickle
+    from beancount.core import inventory
+
+    # booking.book derives these from every Open in the ledger; a segment must
+    # not see only its own Opens.
+    methods = collections.defaultdict(lambda: options["booking_method"])
+    for item in entries:
+        if isinstance(item, data.Open) and item.booking:
+            methods[item.account] = item.booking
+    booking_key = _booking_key(options, methods)
+    closing = _closing_date(entries, _today())
+    dates = [item.date for item in entries]
+    file_digests = {}
+
+    booked, booking_errors, missing_errors = [], [], []
+    balances = collections.defaultdict(inventory.Inventory)
+    start = 0
+    stored = _read_checkpoint(checkpoint_path)
+    previous_files = {}
+    if stored is not None and stored["booking"] == booking_key and stored["closing"] <= closing:
+        # Unchanged files keep their digests even when the prefix is not reused.
+        previous_files = stored["files"]
+        try:
+            end = _checkpoint_prefix(root, entries, dates, file_order, stored, file_digests)
+            if end is not None:
+                prefix_balances = pickle.loads(stored["balances"])
+                decoded = iter(_decode_booked(
+                    [item for item in entries[:end] if isinstance(item, data.Transaction)],
+                    stored["transactions"]))
+        except Exception:
+            # Whatever is wrong with a checkpoint only costs a full booking.
+            end = None
+        if end is not None:
+            booked = [next(decoded) if isinstance(item, data.Transaction) else item for item in entries[:end]]
+            balances = prefix_balances
+            start = end
+        else:
+            stored = None
+    else:
+        stored = None
+
+    def book_segment(segment):
+        segment_booked, segment_errors = booking_full.book(segment, options, methods, balances)
+        booked.extend(segment_booked)
+        booking_errors.extend(segment_errors)
+        missing_errors.extend(booking.validate_missing_eliminated(segment_booked, options))
+
+    refreshed = None
+    if stored is None or stored["closing"] < closing:
+        end = bisect.bisect_left(dates, closing)
+        book_segment(entries[start:end])
+        start = end
+        # Only an error-free prefix is stored: booking drops a transaction it
+        # cannot categorize, and reuse relies on a one-to-one prefix.
+        encoded = None
+        if end and not booking_errors and not missing_errors:
+            encoded = _encode_booked([item for item in entries[:end] if isinstance(item, data.Transaction)],
+                                     [item for item in booked if isinstance(item, data.Transaction)])
+        if encoded is not None:
+            groups = _prefix_transactions_by_file(entries, end, file_order)
+            refreshed = {
+                "runtime": _checkpoint_runtime_identity(),
+                "closing": closing,
+                "booking": booking_key,
+                "order": _prefix_order(root, groups),
+                "files": _prefix_files(root, groups, previous_files, file_digests),
+                # The inventories are serialised now, before the suffix is
+                # booked into them. The encoded transactions hold only
+                # immutable values and are safe to keep as objects.
+                "transactions": encoded,
+                "balances": pickle.dumps(balances, protocol=pickle.HIGHEST_PROTOCOL),
+            }
+    book_segment(entries[start:])
+    return booked, booking_errors + missing_errors, refreshed
+
+
+def _checkpointed_load(root, checkpoint_path, filename, log_timings, extra_validations, encoding):
+    """loader._load for one file, with booking served by a checkpoint.
+
+    Without a checkpoint directory this is exactly beancount's pipeline. With
+    one, the stages are beancount 3.2.3's `_load`, in the same order, with only
+    the booking call replaced.
+    """
+    if checkpoint_path is None:
+        return loader._uncached_load_file(filename, log_timings, extra_validations, encoding)
+    import sys
+    from beancount.utils import misc_utils
+    with misc_utils.log_time("parse", log_timings, indent=1):
+        entries, parse_errors, options = loader._parse_recursive([(filename, True)], log_timings, encoding)
+        # Files are parsed into contiguous runs; their order is the stable-sort
+        # tie-break the prefix order has to reproduce.
+        file_order, last = [], None
+        for item in entries:
+            name = item.meta.get("filename") if item.meta else None
+            if name != last:
+                file_order.append(name)
+                last = name
+        entries.sort(key=data.entry_sortkey)
+    with misc_utils.log_time("booking", log_timings, indent=1):
+        entries, balance_errors, refreshed = _book_with_checkpoint(
+            root, entries, options, list(dict.fromkeys(file_order)), checkpoint_path)
+        parse_errors.extend(balance_errors)
+    with misc_utils.log_time("run_transformations", log_timings, indent=1):
+        saved_pythonpath = list(sys.path)
+        try:
+            if "pythonpath" in options:
+                sys.path[0:0] = options["pythonpath"]
+            entries, errors = loader.run_transformations(entries, parse_errors, options, log_timings)
+        finally:
+            sys.path[:] = saved_pythonpath
+    with misc_utils.log_time("beancount.ops.validate", log_timings, indent=1):
+        errors.extend(validation.validate(entries, options, log_timings, extra_validations))
+    options["input_hash"] = loader.compute_input_hash(options["include"])
+    # A ledger that does not load cleanly never replaces a good checkpoint.
+    if refreshed is not None and not errors:
+        _write_checkpoint(checkpoint_path, refreshed)
+    return entries, errors, options
 
 
 def _validate_json(workspace, entry_file, *, export_canonical, stream_output=None):
