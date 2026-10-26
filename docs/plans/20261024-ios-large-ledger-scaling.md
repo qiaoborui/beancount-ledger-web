@@ -200,3 +200,27 @@
 追加场景的规范流 SHA-256 与无检查点时一致。剩余开销是 parse（约 3s）、插件 + 校验（约 4s）和流导出；插件/校验只跑尾部属于语义变化，未做。
 
 未覆盖：Swift 部分在 `canImport(Darwin)` 下，需真机/模拟器确认环境变量生效；真机耗时尚未采集。
+
+## 第四阶段补充：按文件 parse 缓存（2026-10-26）
+
+在检查点命中的预览里，parse 是剩下最大的一块之一。这一步只换掉 parse，不改变任何语义。
+
+- **原理**：beancount 对每个文件单独调用 `parse_file`，每次都新建 grammar Builder，option、pushtag 不会漏进被 include 的文件；include 展开、重复/缺失文件报错、option 合并都在 loader 里、在 parse 之后做。所以同一相对路径、同样字节的文件，解析结果可以直接复用，只要把记录路径的地方换成当前目录即可。`_parse_recursive` 是 beancount 3.2.3 原样复制，只把 `parse_file` 换成带缓存的版本，include 顺序、glob、options 变化都按当前文件走。
+- **键 / 失效**：相对路径 + 文件字节 sha256 + Python/beancount 版本 + 解析器算术用到的 decimal context + 格式版本。每个相对路径只保留一份，staging 和 generation 共用 `<ledger>/runtime/parse-cache/`。改了哪个文件就只重新解析哪个文件。
+- **路径重绑**：干净的解析结果里只有 meta 的 `filename` 和 options 的 `filename` 带路径，存储时不写入，解码时填当前路径。其他会带目录的情况（Document 的绝对路径、错误信息里的路径、源文件里写了工作区路径、`filename:` 元数据写成文件自身路径）一律不缓存：存储前检查载荷和源文件里都不含工作区路径。有解析错误的文件不缓存。
+- **编码**：不用 pickle。100k 下 pickle 反序列化（约 3.5s）和重新解析差不多，因为每个 namedtuple/Decimal/date 都要走 Python 重建。改为“不可变值表 + 引用”的 marshal 载荷，Decimal 按字符串区分（`1.0` 与 `1.00` 不合并），解码约 0.5s；每个 meta dict 和 list 都是新对象（booking 会往 posting meta 里写）。解析阶段暂停循环 GC（只分配无环对象，结束即恢复），否则大堆上的 GC 扫描比解码本身还贵。
+- **保护**：beancount 不是 3.2.3 时关闭；严格比较（区分 namedtuple 类型、Decimal 指数、bool/int、dict 键顺序）每个文件解码结果与 `parser.parse_file` 一致；随机多文件账本 × 随机改动（增删改条目、语法错误、option、include 顺序、清空文件）与 beancount 自带 loader 全量比对；对关键防护做过变异测试，去掉任一防护都有用例失败。
+- **顺带修复**：交易元数据里写了 `filename:` 时，#563 的检查点在建检查点时会抛异常，导致整次校验失败；现在这种账本改为每次全量 booking。
+
+本机 100k（`scripts/large_ledger_bench.py checkpoint [--parse-cache]`，Python 3.14 与 App 同版本，4 核 x86 容器，今天比上次整体慢约 30%，只看同批对比）：
+
+| 场景 | 只有检查点 | 检查点 + parse 缓存 |
+| --- | --- | --- |
+| 在开放月份追加一笔（命中） | 19.4s，parse 4.9s | **16.6s，parse 2.1s** |
+| 重建后再追加 | 21.3s，parse 4.8s | **16.7s，parse 1.8s** |
+| 改关账月份一笔（检查点重建） | 49.7s | 36.5s |
+| 首次加载（建缓存） | 55.8s | 60.1s（一次性多约 4s 编码） |
+
+追加场景的规范流 SHA-256 与无缓存全量加载一致。缓存约 20MB（100k、244 个文件）。
+
+未覆盖：Swift 部分在 `canImport(Darwin)` 下，需真机确认 `LEDGER_PARSE_CACHE_DIR` 生效；真机耗时尚未采集。
