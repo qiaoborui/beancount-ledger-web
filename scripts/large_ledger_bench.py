@@ -17,8 +17,9 @@ ledger data or machine-specific paths.
     # Generate all tiers and measure the real pipeline segments.
     python3 scripts/large_ledger_bench.py bench --tiers 10k,50k,100k
 
-    # Measure the closed-period booking checkpoint on a generated tier.
-    python3 scripts/large_ledger_bench.py checkpoint --source /tmp/ledger-100k
+    # Measure the closed-period booking checkpoint on a generated tier, and
+    # with --parse-cache the per-file parse cache on top of it.
+    python3 scripts/large_ledger_bench.py checkpoint --source /tmp/ledger-100k [--parse-cache]
 
 `generate` also writes `manifest.json` next to the ledger (transaction count,
 directive counts by kind, source files, source bytes, expected canonical entry
@@ -730,7 +731,7 @@ def bench(args):
 _APPENDED = '{day} * "基准" "检查点追加"\n  Expenses:Home:Utilities  12.00 CNY\n  Assets:Bank:Checking\n'
 
 
-def _checkpoint_export(ledger_validator, workspace, runtime_dir, checkpoint_dir, label):
+def _checkpoint_export(ledger_validator, workspace, runtime_dir, checkpoint_dir, label, parse_cache_dir=None):
     reused = []
     original = ledger_validator._checkpoint_prefix
 
@@ -742,9 +743,13 @@ def _checkpoint_export(ledger_validator, workspace, runtime_dir, checkpoint_dir,
     environment = {ledger_validator.TIMINGS_ENVIRONMENT: "1"}
     if checkpoint_dir is not None:
         environment[ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT] = str(checkpoint_dir)
+    if parse_cache_dir is not None:
+        environment[ledger_validator.PARSE_CACHE_ENVIRONMENT] = str(parse_cache_dir)
     saved = {name: os.environ.get(name) for name in
-             (ledger_validator.TIMINGS_ENVIRONMENT, ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT)}
+             (ledger_validator.TIMINGS_ENVIRONMENT, ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT,
+              ledger_validator.PARSE_CACHE_ENVIRONMENT)}
     os.environ.pop(ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT, None)
+    os.environ.pop(ledger_validator.PARSE_CACHE_ENVIRONMENT, None)
     os.environ.update(environment)
     ledger_validator._checkpoint_prefix = spy
     try:
@@ -768,6 +773,13 @@ def checkpoint(args):
     checkpoint_dir = workdir / "runtime" / "booking-checkpoint"
     shutil.rmtree(checkpoint_dir, ignore_errors=True)
     checkpoint_dir.mkdir(parents=True)
+    # With --parse-cache every checkpointed scenario also reuses unchanged
+    # files' parses, as the app does.
+    parse_cache_dir = None
+    if args.parse_cache:
+        parse_cache_dir = workdir / "runtime" / "parse-cache"
+        shutil.rmtree(parse_cache_dir, ignore_errors=True)
+        parse_cache_dir.mkdir(parents=True)
     runtime_dir = workdir / "runtime"
     month_files = sorted((source / "transactions").glob("*.bean"))
     if not month_files:
@@ -799,11 +811,12 @@ def checkpoint(args):
     scenarios = []
 
     def measure(name, workspace, checkpoint_dir_or_none):
-        run = _checkpoint_export(ledger_validator, workspace, runtime_dir, checkpoint_dir_or_none, name)
+        run = _checkpoint_export(ledger_validator, workspace, runtime_dir, checkpoint_dir_or_none, name,
+                                 parse_cache_dir if checkpoint_dir_or_none is not None else None)
         scenarios.append({"scenario": name, **run})
-        print("   {:<34} export {:>9}  booking {:>9}  reused {}".format(
-            name, _format_ms(run["exportMs"]), _format_ms(run["stages"]["booking"]),
-            run["checkpointReused"]))
+        print("   {:<34} export {:>9}  parse {:>9}  booking {:>9}  reused {}".format(
+            name, _format_ms(run["exportMs"]), _format_ms(run["stages"]["parse"]),
+            _format_ms(run["stages"]["booking"]), run["checkpointReused"]))
         return run
 
     print("workdir: {}".format(workdir))
@@ -822,6 +835,9 @@ def checkpoint(args):
     files = list(checkpoint_dir.iterdir())
     result = {"source": str(source), "checkpointBytes": sum(path.stat().st_size for path in files),
               "scenarios": scenarios}
+    if parse_cache_dir is not None:
+        result["parseCacheBytes"] = sum(path.stat().st_size for path in parse_cache_dir.iterdir())
+        print("parse cache: {:.1f} MB".format(result["parseCacheBytes"] / 1e6))
     print("checkpoint file: {:.1f} MB; append stream identical to the full load".format(
         result["checkpointBytes"] / 1e6))
     _write_json(workdir / "checkpoint.json", result)
@@ -1059,6 +1075,8 @@ def main():
     checkpoint_parser.add_argument("--workdir", type=Path, help="artifact directory (default: temp dir)")
     checkpoint_parser.add_argument("--repeat", type=int, default=1,
                                    help="runs of the with/without-checkpoint append scenarios")
+    checkpoint_parser.add_argument("--parse-cache", action="store_true",
+                                   help="also use the per-file parse cache in the checkpointed scenarios")
 
     record_parser = subcommands.add_parser(
         "record", help="bundle app recordings that match this tier's manifest")

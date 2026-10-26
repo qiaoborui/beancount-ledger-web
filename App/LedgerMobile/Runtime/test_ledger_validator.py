@@ -1030,6 +1030,16 @@ include "tx/*.bean"
         self.assertTrue(errors)
         self.assertIsNone(self.stored())
 
+    def test_transactions_naming_another_source_file_are_booked_in_full(self):
+        # `filename:` is ordinary metadata to the parser and overrides the
+        # source path the checkpoint keys its files by.
+        (self.root / "tx/2025.bean").write_text(self.CLOSED.replace(
+            '  memo: "first lot"\n', '  memo: "first lot"\n  filename: "elsewhere.bean"\n'))
+        for _ in range(2):
+            _, errors, _ = self.assert_same_as_beancount()
+            self.assertEqual(errors, [])
+            self.assertIsNone(self.stored())
+
     def test_an_invalid_ledger_never_replaces_the_checkpoint(self):
         self.load()
         before = self.checkpoint_path().read_bytes()
@@ -1180,3 +1190,520 @@ include "tx/*.bean"
             with mock.patch.object(ledger_validator, "_today",
                                    lambda: rng.choice([self.TODAY, datetime.date(2026, 11, 3)])):
                 self.assert_same_as_beancount(root)
+
+
+def strict(value):
+    """A comparable form that also tells apart what == conflates.
+
+    Namedtuples compare equal to plain tuples of other types, Decimal("1.0")
+    equals Decimal("1.00"), True equals 1, and dicts ignore key order; the
+    parse cache has to reproduce all of those exactly.
+    """
+    from decimal import Decimal
+    kind = type(value)
+    if isinstance(value, dict):
+        return (kind.__qualname__, tuple((strict(key), strict(item)) for key, item in value.items()),
+                strict(getattr(value, "default", None)))
+    if isinstance(value, list):
+        return (kind.__qualname__, tuple(strict(item) for item in value))
+    if kind is frozenset or kind is set:
+        return (kind.__name__, frozenset(strict(item) for item in value))
+    if kind is Decimal:
+        return ("Decimal", str(value))
+    if isinstance(value, tuple):
+        return (kind.__module__, kind.__qualname__, tuple(strict(item) for item in value))
+    if isinstance(value, (str, int, float, type(None), datetime.date)):
+        return (kind.__name__, value)
+    if isinstance(value, type) or value is ledger_validator.data.Booking or isinstance(value, ledger_validator.data.Booking):
+        return ("object", id(value))
+    if kind.__module__ == "beancount.core.number" or value.__class__.__name__ == "MISSING":
+        return ("object", id(value))
+    if hasattr(value, "__dict__"):
+        return (kind.__qualname__, strict(vars(value)))
+    raise AssertionError(f"unexpected value in a parse: {kind!r}")
+
+
+class ParseCacheTests(unittest.TestCase):
+    """A cached parse must be indistinguishable from beancount's own."""
+
+    MAIN = '''option "title" "Parse cache"
+option "operating_currency" "CNY"
+option "booking_method" "FIFO"
+option "inferred_tolerance_default" "CNY:0.005"
+plugin "beancount.plugins.implicit_prices"
+include "accounts.bean"
+include "tx/*.bean"
+'''
+    ACCOUNTS = '''option "operating_currency" "USD"
+2000-01-01 open Assets:Cash CNY,USD
+2000-01-01 open Assets:Bank CNY
+  bank: "branch"
+2000-01-01 open Assets:Stock HOOL "FIFO"
+2000-01-01 open Assets:Fund FND "LIFO"
+2000-01-01 open Assets:Mixed
+2000-01-01 open Expenses:Food CNY
+2000-01-01 open Expenses:Misc
+2000-01-01 open Equity:Opening CNY
+2000-01-01 open Income:Gains
+2000-01-02 pad Assets:Bank Equity:Opening
+2000-01-03 balance Assets:Bank 100.00 CNY
+2000-01-04 balance Assets:Bank 100.0 ~ 0.5 CNY
+2019-01-01 commodity HOOL
+  name: "Hooli"
+  precision: 2
+2019-01-02 commodity FND
+2030-01-01 close Assets:Mixed
+'''
+    TX = '''pushtag #trip
+pushmeta where: "Beijing"
+2020-01-01 * "Shop" "Lunch & tea" #food ^trip-1
+  category: "food"
+  note: "escaped \\"quote\\" and 中文"
+  count: 3
+  ratio: 1.50
+  budget: 100.00 CNY
+  reviewed: 2020-01-05
+  flagged: TRUE
+  other: Assets:Cash
+  label: #tagged
+  Assets:Cash -12.50 CNY
+    posting-note: "split"
+  ! Expenses:Food 12.5 CNY
+2020-01-02 ! "Manual"
+  Assets:Cash -3 CNY
+  Expenses:Food
+popmeta where:
+2020-02-01 * "Buy" ^lot
+  Assets:Stock 2 HOOL {10.00 USD}
+  Assets:Cash -20.00 USD
+2020-02-02 * "Buy more"
+  Assets:Stock 2 HOOL {{24.00 USD}}
+  Assets:Cash -24.00 USD
+2020-02-03 * "Buy dated"
+  Assets:Stock 1 HOOL {11 USD, 2020-02-01, "label"}
+  Assets:Cash -11 USD
+2020-02-04 * "Sell"
+  Assets:Stock -3 HOOL {} @ 13 USD
+  Assets:Cash 39.00 USD
+  Income:Gains
+2020-02-05 * "Sell total price"
+  Assets:Stock -1 HOOL {} @@ 14.00 USD
+  Assets:Cash 14.00 USD
+  Income:Gains
+2020-02-06 * "Fund"
+  Assets:Fund 1 FND {100 CNY}
+  Assets:Fund 1 FND {# 5 CNY}
+  Assets:Bank -105 CNY
+2020-02-07 * "Arithmetic"
+  Expenses:Misc (10 / 3) CNY
+  Expenses:Misc 2 * 1.5 CNY
+  Assets:Cash
+poptag #trip
+2020-03-01 price HOOL 10.50 USD
+2020-03-02 event "location" "Beijing"
+2020-03-03 note Assets:Cash "note with 中文" #n ^m
+2020-03-04 query "cash" "SELECT account WHERE account ~ 'Cash'"
+2020-03-05 custom "budget" Expenses:Food "monthly" 100.00 CNY 2020-03-01 TRUE 7
+2020-03-06 txn "No flag"
+  Assets:Cash -1 CNY
+  Expenses:Food 1 CNY
+2020-03-07 *
+  Assets:Cash 0 CNY
+2020-03-08 * "Overridden source"
+  filename: "elsewhere.bean"
+  Assets:Cash -1 CNY
+  Expenses:Food
+'''
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.temporary.name).resolve()
+        self.root = self.base / "generations" / "a" / "workspace"
+        self.cache_directory = self.base / "parse-cache"
+        self.cache_directory.mkdir()
+        self.write(self.root, {"main.bean": self.MAIN, "accounts.bean": self.ACCOUNTS, "tx/2020.bean": self.TX})
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    @staticmethod
+    def write(root, files):
+        for name, text in files.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+
+    def cache(self, root=None):
+        return ledger_validator._ParseCache(root or self.root, self.cache_directory)
+
+    counting = False
+
+    def load(self, root=None, checkpoint=None):
+        root = root or self.root
+        self.counting = True
+        try:
+            return ledger_validator._checkpointed_load(
+                root, checkpoint, str(root / "main.bean"), None, ledger_validator.validation.HARDCORE_VALIDATIONS,
+                None, parse_cache=self.cache(root))
+        finally:
+            self.counting = False
+
+    @staticmethod
+    def comparable(result):
+        entries, errors, options = result
+        return (strict(entries), [(type(e), e.message, strict(e.source)) for e in errors], strict(options))
+
+    def assert_same_as_beancount(self, root=None, checkpoint=None):
+        root = root or self.root
+        expected = ledger_validator.loader._uncached_load_file(
+            str(root / "main.bean"), None, ledger_validator.validation.HARDCORE_VALIDATIONS, None)
+        actual = self.load(root, checkpoint)
+        self.assertEqual(self.comparable(actual), self.comparable(expected))
+        return actual
+
+    @contextlib.contextmanager
+    def count_parses(self):
+        """Yield a mock whose calls are the files that were actually parsed."""
+        parsed = mock.Mock()
+        original = ledger_validator.parser.parse_file
+
+        def spy(filename, *args, **kwargs):
+            # beancount's own load, the reference, is not counted.
+            if self.counting:
+                parsed(str(filename))
+            return original(filename, *args, **kwargs)
+
+        with mock.patch.object(ledger_validator.parser, "parse_file", spy):
+            yield parsed
+
+    def parsed_names(self, parsed, root=None):
+        root = root or self.root
+        return sorted(pathlib.Path(call.args[0]).relative_to(root).as_posix() for call in parsed.call_args_list)
+
+    def stored(self):
+        return sorted(path.name for path in self.cache_directory.iterdir())
+
+    def test_second_load_parses_nothing_and_matches_beancount(self):
+        _, errors, _ = self.assert_same_as_beancount()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(self.stored()), 3)
+        with self.count_parses() as parsed:
+            self.assert_same_as_beancount()
+        parsed.assert_not_called()
+
+    def test_every_file_decodes_to_its_parse_exactly(self):
+        self.load()
+        for name in ("main.bean", "accounts.bean", "tx/2020.bean"):
+            with self.subTest(name=name):
+                filename = str(self.root / name)
+                with self.count_parses() as parsed:
+                    self.counting = True
+                    cached = self.cache().parse_file(filename)
+                    self.counting = False
+                parsed.assert_not_called()
+                fresh = ledger_validator.parser.parse_file(filename)
+                self.assertEqual(strict(cached[0]), strict(fresh[0]))
+                self.assertEqual(cached[1], fresh[1])
+                self.assertEqual(strict(cached[2]), strict(fresh[2]))
+                # Booking writes into metadata, so no two directives or
+                # postings may share a metadata dict or a postings list.
+                metas = [id(entry.meta) for entry in cached[0]]
+                metas += [id(posting.meta) for entry in cached[0] for posting in getattr(entry, "postings", ())]
+                self.assertEqual(len(metas), len(set(metas)))
+
+    def test_a_new_directory_reuses_the_cache_with_its_own_paths(self):
+        self.load()
+        other = self.base / "staging" / "b" / "workspace"
+        shutil.copytree(self.root, other)
+        with self.count_parses() as parsed:
+            entries, _, options = self.assert_same_as_beancount(other)
+        parsed.assert_not_called()
+        sources = {entry.meta["filename"] for entry in entries}
+        self.assertEqual({name for name in sources if not name.startswith(str(other))},
+                         {"elsewhere.bean", "<auto_insert_open>"} & sources)
+        self.assertTrue(all(name.startswith(str(other)) for name in options["include"]))
+        # The exported stream is byte-identical to the uncached one.
+        streams = []
+        for environment in ({}, {ledger_validator.PARSE_CACHE_ENVIRONMENT: str(self.cache_directory)}):
+            with mock.patch.dict("os.environ", environment):
+                if not environment:
+                    os.environ.pop(ledger_validator.PARSE_CACHE_ENVIRONMENT, None)
+                target = self.base / f"{len(streams)}.records"
+                reply = json.loads(ledger_validator.export_canonical_json(str(other), "main.bean", str(target)))
+                self.assertEqual(reply["errors"], [])
+                streams.append(target.read_bytes())
+        self.assertEqual(streams[0], streams[1])
+
+    def test_a_source_typed_as_the_file_itself_is_never_stored(self):
+        # Metadata may set "filename" itself; set to this very path, it would
+        # be indistinguishable from the parser's own and rebound on reuse.
+        (self.root / "tx/2020.bean").write_text(
+            self.TX + f'2020-04-01 * "Typed"\n  filename: "{self.root}/tx/2020.bean"\n'
+            '  Assets:Cash -1 CNY\n  Expenses:Food\n')
+        self.assert_same_as_beancount()
+        self.assertNotIn(self.cache_name("tx/2020.bean"), self.stored())
+        other = self.base / "generations" / "b" / "workspace"
+        shutil.copytree(self.root, other)
+        self.assert_same_as_beancount(other)
+
+    def test_an_edit_reparses_only_the_edited_file(self):
+        self.load()
+        for text in (self.TX + '2020-04-01 * "More"\n  Assets:Cash -1 CNY\n  Expenses:Food\n',
+                     self.TX.replace("12.50", "12.51"), self.TX.replace("ratio: 1.50", "ratio: 1.5"),
+                     self.TX.replace("12.5 CNY", "12.50 CNY"), "\n" + self.TX, self.TX + "; comment\n"):
+            with self.subTest(text=text[-30:]):
+                (self.root / "tx/2020.bean").write_text(text)
+                with self.count_parses() as parsed:
+                    self.assert_same_as_beancount()
+                self.assertEqual(self.parsed_names(parsed), ["tx/2020.bean"])
+                with self.count_parses() as parsed:
+                    self.assert_same_as_beancount()
+                parsed.assert_not_called()
+
+    def test_includes_follow_the_current_files(self):
+        self.load()
+        cases = [
+            # A new file matching the glob is parsed; the others still hit.
+            ("add", {"tx/2021.bean": '2021-01-01 * "New"\n  Assets:Cash -1 CNY\n  Expenses:Food\n'}),
+            # Include order changes only main.bean.
+            ("order", {"main.bean": self.MAIN.replace('include "accounts.bean"\ninclude "tx/*.bean"\n',
+                                                      'include "tx/*.bean"\ninclude "accounts.bean"\n')}),
+            # The same file reached twice reports beancount's duplicate error.
+            ("duplicate", {"main.bean": self.MAIN + 'include "accounts.bean"\n'}),
+            ("missing", {"main.bean": self.MAIN + 'include "nothing/*.bean"\ninclude "gone.bean"\n'}),
+            ("nested", {"accounts.bean": self.ACCOUNTS + 'include "more/*.bean"\n',
+                        "more/x.bean": '2001-01-01 open Assets:More\n'}),
+        ]
+        for label, files in cases:
+            with self.subTest(label=label):
+                self.write(self.root, files)
+                with self.count_parses() as parsed:
+                    self.assert_same_as_beancount()
+                self.assertEqual(self.parsed_names(parsed), sorted(files))
+                with self.count_parses() as parsed:
+                    self.assert_same_as_beancount()
+                parsed.assert_not_called()
+        (self.root / "tx/2021.bean").unlink()
+        (self.root / "more/x.bean").rename(self.root / "more/y.bean")
+        with self.count_parses() as parsed:
+            self.assert_same_as_beancount()
+        self.assertEqual(self.parsed_names(parsed), ["more/y.bean"])
+
+    def test_option_changes_apply_to_the_file_that_declares_them(self):
+        self.load()
+        for name, text in (("main.bean", self.MAIN.replace('"FIFO"', '"LIFO"')),
+                           ("main.bean", self.MAIN + 'option "render_commas" "TRUE"\n'),
+                           ("main.bean", self.MAIN + 'option "name_assets" "Activa"\n'),
+                           ("accounts.bean", self.ACCOUNTS.replace('"USD"', '"HOOL"', 1)),
+                           ("main.bean", 'option "display_precision" "CNY:0.001"\n' + self.MAIN)):
+            with self.subTest(name=name, text=text[-40:]):
+                original = (self.root / name).read_text()
+                (self.root / name).write_text(text)
+                with self.count_parses() as parsed:
+                    self.assert_same_as_beancount()
+                self.assertEqual(self.parsed_names(parsed), [name])
+                with self.count_parses() as parsed:
+                    self.assert_same_as_beancount()
+                parsed.assert_not_called()
+                # One parse is kept per file, so going back parses it again.
+                (self.root / name).write_text(original)
+                with self.count_parses() as parsed:
+                    self.assert_same_as_beancount()
+                self.assertEqual(self.parsed_names(parsed), [name])
+
+    def test_files_that_name_their_directory_are_never_stored(self):
+        cases = {
+            # A Document's path is resolved against the file's directory.
+            "documents": '2020-01-01 document Assets:Cash "receipt.pdf"\n',
+            # A path written into the file has to stay what was written.
+            "typed path": f'2020-01-01 note Assets:Cash "{self.root}/tx/typed.bean"\n',
+            # Parse errors quote nothing to rebind, but are never stored either.
+            "errors": '2020-01-01 open Assets:Cash\n2020-13-01 * "Bad date"\n',
+        }
+        (self.root / "tx/receipt.pdf").write_bytes(b"%PDF")
+        for label, text in cases.items():
+            with self.subTest(label=label):
+                (self.root / "tx/typed.bean").write_text(text)
+                before = self.stored()
+                for _ in range(2):
+                    with self.count_parses() as parsed:
+                        self.assert_same_as_beancount()
+                    self.assertIn("tx/typed.bean", self.parsed_names(parsed))
+                self.assertEqual(self.stored(), sorted(set(before) | set(self.stored()) - {self.cache_name("tx/typed.bean")}))
+                self.assertNotIn(self.cache_name("tx/typed.bean"), self.stored())
+
+    def cache_name(self, relative):
+        return hashlib.sha256(relative.encode("utf-8")).hexdigest()[:32] + ".parse"
+
+    def test_a_changed_file_replaces_a_stored_parse_that_no_longer_applies(self):
+        self.load()
+        name = self.cache_name("tx/2020.bean")
+        before = (self.cache_directory / name).read_bytes()
+        (self.root / "tx/2020.bean").write_text('2020-01-01 document Assets:Cash "x.pdf"\n')
+        self.assert_same_as_beancount()
+        # The stale entry is left alone and simply never matches.
+        self.assertEqual((self.cache_directory / name).read_bytes(), before)
+        (self.root / "tx/2020.bean").write_text(self.TX)
+        with self.count_parses() as parsed:
+            self.assert_same_as_beancount()
+        parsed.assert_not_called()
+
+    def test_unreadable_or_foreign_cache_files_are_ignored(self):
+        import pickle
+        self.load()
+        path = self.cache_directory / self.cache_name("tx/2020.bean")
+        good = pickle.loads(path.read_bytes())
+        for content in (b"", b"not a pickle", pickle.dumps(["list"]), pickle.dumps({"key": "other"}),
+                        pickle.dumps(dict(good, entries=b"garbage")), pickle.dumps(dict(good, options=b"x")),
+                        pickle.dumps(dict(good, entries=__import__("marshal").dumps(([("Z", 1)], []))))):
+            with self.subTest(content=content[:20]):
+                path.write_bytes(content)
+                with self.count_parses() as parsed:
+                    self.assert_same_as_beancount()
+                self.assertEqual(self.parsed_names(parsed), ["tx/2020.bean"])
+
+    def test_the_key_covers_the_runtime_and_decimal_context(self):
+        import decimal
+        self.load()
+        with mock.patch.object(ledger_validator, "PARSE_CACHE_FORMAT", 2):
+            with self.count_parses() as parsed:
+                self.assert_same_as_beancount()
+            self.assertEqual(len(parsed.call_args_list), 3)
+        with decimal.localcontext() as context:
+            context.prec = 5
+            with self.count_parses() as parsed:
+                self.assert_same_as_beancount()
+            self.assertEqual(len(parsed.call_args_list), 3)
+
+    def test_parse_cache_is_off_without_an_owned_directory(self):
+        with mock.patch.dict("os.environ", {}, clear=False):
+            os.environ.pop(ledger_validator.PARSE_CACHE_ENVIRONMENT, None)
+            self.assertIsNone(ledger_validator._parse_cache_directory())
+        link = self.base / "link"
+        link.symlink_to(self.cache_directory)
+        with mock.patch.dict("os.environ", {ledger_validator.PARSE_CACHE_ENVIRONMENT: str(link)}):
+            self.assertIsNone(ledger_validator._parse_cache_directory())
+        with mock.patch.dict("os.environ", {ledger_validator.PARSE_CACHE_ENVIRONMENT: str(self.cache_directory)}):
+            self.assertEqual(ledger_validator._parse_cache_directory(), self.cache_directory)
+            with mock.patch.object(ledger_validator.beancount, "__version__", "3.3.0"):
+                self.assertIsNone(ledger_validator._parse_cache_directory())
+
+    def test_validation_entrypoints_use_the_parse_cache_directory(self):
+        with mock.patch.dict("os.environ", {ledger_validator.PARSE_CACHE_ENVIRONMENT: str(self.cache_directory)}):
+            first = json.loads(validate_json(str(self.root)))
+            self.assertEqual(len(self.stored()), 3)
+            with mock.patch.object(ledger_validator, "_decode_parsed",
+                                   wraps=ledger_validator._decode_parsed) as decoded:
+                second = json.loads(validate_json(str(self.root)))
+            self.assertEqual(decoded.call_count, 3)
+        os.environ.pop(ledger_validator.PARSE_CACHE_ENVIRONMENT, None)
+        self.assertEqual(first, json.loads(validate_json(str(self.root))))
+        self.assertEqual(first, second)
+
+    def test_parse_cache_and_booking_checkpoint_together_match_beancount(self):
+        # A checkpoint is only written without the overridden source file.
+        (self.root / "tx/2020.bean").write_text(self.TX.split('2020-03-08 * "Overridden source"')[0])
+        checkpoints = self.base / "checkpoints"
+        checkpoints.mkdir()
+        with mock.patch.dict("os.environ", {ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT: str(checkpoints)}):
+            path = ledger_validator._booking_checkpoint_path(self.root, self.root / "main.bean")
+        with mock.patch.object(ledger_validator, "_today", lambda: datetime.date(2020, 6, 15)):
+            self.assert_same_as_beancount(checkpoint=path)
+            self.assertTrue(path.exists())
+            with self.count_parses() as parsed:
+                self.assert_same_as_beancount(checkpoint=path)
+            parsed.assert_not_called()
+
+    def test_random_ledgers_and_edits_match_beancount(self):
+        rng = random.Random(20261026)
+        hits = 0
+        for ledger in range(10):
+            with self.subTest(ledger=ledger):
+                hits += self.run_random_ledger(rng, ledger)
+        # The comparison is only meaningful if most files came from the cache.
+        self.assertGreater(hits, 300)
+
+    def run_random_ledger(self, rng, ledger):
+        """Random multi-file ledgers and random edits; compare every load."""
+        root = self.base / "random" / str(ledger) / "workspace"
+        accounts = ["Assets:Cash", "Assets:Bank", "Expenses:Food", "Expenses:Rent", "Income:Salary"]
+        currencies = ["CNY", "USD"]
+
+        def amount():
+            exponent = rng.choice([0, 1, 2, 3])
+            number = rng.randint(1, 99999)
+            text = str(number) if not exponent else f"{number // 10 ** exponent}.{number % 10 ** exponent:0{exponent}d}"
+            return text
+
+        def directive(stamp):
+            kind = rng.random()
+            meta = "".join(rng.choice(['  k: "v"\n', "  n: 1.0\n", "  d: 2020-01-01\n", "  a: 5 CNY\n",
+                                       "  b: TRUE\n", "  acct: Assets:Cash\n"]) for _ in range(rng.randint(0, 2)))
+            if kind < 0.55:
+                account = rng.choice(accounts[2:])
+                currency = rng.choice(currencies)
+                tags = rng.choice(["", " #t", " #t ^l", " ^l2"])
+                posting_meta = rng.choice(["", '    pm: "x"\n'])
+                return (f'{stamp} {rng.choice(["*", "!", "txn"])} "P{rng.randint(1, 30)}" "N{rng.randint(1, 30)}"{tags}\n'
+                        f'{meta}  {account} {amount()} {currency}\n{posting_meta}  Assets:Cash\n')
+            if kind < 0.65:
+                return f'{stamp} price USD {amount()} CNY\n'
+            if kind < 0.72:
+                return f'{stamp} note Assets:Cash "note {rng.randint(1, 9)}"\n{meta}'
+            if kind < 0.78:
+                return f'{stamp} event "e" "v{rng.randint(1, 3)}"\n'
+            if kind < 0.84:
+                return f'{stamp} custom "c" "s" {amount()} CNY TRUE {stamp}\n'
+            if kind < 0.9:
+                return f'pushtag #p\n{stamp} * "Tagged"\n  Expenses:Food 1 CNY\n  Assets:Cash\npoptag #p\n'
+            if kind < 0.95:
+                return f'{stamp} balance Assets:Bank 0 CNY\n'
+            return f'{stamp} commodity C{rng.randint(1, 5)}X\n{meta}'
+
+        main_lines = ['option "operating_currency" "CNY"', 'include "accounts.bean"', 'include "tx/*.bean"']
+        files = {"accounts.bean": "".join(f"2000-01-01 open {name}\n" for name in accounts)}
+        months = [f"2020-{month:02d}" for month in range(1, 13)]
+        body = {month: [directive(f"{month}-{rng.randint(1, 28):02d}") for _ in range(rng.randint(0, 6))]
+                for month in months}
+
+        def sync():
+            shutil.rmtree(root, ignore_errors=True)
+            rendered = dict(files, **{"main.bean": "\n".join(main_lines) + "\n"})
+            for month, items in body.items():
+                if items:
+                    rendered[f"tx/{month}.bean"] = "".join(items)
+            self.write(root, rendered)
+            return len(rendered)
+
+        hits = 0
+        count = sync()
+        self.assert_same_as_beancount(root)
+        for step in range(12):
+            action = rng.random()
+            month = rng.choice(months)
+            items = body[month]
+            if action < 0.35:
+                items.append(directive(f"{month}-{rng.randint(1, 28):02d}"))
+            elif action < 0.5 and items:
+                items.pop(rng.randrange(len(items)))
+            elif action < 0.6 and items:
+                index = rng.randrange(len(items))
+                items[index] = items[index].replace(" CNY", " USD", 1)
+            elif action < 0.67:
+                items.append(f"{month}-02 * \"Broken\"\n  Assets:Nowhere 1 CNY\n  Assets:Cash\n")
+            elif action < 0.72:
+                items.append(f"{month}-03 * \"Syntax\" \n  Assets:Cash 1 CNY CNY\n")
+            elif action < 0.8:
+                main_lines.append(rng.choice(['option "operating_currency" "USD"', 'option "render_commas" "TRUE"',
+                                              'option "booking_method" "LIFO"', 'option "title" "T"']))
+            elif action < 0.87:
+                main_lines[1:3] = main_lines[2:0:-1]
+            elif action < 0.93:
+                files["accounts.bean"] += f"2000-01-01 open Assets:New{step}\n"
+            else:
+                body[month] = []
+            count = sync()
+            with self.count_parses() as parsed:
+                self.assert_same_as_beancount(root)
+            hits += count - len(parsed.call_args_list)
+        return hits

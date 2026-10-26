@@ -239,6 +239,25 @@ final class LocalCanonicalStreamCacheTests: XCTestCase {
             for: ledger.appendingPathComponent("imports/0003/workspace")))
     }
 
+    /// The parse cache is shared the same way: a stage and the generation it
+    /// becomes have the same files, under different directories.
+    func testParseCacheIsSharedByStagesAndGenerations() throws {
+        let ledger = try makeRoot().appendingPathComponent("ledger-id")
+        let generation = ledger.appendingPathComponent("generations/0001/workspace")
+        let stage = ledger.appendingPathComponent("staging/0002/workspace")
+        for directory in [generation, stage] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        let expected = ledger.appendingPathComponent("runtime/parse-cache").resolvingSymlinksInPath().standardizedFileURL
+        for workspace in [generation, stage] {
+            XCTAssertEqual(EmbeddedBeancountValidator.parseCacheDirectory(for: workspace)?
+                .resolvingSymlinksInPath().standardizedFileURL.path, expected.path)
+        }
+        XCTAssertNil(EmbeddedBeancountValidator.parseCacheDirectory(for: ledger))
+        XCTAssertNil(EmbeddedBeancountValidator.parseCacheDirectory(
+            for: ledger.appendingPathComponent("imports/0003/workspace")))
+    }
+
     /// End to end through the bundled runtimes: an invalid ledger is still
     /// rejected with its location, and the published generation reuses the
     /// stream its validation exported.
