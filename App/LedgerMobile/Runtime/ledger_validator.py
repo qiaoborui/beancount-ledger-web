@@ -3,6 +3,7 @@
 The shipped parser and plugins are trusted application code. Imported ledgers
 are data: preflight every parsed include before invoking loader transformations.
 """
+import contextlib
 import functools
 import glob
 import hashlib
@@ -628,7 +629,9 @@ def _load_cache_path(root, entry, files):
 
 
 def _load_with_optional_cache(root, entry, files, log_timings):
-    load = functools.partial(_checkpointed_load, root, _booking_checkpoint_path(root, entry))
+    directory = _parse_cache_directory()
+    load = functools.partial(_checkpointed_load, root, _booking_checkpoint_path(root, entry),
+                             parse_cache=None if directory is None else _ParseCache(root, directory))
     cache_path = _load_cache_path(root, entry, files)
     if cache_path is None:
         # No cache directory offered: keep the original uncached pipeline.
@@ -995,36 +998,437 @@ def _book_with_checkpoint(root, entries, options, file_order, checkpoint_path):
             encoded = _encode_booked([item for item in entries[:end] if isinstance(item, data.Transaction)],
                                      [item for item in booked if isinstance(item, data.Transaction)])
         if encoded is not None:
-            groups = _prefix_transactions_by_file(entries, end, file_order)
-            refreshed = {
-                "runtime": _checkpoint_runtime_identity(),
-                "closing": closing,
-                "booking": booking_key,
-                "order": _prefix_order(root, groups),
-                "files": _prefix_files(root, groups, previous_files, file_digests),
-                # The inventories are serialised now, before the suffix is
-                # booked into them. The encoded transactions hold only
-                # immutable values and are safe to keep as objects.
-                "transactions": encoded,
-                "balances": pickle.dumps(balances, protocol=pickle.HIGHEST_PROTOCOL),
-            }
+            try:
+                groups = _prefix_transactions_by_file(entries, end, file_order)
+                refreshed = {
+                    "runtime": _checkpoint_runtime_identity(),
+                    "closing": closing,
+                    "booking": booking_key,
+                    "order": _prefix_order(root, groups),
+                    "files": _prefix_files(root, groups, previous_files, file_digests),
+                    # The inventories are serialised now, before the suffix is
+                    # booked into them. The encoded transactions hold only
+                    # immutable values and are safe to keep as objects.
+                    "transactions": encoded,
+                    "balances": pickle.dumps(balances, protocol=pickle.HIGHEST_PROTOCOL),
+                }
+            except (ValueError, OSError):
+                # A transaction whose metadata names a file outside the
+                # ledger (`filename:` is ordinary metadata) cannot be keyed;
+                # book it in full every time instead of failing the load.
+                refreshed = None
     book_segment(entries[start:])
     return booked, booking_errors + missing_errors, refreshed
 
 
-def _checkpointed_load(root, checkpoint_path, filename, log_timings, extra_validations, encoding):
-    """loader._load for one file, with booking served by a checkpoint.
+# Per-file parse cache.
+#
+# beancount parses every file of a load on its own: each parse_file call
+# starts a fresh grammar Builder, so a file's (entries, errors, options) are a
+# function of its bytes and of the path the loader opens it by, nothing else.
+# Options and pushed tags never leak into an included file, and the include
+# walk, the duplicate checks and the option aggregation happen in the loader
+# after each parse. So a stored parse of the same bytes, under the same
+# relative path, is a complete substitute for re-parsing the file, as long as
+# every place the parse records the path is rebound to the current directory.
+#
+# Only the meta "filename" values and the options' own "filename" carry the
+# path in a clean parse. The stored form names neither: they are written back
+# on decode. Anything else that would carry the directory (a Document's
+# resolved path, the path quoted in an error message, a path typed into the
+# file) makes the file uncacheable: a store refuses any payload that still
+# contains the workspace path, and any source that contains it. Files with
+# parse errors are never stored; the ledger is not loadable anyway.
+#
+# The entries are not pickled. Unpickling a parse costs about as much as
+# parsing it, because every namedtuple, Decimal and date is rebuilt through
+# Python; instead the immutable values are interned in a table and the
+# entries reference it, in a marshal payload that decodes several times
+# faster than parsing (100k transactions: about 0.5s against 3.5s). Decoded entries share equal immutable values (amounts,
+# dates, cost specs); every metadata dict and list is a fresh object, as
+# booking writes into posting metadata.
+#
+# The key is the file's relative path and bytes, the Python and beancount
+# builds, the parts of the decimal context the parser's arithmetic uses, and
+# PARSE_CACHE_FORMAT. One file per relative path is kept, so the directory
+# holds at most one entry per ledger file and generations and staging trees
+# share it. Bump PARSE_CACHE_FORMAT whenever the payload layout changes.
+PARSE_CACHE_ENVIRONMENT = "LEDGER_PARSE_CACHE_DIR"
+PARSE_CACHE_FORMAT = 1
 
-    Without a checkpoint directory this is exactly beancount's pipeline. With
-    one, the stages are beancount 3.2.3's `_load`, in the same order, with only
-    the booking call replaced.
+
+def _parse_cache_directory():
+    # _parse_recursive below is beancount 3.2.3's, and the payload knows its
+    # directive types; any other version parses every file.
+    if getattr(beancount, "__version__", "") != _CHECKPOINT_BEANCOUNT_VERSION:
+        return None
+    return _owned_directory(os.environ.get(PARSE_CACHE_ENVIRONMENT, "").strip())
+
+
+def _parse_cache_identity():
+    import decimal
+    import sys
+    context = decimal.getcontext()
+    traps = sorted(signal.__name__ for signal, enabled in context.traps.items() if enabled)
+    return repr((PARSE_CACHE_FORMAT, sys.version, getattr(beancount, "__version__", ""),
+                 context.prec, context.rounding, context.Emin, context.Emax, context.capitals,
+                 context.clamp, traps)).encode("utf-8")
+
+
+class _Uncacheable(Exception):
+    pass
+
+
+@functools.lru_cache(maxsize=1)
+def _parse_codec_types():
+    from beancount.core import number, position
+    from beancount.parser import grammar
+    import datetime
+    # Index 0 is the Transaction fast path; 1..11 are the other directives.
+    directives = (data.Transaction, data.Open, data.Close, data.Commodity, data.Pad, data.Balance,
+                  data.Note, data.Event, data.Query, data.Price, data.Document, data.Custom)
+    # Immutable values that can sit in the table.
+    values = (Amount, position.Cost, position.CostSpec, grammar.ValueType)
+    # Singletons the parser returns by identity: number.MISSING, booking
+    # methods, and the dtype of a custom value.
+    constants = (number.MISSING, str, Decimal, bool, int, datetime.date, Amount) + tuple(data.Booking)
+    return directives, values, constants
+
+
+def _encode_parsed(entries, filename):
+    """Return a marshal payload for a clean parse of `filename`, or raise _Uncacheable."""
+    import datetime
+    import marshal
+    directives, values, constants = _parse_codec_types()
+    directive_ids = {kind: index for index, kind in enumerate(directives)}
+    value_ids = {kind: index for index, kind in enumerate(values)}
+    constant_ids = {id(item): index for index, item in enumerate(constants)}
+    table, index = [], {}
+
+    def ref(value):
+        kind = value.__class__
+        if kind is str or kind is int or kind is bool or value is None:
+            spec, key = value, (kind, value)
+        elif id(value) in constant_ids:
+            spec = key = ("C", constant_ids[id(value)])
+        elif kind is Decimal:
+            # By string: equal Decimals with different exponents are distinct.
+            spec = key = ("D", str(value))
+        elif kind is datetime.date:
+            spec = key = ("d", value.toordinal())
+        elif kind is frozenset:
+            spec = key = ("F",) + tuple(ref(item) for item in value)
+        elif kind in value_ids:
+            spec = key = ("T", value_ids[kind]) + tuple(ref(item) for item in value)
+        else:
+            raise _Uncacheable(kind)
+        found = index.get(key)
+        if found is None:
+            found = index[key] = len(table)
+            table.append(spec)
+        return found
+
+    def meta(value):
+        if value is None:
+            return None
+        if value.__class__ is not dict:
+            raise _Uncacheable(type(value))
+        items = list(value.items())
+        if (len(items) >= 2 and items[0] == ("filename", filename) and items[0][1].__class__ is str
+                and items[1][0] == "lineno" and items[1][1].__class__ is int):
+            # The parser's own layout: filename, lineno, then the key-values.
+            out = [items[1][1]]
+            for key, item in items[2:]:
+                out.append(ref(key))
+                out.append(ref(item))
+            return tuple(out)
+        # Anything else is stored as is; a path in it fails the store.
+        out = []
+        for key, item in items:
+            out.append(ref(key))
+            out.append(ref(item))
+        return out
+
+    def field(value):
+        if value.__class__ is list:
+            return [ref(item) for item in value]
+        return ref(value)
+
+    nodes = []
+    for entry in entries:
+        kind = entry.__class__
+        if kind is data.Transaction:
+            if entry.postings.__class__ is not list:
+                raise _Uncacheable(type(entry.postings))
+            postings = []
+            for posting in entry.postings:
+                if posting.__class__ is not data.Posting:
+                    raise _Uncacheable(type(posting))
+                postings.append((meta(posting.meta), ref(posting.account), ref(posting.units),
+                                 ref(posting.cost), ref(posting.price), ref(posting.flag)))
+            nodes.append((0, meta(entry.meta), ref(entry.date), ref(entry.flag), ref(entry.payee),
+                          ref(entry.narration), ref(entry.tags), ref(entry.links), postings))
+        elif kind in directive_ids:
+            nodes.append((directive_ids[kind], meta(entry.meta)) + tuple(field(item) for item in entry[1:]))
+        else:
+            raise _Uncacheable(kind)
+    return marshal.dumps((table, nodes))
+
+
+def _decode_parsed(payload, filename):
+    import datetime
+    import marshal
+    directives, value_types, constants = _parse_codec_types()
+    table, nodes = marshal.loads(payload)
+    values = []
+    append = values.append
+    new = tuple.__new__
+    decimal, from_ordinal = Decimal, datetime.date.fromordinal
+    for spec in table:
+        if spec.__class__ is not tuple:
+            append(spec)
+            continue
+        tag = spec[0]
+        if tag == "D":
+            append(decimal(spec[1]))
+        elif tag == "d":
+            append(from_ordinal(spec[1]))
+        elif tag == "T":
+            append(new(value_types[spec[1]], [values[item] for item in spec[2:]]))
+        elif tag == "F":
+            append(frozenset([values[item] for item in spec[1:]]))
+        elif tag == "C":
+            append(constants[spec[1]])
+        else:
+            raise ValueError("unknown parse cache value")
+
+    def meta(encoded):
+        if encoded is None:
+            return None
+        if encoded.__class__ is tuple:
+            result = {"filename": filename, "lineno": encoded[0]}
+            for position in range(1, len(encoded), 2):
+                result[values[encoded[position]]] = values[encoded[position + 1]]
+            return result
+        result = {}
+        for position in range(0, len(encoded), 2):
+            result[values[encoded[position]]] = values[encoded[position + 1]]
+        return result
+
+    transaction, posting = data.Transaction, data.Posting
+    entries = []
+    add = entries.append
+    for node in nodes:
+        if node[0] == 0:
+            _, encoded, day, flag, payee, narration, tags, links, postings = node
+            add(new(transaction, (meta(encoded), values[day], values[flag], values[payee], values[narration],
+                                  values[tags], values[links],
+                                  [new(posting, (values[account], values[units], values[cost], values[price],
+                                                 values[posting_flag], meta(posting_meta)))
+                                   for posting_meta, account, units, cost, price, posting_flag in postings])))
+        else:
+            fields = [meta(node[1])]
+            for item in node[2:]:
+                fields.append([values[value] for value in item] if item.__class__ is list else values[item])
+            add(new(directives[node[0]], fields))
+    return entries
+
+
+class _ParseCache:
+    """parser.parse_file for files under `root`, served from `directory`."""
+
+    def __init__(self, root, directory):
+        self.root = root
+        self.directory = directory
+        self.identity = _parse_cache_identity()
+        self.root_bytes = os.fsencode(str(root))
+
+    def parse_file(self, filename, encoding=None):
+        if encoding is not None:
+            return parser.parse_file(filename, encoding=encoding)
+        try:
+            relative = Path(filename).relative_to(self.root).as_posix()
+            content = Path(filename).read_bytes()
+        except (ValueError, OSError):
+            return parser.parse_file(filename, encoding=encoding)
+        key = hashlib.sha256(self.identity + b"\0" + relative.encode("utf-8") + b"\0"
+                             + hashlib.sha256(content).digest()).hexdigest()
+        path = self.directory / (hashlib.sha256(relative.encode("utf-8")).hexdigest()[:32] + ".parse")
+        stored = self._read(path, key, filename)
+        if stored is not None:
+            return stored
+        result = parser.parse_file(filename, encoding=encoding)
+        self._write(path, key, filename, content, result)
+        return result
+
+    def _read(self, path, key, filename):
+        import pickle
+        try:
+            with open(path, "rb") as handle:
+                stored = pickle.load(handle)
+            if not isinstance(stored, dict) or stored.get("key") != key:
+                return None
+            options = pickle.loads(stored["options"])
+            options["filename"] = filename
+            entries = _decode_parsed(stored["entries"], filename)
+        except Exception:
+            # Missing, truncated or written by something else: parse instead.
+            return None
+        return entries, [], options
+
+    def _write(self, path, key, filename, content, result):
+        import pickle
+        entries, errors, options = result
+        if errors or self.root_bytes in content or options.get("filename") != filename:
+            return
+        try:
+            payload = _encode_parsed(entries, filename)
+            stored_options = dict(options)
+            stored_options["filename"] = None
+            stored_options = pickle.dumps(stored_options, protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception:
+            # _Uncacheable, or options that do not pickle: parse it every time.
+            return
+        if self.root_bytes in payload or self.root_bytes in stored_options:
+            return
+        try:
+            # The parse read the file again; store only if it read these bytes.
+            if Path(filename).read_bytes() != content:
+                return
+        except OSError:
+            return
+        stored = {"key": key, "options": stored_options, "entries": payload}
+        temporary = path.with_name(path.name + ".tmp")
+        try:
+            with open(temporary, "wb") as handle:
+                pickle.dump(stored, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(temporary, path)
+        except OSError:
+            temporary.unlink(missing_ok=True)
+
+
+@contextlib.contextmanager
+def _collection_paused():
+    """Hold off the cyclic garbage collector.
+
+    Parsing and decoding allocate hundreds of thousands of acyclic objects; on
+    a large ledger the collector's repeated scans of them cost more than the
+    decode itself. Nothing here creates garbage cycles, and the collector
+    resumes, unchanged, as soon as the block ends.
     """
-    if checkpoint_path is None:
+    import gc
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def _parse_recursive(sources, log_timings, encoding, parse_file):
+    """beancount 3.2.3's loader._parse_recursive with parse_file injected.
+
+    Statement for statement the same as the original, so the include walk,
+    duplicate and missing-file errors, option aggregation and the order of the
+    entries are beancount's own; only the parser.parse_file call goes through
+    `parse_file`.
+    """
+    import itertools
+    from os import path
+    from beancount.parser import options as beancount_options
+    from beancount.utils import encryption, misc_utils
+    assert isinstance(sources, list) and all(isinstance(el, tuple) for el in sources)
+    entries = []
+    parse_errors = []
+    options_map = None
+    other_options_map = []
+    source_stack = list(sources)
+    filenames_seen = set()
+    with misc_utils.log_time("beancount.parser.parser", log_timings, indent=1):
+        while source_stack:
+            source, is_file = source_stack.pop(0)
+            is_top_level = options_map is None
+            if is_file:
+                cwd = path.dirname(source)
+                source_filename = source
+                if encryption.is_encrypted_file(source):
+                    source = encryption.read_encrypted_file(source)
+                    is_file = False
+            else:
+                cwd = os.getcwd()
+                source_filename = None
+            if is_file:
+                assert path.isabs(source)
+                filename = path.normpath(source)
+                if filename in filenames_seen:
+                    parse_errors.append(loader.LoadError(
+                        data.new_metadata("<load>", 0), 'Duplicate filename parsed: "{}"'.format(filename)))
+                    continue
+                if not path.exists(filename):
+                    parse_errors.append(loader.LoadError(
+                        data.new_metadata("<load>", 0), 'File "{}" does not exist'.format(filename)))
+                    continue
+                filenames_seen.add(filename)
+                with misc_utils.log_time("beancount.parser.parser.parse_file", log_timings, indent=2):
+                    (src_entries, src_errors, src_options_map) = parse_file(filename, encoding=encoding)
+                cwd = path.dirname(filename)
+            else:
+                if encoding:
+                    if isinstance(source, bytes):
+                        source = source.decode(encoding)
+                    source = source.encode("ascii", "replace")
+                with misc_utils.log_time("beancount.parser.parser.parse_string", log_timings, indent=2):
+                    (src_entries, src_errors, src_options_map) = parser.parse_string(source, source_filename)
+            entries.extend(src_entries)
+            parse_errors.extend(src_errors)
+            if is_top_level:
+                options_map = src_options_map
+            else:
+                other_options_map.append(src_options_map)
+            include_expanded = []
+            for include_filename in src_options_map["include"]:
+                search_path = include_filename
+                if not os.path.isabs(include_filename):
+                    search_path = os.path.join(cwd, include_filename)
+                matched_filenames = glob.glob(search_path, recursive=True)
+                if matched_filenames:
+                    include_expanded.extend(matched_filenames)
+                else:
+                    parse_errors.append(loader.LoadError(
+                        data.new_metadata("<load>", 0),
+                        'File glob "{}" does not match any files'.format(include_filename)))
+            for include_filename in include_expanded:
+                if not path.isabs(include_filename):
+                    include_filename = path.join(cwd, include_filename)
+                include_filename = path.normpath(include_filename)
+                source_stack.append((include_filename, True))
+    if options_map is None:
+        options_map = beancount_options.OPTIONS_DEFAULTS.copy()
+    options_map["include"] = sorted(filenames_seen)
+    options_map = loader.aggregate_options_map(options_map, other_options_map)
+    return entries, parse_errors, options_map
+
+
+def _checkpointed_load(root, checkpoint_path, filename, log_timings, extra_validations, encoding,
+                       parse_cache=None):
+    """loader._load for one file, with parsing and booking served from caches.
+
+    Without a checkpoint directory or a parse cache this is exactly beancount's
+    pipeline. With either, the stages are beancount 3.2.3's `_load`, in the
+    same order, with only the per-file parse and the booking call replaced.
+    """
+    if checkpoint_path is None and parse_cache is None:
         return loader._uncached_load_file(filename, log_timings, extra_validations, encoding)
     import sys
     from beancount.utils import misc_utils
     with misc_utils.log_time("parse", log_timings, indent=1):
-        entries, parse_errors, options = loader._parse_recursive([(filename, True)], log_timings, encoding)
+        if parse_cache is None:
+            entries, parse_errors, options = loader._parse_recursive([(filename, True)], log_timings, encoding)
+        else:
+            with _collection_paused():
+                entries, parse_errors, options = _parse_recursive(
+                    [(filename, True)], log_timings, encoding, parse_cache.parse_file)
         # Files are parsed into contiguous runs; their order is the stable-sort
         # tie-break the prefix order has to reproduce.
         file_order, last = [], None
@@ -1035,8 +1439,12 @@ def _checkpointed_load(root, checkpoint_path, filename, log_timings, extra_valid
                 last = name
         entries.sort(key=data.entry_sortkey)
     with misc_utils.log_time("booking", log_timings, indent=1):
-        entries, balance_errors, refreshed = _book_with_checkpoint(
-            root, entries, options, list(dict.fromkeys(file_order)), checkpoint_path)
+        if checkpoint_path is None:
+            entries, balance_errors = booking.book(entries, options)
+            refreshed = None
+        else:
+            entries, balance_errors, refreshed = _book_with_checkpoint(
+                root, entries, options, list(dict.fromkeys(file_order)), checkpoint_path)
         parse_errors.extend(balance_errors)
     with misc_utils.log_time("run_transformations", log_timings, indent=1):
         saved_pythonpath = list(sys.path)

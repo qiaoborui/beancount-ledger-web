@@ -66,6 +66,7 @@ actor EmbeddedBeancountValidator {
             _ = unsetenv(loaderCacheRuntimeEnvironment)
         }
         prepareBookingCheckpoint(workspace: workspace)
+        prepareParseCache(workspace: workspace)
         #endif
     }
 
@@ -109,6 +110,30 @@ actor EmbeddedBeancountValidator {
         return ledger
     }
 
+    /// Points the Python loader at the ledger's per-file parse cache: each
+    /// file's parse, keyed by its relative path and bytes, so a load parses
+    /// only the files that changed. Like the booking checkpoint it is shared
+    /// by stages and generations (paths are rebound to the loading tree) and
+    /// is keyed by the Python and Beancount builds, not by the app build.
+    static func prepareParseCache(workspace: URL) {
+        #if canImport(Darwin)
+        if let directory = parseCacheDirectory(for: workspace),
+           (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil {
+            _ = setenv(parseCacheEnvironment, directory.path, 1)
+        } else {
+            _ = unsetenv(parseCacheEnvironment)
+        }
+        #endif
+    }
+
+    /// `<ledger>/runtime/parse-cache` for
+    /// `<ledger>/{generations,staging}/<id>/workspace`, nil for every other layout.
+    static func parseCacheDirectory(for workspace: URL) -> URL? {
+        guard let ledger = ledgerRoot(for: workspace, containers: ["generations", "staging"]) else { return nil }
+        return ledger.appendingPathComponent("runtime", isDirectory: true)
+            .appendingPathComponent("parse-cache", isDirectory: true)
+    }
+
     /// `<ledger>/runtime/loader-cache` for `<ledger>/generations/<id>/workspace`,
     /// nil for every other layout.
     static func loaderCacheDirectory(for workspace: URL) -> URL? {
@@ -120,6 +145,7 @@ actor EmbeddedBeancountValidator {
     static let loaderCacheEnvironment = "LEDGER_LOAD_CACHE_DIR"
     static let loaderCacheRuntimeEnvironment = "LEDGER_LOAD_CACHE_RUNTIME"
     static let bookingCheckpointEnvironment = "LEDGER_BOOKING_CHECKPOINT_DIR"
+    static let parseCacheEnvironment = "LEDGER_PARSE_CACHE_DIR"
 
     func validate(workspace: URL, entryFile: String = "main.bean") throws {
         _ = try load(workspace: workspace, entryFile: entryFile, includeCanonical: false)
