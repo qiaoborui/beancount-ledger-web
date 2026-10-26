@@ -95,6 +95,12 @@ class PrivateIPATests(unittest.TestCase):
             script.index("version_file_dirty=0"),
             script.index("version_file_dirty=1"),
             "the dirty flag must be armed after the write, not before")
+        # A finished IPA carries the new number, so success must disarm the
+        # trap; otherwise the bump is rolled back and the next package reuses it.
+        self.assertGreater(
+            script.rindex("version_file_dirty=0"),
+            script.index('unzip -tq "$output_dir/$ipa_name"'),
+            "the bump must survive once the IPA is written")
         # CI no longer offsets by the run number: the increment covers every
         # package, local or hosted.
         self.assertNotIn("GITHUB_RUN_NUMBER", script)

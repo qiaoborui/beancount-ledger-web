@@ -178,6 +178,9 @@ build="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")"
 ipa_name="LedgerMobile-${version}-${build}-SideStore.ipa"
 ditto -c -k --norsrc --keepParent "$build_dir/Payload" "$output_dir/$ipa_name"
 unzip -tq "$output_dir/$ipa_name"
+# The IPA now carries this build number, so keep the bump for the caller to
+# commit; the exit trap only rolls it back when packaging fails.
+version_file_dirty=0
 cd "$output_dir"
 shasum -a 256 "$ipa_name" > "$ipa_name.sha256"
 {
