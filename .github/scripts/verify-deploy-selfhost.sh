@@ -154,7 +154,7 @@ done
 
 for required in \
   'name: Gate' \
-  'needs: [plan, go, agent, web, ios]' \
+  'needs: [plan, go, agent, web, ios, ios-runtime]' \
   'Require every planned check to pass'; do
   if ! grep -Fq "$required" "$ci"; then
     echo "CI is missing its stable gate: ${required}" >&2

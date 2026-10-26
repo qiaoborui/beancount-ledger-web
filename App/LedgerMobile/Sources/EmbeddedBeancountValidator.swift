@@ -65,24 +65,61 @@ actor EmbeddedBeancountValidator {
             _ = unsetenv(loaderCacheEnvironment)
             _ = unsetenv(loaderCacheRuntimeEnvironment)
         }
+        prepareBookingCheckpoint(workspace: workspace)
         #endif
+    }
+
+    /// Points the Python loader at the ledger's closed-period booking
+    /// checkpoint: the booked transactions and lot inventories before a
+    /// closing date two months back, so a load books only the open months.
+    /// Plugins and every validation still run over the whole ledger.
+    ///
+    /// Unlike the pickle cache this is offered to staging trees too: a write's
+    /// preview is exactly the load it is meant to speed up, and the checkpoint
+    /// is keyed by the closed transactions' content, not by a source version or
+    /// directory, so the stage and the generation it becomes share one file.
+    /// It is not keyed by the app build either; Python checks its own runtime
+    /// (Python and Beancount versions), so an app update keeps the checkpoint.
+    static func prepareBookingCheckpoint(workspace: URL) {
+        #if canImport(Darwin)
+        if let directory = bookingCheckpointDirectory(for: workspace),
+           (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil {
+            _ = setenv(bookingCheckpointEnvironment, directory.path, 1)
+        } else {
+            _ = unsetenv(bookingCheckpointEnvironment)
+        }
+        #endif
+    }
+
+    /// `<ledger>/runtime/booking-checkpoint` for
+    /// `<ledger>/{generations,staging}/<id>/workspace`, nil for every other layout.
+    static func bookingCheckpointDirectory(for workspace: URL) -> URL? {
+        guard let ledger = ledgerRoot(for: workspace, containers: ["generations", "staging"]) else { return nil }
+        return ledger.appendingPathComponent("runtime", isDirectory: true)
+            .appendingPathComponent("booking-checkpoint", isDirectory: true)
+    }
+
+    private static func ledgerRoot(for workspace: URL, containers: Set<String>) -> URL? {
+        let workspace = workspace.resolvingSymlinksInPath().standardizedFileURL
+        let generation = workspace.deletingLastPathComponent()
+        let container = generation.deletingLastPathComponent()
+        let ledger = container.deletingLastPathComponent()
+        guard workspace.lastPathComponent == "workspace", containers.contains(container.lastPathComponent),
+              !generation.lastPathComponent.isEmpty, ledger.path != "/", !ledger.path.isEmpty else { return nil }
+        return ledger
     }
 
     /// `<ledger>/runtime/loader-cache` for `<ledger>/generations/<id>/workspace`,
     /// nil for every other layout.
     static func loaderCacheDirectory(for workspace: URL) -> URL? {
-        let workspace = workspace.resolvingSymlinksInPath().standardizedFileURL
-        let generation = workspace.deletingLastPathComponent()
-        let container = generation.deletingLastPathComponent()
-        let ledger = container.deletingLastPathComponent()
-        guard workspace.lastPathComponent == "workspace", container.lastPathComponent == "generations",
-              !generation.lastPathComponent.isEmpty, ledger.path != "/", !ledger.path.isEmpty else { return nil }
+        guard let ledger = ledgerRoot(for: workspace, containers: ["generations"]) else { return nil }
         return ledger.appendingPathComponent("runtime", isDirectory: true)
             .appendingPathComponent("loader-cache", isDirectory: true)
     }
 
     static let loaderCacheEnvironment = "LEDGER_LOAD_CACHE_DIR"
     static let loaderCacheRuntimeEnvironment = "LEDGER_LOAD_CACHE_RUNTIME"
+    static let bookingCheckpointEnvironment = "LEDGER_BOOKING_CHECKPOINT_DIR"
 
     func validate(workspace: URL, entryFile: String = "main.bean") throws {
         _ = try load(workspace: workspace, entryFile: entryFile, includeCanonical: false)

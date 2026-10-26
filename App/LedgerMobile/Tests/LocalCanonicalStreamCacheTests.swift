@@ -220,6 +220,25 @@ final class LocalCanonicalStreamCacheTests: XCTestCase {
         XCTAssertNil(EmbeddedBeancountValidator.loaderCacheDirectory(for: ledger))
     }
 
+    /// The booking checkpoint is shared by a ledger's stages and generations,
+    /// because a write's preview validates the stage.
+    func testBookingCheckpointIsSharedByStagesAndGenerations() throws {
+        let ledger = try makeRoot().appendingPathComponent("ledger-id")
+        let generation = ledger.appendingPathComponent("generations/0001/workspace")
+        let stage = ledger.appendingPathComponent("staging/0002/workspace")
+        for directory in [generation, stage] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        let expected = ledger.appendingPathComponent("runtime/booking-checkpoint").resolvingSymlinksInPath().standardizedFileURL
+        for workspace in [generation, stage] {
+            XCTAssertEqual(EmbeddedBeancountValidator.bookingCheckpointDirectory(for: workspace)?
+                .resolvingSymlinksInPath().standardizedFileURL.path, expected.path)
+        }
+        XCTAssertNil(EmbeddedBeancountValidator.bookingCheckpointDirectory(for: ledger))
+        XCTAssertNil(EmbeddedBeancountValidator.bookingCheckpointDirectory(
+            for: ledger.appendingPathComponent("imports/0003/workspace")))
+    }
+
     /// End to end through the bundled runtimes: an invalid ledger is still
     /// rejected with its location, and the published generation reuses the
     /// stream its validation exported.

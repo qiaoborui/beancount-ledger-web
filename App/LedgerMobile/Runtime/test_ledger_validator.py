@@ -1,7 +1,11 @@
+import contextlib
+import datetime
 import json
 import os
 import hashlib
 import pathlib
+import random
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -765,3 +769,413 @@ class LoadCacheTests(unittest.TestCase):
         with self.environment(pathlib.Path(self.temporary.name) / "absent"):
             payload = json.loads(validate_only_json(str(self.root)))
         self.assertEqual(payload, {"errors": []})
+
+
+class BookingCheckpointTests(unittest.TestCase):
+    """The checkpointed load must be indistinguishable from beancount's own."""
+
+    TODAY = datetime.date(2026, 10, 15)  # closing date 2026-08-01
+
+    MAIN = '''option "operating_currency" "CNY"
+option "booking_method" "FIFO"
+plugin "beancount.plugins.implicit_prices"
+plugin "beancount.plugins.sellgains"
+include "accounts.bean"
+include "tx/*.bean"
+'''
+    ACCOUNTS = '''2025-01-01 open Assets:Cash CNY
+2025-01-01 open Assets:Savings CNY
+2025-01-01 open Assets:Broker:Cash CNY
+2025-01-01 open Assets:Broker:Stock STK
+2025-01-01 open Assets:Broker:Fund FND "LIFO"
+2025-01-01 open Equity:Opening CNY
+2025-01-01 open Expenses:Food CNY
+2025-01-01 open Expenses:Fees CNY
+2025-01-01 open Income:Gains CNY
+'''
+    CLOSED = '''2025-01-02 pad Assets:Savings Equity:Opening
+2025-01-03 balance Assets:Savings 1000.00 CNY
+2025-02-01 * "Broker" "Buy" #invest ^lot-a
+  memo: "first lot"
+  Assets:Broker:Stock 10 STK {10.00 CNY}
+  Assets:Broker:Cash
+2025-03-01 * "Broker" "Buy again"
+  Assets:Broker:Stock 5 STK {12.00 CNY, "late"}
+  Assets:Broker:Cash -60.00 CNY
+2025-03-02 * "Broker" "Fund"
+  Assets:Broker:Fund 3 FND {100 CNY}
+  Assets:Broker:Fund 2 FND {110 CNY}
+  Assets:Broker:Cash
+2025-04-01 * "Broker" "Sell part of the first lot"
+  Assets:Broker:Stock -4 STK {} @ 15.00 CNY
+  Assets:Broker:Cash 60.00 CNY
+  Income:Gains
+2025-05-01 * "Lunch"
+  Expenses:Food 12.50 CNY
+  Assets:Cash
+2025-06-01 price STK 14.00 CNY
+2025-07-31 * "Fee"
+  Expenses:Fees 1.00 CNY
+  Assets:Broker:Cash
+'''
+    OPEN = '''2026-08-03 * "Broker" "Sell across lots"
+  Assets:Broker:Stock -8 STK {} @ 16.00 CNY
+  Assets:Broker:Cash 128.00 CNY
+  Income:Gains
+2026-08-04 * "Broker" "Fund sell"
+  Assets:Broker:Fund -1 FND {}
+  Assets:Broker:Cash 120 CNY
+  Income:Gains
+2026-09-01 balance Assets:Broker:Stock 3 STK
+2026-10-01 * "Coffee"
+  Expenses:Food 3.00 CNY
+  Assets:Cash
+'''
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        base = pathlib.Path(self.temporary.name).resolve()
+        self.root = base / "generations" / "a" / "workspace"
+        self.checkpoints = base / "checkpoints"
+        self.checkpoints.mkdir()
+        self.write(self.root, {"main.bean": self.MAIN, "accounts.bean": self.ACCOUNTS,
+                               "tx/2025.bean": self.CLOSED, "tx/2026.bean": self.OPEN})
+        patcher = mock.patch.object(ledger_validator, "_today", lambda: self.TODAY)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    @staticmethod
+    def write(root, files):
+        for name, text in files.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+
+    def checkpoint_path(self, root=None):
+        root = root or self.root
+        with mock.patch.dict("os.environ", {ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT: str(self.checkpoints)}):
+            return ledger_validator._booking_checkpoint_path(root, root / "main.bean")
+
+    def load(self, root=None, *, checkpoint=True):
+        root = root or self.root
+        path = self.checkpoint_path(root) if checkpoint else None
+        return ledger_validator._checkpointed_load(
+            root, path, str(root / "main.bean"), None, ledger_validator.validation.HARDCORE_VALIDATIONS, None)
+
+    def assert_same_as_beancount(self, root=None):
+        root = root or self.root
+        expected = ledger_validator.loader._uncached_load_file(
+            str(root / "main.bean"), None, ledger_validator.validation.HARDCORE_VALIDATIONS, None)
+        actual = self.load(root)
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual([(type(e), e.message, e.source) for e in actual[1]],
+                         [(type(e), e.message, e.source) for e in expected[1]])
+        # Metadata order is part of the exported model.
+        for left, right in zip(actual[0], expected[0]):
+            self.assertEqual(list((left.meta or {}).keys()), list((right.meta or {}).keys()))
+            for a, b in zip(getattr(left, "postings", ()), getattr(right, "postings", ())):
+                self.assertEqual(list((a.meta or {}).keys()), list((b.meta or {}).keys()))
+        actual[2].pop("dcontext"), expected[2].pop("dcontext")
+        self.assertEqual(actual[2], expected[2])
+        return actual
+
+    def stored(self, root=None):
+        return ledger_validator._read_checkpoint(self.checkpoint_path(root))
+
+    @contextlib.contextmanager
+    def count_reuse(self):
+        """Yield a mock whose calls are the loads that reused a checkpoint."""
+        reused = mock.Mock()
+        original = ledger_validator._checkpoint_prefix
+
+        def spy(*args):
+            end = original(*args)
+            if end is not None:
+                reused(end)
+            return end
+
+        with mock.patch.object(ledger_validator, "_checkpoint_prefix", spy):
+            yield reused
+
+    def test_first_load_writes_a_checkpoint_and_later_loads_reuse_it(self):
+        self.assertIsNone(self.stored())
+        entries, errors, _ = self.assert_same_as_beancount()
+        self.assertEqual(errors, [])
+        stored = self.stored()
+        self.assertEqual(stored["closing"], datetime.date(2026, 8, 1))
+        self.assertEqual(stored["order"], ["tx/2025.bean"])
+        self.assertEqual(len(stored["transactions"][1]), 6)
+        self.assertEqual(stored["files"]["tx/2025.bean"][2], 6)
+        with self.count_reuse() as decode:
+            self.assert_same_as_beancount()
+        decode.assert_called_once()
+
+    def test_open_period_writes_reuse_the_checkpoint(self):
+        self.load()
+        (self.root / "tx/2026.bean").write_text(self.OPEN + '''2026-10-01 * "Dinner"
+  Expenses:Food 30.00 CNY
+  Assets:Cash
+''')
+        with self.count_reuse() as decode:
+            self.assert_same_as_beancount()
+        decode.assert_called_once()
+
+    def test_open_period_errors_against_closed_lots_match_beancount(self):
+        self.load()
+        # Only 3 STK remain after the closed and open sales.
+        (self.root / "tx/2026.bean").write_text(self.OPEN + '''2026-10-02 * "Broker" "Oversell"
+  Assets:Broker:Stock -5 STK {}
+  Assets:Broker:Cash 80.00 CNY
+  Income:Gains
+2026-10-03 balance Assets:Broker:Cash 1 CNY
+''')
+        with self.count_reuse() as decode:
+            _, errors, _ = self.assert_same_as_beancount()
+        decode.assert_called_once()
+        self.assertTrue(errors)
+
+    def test_closed_period_edits_fall_back_to_full_booking(self):
+        self.load()
+        for closed in (self.CLOSED.replace("12.50", "13.50"),
+                       self.CLOSED.replace('  memo: "first lot"\n', ""),
+                       self.CLOSED.replace("#invest", "#invest #more"),
+                       "\n" + self.CLOSED,
+                       self.CLOSED.replace("-4 STK", "-40 STK")):
+            with self.subTest(closed=closed[:40]):
+                (self.root / "tx/2025.bean").write_text(closed)
+                with self.count_reuse() as decode:
+                    self.assert_same_as_beancount()
+                decode.assert_not_called()
+
+    def test_closed_non_transactions_are_still_checked_in_full(self):
+        self.load()
+        # Balances, pads and prices are not part of the checkpoint key: they are
+        # never stored and always come from the fresh parse.
+        (self.root / "tx/2025.bean").write_text(self.CLOSED + "2025-07-31 balance Assets:Savings 999.00 CNY\n")
+        with self.count_reuse() as decode:
+            _, errors, _ = self.assert_same_as_beancount()
+        decode.assert_called_once()
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Balance failed", errors[0].message)
+
+    def test_booking_options_and_methods_are_part_of_the_key(self):
+        self.load()
+        for name, text in (("main.bean", self.MAIN.replace('"FIFO"', '"LIFO"')),
+                           ("main.bean", self.MAIN + 'option "inferred_tolerance_default" "CNY:0.1"\n'),
+                           ("accounts.bean", self.ACCOUNTS.replace('FND "LIFO"', 'FND "FIFO"'))):
+            with self.subTest(name=name, text=text[-40:]):
+                original = (self.root / name).read_text()
+                (self.root / name).write_text(text)
+                with self.count_reuse() as decode:
+                    self.assert_same_as_beancount()
+                decode.assert_not_called()
+                (self.root / name).write_text(original)
+                self.load()
+
+    def test_a_new_generation_directory_reuses_the_checkpoint(self):
+        self.load()
+        other = self.root.parents[1] / "b" / "workspace"
+        shutil.copytree(self.root, other)
+        with self.count_reuse() as decode:
+            self.assert_same_as_beancount(other)
+        decode.assert_called_once()
+        # The exported stream of the new directory is byte-identical to the
+        # one beancount's own pipeline produces for it.
+        output = pathlib.Path(self.temporary.name).resolve() / "out"
+        output.mkdir()
+        streams = []
+        for index, environment in enumerate(({}, {ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT: str(self.checkpoints)})):
+            with mock.patch.dict("os.environ", environment):
+                if not environment:
+                    os.environ.pop(ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT, None)
+                target = output / f"{index}.records"
+                reply = json.loads(ledger_validator.export_canonical_json(str(other), "main.bean", str(target)))
+                self.assertEqual(reply["errors"], [])
+                streams.append(target.read_bytes())
+        self.assertEqual(streams[0], streams[1])
+
+    def test_new_open_period_files_do_not_invalidate(self):
+        self.load()
+        (self.root / "tx/2026-10.bean").write_text('2026-10-05 * "Lunch"\n  Expenses:Food 8 CNY\n  Assets:Cash\n')
+        with self.count_reuse() as decode:
+            self.assert_same_as_beancount()
+        decode.assert_called_once()
+
+    def test_closing_date_moves_forward_from_the_previous_checkpoint(self):
+        self.load()
+        (self.root / "tx/2026.bean").write_text(self.OPEN + '2026-11-02 * "Lunch"\n  Expenses:Food 8 CNY\n  Assets:Cash\n')
+        with mock.patch.object(ledger_validator, "_today", lambda: datetime.date(2026, 11, 20)):
+            with self.count_reuse() as decode:
+                self.assert_same_as_beancount()
+            decode.assert_called_once()
+            stored = self.stored()
+            self.assertEqual(stored["closing"], datetime.date(2026, 9, 1))
+            self.assertEqual(stored["order"], ["tx/2025.bean", "tx/2026.bean"])
+            with self.count_reuse() as decode:
+                self.assert_same_as_beancount()
+            decode.assert_called_once()
+
+    def test_a_stale_ledger_keeps_its_last_months_open(self):
+        with mock.patch.object(ledger_validator, "_today", lambda: datetime.date(2030, 1, 1)):
+            self.load()
+        self.assertEqual(self.stored()["closing"], datetime.date(2026, 8, 1))
+
+    def test_closed_period_errors_are_never_checkpointed(self):
+        (self.root / "tx/2025.bean").write_text(self.CLOSED.replace("-4 STK", "-40 STK"))
+        _, errors, _ = self.assert_same_as_beancount()
+        self.assertTrue(errors)
+        self.assertIsNone(self.stored())
+
+    def test_an_invalid_ledger_never_replaces_the_checkpoint(self):
+        self.load()
+        before = self.checkpoint_path().read_bytes()
+        (self.root / "tx/2025.bean").write_text(self.CLOSED.replace("12.50", "13.50") + "2025-07-31 balance Assets:Cash 1 CNY\n")
+        _, errors, _ = self.assert_same_as_beancount()
+        self.assertTrue(errors)
+        self.assertEqual(self.checkpoint_path().read_bytes(), before)
+
+    def test_unreadable_or_foreign_checkpoints_are_ignored(self):
+        self.load()
+        path = self.checkpoint_path()
+        for content in (b"", b"not a pickle", __import__("pickle").dumps({"runtime": "other"}),
+                        __import__("pickle").dumps({"runtime": ledger_validator._checkpoint_runtime_identity()})):
+            with self.subTest(content=content[:20]):
+                path.write_bytes(content)
+                self.assert_same_as_beancount()
+
+    def test_checkpoint_is_off_without_an_owned_directory(self):
+        with mock.patch.dict("os.environ", {}, clear=False):
+            os.environ.pop(ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT, None)
+            self.assertIsNone(ledger_validator._booking_checkpoint_path(self.root, self.root / "main.bean"))
+        link = pathlib.Path(self.temporary.name) / "link"
+        link.symlink_to(self.checkpoints)
+        with mock.patch.dict("os.environ", {ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT: str(link)}):
+            self.assertIsNone(ledger_validator._booking_checkpoint_path(self.root, self.root / "main.bean"))
+        with mock.patch.object(ledger_validator.beancount, "__version__", "3.3.0"):
+            self.assertIsNone(self.checkpoint_path())
+
+    def test_validation_entrypoints_use_the_checkpoint_directory(self):
+        with mock.patch.dict("os.environ", {ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT: str(self.checkpoints)}):
+            first = json.loads(validate_json(str(self.root)))
+            with self.count_reuse() as decode:
+                second = json.loads(validate_json(str(self.root)))
+            decode.assert_called_once()
+        os.environ.pop(ledger_validator.BOOKING_CHECKPOINT_ENVIRONMENT, None)
+        self.assertEqual(first, json.loads(validate_json(str(self.root))))
+        self.assertEqual(first, second)
+
+    def test_booking_reads_only_the_options_in_the_key(self):
+        # If a beancount upgrade makes booking read another option, the
+        # checkpoint key has to grow with it.
+        read = set()
+
+        class Recording(dict):
+            def __getitem__(self, key):
+                read.add(key)
+                return super().__getitem__(key)
+
+            def get(self, key, default=None):
+                read.add(key)
+                return super().get(key, default)
+
+        for precise in ("FALSE", "TRUE"):
+            text = (self.MAIN + f'option "use_precise_interpolation" "{precise}"\n'
+                    + 'option "infer_tolerance_from_cost" "TRUE"\n' + self.ACCOUNTS + self.CLOSED + self.OPEN)
+            text = text.replace('include "accounts.bean"\ninclude "tx/*.bean"\n', "")
+            entries, _, options = ledger_validator.parser.parse_string(text)
+            entries.sort(key=ledger_validator.data.entry_sortkey)
+            ledger_validator.booking.book(entries, Recording(options))
+        self.assertLessEqual(read, set(ledger_validator._BOOKING_OPTIONS))
+        self.assertIn("booking_method", read)
+
+    def test_random_ledgers_and_edits_match_beancount(self):
+        rng = random.Random(20261026)
+        with self.count_reuse() as reused:
+            for ledger in range(12):
+                with self.subTest(ledger=ledger):
+                    self.run_random_ledger(rng, ledger)
+        # The comparison is only meaningful if many loads took the checkpoint.
+        self.assertGreater(reused.call_count, 30)
+
+    def run_random_ledger(self, rng, ledger):
+        """Grow a mostly valid ledger, then apply random edits; compare each load."""
+        root = pathlib.Path(self.temporary.name).resolve() / "random" / str(ledger) / "workspace"
+        months = [(2025 + m // 12, m % 12 + 1) for m in range(22)]  # 2025-01 .. 2026-10
+        files = {"main.bean": self.MAIN.replace('"FIFO"', rng.choice(['"FIFO"', '"LIFO"', '"HIFO"'])),
+                 "accounts.bean": self.ACCOUNTS}
+        body = {month: [] for month in months}
+        held = {"STK": 0, "FND": 0}
+
+        def expense(stamp):
+            return f'{stamp} * "Shop" "Food"\n  Expenses:Food {rng.randint(1, 900)}.{rng.randint(0, 99):02d} CNY\n  Assets:Cash\n'
+
+        def transaction(stamp):
+            kind = rng.random()
+            if kind < 0.3:
+                return expense(stamp)
+            if kind < 0.5:
+                units = rng.randint(1, 9)
+                held["STK"] += units
+                return (f'{stamp} * "Broker" "Buy" #lot\n  lot: "{rng.randint(1, 99)}"\n'
+                        f'  Assets:Broker:Stock {units} STK {{{rng.randint(5, 30)}.{rng.randint(0, 99):02d} CNY}}\n'
+                        f'  Assets:Broker:Cash\n')
+            if kind < 0.7 and held["STK"]:
+                units, price = rng.randint(1, held["STK"]), rng.randint(5, 40)
+                held["STK"] -= units
+                return (f'{stamp} * "Broker" "Sell"\n  Assets:Broker:Stock -{units} STK {{}} @ {price}.00 CNY\n'
+                        f'  Assets:Broker:Cash {units * price}.00 CNY\n  Income:Gains\n')
+            if kind < 0.8:
+                held["FND"] += 2
+                return (f'{stamp} * "Broker" "Fund"\n  Assets:Broker:Fund 1 FND {{{rng.randint(90, 110)} CNY}}\n'
+                        f'  Assets:Broker:Fund 1 FND {{{rng.randint(90, 110)} CNY}}\n  Assets:Broker:Cash\n')
+            if kind < 0.88 and held["FND"]:
+                held["FND"] -= 1
+                return (f'{stamp} * "Broker" "Fund sell"\n  Assets:Broker:Fund -1 FND {{}}\n'
+                        f'  Assets:Broker:Cash {rng.randint(90, 120)} CNY\n  Income:Gains\n')
+            if kind < 0.94:
+                return f'{stamp} balance Assets:Broker:Stock {held["STK"]} STK\n'
+            return f'{stamp} price STK {rng.randint(5, 40)}.00 CNY\n'
+
+        for year, month in months:
+            for day in sorted(rng.sample(range(1, 29), rng.randint(0, 5))):
+                body[(year, month)].append(transaction(f"{year}-{month:02d}-{day:02d}"))
+
+        def sync():
+            shutil.rmtree(root, ignore_errors=True)
+            rendered = dict(files)
+            for (year, month), items in body.items():
+                if items:
+                    rendered[f"tx/{year}-{month:02d}.bean"] = "".join(items)
+            self.write(root, rendered)
+
+        sync()
+        self.assert_same_as_beancount(root)
+        for step in range(10):
+            action = rng.random()
+            year, month = rng.choice(months[-2:] if action < 0.5 else months)
+            items = body[(year, month)]
+            stamp = f"{year}-{month:02d}-28"
+            if action < 0.4 or not items:
+                items.append(expense(stamp) if rng.random() < 0.6 else transaction(stamp))
+            elif action < 0.5:
+                # Selling more than is held is an error wherever it lands.
+                items.append(f'{stamp} * "Broker" "Oversell"\n  Assets:Broker:Stock -1000 STK {{}}\n'
+                             f'  Assets:Broker:Cash 1 CNY\n  Income:Gains\n')
+            elif action < 0.65:
+                items.insert(rng.randrange(len(items) + 1), expense(f"{year}-{month:02d}-01"))
+            elif action < 0.75:
+                index = rng.randrange(len(items))
+                if '"Food"' in items[index]:
+                    items.pop(index)
+            elif action < 0.9:
+                index = rng.randrange(len(items))
+                items[index] = items[index].replace("\n", '\n  note: "edited"\n', 1)
+            else:
+                files["main.bean"] = files["main.bean"].replace('"FIFO"', '"LIFO"', 1)
+            sync()
+            with mock.patch.object(ledger_validator, "_today",
+                                   lambda: rng.choice([self.TODAY, datetime.date(2026, 11, 3)])):
+                self.assert_same_as_beancount(root)
