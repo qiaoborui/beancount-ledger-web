@@ -189,3 +189,8 @@ shasum -a 256 "$ipa_name" > "$ipa_name.sha256"
   echo 'Distribution: private local use only; public redistribution remains gated'
   cat "$ipa_name.sha256"
 } | tee build-info.txt
+
+# The package exists, so its build number is now taken: keep the bump in
+# project.yml for the caller to commit instead of letting the exit trap undo it.
+version_file_dirty=0
+echo "Commit the CURRENT_PROJECT_VERSION bump to $build_number in App/LedgerMobile/project.yml."
