@@ -95,6 +95,11 @@ class PrivateIPATests(unittest.TestCase):
             script.index("version_file_dirty=0"),
             script.index("version_file_dirty=1"),
             "the dirty flag must be armed after the write, not before")
+        # A finished package keeps its bump: the trap only undoes a failed one.
+        self.assertGreater(
+            script.rindex("version_file_dirty=0"),
+            script.index("tee build-info.txt"),
+            "the dirty flag must be cleared once the IPA is written")
         # CI no longer offsets by the run number: the increment covers every
         # package, local or hosted.
         self.assertNotIn("GITHUB_RUN_NUMBER", script)
