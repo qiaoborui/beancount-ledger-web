@@ -5,8 +5,8 @@ terminal design in [`../ios-terminal/`](../ios-terminal/) — not as a
 replacement, but as an alternative answer to the same product.
 
 - [`index.html`](index.html) — the remaining screens (20 frames, light and dark)
-- [`glass.html`](glass.html) — the iOS 26 Liquid Glass layer: top bar, tab bar,
-  docked action bars and sheets (draft)
+- [`glass.html`](glass.html) — batch 1 with the iOS 26 Liquid Glass control
+  layer (draft)
 - [`splash.html`](splash.html) — the launch animation, drawn on a canvas
 - [`styles.css`](styles.css) — every token and component in this document
 - [`batch1/`](batch1/) — the first batch: overview, transactions, analysis,
@@ -447,22 +447,22 @@ state, and is meant to be read rather than clicked.
 
 ## Liquid Glass (iOS 26)
 
-[`glass.html`](glass.html) adds one material on top of Balanced, in the spirit
-of the Claude iOS app: every control floats over full-bleed content as glass
-circles and capsules. Glass belongs to the **control layer** only; the paper
-underneath keeps every rule above (no cards, no shadows, no accent colour, the
-double rule unchanged). The page opens with an inventory of which surfaces use
-glass.
+[`glass.html`](glass.html) is batch 1 with one material added on top. Every
+frame is taken from [`batch1/index.html`](batch1/index.html) unchanged: the
+page content (settlement blocks, retention bar, category table, recent
+transactions, filters, search) stays exactly as designed. Only the **control
+layer** becomes glass, in the spirit of the Claude iOS app: controls float as
+glass circles and capsules over full-bleed content.
 
-- Top bar: 22pt root title on the paper; at most two capsules on the right
-  (time range; status + actions). Pushed pages use a 44pt glass back circle.
-- Transaction filter: a sticky glass segmented capsule under the top bar.
-- Search: the field moves to the bottom; scope chips are glass.
-- Menus and sheets: system glass. Cancel is a glass circle, confirm is a solid
-  circle. Quick entry uses a floating glass composer.
-- Docked action bars: floating glass panels; the primary button is solid ink.
+- Top bar: the title stays on the paper; the period control is one glass
+  capsule, status and action icons share a second; pushed pages get a 44pt
+  glass back circle.
+- Tab bar (概览 / 流水 / 账户 / 更多): the system glass capsule, floating.
+- Search field and filter segment: glass capsules in their original places.
+- Sheets: system glass shell with inset corners; the reading area stays paper.
+- Docked actions (import review): a floating glass panel; primary stays solid.
 - **No occlusion:** at rest the first content starts below the top bar; the
   scroll content's bottom inset equals the floating stack's height + 12pt, so
   the last row scrolls fully clear. Fixed content never sits under glass.
 - Glass is never tinted. Below iOS 26 (deployment target iOS 17) the app keeps
-  the flat Balanced surfaces and does not imitate glass with material blur.
+  batch 1's flat surfaces and does not imitate glass with material blur.
