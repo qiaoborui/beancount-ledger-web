@@ -26,7 +26,7 @@ push — stay out of scope by design, not as pending work.
 | Currencies | Current, inverse, and CNY-cross rate cards with sparklines, missing-rate warnings, valuation currency per server origin | Read | `CurrencyAnalysisView.swift` |
 | BQL | Multi-statement editor, examples, table/bar/pie/line results, device-local history | Read plus runtime history | `BQLQueryView.swift` |
 | Global search | Search across transactions, accounts, tags, and files with filters | Read | `GlobalSearchView.swift` |
-| Imports | File picker for CSV/XLSX/PDF/ZIP (including encrypted) and EML/HTML, shared-inbox files from the Share Extension, provider detection, duplicate review, per-entry and bulk tagging, confirmation, commit result, channel coverage, archive history | Preview-confirmed write | `NativeImportFlowView.swift`, `ImportHistoryView.swift` |
+| Imports | File picker for CSV/XLSX/PDF/ZIP (including encrypted) and EML/HTML, shared-inbox files from the Share Extension, provider detection, duplicate review, per-entry and bulk tagging, confirmation, commit result, channel coverage, archive history. Parsing starts as soon as a file is picked; the review page opens on the entries that need a decision, and an unfinished review is kept as a per-ledger draft | Preview-confirmed write | `NativeImportFlowView.swift`, `ImportHistoryView.swift`, `ImportReviewQueue.swift` |
 | Import classification (Jev) | Optional two-question account classification with a user-supplied TypeSafe key; suggestions require explicit acceptance | Network opt-in | `ImportClassification*.swift` |
 | Natural-language bookkeeping | One-sentence drafts, edited and confirmed before writing. On-device Chinese rules read amounts (Chinese numerals, 块/毛, thousands separators), currencies, relative dates, several transactions per message, splits, transfers, refunds, income and debts, and match accounts by scored concepts against the ledger's own names; an OpenAI-compatible endpoint the user configures takes over when set, grounded by those readings, with the rules as fallback | Local; network opt-in for the endpoint | `NaturalLanguageBookkeepingView.swift`, `BookkeepingSettings.swift`, `LocalBookkeepingParser.swift`, `BookkeepingAccountMatcher.swift`, `BookkeepingTextAnalysis.swift` |
 | Backup and restore | iCloud Drive (or any folder) snapshots with hash verification, restore into the current ledger or as a new one, daily automatic backup | Local read/write | `LocalLedgerBackup*.swift` |
@@ -70,8 +70,11 @@ finished:
   destinations are user-selectable and reorderable; More stays fixed.
 - iPad uses `NavigationSplitView`; the sidebar lists every destination and keeps
   its visibility across selection changes.
-- BQL, Currencies, Imports, Categories, and Search live in iPhone More and in
-  the iPad sidebar.
+- BQL, Currencies, Imports, and Categories live in iPhone More and in the iPad
+  sidebar.
+- Whole-ledger search is a tab of its own, not a 更多 row. On iOS 26 it uses the
+  tab bar's search role, which the system detaches into a floating button with
+  the field at the bottom; earlier versions get a trailing 搜索 tab item.
 - Financial writes keep the shared preview, canonical workspace validation,
   confirmation, and rollback boundaries. Nothing writes a ledger without
   canonical validation of the whole workspace.
