@@ -472,9 +472,7 @@ final class BalancedScreenshotTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--safe-preview", "--safe-import-flow", "--tab=imports"]
         app.launch()
-        let generate = app.buttons["import-generate-preview"]
-        XCTAssertTrue(generate.waitForExistence(timeout: 10), app.debugDescription)
-        generate.tap()
+        // Picking a file parses it straight away; the summary is the review page.
         let preview = app.descendants(matching: .any)["import-preview-summary"]
         XCTAssertTrue(preview.waitForExistence(timeout: 15), app.debugDescription)
         Thread.sleep(forTimeInterval: 0.8)
@@ -499,9 +497,7 @@ final class BalancedScreenshotTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--safe-preview", "--safe-import-flow", "--tab=imports"]
         app.launch()
-        let generate = app.buttons["import-generate-preview"]
-        XCTAssertTrue(generate.waitForExistence(timeout: 10), app.debugDescription)
-        generate.tap()
+        // Picking a file parses it straight away; the summary is the review page.
         let preview = app.descendants(matching: .any)["import-preview-summary"]
         XCTAssertTrue(preview.waitForExistence(timeout: 15), app.debugDescription)
         Thread.sleep(forTimeInterval: 0.8)
@@ -552,7 +548,10 @@ final class BalancedScreenshotTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--safe-preview", "--safe-import-flow", "--tab=imports"]
         app.launch()
-        XCTAssertTrue(app.descendants(matching: .any)["native-import-preparation"].waitForExistence(timeout: 10), app.debugDescription)
+        // The old preparation step is now the review page's 解析选项 sheet.
+        XCTAssertTrue(app.descendants(matching: .any)["import-preview-summary"].waitForExistence(timeout: 15), app.debugDescription)
+        app.buttons["import-parse-options"].tap()
+        XCTAssertTrue(app.navigationBars["解析选项"].waitForExistence(timeout: 5), app.debugDescription)
         Thread.sleep(forTimeInterval: 1)
         save(app.screenshot(), as: "import-file-picker-light")
         #else
@@ -566,7 +565,10 @@ final class BalancedScreenshotTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--safe-preview", "--safe-import-flow", "--tab=imports"]
         app.launch()
-        XCTAssertTrue(app.descendants(matching: .any)["native-import-preparation"].waitForExistence(timeout: 10), app.debugDescription)
+        // The old preparation step is now the review page's 解析选项 sheet.
+        XCTAssertTrue(app.descendants(matching: .any)["import-preview-summary"].waitForExistence(timeout: 15), app.debugDescription)
+        app.buttons["import-parse-options"].tap()
+        XCTAssertTrue(app.navigationBars["解析选项"].waitForExistence(timeout: 5), app.debugDescription)
         Thread.sleep(forTimeInterval: 1)
         save(app.screenshot(), as: "import-file-picker-dark")
         #else

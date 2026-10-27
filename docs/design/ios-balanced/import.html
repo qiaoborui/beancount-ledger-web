@@ -194,7 +194,7 @@ body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px,
 <p>这一版重新梳理了导入的流程和信息结构，不只是换玻璃。视觉沿用结平第一批（纸面、墨色、只有进出两个方向色、双线结算区）和 Liquid Glass 控件层（顶部栏、筛选分段、弹窗外壳、底部浮层）。原第一批里的「账单导入复核」两帧是这次核对页的起点，结算区、勾选框、→ 账户行、写入按钮都保留。</p>
 <p>新的流程从五步减到三步，绝大多数账单选完文件就直接进入核对：</p>
 <ol class="flow">
-<li><b>选文件或点待处理</b>文件选择、系统分享、Gmail 邮件、上次没核对完的草稿，都从导入首页进入</li>
+<li><b>选文件或点待处理</b>文件选择、系统分享、上次没核对完的草稿，都从导入首页进入</li>
 <li><b>自动解析</b>识别渠道、解析、去重；只有缺密码或认不出渠道时才停下来问</li>
 <li><b>核对</b>先处理待确认的几笔，其余已就绪；批量改标签或分类</li>
 <li><b>写入前确认</b>看总数和 diff，本地引擎校验通过才写入</li>
@@ -204,13 +204,13 @@ body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px,
 <p>每个现有功能在新设计里都有位置，下表右列写明去处。</p>
 <div class="invwrap"><table class="inv">
 <thead><tr><th>页面</th><th>现有元素</th><th>问题</th><th>新设计</th></tr></thead>
-<tbody><tr><td>导入首页（ImportHistoryView）</td><td>智能账单导入卡片 + 格式标签、待导入（分享）、渠道覆盖（折叠）、归档记录</td><td>主按钮在卡片里，滚动后消失；分享来的文件和未完成的核对散落；渠道新鲜度折叠在一行里；Gmail 自动账单区块写好了但没有放进页面，待核对的邮件账单看不到；未完成草稿一进页面就自动弹出</td><td>主操作沉到底部玻璃浮层，随时可点；分享文件、Gmail 账单、未完成核对合并为「待处理」放在最上面；渠道直接列出状态点；Gmail 放回页面</td></tr><tr><td>准备页（preparationView）</td><td>账单文件、渠道选择、压缩包密码、基金补差开关、生成导入预览</td><td>每次都要多点一下「生成导入预览」，而绝大多数文件自动识别就能成功</td><td>选完文件直接解析；只有缺密码或识别失败时才停下来补信息；渠道和补差移到核对页顶部栏的「解析选项」</td></tr><tr><td>核对页（previewView）</td><td>结算区、去重说明、导入详情、智能分类状态、核对提示、批量标签、交易明细（只看待核对 / 全选）、底部写入栏</td><td>上下堆了 6 个区块才看到第一笔交易；智能分类的逐条建议只在调试模式显示；勾选是一套选择、批量标签又是另一套选择；需要处理的交易混在全部里</td><td>结算区保留；去重、提示、详情合成一行可展开；分段筛选「待确认 / 已就绪 / 未勾选 / 全部」，默认停在待确认；建议账户直接在行内一点采纳；批量操作只作用于已勾选的交易</td></tr><tr><td>编辑一笔（ImportEntryEditor）</td><td>商家、标题、日期、状态、来源 / 目标账户及候选概率、金额、标签及建议</td><td>处理完一笔要关掉再点下一笔；参考历史只在调试视图里</td><td>弹窗顶部可上下切换，「保存，下一条」连续处理待确认；参考历史放进弹窗</td></tr><tr><td>写入确认（BookkeepingPreviewView / 系统提示框）</td><td>校验通过、文件 diff、确认保存；远端账本为系统提示框</td><td>diff 之前没有总数，看不出这次一共改了什么</td><td>先给结算区（新增笔数、改动文件、归档），再给 diff</td></tr><tr><td>写入失败 / 待确认</td><td>commitErrorMessage、保存结果待确认 → 重新检查保存结果</td><td>提示文字挤在底部栏一行灰字里</td><td>放进玻璃浮层的状态行，主按钮随状态变成「重试保存」或「重新检查保存结果」</td></tr><tr><td>完成页（completionView）</td><td>成功图标、已写入 N 条、索引进度、归档文件、清理警告、完成</td><td>沿用旧的蓝绿配色和卡片，与结平不一致；完成后没有下一步</td><td>换成结平的双线和结算区；加「整理未分类」和「查看这批流水」两个去处</td></tr></tbody>
+<tbody><tr><td>导入首页（ImportHistoryView）</td><td>智能账单导入卡片 + 格式标签、待导入（分享）、渠道覆盖（折叠）、归档记录</td><td>主按钮在卡片里，滚动后消失；分享来的文件和未完成的核对散落；渠道新鲜度折叠在一行里；未完成草稿一进页面就自动弹出</td><td>主操作沉到底部玻璃浮层，随时可点；分享来的文件和未完成的核对合并为「待处理」放在最上面；渠道直接列出状态点</td></tr><tr><td>准备页（preparationView）</td><td>账单文件、渠道选择、压缩包密码、基金补差开关、生成导入预览</td><td>每次都要多点一下「生成导入预览」，而绝大多数文件自动识别就能成功</td><td>选完文件直接解析；只有缺密码或识别失败时才停下来补信息；渠道和补差移到核对页顶部栏的「解析选项」</td></tr><tr><td>核对页（previewView）</td><td>结算区、去重说明、导入详情、智能分类状态、核对提示、批量标签、交易明细（只看待核对 / 全选）、底部写入栏</td><td>上下堆了 6 个区块才看到第一笔交易；智能分类的逐条建议只在调试模式显示；勾选是一套选择、批量标签又是另一套选择；需要处理的交易混在全部里</td><td>结算区保留；去重、提示、详情合成一行可展开；分段筛选「待确认 / 已就绪 / 未勾选 / 全部」，默认停在待确认；建议账户直接在行内一点采纳；批量操作只作用于已勾选的交易</td></tr><tr><td>编辑一笔（ImportEntryEditor）</td><td>商家、标题、日期、状态、来源 / 目标账户及候选概率、金额、标签及建议</td><td>处理完一笔要关掉再点下一笔；参考历史只在调试视图里</td><td>弹窗顶部可上下切换，「保存，下一条」连续处理待确认；参考历史放进弹窗</td></tr><tr><td>写入确认（BookkeepingPreviewView / 系统提示框）</td><td>校验通过、文件 diff、确认保存；远端账本为系统提示框</td><td>diff 之前没有总数，看不出这次一共改了什么</td><td>先给结算区（新增笔数、改动文件、归档），再给 diff</td></tr><tr><td>写入失败 / 待确认</td><td>commitErrorMessage、保存结果待确认 → 重新检查保存结果</td><td>提示文字挤在底部栏一行灰字里</td><td>放进玻璃浮层的状态行，主按钮随状态变成「重试保存」或「重新检查保存结果」</td></tr><tr><td>完成页（completionView）</td><td>成功图标、已写入 N 条、索引进度、归档文件、清理警告、完成</td><td>沿用旧的蓝绿配色和卡片，与结平不一致；完成后没有下一步</td><td>换成结平的双线和结算区；加「整理未分类」和「查看这批流水」两个去处</td></tr></tbody>
 </table></div>
 </header>
 
 <section class="section">
 <h2>导入首页</h2>
-<p>主按钮固定在底部玻璃浮层，滚动到哪里都能点。最上面是「待处理」：上次没核对完的草稿、从其他 App 分享来的文件、Gmail 收到的账单（可核对、解析中、失败可重试或忽略）合在一个列表里，不再在进入页面时自动弹出草稿。渠道覆盖直接列出每个渠道的状态点，归档记录默认显示最近两条。右上角玻璃按钮收纳 Gmail 连接、立即同步、断开。首次使用时给出各渠道的导出路径。</p>
+<p>主按钮固定在底部玻璃浮层，滚动到哪里都能点。最上面是「待处理」：上次没核对完的草稿和从其他 App 分享来的文件合在一个列表里，不再在进入页面时自动弹出草稿。渠道覆盖直接列出每个渠道的状态点，归档记录默认显示最近两条。首次使用时给出各渠道的导出路径。</p>
 <div class="grid">
 <figure class="screen" id="hub">
 <figcaption>账单导入 <span>浅色 · 有待处理的账单</span></figcaption>
@@ -222,15 +222,12 @@ body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px,
 <svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
 <svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
 </span>
-</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账单导入</h1><span class="g gcap"><button aria-label="Gmail 与导入设置" class="iconbtn" type="button"><svg fill="currentColor" height="19" viewbox="0 0 20 20" width="19"><circle cx="5" cy="10" r="1.5"></circle><circle cx="10" cy="10" r="1.5"></circle><circle cx="15" cy="10" r="1.5"></circle></svg></button></span></div></div>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账单导入</h1></div></div>
 <div class="scroll">
 
-<div class="group">待处理 · 4</div>
+<div class="group">待处理 · 2</div>
 <div class="row "><div class="body"><div class="label">继续核对 · 支付宝 2026-08</div><span class="hint">上次停在核对页 · 25 / 28 笔已勾选 · 3 笔待确认</span></div><span class="value">10:12</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
 <div class="row "><div class="body"><div class="label">微信支付账单(20260801-20260831).xlsx</div><span class="hint">从「文件」分享 · 1.2 MB</span></div><span class="value">核对</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
-<div class="row "><div class="body"><div class="label">招商银行信用卡 8 月账单</div><span class="hint">Gmail · 41 条候选交易</span></div><span class="value">核对</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
-<div class="row"><div class="body"><div class="label">工商银行对账单.pdf</div><span class="hint">Gmail · 服务器正在解析、去重</span></div><span class="value"><span class="spin" aria-label="处理中"></span></span></div>
-<div class="row"><div class="body"><div class="label">京东白条账单</div><span class="hint">Gmail · 附件需要密码，自动解析失败</span></div><span class="value strong">重试</span><span class="value">忽略</span></div>
 <div class="group">渠道 · 1 个建议更新</div>
 <div class="row"><div class="body"><div class="label">支付宝</div><span class="hint num">07-01 至 08-31 · 距今 57 天</span></div><span class="fresh"><i class="v-out-bg"></i>建议更新</span></div>
 <div class="row"><div class="body"><div class="label">微信支付</div><span class="hint num">08-01 至 10-20 · 距今 7 天</span></div><span class="fresh"><i class="v-in-bg"></i>正常</span></div>
@@ -267,8 +264,6 @@ body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px,
 <div class="field-row"><span class="k">微信支付 · XLSX</span><span class="v small">我 → 服务 → 钱包 → 账单 → 下载账单</span></div>
 <div class="field-row"><span class="k">银行流水 · PDF / 压缩包 · ZIP</span><span class="v small">网银导出的对账单；加密压缩包在解析时输入密码</span></div>
 <div class="field-row"><span class="k">Beancount · .bean</span><span class="v small">保留原始分录、注释和元数据，直接追加交易</span></div>
-<div class="group">自动接收</div>
-<div class="row"><div class="body"><div class="label">Gmail 自动账单</div><span class="hint">连接后服务器自动识别账单邮件，仍需在这里核对</span></div><span class="value strong">连接</span></div>
 
 </div>
 <div class="sheet-actions g gdock"><div class="dock-row"><button class="btn primary" type="button">选择账单文件</button></div></div>
@@ -765,7 +760,7 @@ body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px,
 <h2>需要你决定的几处</h2>
 <div class="rules">
 <div><h3>选完文件直接解析</h3><p>省掉准备页这一步。代价是想手动指定渠道时要在核对页的「解析选项」里改，然后重新生成预览。</p></div>
-<div><h3>Gmail 放回页面</h3><p>代码里 Gmail 自动账单的连接、同步、待核对列表都在，但没有放进导入页面。设计稿把它放回「待处理」和右上角菜单。如果服务器没配置 Gmail，这些行不显示。</p></div>
+<div><h3>Gmail 保持关闭</h3><p>本地账本不支持 Gmail 自动账单（这是有意的设置），所以这一版不放回页面。</p></div>
 <div><h3>重复交易只显示说明</h3><p>原第一批设计稿写「取消排除后仍可逐条复核」，但目前预览不返回被跳过的重复行，所以这版只展示去重说明。要能逐条恢复，需要改解析引擎。</p></div>
 <div><h3>完成页的两个去处</h3><p>「整理未分类」打开现有的待整理收件箱；「查看这批流水」需要流水页支持按导入批次筛选，可以第二步再做。</p></div>
 </div>
