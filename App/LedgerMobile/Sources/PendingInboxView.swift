@@ -311,8 +311,7 @@ struct PendingInboxView: View {
         .disabled(filteredItems.isEmpty)
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        .background(BalancedPalette.page)
-        .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+        .ledgerGlassDock()
     }
 
     /// `.band`: 待整理金额 (`--out` — unresolved money), 涉及笔数 (ink), then a

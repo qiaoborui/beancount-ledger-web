@@ -854,8 +854,7 @@ struct NativeImportFlowView: View {
             }
         }
         .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
-        .background(BalancedPalette.page)
-        .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+        .ledgerGlassDock()
     }
 
     private func completionView(_ result: LedgerImportCommitResult) -> some View {
