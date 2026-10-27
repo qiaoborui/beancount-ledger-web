@@ -13,9 +13,9 @@ final class LedgerModelsTests: XCTestCase {
 
     func testSearchAndMoreNeverBecomeOverflowRoutes() {
         for tabs: [LedgerDestination] in [[.overview, .transactions, .accounts], [.assets]] {
-            XCTAssertTrue(LedgerDestination.search.isCompactOverflow(in: tabs))
+            XCTAssertFalse(LedgerDestination.search.isCompactOverflow(in: tabs))
             XCTAssertFalse(LedgerDestination.settings.isCompactOverflow(in: tabs))
-            XCTAssertEqual(LedgerDestination.search.compactSelection(in: tabs), .settings)
+            XCTAssertEqual(LedgerDestination.search.compactSelection(in: tabs), .search)
             XCTAssertTrue(LedgerDestination.imports.isCompactOverflow(in: tabs))
             XCTAssertEqual(LedgerDestination.imports.compactSelection(in: tabs), .settings)
         }

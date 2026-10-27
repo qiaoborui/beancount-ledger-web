@@ -24,9 +24,8 @@ struct MoreView: View {
                     accessibilityIdentifier: "more-analysis-\(kind.rawValue)")
             }} header: { TerminalSectionLabel(text: String(localized: "财务分析")) }
             Section {
-                MoreDestinationButton(destination: .search, detail: String(localized: "搜索整个账本"), accessibilityIdentifier: "more-search")
                 NavigationLink { CategoriesManagementView() } label: {
-                    MoreNavigationRow(index: "02", icon: "tag", title: String(localized: "分类管理"), detail: String(localized: "查看与新增收支分类"))
+                    MoreNavigationRow(index: "01", icon: "tag", title: String(localized: "分类管理"), detail: String(localized: "查看与新增收支分类"))
                 }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).listRowSeparator(.hidden).navigationLinkIndicatorVisibility(.hidden).accessibilityIdentifier("more-categories")
                 MoreDestinationButton(destination: .imports, detail: String(localized: "账单导入与归档"), accessibilityIdentifier: "more-imports")
                 MoreDestinationButton(destination: .currencies, detail: String(localized: "估值货币与汇率"), accessibilityIdentifier: "more-currencies")
@@ -40,11 +39,7 @@ struct MoreView: View {
         .tint(TerminalPalette.accent)
         .font(.subheadline)
         .accessibilityIdentifier("more-list")
-        .terminalPageChrome(String(localized: "更多"), isRoot: true,
-            actions: AnyView(Button { session.primaryDestinationID = LedgerDestination.search.rawValue } label: {
-                Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(TerminalPalette.accent).frame(width: 44, height: 44)
-            }.buttonStyle(.plain).accessibilityLabel("搜索账本").accessibilityIdentifier("more-header-search")), balanced: true)
+        .terminalPageChrome(String(localized: "更多"), isRoot: true, balanced: true)
         .navigationDestination(item: $overflowDestination) { destination in
             LedgerDestinationView(destination: destination)
         }
@@ -86,7 +81,7 @@ private struct MoreDestinationButton: View {
         }.buttonStyle(.plain).listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).listRowSeparator(.hidden).accessibilityIdentifier(accessibilityIdentifier ?? "more-\(destination.rawValue)")
     }
     private var index: String {
-        switch destination { case .overview: "01"; case .transactions: "02"; case .accounts: "03"; case .assets: "01"; case .incomeExpense: "02"; case .investments: "03"; case .search: "01"; case .imports: "03"; case .currencies: "04"; case .query: "05"; case .settings: "00" }
+        switch destination { case .overview: "01"; case .transactions: "02"; case .accounts: "03"; case .assets: "01"; case .incomeExpense: "02"; case .investments: "03"; case .search: "01"; case .imports: "02"; case .currencies: "03"; case .query: "04"; case .settings: "00" }
     }
 }
 

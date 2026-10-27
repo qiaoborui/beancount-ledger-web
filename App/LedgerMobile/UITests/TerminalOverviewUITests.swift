@@ -82,10 +82,8 @@ final class TerminalOverviewUITests: XCTestCase {
         let app = launch()
         XCTAssertTrue(app.buttons["navigation-time-range"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.tabBars.firstMatch.exists)
-        app.tabBars.buttons["更多"].tap()
-        let search = app.buttons["more-search"]
-        for _ in 0..<4 where !search.isHittable { app.swipeUp() }
-        XCTAssertTrue(search.isHittable)
+        let search = app.tabBars.buttons["搜索"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5), app.debugDescription)
         search.tap()
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
         app.tabBars.buttons["概览"].tap()
@@ -95,7 +93,7 @@ final class TerminalOverviewUITests: XCTestCase {
     func testNativeTabsScrollAndSearchNavigation() {
         let app = launch()
         XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertEqual(app.tabBars.buttons.count, 4)
+        XCTAssertEqual(app.tabBars.buttons.count, 5)
         capture("native-tabs-expanded")
         app.swipeUp()
         app.swipeUp()
@@ -106,9 +104,9 @@ final class TerminalOverviewUITests: XCTestCase {
         app.tabBars.buttons["更多"].tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["navigation-time-range"].exists)
-        app.buttons["more-header-search"].tap()
+        app.tabBars.buttons["搜索"].tap()
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
-        XCTAssertEqual(app.tabBars.buttons.count, 4)
+        XCTAssertEqual(app.tabBars.buttons.count, 5)
         capture("native-tabs-search")
     }
 

@@ -492,6 +492,11 @@ private struct MainTabView: View {
             Tab("更多", systemImage: "ellipsis", value: LedgerDestination.settings) {
                 NavigationStack { MoreView(overflowDestination: $moreDestination) }
             }
+            // The search role detaches this tab into its own floating button beside the
+            // tab bar, so search stays one tap away from every root page.
+            Tab("搜索", systemImage: "magnifyingglass", value: LedgerDestination.search, role: .search) {
+                NavigationStack { GlobalSearchTabPage() }
+            }
         }
     }
 
@@ -507,6 +512,9 @@ private struct MainTabView: View {
             NavigationStack { MoreView(overflowDestination: $moreDestination) }
                 .tabItem { Label("更多", systemImage: "ellipsis") }
                 .tag(LedgerDestination.settings)
+            NavigationStack { GlobalSearchPage() }
+                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
+                .tag(LedgerDestination.search)
         }
     }
 }

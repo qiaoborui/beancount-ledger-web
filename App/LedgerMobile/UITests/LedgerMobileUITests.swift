@@ -107,10 +107,8 @@ final class LedgerMobileUITests: XCTestCase {
     }
 
     private func openCompactSearch() {
-        app.tabBars.buttons["更多"].tap()
-        let entry = app.buttons["more-search"]
-        for _ in 0..<5 where !entry.isHittable { app.swipeUp() }
-        XCTAssertTrue(entry.isHittable, app.debugDescription)
+        let entry = app.tabBars.buttons["搜索"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5), app.debugDescription)
         entry.tap()
     }
 

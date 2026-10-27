@@ -27,8 +27,8 @@ Overview, transactions, accounts, and More use compact, continuous system lists;
 settings and editing retain grouped forms. All pages use inline navigation titles.
 Range-scoped pages keep the calendar and current period in the navigation bar.
 The transactions page carries its own search field above the kind filter bar;
-whole-ledger search is its own destination with a native navigation search
-field. Period stepping stays in the date picker until confirmation.
+whole-ledger search is its own trailing search tab on iPhone (on iOS 26 it
+floats as a separate button beside the tab bar) and a sidebar row on iPad. Period stepping stays in the date picker until confirmation.
 Transactions show categories beside notes, with date sections and swipe actions
 for tags and confirmed deletion. Accounts show a category filter bar
 (全部/资金/信用/理财/应收) over expandable groups; keyword search on that page is
