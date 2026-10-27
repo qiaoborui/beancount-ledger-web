@@ -46,9 +46,23 @@ extension View {
             glassEffect(.regular, in: RoundedRectangle(cornerRadius: LedgerGlass.dockRadius, style: .continuous))
                 .padding(.horizontal, margin)
                 .padding(.bottom, margin / 3)
+                // Clear space above the panel joins the scroll inset, so the
+                // last row rests 12pt above the glass instead of touching it.
+                .padding(.top, 12)
         } else {
             background(BalancedPalette.page)
                 .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+        }
+    }
+
+    /// An in-content field (search) as a glass capsule; before iOS 26 the
+    /// Balanced sunken well it replaces.
+    @ViewBuilder
+    func ledgerGlassField() -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            background(BalancedPalette.sunken)
         }
     }
 

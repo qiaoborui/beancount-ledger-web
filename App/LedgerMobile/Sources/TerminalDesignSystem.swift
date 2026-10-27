@@ -98,15 +98,33 @@ struct TerminalPageChrome: ViewModifier {
         actions
     }
 
-    /// On iOS 26 the trailing controls share one glass capsule, the way the
-    /// system groups adjacent toolbar items; earlier systems keep them bare.
+    private var hasIconControls: Bool { showsSyncButton || actions != nil }
+
+    /// On iOS 26 the period control is its own glass capsule and the status
+    /// and action icons share a second one, the way the system groups
+    /// adjacent toolbar items; earlier systems keep them bare.
     @ViewBuilder private var trailingCluster: some View {
         if LedgerGlass.isAvailable {
             if hasTrailingControls {
-                HStack(spacing: 0) { trailingControls }
-                    .padding(.horizontal, 6)
-                    .frame(height: LedgerGlass.controlHeight)
-                    .ledgerGlassControl()
+                LedgerGlassGroup(spacing: 8) {
+                    HStack(spacing: 8) {
+                        if showsTimeRange {
+                            TerminalDateRangeButton().fixedSize(horizontal: true, vertical: false)
+                                .padding(.horizontal, 8)
+                                .frame(height: LedgerGlass.controlHeight)
+                                .ledgerGlassControl()
+                        }
+                        if hasIconControls {
+                            HStack(spacing: 0) {
+                                if showsSyncButton { TerminalSyncButton() }
+                                actions
+                            }
+                            .padding(.horizontal, 2)
+                            .frame(height: LedgerGlass.controlHeight)
+                            .ledgerGlassControl()
+                        }
+                    }
+                }
             } else {
                 // BalancedPushedBarLayout places exactly three subviews.
                 Color.clear.frame(width: 0, height: 0)
