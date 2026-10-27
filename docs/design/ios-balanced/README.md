@@ -7,6 +7,8 @@ replacement, but as an alternative answer to the same product.
 - [`index.html`](index.html) — the remaining screens (20 frames, light and dark)
 - [`glass.html`](glass.html) — batch 1 with the iOS 26 Liquid Glass control
   layer (draft)
+- [`import.html`](import.html) — the bill-import flow, redesigned: import home,
+  parsing, review, batch edit and editor, write and result (14 frames)
 - [`splash.html`](splash.html) — the launch animation, drawn on a canvas
 - [`styles.css`](styles.css) — every token and component in this document
 - [`batch1/`](batch1/) — the first batch: overview, transactions, analysis,
