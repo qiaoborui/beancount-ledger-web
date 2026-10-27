@@ -12,6 +12,18 @@ struct GlobalSearchPage: View {
     }
 }
 
+/// Root of the iOS 26 search tab: the system places the field in the floating tab bar,
+/// and the page draws its own title and scope picker instead of a navigation bar.
+@available(iOS 26.0, *)
+struct GlobalSearchTabPage: View {
+    @EnvironmentObject private var session: LedgerSession
+    var body: some View {
+        GlobalSearchView(query: $session.globalSearchQuery, usesNativeSearchTab: true)
+            .searchable(text: $session.globalSearchQuery, prompt: "搜索整个账本")
+            .onSubmit(of: .search) { session.recordGlobalSearch(session.globalSearchQuery) }
+    }
+}
+
 struct GlobalSearchView: View {
     @EnvironmentObject private var session: LedgerSession
     @Binding var query: String
