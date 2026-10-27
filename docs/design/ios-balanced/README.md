@@ -5,6 +5,8 @@ terminal design in [`../ios-terminal/`](../ios-terminal/) — not as a
 replacement, but as an alternative answer to the same product.
 
 - [`index.html`](index.html) — the remaining screens (20 frames, light and dark)
+- [`glass.html`](glass.html) — the iOS 26 Liquid Glass layer: top bar, tab bar,
+  docked action bars and sheets (draft)
 - [`splash.html`](splash.html) — the launch animation, drawn on a canvas
 - [`styles.css`](styles.css) — every token and component in this document
 - [`batch1/`](batch1/) — the first batch: overview, transactions, analysis,
@@ -440,3 +442,22 @@ The frames are static HTML, not a running app. Interaction is wired only where
 it demonstrates a state that matters: the theme toggle, tab and segment
 selection, checkboxes, and toggles. Everything else is the appearance of a
 state, and is meant to be read rather than clicked.
+
+---
+
+## Liquid Glass (iOS 26)
+
+[`glass.html`](glass.html) adds one material on top of Balanced. Glass belongs
+to the **control layer** only: the top-bar controls, the tab bar, docked action
+panels and the sheet shell. The paper underneath keeps every rule above: no
+cards, no shadows, no accent colour, the double rule unchanged.
+
+- Top bar: the title stays on the paper; trailing controls share one glass
+  capsule (back button is a 44pt glass circle). Content fades under the bar
+  through the system scroll edge effect instead of a page-coloured fill.
+- Docked action bars float as glass panels (radius 26, 12pt side margin); the
+  primary button stays solid ink.
+- Sheets use the system glass shell and navigation bar; cancel is a glass
+  circle, confirm is a prominent (solid) circle.
+- Glass is never tinted. Below iOS 26 (deployment target iOS 17) the app keeps
+  the flat Balanced surfaces and does not imitate glass with material blur.
