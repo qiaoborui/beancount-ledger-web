@@ -45,7 +45,14 @@ final class BookkeepingSettings: ObservableObject {
         guard let key = try keyStore.load() else { throw BookkeepingError.configurationRequired }
         return CompatibleBookkeepingParser(configuration: configuration, apiKey: key)
     }
-    var canParse: Bool {
+    /// The configured semantic service, falling back to the on-device rules
+    /// when none is configured or its answer cannot be verified.
+    func bookkeepingParser() -> any BookkeepingSemanticParser {
+        HybridBookkeepingParser(remote: hasSemanticService ? try? parser() : nil)
+    }
+    /// The on-device rules always parse; this only reports a configured service.
+    var canParse: Bool { true }
+    var hasSemanticService: Bool {
         #if DEBUG
         if usesSyntheticParser { return true }
         #endif

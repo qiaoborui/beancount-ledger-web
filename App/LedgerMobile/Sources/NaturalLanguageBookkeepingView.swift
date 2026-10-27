@@ -68,7 +68,7 @@ struct NaturalLanguageBookkeepingView: View {
             ZStack(alignment: .bottom) {
                 ScrollView {
                     VStack(spacing: LedgerSpacing.lg) {
-                        if !settings.canParse {
+                        if !settings.hasSemanticService {
                             unconfiguredHeroBanner
                         }
 
@@ -200,7 +200,7 @@ struct NaturalLanguageBookkeepingView: View {
                             .font(.system(size: 11, weight: .regular))
                             .foregroundStyle(BalancedPalette.edge)
                     }
-                    Text("支持一键接入 DeepSeek、OpenAI、Moonshot 或硅基流动")
+                    Text("当前使用本地规则解析；接入 DeepSeek、OpenAI、Moonshot 或硅基流动可处理更复杂的描述")
                         .balancedFont(size: 12.5)
                         .foregroundStyle(BalancedPalette.meta)
                 }
@@ -981,7 +981,7 @@ struct NaturalLanguageBookkeepingView: View {
         operation = Task { @MainActor in
             defer { if runID == id { busy = false } }
             do {
-                let parser = try settings.parser()
+                let parser = settings.bookkeepingParser()
                 var result = try await parser.parse(request)
                 try Task.checkCancellation()
                 guard runID == id, input == text, settings.revision == settingsRevision,
@@ -1033,17 +1033,23 @@ struct NaturalLanguageBookkeepingView: View {
                     }
                 }
 
-                // If any accounts are still empty, use heuristic keyword matching
+                // Fill accounts that are still empty from each record's own
+                // words, so a second transaction never inherits the first one's
+                // category. Unknown categories stay empty for the user to pick.
                 let ledgerAccounts = session.ledger?.accounts ?? []
                 for r in finalRecords.indices {
+                    let words = result.recordEvidence.indices.contains(r) && !result.recordEvidence[r].isEmpty
+                        ? result.recordEvidence[r] : text
                     for p in finalRecords[r].postings.indices {
                         if finalRecords[r].postings[p].account.isEmpty {
                             let role = (result.accountRoles.indices.contains(r) && result.accountRoles[r].indices.contains(p))
                                 ? result.accountRoles[r][p] : (finalRecords[r].postings[p].amount.hasPrefix("-") ? "funding" : "expense")
                             let matched = BookkeepingAccountMatcher.match(
                                 role: role,
-                                text: "\(text) \(finalRecords[r].payee) \(finalRecords[r].narration)",
-                                accounts: ledgerAccounts
+                                text: "\(words) \(finalRecords[r].payee) \(finalRecords[r].narration)",
+                                accounts: ledgerAccounts,
+                                payee: finalRecords[r].payee,
+                                excluding: Set(finalRecords[r].postings.map(\.account).filter { !$0.isEmpty })
                             )
                             if let matched {
                                 finalRecords[r].postings[p].account = matched
