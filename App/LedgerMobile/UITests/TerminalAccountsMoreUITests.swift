@@ -32,7 +32,7 @@ final class TerminalAccountsMoreUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["01 / 净资产历史"].waitForExistence(timeout: 10))
         app.buttons["返回上一页"].tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5))
-        app.buttons["more-header-search"].tap()
+        app.tabBars.buttons["搜索"].tap()
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 

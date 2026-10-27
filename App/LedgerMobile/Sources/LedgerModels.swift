@@ -78,8 +78,9 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
         return normalized.isEmpty ? defaultCompactTabs : Array(normalized)
     }
 
+    /// Search has its own trailing tab on compact layouts, so it never routes through 更多.
     func isCompactOverflow(in destinations: [LedgerDestination]) -> Bool {
-        self != .settings && !destinations.contains(self)
+        self != .settings && self != .search && !destinations.contains(self)
     }
 
     func compactSelection(in destinations: [LedgerDestination]) -> LedgerDestination {

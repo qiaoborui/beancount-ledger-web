@@ -305,10 +305,8 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["关闭"].firstMatch.tap()
         // Native global search uses complete metadata candidates, not the
         // legacy all-history transaction array. Drill-down must survive refresh.
-        app.tabBars.buttons["更多"].tap()
-        let searchEntry = app.buttons["more-search"]
-        for _ in 0..<4 where !searchEntry.isHittable { app.swipeUp() }
-        XCTAssertTrue(searchEntry.isHittable, app.debugDescription)
+        let searchEntry = app.tabBars.buttons["搜索"]
+        XCTAssertTrue(searchEntry.waitForExistence(timeout: 5), app.debugDescription)
         searchEntry.tap()
         let search = app.searchFields["搜索整个账本"]
         XCTAssertTrue(search.waitForExistence(timeout: 5)); search.tap(); search.typeText("synthetic")
