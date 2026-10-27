@@ -16,10 +16,16 @@ struct NativeImportFlowView: View {
     @State private var preview: LedgerImportPreview?
     @State private var reviewedEntries: [LedgerImportEntry] = []
     @State private var includedEntryIDs: Set<String> = []
-    @State private var expandedEntryIDs: Set<String> = []
-    @State private var selectedTagEntryIDs: Set<String> = []
+    @State private var reviewFilter: ImportReviewFilter?
     @State private var bulkTagInput = ""
-    @FocusState private var bulkTagInputFocused: Bool
+    @State private var bulkCategory = ""
+    @State private var batchSheetPresented = false
+    @State private var parseOptionsPresented = false
+    @State private var parseOptionsApplied = false
+    @State private var optionsBeforeSheet: (provider: String?, rounding: Bool)?
+    @State private var pendingInboxPresented = false
+    @State private var autoStartAttempted = false
+    @State private var committedEntries: [LedgerImportEntry] = []
     @State private var editingEntry: LedgerImportEntry?
     @State private var commitResult: LedgerImportCommitResult?
     @State private var errorMessage: String?
@@ -101,16 +107,41 @@ struct NativeImportFlowView: View {
     }
 
     private var exitConfirmationTitle: String {
-        commitOutcomeNeedsReconciliation ? String(localized: "离开保存结果核对？") : String(localized: "放弃本次修改？")
+        if commitOutcomeNeedsReconciliation { return String(localized: "离开保存结果核对？") }
+        return pendingExit == .preparation ? String(localized: "重新生成预览？") : String(localized: "离开核对？")
     }
 
     private var exitConfirmationDetail: String {
         if commitOutcomeNeedsReconciliation {
             return String(localized: "账本可能已完成写入。离开后请先查看导入记录，确认结果再继续操作。")
         }
-        return pendingExit == .preparation
-            ? String(localized: "返回后会清除本次核对修改，你可以重新生成预览。")
+        if pendingExit == .preparation {
+            return String(localized: "按新的解析选项重新生成预览，本次核对修改会清除。")
+        }
+        return canKeepDraft
+            ? String(localized: "保留草稿后，可以从导入页的「待处理」继续核对。原始账单文件保留。")
             : String(localized: "本次尚未提交的设置和核对修改将被清除，原始账单文件保留。")
+    }
+
+    /// File-backed reviews persist as a draft; a Gmail preview has no file to reopen,
+    /// and drafts are stored per local ledger, so a remote ledger cannot keep one.
+    private var canKeepDraft: Bool {
+        !startsWithPreview && !file.data.isEmpty && preview != nil && !commitOutcomeNeedsReconciliation
+            && session.currentLocalLedgerDescriptor != nil
+    }
+
+    private var reviewQueue: ImportReviewQueue {
+        ImportReviewQueue(entries: reviewedEntries, included: includedEntryIDs, needsReview: classificationNeedsReview)
+    }
+
+    private var activeFilter: ImportReviewFilter {
+        reviewFilter ?? reviewQueue.defaultFilter
+    }
+
+    /// Parsing starts on its own unless the file needs something first: a ZIP
+    /// may need its password, and a failed attempt waits for the person.
+    private var showsParsing: Bool {
+        isPreparing || (!autoStartAttempted && !startsWithPreview && !file.isZIP && errorMessage == nil)
     }
 
     var body: some View {
@@ -120,21 +151,35 @@ struct NativeImportFlowView: View {
                     completionView(commitResult)
                 } else if let preview {
                     previewView(preview)
+                } else if showsParsing {
+                    parsingView
                 } else {
                     preparationView
                 }
             }
-            .background(LedgerPalette.canvas)
+            .background(BalancedPalette.page)
             .alert(exitConfirmationTitle, isPresented: Binding(
                 get: { pendingExit != nil },
                 set: { if !$0 { pendingExit = nil } }
             ), presenting: pendingExit) { action in
-                Button(commitOutcomeNeedsReconciliation ? "离开核对" : "放弃修改", role: .destructive) {
+                if action == .close, canKeepDraft {
+                    Button("保留草稿") {
+                        pendingExit = nil
+                        persistDraft()
+                        dismiss()
+                    }
+                    .accessibilityIdentifier("import-exit-keep-draft")
+                }
+                Button(commitOutcomeNeedsReconciliation ? "离开核对" : (action == .preparation ? "重新生成" : "放弃修改"),
+                       role: .destructive) {
                     pendingExit = nil
                     discardDraft()
                     performExit(action)
                 }
-                Button("继续编辑", role: .cancel) { pendingExit = nil }
+                Button("继续编辑", role: .cancel) {
+                    if action == .preparation { restoreParseOptions() }
+                    pendingExit = nil
+                }
             } message: { _ in
                 Text(exitConfirmationDetail)
             }
@@ -145,29 +190,40 @@ struct NativeImportFlowView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if preview != nil, commitResult == nil {
-                        Button(startsWithPreview ? "关闭" : "返回") {
-                            requestExit(startsWithPreview ? .close : .preparation)
-                        }
-                        .disabled(isCommitting)
+                        Button(startsWithPreview ? "关闭" : "返回") { requestExit(.close) }
+                            .disabled(isCommitting)
                     } else if commitResult == nil {
                         Button("取消") { requestExit(.close) }
-                            .disabled(isPreparing)
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if preview != nil, commitResult == nil,
-                       let ledgerID = session.currentLocalLedgerDescriptor?.id {
-                        NavigationLink {
-                            ImportClassificationSettingsView(ledgerID: ledgerID)
-                        } label: {
-                            Image(systemName: "sparkles")
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if preview != nil, commitResult == nil {
+                        if !startsWithPreview, !file.data.isEmpty {
+                            Button {
+                                optionsBeforeSheet = (providerOverride, alipayFundRounding)
+                                parseOptionsApplied = false
+                                parseOptionsPresented = true
+                            } label: {
+                                Image(systemName: "slider.horizontal.3")
+                            }
+                            .disabled(isCommitting)
+                            .accessibilityLabel("解析选项")
+                            .accessibilityIdentifier("import-parse-options")
                         }
-                        .accessibilityIdentifier("import-classification-settings")
+                        if let ledgerID = session.currentLocalLedgerDescriptor?.id {
+                            NavigationLink {
+                                ImportClassificationSettingsView(ledgerID: ledgerID)
+                            } label: {
+                                Image(systemName: "sparkles")
+                            }
+                            .accessibilityLabel("智能分类设置")
+                            .accessibilityIdentifier("import-classification-settings")
+                        }
                     }
                 }
             }
         }
-        .interactiveDismissDisabled(isPreparing || isCommitting || hasDraftChanges)
+        .interactiveDismissDisabled(isCommitting || hasDraftChanges)
         .privacySensitive()
         .alert("确认写入账本？", isPresented: $confirmationPresented) {
             Button(commitActionTitle) {
@@ -182,14 +238,43 @@ struct NativeImportFlowView: View {
                 entry: entry,
                 accounts: importAccountChoices(for: entry),
                 suggestion: classificationResults[entry.id],
+                evidence: classificationEvidence[entry.id] ?? [],
+                position: editorPosition(for: entry.id),
                 onSave: { updated in
                     applyEditedEntry(updated)
+                },
+                onSaveAndNext: { updated in
+                    // The saved entry may leave the filter, so find its successor first.
+                    let next = nextEditorID(from: entry.id, offset: 1)
+                    applyEditedEntry(updated)
+                    openEditor(next)
+                },
+                onStep: { offset in
+                    openEditor(nextEditorID(from: entry.id, offset: offset))
                 }
             )
+            .id(entry.id)
             .ledgerPrivacyProtectedSheet()
         }
+        .sheet(isPresented: $batchSheetPresented) {
+            batchSheet
+                .presentationDetents([.medium, .large])
+                .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: $parseOptionsPresented, onDismiss: {
+            if !parseOptionsApplied { restoreParseOptions() }
+        }) {
+            parseOptionsSheet
+                .presentationDetents([.medium, .large])
+                .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: $pendingInboxPresented) {
+            PendingInboxView()
+                .environmentObject(session)
+                .ledgerPrivacyProtectedSheet()
+        }
         .sheet(item: $preparedBookkeeping) { prepared in
-            BookkeepingPreviewView(preview: prepared) { result in
+            BookkeepingPreviewView(preview: prepared, entryCount: committedEntries.count) { result in
                 guard let result else { return }
                 commitResult = result
                 discardDraft()
@@ -199,10 +284,17 @@ struct NativeImportFlowView: View {
         .sensoryFeedback(.success, trigger: editSaveFeedback)
         .sensoryFeedback(.error, trigger: failureFeedback)
         .ledgerPrivacyProtectedSheet()
-        .task { restoreDraftIfAvailable() }
+        .task {
+            restoreDraftIfAvailable()
+            await startPreviewIfNeeded()
+        }
         .task(id: classificationTaskID) { await classifyPreview() }
         .onChange(of: providerOverride) { _, _ in persistDraft() }
         .onChange(of: alipayFundRounding) { _, _ in persistDraft() }
+        .onChange(of: reviewFilter) { _, filter in
+            onlyClassificationReview = filter == .pending
+            persistDraft()
+        }
     }
 
     private var classificationTaskID: String {
@@ -435,22 +527,27 @@ struct NativeImportFlowView: View {
     }
 
     private func requestExit(_ action: ImportExitAction) {
-        guard !isPreparing, !isCommitting else { return }
+        guard !isCommitting else { return }
         let needsConfirmation = action == .preparation ? hasReviewChanges : hasDraftChanges
-        if needsConfirmation { pendingExit = action }
-        else { performExit(action) }
+        if needsConfirmation {
+            pendingExit = action
+        } else {
+            discardDraft()
+            performExit(action)
+        }
     }
 
+    /// `.close` leaves the flow (a running parse is cancelled with the view);
+    /// `.preparation` drops the review and parses again with the current options.
     private func performExit(_ action: ImportExitAction) {
-        guard !isPreparing, !isCommitting else { return }
+        guard !isCommitting else { return }
         if action == .close {
             dismiss()
         } else {
-            discardDraft()
             preview = nil
             reviewedEntries = []
             includedEntryIDs = []
-            selectedTagEntryIDs = []
+            reviewFilter = nil
             bulkTagInput = ""
             errorMessage = nil
             commitErrorMessage = nil
@@ -458,44 +555,106 @@ struct NativeImportFlowView: View {
             commitWasReconciled = false
             editedEntryStatus = nil
             resetClassification()
+            optionsBeforeSheet = nil
+            Task { await generatePreview() }
         }
     }
 
-    /// `.field-row` idiom for the picker step: flat rows, no icon chips, no
-    /// rounded cards, ink-3 labels, a 1px rule under each row — the same
-    /// treatment `AddCategoryView`/`LocalLedgerStorageView` already use for
-    /// List-based forms.
+    private func restoreParseOptions() {
+        guard let optionsBeforeSheet else { return }
+        providerOverride = optionsBeforeSheet.provider
+        alipayFundRounding = optionsBeforeSheet.rounding
+        self.optionsBeforeSheet = nil
+    }
+
+    private func startPreviewIfNeeded() async {
+        guard !autoStartAttempted, !startsWithPreview, preview == nil, !file.isZIP, !file.data.isEmpty else { return }
+        autoStartAttempted = true
+        await generatePreview()
+    }
+
+    /// The file being imported, as the head of the parsing and input steps.
+    private var fileHead: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(file.name).balancedFont(size: 15.5, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(fileSizeText).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Picking a file starts parsing straight away; this page names what the
+    /// one parse call is checking, without inventing progress it can't report.
+    private var parsingView: some View {
+        List {
+            Section { fileHead }
+            Section {
+                parsingStep(String(localized: "读取文件"), detail: fileSizeText, state: .done)
+                parsingStep(String(localized: "识别渠道并解析交易"),
+                            detail: providerOverride.map { String(localized: "指定渠道 · \(providerLabel($0))") }
+                                ?? String(localized: "自动识别 · 可在核对页改选渠道"),
+                            state: .running)
+                parsingStep(String(localized: "与账本比对重复"), detail: String(localized: "同日同额的交易默认排除"), state: .waiting)
+                parsingStep(String(localized: "智能分类"), detail: String(localized: "进入核对页后在后台继续，不需要等"), state: .waiting)
+            } footer: {
+                Text("离开这一页会停止解析，原始账单文件保留。")
+                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .listRowSeparatorTint(BalancedPalette.rule)
+        .accessibilityIdentifier("native-import-parsing")
+    }
+
+    private enum ParsingStepState { case done, running, waiting }
+
+    private func parsingStep(_ title: String, detail: String, state: ParsingStepState) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Group {
+                switch state {
+                case .done:
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(BalancedPalette.ink)
+                case .running:
+                    ProgressView().controlSize(.small).tint(BalancedPalette.ink)
+                case .waiting:
+                    Image(systemName: "circle").foregroundStyle(BalancedPalette.edge)
+                }
+            }
+            .font(.system(size: 15))
+            .frame(width: 22, height: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).balancedFont(size: 15, weight: state == .waiting ? .regular : .medium)
+                    .foregroundStyle(state == .waiting ? BalancedPalette.meta : BalancedPalette.ink)
+                Text(detail).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Only reached when parsing can't go on by itself: a ZIP that may need
+    /// its password, or a failed attempt. The options the old preparation page
+    /// always showed live here and in the review page's 解析选项.
     private var preparationView: some View {
         List {
-            if let errorMessage {
-                Section { StatusBanner(message: errorMessage) { self.errorMessage = nil } }
-                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
-            }
-            Section {
-                HStack(spacing: 12) {
-                    Image(systemName: file.isZIP ? "doc.zipper" : "doc.text")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(BalancedPalette.secondary)
-                        .frame(width: 32)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(file.name).balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink).lineLimit(1)
-                        Text(fileSizeText).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
-                    }
-                }
-                .padding(.vertical, 6)
-            } header: { TerminalSectionLabel(text: String(localized: "账单文件")).listRowBackground(BalancedPalette.page) }
+            Section { fileHead }
 
-            Section {
-                Picker("账单渠道", selection: $providerOverride) {
-                    Text("自动识别").tag(String?.none)
-                    ForEach(LedgerMobileImportCapabilities.fileImportProviders(from: providers)) { provider in
-                        Text(provider.label).tag(Optional(provider.id))
+            if let errorMessage {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("没能生成预览").balancedFont(size: 15, weight: .semibold).foregroundStyle(BalancedPalette.ink)
+                        Text(errorMessage).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("检查文件或手动指定渠道后重试。").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                     }
+                    .padding(.vertical, 6)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("import-preview-error")
                 }
-                .balancedFont(size: 15).tint(BalancedPalette.ink)
-                .accessibilityIdentifier("import-provider-menu")
-            } footer: {
-                Text(selectedProviderDetail).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             }
 
             if file.isZIP {
@@ -504,46 +663,97 @@ struct NativeImportFlowView: View {
                         .balancedFont(size: 15)
                         .textContentType(.password)
                         .accessibilityIdentifier("import-archive-password")
-                } header: { TerminalSectionLabel(text: String(localized: "压缩包密码")).listRowBackground(BalancedPalette.page) }
-            }
-
-            if providerOverride == nil || providerOverride == "alipay" {
-                Section {
-                    Toggle("支付宝基金 9.99 → 10.00 补差", isOn: $alipayFundRounding)
-                        .balancedFont(size: 15).toggleStyle(BalancedToggleStyle())
+                } header: {
+                    TerminalSectionLabel(text: String(localized: "压缩包密码")).listRowBackground(BalancedPalette.page)
                 } footer: {
-                    Text("仅在确认该基金定投需要补 0.01 时开启。").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    Text("没有密码的压缩包留空即可。密码只用于这次解压，不会保存。")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                 }
             }
 
-            Section {
-                Button {
-                    Task { await generatePreview() }
-                } label: {
-                    HStack(spacing: 8) {
-                        if isPreparing {
-                            ProgressView().tint(BalancedPalette.page)
-                            Text("正在生成预览...")
-                        } else {
-                            Text("生成导入预览")
-                        }
-                    }
-                }
-                .buttonStyle(.balanced(.primary, disabled: isPreparing))
-                .disabled(isPreparing)
-                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 8, trailing: 20))
-                .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                .accessibilityIdentifier("import-generate-preview")
-            } footer: {
-                Text("预览会检查渠道与重复交易。核对并确认后写入账本，关闭页面会丢弃当前预览。")
-                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-            }
+            parseOptionsSections
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .listRowSeparatorTint(BalancedPalette.rule)
         .tint(BalancedPalette.ink)
         .disabled(isPreparing)
         .scrollDismissesKeyboard(.interactively)
         .accessibilityIdentifier("native-import-preparation")
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button {
+                Task { await generatePreview() }
+            } label: {
+                Text(errorMessage == nil ? "继续解析" : "重新解析")
+            }
+            .buttonStyle(.balanced(.primary, disabled: isPreparing))
+            .disabled(isPreparing)
+            .accessibilityIdentifier("import-generate-preview")
+            .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+            .ledgerGlassDock()
+        }
+    }
+
+    /// Channel and Alipay rounding: shared by the input step and the review
+    /// page's 解析选项 sheet.
+    @ViewBuilder
+    private var parseOptionsSections: some View {
+        Section {
+            Picker("账单渠道", selection: $providerOverride) {
+                Text("自动识别").tag(String?.none)
+                ForEach(LedgerMobileImportCapabilities.fileImportProviders(from: providers)) { provider in
+                    Text(provider.label).tag(Optional(provider.id))
+                }
+            }
+            .balancedFont(size: 15).tint(BalancedPalette.ink)
+            .accessibilityIdentifier("import-provider-menu")
+        } header: {
+            TerminalSectionLabel(text: String(localized: "解析选项")).listRowBackground(BalancedPalette.page)
+        } footer: {
+            Text(selectedProviderDetail).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+        }
+
+        if providerOverride == nil || providerOverride == "alipay" {
+            Section {
+                Toggle("支付宝基金 9.99 → 10.00 补差", isOn: $alipayFundRounding)
+                    .balancedFont(size: 15).toggleStyle(BalancedToggleStyle())
+            } footer: {
+                Text("仅在确认该基金定投需要补 0.01 时开启。").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            }
+        }
+    }
+
+    private var parseOptionsSheet: some View {
+        NavigationStack {
+            List {
+                parseOptionsSections
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(BalancedPalette.page)
+            .tint(BalancedPalette.ink)
+            .navigationTitle("解析选项")
+            .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("会按新的选项重新生成预览，本次核对修改会清除。")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    HStack(spacing: 10) {
+                        Button("取消") { parseOptionsPresented = false }
+                            .buttonStyle(.balanced(.outline))
+                        Button("重新生成预览") {
+                            parseOptionsApplied = true
+                            parseOptionsPresented = false
+                            requestExit(.preparation)
+                        }
+                        .buttonStyle(.balanced(.primary))
+                        .accessibilityIdentifier("import-parse-options-apply")
+                    }
+                }
+                .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+                .ledgerGlassDock()
+            }
+        }
     }
 
     private func friendlyAccountLabel(_ account: String) -> String {
@@ -556,19 +766,22 @@ struct NativeImportFlowView: View {
     }
 
     private func previewView(_ preview: LedgerImportPreview) -> some View {
-        List {
+        let needsReview = classificationNeedsReview
+        let queue = ImportReviewQueue(entries: reviewedEntries, included: includedEntryIDs, needsReview: needsReview)
+        let filter = reviewFilter ?? queue.defaultFilter
+        return List {
             if let errorMessage {
                 Section {
                     StatusBanner(message: errorMessage) { self.errorMessage = nil }
                 }
             }
             previewSummary(preview)
-            bulkTagSection
-            entrySection(preview)
+            reviewFilterBar(queue, selected: filter)
+            entrySection(filter, ids: queue.ids(for: filter), needsReview: needsReview)
         }
         .ledgerReadingList()
         .contentMargins(.top, LedgerLayout.pageTopInset, for: .scrollContent)
-        .tint(LedgerPalette.cobalt)
+        .tint(BalancedPalette.ink)
         .disabled(isCommitting)
         .accessibilityIdentifier("native-import-preview")
         .scrollDismissesKeyboard(.interactively)
@@ -577,10 +790,9 @@ struct NativeImportFlowView: View {
         }
     }
 
-    /// `.settle` filter-result block (b15/b16): 已勾选 N/M, 勾选金额合计, 重复或被
-    /// 排除, 将写入 — the one verified total on this screen. The channel/range/
-    /// classification/warnings detail that isn't in the mock stays below it,
-    /// reskinned to ink tones instead of the old cobalt-accent card.
+    /// `.settle` filter-result block (b15/b16): 已勾选 N/M, 勾选金额合计, 重复已
+    /// 跳过, 将写入 — the one verified total on this screen. Dedup, warnings
+    /// and detection detail fold into one disclosure under it.
     private func previewSummary(_ preview: LedgerImportPreview) -> some View {
         let currency = reviewedEntries.first?.currency ?? "CNY"
         let selectedTotal = selectedEntries.reduce(0) { $0 + Int(($1.amount * 100).rounded()) }
@@ -594,7 +806,7 @@ struct NativeImportFlowView: View {
                         .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                 }.padding(.bottom, 14)
                 settleRow(String(localized: "勾选金额合计"), amountText(selectedTotal, currency: currency))
-                settleRow(String(localized: "重复或被排除"), amountText(preview.skippedDuplicateCount, currency: "", suffix: String(localized: " 行")))
+                settleRow(String(localized: "重复，已跳过"), amountText(preview.skippedDuplicateCount, currency: "", suffix: String(localized: " 行")))
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
                     Text("将写入").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                     Spacer(minLength: 0)
@@ -614,18 +826,11 @@ struct NativeImportFlowView: View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
 
-            if preview.skippedDuplicateCount > 0, !preview.dedupReport.isEmpty {
-                Text(preview.dedupReport)
-                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
-                    .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(BalancedPalette.sunken)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-
-            DisclosureGroup {
+            DisclosureGroup(isExpanded: $warningsExpanded) {
+                if preview.skippedDuplicateCount > 0, !preview.dedupReport.isEmpty {
+                    Text(preview.dedupReport).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 kvRow(String(localized: "识别渠道"), providerLabel(preview.provider))
                 kvRow(String(localized: "交易区间"), importRangeText(preview))
                 kvRow(String(localized: "候选交易"), String(localized: "\(preview.candidateCount) 条"))
@@ -633,11 +838,16 @@ struct NativeImportFlowView: View {
                 if !preview.providerDetection.reason.isEmpty {
                     Text(preview.providerDetection.reason).balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta)
                 }
+                ForEach(Array(preview.warnings.enumerated()), id: \.offset) { _, warning in
+                    Text(warning).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.ink)
+                        .fixedSize(horizontal: false, vertical: true).padding(.vertical, 2)
+                }
             } label: {
-                Text("导入详情").balancedFont(size: 13).foregroundStyle(BalancedPalette.secondary)
+                Text(previewDetailTitle(preview)).balancedFont(size: 13).foregroundStyle(BalancedPalette.secondary)
             }
             .tint(BalancedPalette.ink)
             .listRowBackground(BalancedPalette.page)
+            .accessibilityIdentifier("import-preview-details")
 
             if let ledgerID = session.currentLocalLedgerDescriptor?.id,
                classificationSettings.isEnabled(for: ledgerID) {
@@ -645,12 +855,12 @@ struct NativeImportFlowView: View {
                     HStack(spacing: 8) {
                         if isClassifying {
                             ProgressView().scaleEffect(0.8)
-                            Text("智能匹配中 (\(classificationCompletedIDs.count)/\(reviewedEntries.count))...")
-                                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                            Text("智能分类 \(classificationCompletedIDs.count) / \(reviewedEntries.count)")
+                                .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                             Spacer()
                             Button("停止") { classificationPaused = true }.balancedFont(size: 12.5).foregroundStyle(BalancedPalette.ink)
                         } else {
-                            Text(classificationResults.isEmpty ? "智能分类已就绪" : "已自动完成智能匹配 · \(classificationResults.count) 条已填充")
+                            Text(classificationResults.isEmpty ? "智能分类已就绪" : "智能分类已完成 · \(classificationResults.count) 笔已填写")
                                 .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                             Spacer()
                             if classificationCompletedIDs.count < reviewedEntries.count {
@@ -668,20 +878,18 @@ struct NativeImportFlowView: View {
                 }
                 .listRowBackground(BalancedPalette.page)
             }
-
-            if !preview.warnings.isEmpty {
-                DisclosureGroup(isExpanded: $warningsExpanded) {
-                    ForEach(Array(preview.warnings.enumerated()), id: \.offset) { _, warning in
-                        Text(warning).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.ink)
-                            .fixedSize(horizontal: false, vertical: true).padding(.vertical, 2)
-                    }
-                } label: {
-                    Text("\(preview.warnings.count) 条账单核对提示").balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.secondary)
-                }
-                .tint(BalancedPalette.ink)
-                .listRowBackground(BalancedPalette.page)
-            }
         }
+    }
+
+    private func previewDetailTitle(_ preview: LedgerImportPreview) -> String {
+        var parts: [String] = []
+        if preview.skippedDuplicateCount > 0 {
+            parts.append(String(localized: "\(preview.skippedDuplicateCount) 行与账本重复，已跳过"))
+        }
+        if !preview.warnings.isEmpty {
+            parts.append(String(localized: "\(preview.warnings.count) 条核对提示"))
+        }
+        return parts.isEmpty ? String(localized: "解析详情") : parts.joined(separator: " · ")
     }
 
     private func settleRow(_ label: String, _ value: Text) -> some View {
@@ -707,100 +915,221 @@ struct NativeImportFlowView: View {
         }
     }
 
-    private func entrySection(_ preview: LedgerImportPreview) -> some View {
+    /// 待确认 / 已就绪 / 未勾选 / 全部 as one glass segment: the page opens on
+    /// the entries that need the person, so the rest can be written as they are.
+    private func reviewFilterBar(_ queue: ImportReviewQueue, selected: ImportReviewFilter) -> some View {
         Section {
-            ForEach(reviewedEntries.filter { !onlyClassificationReview || classificationNeedsReview.contains($0.id) }) { entry in
-                ImportEntryReviewRow(
-                    entry: entry,
-                    included: includedEntryIDs.contains(entry.id),
-                    tagSelected: selectedTagEntryIDs.contains(entry.id),
-                    isAIClassified: classificationResults[entry.id] != nil,
-                    categoryLabel: friendlyAccountLabel(entry.categoryAccount),
-                    fundingLabel: friendlyAccountLabel(entry.fundingAccount),
-                    expanded: expandedEntryIDs.contains(entry.id),
-                    onToggle: { toggle(entry.id) },
-                    onToggleTag: { toggleTagSelection(entry.id) },
-                    onEdit: { editingEntry = entry },
-                    onToggleExpanded: {
-                        if expandedEntryIDs.contains(entry.id) { expandedEntryIDs.remove(entry.id) }
-                        else { expandedEntryIDs.insert(entry.id) }
+            HStack(spacing: 2) {
+                ForEach(ImportReviewFilter.allCases) { filter in
+                    let isSelected = filter == selected
+                    Button {
+                        reviewFilter = filter
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(filter.title).balancedFont(size: 14, weight: isSelected ? .semibold : .regular)
+                            Text("\(queue.count(for: filter))").balancedFont(size: 11.5).monospacedDigit()
+                                .foregroundStyle(BalancedPalette.meta)
+                        }
+                        .foregroundStyle(isSelected ? BalancedPalette.ink : BalancedPalette.meta)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .background {
+                            if isSelected { Capsule().fill(BalancedPalette.ink.opacity(0.08)) }
+                        }
+                        .contentShape(Capsule())
                     }
-                )
-                .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 16))
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                    .accessibilityIdentifier("import-filter-\(filter.rawValue)")
+                }
+            }
+            .padding(3)
+            .ledgerGlassField()
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    private func entrySection(_ filter: ImportReviewFilter, ids: [String], needsReview: Set<String>) -> some View {
+        let entriesByID = Dictionary(reviewedEntries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return Section {
+            if ids.isEmpty {
+                Text(emptyFilterText(filter))
+                    .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 18)
+                    .listRowSeparator(.hidden)
+                    .accessibilityIdentifier("import-filter-empty")
+            }
+            ForEach(ids, id: \.self) { id in
+                if let entry = entriesByID[id] {
+                    ImportEntryReviewRow(
+                        entry: entry,
+                        included: includedEntryIDs.contains(entry.id),
+                        isAIClassified: classificationResults[entry.id] != nil,
+                        categoryLabel: friendlyAccountLabel(entry.categoryAccount),
+                        attention: attentionText(for: entry, needsReview: needsReview),
+                        picks: categoryPicks(for: entry),
+                        canConfirm: needsReview.contains(entry.id) && classificationResults[entry.id] != nil
+                            && !ImportReviewQueue.needsAccount(entry),
+                        onToggle: { toggle(entry.id) },
+                        onEdit: { editingEntry = entry },
+                        onPick: { account in applyClassificationAccount(account, field: "category", to: entry) },
+                        onConfirm: { applyEditedEntry(entry) }
+                    )
+                    .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 16))
 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("--safe-classification-review") {
-                    classificationRow(entry)
-                }
-#endif
-            }
-        } header: {
-            HStack(alignment: .firstTextBaseline) {
-                Text("交易明细 · 已选 \(selectedEntries.count)/\(reviewedEntries.count)")
-                Spacer(minLength: 0)
-                if !classificationNeedsReview.isEmpty {
-                    Toggle("只看待核对", isOn: $onlyClassificationReview)
-                        .toggleStyle(.button)
-                        .font(.caption)
-                        .tint(LedgerPalette.cobalt)
-                        .accessibilityIdentifier("import-classification-review-filter")
-                }
-                Button(includedEntryIDs.count == reviewedEntries.count ? "取消全选" : "全选") {
-                    if includedEntryIDs.count == reviewedEntries.count {
-                        includedEntryIDs = []
-                    } else {
-                        includedEntryIDs = Set(reviewedEntries.map(\.id))
+                    if ProcessInfo.processInfo.arguments.contains("--safe-classification-review") {
+                        classificationRow(entry)
                     }
-                    persistDraft()
+#endif
                 }
-                .frame(minHeight: 44)
-                .textCase(nil)
+            }
+        } footer: {
+            Text("点按勾选框决定是否写入；点按一行其余位置打开编辑。")
+                .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                .padding(.top, 8)
+        }
+    }
+
+    private func emptyFilterText(_ filter: ImportReviewFilter) -> String {
+        switch filter {
+        case .pending: String(localized: "没有需要确认的交易，可以直接写入。")
+        case .ready: String(localized: "还没有已就绪的交易。先处理待确认的几笔。")
+        case .unchecked: String(localized: "所有交易都已勾选。")
+        case .all: String(localized: "这份账单没有可导入的交易。不勾选任何交易时，只归档原始账单。")
+        }
+    }
+
+    /// Why an included entry still waits for the person, in the order they'd fix it.
+    private func attentionText(for entry: LedgerImportEntry, needsReview: Set<String>) -> String? {
+        guard includedEntryIDs.contains(entry.id) else { return nil }
+        if let reason = classificationManualReasons[entry.id] { return reason }
+        if ImportReviewQueue.isMissingAccount(entry.categoryAccount) { return String(localized: "缺少分类") }
+        if ImportReviewQueue.isMissingAccount(entry.fundingAccount) { return String(localized: "缺少付款账户") }
+        if needsReview.contains(entry.id) { return String(localized: "AI 填写 · 待确认") }
+        return nil
+    }
+
+    /// The classifier's top category candidates for an entry whose category is
+    /// still open, as one-tap picks on the row.
+    private func categoryPicks(for entry: LedgerImportEntry) -> [ImportEntryPick] {
+        guard includedEntryIDs.contains(entry.id), let result = classificationResults[entry.id],
+              result.pendingFields(for: entry, accepted: classificationAcceptedFields[entry.id] ?? []).contains("category")
+        else { return [] }
+        return result.category.candidates.prefix(2).map {
+            ImportEntryPick(account: $0.value, label: friendlyAccountLabel($0.value),
+                            probability: $0.probability, selected: $0.value == entry.categoryAccount)
+        }
+    }
+
+    private var batchTargetIDs: Set<String> {
+        Set(reviewQueue.ids(for: activeFilter)).intersection(includedEntryIDs)
+    }
+
+    private var bulkCategoryChoices: [LedgerAccountChoice] {
+        (session.ledger?.accounts ?? [])
+            .filter { $0.account.hasPrefix("Expenses:") || $0.account.hasPrefix("Income:") }
+            .map { account in
+                LedgerAccountChoice(account: account.account,
+                                    label: account.alias?.isEmpty == false ? account.alias! : account.label,
+                                    group: account.group, active: account.active)
+            }
+    }
+
+    /// One selection model: batch edits act on the entries that are checked
+    /// for writing within the current filter.
+    private var batchSheet: some View {
+        let targets = batchTargetIDs
+        let uncheckedCount = reviewedEntries.count - includedEntryIDs.count
+        return NavigationStack {
+            List {
+                Section {
+                    TextField("travel, trip-2026", text: $bulkTagInput)
+                        .balancedFont(size: 15)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("import-bulk-tag-input")
+                    HStack(spacing: 10) {
+                        Button("添加标签") { applyBulkTags(mode: .add, to: targets) }
+                            .buttonStyle(.balanced(.primary, disabled: targets.isEmpty))
+                            .disabled(targets.isEmpty)
+                            .accessibilityIdentifier("import-bulk-tag-add")
+                        Button("移除标签") { applyBulkTags(mode: .remove, to: targets) }
+                            .buttonStyle(.balanced(.outline, disabled: targets.isEmpty))
+                            .disabled(targets.isEmpty)
+                            .accessibilityIdentifier("import-bulk-tag-remove")
+                    }
+                    .listRowSeparator(.hidden)
+                } header: {
+                    TerminalSectionLabel(text: String(localized: "标签")).listRowBackground(BalancedPalette.page)
+                } footer: {
+                    Text("作用于「\(activeFilter.title)」里已勾选的 \(targets.count) 笔。")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                }
+
+                Section {
+                    NavigationLink {
+                        LedgerAccountPicker(title: String(localized: "选择分类账户"), accounts: bulkCategoryChoices, selection: $bulkCategory)
+                    } label: {
+                        batchRowLabel(String(localized: "统一设置分类"),
+                                      String(localized: "为这 \(targets.count) 笔选择同一个分类账户"))
+                    }
+                    .disabled(targets.isEmpty)
+                    .accessibilityIdentifier("import-bulk-category")
+                    Button {
+                        includedEntryIDs = Set(reviewedEntries.map(\.id))
+                        persistDraft()
+                    } label: {
+                        batchRowLabel(String(localized: "全部勾选"), String(localized: "把 \(uncheckedCount) 笔未勾选的也加入写入"))
+                    }
+                    .disabled(uncheckedCount == 0)
+                    .accessibilityIdentifier("import-select-all")
+                    Button {
+                        includedEntryIDs = []
+                        persistDraft()
+                    } label: {
+                        batchRowLabel(String(localized: "全部取消勾选"), String(localized: "不写入交易时，只归档原始账单"))
+                    }
+                    .disabled(includedEntryIDs.isEmpty)
+                    .accessibilityIdentifier("import-deselect-all")
+                } header: {
+                    TerminalSectionLabel(text: String(localized: "也可以")).listRowBackground(BalancedPalette.page)
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(BalancedPalette.page)
+            .tint(BalancedPalette.ink)
+            .scrollDismissesKeyboard(.interactively)
+            .navigationTitle("批量修改")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { batchSheetPresented = false }
+                        .accessibilityIdentifier("import-batch-done")
+                }
+            }
+            .onChange(of: bulkCategory) { _, account in
+                applyBulkCategory(account, to: targets)
             }
         }
     }
 
-    private var bulkTagSection: some View {
-        Section {
-            DisclosureGroup {
-                Button(allEntriesSelectedForTags ? "清空" : "全选") {
-                    selectedTagEntryIDs = allEntriesSelectedForTags
-                        ? []
-                        : Set(reviewedEntries.map(\.id))
-                }
-                TextField("travel, trip-2026", text: $bulkTagInput)
-                    .focused($bulkTagInputFocused)
-                    .onSubmit { bulkTagInputFocused = false }
-                    .font(.body)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("import-bulk-tag-input")
-                Button("添加标签") { applyBulkTags(mode: .add) }
-                    .disabled(selectedTagEntryIDs.isEmpty)
-                    .accessibilityIdentifier("import-bulk-tag-add")
-                Button("移除标签") { applyBulkTags(mode: .remove) }
-                    .disabled(selectedTagEntryIDs.isEmpty)
-                    .accessibilityIdentifier("import-bulk-tag-remove")
-                Text("展开交易可选择标签操作对象，也可全选。核对并确认后保存标签修改。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } label: {
-                LabeledContent("批量标签", value: String(localized: "已选 \(selectedTagEntryIDs.count) 条"))
-                    .font(.subheadline)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("import-bulk-tags")
-            }
+    private func batchRowLabel(_ title: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
+            Text(detail).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
         }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
-    private var allEntriesSelectedForTags: Bool {
-        !reviewedEntries.isEmpty && reviewedEntries.allSatisfy { selectedTagEntryIDs.contains($0.id) }
-    }
-
-    /// `.sheet-actions` — a flat left `.btn` (全部勾选/全部展开 depending on
-    /// whether anything is checked yet, matching b15 vs b16) beside the
-    /// primary ink `.btn.primary` write action. The write button is disabled
-    /// only while committing, not while the selection is empty: an empty
-    /// selection is a real, supported action here ("仅归档原始账单"), so
-    /// mirroring b16's `aria-disabled` on a 0-count write would break it.
+    /// `.sheet-actions` on glass: status lines above 批量… and the write action.
+    /// The write button stays enabled on an empty selection: 仅归档账单 is a
+    /// real, supported action.
     private func commitBar(_ preview: LedgerImportPreview) -> some View {
         VStack(spacing: 10) {
             if let editedEntryStatus {
@@ -809,27 +1138,23 @@ struct NativeImportFlowView: View {
                     .accessibilityIdentifier("import-edit-saved-status")
             }
             if let commitErrorMessage {
-                Text(commitErrorMessage).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.expense)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("import-commit-error")
-            }
-            Text(selectedEntries.isEmpty ? "仅归档原始账单" : "准备写入 \(selectedEntries.count) 条交易")
-                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 10) {
-                Button {
-                    if includedEntryIDs.isEmpty {
-                        includedEntryIDs = Set(reviewedEntries.map(\.id))
-                        persistDraft()
-                    } else {
-                        expandedEntryIDs = Set(reviewedEntries.map(\.id))
-                    }
-                } label: {
-                    Text(includedEntryIDs.isEmpty ? "全部勾选" : "全部展开")
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(commitOutcomeNeedsReconciliation ? "保存结果待确认" : "保存没有完成")
+                        .balancedFont(size: 13, weight: .semibold).foregroundStyle(BalancedPalette.ink)
+                    Text(commitErrorMessage).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.balanced(.outline))
-                .accessibilityIdentifier("import-bulk-select-or-expand")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("import-commit-error")
+            }
+            HStack(spacing: 10) {
+                if !commitOutcomeNeedsReconciliation {
+                    Button("批量…") { batchSheetPresented = true }
+                        .buttonStyle(.balanced(.outline, disabled: isCommitting))
+                        .disabled(isCommitting)
+                        .accessibilityIdentifier("import-batch")
+                }
 
                 Button {
                     if commitOutcomeNeedsReconciliation {
@@ -857,104 +1182,146 @@ struct NativeImportFlowView: View {
         .ledgerGlassDock()
     }
 
+    /// The written batch as a closed account: the double rule, the totals the
+    /// person just confirmed, then where to go next.
     private func completionView(_ result: LedgerImportCommitResult) -> some View {
-        ScrollView {
-            VStack(spacing: LedgerSpacing.xl) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 52, weight: .medium))
-                    .foregroundStyle(LedgerPalette.success)
-
-                VStack(spacing: LedgerSpacing.sm) {
+        let currency = committedEntries.first?.currency ?? reviewedEntries.first?.currency ?? "CNY"
+        let writtenTotal = committedEntries.reduce(0) { $0 + Int(($1.amount * 100).rounded()) }
+        let unclassified = committedEntries.filter { ImportReviewQueue.isMissingAccount($0.categoryAccount) }.count
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
+                    VStack(spacing: 2) {
+                        BalancedPalette.ink.frame(width: 40, height: 1)
+                        BalancedPalette.ink.frame(width: 40, height: 1)
+                    }
+                    .padding(.bottom, 12)
+                    .accessibilityHidden(true)
                     Text(result.count == 0 ? "账单已归档" : "已写入 \(result.count) 条交易")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(LedgerPalette.ink)
-                        .multilineTextAlignment(.center)
+                        .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 22, relativeTo: .title2))
+                        .foregroundStyle(BalancedPalette.ink)
                     Text(completionDetail(result))
-                        .font(.system(size: 13))
-                        .foregroundStyle(LedgerPalette.secondary)
-                        .multilineTextAlignment(.center)
+                        .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(EdgeInsets(top: 18, leading: 20, bottom: 20, trailing: 20))
+
+                if result.count > 0 {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let preview {
+                            Text(providerLabel(preview.provider) + " · " + importRangeText(preview))
+                                .balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.secondary)
+                                .padding(.bottom, 10)
+                        }
+                        if !committedEntries.isEmpty {
+                            settleRow(String(localized: "写入金额合计"), amountText(writtenTotal, currency: currency))
+                        }
+                        if reviewedEntries.count > committedEntries.count, !committedEntries.isEmpty {
+                            settleRow(String(localized: "未写入"), amountText(reviewedEntries.count - committedEntries.count,
+                                                                              currency: "", suffix: String(localized: " 笔")))
+                        }
+                        if let preview, preview.skippedDuplicateCount > 0 {
+                            settleRow(String(localized: "重复，已跳过"), amountText(preview.skippedDuplicateCount, currency: "",
+                                                                               suffix: String(localized: " 行")))
+                        }
+                        HStack(alignment: .firstTextBaseline, spacing: 16) {
+                            Text("写入").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                            Spacer(minLength: 0)
+                            Text("\(result.count) 笔")
+                                .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 22, relativeTo: .title2))
+                                .monospacedDigit().foregroundStyle(BalancedPalette.ink)
+                        }
+                        .padding(.top, 12)
+                        .overlay(alignment: .top) { BalancedPalette.ink.frame(height: 1) }
+                    }
+                    .padding(EdgeInsets(top: 16, leading: 20, bottom: 14, trailing: 20))
+                    .background(BalancedPalette.sunken)
+                    .accessibilityElement(children: .combine)
                 }
 
                 if result.readModelPending == true, let progress = session.importIndexProgress {
-                    LedgerPanel {
-                        HStack(spacing: LedgerSpacing.md) {
-                            Group {
-                                if progress.phase == .indexed {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(LedgerPalette.success)
-                                } else {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                        .tint(LedgerPalette.cobalt)
-                                }
-                            }
-                            .frame(width: 36, height: 36)
-                            .background(
-                                (progress.phase == .indexed ? LedgerPalette.success : LedgerPalette.cobalt)
-                                    .opacity(0.12)
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(progress.phase == .indexed ? "索引已完成" : "正在更新索引")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(LedgerPalette.ink)
-                                Text(progress.phase == .indexed ? "最新数据已经可以查询。" : "系统允许实时活动时会显示在灵动岛。")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(LedgerPalette.secondary)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .padding(LedgerSpacing.lg)
-                    }
+                    completionRow(
+                        title: progress.phase == .indexed ? String(localized: "索引已完成") : String(localized: "正在更新索引"),
+                        detail: progress.phase == .indexed ? String(localized: "最新数据已经可以查询。") : String(localized: "系统允许实时活动时会显示在灵动岛。"),
+                        busy: progress.phase != .indexed
+                    )
                     .accessibilityIdentifier("import-index-progress")
                 }
 
                 if let documentFile = result.documentFile {
-                    LedgerPanel {
-                        HStack(alignment: .center, spacing: LedgerSpacing.md) {
-                            Image(systemName: "archivebox.fill")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(LedgerPalette.cobalt)
-                                .frame(width: 36, height: 36)
-                                .background(LedgerPalette.tag)
-                                .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.md, style: .continuous))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("账单已归档")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(LedgerPalette.ink)
-                                Text(URL(fileURLWithPath: documentFile).lastPathComponent)
-                                    .font(.system(size: 11, weight: .medium).monospaced())
-                                    .foregroundStyle(LedgerPalette.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .padding(LedgerSpacing.lg)
-                    }
+                    completionRow(title: String(localized: "归档位置"),
+                                  detail: URL(fileURLWithPath: documentFile).lastPathComponent, mono: true)
                 }
 
                 if let cleanupError = result.runtimeCleanupError, !cleanupWarningDismissed {
                     StatusBanner(message: cleanupError) { cleanupWarningDismissed = true }
+                        .padding(.horizontal, 20).padding(.top, 12)
                 }
 
                 if let warning = result.gmailPendingStatusWarning, !cleanupWarningDismissed {
                     StatusBanner(message: warning) { cleanupWarningDismissed = true }
+                        .padding(.horizontal, 20).padding(.top, 12)
                 }
 
-                Button {
-                    dismiss()
-                } label: {
-                    PrimaryButtonLabel(title: String(localized: "完成"), loading: false)
+                if unclassified > 0 {
+                    Text("接下来").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        .padding(EdgeInsets(top: 24, leading: 20, bottom: 6, trailing: 20))
+                    Button {
+                        pendingInboxPresented = true
+                    } label: {
+                        HStack(spacing: 14) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("整理 \(unclassified) 笔未分类").balancedFont(size: 15.5).foregroundStyle(BalancedPalette.ink)
+                                Text("这批里分类仍是 Unknown 的交易").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                            }
+                            Spacer(minLength: 0)
+                            Text("待整理").balancedFont(size: 14).foregroundStyle(BalancedPalette.meta)
+                            Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(BalancedPalette.edge)
+                        }
+                        .padding(.horizontal, 20)
+                        .frame(minHeight: 52)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                    .accessibilityIdentifier("import-open-pending")
                 }
-                .buttonStyle(PressScaleButtonStyle())
-                .accessibilityIdentifier("import-finish")
             }
-            .padding(.horizontal, LedgerSpacing.xl)
-            .padding(.vertical, LedgerSpacing.xxl)
+            .padding(.bottom, 24)
             .ledgerAdaptivePageWidth()
         }
+        .background(BalancedPalette.page)
         .accessibilityIdentifier("native-import-complete")
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button("完成") { dismiss() }
+                .buttonStyle(.balanced(.primary))
+                .accessibilityIdentifier("import-finish")
+                .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+                .ledgerGlassDock()
+        }
+    }
+
+    private func completionRow(title: String, detail: String, busy: Bool = false, mono: Bool = false) -> some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).balancedFont(size: 15.5).foregroundStyle(BalancedPalette.ink)
+                Group {
+                    if mono {
+                        Text(detail).balancedMono(size: 11.5)
+                    } else {
+                        Text(detail).balancedFont(size: 12.5)
+                    }
+                }
+                .foregroundStyle(BalancedPalette.meta)
+                .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+            if busy { ProgressView().controlSize(.small).tint(BalancedPalette.ink) }
+        }
+        .padding(.horizontal, 20)
+        .frame(minHeight: 56)
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+        .accessibilityElement(children: .combine)
     }
 
     private func completionDetail(_ result: LedgerImportCommitResult) -> String {
@@ -1086,48 +1453,61 @@ struct NativeImportFlowView: View {
         persistDraft()
     }
 
-    private func toggleTagSelection(_ id: String) {
-        if selectedTagEntryIDs.contains(id) {
-            selectedTagEntryIDs.remove(id)
-        } else {
-            selectedTagEntryIDs.insert(id)
-        }
-    }
-
-    private enum BulkTagMode {
-        case add
-        case remove
-    }
-
-    private func applyBulkTags(mode: BulkTagMode) {
-        guard !selectedTagEntryIDs.isEmpty else {
-            errorMessage = String(localized: "请先选择需要修改标签的交易。")
-            failureFeedback &+= 1
-            return
-        }
+    private func applyBulkTags(mode: ImportBulkTagMode, to ids: Set<String>) {
+        guard !ids.isEmpty else { return }
         do {
-            let tags = try LedgerTagRules.parse(bulkTagInput)
-            let changed = Set(tags)
-            reviewedEntries = try reviewedEntries.map { entry in
-                guard selectedTagEntryIDs.contains(entry.id) else { return entry }
-                let existing = LedgerTagRules.normalized(entry.tags ?? [])
-                let updated: [String]
-                switch mode {
-                case .add:
-                    updated = try LedgerTagRules.validating(existing + tags)
-                case .remove:
-                    updated = existing.filter { !changed.contains($0) }
-                }
-                return entry.applyingTags(updated)
-            }
+            reviewedEntries = try ImportBulkEdit.applyingTags(bulkTagInput, mode: mode, to: reviewedEntries, ids: ids)
             bulkTagInput = ""
             errorMessage = nil
-            bulkTagInputFocused = false
+            editedEntryStatus = mode == .add
+                ? String(localized: "已为 \(ids.count) 笔交易添加标签")
+                : String(localized: "已从 \(ids.count) 笔交易移除标签")
+            editSaveFeedback &+= 1
             persistDraft()
         } catch {
             errorMessage = error.localizedDescription
             failureFeedback &+= 1
         }
+    }
+
+    private func applyBulkCategory(_ account: String, to ids: Set<String>) {
+        guard !account.isEmpty else { return }
+        var skipped = 0
+        for index in reviewedEntries.indices where ids.contains(reviewedEntries[index].id) {
+            let entry = reviewedEntries[index]
+            let allowed = importAccountChoices(for: entry).map(\.account)
+            if let updated = ImportClassificationContext.applying(category: account, funding: entry.fundingAccount,
+                                                                  to: entry, allowed: allowed) {
+                reviewedEntries[index] = updated
+                classificationAcceptedFields[entry.id, default: []].insert("category")
+                manuallyReviewedIDs.insert(entry.id)
+            } else {
+                skipped += 1
+            }
+        }
+        bulkCategory = ""
+        errorMessage = skipped == 0 ? nil
+            : String(localized: "\(skipped) 笔包含复杂分录或账户冲突，分类没有修改，请逐笔编辑。")
+        editedEntryStatus = String(localized: "已为 \(ids.count - skipped) 笔交易设置分类")
+        persistDraft()
+    }
+
+    /// Previous / next within the filter the editor was opened from, so the
+    /// person can work through 待确认 without returning to the list.
+    private func editorPosition(for id: String) -> ImportEditorPosition? {
+        guard let position = reviewQueue.position(of: id, in: activeFilter) else { return nil }
+        return ImportEditorPosition(title: activeFilter.title, index: position.index, count: position.count)
+    }
+
+    private func nextEditorID(from id: String, offset: Int) -> String? {
+        let queue = reviewQueue
+        if let neighbor = queue.neighbor(of: id, in: activeFilter, offset: offset) { return neighbor }
+        return offset > 0 ? queue.ids(for: activeFilter).first { $0 != id } : nil
+    }
+
+    /// Replacing the sheet's item swaps the editor in place; nil closes it.
+    private func openEditor(_ id: String?) {
+        editingEntry = id.flatMap { id in reviewedEntries.first { $0.id == id } }
     }
 
     private func generatePreview() async {
@@ -1147,7 +1527,7 @@ struct NativeImportFlowView: View {
             preview = updated
             reviewedEntries = updated.entries
             includedEntryIDs = Set(updated.entries.map(\.id))
-            selectedTagEntryIDs = []
+            reviewFilter = nil
             bulkTagInput = ""
             commitErrorMessage = nil
             commitOutcomeNeedsReconciliation = false
@@ -1190,6 +1570,7 @@ struct NativeImportFlowView: View {
         guard let preview, let repository = session.localRepository, !isCommitting,
               session.phase == .ready, !session.privacyShielded else { return }
         let entries = selectedEntries
+        committedEntries = entries
         isCommitting = true
         commitErrorMessage = nil
         defer { isCommitting = false }
@@ -1207,6 +1588,7 @@ struct NativeImportFlowView: View {
     private func startCommit() {
         guard let preview, !isCommitting else { return }
         let entries = selectedEntries
+        committedEntries = entries
         classificationPaused = true
         isCommitting = true
         commitErrorMessage = nil
@@ -1307,7 +1689,11 @@ private struct ImportEntryEditor: View {
     let entry: LedgerImportEntry
     let accounts: [LedgerAccountChoice]
     let suggestion: ImportClassificationSuggestion?
+    let evidence: [ImportClassificationRequest.Example]
+    let position: ImportEditorPosition?
     let onSave: (LedgerImportEntry) -> Void
+    let onSaveAndNext: ((LedgerImportEntry) -> Void)?
+    let onStep: (Int) -> Void
 
     @State private var date: Date
     @State private var flag: String
@@ -1324,12 +1710,20 @@ private struct ImportEntryEditor: View {
         entry: LedgerImportEntry,
         accounts: [LedgerAccountChoice],
         suggestion: ImportClassificationSuggestion? = nil,
-        onSave: @escaping (LedgerImportEntry) -> Void
+        evidence: [ImportClassificationRequest.Example] = [],
+        position: ImportEditorPosition? = nil,
+        onSave: @escaping (LedgerImportEntry) -> Void,
+        onSaveAndNext: ((LedgerImportEntry) -> Void)? = nil,
+        onStep: @escaping (Int) -> Void = { _ in }
     ) {
         self.entry = entry
         self.accounts = accounts
         self.suggestion = suggestion
+        self.evidence = evidence
+        self.position = position
         self.onSave = onSave
+        self.onSaveAndNext = onSaveAndNext
+        self.onStep = onStep
         _date = State(initialValue: Self.parseDate(entry.date) ?? Date())
         _flag = State(initialValue: entry.flag == "!" ? "!" : "*")
         _payee = State(initialValue: entry.payee)
@@ -1384,6 +1778,12 @@ private struct ImportEntryEditor: View {
     var body: some View {
         NavigationStack {
             List {
+                if let position, position.count > 1 {
+                    Section {
+                        queueHeader(position)
+                    }
+                    .listRowBackground(Color.clear)
+                }
                 Section("交易信息") {
                     TextField("商家", text: $payee)
                         .textContentType(.organizationName)
@@ -1407,30 +1807,7 @@ private struct ImportEntryEditor: View {
                     .accessibilityIdentifier("import-edit-source-account")
 
                     if let candidates = suggestion?.funding.candidates, !candidates.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(candidates, id: \.value) { candidate in
-                                    Button {
-                                        fundingAccount = candidate.value
-                                    } label: {
-                                        HStack(spacing: 4) {
-                                            Text(accountChoice(candidate.value).label)
-                                            Text("\(Int((candidate.probability * 100).rounded()))%")
-                                                .font(.caption2)
-                                                .opacity(0.8)
-                                        }
-                                        .font(.caption)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 5)
-                                        .background(fundingAccount == candidate.value ? LedgerPalette.cobalt.opacity(0.15) : Color.secondary.opacity(0.1))
-                                        .foregroundStyle(fundingAccount == candidate.value ? LedgerPalette.cobalt : LedgerPalette.ink)
-                                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
+                        candidatePicks(candidates, selection: $fundingAccount)
                     }
 
                     NavigationLink {
@@ -1441,30 +1818,7 @@ private struct ImportEntryEditor: View {
                     .accessibilityIdentifier("import-edit-target-account")
 
                     if let candidates = suggestion?.category.candidates, !candidates.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(candidates, id: \.value) { candidate in
-                                    Button {
-                                        categoryAccount = candidate.value
-                                    } label: {
-                                        HStack(spacing: 4) {
-                                            Text(accountChoice(candidate.value).label)
-                                            Text("\(Int((candidate.probability * 100).rounded()))%")
-                                                .font(.caption2)
-                                                .opacity(0.8)
-                                        }
-                                        .font(.caption)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 5)
-                                        .background(categoryAccount == candidate.value ? LedgerPalette.cobalt.opacity(0.15) : Color.secondary.opacity(0.1))
-                                        .foregroundStyle(categoryAccount == candidate.value ? LedgerPalette.cobalt : LedgerPalette.ink)
-                                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
+                        candidatePicks(candidates, selection: $categoryAccount)
                     }
 
                     if fundingAccount == categoryAccount {
@@ -1495,6 +1849,8 @@ private struct ImportEntryEditor: View {
                 }
                 Section {
                     TextField("空格或逗号分隔", text: $tagsText)
+                        // Tags are ASCII only; a Pinyin keyboard would hold them as uncommitted marked text.
+                        .keyboardType(.asciiCapable)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .focused($focusedField, equals: .tags)
@@ -1502,9 +1858,13 @@ private struct ImportEntryEditor: View {
 
                     if let tags = suggestion?.tags, !tags.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
+                            HStack(spacing: 6) {
                                 ForEach(tags.filter { $0.probability >= 0.5 }, id: \.value) { tag in
-                                    Button {
+                                    ImportPickButton(
+                                        label: "#\(tag.value)",
+                                        probability: tag.probability,
+                                        selected: (parsedTags ?? []).contains(tag.value)
+                                    ) {
                                         var current = tagsText.split(whereSeparator: { $0.isWhitespace || $0 == "," }).map(String.init)
                                         if current.contains(tag.value) {
                                             current.removeAll { $0 == tag.value }
@@ -1512,21 +1872,7 @@ private struct ImportEntryEditor: View {
                                             current.append(tag.value)
                                         }
                                         tagsText = current.joined(separator: " ")
-                                    } label: {
-                                        HStack(spacing: 4) {
-                                            Text("#\(tag.value)")
-                                            Text("\(Int((tag.probability * 100).rounded()))%")
-                                                .font(.caption2)
-                                                .opacity(0.8)
-                                        }
-                                        .font(.caption)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 5)
-                                        .background(tagsText.contains(tag.value) ? LedgerPalette.olive.opacity(0.15) : Color.secondary.opacity(0.1))
-                                        .foregroundStyle(tagsText.contains(tag.value) ? LedgerPalette.olive : LedgerPalette.ink)
-                                        .clipShape(RoundedRectangle(cornerRadius: LedgerRadius.sm))
                                     }
-                                    .buttonStyle(.plain)
                                 }
                             }
                             .padding(.vertical, 2)
@@ -1542,9 +1888,56 @@ private struct ImportEntryEditor: View {
                         Text("保存后返回核对，确认导入时才会写入账本。")
                     }
                 }
+                Section {
+                    if let method = entry.method, !method.isEmpty {
+                        LabeledContent("支付方式", value: method)
+                    }
+                    if let orderID = entry.orderID, !orderID.isEmpty {
+                        LabeledContent("订单号") {
+                            Text(orderID).balancedMono(size: 12.5).textSelection(.enabled)
+                        }
+                    }
+                    ForEach(Array(entry.postings.enumerated()), id: \.offset) { _, posting in
+                        LabeledContent {
+                            Text(posting.amount + " " + posting.currency).monospacedDigit()
+                        } label: {
+                            Text(posting.account).balancedMono(size: 12.5).textSelection(.enabled)
+                        }
+                    }
+                    if !evidence.isEmpty {
+                        DisclosureGroup("参考历史 · \(evidence.count) 条") {
+                            ForEach(Array(evidence.enumerated()), id: \.offset) { _, example in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(example.payee + " · " + example.narration)
+                                    if !example.method.isEmpty { Text(example.method).foregroundStyle(.secondary) }
+                                    Text(example.accounts.joined(separator: " · ")).balancedMono(size: 11.5).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .accessibilityIdentifier("import-edit-evidence")
+                    }
+                } header: {
+                    Text("原始账单")
+                }
             }
             .accessibilityIdentifier("import-edit-content")
             .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let position, position.count > 1, onSaveAndNext != nil {
+                    HStack(spacing: 10) {
+                        Button("跳过") { onStep(1) }
+                            .buttonStyle(.balanced(.outline, disabled: hasChanges))
+                            .disabled(hasChanges)
+                            .accessibilityIdentifier("import-edit-skip")
+                        Button("保存，下一条", action: saveAndNext)
+                            .buttonStyle(.balanced(.primary, disabled: !canSave))
+                            .disabled(!canSave)
+                            .accessibilityIdentifier("import-edit-save-next")
+                    }
+                    .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+                    .ledgerGlassDock()
+                }
+            }
             .navigationTitle("编辑交易")
             .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)
@@ -1574,16 +1967,61 @@ private struct ImportEntryEditor: View {
         }
     }
 
-    private func requestDismiss() {
-        focusedField = nil
-        if hasChanges { discardConfirmationPresented = true }
-        else { dismiss() }
+    /// 待确认 2 / 5 with previous / next. Moving away is blocked while this
+    /// entry has unsaved edits, so nothing is dropped silently.
+    private func queueHeader(_ position: ImportEditorPosition) -> some View {
+        HStack(spacing: 12) {
+            Text("\(position.title) \(position.index) / \(position.count)")
+                .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+            Spacer(minLength: 0)
+            HStack(spacing: 0) {
+                Button { onStep(-1) } label: {
+                    Image(systemName: "chevron.up").frame(width: 40, height: 36)
+                }
+                .disabled(hasChanges || position.index <= 1)
+                .accessibilityLabel("上一条")
+                .accessibilityIdentifier("import-edit-previous")
+                Button { onStep(1) } label: {
+                    Image(systemName: "chevron.down").frame(width: 40, height: 36)
+                }
+                .disabled(hasChanges || position.index >= position.count)
+                .accessibilityLabel("下一条")
+                .accessibilityIdentifier("import-edit-next")
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(BalancedPalette.ink)
+            .ledgerGlassControl()
+        }
+        .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 0))
     }
 
-    private func save() {
-        guard canSave else { return }
+    private func candidatePicks(_ candidates: [ImportClassificationSuggestion.Candidate],
+                                selection: Binding<String>) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(candidates, id: \.value) { candidate in
+                    ImportPickButton(
+                        label: accountChoice(candidate.value).label,
+                        probability: candidate.probability,
+                        selected: selection.wrappedValue == candidate.value
+                    ) {
+                        selection.wrappedValue = candidate.value
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func saveAndNext() {
+        guard canSave, let onSaveAndNext else { return }
         focusedField = nil
-        let updated = entry.applyingReviewEdits(
+        onSaveAndNext(reviewedEntry)
+    }
+
+    private var reviewedEntry: LedgerImportEntry {
+        entry.applyingReviewEdits(
             date: Self.formatDate(date),
             flag: flag,
             payee: payee,
@@ -1593,7 +2031,18 @@ private struct ImportEntryEditor: View {
             fundingAccount: fundingAccount,
             tags: parsedTags ?? entry.tags ?? []
         )
-        onSave(updated)
+    }
+
+    private func requestDismiss() {
+        focusedField = nil
+        if hasChanges { discardConfirmationPresented = true }
+        else { dismiss() }
+    }
+
+    private func save() {
+        guard canSave else { return }
+        focusedField = nil
+        onSave(reviewedEntry)
         dismiss()
     }
 
@@ -1626,68 +2075,128 @@ private struct ImportEntryEditor: View {
     }
 }
 
-/// `.imp` — a flat checkbox box (not a filled circle), who/meta/cat stacked
-/// left, amount right. Excluded rows dim to ink-3 (`who`/`amt`) rather than
-/// drawing a status colour; a missing category/funding account also stays
-/// ink-3 prose ("未选择账户") instead of a risk-red flag, matching batch 1's
-/// "no status colours" rule.
+struct ImportEditorPosition: Equatable {
+    let title: String
+    let index: Int
+    let count: Int
+}
+
+struct ImportEntryPick: Identifiable, Equatable {
+    let account: String
+    let label: String
+    let probability: Double
+    let selected: Bool
+
+    var id: String { account }
+}
+
+/// A suggested account or tag: a square outlined control in ink, filled when
+/// chosen, with the classifier's probability in meta. No chip fill or tint.
+private struct ImportPickButton: View {
+    let label: String
+    let probability: Double?
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(label).balancedFont(size: 13).lineLimit(1)
+                if let probability {
+                    Text("\(Int((probability * 100).rounded()))%").balancedFont(size: 11.5).monospacedDigit()
+                        .opacity(0.7)
+                }
+            }
+            .foregroundStyle(selected ? BalancedPalette.page : BalancedPalette.ink)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 34)
+            .background(selected ? BalancedPalette.ink : Color.clear)
+            .overlay { Rectangle().stroke(selected ? BalancedPalette.ink : BalancedPalette.edge, lineWidth: 1) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// `.imp` — a flat checkbox box, who/meta/cat stacked left, amount right.
+/// An entry that still needs the person says why in ink, and offers the
+/// classifier's top categories as one-tap picks; everything else opens the
+/// editor. Excluded rows dim to ink-3 rather than drawing a status colour.
 private struct ImportEntryReviewRow: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let entry: LedgerImportEntry
     let included: Bool
-    let tagSelected: Bool
     let isAIClassified: Bool
     let categoryLabel: String
-    let fundingLabel: String
-    let expanded: Bool
+    let attention: String?
+    let picks: [ImportEntryPick]
+    let canConfirm: Bool
     let onToggle: () -> Void
-    let onToggleTag: () -> Void
     let onEdit: () -> Void
-    let onToggleExpanded: () -> Void
+    let onPick: (String) -> Void
+    let onConfirm: () -> Void
 
-    private var categoryMissing: Bool {
-        entry.categoryAccount.isEmpty || entry.categoryAccount.lowercased().contains("unknown")
+    private var payeeText: String {
+        entry.payee.isEmpty ? String(localized: "未命名交易") : entry.payee
     }
 
-    private var fundingMissing: Bool {
-        entry.fundingAccount.isEmpty || entry.fundingAccount.lowercased().contains("unknown")
+    private var metaText: String {
+        let detail = [entry.method, entry.narration.isEmpty ? nil : entry.narration]
+            .compactMap { $0 }.filter { !$0.isEmpty }.first ?? String(localized: "无摘要")
+        return "\(entry.date) · \(detail)"
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                Button(action: onToggle) {
-                    ZStack {
-                        Rectangle().fill(included ? BalancedPalette.ink : Color.clear)
-                        Rectangle().stroke(included ? BalancedPalette.ink : BalancedPalette.edge, lineWidth: 1)
-                    }
-                    .frame(width: 18, height: 18)
-                    .frame(width: 44, height: 44)
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: onToggle) {
+                ZStack {
+                    Rectangle().fill(included ? BalancedPalette.ink : Color.clear)
+                    Rectangle().stroke(included ? BalancedPalette.ink : BalancedPalette.edge, lineWidth: 1)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(included ? "排除 \(entry.payee)" : "包含 \(entry.payee)")
-                .accessibilityIdentifier("import-entry-toggle-\(entry.id)")
+                .frame(width: 18, height: 18)
+                .frame(width: 44, height: 44)
+                // A clear fill is not hit-tested, so an excluded entry would
+                // only respond on its 1pt border without an explicit shape.
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(included ? "排除 \(payeeText)" : "包含 \(payeeText)")
+            .accessibilityIdentifier("import-entry-toggle-\(entry.id)")
 
-                Button(action: onToggleExpanded) {
+            VStack(alignment: .leading, spacing: 0) {
+                Button(action: onEdit) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(entry.payee.isEmpty ? String(localized: "未命名交易") : entry.payee)
+                            Text(payeeText)
                                 .balancedFont(size: 15, weight: .medium)
                                 .foregroundStyle(included ? BalancedPalette.ink : BalancedPalette.meta)
                                 .lineLimit(1)
-                            Text("\(entry.date) · \(entry.narration.isEmpty ? String(localized: "无摘要") : entry.narration)")
+                            Text(metaText)
                                 .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                                 .lineLimit(1)
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text("→ " + (categoryMissing ? String(localized: "未选择账户") : categoryLabel))
-                                    .balancedMono(size: 12).foregroundStyle(BalancedPalette.secondary).lineLimit(1)
+                                Text("→ " + (ImportReviewQueue.isMissingAccount(entry.categoryAccount) ? String(localized: "未选择分类") : categoryLabel))
+                                    .balancedMono(size: 12)
+                                    .foregroundStyle(attention == nil ? BalancedPalette.secondary : BalancedPalette.ink)
+                                    .lineLimit(1)
                                 if isAIClassified {
                                     Text("AI").balancedFont(size: 10, weight: .medium).foregroundStyle(BalancedPalette.meta)
+                                        .padding(.horizontal, 3)
+                                        .overlay { Rectangle().stroke(BalancedPalette.ruleStrong, lineWidth: 1) }
                                 }
                                 if let tags = entry.tags, !tags.isEmpty {
                                     Text(tags.prefix(2).map { "#\($0)" }.joined(separator: " "))
                                         .balancedFont(size: 11).foregroundStyle(BalancedPalette.meta).lineLimit(1)
                                 }
+                            }
+                            if let attention {
+                                HStack(spacing: 6) {
+                                    Circle().stroke(BalancedPalette.ink, lineWidth: 1.5).frame(width: 6, height: 6)
+                                    Text(attention).balancedFont(size: 12, weight: .semibold).foregroundStyle(BalancedPalette.ink)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .padding(.top, 2)
+                                .accessibilityIdentifier("import-entry-attention-\(entry.id)")
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1695,80 +2204,43 @@ private struct ImportEntryReviewRow: View {
                             .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 15, relativeTo: .body))
                             .monospacedDigit().foregroundStyle(included ? BalancedPalette.ink : BalancedPalette.meta)
                             .lineLimit(1).fixedSize()
-                            .accessibilityLabel(importAmountText(entry))
                     }
-                    .padding(.trailing, 4)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 12)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("import-entry-\(entry.id)")
-
-                Button(action: onEdit) {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 15))
-                        .foregroundStyle(BalancedPalette.secondary)
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("编辑 \(entry.payee.isEmpty ? String(localized: "未命名交易") : entry.payee)")
+                .accessibilityHint("打开编辑")
                 .accessibilityIdentifier("import-entry-edit-\(entry.id)")
-            }
 
-            if expanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    Button(action: onToggleTag) {
-                        Text(tagSelected ? "已选为标签操作对象" : "选择为标签操作对象")
-                            .balancedFont(size: 13).foregroundStyle(BalancedPalette.secondary)
-                            .frame(minHeight: 44, alignment: .leading)
+                if !picks.isEmpty || canConfirm {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if !picks.isEmpty {
+                            Text("建议分类").balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                        }
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(picks) { pick in
+                                    ImportPickButton(label: pick.label, probability: pick.probability, selected: pick.selected) {
+                                        onPick(pick.account)
+                                    }
+                                    .accessibilityIdentifier("import-entry-pick-\(entry.id)-\(pick.account)")
+                                }
+                                if canConfirm {
+                                    ImportPickButton(label: String(localized: "确认"), probability: nil, selected: false, action: onConfirm)
+                                        .accessibilityIdentifier("import-entry-confirm-\(entry.id)")
+                                }
+                            }
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(tagSelected ? "取消选择 \(entry.payee) 的标签操作" : "选择 \(entry.payee) 的标签操作")
-                    .accessibilityIdentifier("import-entry-tag-toggle-\(entry.id)")
-                    ImportEntryDetailLine(label: String(localized: "分类账户"), value: entry.categoryAccount)
-                    ImportEntryDetailLine(label: String(localized: "资金账户"), value: entry.fundingAccount)
-                    ForEach(Array(entry.postings.enumerated()), id: \.offset) { _, posting in
-                        ImportEntryDetailLine(
-                            label: posting.amount + " " + posting.currency,
-                            value: posting.account
-                        )
-                    }
-                    if let method = entry.method, !method.isEmpty {
-                        ImportEntryDetailLine(label: String(localized: "支付方式"), value: method)
-                    }
-                    if let orderID = entry.orderID, !orderID.isEmpty {
-                        ImportEntryDetailLine(label: String(localized: "订单号"), value: orderID)
-                    }
-                    if let tags = entry.tags, !tags.isEmpty {
-                        ImportEntryDetailLine(label: String(localized: "标签"), value: tags.map { "#\($0)" }.joined(separator: " "))
-                    }
+                    .padding(.bottom, 12)
                 }
-                .padding(.leading, 52)
-                .padding(.bottom, 16)
-                .transition(.opacity)
             }
         }
-        .padding(.vertical, 6)
         .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: expanded)
     }
 
     private func importAmountText(_ entry: LedgerImportEntry) -> String {
         let minorUnits = Int((entry.amount * 100).rounded())
         return MoneyText.format(minorUnits: minorUnits, currency: entry.currency, showsCurrency: false)
-    }
-
-}
-
-private struct ImportEntryDetailLine: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
-            Text(value).balancedMono(size: 13).foregroundStyle(BalancedPalette.secondary).textSelection(.enabled)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

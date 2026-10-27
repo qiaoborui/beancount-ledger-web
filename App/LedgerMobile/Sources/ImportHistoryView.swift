@@ -21,6 +21,8 @@ struct ImportHistoryView: View {
     @State private var providers: [LedgerImportProviderInfo] = []
     @State private var fileImporterPresented = false
     @State private var activeImportFile: LedgerImportSelectedFile?
+    @State private var importDraft: LedgerImportDraft?
+    @State private var showsAllDocuments = false
     @State private var isReadingFile = false
     @State private var debugImportFlowPresented = false
     @State private var gmailStatus: LedgerGmailStatus?
@@ -68,7 +70,10 @@ struct ImportHistoryView: View {
         ) { result in
             Task { await handleFileSelection(result) }
         }
-        .sheet(item: $activeImportFile, onDismiss: { activeSharedItem = nil }) { file in
+        .sheet(item: $activeImportFile, onDismiss: {
+            activeSharedItem = nil
+            loadImportDraft()
+        }) { file in
             if file.fileExtension == ".bean" {
                 BeanTransactionImportView(file: file) {
                     let completedItem = activeSharedItem
@@ -137,8 +142,8 @@ struct ImportHistoryView: View {
         .task {
             await loadSharedInbox()
             await refreshAll(replacingContent: true)
-            // Restore after the archive list loads so an already-committed draft is dropped, not reopened.
-            restoreImportDraftIfAvailable()
+            // Read after the archive list loads so an already-committed draft is dropped, not offered.
+            loadImportDraft()
             presentDebugImportFlowIfNeeded()
         }
         .onChange(of: scenePhase) { _, updatedPhase in
@@ -147,7 +152,7 @@ struct ImportHistoryView: View {
                 return
             }
             Task {
-                restoreImportDraftIfAvailable()
+                loadImportDraft()
                 await loadSharedInbox()
             }
         }
@@ -175,17 +180,28 @@ struct ImportHistoryView: View {
         }
     }
 
+    private var hasPendingWork: Bool {
+        importDraft != nil || !sharedItems.isEmpty || sharedInboxError != nil
+    }
+
     private var content: some View {
         List {
-            importSection
             if let errorMessage {
                 Section {
                     StatusBanner(message: errorMessage) { self.errorMessage = nil }
                 }
             }
-            sharedInboxSection
-            channelSection
-            historySection
+            pendingSection
+            if sortedDocuments.isEmpty && !hasPendingWork {
+                firstImportGuide
+            } else {
+                channelSection
+                historySection
+            }
+            Section {} footer: {
+                Text("支持 CSV、Excel、PDF、邮件和 ZIP，最大 10MB。账单先生成预览，确认后才写入账本。")
+                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            }
         }
         .ledgerReadingList()
         .contentMargins(.top, LedgerLayout.pageTopInset, for: .scrollContent)
@@ -193,27 +209,53 @@ struct ImportHistoryView: View {
         .refreshable { await refreshAll(replacingContent: false) }
         .privacySensitive()
         .accessibilityIdentifier("import-history-content")
+        .safeAreaInset(edge: .bottom, spacing: 0) { importDock }
     }
 
+    /// The one primary action, docked on glass so it stays reachable however
+    /// far the archive scrolls.
+    private var importDock: some View {
+        Button {
+            fileImporterPresented = true
+        } label: {
+            HStack(spacing: 8) {
+                if isReadingFile { ProgressView().controlSize(.small).tint(BalancedPalette.page) }
+                Text(isReadingFile ? "正在读取文件..." : "选择账单文件")
+            }
+        }
+        .buttonStyle(.balanced(.primary, disabled: isReadingFile))
+        .disabled(isReadingFile)
+        .accessibilityIdentifier("import-select-file")
+        .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+        .ledgerGlassDock()
+    }
+
+    /// 待处理: an unfinished review and files shared from other apps, in one list.
     @ViewBuilder
-    private var sharedInboxSection: some View {
-        if !sharedItems.isEmpty || sharedInboxError != nil {
+    private var pendingSection: some View {
+        if hasPendingWork {
             Section {
+                if let importDraft {
+                    Button {
+                        activeImportFile = importDraft.selectedFile
+                    } label: {
+                        pendingRow(title: importDraft.preview == nil
+                                       ? String(localized: "继续导入 · \(importDraft.fileName)")
+                                       : String(localized: "继续核对 · \(importDraft.fileName)"),
+                                   detail: draftDetail(importDraft),
+                                   value: importDraft.savedAt.formatted(date: .omitted, time: .shortened))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isReadingFile)
+                    .accessibilityIdentifier("import-continue-draft")
+                }
                 if let sharedInboxError {
                     Text(sharedInboxError).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                 }
                 ForEach(sharedItems) { item in
                     HStack(spacing: 8) {
                         Button { Task { await reviewSharedItem(item) } } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "doc.badge.arrow.up")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(BalancedPalette.secondary)
-                                    .frame(width: 28)
-                                Text(item.name).balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink).lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .frame(minHeight: 44)
+                            pendingRow(title: item.name, detail: String(localized: "从其他 App 分享"), value: String(localized: "核对"))
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("shared-import-review-\(item.name)")
@@ -227,23 +269,77 @@ struct ImportHistoryView: View {
                     }
                 }
             } header: {
-                TerminalSectionLabel(text: String(localized: "待导入")).listRowBackground(BalancedPalette.page)
-            } footer: {
-                Text("从其他 App 分享的账单，核对后导入。").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                TerminalSectionLabel(text: String(localized: "待处理")).listRowBackground(BalancedPalette.page)
             }
         }
     }
 
-    private func restoreImportDraftIfAvailable() {
-        guard activeImportFile == nil,
-              let ledgerID = session.currentLocalLedgerDescriptor?.id,
-              let draft = LedgerImportDraftStore.shared.load(ledgerID: ledgerID) else { return }
+    private func pendingRow(title: String, detail: String, value: String) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                Text(detail).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta).lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(value).balancedFont(size: 14).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+            Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(BalancedPalette.edge)
+        }
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
+    }
+
+    private func draftDetail(_ draft: LedgerImportDraft) -> String {
+        guard let preview = draft.preview else { return String(localized: "尚未生成预览") }
+        let included = draft.includedEntryIDs.count
+        return String(localized: "\(LedgerImportProvider.provider(preview.provider)?.label ?? preview.provider) · 已勾选 \(included) / \(draft.reviewedEntries.count) 笔")
+    }
+
+    /// First run: what can be imported and where each app exports it.
+    private var firstImportGuide: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("还没有导入过账单").balancedFont(size: 15, weight: .semibold).foregroundStyle(BalancedPalette.ink)
+                Text("从支付宝或微信导出账单，用系统分享发到 Ledger，或在下面选择文件。账单会先生成预览，核对后才写入。")
+                    .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 10)
+            .listRowSeparator(.hidden)
+            guideRow(String(localized: "支付宝 · CSV"), String(localized: "我的 → 账单 → 开具交易流水证明"))
+            guideRow(String(localized: "微信支付 · XLSX"), String(localized: "我 → 服务 → 钱包 → 账单 → 下载账单"))
+            guideRow(String(localized: "银行流水 · PDF / 压缩包 · ZIP"), String(localized: "网银导出的对账单；加密压缩包在解析时输入密码"))
+            guideRow(String(localized: "Beancount · .bean"), String(localized: "保留原始分录、注释和元数据，直接追加交易"))
+        } header: {
+            TerminalSectionLabel(text: String(localized: "从哪里导出")).listRowBackground(BalancedPalette.page)
+        }
+        .accessibilityIdentifier("import-first-guide")
+    }
+
+    private func guideRow(_ title: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            Text(detail).balancedFont(size: 14.5).foregroundStyle(BalancedPalette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// An unfinished review is offered as a 待处理 row instead of reopening by
+    /// itself; a draft whose import already reached the archive is dropped.
+    private func loadImportDraft() {
+        guard activeImportFile == nil, let ledgerID = session.currentLocalLedgerDescriptor?.id else { return }
+        guard let draft = LedgerImportDraftStore.shared.load(ledgerID: ledgerID) else {
+            importDraft = nil
+            return
+        }
         if let importID = draft.preview?.importID,
            LedgerImportCommitReconciliation.archivedDocument(importID: importID, in: documents) != nil {
             LedgerImportDraftStore.shared.remove(ledgerID: ledgerID)
+            importDraft = nil
             return
         }
-        activeImportFile = draft.selectedFile
+        importDraft = draft
     }
 
     private func loadSharedInbox() async {
@@ -273,40 +369,6 @@ struct ImportHistoryView: View {
             try await Task.detached { try LedgerSharedImportInbox.appInbox().remove(item) }.value
             await loadSharedInbox()
         } catch { sharedInboxError = error.localizedDescription }
-    }
-
-    private var importSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("智能账单导入").balancedFont(size: 15, weight: .semibold).foregroundStyle(BalancedPalette.ink)
-                    Text("自动识别渠道、解析交易与去重预览").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-                }
-
-                Button {
-                    fileImporterPresented = true
-                } label: {
-                    HStack(spacing: 8) {
-                        if isReadingFile { ProgressView().controlSize(.small).tint(BalancedPalette.page) }
-                        Text(isReadingFile ? "正在读取文件..." : "选择账单文件")
-                    }
-                }
-                .buttonStyle(.balanced(.primary, disabled: isReadingFile))
-                .disabled(isReadingFile)
-                .accessibilityIdentifier("import-select-file")
-
-                HStack(spacing: 14) {
-                    FormatBadge(name: String(localized: "支付宝"), ext: "CSV")
-                    FormatBadge(name: String(localized: "微信支付"), ext: "XLSX")
-                    FormatBadge(name: String(localized: "银行流水"), ext: "PDF")
-                    FormatBadge(name: String(localized: "压缩包"), ext: "ZIP")
-                }
-            }
-            .padding(.vertical, 8)
-        } footer: {
-            Text("支持 CSV、Excel、PDF、邮件和 ZIP，最大 10MB。预览并确认后写入账本。")
-                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-        }
     }
 
     private var gmailAutomationSection: some View {
@@ -574,47 +636,31 @@ struct ImportHistoryView: View {
         }
     }
 
-    private var updateSummary: some View {
-        let recorded = statuses.filter { $0.document != nil }
-        let needsUpdate = recorded.filter { $0.freshness == .attention || $0.freshness == .overdue }.count
-        let missing = statuses.count - recorded.count
-
-        return HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(summaryTitle(recorded: recorded.count, needsUpdate: needsUpdate))
-                    .balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
-                Text("已归档 \(recorded.count) 个渠道 · \(missing) 个渠道暂无记录")
-                    .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
-            }
-            Spacer(minLength: 0)
-            if isRefreshing {
-                ProgressView().controlSize(.small)
-                    .accessibilityLabel("正在刷新导入记录")
-            }
-        }
-        .padding(.vertical, 6)
-    }
-
     private func summaryTitle(recorded: Int, needsUpdate: Int) -> String {
         if recorded == 0 { return String(localized: "还没有导入记录") }
         if needsUpdate > 0 { return String(localized: "\(needsUpdate) 个渠道建议更新") }
         return String(localized: "已归档渠道都在建议周期内")
     }
 
+    /// Every channel with its freshness dot, listed outright instead of folded.
     private var channelSection: some View {
-        Section {
-            DisclosureGroup {
-                ForEach(statuses) { status in
-                    ImportChannelRow(status: status)
-                }
-            } label: {
-                updateSummary
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("import-channel-coverage")
+        let recorded = statuses.filter { $0.document != nil }
+        let needsUpdate = recorded.filter { $0.freshness == .attention || $0.freshness == .overdue }.count
+        return Section {
+            ForEach(statuses) { status in
+                ImportChannelRow(status: status)
             }
-            .tint(BalancedPalette.ink)
         } header: {
-            TerminalSectionLabel(text: String(localized: "渠道覆盖")).listRowBackground(BalancedPalette.page)
+            HStack {
+                TerminalSectionLabel(text: String(localized: "渠道 · \(summaryTitle(recorded: recorded.count, needsUpdate: needsUpdate))"))
+                Spacer(minLength: 0)
+                if isRefreshing {
+                    ProgressView().controlSize(.small).accessibilityLabel("正在刷新导入记录")
+                }
+            }
+            .listRowBackground(BalancedPalette.page)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("import-channel-coverage")
         } footer: {
             if let loadedAt {
                 Text("检查于 \(loadedAt.formatted(date: .omitted, time: .shortened))")
@@ -623,16 +669,28 @@ struct ImportHistoryView: View {
         }
     }
 
+    private static let collapsedDocumentCount = 2
+
     @ViewBuilder
     private var historySection: some View {
         Section {
             if sortedDocuments.isEmpty {
-                ContentUnavailableView("暂无归档记录", systemImage: "tray",
-                    description: Text("导入账单后，归档文件会显示在这里。"))
-                    .listRowSeparator(.hidden)
+                Text("导入账单后，归档文件会显示在这里。")
+                    .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
+                    .padding(.vertical, 8)
             } else {
-                ForEach(sortedDocuments) { document in
+                let shown = showsAllDocuments ? sortedDocuments : Array(sortedDocuments.prefix(Self.collapsedDocumentCount))
+                ForEach(shown) { document in
                     ImportDocumentRow(document: document)
+                }
+                if sortedDocuments.count > Self.collapsedDocumentCount {
+                    Button(showsAllDocuments ? "收起归档记录" : "查看全部 \(sortedDocuments.count) 条归档") {
+                        showsAllDocuments.toggle()
+                    }
+                    .balancedFont(size: 13.5)
+                    .foregroundStyle(BalancedPalette.secondary)
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("import-documents-toggle")
                 }
             }
         } header: {
@@ -1004,19 +1062,6 @@ private struct GmailImportReview: Identifiable {
     let preview: LedgerImportPreview
 
     var id: String { itemID }
-}
-
-/// A plain dot-leader label, not a filled pill — batch 1 has no chip chrome.
-private struct FormatBadge: View {
-    let name: String
-    let ext: String
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Circle().fill(BalancedPalette.edge).frame(width: 3, height: 3)
-            Text("\(name) \(ext)").balancedFont(size: 11).foregroundStyle(BalancedPalette.meta)
-        }
-    }
 }
 
 private struct ImportChannelRow: View {

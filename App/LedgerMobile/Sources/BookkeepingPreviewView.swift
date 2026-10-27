@@ -4,6 +4,9 @@ struct BookkeepingPreviewView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dismiss) private var dismiss
     let preview: PreparedBookkeepingChange
+    /// Imports pass how many transactions the change writes, so the totals
+    /// lead and the diff follows.
+    var entryCount: Int? = nil
     let onSaved: (LedgerImportCommitResult?) -> Void
     @State private var saving = false
     @State private var error: String?
@@ -39,6 +42,23 @@ struct BookkeepingPreviewView: View {
                     }
                     .foregroundStyle(BalancedPalette.income)
                     .padding(.vertical, 4)
+                }
+
+                if let entryCount {
+                    Section {
+                        VStack(alignment: .leading, spacing: 0) {
+                            summaryRow(String(localized: "新增交易"), String(localized: "\(entryCount) 笔"))
+                            summaryRow(String(localized: "改动文件"), String(localized: "\(visibleFiles.count) 个"))
+                        }
+                        .padding(EdgeInsets(top: 10, leading: 20, bottom: 10, trailing: 20))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(BalancedPalette.sunken)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("bookkeeping-import-summary")
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
                 }
 
                 if let error {
@@ -112,6 +132,15 @@ struct BookkeepingPreviewView: View {
         .onDisappear {
             if let repository = session.localRepository { Task { await repository.discardPrepared(preview) } }
         }
+    }
+
+    private func summaryRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label).balancedFont(size: 15).foregroundStyle(BalancedPalette.secondary)
+            Spacer(minLength: 12)
+            Text(value).balancedFont(size: 15).monospacedDigit().foregroundStyle(BalancedPalette.ink)
+        }
+        .padding(.vertical, 5)
     }
 
     static func diff(before: Data?, after: Data?) -> String {

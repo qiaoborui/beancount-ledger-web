@@ -1,0 +1,828 @@
+<title>结平 账单导入</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="batch1/styles.css">
+<style>
+<style>
+/* Liquid Glass layer over the Balanced batch-1 frames (iOS 26 only).
+   Content is untouched; only the control layer changes. */
+:root { --gal-bg: #e8e4dc; --gal-ink: #14100c; --gal-ink-3: #6f675a; --gal-line: rgba(20, 16, 12, 0.14); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gal-bg: #e8e4dc; } }
+:root[data-theme="dark"] { --gal-bg: #e8e4dc; }
+body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.invwrap { overflow-x: auto; margin-top: 22px; }
+.inv { border-collapse: collapse; width: 100%; max-width: 980px; font-size: 13.5px; }
+.inv th { text-align: left; font-weight: 500; font-size: 12px; color: var(--gal-ink-3); padding: 8px 16px 8px 0; border-bottom: 1px solid var(--gal-line); }
+.inv td { padding: 9px 16px 9px 0; border-bottom: 1px solid var(--gal-line); vertical-align: top; }
+.inv td:first-child { white-space: nowrap; font-weight: 500; }
+.pill-yes, .pill-no { font-size: 12px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.pill-yes { background: rgba(13, 83, 70, 0.12); }
+.pill-no { background: rgba(20, 16, 12, 0.08); color: var(--gal-ink-3); }
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; max-width: 1000px; }
+.rules h3 { font-size: 14.5px; font-weight: 600; margin: 0 0 6px; }
+.rules p { font-size: 13.5px; line-height: 1.6; margin: 0; color: #57504a; }
+
+/* glass material, per theme */
+.phone.glass {
+  --glass-fill: color-mix(in srgb, var(--bg) 60%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.78);
+  --glass-hi: rgba(255, 255, 255, 0.85);
+  --glass-shadow: 0 8px 24px -10px rgba(20, 16, 12, 0.3), 0 1px 2px rgba(20, 16, 12, 0.08);
+  --glass-sel: rgba(20, 16, 12, 0.08);
+}
+.phone.glass[data-theme='dark'] {
+  --glass-fill: color-mix(in srgb, #2b2825 55%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.16);
+  --glass-hi: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.7);
+  --glass-sel: rgba(246, 243, 238, 0.12);
+}
+.phone.glass .g {
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: blur(16px) saturate(1.7);
+  backdrop-filter: blur(16px) saturate(1.7);
+  border: 0.5px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--glass-shadow);
+}
+
+/* content runs full-bleed under the chrome, inset so nothing rests under it */
+.phone.glass > .scroll { position: absolute; inset: 0; padding-top: 112px; padding-bottom: 112px; }
+.phone.glass:not(:has(> .tabbar)) > .scroll { padding-bottom: 40px; }
+.phone.glass:has(> .gdock) > .scroll { padding-bottom: 116px; }
+.gtop { position: absolute; top: 0; left: 0; right: 0; z-index: 4; background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 85%, transparent) 60%, transparent 100%); }
+.gtop::before { content: ''; position: absolute; inset: 0; z-index: -1; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+.phone.glass .appbar { gap: 8px; }
+.phone.glass .gcap { display: inline-flex; align-items: center; height: 44px; border-radius: 22px; padding: 0 2px; flex: none; }
+.phone.glass .gcap .iconbtn { width: 40px; }
+.phone.glass .gperiod { padding: 0 14px; color: var(--ink); }
+.phone.glass .appbar .back.gcircle { width: 44px; height: 44px; border-radius: 50%; margin-left: 0; }
+.phone.glass .appbar .back.text.gcircle { width: auto; border-radius: 22px; padding: 0 14px; }
+
+/* tab bar: system glass capsule floating over the content */
+.phone.glass > .tabbar { position: absolute; left: 16px; right: 16px; bottom: 26px; height: 62px; border-radius: 31px; padding: 0 6px; z-index: 4; border-top: 0; }
+.phone.glass .tab[aria-current='page'] { background: var(--glass-sel); border-radius: 26px; margin: 5px 0; }
+.phone.glass .tab[aria-current='page'] .icon::after { display: none; }
+.phone.glass > .homebar { position: absolute; left: 0; right: 0; bottom: 0; background: transparent; z-index: 5; }
+
+/* search field and filter segment */
+.phone.glass .search.g { border-radius: 20px; }
+.phone.glass .seg { margin: 4px 20px 10px; padding: 3px; gap: 2px; display: flex; border-radius: 20px; border-bottom: 0;
+  background: var(--glass-fill); -webkit-backdrop-filter: blur(16px) saturate(1.7); backdrop-filter: blur(16px) saturate(1.7);
+  border: 0.5px solid var(--glass-edge); box-shadow: inset 0 1px 0 var(--glass-hi), var(--glass-shadow); }
+.phone.glass .seg button { display: flex; align-items: center; flex: 1 1 auto; justify-content: center; border-radius: 17px; min-height: 34px; padding: 0 10px; gap: 4px; white-space: nowrap; }
+.phone.glass .seg button[aria-selected='true'] { background: var(--glass-sel); }
+.phone.glass .seg button[aria-selected='true']::after { display: none; }
+
+/* sheets: glass shell with inset corners; the reading area stays paper */
+.phone.glass .scrim { background: rgba(20, 16, 12, 0.22); padding: 0 8px 8px; }
+.phone.glass[data-theme='dark'] .scrim { background: rgba(0, 0, 0, 0.42); }
+.phone.glass .sheet.gsheet { border-radius: 34px; border-top: 0.5px solid var(--glass-edge); --glass-fill: color-mix(in srgb, var(--bg) 88%, transparent); }
+.phone.glass .sheet .btn { border-radius: 23px; }
+
+/* docked bottom actions: floating glass panel */
+.phone.glass > .gdock { position: absolute; left: 12px; right: 12px; bottom: 30px; z-index: 4; border-radius: 28px; padding: 10px !important; }
+.phone.glass > .gdock .btn { border-radius: 23px; }
+.phone.glass > .gdock .btn:not(.primary) { background: transparent; }
+
+
+
+/* ---- import-flow additions (tokens from batch1, glass from glass.html) ---- */
+.toolbar a { font-size: 13px; color: #14100c; }
+.flow { display: flex; flex-wrap: wrap; gap: 6px 0; align-items: stretch; max-width: 1100px; margin: 18px 0 6px; padding: 0; list-style: none; counter-reset: st; }
+.flow li { flex: 1 1 150px; min-width: 0; padding: 10px 14px 12px; border-top: 2px solid #14100c; font-size: 13px; line-height: 1.5; color: #57504a; counter-increment: st; }
+.flow li b { display: block; color: #14100c; font-size: 14px; margin-bottom: 2px; }
+.flow li b::before { content: counter(st) "  "; color: #6f675a; font-weight: 500; font-variant-numeric: tabular-nums; }
+.phone.glass > .gdock { display: flex; flex-direction: column; gap: 8px; }
+.gdock .dock-row { display: flex; gap: 10px; }
+.gdock .dock-status { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); padding: 4px 6px 2px; }
+.gdock .dock-status b { display: block; color: var(--ink); font-weight: 600; font-size: 13px; }
+.phone.glass:has(> .gdock.has-status) > .scroll { padding-bottom: 190px; }
+.row .hint.mono, .mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3); }
+.row .value.strong { color: var(--ink); font-weight: 500; }
+.row .value + .value { margin-left: -2px; }
+.fresh { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+.fresh i { width: 6px; height: 6px; border-radius: 50%; display: block; }
+.v-out-bg { background: var(--out); } .v-in-bg { background: var(--in); } .edge-bg { background: var(--edge); }
+.spin { display: inline-block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--rule-strong); border-top-color: var(--ink); animation: spin 0.9s linear infinite; vertical-align: middle; }
+.spin.sm { width: 12px; height: 12px; border-width: 1.5px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.doc { padding: 12px 20px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 3px; }
+.doc-top { display: flex; gap: 10px; align-items: baseline; font-size: 15px; }
+.doc-top b { font-weight: 500; }
+.doc-top span, .meta2 { font-size: 12.5px; color: var(--ink-3); }
+.field-row .v.small { font-size: 14.5px; color: var(--ink); }
+.field-row.two { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
+.mono-s { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); margin-left: 4px; }
+.sugg { font-size: 12.5px; color: var(--ink-3); margin-left: 8px; border-bottom: 1px dashed var(--edge); }
+.input { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--edge); padding-bottom: 6px; font-size: 16px; min-height: 30px; }
+.caret-line { width: 1.5px; height: 18px; background: var(--ink); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.switch { flex: none; width: 46px; height: 28px; border-radius: 14px; background: var(--rule-strong); position: relative; }
+.switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--bg); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.switch[data-on='true'] { background: var(--ink); }
+.switch[data-on='true']::after { left: 21px; }
+.filehead { padding: 8px 20px 16px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid var(--rule); }
+.filehead b { font-size: 15.5px; font-weight: 500; word-break: break-all; }
+.filehead span { font-size: 12.5px; color: var(--ink-3); }
+.steps { padding: 8px 20px; }
+.step { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding: 12px 0; position: relative; }
+.step i { width: 14px; height: 14px; margin-top: 3px; border: 1px solid var(--edge); border-radius: 50%; display: block; position: relative; }
+.step[data-s='done'] i { background: var(--ink); border-color: var(--ink); }
+.step[data-s='done'] i::after { content: ''; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--bg); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.step[data-s='now'] i { border: 2px solid var(--rule-strong); border-top-color: var(--ink); animation: spin 0.9s linear infinite; }
+.step b { display: block; font-size: 15px; font-weight: 500; }
+.step[data-s='todo'] b { color: var(--ink-3); font-weight: 450; }
+.step span { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 3px; }
+.errblock { padding: 16px 20px; border-bottom: 1px solid var(--rule); }
+.errblock b { font-size: 15px; font-weight: 600; display: block; margin-bottom: 6px; }
+.errblock p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.disclose { color: var(--ink-2); }
+.disclose span { text-align: left; }
+.detail { padding: 2px 20px 12px; font-size: 12.5px; color: var(--ink-2); line-height: 1.55; background: var(--bg); }
+.detail .kv { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; color: var(--ink-3); }
+.detail .kv span:last-child { color: var(--ink-2); text-align: right; }
+.detail p { margin: 6px 0 0; padding-left: 10px; border-left: 1px solid var(--rule-strong); }
+.ailine { display: flex; align-items: center; gap: 8px; padding: 10px 20px; font-size: 12.5px; color: var(--ink-3); border-top: 1px solid var(--rule); }
+.ailine .linkbtn { margin-left: auto; }
+.linkbtn { font: inherit; font-size: 12.5px; background: none; border: 0; color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule-strong); text-underline-offset: 3px; padding: 6px 0; cursor: pointer; }
+.phone.glass .seg { position: sticky; top: 108px; z-index: 2; }
+.imp { cursor: pointer; }
+.imp .imp-main { min-width: 0; }
+.imp .cat .ai { font-family: var(--font-sans); font-size: 10px; font-weight: 600; letter-spacing: .06em; color: var(--ink-3); border: 1px solid var(--rule-strong); padding: 0 3px; margin-left: 6px; vertical-align: 1px; }
+.imp .cat .tags { font-family: var(--font-sans); font-size: 11.5px; color: var(--ink-3); margin-left: 6px; }
+.imp .need { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--ink); }
+.imp .need::before { content: ''; display: inline-block; width: 6px; height: 6px; border: 1.5px solid var(--ink); border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.imp[data-pending='true'] .cat { color: var(--ink); }
+.picks { margin-top: 10px; }
+.picks-k { display: block; font-size: 11.5px; color: var(--ink-3); margin-bottom: 6px; }
+.picks-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.sheet .picks { padding: 10px 20px 12px; margin: 0; border-bottom: 1px solid var(--rule); }
+.pick { font: inherit; display: inline-flex; align-items: baseline; gap: 6px; min-height: 34px; padding: 6px 10px; border: 1px solid var(--edge); background: transparent; color: var(--ink); font-size: 13px; cursor: pointer; text-align: left; }
+.pick .pct { font-size: 11.5px; color: var(--ink-3); }
+.pick[aria-pressed='true'] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.pick[aria-pressed='true'] .pct { color: var(--bg); opacity: .7; }
+.sheet.tall { max-height: 88%; }
+.sheet-nav { display: flex; align-items: center; justify-content: space-between; padding: 0 14px 6px 20px; font-size: 12.5px; color: var(--ink-3); }
+.navcap { height: 38px !important; }
+.navcap .iconbtn { width: 40px; height: 38px; color: var(--ink); }
+.sheet h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.amt-h { font-weight: 500; }
+.source.diff { white-space: normal; display: flex; flex-direction: column; font-size: 11px; line-height: 1.7; margin-top: 12px; }
+.source.diff span { white-space: pre; }
+.d-meta { color: var(--ink-3); }
+.d-add { color: var(--in); }
+.d-ctx { color: var(--ink-3); }
+.donehead { padding: 18px 20px 20px; }
+.donehead .dr { display: block; width: 40px; height: 5px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); margin-bottom: 16px; }
+.donehead h2 { margin: 0 0 6px; font-size: 22px; font-weight: 500; letter-spacing: -0.02em; }
+.donehead p { margin: 0; font-size: 13.5px; color: var(--ink-3); }
+.cmp { overflow-x: auto; margin-top: 18px; }
+
+</style>
+
+<div class="toolbar">
+<button aria-pressed="true" id="theme-light" type="button">浅色</button>
+<button aria-pressed="false" id="theme-dark" type="button">深色</button>
+<button aria-pressed="false" id="full-length" type="button">全长</button>
+<span class="spacer"></span>
+<span class="hint">账单导入重设计 · 结平 + Liquid Glass · 状态栏 09:41</span>
+</div>
+<header class="gallery-head">
+<h1>结平 · 账单导入</h1>
+<p>这一版重新梳理了导入的流程和信息结构，不只是换玻璃。视觉沿用结平第一批（纸面、墨色、只有进出两个方向色、双线结算区）和 Liquid Glass 控件层（顶部栏、筛选分段、弹窗外壳、底部浮层）。原第一批里的「账单导入复核」两帧是这次核对页的起点，结算区、勾选框、→ 账户行、写入按钮都保留。</p>
+<p>新的流程从五步减到三步，绝大多数账单选完文件就直接进入核对：</p>
+<ol class="flow">
+<li><b>选文件或点待处理</b>文件选择、系统分享、上次没核对完的草稿，都从导入首页进入</li>
+<li><b>自动解析</b>识别渠道、解析、去重；只有缺密码或认不出渠道时才停下来问</li>
+<li><b>核对</b>先处理待确认的几笔，其余已就绪；批量改标签或分类</li>
+<li><b>写入前确认</b>看总数和 diff，本地引擎校验通过才写入</li>
+<li><b>完成</b>归档、索引进度，以及去整理未分类的入口</li>
+</ol>
+<h2 style="font-size:17px;margin:30px 0 4px">现有页面盘点</h2>
+<p>每个现有功能在新设计里都有位置，下表右列写明去处。</p>
+<div class="invwrap"><table class="inv">
+<thead><tr><th>页面</th><th>现有元素</th><th>问题</th><th>新设计</th></tr></thead>
+<tbody><tr><td>导入首页（ImportHistoryView）</td><td>智能账单导入卡片 + 格式标签、待导入（分享）、渠道覆盖（折叠）、归档记录</td><td>主按钮在卡片里，滚动后消失；分享来的文件和未完成的核对散落；渠道新鲜度折叠在一行里；未完成草稿一进页面就自动弹出</td><td>主操作沉到底部玻璃浮层，随时可点；分享来的文件和未完成的核对合并为「待处理」放在最上面；渠道直接列出状态点</td></tr><tr><td>准备页（preparationView）</td><td>账单文件、渠道选择、压缩包密码、基金补差开关、生成导入预览</td><td>每次都要多点一下「生成导入预览」，而绝大多数文件自动识别就能成功</td><td>选完文件直接解析；只有缺密码或识别失败时才停下来补信息；渠道和补差移到核对页顶部栏的「解析选项」</td></tr><tr><td>核对页（previewView）</td><td>结算区、去重说明、导入详情、智能分类状态、核对提示、批量标签、交易明细（只看待核对 / 全选）、底部写入栏</td><td>上下堆了 6 个区块才看到第一笔交易；智能分类的逐条建议只在调试模式显示；勾选是一套选择、批量标签又是另一套选择；需要处理的交易混在全部里</td><td>结算区保留；去重、提示、详情合成一行可展开；分段筛选「待确认 / 已就绪 / 未勾选 / 全部」，默认停在待确认；建议账户直接在行内一点采纳；批量操作只作用于已勾选的交易</td></tr><tr><td>编辑一笔（ImportEntryEditor）</td><td>商家、标题、日期、状态、来源 / 目标账户及候选概率、金额、标签及建议</td><td>处理完一笔要关掉再点下一笔；参考历史只在调试视图里</td><td>弹窗顶部可上下切换，「保存，下一条」连续处理待确认；参考历史放进弹窗</td></tr><tr><td>写入确认（BookkeepingPreviewView / 系统提示框）</td><td>校验通过、文件 diff、确认保存；远端账本为系统提示框</td><td>diff 之前没有总数，看不出这次一共改了什么</td><td>先给结算区（新增笔数、改动文件、归档），再给 diff</td></tr><tr><td>写入失败 / 待确认</td><td>commitErrorMessage、保存结果待确认 → 重新检查保存结果</td><td>提示文字挤在底部栏一行灰字里</td><td>放进玻璃浮层的状态行，主按钮随状态变成「重试保存」或「重新检查保存结果」</td></tr><tr><td>完成页（completionView）</td><td>成功图标、已写入 N 条、索引进度、归档文件、清理警告、完成</td><td>沿用旧的蓝绿配色和卡片，与结平不一致；完成后没有下一步</td><td>换成结平的双线和结算区；加「整理未分类」和「查看这批流水」两个去处</td></tr></tbody>
+</table></div>
+</header>
+
+<section class="section">
+<h2>导入首页</h2>
+<p>主按钮固定在底部玻璃浮层，滚动到哪里都能点。最上面是「待处理」：上次没核对完的草稿和从其他 App 分享来的文件合在一个列表里，不再在进入页面时自动弹出草稿。渠道覆盖直接列出每个渠道的状态点，归档记录默认显示最近两条。首次使用时给出各渠道的导出路径。</p>
+<div class="grid">
+<figure class="screen" id="hub">
+<figcaption>账单导入 <span>浅色 · 有待处理的账单</span></figcaption>
+<div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账单导入</h1></div></div>
+<div class="scroll">
+
+<div class="group">待处理 · 2</div>
+<div class="row "><div class="body"><div class="label">继续核对 · 支付宝 2026-08</div><span class="hint">上次停在核对页 · 25 / 28 笔已勾选 · 3 笔待确认</span></div><span class="value">10:12</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
+<div class="row "><div class="body"><div class="label">微信支付账单(20260801-20260831).xlsx</div><span class="hint">从「文件」分享 · 1.2 MB</span></div><span class="value">核对</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
+<div class="group">渠道 · 1 个建议更新</div>
+<div class="row"><div class="body"><div class="label">支付宝</div><span class="hint num">07-01 至 08-31 · 距今 57 天</span></div><span class="fresh"><i class="v-out-bg"></i>建议更新</span></div>
+<div class="row"><div class="body"><div class="label">微信支付</div><span class="hint num">08-01 至 10-20 · 距今 7 天</span></div><span class="fresh"><i class="v-in-bg"></i>正常</span></div>
+<div class="row"><div class="body"><div class="label">银行流水</div><span class="hint">完成首次导入后会显示覆盖日期</span></div><span class="fresh"><i class="edge-bg"></i>暂无</span></div>
+<div class="group">归档记录 · 20</div>
+<div class="doc"><div class="doc-top"><b>微信支付</b><span class="num">08-01 至 10-20</span></div><span class="mono">documents/wechat/2026-10-20.xlsx</span><span class="num meta2">10-21 22:40 归档 · 186 KB</span></div>
+<div class="doc"><div class="doc-top"><b>支付宝</b><span class="num">07-01 至 08-31</span></div><span class="mono">documents/alipay/2026-08-31.csv</span><span class="num meta2">09-01 08:12 归档 · 92 KB</span></div>
+<button aria-expanded="false" class="disclose" type="button"><span>查看全部 20 条归档</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button>
+<div class="note">支持支付宝 CSV、微信 XLSX、银行 PDF、邮件 EML、ZIP 压缩包和 .bean，单个最大 10MB。所有账单先生成预览，确认后才写入账本。</div>
+
+</div>
+<div class="sheet-actions g gdock"><div class="dock-row"><button class="btn primary" type="button">选择账单文件</button></div></div>
+<div class="homebar"></div>
+</div>
+</figure><figure class="screen">
+<figcaption>账单导入 <span>深色 · 首次使用</span></figcaption>
+<div class="phone glass" data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账单导入</h1></div></div>
+<div class="scroll">
+
+<div class="empty" style="padding:28px 20px 18px">
+<h4>还没有导入过账单</h4>
+<p style="max-width:34ch">从支付宝或微信导出账单，用系统分享发到结平，或在下面选择文件。账单会先生成预览，核对后才写入。</p>
+</div>
+<div class="group" style="padding-top:4px">从哪里导出</div>
+<div class="field-row"><span class="k">支付宝 · CSV</span><span class="v small">我的 → 账单 → 开具交易流水证明</span></div>
+<div class="field-row"><span class="k">微信支付 · XLSX</span><span class="v small">我 → 服务 → 钱包 → 账单 → 下载账单</span></div>
+<div class="field-row"><span class="k">银行流水 · PDF / 压缩包 · ZIP</span><span class="v small">网银导出的对账单；加密压缩包在解析时输入密码</span></div>
+<div class="field-row"><span class="k">Beancount · .bean</span><span class="v small">保留原始分录、注释和元数据，直接追加交易</span></div>
+
+</div>
+<div class="sheet-actions g gdock"><div class="dock-row"><button class="btn primary" type="button">选择账单文件</button></div></div>
+<div class="homebar"></div>
+</div>
+</figure>
+</div>
+</section>
+<section class="section">
+<h2>解析</h2>
+<p>选完文件立刻开始，不再经过准备页。解析中的页面告诉你正在做什么、接下来会检查什么；智能分类放到核对页后台进行，不让人干等。只有两种情况会停下来：压缩包需要密码，或渠道认不出来。这时原来准备页的渠道选择、密码、基金补差开关出现在这里。</p>
+<div class="grid">
+<figure class="screen" id="parse">
+<figcaption>解析中 <span>浅色 · 选完文件直接开始</span></figcaption>
+<div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><button class="back text g gcircle" type="button">取消</button><h1 class="title">导入账单</h1></div></div>
+<div class="scroll">
+
+<div class="filehead"><b>支付宝交易明细(20260801-20260831).csv</b><span class="num">312 KB · 从「文件」选择</span></div>
+<div class="steps">
+<div class="step" data-s="done"><i></i><div><b>读取文件</b><span>312 KB</span></div></div>
+<div class="step" data-s="now"><i></i><div><b>识别渠道并解析交易</b><span>自动识别 · 可在核对页改选渠道</span></div></div>
+<div class="step" data-s="todo"><i></i><div><b>与账本比对重复</b><span>同日同额的交易默认排除</span></div></div>
+<div class="step" data-s="todo"><i></i><div><b>智能分类</b><span>进入核对页后在后台继续，不需要等</span></div></div>
+</div>
+<div class="note">离开这一页会停止解析，文件保留在「待处理」里，下次从那里继续。</div>
+
+</div>
+
+<div class="homebar"></div>
+</div>
+</figure><figure class="screen">
+<figcaption>需要补充信息 <span>深色 · 压缩包密码</span></figcaption>
+<div class="phone glass" data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><button class="back text g gcircle" type="button">取消</button><h1 class="title">导入账单</h1></div></div>
+<div class="scroll">
+
+<div class="filehead"><b>账单明细_202608.zip</b><span class="num">1.4 MB · 从微信分享</span></div>
+<div class="warn">压缩包有密码。微信支付账单的解压密码在导出时由微信支付消息发送。</div>
+<div class="field-row"><span class="k">压缩包密码</span><span class="input"><span class="dots">••••••</span><span class="caret-line"></span></span></div>
+<div class="group">解析选项</div>
+<div class="row"><div class="body"><div class="label">账单渠道</div><span class="hint">根据文件名和账单结构选择渠道</span></div><span class="value">自动识别</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
+<div class="row"><div class="body"><div class="label">支付宝基金 9.99 → 10.00 补差</div><span class="hint">仅在确认该基金定投需要补 0.01 时开启</span></div><span class="switch" data-on="false"></span></div>
+<div class="note">密码只用于这次解压，不会保存。</div>
+
+</div>
+<div class="sheet-actions g gdock"><div class="dock-row"><button class="btn primary" type="button">继续解析</button></div></div>
+<div class="homebar"></div>
+</div>
+</figure><figure class="screen">
+<figcaption>解析失败 <span>浅色 · 渠道无法识别</span></figcaption>
+<div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><button class="back text g gcircle" type="button">取消</button><h1 class="title">导入账单</h1></div></div>
+<div class="scroll">
+
+<div class="filehead"><b>bank-statement-oct.pdf</b><span class="num">820 KB · 从「文件」选择</span></div>
+<div class="errblock"><b>没能识别这份账单</b><p>文件里没有找到支持的银行流水表格。请确认是网银导出的「交易明细」PDF，或手动指定渠道后重试。</p></div>
+<div class="group">手动指定渠道</div>
+<div aria-selected="true" class="opt"><span class="mark">✓</span>自动识别</div>
+<div aria-selected="false" class="opt"><span class="mark"></span>支付宝</div>
+<div aria-selected="false" class="opt"><span class="mark"></span>微信支付</div>
+<div aria-selected="false" class="opt"><span class="mark"></span>招商银行信用卡</div>
+<div aria-selected="false" class="opt"><span class="mark"></span>工商银行借记卡</div>
+<div class="note">原始文件保留在「待处理」，不会写入账本。</div>
+
+</div>
+<div class="sheet-actions g gdock"><div class="dock-row"><button class="btn" type="button">移除文件</button><button class="btn primary" type="button">重新解析</button></div></div>
+<div class="homebar"></div>
+</div>
+</figure>
+</div>
+</section>
+<section class="section">
+<h2>核对</h2>
+<p>结算区保留在最上面，这是这一页唯一要核平的数字。去重说明、核对提示、导入详情合成一行，展开才看。分段筛选默认停在「待确认」：缺分类或智能分类需要你确认的交易排在前面，建议账户直接显示在行里，点一下采纳。点勾选框决定写不写入，点行其余位置打开编辑。顶部玻璃胶囊里是解析选项和智能分类设置。</p>
+<div class="grid">
+<figure class="screen" id="review">
+<figcaption>核对交易 <span>浅色 · 待确认在前</span></figcaption>
+<div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">核对交易</h1><span class="g gcap"><button aria-label="解析选项" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button><button aria-label="智能分类设置" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M10 2.5 11.6 8.4 17.5 10l-5.9 1.6L10 17.5l-1.6-5.9L2.5 10l5.9-1.6z"></path></svg></button></span></div></div>
+<div class="scroll">
+
+<div class="settle" style="padding:18px 20px 16px">
+<div class="settle-head" style="margin-bottom:10px"><span class="lede">支付宝 · 08-01 至 08-31</span><span class="num">已勾选 25 / 28</span></div>
+<dl style="margin:0"><div class="settle-row"><dt>勾选金额合计</dt><dd class="num">4,812.40</dd></div><div class="settle-row"><dt>重复，已跳过</dt><dd class="num">2 行</dd></div></dl>
+<div class="settle-total" style="padding-top:12px"><dt>将写入</dt><dd class="num" style="font-size:22px">25 笔</dd></div>
+</div>
+<button aria-expanded="false" class="disclose" type="button"><span>2 行与账本同日同额，已跳过 · 3 条核对提示</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button>
+<div class="ailine"><span class="spin sm"></span><span>智能分类 18 / 28</span><button class="linkbtn" type="button">停止</button></div>
+<div class="seg" role="tablist"><button aria-selected="true" role="tab" type="button">待确认<span class="n">3</span></button><button aria-selected="false" role="tab" type="button">已就绪<span class="n">22</span></button><button aria-selected="false" role="tab" type="button">未勾选<span class="n">3</span></button><button aria-selected="false" role="tab" type="button">全部<span class="n">28</span></button></div>
+<div class="imp" data-state="on" data-pending="true">
+<span class="box"></span>
+<div class="imp-main">
+<div class="who">巷口小馆</div>
+<div class="meta">2026-08-12 20:31 · 招行信用卡</div>
+<span class="cat">→ 未选择分类</span><span class="need">缺少分类</span>
+<div class="picks"><span class="picks-k">建议分类</span><div class="picks-row"><button class="pick" type="button"><span class="pa">餐饮 · Food:Dining</span><span class="pct num">72%</span></button><button class="pick" type="button"><span class="pa">外卖 · Food:Takeout</span><span class="pct num">18%</span></button></div></div>
+</div>
+<div class="amt num">−236.00</div>
+</div><div class="imp" data-state="on" data-pending="true">
+<span class="box"></span>
+<div class="imp-main">
+<div class="who">移动话费</div>
+<div class="meta">2026-08-03 08:00 · 自动扣款</div>
+<span class="cat">→ 通讯话费<span class="ai">AI</span></span><span class="need">AI 填写 · 待确认</span>
+
+</div>
+<div class="amt num">−58.00</div>
+</div><div class="imp" data-state="on">
+<span class="box"></span>
+<div class="imp-main">
+<div class="who">城市书房</div>
+<div class="meta">2026-08-28 19:12 · 借记卡</div>
+<span class="cat">→ 书籍<span class="ai">AI</span><span class="tags">#reading</span></span>
+
+</div>
+<div class="amt num">−328.00</div>
+</div><div class="imp" data-state="on">
+<span class="box"></span>
+<div class="imp-main">
+<div class="who">青禾市场</div>
+<div class="meta">2026-08-26 09:40 · 借记卡</div>
+<span class="cat">→ 买菜生鲜</span>
+
+</div>
+<div class="amt num">−186.80</div>
+</div><div class="imp" data-state="off">
+<span class="box"></span>
+<div class="imp-main">
+<div class="who">余额宝收益</div>
+<div class="meta">2026-08-31 · 支付宝</div>
+<span class="cat">→ 投资收益</span>
+
+</div>
+<div class="amt num">+3.12</div>
+</div>
+<div class="note">点按勾选框决定是否写入；点按一行其余位置打开编辑。</div>
+
+</div>
+<div class="sheet-actions g gdock"><div class="dock-row"><button class="btn" type="button">批量…</button><button class="btn primary" type="button">写入 25 笔</button></div></div>
+<div class="homebar"></div>
+</div>
+</figure><figure class="screen">
+<figcaption>核对交易 <span>深色 · 展开解析详情与核对提示</span></figcaption>
+<div class="phone glass" data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">核对交易</h1><span class="g gcap"><button aria-label="解析选项" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button><button aria-label="智能分类设置" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M10 2.5 11.6 8.4 17.5 10l-5.9 1.6L10 17.5l-1.6-5.9L2.5 10l5.9-1.6z"></path></svg></button></span></div></div>
+<div class="scroll">
+
+<div class="settle" style="padding:18px 20px 16px">
+<div class="settle-head" style="margin-bottom:10px"><span class="lede">支付宝 · 08-01 至 08-31</span><span class="num">已勾选 25 / 28</span></div>
+<dl style="margin:0"><div class="settle-row"><dt>勾选金额合计</dt><dd class="num">4,812.40</dd></div><div class="settle-row"><dt>重复，已跳过</dt><dd class="num">2 行</dd></div></dl>
+<div class="settle-total" style="padding-top:12px"><dt>将写入</dt><dd class="num" style="font-size:22px">25 笔</dd></div>
+</div>
+<button aria-expanded="true" class="disclose" type="button"><span>2 行与账本同日同额，已跳过 · 3 条核对提示</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button>
+<div class="detail">
+<div class="kv"><span>识别渠道</span><span>支付宝 · 依据表头「交易号」「商家订单号」</span></div>
+<div class="kv"><span>候选交易</span><span class="num">30 条 · 跳过重复 2 条</span></div>
+<p>08-05 果蔬店 −425.00 与 Assets:Bank:CMB 已有记录同日同额</p>
+<p>08-19 退款 +39.90 未找到原交易，已作为收入</p>
+<p>08-31 余额宝收益 3 笔合并为 1 笔</p>
+</div>
+<div class="ailine"><span>智能分类已完成 · 20 笔已填写</span></div>
+<div class="seg" role="tablist"><button aria-selected="false" role="tab" type="button">待确认<span class="n">0</span></button><button aria-selected="true" role="tab" type="button">已就绪<span class="n">22</span></button><button aria-selected="false" role="tab" type="button">未勾选<span class="n">3</span></button><button aria-selected="false" role="tab" type="button">全部<span class="n">28</span></button></div>
+<div class="imp" data-state="on">
+<span class="box"></span>
+<div class="imp-main">
+<div class="who">云端出行</div>
+<div class="meta">2026-08-21 07:55 · 借记卡</div>
+<span class="cat">→ 公共交通<span class="tags">#trip-0821</span></span>
+
+</div>
+<div class="amt num">−576.00</div>
+</div><div class="imp" data-state="on">
+<span class="box"></span>
+<div class="imp-main">
+<div class="who">城市书房</div>
+<div class="meta">2026-08-28 19:12 · 借记卡</div>
+<span class="cat">→ 书籍<span class="ai">AI</span><span class="tags">#reading</span></span>
+
+</div>
+<div class="amt num">−328.00</div>
+</div><div class="imp" data-state="on">
+<span class="box"></span>
+<div class="imp-main">
+<div class="who">青禾市场</div>
+<div class="meta">2026-08-26 09:40 · 借记卡</div>
+<span class="cat">→ 买菜生鲜</span>
+
+</div>
+<div class="amt num">−186.80</div>
+</div><div class="imp" data-state="on">
+<span class="box"></span>
+<div class="imp-main">
+<div class="who">工资</div>
+<div class="meta">2026-08-10 · 招商银行</div>
+<span class="cat">→ 工资收入</span>
+
+</div>
+<div class="amt num">+18,400.00</div>
+</div>
+
+</div>
+<div class="sheet-actions g gdock"><div class="dock-row"><button class="btn" type="button">批量…</button><button class="btn primary" type="button">写入 25 笔</button></div></div>
+<div class="homebar"></div>
+</div>
+</figure>
+</div>
+</section>
+<section class="section">
+<h2>批量与编辑</h2>
+<p>原来展开交易后的「选择为标签操作对象」是第二套勾选，容易和写入勾选混淆。现在批量修改只作用于当前筛选里已勾选的交易，标签、统一分类、全选、全不选都在这一张玻璃弹窗里。编辑弹窗可以上下切换，「保存，下一条」把待确认的几笔一口气处理完；智能建议和参考历史也在这里。改渠道或补差设置会重新生成预览，所以单独放在「解析选项」里，并提示会清除本次修改。</p>
+<div class="grid">
+<figure class="screen">
+<figcaption>批量修改 <span>深色 · 替代原来的第二套标签选择</span></figcaption>
+<div class="phone glass" data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">核对交易</h1><span class="g gcap"><button aria-label="解析选项" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button><button aria-label="智能分类设置" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M10 2.5 11.6 8.4 17.5 10l-5.9 1.6L10 17.5l-1.6-5.9L2.5 10l5.9-1.6z"></path></svg></button></span></div></div>
+<div class="scroll">
+<div class="settle" style="padding:18px 20px 16px">
+<div class="settle-head" style="margin-bottom:10px"><span class="lede">支付宝 · 08-01 至 08-31</span><span class="num">已勾选 25 / 28</span></div>
+<dl style="margin:0"><div class="settle-row"><dt>勾选金额合计</dt><dd class="num">4,812.40</dd></div><div class="settle-row"><dt>重复，已跳过</dt><dd class="num">2 行</dd></div></dl>
+<div class="settle-total" style="padding-top:12px"><dt>将写入</dt><dd class="num" style="font-size:22px">25 笔</dd></div>
+</div><div class="seg" role="tablist"><button aria-selected="false" role="tab" type="button">待确认<span class="n">0</span></button><button aria-selected="true" role="tab" type="button">已就绪<span class="n">22</span></button><button aria-selected="false" role="tab" type="button">未勾选<span class="n">3</span></button><button aria-selected="false" role="tab" type="button">全部<span class="n">28</span></button></div>
+</div>
+<div class="scrim">
+<div class="sheet g gsheet">
+<div class="grabber"></div>
+<h2>批量修改</h2>
+<p class="sheet-sub">作用于当前筛选「已就绪」里已勾选的 22 笔</p>
+<div class="field-row"><span class="k">标签</span><span class="input"><span>trip-2026</span><span class="caret-line"></span></span></div>
+<div class="sheet-actions" style="padding-top:12px"><button class="btn primary" type="button">添加标签</button><button class="btn" type="button">移除标签</button></div>
+<div class="group">也可以</div>
+<div class="row"><div class="body"><div class="label">统一设置分类</div><span class="hint">为这 22 笔选择同一个分类账户</span></div><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
+<div class="row"><div class="body"><div class="label">全部勾选</div><span class="hint">把 3 笔未勾选的也加入写入</span></div></div>
+<div class="row"><div class="body"><div class="label">全部取消勾选</div><span class="hint">不写入交易时，只归档原始账单</span></div></div>
+</div>
+</div>
+<div class="homebar"></div>
+</div>
+</figure><figure class="screen" id="editor">
+<figcaption>编辑一笔 <span>浅色 · 逐条处理待确认</span></figcaption>
+<div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">核对交易</h1><span class="g gcap"><button aria-label="解析选项" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button><button aria-label="智能分类设置" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M10 2.5 11.6 8.4 17.5 10l-5.9 1.6L10 17.5l-1.6-5.9L2.5 10l5.9-1.6z"></path></svg></button></span></div></div>
+<div class="scroll">
+<div class="settle" style="padding:18px 20px 16px">
+<div class="settle-head" style="margin-bottom:10px"><span class="lede">支付宝 · 08-01 至 08-31</span><span class="num">已勾选 25 / 28</span></div>
+<dl style="margin:0"><div class="settle-row"><dt>勾选金额合计</dt><dd class="num">4,812.40</dd></div></dl>
+<div class="settle-total" style="padding-top:12px"><dt>将写入</dt><dd class="num" style="font-size:22px">25 笔</dd></div>
+</div>
+</div>
+<div class="scrim">
+<div class="sheet g gsheet tall">
+<div class="grabber"></div>
+<div class="sheet-nav"><span class="num">待确认 1 / 3</span><span class="g gcap navcap"><button aria-label="上一条" class="iconbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 16 16" width="16"><path d="m3 10 5-5 5 5"></path></svg></button><button aria-label="下一条" class="iconbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 16 16" width="16"><path d="m3 6 5 5 5-5"></path></svg></button></span></div>
+<h2>巷口小馆 <span class="amt-h num">−236.00</span></h2>
+<p class="sheet-sub">2026-08-12 20:31 · 招行信用卡 · 订单 2026081220310088</p>
+<div class="field-row"><span class="k">分类 / 对应账户</span><span class="v small">未选择</span></div>
+<div class="picks"><span class="picks-k">建议</span><div class="picks-row"><button class="pick" type="button" aria-pressed="true"><span class="pa">餐饮 · Food:Dining</span><span class="pct num">72%</span></button><button class="pick" type="button"><span class="pa">外卖 · Food:Takeout</span><span class="pct num">18%</span></button><button class="pick" type="button"><span class="pa">全部账户…</span><span class="pct num"></span></button></div></div>
+<div class="field-row"><span class="k">付款账户</span><span class="v small">招行信用卡 <span class="mono-s">Liabilities:CMB:Credit</span></span></div>
+<div class="field-row"><span class="k">商家 · 标题</span><span class="v small">巷口小馆 · 晚餐</span></div>
+<div class="field-row two"><div><span class="k">日期</span><span class="v small num">2026-08-12</span></div><div><span class="k">状态</span><div class="seg-inline"><button aria-selected="true" type="button">已确认</button><button aria-selected="false" type="button">待核对</button></div></div></div>
+<div class="field-row"><span class="k">金额 CNY</span><span class="v num">236.00</span></div>
+<div class="field-row"><span class="k">标签</span><span class="v small">#dinner <span class="sugg">+ #weekend 64%</span></span></div>
+<button aria-expanded="false" class="disclose" type="button"><span>参考历史 · 3 条同商户记录</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button>
+<div class="sheet-actions"><button class="btn" type="button">跳过</button><button class="btn primary" type="button">保存，下一条</button></div>
+</div>
+</div>
+<div class="homebar"></div>
+</div>
+</figure><figure class="screen">
+<figcaption>解析选项 <span>深色 · 从顶部栏打开</span></figcaption>
+<div class="phone glass" data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">核对交易</h1><span class="g gcap"><button aria-label="解析选项" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button><button aria-label="智能分类设置" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M10 2.5 11.6 8.4 17.5 10l-5.9 1.6L10 17.5l-1.6-5.9L2.5 10l5.9-1.6z"></path></svg></button></span></div></div>
+<div class="scroll">
+<div class="settle" style="padding:18px 20px 16px">
+<div class="settle-head" style="margin-bottom:10px"><span class="lede">支付宝 · 08-01 至 08-31</span><span class="num">已勾选 25 / 28</span></div>
+<dl style="margin:0"><div class="settle-row"><dt>勾选金额合计</dt><dd class="num">4,812.40</dd></div></dl>
+<div class="settle-total" style="padding-top:12px"><dt>将写入</dt><dd class="num" style="font-size:22px">25 笔</dd></div>
+</div>
+</div>
+<div class="scrim">
+<div class="sheet g gsheet">
+<div class="grabber"></div>
+<h2>解析选项</h2>
+<p class="sheet-sub">修改后会重新生成预览，本次核对修改会清除</p>
+<div aria-selected="false" class="opt"><span class="mark"></span>自动识别</div>
+<div aria-selected="true" class="opt"><span class="mark">✓</span>支付宝</div>
+<div aria-selected="false" class="opt"><span class="mark"></span>微信支付</div>
+<div class="row"><div class="body"><div class="label">基金 9.99 → 10.00 补差</div><span class="hint">仅在确认该基金定投需要补 0.01 时开启</span></div><span class="switch" data-on="true"></span></div>
+<div class="sheet-actions"><button class="btn" type="button">取消</button><button class="btn primary" type="button">重新生成预览</button></div>
+</div>
+</div>
+<div class="homebar"></div>
+</div>
+</figure>
+</div>
+</section>
+<section class="section">
+<h2>写入与结果</h2>
+<p>本地账本写入前先给结算区（新增笔数、改动文件、归档），再给 diff。写入中断时，玻璃浮层上方出现状态行，主按钮变成「重新检查保存结果」，不会重复提交。完成页换成结平的双线和结算区，并给出下一步：整理未分类的交易、查看这批流水。不勾选任何交易时只归档原始账单。</p>
+<div class="grid">
+<figure class="screen" id="check">
+<figcaption>写入前确认 <span>深色 · 本地账本</span></figcaption>
+<div class="phone glass" data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">核对交易</h1><span class="g gcap"><button aria-label="解析选项" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button><button aria-label="智能分类设置" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M10 2.5 11.6 8.4 17.5 10l-5.9 1.6L10 17.5l-1.6-5.9L2.5 10l5.9-1.6z"></path></svg></button></span></div></div>
+<div class="scroll">
+<div class="settle" style="padding:18px 20px 16px">
+<div class="settle-head" style="margin-bottom:10px"><span class="lede">支付宝 · 08-01 至 08-31</span><span class="num">已勾选 25 / 28</span></div>
+<dl style="margin:0"><div class="settle-row"><dt>勾选金额合计</dt><dd class="num">4,812.40</dd></div></dl>
+<div class="settle-total" style="padding-top:12px"><dt>将写入</dt><dd class="num" style="font-size:22px">25 笔</dd></div>
+</div>
+</div>
+<div class="scrim">
+<div class="sheet g gsheet tall">
+<div class="grabber"></div>
+<h2>写入前确认</h2>
+<p class="sheet-sub">本地 Beancount 引擎已验证复式平衡与语法</p>
+<div class="settle" style="padding:14px 20px 12px;margin:0">
+<dl style="margin:0">
+<div class="settle-row"><dt>新增交易</dt><dd class="num">25 笔</dd></div>
+<div class="settle-row"><dt>改动文件</dt><dd class="num">2 个</dd></div>
+<div class="settle-row"><dt>归档原始账单</dt><dd class="num">1 个</dd></div>
+</dl>
+<div class="settle-total" style="padding-top:10px;margin-top:6px"><dt>校验</dt><dd style="font-size:17px">通过</dd></div>
+</div>
+<div class="source diff"><span class="d-meta">ledger/2026/08.bean</span>
+<span class="d-add">+2026-08-12 * "巷口小馆" "晚餐" #dinner</span>
+<span class="d-add">+  import_id: "alipay-20260812-0088"</span>
+<span class="d-add">+  Expenses:Food:Dining        236.00 CNY</span>
+<span class="d-add">+  Liabilities:CMB:Credit</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+2026-08-03 * "中国移动" "话费"</span>
+<span class="d-add">+  Expenses:Communication:Phone 58.00 CNY</span>
+<span class="d-add">+  Assets:Alipay:Balance</span>
+<span class="d-ctx"> …另外 23 笔</span></div>
+<button aria-expanded="false" class="disclose" type="button"><span>main.bean · 仅新增 include 一行</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button>
+<div class="sheet-actions"><button class="btn" type="button">返回核对</button><button class="btn primary" type="button">确认写入</button></div>
+</div>
+</div>
+<div class="homebar"></div>
+</div>
+</figure><figure class="screen">
+<figcaption>写入没有完成 <span>浅色 · 结果待确认</span></figcaption>
+<div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">核对交易</h1><span class="g gcap"><button aria-label="解析选项" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button><button aria-label="智能分类设置" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M10 2.5 11.6 8.4 17.5 10l-5.9 1.6L10 17.5l-1.6-5.9L2.5 10l5.9-1.6z"></path></svg></button></span></div></div>
+<div class="scroll">
+<div class="settle" style="padding:18px 20px 16px">
+<div class="settle-head" style="margin-bottom:10px"><span class="lede">支付宝 · 08-01 至 08-31</span><span class="num">已勾选 25 / 28</span></div>
+<dl style="margin:0"><div class="settle-row"><dt>勾选金额合计</dt><dd class="num">4,812.40</dd></div><div class="settle-row"><dt>重复，已跳过</dt><dd class="num">2 行</dd></div></dl>
+<div class="settle-total" style="padding-top:12px"><dt>将写入</dt><dd class="num" style="font-size:22px">25 笔</dd></div>
+</div><div class="seg" role="tablist"><button aria-selected="false" role="tab" type="button">待确认<span class="n">0</span></button><button aria-selected="true" role="tab" type="button">已就绪<span class="n">22</span></button><button aria-selected="false" role="tab" type="button">未勾选<span class="n">3</span></button><button aria-selected="false" role="tab" type="button">全部<span class="n">28</span></button></div><div class="imp" data-state="on">
+<span class="box"></span>
+<div class="imp-main">
+<div class="who">城市书房</div>
+<div class="meta">2026-08-28 19:12 · 借记卡</div>
+<span class="cat">→ 书籍<span class="ai">AI</span></span>
+
+</div>
+<div class="amt num">−328.00</div>
+</div><div class="imp" data-state="on">
+<span class="box"></span>
+<div class="imp-main">
+<div class="who">青禾市场</div>
+<div class="meta">2026-08-26 09:40 · 借记卡</div>
+<span class="cat">→ 买菜生鲜</span>
+
+</div>
+<div class="amt num">−186.80</div>
+</div>
+</div>
+<div class="sheet-actions g gdock has-status"><div class="dock-status"><b>保存结果待确认</b>连接在写入时中断，账本可能已经写入。先检查导入归档，不会重复提交。</div><div class="dock-row"><button class="btn primary" type="button">重新检查保存结果</button></div></div>
+<div class="homebar"></div>
+</div>
+</figure><figure class="screen" id="done">
+<figcaption>导入完成 <span>深色</span></figcaption>
+<div class="phone glass" data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><h1 class="title">导入完成</h1></div></div>
+<div class="scroll">
+
+<div class="donehead"><span class="dr"></span><h2>已写入 25 笔交易</h2><p>账本和导入记录已经更新</p></div>
+<div class="settle" style="padding:18px 20px 16px">
+<div class="settle-head" style="margin-bottom:10px"><span class="lede">支付宝 · 08-01 至 08-31</span><span class="num">10-27 09:41</span></div>
+<dl style="margin:0"><div class="settle-row"><dt>支出</dt><dd class="num">−4,815.52</dd></div><div class="settle-row"><dt>收入</dt><dd class="num">+3.12</dd></div><div class="settle-row"><dt>未写入</dt><dd class="num">3 笔</dd></div><div class="settle-row"><dt>重复，已跳过</dt><dd class="num">2 行</dd></div></dl>
+<div class="settle-total" style="padding-top:12px"><dt>写入</dt><dd class="num" style="font-size:22px">25 笔</dd></div>
+</div>
+<div class="row"><div class="body"><div class="label">正在更新索引</div><span class="hint">允许实时活动时会显示在灵动岛</span></div><span class="value"><span class="spin" aria-label="处理中"></span></span></div>
+<div class="row"><div class="body"><div class="label">账单已归档</div><span class="hint mono">documents/alipay/2026-08-31.csv</span></div></div>
+<div class="group">接下来</div>
+<div class="row "><div class="body"><div class="label">整理 1 笔未分类</div><span class="hint">这批里分类仍是 Unknown 的交易</span></div><span class="value">待整理</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
+<div class="row "><div class="body"><div class="label">查看这批流水</div><span class="hint">流水页按 08-01 至 08-31 和支付宝筛选</span></div><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
+
+</div>
+<div class="sheet-actions g gdock"><div class="dock-row"><button class="btn primary" type="button">完成</button></div></div>
+<div class="homebar"></div>
+</div>
+</figure><figure class="screen">
+<figcaption>导入完成 <span>浅色 · 未勾选任何交易，仅归档</span></figcaption>
+<div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><h1 class="title">导入完成</h1></div></div>
+<div class="scroll">
+<div class="donehead"><span class="dr"></span><h2>账单已归档</h2><p>没有写入交易，账本保持不变</p></div><div class="row "><div class="body"><div class="label">账单已归档</div><span class="hint">documents/wechat/2026-10-20.xlsx</span></div></div><div class="note">归档后渠道覆盖会更新到 10-20，之后导入同一时间段的账单会被识别为重复。</div>
+</div>
+<div class="sheet-actions g gdock"><div class="dock-row"><button class="btn primary" type="button">完成</button></div></div>
+<div class="homebar"></div>
+</div>
+</figure>
+</div>
+</section>
+
+<section class="section">
+<h2>需要你决定的几处</h2>
+<div class="rules">
+<div><h3>选完文件直接解析</h3><p>省掉准备页这一步。代价是想手动指定渠道时要在核对页的「解析选项」里改，然后重新生成预览。</p></div>
+<div><h3>Gmail 保持关闭</h3><p>本地账本不支持 Gmail 自动账单（这是有意的设置），所以这一版不放回页面。</p></div>
+<div><h3>重复交易只显示说明</h3><p>原第一批设计稿写「取消排除后仍可逐条复核」，但目前预览不返回被跳过的重复行，所以这版只展示去重说明。要能逐条恢复，需要改解析引擎。</p></div>
+<div><h3>完成页的两个去处</h3><p>「整理未分类」打开现有的待整理收件箱；「查看这批流水」需要流水页支持按导入批次筛选，可以第二步再做。</p></div>
+</div>
+<p style="margin-top:24px">原版平面设计见 <a class="link" href="batch1/index.html">batch1/index.html</a>，全局玻璃层见 <a class="link" href="glass.html">glass.html</a>。</p>
+</section>
+
+<script>
+(function () {
+  var body = document.body;
+  var lightBtn = document.getElementById('theme-light');
+  var darkBtn = document.getElementById('theme-dark');
+  var fullBtn = document.getElementById('full-length');
+  fullBtn.addEventListener('click', function () {
+    var on = fullBtn.getAttribute('aria-pressed') !== 'true';
+    fullBtn.setAttribute('aria-pressed', String(on));
+    body.dataset.length = on ? 'full' : 'screen';
+  });
+  function setGallery(theme) {
+    body.dataset.gallery = theme;
+    darkBtn.setAttribute('aria-pressed', String(theme === 'dark'));
+    lightBtn.setAttribute('aria-pressed', String(theme !== 'dark'));
+  }
+  lightBtn.addEventListener('click', function () { setGallery('light'); });
+  darkBtn.addEventListener('click', function () { setGallery('dark'); });
+  document.querySelectorAll('.disclose').forEach(function (b) {
+    b.addEventListener('click', function () {
+      b.setAttribute('aria-expanded', String(b.getAttribute('aria-expanded') !== 'true'));
+    });
+  });
+  document.querySelectorAll('.seg, .seg-inline').forEach(function (seg) {
+    seg.querySelectorAll('button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        seg.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-selected', String(x === btn)); });
+      });
+    });
+  });
+  // the checkbox decides inclusion and keeps the settle block and write button in step
+  document.querySelectorAll('.phone').forEach(function (p) { p.dataset.on0 = String(p.querySelectorAll('.imp[data-state="on"]').length); });
+  document.querySelectorAll('.imp .box').forEach(function (box) {
+    box.addEventListener('click', function () {
+      var row = box.closest('.imp');
+      row.dataset.state = row.dataset.state === 'on' ? 'off' : 'on';
+      var phone = row.closest('.phone');
+      var n = Math.max(0, 25 + phone.querySelectorAll('.imp[data-state="on"]').length - Number(phone.dataset.on0));
+      var w = phone.querySelector('.gdock .btn.primary');
+      if (w && w.textContent.indexOf('写入') === 0) w.textContent = n === 0 ? '仅归档账单' : '写入 ' + n + ' 笔';
+      var c = phone.querySelector('.settle-head .num');
+      if (c) c.textContent = '已勾选 ' + n + ' / 28';
+      var t = phone.querySelector('.settle-total dd');
+      if (t) t.textContent = n + ' 笔';
+    });
+  });
+  document.querySelectorAll('.picks-row').forEach(function (r) {
+    r.querySelectorAll('.pick').forEach(function (p) {
+      p.addEventListener('click', function () {
+        r.querySelectorAll('.pick').forEach(function (x) { x.setAttribute('aria-pressed', String(x === p)); });
+      });
+    });
+  });
+  document.querySelectorAll('.switch').forEach(function (s) {
+    s.addEventListener('click', function () { s.dataset.on = String(s.dataset.on !== 'true'); });
+  });
+})();
+</script>
+<script>document.body.dataset.gallery=document.body.dataset.gallery||"light";</script>
