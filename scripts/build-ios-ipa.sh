@@ -73,6 +73,10 @@ fi
 version_file_dirty=1
 echo "Packaging version $marketing_version, build $build_number."
 
+# The Xcode project is generated and git-ignored: a clean checkout has none, and
+# a stale one misses source files added since it was generated.
+xcodegen generate --spec project.yml --quiet
+
 xcodebuild archive \
   -project LedgerMobile.xcodeproj \
   -scheme LedgerMobile \
