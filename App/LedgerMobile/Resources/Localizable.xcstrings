@@ -13919,6 +13919,16 @@
         }
       }
     },
+    "正在读取流水…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading transactions…"
+          }
+        }
+      }
+    },
     "正在读取账户对账快照…" : {
       "localizations" : {
         "en" : {

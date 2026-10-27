@@ -597,6 +597,19 @@ struct TransactionsView: View {
         return transactions.filter(kindAgnostic.matches)
     }
 
+    /// True while the rows for the current range are still being read, so an
+    /// empty list means "not loaded yet" rather than "no transactions". The empty
+    /// state is shown only after a read finished (or failed) with nothing to show.
+    private var isAwaitingRows: Bool {
+        if session.isRangeLoading || session.isValuationCurrencyLoading { return true }
+        guard session.isLocal else { return false }
+        if session.isLocalTransactionWindowLoading { return true }
+        // Before the first window of this range/filter lands (the read task has not
+        // started yet, or a reset just cleared it), there is nothing to judge.
+        return session.localTransactionWindow == nil && session.localTransactionWindowError == nil
+            && session.phase == .ready && !session.privacyShielded
+    }
+
     private var displayedCount: Int? {
         session.isLocal ? session.localTransactionSummary?.matchedCount : filteredTransactions.count
     }
@@ -922,14 +935,29 @@ struct TransactionsView: View {
                     }
                 }
             }
-            if displayed.isEmpty && (!session.isLocal || !session.localTransactionHasMore) {
+            if displayed.isEmpty && isAwaitingRows {
+                Section {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small).tint(BalancedPalette.meta)
+                        Text("正在读取流水…")
+                    }
+                    .balancedFont(size: 12.5)
+                    .foregroundStyle(BalancedPalette.meta)
+                    .frame(maxWidth: .infinity, minHeight: 120)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("transaction-list-loading")
+                }
+                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } else if displayed.isEmpty && (!session.isLocal || !session.localTransactionHasMore) {
                 ContentUnavailableView(
                     filters.query.isEmpty && activeStructuredFilterCount == 0 ? "所选范围暂无流水" : "没有匹配的交易",
                     systemImage: "list.bullet.rectangle",
                     description: Text("调整时间范围或搜索条件。")
                 )
             }
-            if displayed.isEmpty && session.isLocal && session.localTransactionHasMore {
+            if displayed.isEmpty && !isAwaitingRows && session.isLocal && session.localTransactionHasMore {
                 // The current window matched nothing but the reader still has rows to
                 // check, so keep the spinner reachable instead of stranding the list.
                 Section {
