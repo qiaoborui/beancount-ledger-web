@@ -447,17 +447,22 @@ state, and is meant to be read rather than clicked.
 
 ## Liquid Glass (iOS 26)
 
-[`glass.html`](glass.html) adds one material on top of Balanced. Glass belongs
-to the **control layer** only: the top-bar controls, the tab bar, docked action
-panels and the sheet shell. The paper underneath keeps every rule above: no
-cards, no shadows, no accent colour, the double rule unchanged.
+[`glass.html`](glass.html) adds one material on top of Balanced, in the spirit
+of the Claude iOS app: every control floats over full-bleed content as glass
+circles and capsules. Glass belongs to the **control layer** only; the paper
+underneath keeps every rule above (no cards, no shadows, no accent colour, the
+double rule unchanged). The page opens with an inventory of which surfaces use
+glass.
 
-- Top bar: the title stays on the paper; trailing controls share one glass
-  capsule (back button is a 44pt glass circle). Content fades under the bar
-  through the system scroll edge effect instead of a page-coloured fill.
-- Docked action bars float as glass panels (radius 26, 12pt side margin); the
-  primary button stays solid ink.
-- Sheets use the system glass shell and navigation bar; cancel is a glass
-  circle, confirm is a prominent (solid) circle.
+- Top bar: 22pt root title on the paper; at most two capsules on the right
+  (time range; status + actions). Pushed pages use a 44pt glass back circle.
+- Transaction filter: a sticky glass segmented capsule under the top bar.
+- Search: the field moves to the bottom; scope chips are glass.
+- Menus and sheets: system glass. Cancel is a glass circle, confirm is a solid
+  circle. Quick entry uses a floating glass composer.
+- Docked action bars: floating glass panels; the primary button is solid ink.
+- **No occlusion:** at rest the first content starts below the top bar; the
+  scroll content's bottom inset equals the floating stack's height + 12pt, so
+  the last row scrolls fully clear. Fixed content never sits under glass.
 - Glass is never tinted. Below iOS 26 (deployment target iOS 17) the app keeps
   the flat Balanced surfaces and does not imitate glass with material blur.
