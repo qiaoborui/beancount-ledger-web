@@ -200,8 +200,7 @@ private struct LedgerSearch: ViewModifier {
 private struct LedgerFloatingActionSurface: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(TerminalPalette.page)
-            .overlay(alignment: .top) { TerminalRule() }
+            .ledgerGlassDock(margin: 0)
             .padding(.horizontal, LedgerSpacing.md)
             .padding(.vertical, LedgerSpacing.sm)
     }

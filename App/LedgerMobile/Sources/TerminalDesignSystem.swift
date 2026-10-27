@@ -87,12 +87,73 @@ struct TerminalPageChrome: ViewModifier {
             .lineLimit(1)
     }
 
+    private var showsSyncButton: Bool { showsSync && (!session.isLocal || session.hasLocalRemoteSync) }
+    private var hasTrailingControls: Bool { showsTimeRange || showsSyncButton || actions != nil }
+
     @ViewBuilder private var trailingControls: some View {
         if showsTimeRange { TerminalDateRangeButton().fixedSize(horizontal: true, vertical: false) }
-        if showsSync && (!session.isLocal || session.hasLocalRemoteSync) {
+        if showsSyncButton {
             TerminalSyncButton()
         }
         actions
+    }
+
+    private var hasIconControls: Bool { showsSyncButton || actions != nil }
+
+    /// On iOS 26 the period control is its own glass capsule and the status
+    /// and action icons share a second one, the way the system groups
+    /// adjacent toolbar items; earlier systems keep them bare.
+    @ViewBuilder private var trailingCluster: some View {
+        if LedgerGlass.isAvailable {
+            if hasTrailingControls {
+                LedgerGlassGroup(spacing: 8) {
+                    HStack(spacing: 8) {
+                        if showsTimeRange {
+                            TerminalDateRangeButton().fixedSize(horizontal: true, vertical: false)
+                                .padding(.horizontal, 8)
+                                .frame(height: LedgerGlass.controlHeight)
+                                .ledgerGlassControl()
+                        }
+                        if hasIconControls {
+                            HStack(spacing: 0) {
+                                if showsSyncButton { TerminalSyncButton() }
+                                actions
+                            }
+                            .padding(.horizontal, 2)
+                            .frame(height: LedgerGlass.controlHeight)
+                            .ledgerGlassControl()
+                        }
+                    }
+                }
+            } else {
+                // BalancedPushedBarLayout places exactly three subviews.
+                Color.clear.frame(width: 0, height: 0)
+            }
+        } else {
+            HStack(spacing: 8) { trailingControls }
+        }
+    }
+
+    /// iOS 26: a centred chevron in a glass circle, like the system back
+    /// button. Earlier: a bare chevron whose hit box is pulled 8pt left.
+    @ViewBuilder private var backButton: some View {
+        if LedgerGlass.isAvailable {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left").font(.system(size: 18, weight: .medium))
+                    .frame(width: LedgerGlass.controlHeight, height: LedgerGlass.controlHeight)
+                    .contentShape(Circle())
+            }.buttonStyle(.plain).foregroundStyle(BalancedPalette.ink)
+                .ledgerGlassControl()
+                .accessibilityLabel("返回上一页")
+        } else {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left").font(.system(size: 18))
+                    .frame(width: 44, height: 44, alignment: .leading)
+                    .padding(.leading, 8)
+            }.buttonStyle(.plain).foregroundStyle(BalancedPalette.ink)
+                .accessibilityLabel("返回上一页")
+                .padding(.leading, -8)
+        }
     }
 
     func body(content: Content) -> some View {
@@ -118,7 +179,7 @@ struct TerminalPageChrome: ViewModifier {
                     }
                 }
             }
-            .safeAreaInset(edge: .top, spacing: 0) {
+            .ledgerGlassTopBar {
                 if horizontalSizeClass != .regular {
                     // `.appbar` (styles.css): `padding: 4px var(--pad) 10px`
                     // with `--pad: 20px`, so a root title sits at x=20. `.back`
@@ -132,26 +193,19 @@ struct TerminalPageChrome: ViewModifier {
                             HStack(spacing: 8) {
                                 titleText
                                 Spacer(minLength: 4)
-                                trailingControls
+                                trailingCluster
                             }
                         } else {
                             BalancedPushedBarLayout(spacing: 8) {
-                                Button { dismiss() } label: {
-                                    Image(systemName: "chevron.left").font(.system(size: 18))
-                                        .frame(width: 44, height: 44, alignment: .leading)
-                                        .padding(.leading, 8)
-                                }.buttonStyle(.plain).foregroundStyle(BalancedPalette.ink)
-                                    .accessibilityLabel("返回上一页")
-                                    .padding(.leading, -8)
+                                backButton
                                 titleText
-                                HStack(spacing: 8) { trailingControls }.fixedSize()
+                                trailingCluster.fixedSize()
                             }
                         }
                     }
-                    .padding(.leading, 20)
-                    .padding(.trailing, 20)
+                    .padding(.leading, LedgerGlass.isAvailable ? 16 : 20)
+                    .padding(.trailing, LedgerGlass.isAvailable ? 16 : 20)
                     .frame(height: 52)
-                    .background(BalancedPalette.page)
                 }
             }
     }
@@ -404,8 +458,7 @@ struct TerminalNativeChrome: ViewModifier {
             .scrollContentBackground(.hidden)
             .background(TerminalPalette.page)
             .tint(TerminalPalette.accent)
-            .toolbarBackground(TerminalPalette.page, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .ledgerGlassNavigationBar()
             .toolbarColorScheme(nil, for: .navigationBar)
             .listStyle(.plain)
             .listSectionSpacing(8)
