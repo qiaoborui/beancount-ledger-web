@@ -431,5 +431,7 @@ private struct StorageKeyRow: View {
             }
         }
         .padding(.vertical, 3)
+        // VoiceOver reads the pair as one "label, value" element.
+        .accessibilityElement(children: .combine)
     }
 }

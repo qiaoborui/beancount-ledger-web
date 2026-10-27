@@ -95,17 +95,16 @@ final class LocalOnlySurfaceUITests: XCTestCase {
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 40))
-        let syncStatus = app.buttons["ledger-sync-status"]
-        XCTAssertTrue(syncStatus.exists)
-        XCTAssertEqual(syncStatus.label, "已保存到本机")
+        // A local-only ledger has nothing to sync, so the overview shows no indicator.
+        XCTAssertFalse(app.buttons["ledger-sync-status"].exists)
         XCTAssertFalse(app.buttons["隐藏金额"].exists)
         XCTAssertFalse(app.buttons["显示金额"].exists)
-        syncStatus.tap()
-        XCTAssertTrue(app.navigationBars["存储与同步"].waitForExistence(timeout: 5))
-        app.buttons["完成"].tap()
         app.tabBars.buttons["更多"].tap()
         app.buttons["more-settings"].tap()
-        XCTAssertTrue(app.buttons["settings-local-files"].waitForExistence(timeout: 5))
+        // The device-only rows sit below the general sections.
+        let localFiles = app.buttons["settings-local-files"]
+        for _ in 0..<4 where !localFiles.waitForExistence(timeout: 2) { app.swipeUp() }
+        XCTAssertTrue(localFiles.exists)
         XCTAssertTrue(app.buttons["local-storage-settings"].exists)
         XCTAssertFalse(app.buttons["更换服务器"].exists)
         XCTAssertFalse(app.staticTexts["服务器"].exists)
@@ -119,7 +118,9 @@ final class LocalOnlySurfaceUITests: XCTestCase {
         for _ in 0..<4 where !storage.isHittable { app.swipeUp() }
         storage.tap()
         XCTAssertTrue(app.navigationBars["存储与同步"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["状态, 已保存到本机"].waitForExistence(timeout: 5))
+        // The combined row label uses the locale's list separator, so match the value.
+        let savedStatus = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "状态", "已保存到本机")).firstMatch
+        XCTAssertTrue(savedStatus.waitForExistence(timeout: 5))
         XCTAssertTrue(app.textFields["local-git-url"].exists)
         XCTAssertTrue(app.textFields["local-git-branch"].exists)
         XCTAssertFalse(app.buttons["local-git-save"].isEnabled)
@@ -134,7 +135,8 @@ final class LocalOnlySurfaceUITests: XCTestCase {
         gitURL.tap()
         gitURL.typeText("https://example.invalid/auto-sync-fixture.git\n")
         let saveGit = app.buttons["local-git-save"]
-        for _ in 0..<4 where !saveGit.isHittable { app.swipeUp() }
+        // The floating tab bar overlaps the lower edge, so lift the button clear of it.
+        for _ in 0..<4 where !saveGit.isHittable || saveGit.frame.maxY > app.frame.height * 0.75 { app.swipeUp() }
         saveGit.tap()
         let automaticSync = app.switches["local-git-auto-sync"]
         XCTAssertTrue(automaticSync.waitForExistence(timeout: 5))
@@ -163,7 +165,8 @@ final class LocalOnlySurfaceUITests: XCTestCase {
         XCTAssertFalse(app.buttons["local-ledger-file-save"].isEnabled)
         app.navigationBars["main.bean"].buttons.firstMatch.tap()
         app.navigationBars["本地文件"].buttons.firstMatch.tap()
-        app.navigationBars["设置"].buttons.firstMatch.tap()
+        // Settings draws its own header, so its back control is a plain button.
+        app.buttons["返回上一页"].firstMatch.tap()
         let imports = app.buttons["more-imports"]
         for _ in 0..<4 where !imports.isHittable { app.swipeUp() }
         imports.tap()

@@ -905,13 +905,13 @@ final class LedgerMobileUITests: XCTestCase {
         revealAboveImportActions(toggle, in: review)
         toggle.tap()
         let oneSelected = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label == %@", "写入 1 条交易"), object: app.buttons["import-commit"])
+            predicate: NSPredicate(format: "label == %@", "写入 1 条交易"), object: app.buttons["import-commit"].firstMatch)
         XCTAssertEqual(XCTWaiter.wait(for: [oneSelected], timeout: 3), .completed)
         XCTAssertTrue(toggle.label.hasPrefix("包含"))
         revealAboveImportActions(toggle, in: review)
         toggle.tap()
         let twoSelected = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label == %@", "写入 2 条交易"), object: app.buttons["import-commit"])
+            predicate: NSPredicate(format: "label == %@", "写入 2 条交易"), object: app.buttons["import-commit"].firstMatch)
         XCTAssertEqual(XCTWaiter.wait(for: [twoSelected], timeout: 3), .completed)
 
         // Batch edits act on the checked entries of the current filter.
@@ -935,15 +935,15 @@ final class LedgerMobileUITests: XCTestCase {
         app.buttons["import-edit-keyboard-done"].tap()
         let editor = app.collectionViews["import-edit-content"]
         let amount = app.textFields["import-edit-amount"]
-        for _ in 0..<4 where !amount.isHittable { editor.swipeUp() }
-        waitUntilHittable(amount)
+        revealAboveEditorBar(amount, in: editor)
         replaceText(in: amount, with: "368.50")
         app.buttons["import-edit-keyboard-done"].tap()
         let tags = app.textFields["import-edit-tags"]
-        for _ in 0..<4 where !tags.isHittable { editor.swipeUp() }
+        revealAboveEditorBar(tags, in: editor)
         XCTAssertEqual(tags.value as? String, "dining learning travel")
         replaceText(in: tags, with: "learning travel personal")
         app.buttons["import-edit-keyboard-done"].tap()
+        XCTAssertEqual(tags.value as? String, "learning travel personal")
         waitUntilHittable(app.buttons["import-edit-save"])
         app.buttons["import-edit-save"].tap()
 
@@ -1064,18 +1064,14 @@ final class LedgerMobileUITests: XCTestCase {
         app.buttons["继续编辑"].tap()
         XCTAssertTrue(oneSelected.waitForExistence(timeout: 3))
 
-        // Keeping the draft offers it under 待处理 instead of reopening by itself.
+        // Drafts are stored per local ledger, so this remote fixture offers no
+        // draft to keep and leaving means discarding the review.
         app.navigationBars["核对交易"].buttons["返回"].tap()
-        app.buttons["import-exit-keep-draft"].tap()
-        let continueDraft = app.buttons["import-continue-draft"]
-        XCTAssertTrue(continueDraft.waitForExistence(timeout: 4), app.debugDescription)
-        continueDraft.tap()
-        XCTAssertTrue(oneSelected.waitForExistence(timeout: 5))
-
-        app.navigationBars["核对交易"].buttons["返回"].tap()
+        XCTAssertTrue(app.buttons["放弃修改"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["import-exit-keep-draft"].exists)
         app.buttons["放弃修改"].tap()
         XCTAssertTrue(app.collectionViews["import-history-content"].waitForExistence(timeout: 4))
-        XCTAssertTrue(continueDraft.waitForNonExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["import-continue-draft"].exists)
     }
 
     func testTransactionDraftDismissalKeepsChangesUntilDiscarded() throws {
@@ -1476,11 +1472,24 @@ final class LedgerMobileUITests: XCTestCase {
             // selection menu follows that field through the keyboard animation.
             element.press(forDuration: 1.0)
             let selectionLabel = NSPredicate(format: "label IN %@", ["Select All", "全选"])
-            let candidates = app.menuItems.matching(selectionLabel).allElementsBoundByIndex
-                + app.buttons.matching(selectionLabel).allElementsBoundByIndex
-            // The preview behind the sheet also has a Select All action.
-            // Only interact with the visible text-selection menu.
-            if let selectAll = candidates.first(where: { $0.isHittable }) {
+            // The edit menu can appear after the press returns, and lower fields
+            // may still be scrolling above the keyboard. Poll briefly for it.
+            var selectAll: XCUIElement?
+            let deadline = Date().addingTimeInterval(3)
+            repeat {
+                let candidates = app.menuItems.matching(selectionLabel).allElementsBoundByIndex
+                    + app.buttons.matching(selectionLabel).allElementsBoundByIndex
+                // The preview behind the sheet also has a Select All action.
+                // Only interact with the visible text-selection menu.
+                selectAll = candidates.first(where: { $0.isHittable })
+                if selectAll == nil { RunLoop.current.run(until: Date().addingTimeInterval(0.25)) }
+            } while selectAll == nil && Date() < deadline
+            if selectAll == nil {
+                element.press(forDuration: 1.0)
+                selectAll = (app.menuItems.matching(selectionLabel).allElementsBoundByIndex
+                    + app.buttons.matching(selectionLabel).allElementsBoundByIndex).first(where: { $0.isHittable })
+            }
+            if let selectAll {
                 selectAll.tap()
                 element.typeText(replacement)
                 XCTAssertEqual(element.value as? String, replacement)
@@ -1544,6 +1553,27 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(element.exists)
         XCTAssertTrue(element.isHittable)
         XCTAssertGreaterThan(element.frame.minY, safeTop)
+        XCTAssertLessThan(element.frame.maxY, safeBottom)
+    }
+
+    private func revealAboveEditorBar(_ element: XCUIElement, in scrollView: XCUIElement) {
+        // A two-or-more-entry queue adds a 跳过 / 保存，下一条 safeAreaInset to the
+        // editor. It overlaps the last fields (金额, 标签) while XCTest still calls
+        // them hittable, so a tap lands on the bar instead. Scroll with swipeUp
+        // from the middle of the list: a drag anchored near the bottom edge would
+        // start inside the bar and fire 保存，下一条, swapping the entry mid-edit.
+        let editorTop = app.navigationBars["编辑交易"].frame.maxY + 8
+        let barTop = app.buttons["import-edit-save-next"].exists
+            ? app.buttons["import-edit-save-next"].frame.minY
+            : scrollView.frame.maxY
+        let safeBottom = barTop - 12
+        for _ in 0..<6 {
+            if element.exists && element.isHittable
+                && element.frame.minY > editorTop && element.frame.maxY < safeBottom { break }
+            scrollView.swipeUp(velocity: .slow)
+        }
+        XCTAssertTrue(element.exists)
+        XCTAssertTrue(element.isHittable)
         XCTAssertLessThan(element.frame.maxY, safeBottom)
     }
 

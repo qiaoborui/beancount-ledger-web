@@ -123,9 +123,11 @@ struct NativeImportFlowView: View {
             : String(localized: "本次尚未提交的设置和核对修改将被清除，原始账单文件保留。")
     }
 
-    /// File-backed reviews persist as a draft; a Gmail preview has no file to reopen.
+    /// File-backed reviews persist as a draft; a Gmail preview has no file to reopen,
+    /// and drafts are stored per local ledger, so a remote ledger cannot keep one.
     private var canKeepDraft: Bool {
         !startsWithPreview && !file.data.isEmpty && preview != nil && !commitOutcomeNeedsReconciliation
+            && session.currentLocalLedgerDescriptor != nil
     }
 
     private var reviewQueue: ImportReviewQueue {
@@ -1847,6 +1849,8 @@ private struct ImportEntryEditor: View {
                 }
                 Section {
                     TextField("空格或逗号分隔", text: $tagsText)
+                        // Tags are ASCII only; a Pinyin keyboard would hold them as uncommitted marked text.
+                        .keyboardType(.asciiCapable)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .focused($focusedField, equals: .tags)
@@ -2151,6 +2155,9 @@ private struct ImportEntryReviewRow: View {
                 }
                 .frame(width: 18, height: 18)
                 .frame(width: 44, height: 44)
+                // A clear fill is not hit-tested, so an excluded entry would
+                // only respond on its 1pt border without an explicit shape.
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(included ? "排除 \(payeeText)" : "包含 \(payeeText)")
