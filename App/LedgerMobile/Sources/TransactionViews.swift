@@ -339,13 +339,50 @@ private struct BalancedTransactionFilterBar: View {
     let counts: [TransactionKindFilter: Int]?
 
     var body: some View {
+        if LedgerGlass.isAvailable {
+            glassSegments
+        } else {
+            underlinedTabs
+        }
+    }
+
+    private func countText(_ filter: TransactionKindFilter) -> String {
+        counts.map { "\($0[filter, default: 0])" } ?? "…"
+    }
+
+    /// iOS 26: the same four filters as one glass capsule; the selection is a
+    /// faint ink plate inside the glass instead of an underline.
+    private var glassSegments: some View {
+        HStack(spacing: 2) {
+            ForEach(TransactionKindFilter.allCases) { filter in
+                let selected = kindFilter == filter
+                Button { kindFilter = filter } label: {
+                    HStack(spacing: 4) {
+                        Text(filter.title).balancedFont(size: 14.5, weight: selected ? .semibold : .regular)
+                        Text(countText(filter)).balancedFont(size: 11.5).monospacedDigit()
+                    }
+                    .lineLimit(1)
+                    .foregroundStyle(selected ? BalancedPalette.ink : BalancedPalette.meta)
+                    .frame(maxWidth: .infinity, minHeight: 36)
+                    .background { if selected { Capsule().fill(BalancedPalette.ink.opacity(0.08)) } }
+                    .contentShape(Capsule())
+                }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .frame(minHeight: 44)
+        .ledgerGlassControl()
+        .accessibilityIdentifier("transaction-kind-filter")
+    }
+
+    private var underlinedTabs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 22) {
                 ForEach(TransactionKindFilter.allCases) { filter in
                     Button { kindFilter = filter } label: {
                         HStack(spacing: 4) {
                             Text(filter.title).balancedFont(size: 14.5, weight: kindFilter == filter ? .semibold : .regular)
-                            Text(counts.map { "\($0[filter, default: 0])" } ?? "…")
+                            Text(countText(filter))
                                 .balancedFont(size: 11.5).monospacedDigit()
                         }
                         .foregroundStyle(kindFilter == filter ? BalancedPalette.ink : BalancedPalette.meta)
@@ -879,7 +916,7 @@ struct TransactionsView: View {
                         }
                     }
                     .foregroundStyle(BalancedPalette.meta).padding(.horizontal, 12)
-                    .frame(minHeight: 40).background(BalancedPalette.sunken)
+                    .frame(minHeight: 40).ledgerGlassField()
                     .padding(.bottom, 14)
                     BalancedTransactionFilterBar(kindFilter: $filters.kind, counts: kindCounts)
                     HStack {
