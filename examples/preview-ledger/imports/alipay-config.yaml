@@ -17,10 +17,12 @@ alipay:
     - method: 互联网银行
       methodAccount: Assets:CN:DigitalBank:Yulibao
 
+    # 基金买入只指定目标账户。付款账户交给上面的支付方式映射：
+    # 规则按顺序叠加、后命中的覆盖先命中的，这里若再写 methodAccount，
+    # 余额宝、银行卡付的基金都会被统一记到同一个账户。
     - category: 投资理财
       type: 不计收支
       item: 买入
-      methodAccount: Assets:CN:DigitalBank:Yulibao
       targetAccount: Assets:CN:Alipay:Fund
 
     - category: 餐饮美食
