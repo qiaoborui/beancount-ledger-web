@@ -394,17 +394,126 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(lifecycle.events.last, "ended changeReady(\"改好了。\", files: 1)")
     }
 
+    func testThinkingClampsLikeTheNativeLoop() {
+        XCTAssertEqual(LedgerAgentThinking.max.clamped(to: [.off, .minimal, .low, .medium, .high]), .high)
+        XCTAssertEqual(LedgerAgentThinking.off.clamped(to: [.low, .medium, .high]), .low)
+        XCTAssertEqual(LedgerAgentThinking.medium.clamped(to: [.off, .low, .high]), .high)
+        XCTAssertEqual(LedgerAgentThinking.medium.clamped(to: [.off]), .off)
+
+        let catalog = try? JSONDecoder().decode(LedgerAgentCatalog.self, from: Data(#"""
+        {"providers":[{"id":"anthropic","title":"Anthropic","models":[
+          {"id":"a","title":"A","thinkingLevels":["off","low","medium","high","ultra"]},{"id":"b","title":"B"}]}]}
+        """#.utf8))
+        XCTAssertEqual(catalog?.provider("anthropic")?.models.map(\.thinking), [[.off, .low, .medium, .high], [.off]])
+    }
+
+    func testTurnRequestSendsThinkingOnlyWhenSet() throws {
+        func encoded(_ thinking: String?) throws -> [String: Any] {
+            let request = LedgerAgentTurnRequest(turnId: "t", workspaceRoot: "/w", runtimeRoot: "/r", entrypoint: "main.bean",
+                sensitiveUnlocked: true, provider: "anthropic", model: "m", apiKey: "k", thinking: thinking, history: [], message: "hi")
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        }
+        XCTAssertEqual(try encoded("high")["thinking"] as? String, "high")
+        XCTAssertNil(try encoded(nil)["thinking"])
+    }
+
     @MainActor
-    func testConversationStartsOverForAnotherLedger() async throws {
-        let conversation = LedgerAgentConversation()
+    func testSessionsSaveConversationsAndReopenThem() async throws {
+        let store = MemoryConversationStore()
+        let sessions = LedgerAgentSessions()
+        sessions.bind(ledger: UUID(), storage: store.storage)
+        sessions.current.send("十月吃饭花了多少") { _, _, _ in .init(ok: true, reply: "## 餐饮\n共 **812** 元。") }
+        try await waitUntilIdle(sessions.current)
+        let first = sessions.current.id
+        XCTAssertEqual(sessions.saved.map(\.title), ["十月吃饭花了多少"])
+        XCTAssertEqual(sessions.saved.first?.summary, "餐饮 共 812 元。")
+        for _ in 0..<200 { if await store.count == 1 { break }; try await Task.sleep(nanoseconds: 2_000_000) }
+        let stored = await store.count
+        XCTAssertEqual(stored, 1)
+
+        sessions.startNew()
+        XCTAssertTrue(sessions.current.messages.isEmpty)
+        XCTAssertNotEqual(sessions.current.id, first)
+        sessions.open(first)
+        XCTAssertEqual(sessions.current.id, first)
+        XCTAssertEqual(sessions.current.messages.map(\.text), ["十月吃饭花了多少", "## 餐饮\n共 **812** 元。"])
+
+        // A fresh session for the same ledger reads the saved history back.
+        let reopened = LedgerAgentSessions()
+        reopened.bind(ledger: UUID(), storage: store.storage)
+        for _ in 0..<200 where reopened.saved.isEmpty { try await Task.sleep(nanoseconds: 2_000_000) }
+        XCTAssertEqual(reopened.saved.map(\.id), [first])
+
+        reopened.delete(first)
+        XCTAssertTrue(reopened.saved.isEmpty)
+        for _ in 0..<200 { if await store.count == 0 { break }; try await Task.sleep(nanoseconds: 2_000_000) }
+        let left = await store.count
+        XCTAssertEqual(left, 0)
+    }
+
+    @MainActor
+    func testRunningConversationKeepsAnsweringAfterTheUserMovesOn() async throws {
+        let sessions = LedgerAgentSessions()
+        sessions.bind(ledger: UUID(), storage: MemoryConversationStore().storage)
+        let slow = sessions.current
+        slow.send("慢问题") { _, _, _ in
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            return .init(ok: true, reply: "答完了")
+        }
+        sessions.startNew()
+        XCTAssertTrue(sessions.background === slow)
+        XCTAssertTrue(slow.isRunning)
+        XCTAssertTrue(sessions.busyElsewhere)
+        try await waitUntilIdle(slow)
+        XCTAssertFalse(sessions.busyElsewhere)
+        XCTAssertEqual(sessions.saved.first?.summary, "答完了")
+        sessions.showBackground()
+        XCTAssertTrue(sessions.current === slow)
+        XCTAssertNil(sessions.background)
+    }
+
+    @MainActor
+    func testLeavingAnUnwrittenChangeDropsItAndSaysSoOnReopen() async throws {
+        let ledger = FakeDraftLedger()
+        let sessions = LedgerAgentSessions()
+        sessions.bind(ledger: UUID(), storage: MemoryConversationStore().storage)
+        let editing = sessions.current
+        editing.editor = ledger.editor
+        editing.send("午饭改成 26") { _, _, _ in .init(ok: true, reply: "改好了。", edited: true) }
+        try await waitUntilIdle(editing)
+        XCTAssertEqual(editing.pending?.status, .ready)
+        XCTAssertEqual(sessions.saved.first?.unwrittenChange, true)
+
+        sessions.startNew()
+        for _ in 0..<200 { if await ledger.closed == 1 { break }; try await Task.sleep(nanoseconds: 2_000_000) }
+        let closed = await ledger.closed
+        XCTAssertEqual(closed, 1)
+
+        sessions.open(editing.id)
+        XCTAssertNotNil(sessions.current.restoredNotice)
+        XCTAssertNil(sessions.current.pending)
+        sessions.current.send("接着改") { message, history, _ in
+            XCTAssertTrue(message.contains("旧对话"))
+            XCTAssertEqual(history.count, 2)
+            return .init(ok: true, reply: "好。")
+        }
+        try await waitUntilIdle(sessions.current)
+        XCTAssertNil(sessions.current.restoredNotice)
+    }
+
+    @MainActor
+    func testSessionsStartOverForAnotherLedger() async throws {
+        let sessions = LedgerAgentSessions()
+        let store = MemoryConversationStore()
         let first = UUID()
-        conversation.bind(ledger: first)
-        conversation.send("问题") { _, _, _ in .init(ok: true, reply: "回答") }
-        try await waitUntilIdle(conversation)
-        conversation.bind(ledger: first)
-        XCTAssertEqual(conversation.messages.count, 2)
-        conversation.bind(ledger: UUID())
-        XCTAssertTrue(conversation.messages.isEmpty)
+        sessions.bind(ledger: first, storage: store.storage)
+        sessions.current.send("问题") { _, _, _ in .init(ok: true, reply: "回答") }
+        try await waitUntilIdle(sessions.current)
+        sessions.bind(ledger: first, storage: store.storage)
+        XCTAssertEqual(sessions.current.messages.count, 2)
+        sessions.bind(ledger: UUID(), storage: MemoryConversationStore().storage)
+        XCTAssertTrue(sessions.current.messages.isEmpty)
+        XCTAssertTrue(sessions.saved.isEmpty)
     }
 
     func testRepositoryWritesAnAgentDraftThroughThePreparedPath() async throws {
@@ -483,6 +592,20 @@ final class LedgerAgentTests: XCTestCase {
     }
 
     // MARK: Fixtures
+
+    private actor MemoryConversationStore {
+        private var files: [UUID: Data] = [:]
+        var count: Int { files.count }
+        func save(_ id: UUID, _ data: Data) { files[id] = data }
+        func load() -> [Data] { Array(files.values) }
+        func remove(_ id: UUID) { files[id] = nil }
+        func removeAll() { files = [:] }
+
+        nonisolated var storage: LedgerAgentSessions.Storage {
+            .init(save: { await self.save($0, $1) }, load: { await self.load() },
+                  remove: { await self.remove($0) }, removeAll: { await self.removeAll() })
+        }
+    }
 
     @MainActor
     private final class RecordingLifecycle: LedgerAgentLifecycle {

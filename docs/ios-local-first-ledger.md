@@ -50,6 +50,14 @@ notification, and tapping it opens `ledger://agent`. With privacy protection
 on, the Lock Screen and notification text say only that the assistant is
 working or done.
 
+Conversations are saved per ledger as `runtime/agent-history/<id>.json`, which
+is outside every generation, so they never reach a commit, a backup or Git
+sync. `LedgerAgentSessions` keeps the conversation on screen. It also keeps one
+that is still answering after the user moved on, because only one turn runs at
+a time. Leaving a conversation drops its draft. A change it never wrote is lost,
+and the reopened conversation says so. Each turn sends a thinking effort: the
+user's pick, clamped to the levels `ModelCatalogJSON` lists for the model.
+
 ## Product decision
 
 The architecture uses an app-managed local Beancount workspace. SwiftUI reads

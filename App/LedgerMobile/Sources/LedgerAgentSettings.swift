@@ -9,11 +9,15 @@ final class LedgerAgentSettings: ObservableObject {
     nonisolated static let keychainService = "com.qiaoborui.ledger.agent"
     @Published private(set) var choice: LedgerAgentModelChoice
     @Published private(set) var hasKey: Bool
+    /// The effort the user picked. It is kept across models; each turn uses
+    /// the nearest level the current model supports.
+    @Published private(set) var thinking: LedgerAgentThinking
     let catalog: LedgerAgentCatalog
     private let defaults: UserDefaults
     private let preferenceKey = "ledger.agent.model-choice"
     /// The custom endpoint survives switching to a listed provider and back.
     private let customKey = "ledger.agent.custom-choice"
+    private let thinkingKey = "ledger.agent.thinking"
     private let keyStore: (String) -> ClassificationKeyStore
 
     init(defaults: UserDefaults = .standard, catalog: LedgerAgentCatalog = .native,
@@ -24,7 +28,23 @@ final class LedgerAgentSettings: ObservableObject {
         let stored = defaults.data(forKey: preferenceKey).flatMap { try? JSONDecoder().decode(LedgerAgentModelChoice.self, from: $0) }
         let choice = stored.flatMap { catalog.provider($0.provider) == nil ? nil : $0 } ?? Self.defaultChoice(in: catalog)
         self.choice = choice
+        thinking = defaults.string(forKey: thinkingKey).flatMap(LedgerAgentThinking.init(rawValue:)) ?? .default
         hasKey = (try? keyStore(choice.provider).load()) != nil
+    }
+
+    /// The levels the current model accepts, least to most.
+    var supportedThinking: [LedgerAgentThinking] {
+        if choice.isCustom { return LedgerAgentThinking.custom }
+        return catalog.provider(choice.provider)?.models.first { $0.id == choice.model }?.thinking ?? [.off]
+    }
+
+    /// What the next turn sends.
+    var effectiveThinking: LedgerAgentThinking { thinking.clamped(to: supportedThinking) }
+
+    func select(thinking level: LedgerAgentThinking) {
+        guard level != thinking else { return }
+        thinking = level
+        defaults.set(level.rawValue, forKey: thinkingKey)
     }
 
     var modelTitle: String {

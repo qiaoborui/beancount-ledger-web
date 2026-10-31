@@ -4,7 +4,7 @@ import LedgerCore
 #endif
 
 /// One read the on-device Agent made while answering.
-struct LedgerAgentToolCall: Decodable, Equatable, Sendable {
+struct LedgerAgentToolCall: Codable, Equatable, Sendable {
     let name: String
     var arguments: BQLCell? = nil
     let isError: Bool
@@ -111,7 +111,17 @@ struct LedgerAgentModelChoice: Codable, Equatable, Sendable {
 /// Providers and models the native loop knows, as `ModelCatalogJSON` lists
 /// them. Builds without the native core fall back to a single entry.
 struct LedgerAgentCatalog: Decodable, Sendable {
-    struct Model: Decodable, Identifiable, Hashable, Sendable { let id: String; let title: String }
+    struct Model: Decodable, Identifiable, Hashable, Sendable {
+        let id: String
+        let title: String
+        /// The native catalog's levels, least to most; nil from older cores.
+        var thinkingLevels: [String]? = nil
+
+        var thinking: [LedgerAgentThinking] {
+            let levels = (thinkingLevels ?? []).compactMap(LedgerAgentThinking.init(rawValue:))
+            return levels.isEmpty ? [.off] : levels
+        }
+    }
     struct Provider: Decodable, Identifiable, Hashable, Sendable {
         let id: String
         let title: String
@@ -141,6 +151,49 @@ struct LedgerAgentCatalog: Decodable, Sendable {
     }
 }
 
+/// How hard the model reasons before answering. Each model accepts some of
+/// these; a choice it does not accept falls to the nearest one it does.
+enum LedgerAgentThinking: String, Codable, CaseIterable, Identifiable, Sendable {
+    case off, minimal, low, medium, high, xhigh, max
+
+    static let `default` = LedgerAgentThinking.medium
+    /// What a custom endpoint is offered: it cannot say what it supports.
+    static let custom: [LedgerAgentThinking] = [.off, .minimal, .low, .medium, .high]
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .off: String(localized: "关")
+        case .minimal: String(localized: "最少")
+        case .low: String(localized: "低")
+        case .medium: String(localized: "中")
+        case .high: String(localized: "高")
+        case .xhigh: String(localized: "超高")
+        case .max: String(localized: "最大")
+        }
+    }
+
+    var hint: String? {
+        switch self {
+        case .off: String(localized: "不思考，直接回答和调用工具")
+        case .low: String(localized: "简单查询")
+        case .medium: String(localized: "大多数查账和单笔修改")
+        case .high: String(localized: "跨多个文件的批量修改")
+        case .minimal, .xhigh, .max: nil
+        }
+    }
+
+    /// The supported level nearest to this one: the next stronger, else the
+    /// next weaker, as the native loop clamps.
+    func clamped(to supported: [LedgerAgentThinking]) -> LedgerAgentThinking {
+        guard !supported.contains(self) else { return self }
+        let all = Self.allCases, index = all.firstIndex(of: self) ?? 0
+        if let stronger = all[index...].first(where: supported.contains) { return stronger }
+        return all[..<index].last(where: supported.contains) ?? supported.first ?? .off
+    }
+}
+
 /// The wire request of `RunTurnJSON`. The native decoder rejects unknown
 /// fields, so this lists exactly what the Go side accepts.
 struct LedgerAgentTurnRequest: Encodable, Sendable {
@@ -156,6 +209,7 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     let model: String
     let apiKey: String
     var custom: LedgerAgentModelChoice.CustomEndpoint? = nil
+    var thinking: String? = nil
     let history: [HistoryEntry]
     let message: String
     /// The private ledger copy this turn may edit; nil keeps the turn read-only.
@@ -429,13 +483,14 @@ struct LedgerAgentPendingEdit: Equatable {
     var status: Status
 }
 
-/// The in-memory conversation behind the Agent screen. Nothing is written to
-/// the ledger without the change card's confirmation. It outlives the screen,
-/// so a turn keeps running when the user leaves the page or the app; starting
-/// a new chat or switching ledgers drops the conversation and its draft.
+/// One conversation behind the Agent screen. Nothing is written to the
+/// ledger without the change card's confirmation. `LedgerAgentSessions` keeps
+/// it beyond the screen, so a turn keeps running when the user leaves the
+/// page or the app, and saves it after every settled turn.
 @MainActor
 final class LedgerAgentConversation: ObservableObject {
-    static let shared = LedgerAgentConversation()
+    let id: UUID
+    let createdAt: Date
 
     enum Phase: Equatable {
         case idle
@@ -451,8 +506,11 @@ final class LedgerAgentConversation: ObservableObject {
     /// What the running turn is doing now; nil before its first event.
     @Published private(set) var step: LedgerAgentStep?
     private(set) var stepCount = 0
-    /// The ledger this conversation and its draft belong to.
-    private(set) var ledgerID: UUID?
+    /// Shown above a reopened conversation whose change was never written.
+    private(set) var restoredNotice: String?
+    /// Told when a turn, a write or a discard settles, so the conversation
+    /// can be saved.
+    var onSettled: ((LedgerAgentConversation) -> Void)?
     /// True while the Agent screen shows this conversation.
     var isOnScreen = false
     weak var lifecycle: LedgerAgentLifecycle?
@@ -478,11 +536,33 @@ final class LedgerAgentConversation: ObservableObject {
                                          _ draft: URL?, _ report: @escaping LedgerAgentSteps.Handler) async throws
         -> LedgerAgentTurnResponse
 
-    /// Drops the conversation when the screen now shows another ledger.
-    func bind(ledger id: UUID) {
-        guard ledgerID != id else { return }
-        if ledgerID != nil { reset() }
-        ledgerID = id
+    init(id: UUID = UUID(), createdAt: Date = Date()) {
+        self.id = id
+        self.createdAt = createdAt
+    }
+
+    /// Reopens a saved conversation. Its draft is gone; a change it never
+    /// wrote is dropped, and both the screen and the model are told so.
+    convenience init(restoring saved: LedgerAgentSavedConversation) {
+        self.init(id: saved.id, createdAt: saved.createdAt)
+        messages = saved.messages.compactMap { stored in
+            LedgerAgentMessage.Role(rawValue: stored.role).map {
+                LedgerAgentMessage(role: $0, text: stored.text, toolCalls: stored.toolCalls, duration: stored.duration)
+            }
+        }
+        if saved.unwrittenChange {
+            restoredNotice = String(localized: "上次的草稿改动没有写入，重新打开后已放弃。需要的话让助手重新改一次。")
+            note = String(localized: "（系统提示：这是重新打开的旧对话，之前草稿里没有写入的改动已经放弃，账本以当前内容为准。）")
+        }
+    }
+
+    /// What to save, or nil while nothing has been asked.
+    func saved(at date: Date = Date()) -> LedgerAgentSavedConversation? {
+        guard !messages.isEmpty else { return nil }
+        return LedgerAgentSavedConversation(
+            id: id, createdAt: createdAt, updatedAt: date,
+            messages: messages.map { .init(role: $0.role.rawValue, text: $0.text, toolCalls: $0.toolCalls, duration: $0.duration) },
+            unwrittenChange: pending?.review != nil || draftUnreviewed)
     }
 
     private struct Outcome: Sendable {
@@ -570,7 +650,9 @@ final class LedgerAgentConversation: ObservableObject {
     private func endRunning(_ ending: LedgerAgentTurnEnding) {
         if ending == .stopped || ending == .interrupted, draft != nil { draftUnreviewed = true }
         step = nil
+        restoredNotice = nil
         lifecycle?.turnEnded(ending)
+        onSettled?(self)
     }
 
     func reset() {
@@ -578,6 +660,7 @@ final class LedgerAgentConversation: ObservableObject {
         task = nil
         if isRunning { lifecycle?.turnEnded(.stopped) }
         step = nil
+        restoredNotice = nil
         draftUnreviewed = false
         messages = []
         phase = .idle
@@ -609,6 +692,7 @@ final class LedgerAgentConversation: ObservableObject {
                 self.pending = nil
                 self.written = review
                 self.note = String(localized: "（系统提示：上一轮的草稿改动已写入账本，草稿与账本现在一致。）")
+                self.onSettled?(self)
             } catch {
                 guard self?.epoch == epoch else { return }
                 self?.pending?.status = error as? LedgerAgentEditError == .stale ? .stale : .failed(error.localizedDescription)
@@ -625,6 +709,7 @@ final class LedgerAgentConversation: ObservableObject {
         self.draft = nil
         // The next turn waits for the fresh copy instead of making its own.
         reopening = Task { try? await editor.discard(review, draft) }
+        onSettled?(self)
     }
 
     private func finish(_ outcome: Result<Outcome, Error>, question: String, started: Date) {

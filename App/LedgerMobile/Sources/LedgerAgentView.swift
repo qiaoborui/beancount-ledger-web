@@ -6,15 +6,37 @@ import SwiftUI
 /// the right, replies run on the page with a collapsible list of the reads
 /// behind them, and the composer is the glass dock used by the import flow.
 /// The Agent edits a private draft of the ledger; the change card under the
-/// conversation is the only way that draft reaches the ledger.
+/// conversation is the only way that draft reaches the ledger. History and
+/// the thinking effort follow `docs/design/ios-balanced/agent-history.html`.
 struct LedgerAgentView: View {
     var isRoot = false
     @EnvironmentObject private var session: LedgerSession
-    @ObservedObject private var settings = LedgerAgentSettings.shared
     /// Shared, so a turn keeps going when this page closes or the app leaves
     /// the screen; `LedgerAgentBackgroundRun` holds it while it runs there.
-    @ObservedObject private var conversation = LedgerAgentConversation.shared
+    @ObservedObject private var sessions = LedgerAgentSessions.shared
+
+    var body: some View {
+        LedgerAgentChatScreen(isRoot: isRoot, conversation: sessions.current)
+            .id(sessions.current.id)
+            // The lock and privacy cover hide this page; the conversations
+            // stay, so a turn sent before leaving the app still lands here.
+            // Another ledger has its own history.
+            .task(id: session.localRepository?.descriptor.id) {
+                if let repository = session.localRepository {
+                    sessions.bind(ledger: repository.descriptor.id, storage: .live(repository))
+                }
+            }
+    }
+}
+
+private struct LedgerAgentChatScreen: View {
+    var isRoot: Bool
+    @ObservedObject var conversation: LedgerAgentConversation
+    @EnvironmentObject private var session: LedgerSession
+    @ObservedObject private var settings = LedgerAgentSettings.shared
+    @ObservedObject private var sessions = LedgerAgentSessions.shared
     @State private var draft = ""
+    @State private var historyPresented = false
     @State private var settingsPresented = false
     @State private var bookkeeping: BookkeepingPrefill?
     @State private var crashReport: String?
@@ -35,14 +57,13 @@ struct LedgerAgentView: View {
             NavigationStack { LedgerAgentSettingsView() }
                 .ledgerPrivacyProtectedSheet()
         }
+        .sheet(isPresented: $historyPresented) {
+            NavigationStack { LedgerAgentHistoryView() }
+                .presentationDetents([.medium, .large])
+                .ledgerPrivacyProtectedSheet()
+        }
         .fullScreenCover(item: $bookkeeping) { prefill in
             NaturalLanguageBookkeepingView(onSaved: { bookkeeping = nil }, initialInput: prefill.text)
-        }
-        // The lock and privacy cover hide this page; the conversation stays,
-        // so a turn sent before leaving the app still lands here. Another
-        // ledger starts a new one.
-        .task(id: session.localRepository?.descriptor.id) {
-            if let id = session.localRepository?.descriptor.id { conversation.bind(ledger: id) }
         }
         .onAppear {
             conversation.isOnScreen = true
@@ -81,10 +102,13 @@ struct LedgerAgentView: View {
     private var actions: some View {
         HStack(spacing: 0) {
             if settings.isReady {
-                Button {
-                    conversation.reset()
-                    draft = ""
-                } label: {
+                Button { historyPresented = true } label: {
+                    Image(systemName: "clock.arrow.circlepath").font(.system(size: 16)).frame(width: 44, height: 44)
+                        .foregroundStyle(BalancedPalette.ink)
+                }
+                .accessibilityLabel("历史对话")
+                .accessibilityIdentifier("ledger-agent-history")
+                Button { sessions.startNew() } label: {
                     Image(systemName: "square.and.pencil").font(.system(size: 16)).frame(width: 44, height: 44)
                         .foregroundStyle(BalancedPalette.ink)
                 }
@@ -115,6 +139,13 @@ struct LedgerAgentView: View {
                         case .user: LedgerAgentQuestion(text: message.text)
                         case .assistant: LedgerAgentAnswer(message: message) { bookkeeping = .init(text: question(before: message)) }
                         }
+                    }
+                    if let notice = conversation.restoredNotice {
+                        Text(notice).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                            .padding(.horizontal, 12).padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(BalancedPalette.sunken)
+                            .accessibilityIdentifier("ledger-agent-restored-notice")
                     }
                     if let pending = conversation.pending {
                         LedgerAgentChangeCard(pending: pending, isBusy: conversation.isRunning,
@@ -216,8 +247,12 @@ struct LedgerAgentView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if conversation.messages.isEmpty && !conversation.isRunning {
-                Text(verbatim: "\(settings.modelTitle) · \(settings.providerTitle)")
+            if sessions.busyElsewhere {
+                Text("另一个对话正在回答，答完后才能在这里提问")
+                    .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .padding(.horizontal, 6)
+            } else if conversation.messages.isEmpty && !conversation.isRunning {
+                Text(verbatim: "\(settings.modelTitle) · \(settings.providerTitle) · " + String(localized: "思考 \(settings.effectiveThinking.title)"))
                     .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                     .padding(.horizontal, 6)
             }
@@ -243,8 +278,8 @@ struct LedgerAgentView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!conversation.isRunning && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .opacity(!conversation.isRunning && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.38 : 1)
+                .disabled(!conversation.isRunning && (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sessions.busyElsewhere))
+                .opacity(!conversation.isRunning && (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sessions.busyElsewhere) ? 0.38 : 1)
                 .accessibilityLabel(conversation.isRunning ? "停止" : "发送")
                 .accessibilityIdentifier("ledger-agent-send")
             }
@@ -255,21 +290,21 @@ struct LedgerAgentView: View {
 
     private func send(_ text: String) {
         let question = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty, !conversation.isRunning else { return }
+        guard !question.isEmpty, !conversation.isRunning, !sessions.busyElsewhere else { return }
         guard let repository = session.localRepository, !session.privacyShielded else { return }
         let key: String
         do { key = try settings.apiKey() } catch {
             settingsPresented = true
             return
         }
-        let choice = settings.choice
-        conversation.bind(ledger: repository.descriptor.id)
+        let choice = settings.choice, thinking = settings.effectiveThinking
         conversation.editor = .live(repository)
         conversation.lifecycle = LedgerAgentBackgroundRun.shared
         LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
         conversation.send(question, reporting: { message, history, draftRoot, report in
             try await repository.runAgentTurn(message: message, history: history, choice: choice,
-                                              apiKey: key, sensitiveUnlocked: true, draft: draftRoot, onStep: report)
+                                              apiKey: key, sensitiveUnlocked: true, thinking: thinking,
+                                              draft: draftRoot, onStep: report)
         })
         draft = ""
     }
@@ -730,6 +765,14 @@ struct LedgerAgentSettingsView: View {
                     }
                     .accessibilityIdentifier("ledger-agent-model")
                 }
+                NavigationLink {
+                    LedgerAgentThinkingPicker()
+                } label: {
+                    LabeledContent("思考强度") {
+                        Text(settings.effectiveThinking.title).foregroundStyle(BalancedPalette.meta)
+                    }
+                }
+                .accessibilityIdentifier("ledger-agent-thinking")
             } header: { Text("模型") } footer: {
                 if settings.choice.isCustom {
                     let invalid = !(settings.choice.custom?.baseURL ?? "").isEmpty && settings.choice.custom?.isValid != true
@@ -832,6 +875,151 @@ private struct LedgerAgentModelPicker: View {
     private func choose(_ id: String) {
         settings.select(model: id)
         dismiss()
+    }
+}
+
+/// The efforts the current model accepts. The choice is kept across models;
+/// a model without it uses the nearest level, which is the one checked.
+private struct LedgerAgentThinkingPicker: View {
+    @ObservedObject private var settings = LedgerAgentSettings.shared
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(settings.supportedThinking) { level in
+                    Button { settings.select(thinking: level) } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(level.title).foregroundStyle(BalancedPalette.ink)
+                                if let hint = level.hint {
+                                    Text(level == .default ? String(localized: "默认。") + hint : hint)
+                                        .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                                }
+                            }
+                            Spacer()
+                            if level == settings.effectiveThinking {
+                                Image(systemName: "checkmark").foregroundStyle(BalancedPalette.ink)
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text("\(settings.modelTitle) 支持")
+            } footer: {
+                Text(settings.choice.isCustom
+                     ? "自定义服务无法事先知道是否支持推理，最高给到「高」；不支持时由服务端忽略。"
+                     : "越高越慢、越贵，复杂的批量改动更稳。换到不支持这一档的模型时，自动用最接近的一档。")
+            }
+        }
+        .font(.subheadline)
+        .navigationTitle("思考强度")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Saved conversations of this ledger, newest first, grouped by day. Picking
+/// one switches the screen to it; a running one keeps running.
+private struct LedgerAgentHistoryView: View {
+    @ObservedObject private var sessions = LedgerAgentSessions.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var confirmingClear = false
+
+    private struct DaySection: Identifiable {
+        let title: String
+        let items: [LedgerAgentSavedConversation]
+        var id: String { title }
+    }
+
+    private var groups: [DaySection] {
+        let calendar = Calendar.current
+        var today: [LedgerAgentSavedConversation] = [], yesterday: [LedgerAgentSavedConversation] = [], earlier: [LedgerAgentSavedConversation] = []
+        for item in sessions.saved where item.matches(query) {
+            if calendar.isDateInToday(item.updatedAt) { today.append(item) }
+            else if calendar.isDateInYesterday(item.updatedAt) { yesterday.append(item) }
+            else { earlier.append(item) }
+        }
+        return [DaySection(title: String(localized: "今天"), items: today), DaySection(title: String(localized: "昨天"), items: yesterday),
+                DaySection(title: String(localized: "更早"), items: earlier)].filter { !$0.items.isEmpty }
+    }
+
+    var body: some View {
+        List {
+            if sessions.saved.isEmpty {
+                Text("还没有历史对话。问过的问题会按账本存在本机。")
+                    .foregroundStyle(BalancedPalette.meta)
+            }
+            ForEach(groups) { group in
+                Section(group.title) {
+                    ForEach(group.items) { item in
+                        Button {
+                            sessions.open(item.id)
+                            dismiss()
+                        } label: { row(item) }
+                        .listRowBackground(item.id == sessions.current.id ? BalancedPalette.sunken : nil)
+                        .swipeActions {
+                            if !isRunning(item.id) {
+                                Button(role: .destructive) { sessions.delete(item.id) } label: { Label("删除", systemImage: "trash") }
+                            }
+                        }
+                    }
+                }
+            }
+            if !sessions.saved.isEmpty {
+                Section {
+                    Button("清空历史", role: .destructive) { confirmingClear = true }
+                } footer: {
+                    Text("对话跟着账本存在本机，不进 Git 同步、备份或导出。")
+                }
+            }
+        }
+        .font(.subheadline)
+        .searchable(text: $query, prompt: Text("搜索问题和回答"))
+        .navigationTitle("历史对话")
+        .navigationBarTitleDisplayMode(.inline)
+        .privacySensitive()
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) { Button("完成") { dismiss() } }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    sessions.startNew()
+                    dismiss()
+                } label: { Image(systemName: "square.and.pencil") }
+                .accessibilityLabel("新对话")
+            }
+        }
+        .confirmationDialog("清空这本账本的全部历史对话？", isPresented: $confirmingClear, titleVisibility: .visible) {
+            Button("清空", role: .destructive) { sessions.deleteAll() }
+        }
+        .accessibilityIdentifier("ledger-agent-history-list")
+    }
+
+    private func isRunning(_ id: UUID) -> Bool {
+        (sessions.current.id == id && sessions.current.isRunning) || (sessions.background?.id == id && sessions.background?.isRunning == true)
+    }
+
+    private func row(_ item: LedgerAgentSavedConversation) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                Text(isRunning(item.id) ? String(localized: "正在回答…") : item.summary)
+                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta).lineLimit(1)
+                if item.unwrittenChange {
+                    Text("有未写入的草稿改动").balancedFont(size: 11.5).foregroundStyle(BalancedPalette.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            Text(Self.time(item.updatedAt)).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).monospacedDigit()
+        }
+        .contentShape(Rectangle())
+    }
+
+    private static func time(_ date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) || calendar.isDateInYesterday(date) {
+            return date.formatted(date: .omitted, time: .shortened)
+        }
+        return date.formatted(.dateTime.month(.twoDigits).day(.twoDigits))
     }
 }
 #endif
