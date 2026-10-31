@@ -2,7 +2,10 @@
 set -euo pipefail
 
 readonly GOMOBILE_VERSION="v0.0.0-20260908204917-8b95e45f8d3e"
-readonly XTEXT_VERSION="v0.40.0"
+readonly XTEXT_VERSION="v0.42.0"
+# The on-device Agent links only the providers a phone can use: no Bedrock,
+# Vertex, Mistral conversations, Codex or Node extension runtimes.
+readonly PIG_STRIP_TAGS="pig_strip_bedrock_converse_stream,pig_strip_google_vertex,pig_strip_mistral_conversations,pig_strip_node_extensions,pig_strip_openai_codex_responses"
 readonly IOS_MIN_VERSION="17.0"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +33,7 @@ source_root="${staging_dir}/source"
 mkdir -p "${source_root}/internal"
 cp -R "${server_root}/mobilecore" "${source_root}/mobilecore"
 cp -R "${server_root}/mobilegit" "${source_root}/mobilegit"
+cp -R "${server_root}/mobileagent" "${source_root}/mobileagent"
 cp -R "${server_root}/internal/." "${source_root}/internal/"
 cp "${server_root}/go.mod" "${server_root}/go.sum" "${source_root}/"
 
@@ -45,10 +49,11 @@ go get -tool "golang.org/x/mobile/cmd/gobind@${GOMOBILE_VERSION}"
 "${tool_bin}/gomobile" bind \
   -target=ios,iossimulator \
   -iosversion="${IOS_MIN_VERSION}" \
+  -tags="${PIG_STRIP_TAGS}" \
   -ldflags="-s -w" \
   -trimpath \
   -o "${staging_dir}/LedgerCore.xcframework" \
-  ./mobilecore ./mobilegit
+  ./mobilecore ./mobilegit ./mobileagent
 
 rm -rf "${output}"
 mv "${staging_dir}/LedgerCore.xcframework" "${output}"
