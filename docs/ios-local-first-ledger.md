@@ -30,6 +30,14 @@ hosted ledger automation are outside the local-only product. Optional import
 classification calls TypeSafe directly with a user-supplied key; ledger queries,
 validation and writes continue to run entirely on the device.
 
+An on-device ledger Agent is in progress in `server/mobileagent`. It runs a
+PiG (Pi in Go) agent loop inside LedgerCore and calls the model provider
+directly with a user-supplied key. Its tools are the read-only server Agent
+tools (BQL, summary, search, accounts) executed against a pinned committed
+generation; it cannot stage, write, or reach the dispatcher's endpoint
+allowlist. Write tools will follow once the shell can pause a turn for an
+explicit confirmation card.
+
 ## Product decision
 
 The architecture uses an app-managed local Beancount workspace. SwiftUI reads

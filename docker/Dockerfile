@@ -35,7 +35,7 @@ EXPOSE 8080
 CMD ["ledger-agent"]
 
 # ── Backend build ──
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS go-builder
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /app/server

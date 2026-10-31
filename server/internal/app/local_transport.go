@@ -176,23 +176,7 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 		raw, err := json.Marshal(result)
 		return http.StatusOK, raw, err
 	}
-	runtime := newFilesystemRuntimeStore(cfg.RuntimeDir)
-	writer := NewLedgerWriterWithRuntimeStore(cfg, cache, runtime)
-	if input.Staging {
-		writer.stagingValidation = func() error {
-			_, _, err := localLedgerSource(cfg)
-			return err
-		}
-	}
-	reader := NewLedgerReadService(cache)
-	s := &Server{cfg: cfg, cache: cache, runtimeStore: runtime, writer: writer,
-		queryPort: reader, snapshotPort: reader, limiter: NewRateLimiter(),
-		accountService:   NewAccountService(cache, writer),
-		txService:        NewTransactionService(cache, writer),
-		reconcileService: NewReconciliationService(cache, writer)}
-	s.notificationService, err = newNotificationService(NotificationServiceDependencies{
-		Config: cfg, RuntimeStore: runtime, SnapshotPort: reader,
-	}, newNotificationChannelRegistry())
+	s, err := newLocalServer(cfg, cache, input.Staging)
 	if err != nil {
 		return http.StatusInternalServerError, nil, err
 	}
@@ -243,6 +227,33 @@ func DispatchLocalRequest(input LocalRequest) (int, json.RawMessage, error) {
 	}
 	encoded, err := json.Marshal(payload)
 	return status, encoded, err
+}
+
+// newLocalServer wires the application services over one local workspace. It
+// starts no listener, scheduler or outbound client.
+func newLocalServer(cfg Config, cache *LedgerCache, staging bool) (*Server, error) {
+	runtime := newFilesystemRuntimeStore(cfg.RuntimeDir)
+	writer := NewLedgerWriterWithRuntimeStore(cfg, cache, runtime)
+	if staging {
+		writer.stagingValidation = func() error {
+			_, _, err := localLedgerSource(cfg)
+			return err
+		}
+	}
+	reader := NewLedgerReadService(cache)
+	s := &Server{cfg: cfg, cache: cache, runtimeStore: runtime, writer: writer,
+		queryPort: reader, snapshotPort: reader, limiter: NewRateLimiter(),
+		accountService:   NewAccountService(cache, writer),
+		txService:        NewTransactionService(cache, writer),
+		reconcileService: NewReconciliationService(cache, writer)}
+	var err error
+	s.notificationService, err = newNotificationService(NotificationServiceDependencies{
+		Config: cfg, RuntimeStore: runtime, SnapshotPort: reader,
+	}, newNotificationChannelRegistry())
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // Retain one read model across native page requests. Source content and the
