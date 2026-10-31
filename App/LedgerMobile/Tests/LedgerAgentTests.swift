@@ -141,6 +141,68 @@ final class LedgerAgentTests: XCTestCase {
             custom: .init(api: .openAIResponses, baseURL: "https://gw.example.com/v1")))
     }
 
+    @MainActor
+    func testFavoritesSwitchProviderAndModelInOneTap() throws {
+        let suite = "LedgerAgentTests-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
+        let keys: (String) -> ClassificationKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
+        let settings = LedgerAgentSettings(defaults: defaults, catalog: .fallback, keyStore: keys)
+        settings.toggleFavoriteForCurrent()
+        XCTAssertTrue(settings.currentIsFavorite)
+        settings.select(provider: "custom")
+        settings.setCustom(api: .openAICompletions, baseURL: "https://gw.example.com/v1")
+        settings.select(model: "qwen3")
+        settings.toggleFavoriteForCurrent()
+        XCTAssertEqual(settings.favorites.map(\.choice.model), ["claude-sonnet-4-5", "qwen3"])
+        // A model nothing describes is offered the assumed levels.
+        XCTAssertEqual(settings.supportedThinking, LedgerAgentThinking.custom)
+        XCTAssertTrue(settings.thinkingIsAssumed)
+
+        let anthropic = try XCTUnwrap(settings.favorites.first)
+        settings.select(favorite: anthropic)
+        XCTAssertEqual(settings.choice, .init(provider: "anthropic", model: "claude-sonnet-4-5"))
+
+        // Favorites survive a relaunch; unstarring removes one.
+        let reopened = LedgerAgentSettings(defaults: defaults, catalog: .fallback, keyStore: keys)
+        XCTAssertEqual(reopened.favorites, settings.favorites)
+        reopened.toggleFavoriteForCurrent()
+        XCTAssertEqual(reopened.favorites.map(\.choice.model), ["qwen3"])
+    }
+
+    @MainActor
+    func testProviderListAddsModelsTheCatalogLacks() async throws {
+        let suite = "LedgerAgentTests-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let keys: (String) -> ClassificationKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
+        addTeardownBlock {
+            UserDefaults().removePersistentDomain(forName: suite)
+            try? keys("anthropic").remove()
+        }
+        let sent = SentRequest()
+        let lister = LedgerAgentModelLister(run: { request in
+            sent.data = request
+            return Data(#"{"version":1,"ok":true,"models":[{"id":"claude-next","title":"Claude Next","thinkingLevels":["off","low","high"],"known":false}]}"#.utf8)
+        })
+        let settings = LedgerAgentSettings(defaults: defaults, catalog: .fallback, keyStore: keys, lister: lister)
+        await settings.refreshModels()
+        XCTAssertNotNil(settings.listError, "listed without a key")
+        try settings.saveKey("sk-test")
+        await settings.refreshModels()
+        XCTAssertNil(settings.listError)
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(sent.data)) as? [String: Any])
+        XCTAssertEqual(request["provider"] as? String, "anthropic")
+        XCTAssertEqual(request["apiKey"] as? String, "sk-test")
+        XCTAssertEqual(settings.listedModels?.map(\.id), ["claude-next"])
+
+        settings.select(model: "claude-next")
+        XCTAssertEqual(settings.modelTitle, "Claude Next")
+        XCTAssertEqual(settings.supportedThinking, [.off, .low, .high])
+        XCTAssertEqual(settings.effectiveThinking, .high)
+        settings.toggleFavoriteForCurrent()
+        XCTAssertEqual(settings.favorites.last?.thinkingLevels, ["off", "low", "high"])
+    }
+
     func testCrashReportShowsOnce() throws {
         let runtime = try root()
         XCTAssertNil(LedgerAgentCrashReport.take(runtimeRoot: runtime))
@@ -676,5 +738,15 @@ final class LedgerAgentTests: XCTestCase {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: url) }
         return url
+    }
+}
+
+/// The last request a substitute lister saw.
+private final class SentRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Data?
+    var data: Data? {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
     }
 }

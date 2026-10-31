@@ -194,6 +194,57 @@ enum LedgerAgentThinking: String, Codable, CaseIterable, Identifiable, Sendable 
     }
 }
 
+/// A model the provider says the key can call, from `ListModelsJSON`.
+struct LedgerAgentListedModel: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let title: String
+    var thinkingLevels: [String]? = nil
+    /// The native catalog describes it; otherwise its levels are assumed.
+    var known = false
+
+    var thinking: [LedgerAgentThinking] {
+        let levels = (thinkingLevels ?? []).compactMap(LedgerAgentThinking.init(rawValue:))
+        return levels.isEmpty ? LedgerAgentThinking.custom : levels
+    }
+}
+
+/// The blocking JSON boundary to the native model list. Tests substitute it.
+struct LedgerAgentModelLister: Sendable {
+    private struct Request: Encodable {
+        let version = 1
+        let provider: String
+        let apiKey: String
+        let custom: LedgerAgentModelChoice.CustomEndpoint?
+    }
+    private struct Response: Decodable {
+        let ok: Bool
+        var models: [LedgerAgentListedModel] = []
+        var error: String?
+    }
+
+    var run: @Sendable (Data) async throws -> Data
+
+    static let native = LedgerAgentModelLister(run: { request in
+        #if canImport(LedgerCore)
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: Data(MobileagentListModelsJSON(String(decoding: request, as: UTF8.self)).utf8))
+            }
+        }
+        #else
+        throw LocalLedgerError.runtimeUnavailable
+        #endif
+    })
+
+    /// The provider's models for this key, in the order it lists them.
+    func models(for choice: LedgerAgentModelChoice, apiKey: String) async throws -> [LedgerAgentListedModel] {
+        let request = Request(provider: choice.provider, apiKey: apiKey, custom: choice.isCustom ? choice.custom : nil)
+        let response = try JSONDecoder().decode(Response.self, from: try await run(try JSONEncoder().encode(request)))
+        guard response.ok else { throw LedgerAgentError.classify(response.error ?? String(localized: "拉取模型列表失败")) }
+        return response.models
+    }
+}
+
 /// The wire request of `RunTurnJSON`. The native decoder rejects unknown
 /// fields, so this lists exactly what the Go side accepts.
 struct LedgerAgentTurnRequest: Encodable, Sendable {

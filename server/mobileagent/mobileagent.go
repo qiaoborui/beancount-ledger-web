@@ -66,10 +66,10 @@ type customEndpointV1 struct {
 var thinkingLevels = []ai.ModelThinkingLevel{ai.ThinkingOff, ai.ThinkingMinimal, ai.ThinkingLow,
 	ai.ThinkingMedium, ai.ThinkingHigh, ai.ThinkingXHigh, ai.ThinkingMax}
 
-// thinkingLevel resolves the requested effort for model. A custom endpoint
-// cannot say whether it reasons, so asking for a level marks it as a
-// reasoning model; levels it does not know are left to the server.
-func thinkingLevel(model *ai.Model, requested string, custom bool) (ai.ModelThinkingLevel, error) {
+// thinkingLevel resolves the requested effort for model. For an assumed
+// model nothing says whether it reasons, so asking for a level marks it as
+// a reasoning model; levels it does not know are left to the server.
+func thinkingLevel(model *ai.Model, requested string, assumed bool) (ai.ModelThinkingLevel, error) {
 	level := ai.ModelThinkingLevel(requested)
 	if level == "" {
 		level = ai.ThinkingOff
@@ -77,7 +77,7 @@ func thinkingLevel(model *ai.Model, requested string, custom bool) (ai.ModelThin
 	if !slices.Contains(thinkingLevels, level) {
 		return "", fmt.Errorf("unknown thinking level %q", requested)
 	}
-	if custom && level != ai.ThinkingOff {
+	if assumed && level != ai.ThinkingOff {
 		model.ProviderMeta.Reasoning = true
 	}
 	return ai.ClampThinkingLevel(model, level), nil
@@ -294,6 +294,9 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON strin
 	}
 	var model *ai.Model
 	var err error
+	// assumed is set for a model whose abilities nobody describes: a custom
+	// endpoint, or one the provider listed but the catalog does not know.
+	assumed := request.Provider == customProvider
 	if request.Provider == customProvider {
 		if model, err = customModel(request.Model, request.Custom); err != nil {
 			return "", calls, files, err
@@ -301,9 +304,12 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON strin
 	} else if request.Custom != nil {
 		return "", calls, files, errors.New("custom is only valid with provider custom")
 	} else if model = resolveModel(request.Provider, request.Model); model == nil {
-		return "", calls, files, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
+		if model = listedModel(request.Provider, request.Model); model == nil {
+			return "", calls, files, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
+		}
+		assumed = true
 	}
-	thinking, err := thinkingLevel(model, request.Thinking, request.Provider == customProvider)
+	thinking, err := thinkingLevel(model, request.Thinking, assumed)
 	if err != nil {
 		return "", calls, files, err
 	}

@@ -58,6 +58,14 @@ a time. Leaving a conversation drops its draft. A change it never wrote is lost,
 and the reopened conversation says so. Each turn sends a thinking effort: the
 user's pick, clamped to the levels `ModelCatalogJSON` lists for the model.
 
+The chat page's composer has two switchers: one for starred models and one for the
+thinking effort. The model picker can fetch the provider's own list with the saved
+key (`ListModelsJSON`), so models newer than the built-in catalog can be picked and
+starred. Such a model borrows the protocol, base URL and quirks of the catalog entry
+whose id shares the longest prefix with it. Like a custom endpoint, it is offered
+efforts up to high, and the provider ignores them if the model cannot reason.
+Favorites keep their provider and endpoint, and each one uses that provider's key.
+
 ## Product decision
 
 The architecture uses an app-managed local Beancount workspace. SwiftUI reads

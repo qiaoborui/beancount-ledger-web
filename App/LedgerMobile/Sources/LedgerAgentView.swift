@@ -251,10 +251,9 @@ private struct LedgerAgentChatScreen: View {
                 Text("另一个对话正在回答，答完后才能在这里提问")
                     .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                     .padding(.horizontal, 6)
-            } else if conversation.messages.isEmpty && !conversation.isRunning {
-                Text(verbatim: "\(settings.modelTitle) · \(settings.providerTitle) · " + String(localized: "思考 \(settings.effectiveThinking.title)"))
-                    .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
-                    .padding(.horizontal, 6)
+            } else {
+                LedgerAgentQuickSwitch { settingsPresented = true }
+                    .padding(.horizontal, 2)
             }
             HStack(alignment: .bottom, spacing: 10) {
                 TextField(conversation.pending == nil ? String(localized: "问问账本，比如「上个月餐饮花了多少」")
@@ -755,6 +754,10 @@ struct LedgerAgentSettingsView: View {
                         .autocorrectionDisabled()
                         .balancedMono(size: 13)
                         .accessibilityIdentifier("ledger-agent-custom-model")
+                    if settings.hasKey, settings.choice.custom?.isValid == true {
+                        NavigationLink("从服务拉取模型列表") { LedgerAgentModelPicker() }
+                            .accessibilityIdentifier("ledger-agent-custom-list")
+                    }
                 } else {
                     NavigationLink {
                         LedgerAgentModelPicker()
@@ -779,6 +782,32 @@ struct LedgerAgentSettingsView: View {
                     Text(invalid ? "Base URL 需要是 http(s) 地址，不能带账号密码或查询参数。"
                                  : "兼容这三种协议的服务都可以用，比如自建网关、OneAPI、Ollama、vLLM。Base URL 填到 /v1 为止，Anthropic 协议也一样。模型需要支持工具调用。")
                 }
+            }
+            Section {
+                if settings.favorites.isEmpty {
+                    Text("在模型列表里点星标收藏，聊天页就能一键切换。")
+                        .foregroundStyle(BalancedPalette.meta)
+                }
+                ForEach(settings.favorites) { favorite in
+                    Button { settings.select(favorite: favorite) } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(favorite.title).foregroundStyle(BalancedPalette.ink)
+                                Text(verbatim: settings.providerTitle(for: favorite.choice.provider) + " · " + favorite.choice.model)
+                                    .balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            if favorite.id == LedgerAgentSettings.identity(settings.choice) {
+                                Image(systemName: "checkmark").foregroundStyle(BalancedPalette.ink)
+                            }
+                        }
+                    }
+                }
+                .onDelete { settings.removeFavorites(at: $0) }
+                .onMove { settings.moveFavorites(from: $0, to: $1) }
+            } header: { Text("收藏的模型") } footer: {
+                if !settings.favorites.isEmpty { Text("左滑删除。最多 \(LedgerAgentSettings.favoriteLimit) 个，各自用对应服务商的 Key。") }
             }
             Section {
                 if settings.hasKey { Label("\(settings.providerTitle) API Key 已保存在本机", systemImage: "key.fill") }
@@ -829,15 +858,27 @@ struct LedgerAgentSettingsView: View {
     }
 }
 
-/// The models the native loop knows for the selected provider, searchable
-/// because OpenRouter lists hundreds; a typed id is accepted as is.
+/// The selected provider's models: its own list once fetched with the saved
+/// key, else the built-in catalog. Searchable because OpenRouter lists
+/// hundreds; a typed id is accepted as is. The star keeps a model for the
+/// chat page's switcher.
 private struct LedgerAgentModelPicker: View {
     @ObservedObject private var settings = LedgerAgentSettings.shared
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
 
-    private var models: [LedgerAgentCatalog.Model] {
-        let all = settings.catalog.provider(settings.choice.provider)?.models ?? []
+    private struct Row: Identifiable {
+        let id: String
+        let title: String
+        let levels: [LedgerAgentThinking]
+    }
+
+    private var all: [Row] {
+        if let listed = settings.listedModels { return listed.map { .init(id: $0.id, title: $0.title, levels: $0.thinking) } }
+        return (settings.catalog.provider(settings.choice.provider)?.models ?? []).map { .init(id: $0.id, title: $0.title, levels: $0.thinking) }
+    }
+
+    private var rows: [Row] {
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !needle.isEmpty else { return all }
         return all.filter { $0.id.lowercased().contains(needle) || $0.title.lowercased().contains(needle) }
@@ -845,22 +886,55 @@ private struct LedgerAgentModelPicker: View {
 
     var body: some View {
         List {
-            let typed = query.trimmingCharacters(in: .whitespaces)
-            if !typed.isEmpty, !models.contains(where: { $0.id == typed }) {
-                Button { choose(typed) } label: { Text("使用「\(typed)」") }
+            if let error = settings.listError {
+                Section { StatusBanner(message: error) { settings.clearListError() } }
             }
-            ForEach(models) { model in
-                Button { choose(model.id) } label: {
+            Section {
+                let typed = query.trimmingCharacters(in: .whitespaces)
+                if !typed.isEmpty, !rows.contains(where: { $0.id == typed }) {
+                    Button { choose(typed) } label: { Text("使用「\(typed)」") }
+                }
+                ForEach(rows) { row in
                     HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(model.title).foregroundStyle(BalancedPalette.ink)
-                            Text(model.id).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                        Button { choose(row.id) } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(row.title).foregroundStyle(BalancedPalette.ink)
+                                    Text(row.id).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                                }
+                                Spacer()
+                                if row.id == settings.choice.model {
+                                    Image(systemName: "checkmark").foregroundStyle(BalancedPalette.ink)
+                                }
+                            }
+                            .contentShape(Rectangle())
                         }
-                        Spacer()
-                        if model.id == settings.choice.model {
-                            Image(systemName: "checkmark").foregroundStyle(BalancedPalette.ink)
+                        .buttonStyle(.plain)
+                        Button {
+                            settings.toggleFavorite(model: row.id, title: row.title, levels: row.levels)
+                        } label: {
+                            Image(systemName: settings.isFavorite(model: row.id) ? "star.fill" : "star")
+                                .foregroundStyle(settings.isFavorite(model: row.id) ? BalancedPalette.ink : BalancedPalette.meta)
+                                .frame(width: 36, height: 36)
+                                .contentShape(Rectangle())
                         }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(settings.isFavorite(model: row.id) ? "取消收藏" : "收藏")
                     }
+                }
+            } header: {
+                if settings.listing {
+                    Text("正在向 \(settings.providerTitle) 拉取…")
+                } else if let listed = settings.listedModels {
+                    Text("\(settings.providerTitle) 提供的 \(listed.count) 个模型")
+                } else if !settings.choice.isCustom {
+                    Text("内置目录")
+                }
+            } footer: {
+                if settings.listedModels == nil, !settings.choice.isCustom {
+                    Text("内置目录随 App 更新。点右上角刷新，用已保存的 Key 拉取服务商当前提供的模型。")
+                } else if settings.listedModels != nil {
+                    Text("目录里没有的模型，思考强度最高给到「高」，不支持时由服务端忽略。")
                 }
             }
         }
@@ -870,11 +944,100 @@ private struct LedgerAgentModelPicker: View {
         .autocorrectionDisabled()
         .navigationTitle(settings.providerTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if settings.listing {
+                    ProgressView()
+                } else {
+                    Button { Task { await settings.refreshModels() } } label: { Image(systemName: "arrow.clockwise") }
+                        .disabled(!settings.hasKey)
+                        .accessibilityLabel("拉取模型列表")
+                        .accessibilityIdentifier("ledger-agent-refresh-models")
+                }
+            }
+        }
+        .task {
+            if settings.listedModels == nil, settings.hasKey, settings.choice.isCustom { await settings.refreshModels() }
+        }
     }
 
     private func choose(_ id: String) {
         settings.select(model: id)
         dismiss()
+    }
+}
+
+/// The chat page's switcher: starred models and the current model's
+/// thinking levels, each one tap away. A turn already running keeps the
+/// model and effort it was sent with.
+private struct LedgerAgentQuickSwitch: View {
+    @ObservedObject private var settings = LedgerAgentSettings.shared
+    var manage: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Menu { models } label: { chip(settings.modelTitle) }
+                .accessibilityLabel(String(localized: "模型：\(settings.modelTitle)"))
+                .accessibilityIdentifier("ledger-agent-quick-model")
+            Menu { thinking } label: { chip(String(localized: "思考 \(settings.effectiveThinking.title)")) }
+                .accessibilityLabel(String(localized: "思考强度：\(settings.effectiveThinking.title)"))
+                .accessibilityIdentifier("ledger-agent-quick-thinking")
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder private var models: some View {
+        let current = LedgerAgentSettings.identity(settings.choice)
+        Section(settings.favorites.isEmpty ? String(localized: "当前模型") : String(localized: "收藏")) {
+            if !settings.currentIsFavorite {
+                Button {} label: {
+                    Label(settings.modelTitle, systemImage: "checkmark")
+                    Text(verbatim: settings.providerTitle)
+                }
+            }
+            ForEach(settings.favorites) { favorite in
+                let provider = settings.providerTitle(for: favorite.choice.provider)
+                Button {
+                    settings.select(favorite: favorite)
+                    if !settings.hasKey { manage() }
+                } label: {
+                    if favorite.id == current { Label(favorite.title, systemImage: "checkmark") } else { Text(favorite.title) }
+                    Text(settings.hasKey(for: favorite.choice.provider) ? provider : String(localized: "\(provider) · 未保存 Key"))
+                }
+            }
+        }
+        Section {
+            Button { settings.toggleFavoriteForCurrent() } label: {
+                Label(settings.currentIsFavorite ? "取消收藏当前模型" : "收藏当前模型",
+                      systemImage: settings.currentIsFavorite ? "star.slash" : "star")
+            }
+            Button(action: manage) { Label("全部模型与密钥…", systemImage: "slider.horizontal.3") }
+        }
+    }
+
+    @ViewBuilder private var thinking: some View {
+        Picker("思考强度", selection: Binding(get: { settings.effectiveThinking }, set: { settings.select(thinking: $0) })) {
+            ForEach(settings.supportedThinking.reversed()) { level in
+                Text(level.title).tag(level)
+            }
+        }
+        .pickerStyle(.inline)
+        if settings.thinkingIsAssumed {
+            Section { Text("这个模型是否支持推理无从得知，不支持时由服务端忽略") }
+        }
+    }
+
+    private func chip(_ title: String) -> some View {
+        HStack(spacing: 3) {
+            Text(verbatim: title).lineLimit(1)
+            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+        }
+        .balancedFont(size: 12)
+        .foregroundStyle(BalancedPalette.meta)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(BalancedPalette.meta.opacity(0.1)))
+        .contentShape(Capsule())
     }
 }
 
@@ -906,8 +1069,8 @@ private struct LedgerAgentThinkingPicker: View {
             } header: {
                 Text("\(settings.modelTitle) 支持")
             } footer: {
-                Text(settings.choice.isCustom
-                     ? "自定义服务无法事先知道是否支持推理，最高给到「高」；不支持时由服务端忽略。"
+                Text(settings.thinkingIsAssumed
+                     ? "这个模型是否支持推理无从得知，最高给到「高」；不支持时由服务端忽略。"
                      : "越高越慢、越贵，复杂的批量改动更稳。换到不支持这一档的模型时，自动用最接近的一档。")
             }
         }
