@@ -492,12 +492,18 @@ private struct MainTabView: View {
             Tab("更多", systemImage: "ellipsis", value: LedgerDestination.settings) {
                 NavigationStack { MoreView(overflowDestination: $moreDestination) }
             }
-            // The search role detaches this tab into its own floating button beside the
-            // tab bar, so search stays one tap away from every root page.
-            Tab("搜索", systemImage: "magnifyingglass", value: LedgerDestination.search, role: .search) {
-                NavigationStack { GlobalSearchTabPage() }
+            // Search floats as its own button beside the tab bar, one tap from every root page.
+            Tab("搜索", systemImage: "magnifyingglass", value: LedgerDestination.search, role: Self.searchTabRole) {
+                NavigationStack { SearchTabRoot() }
             }
         }
+    }
+
+    /// iOS 26 detaches a search-role tab by itself. Built with the iOS 27 SDK it stays
+    /// inside the bar, and only the prominent role sets a tab apart.
+    @available(iOS 26.0, *)
+    private static var searchTabRole: TabRole {
+        if #available(iOS 27.0, *) { .prominent } else { .search }
     }
 
     private var compactTabs: some View {
@@ -516,6 +522,15 @@ private struct MainTabView: View {
                 .tabItem { Label("搜索", systemImage: "magnifyingglass") }
                 .tag(LedgerDestination.search)
         }
+    }
+}
+
+/// A prominent tab no longer hands its field to the tab bar, so on iOS 27 search keeps
+/// the field in its own navigation bar.
+@available(iOS 26.0, *)
+private struct SearchTabRoot: View {
+    var body: some View {
+        if #available(iOS 27.0, *) { GlobalSearchPage() } else { GlobalSearchTabPage() }
     }
 }
 
