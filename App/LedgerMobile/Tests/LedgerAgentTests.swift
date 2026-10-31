@@ -358,7 +358,10 @@ final class LedgerAgentTests: XCTestCase {
         } catch let error as LedgerAgentEditError {
             guard case .invalid = error else { return XCTFail("\(error)") }
         }
-        try Data((original + "\n2026-10-31 open Expenses:Food CNY\n").utf8).write(to: main)
+        // The template already opens Expenses:Food, so assert on the exact
+        // line the draft adds rather than on the account name.
+        let added = "2026-10-31 open Expenses:Food CNY"
+        try Data((original + "\n" + added + "\n").utf8).write(to: main)
         try FileManager.default.createDirectory(at: draft.root.appendingPathComponent("2026"), withIntermediateDirectories: true)
         try Data("; 新文件\n".utf8).write(to: draft.root.appendingPathComponent("2026/02.bean"))
         let prepared = try await repository.reviewAgentDraft(draft)
@@ -366,12 +369,12 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(review.files.map(\.path), ["2026/02.bean", "main.bean"])
         XCTAssertEqual(review.files.first?.change, .added)
         let before = try await repository.readFile(path: "main.bean").text
-        XCTAssertFalse(before.contains("Expenses:Food"))
+        XCTAssertFalse(before.contains(added))
 
         let rebased = try await repository.writeAgentDraft(review, draft: draft)
         XCTAssertNotEqual(rebased.baseRevisionID, draft.baseRevisionID)
         let after = try await repository.readFile(path: "main.bean").text
-        XCTAssertTrue(after.contains("Expenses:Food"))
+        XCTAssertTrue(after.contains(added))
         let created = try await repository.readFile(path: "2026/02.bean").text
         XCTAssertEqual(created, "; 新文件\n")
         let clean = try await repository.reviewAgentDraft(rebased)
