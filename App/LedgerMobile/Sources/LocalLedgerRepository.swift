@@ -1180,7 +1180,11 @@ actor LocalLedgerRepository: LedgerRepository {
     /// native turn.
     func runAgentTurn(message: String, history: [LedgerAgentTurnRequest.HistoryEntry],
                       choice: LedgerAgentModelChoice, apiKey: String, sensitiveUnlocked: Bool,
+<<<<<<< HEAD
                       thinking: LedgerAgentThinking? = nil, draft: URL? = nil, runner: LedgerAgentRunner = .native,
+=======
+                      draft: URL? = nil, runner: LedgerAgentRunner = .native,
+>>>>>>> origin/main
                       onStep: LedgerAgentSteps.Handler? = nil) async throws -> LedgerAgentTurnResponse {
         if draft != nil { LedgerAgentChecker.install() }
         let engine = engine, entrypoint = descriptor.entrypoint

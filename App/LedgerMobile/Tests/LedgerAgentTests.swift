@@ -479,6 +479,7 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(lifecycle.events.last, "ended changeReady(\"改好了。\", files: 1)")
     }
 
+<<<<<<< HEAD
     func testThinkingClampsLikeTheNativeLoop() {
         XCTAssertEqual(LedgerAgentThinking.max.clamped(to: [.off, .minimal, .low, .medium, .high]), .high)
         XCTAssertEqual(LedgerAgentThinking.off.clamped(to: [.low, .medium, .high]), .low)
@@ -599,6 +600,19 @@ final class LedgerAgentTests: XCTestCase {
         sessions.bind(ledger: UUID(), storage: MemoryConversationStore().storage)
         XCTAssertTrue(sessions.current.messages.isEmpty)
         XCTAssertTrue(sessions.saved.isEmpty)
+=======
+    @MainActor
+    func testConversationStartsOverForAnotherLedger() async throws {
+        let conversation = LedgerAgentConversation()
+        let first = UUID()
+        conversation.bind(ledger: first)
+        conversation.send("问题") { _, _, _ in .init(ok: true, reply: "回答") }
+        try await waitUntilIdle(conversation)
+        conversation.bind(ledger: first)
+        XCTAssertEqual(conversation.messages.count, 2)
+        conversation.bind(ledger: UUID())
+        XCTAssertTrue(conversation.messages.isEmpty)
+>>>>>>> origin/main
     }
 
     func testRepositoryWritesAnAgentDraftThroughThePreparedPath() async throws {
@@ -678,6 +692,7 @@ final class LedgerAgentTests: XCTestCase {
 
     // MARK: Fixtures
 
+<<<<<<< HEAD
     private actor MemoryConversationStore {
         private var files: [UUID: Data] = [:]
         var count: Int { files.count }
@@ -692,6 +707,8 @@ final class LedgerAgentTests: XCTestCase {
         }
     }
 
+=======
+>>>>>>> origin/main
     @MainActor
     private final class RecordingLifecycle: LedgerAgentLifecycle {
         var events: [String] = []
