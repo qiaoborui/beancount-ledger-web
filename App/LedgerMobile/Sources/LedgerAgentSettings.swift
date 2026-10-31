@@ -12,6 +12,8 @@ final class LedgerAgentSettings: ObservableObject {
     let catalog: LedgerAgentCatalog
     private let defaults: UserDefaults
     private let preferenceKey = "ledger.agent.model-choice"
+    /// The custom endpoint survives switching to a listed provider and back.
+    private let customKey = "ledger.agent.custom-choice"
     private let keyStore: (String) -> ClassificationKeyStore
 
     init(defaults: UserDefaults = .standard, catalog: LedgerAgentCatalog = .native,
@@ -25,18 +27,39 @@ final class LedgerAgentSettings: ObservableObject {
         hasKey = (try? keyStore(choice.provider).load()) != nil
     }
 
-    var modelTitle: String { catalog.modelTitle(choice) }
+    var modelTitle: String {
+        if choice.isCustom, choice.model.isEmpty { return String(localized: "未设置") }
+        return catalog.modelTitle(choice)
+    }
+
+    /// A key is saved and the choice names a callable model.
+    var isReady: Bool { hasKey && choice.isComplete }
     var providerTitle: String { catalog.provider(choice.provider)?.title ?? choice.provider }
 
     func select(provider: String) {
         guard provider != choice.provider, let entry = catalog.provider(provider) else { return }
-        store(.init(provider: provider, model: Self.preferredModel(in: entry)))
+        if provider == LedgerAgentModelChoice.customProvider {
+            let saved = defaults.data(forKey: customKey).flatMap { try? JSONDecoder().decode(LedgerAgentModelChoice.self, from: $0) }
+            store(saved ?? .init(provider: provider, model: "", custom: .init()))
+        } else {
+            store(.init(provider: provider, model: Self.preferredModel(in: entry)))
+        }
     }
 
     func select(model: String) {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != choice.model else { return }
-        store(.init(provider: choice.provider, model: trimmed))
+        guard trimmed != choice.model, !trimmed.isEmpty || choice.isCustom else { return }
+        store(.init(provider: choice.provider, model: trimmed, custom: choice.custom))
+    }
+
+    /// Updates the custom endpoint; only meaningful while 自定义 is selected.
+    func setCustom(api: LedgerAgentModelChoice.CustomEndpoint.API? = nil, baseURL: String? = nil) {
+        guard choice.isCustom else { return }
+        var endpoint = choice.custom ?? .init()
+        if let api { endpoint.api = api }
+        if let baseURL { endpoint.baseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard endpoint != choice.custom else { return }
+        store(.init(provider: choice.provider, model: choice.model, custom: endpoint))
     }
 
     func saveKey(_ raw: String) throws {
@@ -62,6 +85,7 @@ final class LedgerAgentSettings: ObservableObject {
     private func store(_ choice: LedgerAgentModelChoice) {
         self.choice = choice
         defaults.set(try? JSONEncoder().encode(choice), forKey: preferenceKey)
+        if choice.isCustom { defaults.set(try? JSONEncoder().encode(choice), forKey: customKey) }
         hasKey = (try? keyStore(choice.provider).load()) != nil
     }
 

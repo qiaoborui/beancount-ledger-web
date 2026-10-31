@@ -3,6 +3,9 @@ package mobileagent
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -223,6 +226,9 @@ func TestModelCatalogOffersKeyProviders(t *testing.T) {
 		t.Fatalf("providers = %+v", catalog.Providers)
 	}
 	for _, provider := range catalog.Providers {
+		if provider.ID == customProvider {
+			continue
+		}
 		if len(provider.Models) == 0 {
 			t.Fatalf("provider %s lists no models", provider.ID)
 		}
@@ -238,5 +244,49 @@ func TestRunTurnReportsAnUnavailableModelHandle(t *testing.T) {
 		"provider": "faux", "model": "faux-1", "message": "hi"})
 	if response.OK || !response.ModelUnavailable {
 		t.Fatalf("stale handle not reported: %+v", response)
+	}
+}
+
+func TestCustomEndpointSpeaksEachProtocol(t *testing.T) {
+	for api, path := range map[string]string{
+		"openai-completions": "/v1/chat/completions",
+		"openai-responses":   "/v1/responses",
+		"anthropic-messages": "/v1/messages",
+	} {
+		var hit, model, key string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body struct{ Model string }
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &body)
+			hit, model, key = r.URL.Path, body.Model, r.Header.Get("Authorization")+r.Header.Get("x-api-key")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"message":"bad key"}}`))
+		}))
+		response := runTurnFor(t, map[string]any{"version": 1, "workspaceRoot": committedWorkspace(t), "provider": "custom",
+			"model": "my-model", "apiKey": "secret", "message": "hi", "custom": map[string]any{"api": api, "baseURL": server.URL + "/v1/"}})
+		server.Close()
+		if hit != path || model != "my-model" || !strings.Contains(key, "secret") {
+			t.Fatalf("%s: request went to %q for model %q with key %q", api, hit, model, key)
+		}
+		if response.OK || !strings.Contains(response.Error, "401") {
+			t.Fatalf("%s: provider error not surfaced: %+v", api, response)
+		}
+	}
+}
+
+func TestCustomEndpointRejectsBadConfiguration(t *testing.T) {
+	root := committedWorkspace(t)
+	for name, request := range map[string]map[string]any{
+		"no endpoint":    {"provider": "custom", "model": "m"},
+		"unknown api":    {"provider": "custom", "model": "m", "custom": map[string]any{"api": "bedrock", "baseURL": "https://example.com/v1"}},
+		"bad scheme":     {"provider": "custom", "model": "m", "custom": map[string]any{"api": "openai-completions", "baseURL": "file:///etc"}},
+		"credentials":    {"provider": "custom", "model": "m", "custom": map[string]any{"api": "openai-completions", "baseURL": "https://u:p@example.com/v1"}},
+		"no model":       {"provider": "custom", "model": " ", "custom": map[string]any{"api": "openai-completions", "baseURL": "https://example.com/v1"}},
+		"custom builtin": {"provider": "anthropic", "model": "claude-sonnet-4-5", "custom": map[string]any{"api": "openai-completions", "baseURL": "https://example.com/v1"}},
+	} {
+		request["version"], request["workspaceRoot"], request["message"] = 1, root, "hi"
+		if response := runTurnFor(t, request); response.OK || response.Error == "" {
+			t.Fatalf("%s accepted: %+v", name, response)
+		}
 	}
 }

@@ -64,6 +64,48 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(object["version"] as? Int, 1)
     }
 
+    func testCustomEndpointEncodesForTheNativeDecoder() throws {
+        let choice = LedgerAgentModelChoice(provider: "custom", model: "qwen3", custom: .init(api: .anthropicMessages, baseURL: "https://gw.example.com/v1"))
+        XCTAssertTrue(choice.isComplete)
+        let request = LedgerAgentTurnRequest(turnId: "t", workspaceRoot: "/w", runtimeRoot: "/r", entrypoint: "main.bean",
+            sensitiveUnlocked: true, provider: choice.provider, model: choice.model, apiKey: "k", custom: choice.custom,
+            history: [], message: "m")
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        let custom = try XCTUnwrap(object["custom"] as? [String: String])
+        XCTAssertEqual(custom, ["api": "anthropic-messages", "baseURL": "https://gw.example.com/v1"])
+    }
+
+    func testCustomChoiceNeedsAModelAndAPlainHTTPURL() {
+        func choice(_ url: String, model: String = "m") -> LedgerAgentModelChoice {
+            .init(provider: "custom", model: model, custom: .init(api: .openAICompletions, baseURL: url))
+        }
+        XCTAssertTrue(choice("http://192.168.1.8:11434/v1").isComplete)
+        XCTAssertFalse(choice("https://api.example.com/v1", model: " ").isComplete)
+        XCTAssertFalse(choice("").isComplete)
+        XCTAssertFalse(choice("ftp://example.com").isComplete)
+        XCTAssertFalse(choice("https://user:pass@example.com/v1").isComplete)
+        XCTAssertFalse(choice("https://example.com/v1?key=1").isComplete)
+        XCTAssertTrue(LedgerAgentModelChoice(provider: "anthropic", model: "claude-sonnet-4-5").isComplete)
+    }
+
+    @MainActor
+    func testSettingsRestoreTheCustomEndpointAfterSwitchingProviders() throws {
+        let suite = "LedgerAgentTests-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
+        let settings = LedgerAgentSettings(defaults: defaults, catalog: .fallback,
+            keyStore: { .init(service: "LedgerAgentTests-" + suite, account: $0) })
+        settings.select(provider: "custom")
+        XCTAssertTrue(settings.choice.isCustom)
+        settings.setCustom(api: .openAIResponses, baseURL: " https://gw.example.com/v1 ")
+        settings.select(model: "my-model")
+        settings.select(provider: "anthropic")
+        XCTAssertNil(settings.choice.custom)
+        settings.select(provider: "custom")
+        XCTAssertEqual(settings.choice, .init(provider: "custom", model: "my-model",
+            custom: .init(api: .openAIResponses, baseURL: "https://gw.example.com/v1")))
+    }
+
     func testErrorsClassifyAuthFailures() {
         XCTAssertEqual(LedgerAgentError.classify("401 Unauthorized: invalid x-api-key"), .invalidKey("401 Unauthorized: invalid x-api-key"))
         XCTAssertEqual(LedgerAgentError.classify("context deadline exceeded"), .failed("context deadline exceeded"))
