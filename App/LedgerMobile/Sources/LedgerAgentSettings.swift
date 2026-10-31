@@ -173,6 +173,13 @@ final class LedgerAgentSettings: ObservableObject {
             listError = String(localized: "先保存 \(providerTitle) 的 API Key")
             return
         }
+        await refreshModels(apiKey: key)
+    }
+
+    /// Fetches the current provider's list with the given key.
+    func refreshModels(apiKey key: String) async {
+        guard !listing else { return }
+        let choice = choice
         listing = true
         listError = nil
         defer { listing = false }

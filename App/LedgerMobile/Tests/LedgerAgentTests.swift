@@ -175,10 +175,7 @@ final class LedgerAgentTests: XCTestCase {
         let suite = "LedgerAgentTests-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let keys: (String) -> ClassificationKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
-        addTeardownBlock {
-            UserDefaults().removePersistentDomain(forName: suite)
-            try? keys("anthropic").remove()
-        }
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
         let sent = SentRequest()
         let lister = LedgerAgentModelLister(run: { request in
             sent.data = request
@@ -187,8 +184,8 @@ final class LedgerAgentTests: XCTestCase {
         let settings = LedgerAgentSettings(defaults: defaults, catalog: .fallback, keyStore: keys, lister: lister)
         await settings.refreshModels()
         XCTAssertNotNil(settings.listError, "listed without a key")
-        try settings.saveKey("sk-test")
-        await settings.refreshModels()
+        // CI runners cannot write the Keychain, so the key is passed in.
+        await settings.refreshModels(apiKey: "sk-test")
         XCTAssertNil(settings.listError)
         let request = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(sent.data)) as? [String: Any])
         XCTAssertEqual(request["provider"] as? String, "anthropic")
