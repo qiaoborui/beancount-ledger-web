@@ -402,8 +402,14 @@ enum LedgerAgentCrashReport {
         if (try? FileManager.default.moveItem(at: file, to: previous)) == nil {
             try? FileManager.default.removeItem(at: file)
         }
-        let text = String(decoding: data.prefix(maximumBytes), as: UTF8.self)
+        let text = crashingGoroutine(String(decoding: data.prefix(maximumBytes), as: UTF8.self))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
+    }
+
+    /// Keeps the panic message and the goroutine that raised it, which Go writes first; the idle goroutines after it only bury the cause.
+    static func crashingGoroutine(_ text: String) -> String {
+        let blocks = text.components(separatedBy: "\n\ngoroutine ")
+        return blocks.prefix(2).joined(separator: "\n\ngoroutine ")
     }
 }
