@@ -270,6 +270,64 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertTrue(conversation.messages.isEmpty)
     }
 
+    func testErrorHeadlinesSayWhetherARetryHelps() {
+        XCTAssertEqual(LedgerAgentError.failed("模型服务 150 秒没有任何响应，连接已断开").headline, "模型服务长时间没有响应")
+        XCTAssertEqual(LedgerAgentError.failed("429 Too Many Requests").headline, "模型服务限流或额度不足")
+        XCTAssertEqual(LedgerAgentError.failed("529 overloaded_error").headline, "模型服务暂时不可用")
+        XCTAssertEqual(LedgerAgentError.failed("dial tcp: lookup api.example.com: no such host").headline, "网络连接出了问题")
+        XCTAssertEqual(LedgerAgentError.failed("400 invalid_request_error: messages.1").headline, "模型服务拒绝了这次请求")
+        XCTAssertEqual(LedgerAgentError.invalidKey("401").headline, "API Key 无效或已过期")
+    }
+
+    func testHistorySkipsEmptyReplies() {
+        let messages: [LedgerAgentMessage] = [
+            .init(role: .user, text: "一"), .init(role: .assistant, text: "  "),
+            .init(role: .user, text: "二"), .init(role: .assistant, text: "答"),
+        ]
+        XCTAssertEqual(LedgerAgentHistory.entries(from: messages), [.init(role: "user", content: "二"), .init(role: "assistant", content: "答")])
+    }
+
+    /// An answer without text used to draw an empty reply, which read as the
+    /// assistant not answering at all.
+    @MainActor
+    func testEmptyReplyIsAFailureWithRetry() async throws {
+        let conversation = LedgerAgentConversation()
+        conversation.send("这个月花了多少") { _, _, _ in .init(ok: true, reply: "  ") }
+        try await waitUntilIdle(conversation)
+        guard case let .failed(_, question) = conversation.phase else { return XCTFail("empty reply passed as an answer") }
+        XCTAssertEqual(question, "这个月花了多少")
+        XCTAssertEqual(conversation.messages.map(\.role), [.user])
+    }
+
+    @MainActor
+    func testSendReportsWhetherTheTurnStarted() async throws {
+        let conversation = LedgerAgentConversation()
+        XCTAssertFalse(conversation.send("   ") { _, _, _ in .init(ok: true, reply: "x") })
+        XCTAssertTrue(conversation.send("问") { _, _, _ in
+            try? await Task.sleep(nanoseconds: 30_000_000)
+            return .init(ok: true, reply: "答")
+        })
+        XCTAssertFalse(conversation.send("又问") { _, _, _ in .init(ok: true, reply: "x") })
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.messages.map(\.text), ["问", "答"])
+    }
+
+    func testNativeDeadlineStopsWaitingOnACallThatNeverReturns() async throws {
+        let cancelled = expectation(description: "the stuck turn is cancelled")
+        do {
+            _ = try await LedgerAgentRunner.withDeadline(0.05, onTimeout: { cancelled.fulfill() }) {
+                Thread.sleep(forTimeInterval: 0.5)
+                return Data()
+            }
+            XCTFail("a stuck call was waited for")
+        } catch let error as LedgerAgentError {
+            XCTAssertEqual(error.headline, "模型服务长时间没有响应")
+        }
+        await fulfillment(of: [cancelled], timeout: 1)
+        let quick = try await LedgerAgentRunner.withDeadline(5, onTimeout: {}) { Data("ok".utf8) }
+        XCTAssertEqual(quick, Data("ok".utf8))
+    }
+
     @MainActor
     func testStoppedTurnDropsALateReply() async throws {
         let conversation = LedgerAgentConversation()

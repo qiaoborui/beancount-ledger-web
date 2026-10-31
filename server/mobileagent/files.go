@@ -10,6 +10,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
@@ -159,7 +160,7 @@ func (s *scratch) tools() []agent.AgentTool {
 			run:         s.writeFile},
 		fileTool{name: "bean_check", title: "校验账本",
 			description: "用 App 内置的 Beancount 校验整份草稿账本，返回错误及所在文件和行号。改完后必须调用，直到通过。",
-			parameters:  object(map[string]any{}), run: s.beanCheck},
+			parameters:  object(map[string]any{}), run: s.beanCheck, detached: true},
 	}
 }
 
@@ -310,7 +311,13 @@ type fileTool struct {
 	name, title, description string
 	parameters               map[string]any
 	run                      func(json.RawMessage) (any, error)
+	// detached runs a read-only tool that calls into the shell on a goroutine
+	// of its own, so a stop or the turn's deadline does not wait for it.
+	detached bool
 }
+
+// beanCheckTimeout bounds one validation; the model hears that it timed out.
+const beanCheckTimeout = 2 * time.Minute
 
 func (t fileTool) Name() string  { return t.name }
 func (t fileTool) Label() string { return t.title }
@@ -326,7 +333,13 @@ func (t fileTool) Execute(ctx context.Context, _ string, params json.RawMessage,
 	if len(strings.TrimSpace(string(params))) == 0 {
 		params = json.RawMessage(`{}`)
 	}
-	output, err := t.run(params)
+	var output any
+	var err error
+	if t.detached {
+		output, err = runDetached(ctx, beanCheckTimeout, func() (any, error) { return t.run(params) })
+	} else {
+		output, err = t.run(params)
+	}
 	if err != nil {
 		return agent.AgentToolResult{}, err
 	}
@@ -335,4 +348,28 @@ func (t fileTool) Execute(ctx context.Context, _ string, params json.RawMessage,
 		return agent.AgentToolResult{}, err
 	}
 	return agent.AgentToolResult{Content: []ai.ToolResultMessageContent{ai.TextContent{Text: string(raw)}}, Details: map[string]any{}}, nil
+}
+
+// runDetached returns run's result, or an error when ctx ends or timeout
+// passes first; run then finishes on its own and its result is dropped.
+func runDetached(ctx context.Context, timeout time.Duration, run func() (any, error)) (any, error) {
+	type result struct {
+		output any
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		output, err := run()
+		done <- result{output, err}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case r := <-done:
+		return r.output, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+		return nil, fmt.Errorf("校验超过 %d 秒没有完成", int(timeout/time.Second))
+	}
 }

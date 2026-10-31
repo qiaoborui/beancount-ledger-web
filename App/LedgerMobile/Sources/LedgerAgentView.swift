@@ -158,7 +158,8 @@ private struct LedgerAgentChatScreen: View {
                     }
                     switch conversation.phase {
                     case .idle: EmptyView()
-                    case .running: LedgerAgentRunning(step: conversation.step)
+                    case let .running(since): LedgerAgentRunning(step: conversation.step, since: since,
+                                                                 stepSince: conversation.stepSince ?? since)
                     case let .failed(error, question): failure(error, question: question)
                     }
                     Color.clear.frame(height: 1).id(Self.bottomID)
@@ -218,7 +219,7 @@ private struct LedgerAgentChatScreen: View {
 
     private func failure(_ error: LedgerAgentError, question: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(error == .notConfigured || error == .interrupted ? error.localizedDescription : String(localized: "模型服务拒绝了这次请求"))
+            Text(error.headline)
                 .balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.expense)
             Text(failureDetail(error)).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
                 .textSelection(.enabled)
@@ -301,12 +302,12 @@ private struct LedgerAgentChatScreen: View {
         conversation.editor = .live(repository)
         conversation.lifecycle = LedgerAgentBackgroundRun.shared
         LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
-        conversation.send(question, reporting: { message, history, draftRoot, report in
+        let started = conversation.send(question, reporting: { message, history, draftRoot, report in
             try await repository.runAgentTurn(message: message, history: history, choice: choice,
                                               apiKey: key, sensitiveUnlocked: true, thinking: thinking,
                                               draft: draftRoot, onStep: report)
         })
-        draft = ""
+        if started { draft = "" }
     }
 
     private func question(before answer: LedgerAgentMessage) -> String {
@@ -721,16 +722,35 @@ private struct LedgerAgentChartView: View {
     }
 }
 
+/// The running turn: what it is doing, for how long, and, once a step has
+/// been quiet for a while, that stopping and asking again is an option.
 private struct LedgerAgentRunning: View {
     let step: LedgerAgentStep?
+    let since: Date
+    let stepSince: Date
+
+    /// A step quiet this long gets the hint.
+    private static let slowAfter: TimeInterval = 45
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             ProgressView().controlSize(.small).tint(BalancedPalette.meta).padding(.top, 2)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(step?.title ?? String(localized: "正在查询账本")).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
-                    .lineLimit(1)
-                Text("可以离开这一页或切到后台，答完会通知你").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            TimelineView(.periodic(from: since, by: 1)) { context in
+                let elapsed = Int(context.date.timeIntervalSince(since).rounded(.down))
+                let quiet = context.date.timeIntervalSince(stepSince)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(step?.title ?? String(localized: "正在查询账本")).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
+                            .lineLimit(1)
+                        Text("\(max(elapsed, 0)) 秒").balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                    }
+                    if quiet >= Self.slowAfter {
+                        Text("模型这一步比较慢。网络不好时可以点停止，再发一次。")
+                            .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                    } else {
+                        Text("可以离开这一页或切到后台，答完会通知你").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    }
+                }
             }
         }
         .accessibilityElement(children: .combine)
