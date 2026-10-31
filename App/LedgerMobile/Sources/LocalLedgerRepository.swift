@@ -1174,6 +1174,38 @@ actor LocalLedgerRepository: LedgerRepository {
         presentedRevisionID = revision
         return result
     }
+    /// Runs one on-device Agent turn against the current committed generation.
+    /// The Agent reads through its own read-only tools and never stages or
+    /// publishes; a stopped task cancels the native turn.
+    func runAgentTurn(message: String, history: [LedgerAgentTurnRequest.HistoryEntry],
+                      choice: LedgerAgentModelChoice, apiKey: String, sensitiveUnlocked: Bool,
+                      runner: LedgerAgentRunner = .native) async throws -> LedgerAgentTurnResponse {
+        let engine = engine, entrypoint = descriptor.entrypoint
+        let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
+        return try await workspace.withCurrentSnapshot { _, root in
+            let model = LocalLedgerEngineRequest(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+                entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
+            var handle = try await engine.committedModelHandle(for: model, replacing: nil)
+            // One retry: the core may have evicted the model since it was cached.
+            for attempt in 0..<2 {
+                let turnID = UUID().uuidString
+                let request = LedgerAgentTurnRequest(turnId: turnID, workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+                    entrypoint: entrypoint, modelHandle: handle, sensitiveUnlocked: sensitiveUnlocked,
+                    provider: choice.provider, model: choice.model, apiKey: apiKey,
+                    custom: choice.isCustom ? choice.custom : nil, history: history, message: message)
+                let encoded = try JSONEncoder().encode(request)
+                let data = try await withTaskCancellationHandler {
+                    try await runner.run(encoded)
+                } onCancel: { runner.cancel(turnID) }
+                try Task.checkCancellation()
+                let response = try JSONDecoder().decode(LedgerAgentTurnResponse.self, from: data)
+                guard response.modelUnavailable == true, attempt == 0 else { return response }
+                handle = try await engine.committedModelHandle(for: model, replacing: handle)
+            }
+            throw LedgerAgentError.failed(String(localized: "账本模型暂时不可用，请稍后重试"))
+        }
+    }
+
     private func readSnapshot(_ path: String, method: String = "GET", query: [String: String] = [:],
         body: BQLCell? = nil, importFile: LocalLedgerEngineRequest.ImportFile? = nil,
         expectedRevisionID: UUID? = nil) async throws -> (UUID, LocalLedgerResponse) {
