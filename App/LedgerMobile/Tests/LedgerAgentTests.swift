@@ -109,9 +109,9 @@ final class LedgerAgentTests: XCTestCase {
     func testCrashReportShowsOnce() throws {
         let runtime = try root()
         XCTAssertNil(LedgerAgentCrashReport.take(runtimeRoot: runtime))
-        try Data("panic: boom\n\ngoroutine 7 [running]:\n".utf8)
+        try Data("panic: boom\n\ngoroutine 7 [running]:\nai.parseSSE()\n\ngoroutine 18 [force gc (idle)]:\nruntime.gopark()\n".utf8)
             .write(to: runtime.appendingPathComponent(LedgerAgentCrashReport.fileName))
-        XCTAssertEqual(LedgerAgentCrashReport.take(runtimeRoot: runtime)?.hasPrefix("panic: boom"), true)
+        XCTAssertEqual(LedgerAgentCrashReport.take(runtimeRoot: runtime), "panic: boom\n\ngoroutine 7 [running]:\nai.parseSSE()")
         XCTAssertNil(LedgerAgentCrashReport.take(runtimeRoot: runtime))
     }
 
