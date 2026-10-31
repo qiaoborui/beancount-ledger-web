@@ -1191,7 +1191,8 @@ actor LocalLedgerRepository: LedgerRepository {
                 let turnID = UUID().uuidString
                 let request = LedgerAgentTurnRequest(turnId: turnID, workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                     entrypoint: entrypoint, modelHandle: handle, sensitiveUnlocked: sensitiveUnlocked,
-                    provider: choice.provider, model: choice.model, apiKey: apiKey, history: history, message: message)
+                    provider: choice.provider, model: choice.model, apiKey: apiKey,
+                    custom: choice.isCustom ? choice.custom : nil, history: history, message: message)
                 let encoded = try JSONEncoder().encode(request)
                 let data = try await withTaskCancellationHandler {
                     try await runner.run(encoded)

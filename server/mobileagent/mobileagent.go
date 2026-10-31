@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -35,9 +36,47 @@ type turnRequestV1 struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 	APIKey   string `json:"apiKey"`
+	// Custom describes the endpoint when Provider is "custom": any server
+	// that speaks one of the supported wire protocols.
+	Custom *customEndpointV1 `json:"custom,omitempty"`
 	// History is the prior visible conversation; tool calls are not replayed.
 	History []historyMessageV1 `json:"history"`
 	Message string             `json:"message"`
+}
+
+type customEndpointV1 struct {
+	API     string `json:"api"`
+	BaseURL string `json:"baseURL"`
+}
+
+// customProvider is the catalog id of a user-supplied endpoint.
+const customProvider = "custom"
+
+// customAPIs are the wire protocols a custom endpoint may speak.
+var customAPIs = map[string]bool{"openai-completions": true, "openai-responses": true, "anthropic-messages": true}
+
+// customModel builds a model for a user-supplied endpoint. Base URLs are
+// taken in the OpenAI form ending in /v1; PiG's Anthropic client appends
+// /v1/messages itself, so a trailing /v1 is dropped for that protocol.
+func customModel(id string, endpoint *customEndpointV1) (*ai.Model, error) {
+	if endpoint == nil || !customAPIs[endpoint.API] {
+		return nil, errors.New("custom endpoint needs api openai-completions, openai-responses or anthropic-messages")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, errors.New("custom endpoint needs a model id")
+	}
+	base, err := url.Parse(strings.TrimSpace(endpoint.BaseURL))
+	if err != nil || (base.Scheme != "https" && base.Scheme != "http") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		return nil, errors.New("custom endpoint needs an http(s) base URL without credentials or query")
+	}
+	baseURL := strings.TrimRight(base.String(), "/")
+	if endpoint.API == "anthropic-messages" {
+		baseURL = strings.TrimSuffix(baseURL, "/v1")
+	}
+	return &ai.Model{ID: id, DisplayName: id,
+		ProviderMeta: ai.ProviderMetadata{ProviderID: customProvider, API: ai.API(endpoint.API), BaseURL: baseURL},
+		Capabilities: ai.ModelCapabilities{SupportsToolUse: true, ContextWindow: 128000, MaxOutputTokens: 8192}}, nil
 }
 
 type historyMessageV1 struct {
@@ -113,6 +152,8 @@ var catalogProviders = []struct{ ID, Title string }{
 	{"moonshotai", "Moonshot（Kimi）"},
 	{"zai", "智谱 Z.ai"},
 	{"openrouter", "OpenRouter"},
+	// Lists no models: the shell asks for the protocol, base URL and model id.
+	{customProvider, "自定义"},
 }
 
 // ModelCatalogJSON lists the chat models of each offered provider.
@@ -170,8 +211,15 @@ func runTurn(ctx context.Context, cancel context.CancelFunc, requestJSON string)
 	if message == "" || len(message) > maxMessageBytes {
 		return "", calls, errors.New("message is required and must be at most 12000 bytes")
 	}
-	model := resolveModel(request.Provider, request.Model)
-	if model == nil {
+	var model *ai.Model
+	var err error
+	if request.Provider == customProvider {
+		if model, err = customModel(request.Model, request.Custom); err != nil {
+			return "", calls, err
+		}
+	} else if request.Custom != nil {
+		return "", calls, errors.New("custom is only valid with provider custom")
+	} else if model = resolveModel(request.Provider, request.Model); model == nil {
 		return "", calls, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
 	}
 	session, err := app.OpenLocalAgentSession(request.LocalRequest, request.SensitiveUnlocked)

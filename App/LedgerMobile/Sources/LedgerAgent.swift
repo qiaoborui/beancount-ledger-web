@@ -58,8 +58,48 @@ struct LedgerAgentMessage: Identifiable, Equatable, Sendable {
 
 /// The provider and model a turn uses. The key travels separately.
 struct LedgerAgentModelChoice: Codable, Equatable, Sendable {
+    /// A user-supplied server that speaks one of the supported protocols.
+    struct CustomEndpoint: Codable, Equatable, Sendable {
+        enum API: String, Codable, CaseIterable, Identifiable, Sendable {
+            case openAICompletions = "openai-completions"
+            case openAIResponses = "openai-responses"
+            case anthropicMessages = "anthropic-messages"
+            var id: String { rawValue }
+            var title: String {
+                switch self {
+                case .openAICompletions: "OpenAI Chat Completions"
+                case .openAIResponses: "OpenAI Responses"
+                case .anthropicMessages: "Anthropic Messages"
+                }
+            }
+        }
+        var api: API = .openAICompletions
+        var baseURL = ""
+
+        /// An http(s) URL with a host and no credentials, as the native side
+        /// requires; checked here so the screen can say so before a turn.
+        var isValid: Bool {
+            guard let url = URL(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http",
+                  url.host?.isEmpty == false, url.user == nil, url.password == nil,
+                  url.query == nil, url.fragment == nil else { return false }
+            return true
+        }
+    }
+
+    static let customProvider = "custom"
+
     var provider: String
     var model: String
+    var custom: CustomEndpoint? = nil
+
+    var isCustom: Bool { provider == Self.customProvider }
+
+    /// Whether the choice names a model a turn can call.
+    var isComplete: Bool {
+        guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return !isCustom || custom?.isValid == true
+    }
 }
 
 /// Providers and models the native loop knows, as `ModelCatalogJSON` lists
@@ -75,6 +115,7 @@ struct LedgerAgentCatalog: Decodable, Sendable {
 
     static let fallback = LedgerAgentCatalog(providers: [
         .init(id: "anthropic", title: "Anthropic", models: [.init(id: "claude-sonnet-4-5", title: "Claude Sonnet 4.5")]),
+        .init(id: LedgerAgentModelChoice.customProvider, title: "自定义", models: []),
     ])
 
     static let native: LedgerAgentCatalog = {
@@ -108,6 +149,7 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     let provider: String
     let model: String
     let apiKey: String
+    var custom: LedgerAgentModelChoice.CustomEndpoint? = nil
     let history: [HistoryEntry]
     let message: String
 }

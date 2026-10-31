@@ -21,7 +21,7 @@ struct LedgerAgentView: View {
 
     var body: some View {
         Group {
-            if settings.hasKey { chat } else { LedgerAgentIntro { settingsPresented = true } }
+            if settings.isReady { chat } else { LedgerAgentIntro { settingsPresented = true } }
         }
         .background(BalancedPalette.page)
         .terminalPageChrome(String(localized: "账本助手"), isRoot: false, showsSync: false, actions: AnyView(actions), balanced: true)
@@ -41,7 +41,7 @@ struct LedgerAgentView: View {
 
     private var actions: some View {
         HStack(spacing: 0) {
-            if settings.hasKey {
+            if settings.isReady {
                 Button {
                     conversation.reset()
                     draft = ""
@@ -413,15 +413,42 @@ struct LedgerAgentSettingsView: View {
                     ForEach(settings.catalog.providers) { provider in Text(provider.title).tag(provider.id) }
                 }
                 .accessibilityIdentifier("ledger-agent-provider")
-                NavigationLink {
-                    LedgerAgentModelPicker()
-                } label: {
-                    LabeledContent("模型") {
-                        Text(settings.modelTitle).foregroundStyle(BalancedPalette.meta)
+                if settings.choice.isCustom {
+                    Picker("接口协议", selection: Binding(get: { settings.choice.custom?.api ?? .openAICompletions },
+                                                      set: { settings.setCustom(api: $0) })) {
+                        ForEach(LedgerAgentModelChoice.CustomEndpoint.API.allCases) { api in Text(api.title).tag(api) }
                     }
+                    .accessibilityIdentifier("ledger-agent-custom-api")
+                    TextField("Base URL", text: Binding(get: { settings.choice.custom?.baseURL ?? "" },
+                                                        set: { settings.setCustom(baseURL: $0) }),
+                              prompt: Text(verbatim: "https://api.example.com/v1"))
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .balancedMono(size: 13)
+                        .accessibilityIdentifier("ledger-agent-custom-url")
+                    TextField("模型 ID", text: Binding(get: { settings.choice.model }, set: { settings.select(model: $0) }))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .balancedMono(size: 13)
+                        .accessibilityIdentifier("ledger-agent-custom-model")
+                } else {
+                    NavigationLink {
+                        LedgerAgentModelPicker()
+                    } label: {
+                        LabeledContent("模型") {
+                            Text(settings.modelTitle).foregroundStyle(BalancedPalette.meta)
+                        }
+                    }
+                    .accessibilityIdentifier("ledger-agent-model")
                 }
-                .accessibilityIdentifier("ledger-agent-model")
-            } header: { Text("模型") }
+            } header: { Text("模型") } footer: {
+                if settings.choice.isCustom {
+                    let invalid = !(settings.choice.custom?.baseURL ?? "").isEmpty && settings.choice.custom?.isValid != true
+                    Text(invalid ? "Base URL 需要是 http(s) 地址，不能带账号密码或查询参数。"
+                                 : "兼容这三种协议的服务都可以用，比如自建网关、OneAPI、Ollama、vLLM。Base URL 填到 /v1 为止，Anthropic 协议也一样。模型需要支持工具调用。")
+                }
+            }
             Section {
                 if settings.hasKey { Label("\(settings.providerTitle) API Key 已保存在本机", systemImage: "key.fill") }
                 SecureField(settings.hasKey ? "替换 API Key" : "\(settings.providerTitle) API Key", text: $key)
