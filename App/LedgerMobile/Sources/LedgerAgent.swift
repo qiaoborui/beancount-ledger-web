@@ -385,3 +385,25 @@ enum LedgerAgentReplyText {
         return nil
     }
 }
+
+/// The report a fatal native error left behind. In a bound Go library a
+/// goroutine panic aborts the app, so the core writes the report to a file in
+/// the runtime directory and the Agent screen shows it on the next visit.
+enum LedgerAgentCrashReport {
+    static let fileName = "agent-crash.log"
+    static let maximumBytes = 16_000
+
+    /// Returns the report, if any, and moves it aside so it shows once.
+    static func take(runtimeRoot: URL) -> String? {
+        let file = runtimeRoot.appendingPathComponent(fileName)
+        guard let data = try? Data(contentsOf: file), !data.isEmpty else { return nil }
+        let previous = runtimeRoot.appendingPathComponent("agent-crash.previous.log")
+        try? FileManager.default.removeItem(at: previous)
+        if (try? FileManager.default.moveItem(at: file, to: previous)) == nil {
+            try? FileManager.default.removeItem(at: file)
+        }
+        let text = String(decoding: data.prefix(maximumBytes), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+}
