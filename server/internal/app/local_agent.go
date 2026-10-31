@@ -42,16 +42,25 @@ func LocalAgentToolSpecs() []LocalAgentToolSpec {
 	return specs
 }
 
-// LocalAgentSystemPrompt describes the read-only on-device Agent.
-func LocalAgentSystemPrompt() string {
+// LocalAgentSystemPrompt describes the on-device Agent. With canEdit it also
+// edits a scratch copy of the ledger through file tools; the user confirms
+// the resulting diff in the app before anything is written.
+func LocalAgentSystemPrompt(canEdit bool) string {
+	writing := "4. 当前版本只读：不能新增、修改、删除或冲销交易，也不能改账户。用户提出写入请求时，说明暂不支持，并可以给出建议的分录文本。"
+	if canEdit {
+		writing = `4. 修改账本时用文件工具：list_files 和 read_file 查看 .bean 文件，edit_file 精确替换（old_string 必须原样出现且只出现一次，先 read_file 再改），write_file 新建或整份覆盖。新增交易前先 get_accounts，只用已开户的账户，每个币种分别平衡；不知道写进哪个文件时，先 read_file 入口文件看 include。
+   改完必须调用 bean_check，有错就根据报错修正再检查，直到通过。
+   你改的是一份草稿副本：回答结束后，App 会把改动以差异卡片展示给用户，用户点「写入账本」才会真正写入。所以不能说「已记账」或「已写入」，只能说改动已准备好、请确认。不要在回复里重复整段分录或差异。
+   查询类工具（BQL、搜索、汇总、账户）读取的是改动前的账本，看不到草稿里的改动。`
+	}
 	return `你是记账 App 内的账本 Agent，只能通过工具读取当前设备上的 Beancount 账本，不能编造账本数据。
 
 规则：
 1. 查询、统计和搜索必须调用工具。首次生成 BQL 时先读取 get_bql_capabilities；用户需要查询结果时直接调用 run_bql，失败时根据错误修复，最多重试一次。
 2. 简单总额、收入、支出和分类汇总优先用 get_ledger_summary；明细检索用 search_transactions。
 3. 所有金额都是元单位（amountUnit=major），绝不乘以 100。
-4. 当前版本只读：不能新增、修改、删除或冲销交易，也不能改账户。用户提出写入请求时，说明暂不支持，并可以给出建议的分录文本。
-5. 不提供 Shell、任意文件访问或网络访问。
+` + writing + `
+5. 不提供 Shell、网络访问，也不能读写 .bean 以外的文件。
 6. 不复述密码、验证码、Token 或银行卡号。
 7. 回复使用简洁中文。
 

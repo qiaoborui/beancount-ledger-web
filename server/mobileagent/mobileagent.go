@@ -24,6 +24,7 @@ import (
 
 const (
 	maxTurns        = 12
+	maxEditTurns    = 40
 	maxMessageBytes = 12000
 	turnTimeout     = 3 * time.Minute
 )
@@ -42,6 +43,10 @@ type turnRequestV1 struct {
 	// Custom describes the endpoint when Provider is "custom": any server
 	// that speaks one of the supported wire protocols.
 	Custom *customEndpointV1 `json:"custom,omitempty"`
+	// ScratchRoot, when set, is a private copy of the ledger the turn may
+	// edit with file tools. The shell diffs it against the committed
+	// generation and writes the change only after the user confirms.
+	ScratchRoot string `json:"scratchRoot,omitempty"`
 	// History is the prior visible conversation; tool calls are not replayed.
 	History []historyMessageV1 `json:"history"`
 	Message string             `json:"message"`
@@ -104,7 +109,9 @@ type turnResponseV1 struct {
 	ModelUnavailable bool         `json:"modelUnavailable,omitempty"`
 	Reply            string       `json:"reply,omitempty"`
 	ToolCalls        []toolCallV1 `json:"toolCalls"`
-	Error            string       `json:"error,omitempty"`
+	// Edited reports that a file tool changed the scratch copy this turn.
+	Edited bool   `json:"edited,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // streamFn is replaced by tests with a deterministic provider.
@@ -154,15 +161,16 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), turnTimeout)
 	defer cancel()
-	reply, calls, err := runTurn(ctx, cancel, requestJSON)
+	reply, calls, edited, err := runTurn(ctx, cancel, requestJSON)
+	// A failed or cancelled turn may still have edited the scratch copy.
 	if errors.Is(ctx.Err(), context.Canceled) {
-		return encode(turnResponseV1{Version: 1, Cancelled: true, ToolCalls: calls, Error: "cancelled"})
+		return encode(turnResponseV1{Version: 1, Cancelled: true, ToolCalls: calls, Edited: edited, Error: "cancelled"})
 	}
 	if err != nil {
-		return encode(turnResponseV1{Version: 1, ToolCalls: calls, Error: err.Error(),
+		return encode(turnResponseV1{Version: 1, ToolCalls: calls, Edited: edited, Error: err.Error(),
 			ModelUnavailable: errors.Is(err, app.ErrLocalModelUnavailable)})
 	}
-	return encode(turnResponseV1{Version: 1, OK: true, Reply: reply, ToolCalls: calls})
+	return encode(turnResponseV1{Version: 1, OK: true, Reply: reply, ToolCalls: calls, Edited: edited})
 }
 
 // CancelTurn stops the running turn started with turnID. Unknown or finished
@@ -221,53 +229,74 @@ func ToolCatalogJSON() string {
 	return encode(map[string]any{"version": 1, "tools": tools})
 }
 
-func runTurn(ctx context.Context, cancel context.CancelFunc, requestJSON string) (string, []toolCallV1, error) {
+func runTurn(ctx context.Context, cancel context.CancelFunc, requestJSON string) (reply string, calls []toolCallV1, edited bool, err error) {
+	reply, calls, scratch, err := runTurnIn(ctx, cancel, requestJSON)
+	if scratch != nil {
+		edited = scratch.wasEdited()
+		scratch.close()
+	}
+	return reply, calls, edited, err
+}
+
+func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON string) (string, []toolCallV1, *scratch, error) {
 	calls := []toolCallV1{}
+	var files *scratch
 	decoder := json.NewDecoder(strings.NewReader(requestJSON))
 	decoder.DisallowUnknownFields()
 	var request turnRequestV1
 	if err := decoder.Decode(&request); err != nil {
-		return "", calls, fmt.Errorf("invalid Agent request: %w", err)
+		return "", calls, files, fmt.Errorf("invalid Agent request: %w", err)
 	}
 	if request.Version != 1 {
-		return "", calls, errors.New("supported Agent request version is 1")
+		return "", calls, files, errors.New("supported Agent request version is 1")
 	}
 	captureCrashes(request.RuntimeRoot)
 	if request.TurnID != "" {
 		if _, loaded := runningTurns.LoadOrStore(request.TurnID, cancel); loaded {
-			return "", calls, errors.New("turnId is already running")
+			return "", calls, files, errors.New("turnId is already running")
 		}
 		defer runningTurns.Delete(request.TurnID)
 	}
 	message := strings.TrimSpace(request.Message)
 	if message == "" || len(message) > maxMessageBytes {
-		return "", calls, errors.New("message is required and must be at most 12000 bytes")
+		return "", calls, files, errors.New("message is required and must be at most 12000 bytes")
 	}
 	var model *ai.Model
 	var err error
 	if request.Provider == customProvider {
 		if model, err = customModel(request.Model, request.Custom); err != nil {
-			return "", calls, err
+			return "", calls, files, err
 		}
 	} else if request.Custom != nil {
-		return "", calls, errors.New("custom is only valid with provider custom")
+		return "", calls, files, errors.New("custom is only valid with provider custom")
 	} else if model = resolveModel(request.Provider, request.Model); model == nil {
-		return "", calls, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
+		return "", calls, files, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
 	}
 	session, err := app.OpenLocalAgentSession(request.LocalRequest, request.SensitiveUnlocked)
 	if err != nil {
-		return "", calls, err
+		return "", calls, files, err
 	}
 	specs := app.LocalAgentToolSpecs()
-	tools := make([]agent.AgentTool, 0, len(specs))
-	allowed := make(map[string]bool, len(specs))
+	tools := make([]agent.AgentTool, 0, len(specs)+5)
+	allowed := make(map[string]bool, len(specs)+5)
 	for _, spec := range specs {
 		tools = append(tools, ledgerTool{spec: spec, session: session})
 		allowed[spec.Name] = true
 	}
+	turns := maxTurns
+	if request.ScratchRoot != "" {
+		if files, err = editableScratch(request); err != nil {
+			return "", calls, nil, err
+		}
+		for _, tool := range files.tools() {
+			tools = append(tools, tool)
+			allowed[tool.Name()] = true
+		}
+		turns = maxEditTurns
+	}
 	history, err := historyMessages(request.History)
 	if err != nil {
-		return "", calls, err
+		return "", calls, files, err
 	}
 	key := request.APIKey
 	var argumentsMu sync.Mutex
@@ -276,8 +305,8 @@ func runTurn(ctx context.Context, cancel context.CancelFunc, requestJSON string)
 		InitialState: &agent.AgentInitialState{Messages: history},
 		Model:        model,
 		Tools:        tools,
-		SystemPrompt: app.LocalAgentSystemPrompt(),
-		MaxTurns:     maxTurns,
+		SystemPrompt: app.LocalAgentSystemPrompt(files != nil),
+		MaxTurns:     turns,
 		StreamFn:     streamFn,
 		GetAPIKey:    func(string) (string, error) { return key, nil },
 		// Defense in depth: the loop must never run a tool outside the catalog.
@@ -292,7 +321,7 @@ func runTurn(ctx context.Context, cancel context.CancelFunc, requestJSON string)
 		}},
 	})
 	if err != nil {
-		return "", calls, err
+		return "", calls, files, err
 	}
 	produced, err := runner.Send(ctx, message)
 	for _, produced := range produced {
@@ -303,17 +332,37 @@ func runTurn(ctx context.Context, cancel context.CancelFunc, requestJSON string)
 		}
 	}
 	if err != nil {
-		return "", calls, err
+		return "", calls, files, err
 	}
 	for index := len(produced) - 1; index >= 0; index-- {
 		if assistant := produced[index].Assistant; assistant != nil {
 			if assistant.ErrorMessage != "" {
-				return "", calls, errors.New(assistant.ErrorMessage)
+				return "", calls, files, errors.New(assistant.ErrorMessage)
 			}
-			return assistantText(assistant.Content), calls, nil
+			return assistantText(assistant.Content), calls, files, nil
 		}
 	}
-	return "", calls, errors.New("the model returned no reply")
+	return "", calls, files, errors.New("the model returned no reply")
+}
+
+// editableScratch opens the scratch copy named by request. It must be an
+// absolute directory distinct from the committed generation the read tools
+// use, so an edit can never reach published ledger files.
+func editableScratch(request turnRequestV1) (*scratch, error) {
+	dir := filepath.Clean(request.ScratchRoot)
+	if !filepath.IsAbs(dir) {
+		return nil, errors.New("scratchRoot must be absolute")
+	}
+	if committed, err := filepath.EvalSymlinks(request.WorkspaceRoot); err == nil {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil && resolved == committed {
+			return nil, errors.New("scratchRoot must not be the committed generation")
+		}
+	}
+	entrypoint := request.Entrypoint
+	if entrypoint == "" {
+		entrypoint = "main.bean"
+	}
+	return openScratch(dir, entrypoint)
 }
 
 func historyMessages(history []historyMessageV1) ([]agent.AgentMessage, error) {

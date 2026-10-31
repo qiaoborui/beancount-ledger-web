@@ -500,6 +500,47 @@ actor LocalLedgerWorkspace {
         return try await operation(revision, workspace)
     }
 
+    /// Copies the current generation into runtime/agent/<id>/workspace, a
+    /// private tree the ledger Agent edits freely. It is never published:
+    /// a change reaches the ledger only through `prepare` and `commit`.
+    /// Making a draft again with the same id replaces it.
+    func makeAgentDraft(id: UUID) throws -> (revision: Revision, root: URL) {
+        let revision = try requiredCurrentRevision()
+        let previous = try workspaceLocation(for: revision)
+        let container = try agentDraftDirectory(id)
+        removeIfPresent(container)
+        let workspace = container.appendingPathComponent("workspace", isDirectory: true)
+        do {
+            try createProtectedDirectory(workspace)
+            _ = try copyDirectoryContents(from: previous, to: workspace, sourceRoot: previous,
+                expectedSourceIdentity: directoryIdentity(at: previous), requiresExternalSource: false)
+        } catch {
+            removeIfPresent(container)
+            throw error
+        }
+        return (revision, workspace)
+    }
+
+    func removeAgentDraft(id: UUID) {
+        guard let container = try? agentDraftDirectory(id) else { return }
+        removeIfPresent(container)
+    }
+
+    /// Drafts of conversations the app never closed, such as when it was
+    /// terminated mid-chat.
+    func removeAgentDrafts(olderThan cutoff: Date) {
+        guard let parent = try? importRuntimeDirectory("runtime/agent"),
+              let drafts = try? fileManager.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil) else { return }
+        for draft in drafts where UUID(uuidString: draft.lastPathComponent) != nil {
+            guard let modified = try? PosixStat.at(draft).modified, modified < cutoff else { continue }
+            removeIfPresent(draft)
+        }
+    }
+
+    private func agentDraftDirectory(_ id: UUID) throws -> URL {
+        try importRuntimeDirectory("runtime/agent/" + id.uuidString)
+    }
+
     private func requiredCurrentRevision() throws -> Revision {
         try prepareLayout()
         guard let revision = try loadCurrentRevisionIfPresent() else {
