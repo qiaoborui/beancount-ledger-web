@@ -22,6 +22,11 @@ struct LedgerMobileApp: App {
         LocalLedgerBackgroundSyncService.shared.startMonitoring { [weak session] reachable in
             session?.updateLocalSyncNetworkAvailability(reachable)
         }
+        #if os(iOS)
+        LedgerAgentNotifications.shared.open = { [weak session] in
+            session?.openWidgetURL(URL(string: "ledger://agent")!)
+        }
+        #endif
     }
 
     var body: some Scene {

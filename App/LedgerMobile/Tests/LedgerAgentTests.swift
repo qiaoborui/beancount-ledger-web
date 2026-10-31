@@ -324,6 +324,89 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(closed, 1)
     }
 
+    func testStepDecodesNativeEvents() {
+        XCTAssertEqual(LedgerAgentStep.decode(#"{"version":1,"kind":"model"}"#)?.title, "正在思考")
+        let read = LedgerAgentStep.decode(#"{"version":1,"kind":"tool","name":"read_file","arguments":{"path":"2026/10.bean"}}"#)
+        XCTAssertEqual(read?.kind, .tool)
+        XCTAssertEqual(read?.title, "读取文件 · 2026/10.bean")
+        XCTAssertNil(LedgerAgentStep.decode(#"{"version":2,"kind":"model"}"#))
+        XCTAssertNil(LedgerAgentStep.decode(#"{"version":1,"kind":"stream"}"#))
+        XCTAssertNil(LedgerAgentStep.decode(#"{"version":1,"kind":"tool"}"#))
+    }
+
+    @MainActor
+    func testConversationReportsStepsAndEndingsToItsLifecycle() async throws {
+        let lifecycle = RecordingLifecycle()
+        let conversation = LedgerAgentConversation()
+        conversation.lifecycle = lifecycle
+        conversation.send("这个月餐饮", reporting: { _, _, _, report in
+            report(.init(kind: .model))
+            report(.init(kind: .tool, call: .init(name: "run_bql", isError: false)))
+            try? await Task.sleep(nanoseconds: 30_000_000)
+            return .init(ok: true, reply: "共 812 元。")
+        })
+        XCTAssertEqual(lifecycle.events.first, "started 这个月餐饮")
+        for _ in 0..<200 where conversation.step?.kind != .tool { try await Task.sleep(nanoseconds: 2_000_000) }
+        XCTAssertEqual(conversation.step?.title, "BQL 查询")
+        try await waitUntilIdle(conversation)
+        XCTAssertNil(conversation.step)
+        XCTAssertEqual(lifecycle.events, ["started 这个月餐饮", "step 1 正在思考", "step 2 BQL 查询",
+                                          "ended answered(\"共 812 元。\")"])
+
+        conversation.send("慢问题") { _, _, _ in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            return .init(ok: true, reply: "迟到")
+        }
+        conversation.stop()
+        XCTAssertEqual(lifecycle.events.last, "ended stopped")
+    }
+
+    @MainActor
+    func testInterruptedTurnReturnsTheQuestionAndReviewsTheDraftNext() async throws {
+        let ledger = FakeDraftLedger()
+        let lifecycle = RecordingLifecycle()
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.lifecycle = lifecycle
+        conversation.send("看看草稿") { _, _, _ in .init(ok: true, reply: "好。") }
+        try await waitUntilIdle(conversation)
+        XCTAssertNil(conversation.pending)
+
+        conversation.send("批量改分类") { _, _, draft in
+            XCTAssertEqual(draft?.lastPathComponent, "draft-1")
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            return .init(ok: true, reply: "迟到的回答", edited: true)
+        }
+        conversation.interrupt()
+        XCTAssertEqual(conversation.phase, .failed(.interrupted, question: "批量改分类"))
+        XCTAssertEqual(lifecycle.events.last, "ended interrupted")
+
+        // The retry is told about the interruption and shows whatever the
+        // interrupted turn left in the draft, even if it edits nothing itself.
+        conversation.send("批量改分类") { message, _, draft in
+            XCTAssertTrue(message.contains("中断"))
+            XCTAssertEqual(draft?.lastPathComponent, "draft-1")
+            return .init(ok: true, reply: "改好了。")
+        }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.messages.map(\.text), ["看看草稿", "好。", "批量改分类", "改好了。"])
+        XCTAssertEqual(conversation.pending?.status, .ready)
+        XCTAssertEqual(lifecycle.events.last, "ended changeReady(\"改好了。\", files: 1)")
+    }
+
+    @MainActor
+    func testConversationStartsOverForAnotherLedger() async throws {
+        let conversation = LedgerAgentConversation()
+        let first = UUID()
+        conversation.bind(ledger: first)
+        conversation.send("问题") { _, _, _ in .init(ok: true, reply: "回答") }
+        try await waitUntilIdle(conversation)
+        conversation.bind(ledger: first)
+        XCTAssertEqual(conversation.messages.count, 2)
+        conversation.bind(ledger: UUID())
+        XCTAssertTrue(conversation.messages.isEmpty)
+    }
+
     func testRepositoryWritesAnAgentDraftThroughThePreparedPath() async throws {
         let catalog = LocalLedgerCatalog(rootDirectory: try root(), engine: HandleEngine(), validator: { root, entry in
             let text = try String(contentsOf: root.appendingPathComponent(entry), encoding: .utf8)
@@ -400,6 +483,14 @@ final class LedgerAgentTests: XCTestCase {
     }
 
     // MARK: Fixtures
+
+    @MainActor
+    private final class RecordingLifecycle: LedgerAgentLifecycle {
+        var events: [String] = []
+        func turnStarted(question: String, conversation: LedgerAgentConversation) { events.append("started " + question) }
+        func turnStepped(_ step: LedgerAgentStep, count: Int) { events.append("step \(count) \(step.title)") }
+        func turnEnded(_ ending: LedgerAgentTurnEnding) { events.append("ended \(ending)") }
+    }
 
     private actor FakeDraftLedger {
         var opened = 0, writes = 0, closed = 0

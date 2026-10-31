@@ -10,7 +10,7 @@ final class LedgerExternalRouteTests: XCTestCase {
     func testPlainSystemDestinationsAndSearchDefaults() throws {
         for (host, destination) in [
             ("overview", LedgerDestination.overview), ("transactions", .transactions),
-            ("accounts", .accounts), ("imports", .imports)
+            ("accounts", .accounts), ("imports", .imports), ("agent", .agent)
         ] {
             XCTAssertEqual(try parse("ledger://" + host), .page(destination))
             XCTAssertEqual(try parse("ledger://" + host + "/"), .page(destination))

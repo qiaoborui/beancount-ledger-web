@@ -257,6 +257,8 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON strin
 		}
 		defer runningTurns.Delete(request.TurnID)
 	}
+	feed := openEventFeed(request.TurnID)
+	defer feed.close()
 	message := strings.TrimSpace(request.Message)
 	if message == "" || len(message) > maxMessageBytes {
 		return "", calls, files, errors.New("message is required and must be at most 12000 bytes")
@@ -307,8 +309,11 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON strin
 		Tools:        tools,
 		SystemPrompt: app.LocalAgentSystemPrompt(files != nil),
 		MaxTurns:     turns,
-		StreamFn:     streamFn,
-		GetAPIKey:    func(string) (string, error) { return key, nil },
+		StreamFn: func(ctx context.Context, model *ai.Model, transcript ai.TranscriptContext, options ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
+			feed.send(turnEventV1{Kind: "model"})
+			return streamFn(ctx, model, transcript, options)
+		},
+		GetAPIKey: func(string) (string, error) { return key, nil },
 		// Defense in depth: the loop must never run a tool outside the catalog.
 		BeforeToolCallHooks: []agent.BeforeToolCallHook{func(_ context.Context, id, name string, args json.RawMessage) agent.ToolCallHookResult {
 			argumentsMu.Lock()
@@ -317,6 +322,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON strin
 			if !allowed[name] {
 				return agent.ToolCallHookResult{Block: true, Reason: "tool is not available on this device"}
 			}
+			feed.send(turnEventV1{Kind: "tool", Name: name, Arguments: append(json.RawMessage(nil), args...)})
 			return agent.ToolCallHookResult{}
 		}},
 	})

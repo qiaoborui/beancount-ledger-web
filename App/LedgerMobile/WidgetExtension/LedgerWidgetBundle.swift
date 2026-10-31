@@ -15,6 +15,7 @@ struct LedgerWidgetBundle: WidgetBundle {
         ImportStatusWidget()
 #if !targetEnvironment(macCatalyst)
         ImportIndexLiveActivity()
+        LedgerAgentLiveActivity()
 #endif
     }
 }

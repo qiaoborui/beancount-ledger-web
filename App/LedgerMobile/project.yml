@@ -87,6 +87,7 @@ targets:
         BGTaskSchedulerPermittedIdentifiers:
           - com.qiaoborui.ledger.mobile.local-sync
           - com.qiaoborui.ledger.mobile.refresh
+          - com.qiaoborui.ledger.mobile.agent.*
         UILaunchStoryboardName: LaunchScreen
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -138,6 +139,7 @@ targets:
       - path: Sources/MoneyText.swift
       - path: Sources/LedgerLocale.swift
       - path: Sources/ImportIndexActivityAttributes.swift
+      - path: Sources/LedgerAgentActivityAttributes.swift
     info:
       path: WidgetExtension/Info.plist
       properties:

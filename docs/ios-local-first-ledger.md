@@ -38,6 +38,18 @@ generation; it cannot stage, write, or reach the dispatcher's endpoint
 allowlist. Write tools will follow once the shell can pause a turn for an
 explicit confirmation card.
 
+A turn keeps running when the user leaves the Agent page or the app. The
+conversation is shared rather than owned by the page. On iOS 26 each turn is
+submitted as a `BGContinuedProcessingTask` (`com.qiaoborui.ledger.mobile.agent.*`),
+whose system progress shows the step the loop reports through
+`mobileagent.SetObserver`. Elsewhere the turn holds the usual background grace
+time and shows the `LedgerAgentActivityAttributes` Live Activity. When the
+system takes the time back, the turn is interrupted. The question returns for a
+retry and the draft keeps its edits. A turn that ends off screen posts a local
+notification, and tapping it opens `ledger://agent`. With privacy protection
+on, the Lock Screen and notification text say only that the assistant is
+working or done.
+
 ## Product decision
 
 The architecture uses an app-managed local Beancount workspace. SwiftUI reads
