@@ -52,9 +52,10 @@ final class ImportClassificationSettings: ObservableObject {
 
 struct ClassificationKeyStore {
     var service = "com.qiaoborui.ledger.typesafe"
+    var account = "api-key"
     private var query: [CFString: Any] {
         [kSecClass: kSecClassGenericPassword, kSecAttrService: service,
-         kSecAttrAccount: "api-key", kSecAttrSynchronizable: false]
+         kSecAttrAccount: account, kSecAttrSynchronizable: false]
     }
     func load() throws -> String? {
         var request = query

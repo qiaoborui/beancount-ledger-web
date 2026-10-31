@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MichaelKinsy/PiG/agent"
@@ -25,6 +26,8 @@ const (
 
 type turnRequestV1 struct {
 	Version int `json:"version"`
+	// TurnID lets CancelTurn stop this turn; optional.
+	TurnID string `json:"turnId"`
 	app.LocalRequest
 	SensitiveUnlocked bool `json:"sensitiveUnlocked"`
 	// Provider and Model name a PiG built-in model, for example
@@ -43,16 +46,23 @@ type historyMessageV1 struct {
 }
 
 type toolCallV1 struct {
-	Name    string `json:"name"`
-	IsError bool   `json:"isError"`
+	Name string `json:"name"`
+	// Arguments are what the model asked for, so the shell can show the BQL
+	// or date range each read used.
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	IsError   bool            `json:"isError"`
 }
 
 type turnResponseV1 struct {
-	Version   int          `json:"version"`
-	OK        bool         `json:"ok"`
-	Reply     string       `json:"reply,omitempty"`
-	ToolCalls []toolCallV1 `json:"toolCalls"`
-	Error     string       `json:"error,omitempty"`
+	Version   int  `json:"version"`
+	OK        bool `json:"ok"`
+	Cancelled bool `json:"cancelled,omitempty"`
+	// ModelUnavailable asks the shell to register the generation again and
+	// retry; nothing reached the model.
+	ModelUnavailable bool         `json:"modelUnavailable,omitempty"`
+	Reply            string       `json:"reply,omitempty"`
+	ToolCalls        []toolCallV1 `json:"toolCalls"`
+	Error            string       `json:"error,omitempty"`
 }
 
 // streamFn is replaced by tests with a deterministic provider.
@@ -60,6 +70,9 @@ var streamFn agent.StreamFn = ai.StreamSimple
 
 // resolveModel is replaced by tests with a deterministic model.
 var resolveModel = func(provider, model string) *ai.Model { return ai.GetBuiltinModel(provider, model) }
+
+// runningTurns maps a request's turnId to the cancel function of its turn.
+var runningTurns sync.Map
 
 // RunTurnJSON runs one user turn to completion and returns the final reply.
 // The call blocks; the shell runs it off the main thread.
@@ -71,11 +84,59 @@ func RunTurnJSON(requestJSON string) (responseJSON string) {
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), turnTimeout)
 	defer cancel()
-	reply, calls, err := runTurn(ctx, requestJSON)
+	reply, calls, err := runTurn(ctx, cancel, requestJSON)
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return encode(turnResponseV1{Version: 1, Cancelled: true, ToolCalls: calls, Error: "cancelled"})
+	}
 	if err != nil {
-		return encode(turnResponseV1{Version: 1, ToolCalls: calls, Error: err.Error()})
+		return encode(turnResponseV1{Version: 1, ToolCalls: calls, Error: err.Error(),
+			ModelUnavailable: errors.Is(err, app.ErrLocalModelUnavailable)})
 	}
 	return encode(turnResponseV1{Version: 1, OK: true, Reply: reply, ToolCalls: calls})
+}
+
+// CancelTurn stops the running turn started with turnID. Unknown or finished
+// turns are ignored.
+func CancelTurn(turnID string) {
+	if cancel, ok := runningTurns.LoadAndDelete(turnID); ok {
+		cancel.(context.CancelFunc)()
+	}
+}
+
+// catalogProviders are the PiG providers the settings screen offers, in order.
+// Each authenticates with a plain API key, which the shell keeps in Keychain.
+var catalogProviders = []struct{ ID, Title string }{
+	{"anthropic", "Anthropic"},
+	{"openai", "OpenAI"},
+	{"google", "Google Gemini"},
+	{"deepseek", "DeepSeek"},
+	{"moonshotai", "Moonshot（Kimi）"},
+	{"zai", "智谱 Z.ai"},
+	{"openrouter", "OpenRouter"},
+}
+
+// ModelCatalogJSON lists the chat models of each offered provider.
+func ModelCatalogJSON() string {
+	type modelV1 struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	type providerV1 struct {
+		ID     string    `json:"id"`
+		Title  string    `json:"title"`
+		Models []modelV1 `json:"models"`
+	}
+	providers := make([]providerV1, 0, len(catalogProviders))
+	for _, provider := range catalogProviders {
+		models := []modelV1{}
+		for _, model := range ai.GetBuiltinModels(provider.ID) {
+			if model.Type == "" || model.Type == ai.ModelTypeChat {
+				models = append(models, modelV1{ID: model.ID, Title: model.DisplayName})
+			}
+		}
+		providers = append(providers, providerV1{ID: provider.ID, Title: provider.Title, Models: models})
+	}
+	return encode(map[string]any{"version": 1, "providers": providers})
 }
 
 // ToolCatalogJSON lists the tools the on-device Agent can call.
@@ -88,7 +149,7 @@ func ToolCatalogJSON() string {
 	return encode(map[string]any{"version": 1, "tools": tools})
 }
 
-func runTurn(ctx context.Context, requestJSON string) (string, []toolCallV1, error) {
+func runTurn(ctx context.Context, cancel context.CancelFunc, requestJSON string) (string, []toolCallV1, error) {
 	calls := []toolCallV1{}
 	decoder := json.NewDecoder(strings.NewReader(requestJSON))
 	decoder.DisallowUnknownFields()
@@ -98,6 +159,12 @@ func runTurn(ctx context.Context, requestJSON string) (string, []toolCallV1, err
 	}
 	if request.Version != 1 {
 		return "", calls, errors.New("supported Agent request version is 1")
+	}
+	if request.TurnID != "" {
+		if _, loaded := runningTurns.LoadOrStore(request.TurnID, cancel); loaded {
+			return "", calls, errors.New("turnId is already running")
+		}
+		defer runningTurns.Delete(request.TurnID)
 	}
 	message := strings.TrimSpace(request.Message)
 	if message == "" || len(message) > maxMessageBytes {
@@ -123,6 +190,8 @@ func runTurn(ctx context.Context, requestJSON string) (string, []toolCallV1, err
 		return "", calls, err
 	}
 	key := request.APIKey
+	var argumentsMu sync.Mutex
+	arguments := map[string]json.RawMessage{}
 	runner, err := agent.NewAgent(agent.AgentOptions{
 		InitialState: &agent.AgentInitialState{Messages: history},
 		Model:        model,
@@ -132,7 +201,10 @@ func runTurn(ctx context.Context, requestJSON string) (string, []toolCallV1, err
 		StreamFn:     streamFn,
 		GetAPIKey:    func(string) (string, error) { return key, nil },
 		// Defense in depth: the loop must never run a tool outside the catalog.
-		BeforeToolCallHooks: []agent.BeforeToolCallHook{func(_ context.Context, _, name string, _ json.RawMessage) agent.ToolCallHookResult {
+		BeforeToolCallHooks: []agent.BeforeToolCallHook{func(_ context.Context, id, name string, args json.RawMessage) agent.ToolCallHookResult {
+			argumentsMu.Lock()
+			arguments[id] = append(json.RawMessage(nil), args...)
+			argumentsMu.Unlock()
 			if !allowed[name] {
 				return agent.ToolCallHookResult{Block: true, Reason: "tool is not available on this device"}
 			}
@@ -145,7 +217,9 @@ func runTurn(ctx context.Context, requestJSON string) (string, []toolCallV1, err
 	produced, err := runner.Send(ctx, message)
 	for _, produced := range produced {
 		if result := produced.ToolResult; result != nil {
-			calls = append(calls, toolCallV1{Name: result.ToolName, IsError: result.IsError})
+			argumentsMu.Lock()
+			calls = append(calls, toolCallV1{Name: result.ToolName, Arguments: arguments[result.ToolCallID], IsError: result.IsError})
+			argumentsMu.Unlock()
 		}
 	}
 	if err != nil {
