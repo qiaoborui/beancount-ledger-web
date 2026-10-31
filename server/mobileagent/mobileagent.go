@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,10 @@ type turnRequestV1 struct {
 	// Custom describes the endpoint when Provider is "custom": any server
 	// that speaks one of the supported wire protocols.
 	Custom *customEndpointV1 `json:"custom,omitempty"`
+	// Thinking is the reasoning effort: off, minimal, low, medium, high,
+	// xhigh or max. It is clamped to the nearest level the model supports;
+	// empty means off.
+	Thinking string `json:"thinking,omitempty"`
 	// ScratchRoot, when set, is a private copy of the ledger the turn may
 	// edit with file tools. The shell diffs it against the committed
 	// generation and writes the change only after the user confirms.
@@ -55,6 +60,27 @@ type turnRequestV1 struct {
 type customEndpointV1 struct {
 	API     string `json:"api"`
 	BaseURL string `json:"baseURL"`
+}
+
+// thinkingLevels are the efforts a request may name, from least to most.
+var thinkingLevels = []ai.ModelThinkingLevel{ai.ThinkingOff, ai.ThinkingMinimal, ai.ThinkingLow,
+	ai.ThinkingMedium, ai.ThinkingHigh, ai.ThinkingXHigh, ai.ThinkingMax}
+
+// thinkingLevel resolves the requested effort for model. For an assumed
+// model nothing says whether it reasons, so asking for a level marks it as
+// a reasoning model; levels it does not know are left to the server.
+func thinkingLevel(model *ai.Model, requested string, assumed bool) (ai.ModelThinkingLevel, error) {
+	level := ai.ModelThinkingLevel(requested)
+	if level == "" {
+		level = ai.ThinkingOff
+	}
+	if !slices.Contains(thinkingLevels, level) {
+		return "", fmt.Errorf("unknown thinking level %q", requested)
+	}
+	if assumed && level != ai.ThinkingOff {
+		model.ProviderMeta.Reasoning = true
+	}
+	return ai.ClampThinkingLevel(model, level), nil
 }
 
 // customProvider is the catalog id of a user-supplied endpoint.
@@ -200,6 +226,9 @@ func ModelCatalogJSON() string {
 	type modelV1 struct {
 		ID    string `json:"id"`
 		Title string `json:"title"`
+		// ThinkingLevels are the reasoning efforts the model accepts, from
+		// least to most; ["off"] for a model without reasoning.
+		ThinkingLevels []ai.ModelThinkingLevel `json:"thinkingLevels"`
 	}
 	type providerV1 struct {
 		ID     string    `json:"id"`
@@ -211,7 +240,7 @@ func ModelCatalogJSON() string {
 		models := []modelV1{}
 		for _, model := range ai.GetBuiltinModels(provider.ID) {
 			if model.Type == "" || model.Type == ai.ModelTypeChat {
-				models = append(models, modelV1{ID: model.ID, Title: model.DisplayName})
+				models = append(models, modelV1{ID: model.ID, Title: model.DisplayName, ThinkingLevels: ai.GetSupportedThinkingLevels(model)})
 			}
 		}
 		providers = append(providers, providerV1{ID: provider.ID, Title: provider.Title, Models: models})
@@ -265,6 +294,9 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON strin
 	}
 	var model *ai.Model
 	var err error
+	// assumed is set for a model whose abilities nobody describes: a custom
+	// endpoint, or one the provider listed but the catalog does not know.
+	assumed := request.Provider == customProvider
 	if request.Provider == customProvider {
 		if model, err = customModel(request.Model, request.Custom); err != nil {
 			return "", calls, files, err
@@ -272,7 +304,14 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON strin
 	} else if request.Custom != nil {
 		return "", calls, files, errors.New("custom is only valid with provider custom")
 	} else if model = resolveModel(request.Provider, request.Model); model == nil {
-		return "", calls, files, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
+		if model = listedModel(request.Provider, request.Model); model == nil {
+			return "", calls, files, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
+		}
+		assumed = true
+	}
+	thinking, err := thinkingLevel(model, request.Thinking, assumed)
+	if err != nil {
+		return "", calls, files, err
 	}
 	session, err := app.OpenLocalAgentSession(request.LocalRequest, request.SensitiveUnlocked)
 	if err != nil {
@@ -304,11 +343,12 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON strin
 	var argumentsMu sync.Mutex
 	arguments := map[string]json.RawMessage{}
 	runner, err := agent.NewAgent(agent.AgentOptions{
-		InitialState: &agent.AgentInitialState{Messages: history},
-		Model:        model,
-		Tools:        tools,
-		SystemPrompt: app.LocalAgentSystemPrompt(files != nil),
-		MaxTurns:     turns,
+		InitialState:  &agent.AgentInitialState{Messages: history},
+		Model:         model,
+		Tools:         tools,
+		SystemPrompt:  app.LocalAgentSystemPrompt(files != nil),
+		MaxTurns:      turns,
+		ThinkingLevel: thinking,
 		StreamFn: func(ctx context.Context, model *ai.Model, transcript ai.TranscriptContext, options ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
 			feed.send(turnEventV1{Kind: "model"})
 			return streamFn(ctx, model, transcript, options)

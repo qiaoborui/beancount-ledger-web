@@ -537,6 +537,40 @@ actor LocalLedgerWorkspace {
         }
     }
 
+    /// Saves one Agent conversation as runtime/agent-history/<id>.json. The
+    /// runtime directory is outside every generation, so history never enters
+    /// a commit, a backup or Git sync.
+    func saveAgentConversation(id: UUID, data: Data) throws {
+        let directory = try importRuntimeDirectory("runtime/agent-history")
+        try createProtectedDirectory(directory)
+        let file = directory.appendingPathComponent(id.uuidString + ".json")
+        if let kind = try itemKindIfPresent(at: file), kind != .regularFile { throw WorkspaceError.unsupportedItem(file.lastPathComponent) }
+        try data.write(to: file, options: .atomic)
+        try protect(file)
+    }
+
+    /// Every saved conversation's bytes; unreadable entries are skipped.
+    func agentConversations() -> [Data] {
+        guard let directory = try? importRuntimeDirectory("runtime/agent-history"),
+              let names = try? fileManager.contentsOfDirectory(atPath: directory.path) else { return [] }
+        return names.compactMap { name -> Data? in
+            guard name.hasSuffix(".json"), UUID(uuidString: String(name.dropLast(5))) != nil else { return nil }
+            let file = directory.appendingPathComponent(name)
+            guard (try? itemKindIfPresent(at: file)) == .regularFile else { return nil }
+            return try? Data(contentsOf: file)
+        }
+    }
+
+    func removeAgentConversation(id: UUID) {
+        guard let directory = try? importRuntimeDirectory("runtime/agent-history") else { return }
+        removeIfPresent(directory.appendingPathComponent(id.uuidString + ".json"))
+    }
+
+    func removeAgentConversations() {
+        guard let directory = try? importRuntimeDirectory("runtime/agent-history") else { return }
+        removeIfPresent(directory)
+    }
+
     private func agentDraftDirectory(_ id: UUID) throws -> URL {
         try importRuntimeDirectory("runtime/agent/" + id.uuidString)
     }

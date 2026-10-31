@@ -4,7 +4,7 @@ import LedgerCore
 #endif
 
 /// One read the on-device Agent made while answering.
-struct LedgerAgentToolCall: Decodable, Equatable, Sendable {
+struct LedgerAgentToolCall: Codable, Equatable, Sendable {
     let name: String
     var arguments: BQLCell? = nil
     let isError: Bool
@@ -111,7 +111,17 @@ struct LedgerAgentModelChoice: Codable, Equatable, Sendable {
 /// Providers and models the native loop knows, as `ModelCatalogJSON` lists
 /// them. Builds without the native core fall back to a single entry.
 struct LedgerAgentCatalog: Decodable, Sendable {
-    struct Model: Decodable, Identifiable, Hashable, Sendable { let id: String; let title: String }
+    struct Model: Decodable, Identifiable, Hashable, Sendable {
+        let id: String
+        let title: String
+        /// The native catalog's levels, least to most; nil from older cores.
+        var thinkingLevels: [String]? = nil
+
+        var thinking: [LedgerAgentThinking] {
+            let levels = (thinkingLevels ?? []).compactMap(LedgerAgentThinking.init(rawValue:))
+            return levels.isEmpty ? [.off] : levels
+        }
+    }
     struct Provider: Decodable, Identifiable, Hashable, Sendable {
         let id: String
         let title: String
@@ -141,6 +151,100 @@ struct LedgerAgentCatalog: Decodable, Sendable {
     }
 }
 
+/// How hard the model reasons before answering. Each model accepts some of
+/// these; a choice it does not accept falls to the nearest one it does.
+enum LedgerAgentThinking: String, Codable, CaseIterable, Identifiable, Sendable {
+    case off, minimal, low, medium, high, xhigh, max
+
+    static let `default` = LedgerAgentThinking.medium
+    /// What a custom endpoint is offered: it cannot say what it supports.
+    static let custom: [LedgerAgentThinking] = [.off, .minimal, .low, .medium, .high]
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .off: String(localized: "关")
+        case .minimal: String(localized: "最少")
+        case .low: String(localized: "低")
+        case .medium: String(localized: "中")
+        case .high: String(localized: "高")
+        case .xhigh: String(localized: "超高")
+        case .max: String(localized: "最大")
+        }
+    }
+
+    var hint: String? {
+        switch self {
+        case .off: String(localized: "不思考，直接回答和调用工具")
+        case .low: String(localized: "简单查询")
+        case .medium: String(localized: "大多数查账和单笔修改")
+        case .high: String(localized: "跨多个文件的批量修改")
+        case .minimal, .xhigh, .max: nil
+        }
+    }
+
+    /// The supported level nearest to this one: the next stronger, else the
+    /// next weaker, as the native loop clamps.
+    func clamped(to supported: [LedgerAgentThinking]) -> LedgerAgentThinking {
+        guard !supported.contains(self) else { return self }
+        let all = Self.allCases, index = all.firstIndex(of: self) ?? 0
+        if let stronger = all[index...].first(where: supported.contains) { return stronger }
+        return all[..<index].last(where: supported.contains) ?? supported.first ?? .off
+    }
+}
+
+/// A model the provider says the key can call, from `ListModelsJSON`.
+struct LedgerAgentListedModel: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let title: String
+    var thinkingLevels: [String]? = nil
+    /// The native catalog describes it; otherwise its levels are assumed.
+    var known = false
+
+    var thinking: [LedgerAgentThinking] {
+        let levels = (thinkingLevels ?? []).compactMap(LedgerAgentThinking.init(rawValue:))
+        return levels.isEmpty ? LedgerAgentThinking.custom : levels
+    }
+}
+
+/// The blocking JSON boundary to the native model list. Tests substitute it.
+struct LedgerAgentModelLister: Sendable {
+    private struct Request: Encodable {
+        let version = 1
+        let provider: String
+        let apiKey: String
+        let custom: LedgerAgentModelChoice.CustomEndpoint?
+    }
+    private struct Response: Decodable {
+        let ok: Bool
+        var models: [LedgerAgentListedModel] = []
+        var error: String?
+    }
+
+    var run: @Sendable (Data) async throws -> Data
+
+    static let native = LedgerAgentModelLister(run: { request in
+        #if canImport(LedgerCore)
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: Data(MobileagentListModelsJSON(String(decoding: request, as: UTF8.self)).utf8))
+            }
+        }
+        #else
+        throw LocalLedgerError.runtimeUnavailable
+        #endif
+    })
+
+    /// The provider's models for this key, in the order it lists them.
+    func models(for choice: LedgerAgentModelChoice, apiKey: String) async throws -> [LedgerAgentListedModel] {
+        let request = Request(provider: choice.provider, apiKey: apiKey, custom: choice.isCustom ? choice.custom : nil)
+        let response = try JSONDecoder().decode(Response.self, from: try await run(try JSONEncoder().encode(request)))
+        guard response.ok else { throw LedgerAgentError.classify(response.error ?? String(localized: "拉取模型列表失败")) }
+        return response.models
+    }
+}
+
 /// The wire request of `RunTurnJSON`. The native decoder rejects unknown
 /// fields, so this lists exactly what the Go side accepts.
 struct LedgerAgentTurnRequest: Encodable, Sendable {
@@ -156,6 +260,7 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     let model: String
     let apiKey: String
     var custom: LedgerAgentModelChoice.CustomEndpoint? = nil
+    var thinking: String? = nil
     let history: [HistoryEntry]
     let message: String
     /// The private ledger copy this turn may edit; nil keeps the turn read-only.
@@ -429,13 +534,14 @@ struct LedgerAgentPendingEdit: Equatable {
     var status: Status
 }
 
-/// The in-memory conversation behind the Agent screen. Nothing is written to
-/// the ledger without the change card's confirmation. It outlives the screen,
-/// so a turn keeps running when the user leaves the page or the app; starting
-/// a new chat or switching ledgers drops the conversation and its draft.
+/// One conversation behind the Agent screen. Nothing is written to the
+/// ledger without the change card's confirmation. `LedgerAgentSessions` keeps
+/// it beyond the screen, so a turn keeps running when the user leaves the
+/// page or the app, and saves it after every settled turn.
 @MainActor
 final class LedgerAgentConversation: ObservableObject {
-    static let shared = LedgerAgentConversation()
+    let id: UUID
+    let createdAt: Date
 
     enum Phase: Equatable {
         case idle
@@ -451,8 +557,11 @@ final class LedgerAgentConversation: ObservableObject {
     /// What the running turn is doing now; nil before its first event.
     @Published private(set) var step: LedgerAgentStep?
     private(set) var stepCount = 0
-    /// The ledger this conversation and its draft belong to.
-    private(set) var ledgerID: UUID?
+    /// Shown above a reopened conversation whose change was never written.
+    private(set) var restoredNotice: String?
+    /// Told when a turn, a write or a discard settles, so the conversation
+    /// can be saved.
+    var onSettled: ((LedgerAgentConversation) -> Void)?
     /// True while the Agent screen shows this conversation.
     var isOnScreen = false
     weak var lifecycle: LedgerAgentLifecycle?
@@ -478,11 +587,33 @@ final class LedgerAgentConversation: ObservableObject {
                                          _ draft: URL?, _ report: @escaping LedgerAgentSteps.Handler) async throws
         -> LedgerAgentTurnResponse
 
-    /// Drops the conversation when the screen now shows another ledger.
-    func bind(ledger id: UUID) {
-        guard ledgerID != id else { return }
-        if ledgerID != nil { reset() }
-        ledgerID = id
+    init(id: UUID = UUID(), createdAt: Date = Date()) {
+        self.id = id
+        self.createdAt = createdAt
+    }
+
+    /// Reopens a saved conversation. Its draft is gone; a change it never
+    /// wrote is dropped, and both the screen and the model are told so.
+    convenience init(restoring saved: LedgerAgentSavedConversation) {
+        self.init(id: saved.id, createdAt: saved.createdAt)
+        messages = saved.messages.compactMap { stored in
+            LedgerAgentMessage.Role(rawValue: stored.role).map {
+                LedgerAgentMessage(role: $0, text: stored.text, toolCalls: stored.toolCalls, duration: stored.duration)
+            }
+        }
+        if saved.unwrittenChange {
+            restoredNotice = String(localized: "上次的草稿改动没有写入，重新打开后已放弃。需要的话让助手重新改一次。")
+            note = String(localized: "（系统提示：这是重新打开的旧对话，之前草稿里没有写入的改动已经放弃，账本以当前内容为准。）")
+        }
+    }
+
+    /// What to save, or nil while nothing has been asked.
+    func saved(at date: Date = Date()) -> LedgerAgentSavedConversation? {
+        guard !messages.isEmpty else { return nil }
+        return LedgerAgentSavedConversation(
+            id: id, createdAt: createdAt, updatedAt: date,
+            messages: messages.map { .init(role: $0.role.rawValue, text: $0.text, toolCalls: $0.toolCalls, duration: $0.duration) },
+            unwrittenChange: pending?.review != nil || draftUnreviewed)
     }
 
     private struct Outcome: Sendable {
@@ -570,7 +701,9 @@ final class LedgerAgentConversation: ObservableObject {
     private func endRunning(_ ending: LedgerAgentTurnEnding) {
         if ending == .stopped || ending == .interrupted, draft != nil { draftUnreviewed = true }
         step = nil
+        restoredNotice = nil
         lifecycle?.turnEnded(ending)
+        onSettled?(self)
     }
 
     func reset() {
@@ -578,6 +711,7 @@ final class LedgerAgentConversation: ObservableObject {
         task = nil
         if isRunning { lifecycle?.turnEnded(.stopped) }
         step = nil
+        restoredNotice = nil
         draftUnreviewed = false
         messages = []
         phase = .idle
@@ -609,6 +743,7 @@ final class LedgerAgentConversation: ObservableObject {
                 self.pending = nil
                 self.written = review
                 self.note = String(localized: "（系统提示：上一轮的草稿改动已写入账本，草稿与账本现在一致。）")
+                self.onSettled?(self)
             } catch {
                 guard self?.epoch == epoch else { return }
                 self?.pending?.status = error as? LedgerAgentEditError == .stale ? .stale : .failed(error.localizedDescription)
@@ -625,6 +760,7 @@ final class LedgerAgentConversation: ObservableObject {
         self.draft = nil
         // The next turn waits for the fresh copy instead of making its own.
         reopening = Task { try? await editor.discard(review, draft) }
+        onSettled?(self)
     }
 
     private func finish(_ outcome: Result<Outcome, Error>, question: String, started: Date) {
@@ -757,6 +893,62 @@ struct LedgerAgentFileDiff: Identifiable, Equatable, Sendable {
     }
 }
 
+/// A chart the model asks the app to draw, written in its reply as a fenced
+/// `chart` block of JSON. A block that does not decode, or does not add up,
+/// shows as code instead.
+struct LedgerAgentChart: Codable, Equatable, Sendable {
+    enum Kind: String, Codable, Sendable { case bar, line, pie }
+    struct Series: Codable, Equatable, Sendable {
+        var name: String
+        var values: [Double]
+    }
+
+    var type: Kind
+    var title: String? = nil
+    var unit: String? = nil
+    /// Bars of different series stack unless this is false.
+    var stacked: Bool? = nil
+    var labels: [String]
+    var series: [Series]
+
+    static let maximumLabels = 60
+    static let maximumSeries = 8
+
+    init?(json: String) {
+        guard let chart = try? JSONDecoder().decode(Self.self, from: Data(json.utf8)), chart.isValid else { return nil }
+        self = chart
+    }
+
+    init(type: Kind, title: String? = nil, unit: String? = nil, stacked: Bool? = nil, labels: [String], series: [Series]) {
+        self.type = type
+        self.title = title
+        self.unit = unit
+        self.stacked = stacked
+        self.labels = labels
+        self.series = series
+    }
+
+    private var isValid: Bool {
+        guard !labels.isEmpty, labels.count <= Self.maximumLabels, !series.isEmpty, series.count <= Self.maximumSeries,
+              Set(labels).count == labels.count else { return false }
+        if type == .pie, series.count != 1 { return false }
+        return series.allSatisfy { $0.values.count == labels.count && $0.values.allSatisfy(\.isFinite) }
+            && (type != .pie || series[0].values.allSatisfy { $0 >= 0 })
+    }
+
+    /// One mark per label and series, in label order.
+    struct Point: Identifiable, Equatable, Sendable {
+        var id: String { series + "\u{1F}" + label }
+        let label: String
+        let series: String
+        let value: Double
+    }
+
+    var points: [Point] {
+        series.flatMap { entry in zip(labels, entry.values).map { Point(label: $0, series: entry.name, value: $1) } }
+    }
+}
+
 /// Splits a reply into prose and fenced code, and finds the beancount entry a
 /// read-only reply suggests for a write request.
 enum LedgerAgentReplyText {
@@ -770,6 +962,7 @@ enum LedgerAgentReplyText {
         case table(header: [String], rows: [[String]])
         case rule
         case code(String)
+        case chart(LedgerAgentChart)
     }
 
     struct ListItem: Equatable, Sendable {
@@ -782,18 +975,26 @@ enum LedgerAgentReplyText {
         var segments: [Segment] = []
         var lines: [Substring] = []
         var inCode = false
+        var language = ""
         func flush() {
             if inCode {
-                segments.append(.code(lines.joined(separator: "\n")))
+                let code = lines.joined(separator: "\n")
+                if language == "chart", let chart = LedgerAgentChart(json: code) {
+                    segments.append(.chart(chart))
+                } else {
+                    segments.append(.code(code))
+                }
             } else {
                 segments.append(contentsOf: blocks(lines))
             }
             lines = []
         }
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") {
                 flush()
                 inCode.toggle()
+                language = inCode ? trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces).lowercased() : ""
             } else {
                 lines.append(line)
             }

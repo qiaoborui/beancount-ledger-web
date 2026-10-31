@@ -24,6 +24,7 @@ struct LedgerMobileApp: App {
         }
         #if os(iOS)
         LedgerAgentNotifications.shared.open = { [weak session] in
+            LedgerAgentSessions.shared.showBackground()
             session?.openWidgetURL(URL(string: "ledger://agent")!)
         }
         #endif

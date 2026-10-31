@@ -50,6 +50,28 @@ notification, and tapping it opens `ledger://agent`. With privacy protection
 on, the Lock Screen and notification text say only that the assistant is
 working or done.
 
+Conversations are saved per ledger as `runtime/agent-history/<id>.json`, which
+is outside every generation, so they never reach a commit, a backup or Git
+sync. `LedgerAgentSessions` keeps the conversation on screen. It also keeps one
+that is still answering after the user moved on, because only one turn runs at
+a time. Leaving a conversation drops its draft. A change it never wrote is lost,
+and the reopened conversation says so. Each turn sends a thinking effort: the
+user's pick, clamped to the levels `ModelCatalogJSON` lists for the model.
+
+The chat page's composer has two switchers: one for starred models and one for the
+thinking effort. The model picker can fetch the provider's own list with the saved
+key (`ListModelsJSON`), so models newer than the built-in catalog can be picked and
+starred. Such a model borrows the protocol, base URL and quirks of the catalog entry
+whose id shares the longest prefix with it. Like a custom endpoint, it is offered
+efforts up to high, and the provider ignores them if the model cannot reason.
+Favorites keep their provider and endpoint, and each one uses that provider's key.
+
+A reply can carry charts. The system prompt teaches the model a fenced `chart`
+block of JSON (bar, line or pie; labels plus series of values), and the chat page
+draws it with Swift Charts. A block that fails validation shows as code, so a bad
+spec stays visible. The prompt also tells the model not to refer to a chart it did
+not write.
+
 ## Product decision
 
 The architecture uses an app-managed local Beancount workspace. SwiftUI reads

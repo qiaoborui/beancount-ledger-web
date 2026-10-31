@@ -1,0 +1,394 @@
+<title>结平 助手历史</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="batch1/styles.css">
+<style>
+<style>
+/* Liquid Glass layer over the Balanced batch-1 frames (iOS 26 only).
+   Content is untouched; only the control layer changes. */
+:root { --gal-bg: #e8e4dc; --gal-ink: #14100c; --gal-ink-3: #6f675a; --gal-line: rgba(20, 16, 12, 0.14); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gal-bg: #e8e4dc; } }
+:root[data-theme="dark"] { --gal-bg: #e8e4dc; }
+body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.invwrap { overflow-x: auto; margin-top: 22px; }
+.inv { border-collapse: collapse; width: 100%; max-width: 980px; font-size: 13.5px; }
+.inv th { text-align: left; font-weight: 500; font-size: 12px; color: var(--gal-ink-3); padding: 8px 16px 8px 0; border-bottom: 1px solid var(--gal-line); }
+.inv td { padding: 9px 16px 9px 0; border-bottom: 1px solid var(--gal-line); vertical-align: top; }
+.inv td:first-child { white-space: nowrap; font-weight: 500; }
+.pill-yes, .pill-no { font-size: 12px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.pill-yes { background: rgba(13, 83, 70, 0.12); }
+.pill-no { background: rgba(20, 16, 12, 0.08); color: var(--gal-ink-3); }
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; max-width: 1000px; }
+.rules h3 { font-size: 14.5px; font-weight: 600; margin: 0 0 6px; }
+.rules p { font-size: 13.5px; line-height: 1.6; margin: 0; color: #57504a; }
+
+/* glass material, per theme */
+.phone.glass {
+  --glass-fill: color-mix(in srgb, var(--bg) 60%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.78);
+  --glass-hi: rgba(255, 255, 255, 0.85);
+  --glass-shadow: 0 8px 24px -10px rgba(20, 16, 12, 0.3), 0 1px 2px rgba(20, 16, 12, 0.08);
+  --glass-sel: rgba(20, 16, 12, 0.08);
+}
+.phone.glass[data-theme='dark'] {
+  --glass-fill: color-mix(in srgb, #2b2825 55%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.16);
+  --glass-hi: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.7);
+  --glass-sel: rgba(246, 243, 238, 0.12);
+}
+.phone.glass .g {
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: blur(16px) saturate(1.7);
+  backdrop-filter: blur(16px) saturate(1.7);
+  border: 0.5px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--glass-shadow);
+}
+
+/* content runs full-bleed under the chrome, inset so nothing rests under it */
+.phone.glass > .scroll { position: absolute; inset: 0; padding-top: 112px; padding-bottom: 112px; }
+.phone.glass:not(:has(> .tabbar)) > .scroll { padding-bottom: 40px; }
+.phone.glass:has(> .gdock) > .scroll { padding-bottom: 116px; }
+.gtop { position: absolute; top: 0; left: 0; right: 0; z-index: 4; background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 85%, transparent) 60%, transparent 100%); }
+.gtop::before { content: ''; position: absolute; inset: 0; z-index: -1; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+.phone.glass .appbar { gap: 8px; }
+.phone.glass .gcap { display: inline-flex; align-items: center; height: 44px; border-radius: 22px; padding: 0 2px; flex: none; }
+.phone.glass .gcap .iconbtn { width: 40px; }
+.phone.glass .gperiod { padding: 0 14px; color: var(--ink); }
+.phone.glass .appbar .back.gcircle { width: 44px; height: 44px; border-radius: 50%; margin-left: 0; }
+.phone.glass .appbar .back.text.gcircle { width: auto; border-radius: 22px; padding: 0 14px; }
+
+/* tab bar: system glass capsule floating over the content */
+.phone.glass > .tabbar { position: absolute; left: 16px; right: 16px; bottom: 26px; height: 62px; border-radius: 31px; padding: 0 6px; z-index: 4; border-top: 0; }
+.phone.glass .tab[aria-current='page'] { background: var(--glass-sel); border-radius: 26px; margin: 5px 0; }
+.phone.glass .tab[aria-current='page'] .icon::after { display: none; }
+.phone.glass > .homebar { position: absolute; left: 0; right: 0; bottom: 0; background: transparent; z-index: 5; }
+
+/* search field and filter segment */
+.phone.glass .search.g { border-radius: 20px; }
+.phone.glass .seg { margin: 4px 20px 10px; padding: 3px; gap: 2px; display: flex; border-radius: 20px; border-bottom: 0;
+  background: var(--glass-fill); -webkit-backdrop-filter: blur(16px) saturate(1.7); backdrop-filter: blur(16px) saturate(1.7);
+  border: 0.5px solid var(--glass-edge); box-shadow: inset 0 1px 0 var(--glass-hi), var(--glass-shadow); }
+.phone.glass .seg button { display: flex; align-items: center; flex: 1 1 auto; justify-content: center; border-radius: 17px; min-height: 34px; padding: 0 10px; gap: 4px; white-space: nowrap; }
+.phone.glass .seg button[aria-selected='true'] { background: var(--glass-sel); }
+.phone.glass .seg button[aria-selected='true']::after { display: none; }
+
+/* sheets: glass shell with inset corners; the reading area stays paper */
+.phone.glass .scrim { background: rgba(20, 16, 12, 0.22); padding: 0 8px 8px; }
+.phone.glass[data-theme='dark'] .scrim { background: rgba(0, 0, 0, 0.42); }
+.phone.glass .sheet.gsheet { border-radius: 34px; border-top: 0.5px solid var(--glass-edge); --glass-fill: color-mix(in srgb, var(--bg) 88%, transparent); }
+.phone.glass .sheet .btn { border-radius: 23px; }
+
+/* docked bottom actions: floating glass panel */
+.phone.glass > .gdock { position: absolute; left: 12px; right: 12px; bottom: 30px; z-index: 4; border-radius: 28px; padding: 10px !important; }
+.phone.glass > .gdock .btn { border-radius: 23px; }
+.phone.glass > .gdock .btn:not(.primary) { background: transparent; }
+
+
+
+/* ---- import-flow additions (tokens from batch1, glass from glass.html) ---- */
+.toolbar a { font-size: 13px; color: #14100c; }
+.flow { display: flex; flex-wrap: wrap; gap: 6px 0; align-items: stretch; max-width: 1100px; margin: 18px 0 6px; padding: 0; list-style: none; counter-reset: st; }
+.flow li { flex: 1 1 150px; min-width: 0; padding: 10px 14px 12px; border-top: 2px solid #14100c; font-size: 13px; line-height: 1.5; color: #57504a; counter-increment: st; }
+.flow li b { display: block; color: #14100c; font-size: 14px; margin-bottom: 2px; }
+.flow li b::before { content: counter(st) "  "; color: #6f675a; font-weight: 500; font-variant-numeric: tabular-nums; }
+.phone.glass > .gdock { display: flex; flex-direction: column; gap: 8px; }
+.gdock .dock-row { display: flex; gap: 10px; }
+.gdock .dock-status { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); padding: 4px 6px 2px; }
+.gdock .dock-status b { display: block; color: var(--ink); font-weight: 600; font-size: 13px; }
+.phone.glass:has(> .gdock.has-status) > .scroll { padding-bottom: 190px; }
+.row .hint.mono, .mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3); }
+.row .value.strong { color: var(--ink); font-weight: 500; }
+.row .value + .value { margin-left: -2px; }
+.fresh { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+.fresh i { width: 6px; height: 6px; border-radius: 50%; display: block; }
+.v-out-bg { background: var(--out); } .v-in-bg { background: var(--in); } .edge-bg { background: var(--edge); }
+.spin { display: inline-block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--rule-strong); border-top-color: var(--ink); animation: spin 0.9s linear infinite; vertical-align: middle; }
+.spin.sm { width: 12px; height: 12px; border-width: 1.5px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.doc { padding: 12px 20px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 3px; }
+.doc-top { display: flex; gap: 10px; align-items: baseline; font-size: 15px; }
+.doc-top b { font-weight: 500; }
+.doc-top span, .meta2 { font-size: 12.5px; color: var(--ink-3); }
+.field-row .v.small { font-size: 14.5px; color: var(--ink); }
+.field-row.two { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
+.mono-s { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); margin-left: 4px; }
+.sugg { font-size: 12.5px; color: var(--ink-3); margin-left: 8px; border-bottom: 1px dashed var(--edge); }
+.input { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--edge); padding-bottom: 6px; font-size: 16px; min-height: 30px; }
+.caret-line { width: 1.5px; height: 18px; background: var(--ink); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.switch { flex: none; width: 46px; height: 28px; border-radius: 14px; background: var(--rule-strong); position: relative; }
+.switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--bg); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.switch[data-on='true'] { background: var(--ink); }
+.switch[data-on='true']::after { left: 21px; }
+.filehead { padding: 8px 20px 16px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid var(--rule); }
+.filehead b { font-size: 15.5px; font-weight: 500; word-break: break-all; }
+.filehead span { font-size: 12.5px; color: var(--ink-3); }
+.steps { padding: 8px 20px; }
+.step { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding: 12px 0; position: relative; }
+.step i { width: 14px; height: 14px; margin-top: 3px; border: 1px solid var(--edge); border-radius: 50%; display: block; position: relative; }
+.step[data-s='done'] i { background: var(--ink); border-color: var(--ink); }
+.step[data-s='done'] i::after { content: ''; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--bg); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.step[data-s='now'] i { border: 2px solid var(--rule-strong); border-top-color: var(--ink); animation: spin 0.9s linear infinite; }
+.step b { display: block; font-size: 15px; font-weight: 500; }
+.step[data-s='todo'] b { color: var(--ink-3); font-weight: 450; }
+.step span { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 3px; }
+.errblock { padding: 16px 20px; border-bottom: 1px solid var(--rule); }
+.errblock b { font-size: 15px; font-weight: 600; display: block; margin-bottom: 6px; }
+.errblock p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.disclose { color: var(--ink-2); }
+.disclose span { text-align: left; }
+.detail { padding: 2px 20px 12px; font-size: 12.5px; color: var(--ink-2); line-height: 1.55; background: var(--bg); }
+.detail .kv { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; color: var(--ink-3); }
+.detail .kv span:last-child { color: var(--ink-2); text-align: right; }
+.detail p { margin: 6px 0 0; padding-left: 10px; border-left: 1px solid var(--rule-strong); }
+.ailine { display: flex; align-items: center; gap: 8px; padding: 10px 20px; font-size: 12.5px; color: var(--ink-3); border-top: 1px solid var(--rule); }
+.ailine .linkbtn { margin-left: auto; }
+.linkbtn { font: inherit; font-size: 12.5px; background: none; border: 0; color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule-strong); text-underline-offset: 3px; padding: 6px 0; cursor: pointer; }
+.phone.glass .seg { position: sticky; top: 108px; z-index: 2; }
+.imp { cursor: pointer; }
+.imp .imp-main { min-width: 0; }
+.imp .cat .ai { font-family: var(--font-sans); font-size: 10px; font-weight: 600; letter-spacing: .06em; color: var(--ink-3); border: 1px solid var(--rule-strong); padding: 0 3px; margin-left: 6px; vertical-align: 1px; }
+.imp .cat .tags { font-family: var(--font-sans); font-size: 11.5px; color: var(--ink-3); margin-left: 6px; }
+.imp .need { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--ink); }
+.imp .need::before { content: ''; display: inline-block; width: 6px; height: 6px; border: 1.5px solid var(--ink); border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.imp[data-pending='true'] .cat { color: var(--ink); }
+.picks { margin-top: 10px; }
+.picks-k { display: block; font-size: 11.5px; color: var(--ink-3); margin-bottom: 6px; }
+.picks-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.sheet .picks { padding: 10px 20px 12px; margin: 0; border-bottom: 1px solid var(--rule); }
+.pick { font: inherit; display: inline-flex; align-items: baseline; gap: 6px; min-height: 34px; padding: 6px 10px; border: 1px solid var(--edge); background: transparent; color: var(--ink); font-size: 13px; cursor: pointer; text-align: left; }
+.pick .pct { font-size: 11.5px; color: var(--ink-3); }
+.pick[aria-pressed='true'] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.pick[aria-pressed='true'] .pct { color: var(--bg); opacity: .7; }
+.sheet.tall { max-height: 88%; }
+.sheet-nav { display: flex; align-items: center; justify-content: space-between; padding: 0 14px 6px 20px; font-size: 12.5px; color: var(--ink-3); }
+.navcap { height: 38px !important; }
+.navcap .iconbtn { width: 40px; height: 38px; color: var(--ink); }
+.sheet h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.amt-h { font-weight: 500; }
+.source.diff { white-space: normal; display: flex; flex-direction: column; font-size: 11px; line-height: 1.7; margin-top: 12px; }
+.source.diff span { white-space: pre; }
+.d-meta { color: var(--ink-3); }
+.d-add { color: var(--in); }
+.d-ctx { color: var(--ink-3); }
+.donehead { padding: 18px 20px 20px; }
+.donehead .dr { display: block; width: 40px; height: 5px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); margin-bottom: 16px; }
+.donehead h2 { margin: 0 0 6px; font-size: 22px; font-weight: 500; letter-spacing: -0.02em; }
+.donehead p { margin: 0; font-size: 13.5px; color: var(--ink-3); }
+.cmp { overflow-x: auto; margin-top: 18px; }
+
+
+/* ---- ledger agent additions ---- */
+.msg-user { margin: 10px 20px 4px auto; max-width: 78%; width: fit-content; background: var(--sunken); padding: 10px 14px; font-size: 15px; line-height: 1.5; color: var(--ink); }
+.msg-ai { padding: 4px 20px 2px; font-size: 15px; line-height: 1.6; color: var(--ink); }
+.msg-ai p { margin: 8px 0; }
+.msg-ai b { font-weight: 500; }
+.v-out { color: var(--out); } .v-in { color: var(--in); }
+.tools { margin: 10px 20px 2px; border-left: 1px solid var(--rule-strong); padding-left: 12px; }
+.tools-head { font: inherit; display: flex; align-items: center; gap: 6px; width: 100%; min-height: 32px; background: none; border: 0; padding: 0; color: var(--ink-3); font-size: 12.5px; cursor: pointer; text-align: left; }
+.tools-head .chev { width: 6px; transition: transform .18s; }
+.tools-head[aria-expanded='true'] .chev { transform: rotate(90deg); }
+.tools-list { display: none; padding-bottom: 6px; }
+.tools-head[aria-expanded='true'] + .tools-list { display: block; }
+.tool { display: grid; grid-template-columns: 14px 1fr; gap: 10px; padding: 5px 0; }
+.tool i { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); margin-top: 6px; display: block; }
+.tool b { display: block; font-size: 13.5px; font-weight: 450; color: var(--ink-2); }
+.tool .mono { font-size: 11px; }
+.tool-detail { margin: 6px 0 2px 24px; padding: 8px 10px; background: var(--sunken); line-height: 1.6; }
+.ans-tbl { margin: 6px 0; border-top: 1px solid var(--rule); }
+.ans-r { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 14px; }
+.ans-r .num { font-variant-numeric: tabular-nums; }
+.ans-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 20px 8px; }
+.meta2 { font-size: 12px; color: var(--ink-3); }
+.sugg-list { display: flex; flex-direction: column; }
+.sugg-row { font: inherit; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--rule); min-height: 44px; padding: 10px 20px; font-size: 15px; color: var(--ink); cursor: pointer; }
+.modelline { padding: 14px 20px; font-size: 12px; color: var(--ink-3); }
+.composer .cmp-row { display: flex; align-items: center; gap: 10px; padding-left: 10px; min-height: 44px; }
+.cmp-ph { flex: 1; font-size: 15px; color: var(--ink-3); }
+.cmp-text { flex: 1; font-size: 15px; color: var(--ink); }
+.sendbtn { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--ink); color: var(--bg); display: grid; place-items: center; cursor: pointer; }
+.composer[data-empty='true'] .sendbtn { opacity: .38; }
+.source { margin: 8px 20px; }
+.source span { display: block; white-space: pre; }
+.dock-inline { display: flex; gap: 10px; padding: 4px 20px 12px; }
+.dock-inline .btn { flex: 1; }
+.d-del { color: var(--out); }
+.wconfirm { margin: 10px 0 4px; background: var(--sunken); }
+.wconfirm-head { display: flex; flex-direction: column; gap: 3px; padding: 14px 20px 0; }
+.wconfirm-head b { font-size: 15px; font-weight: 500; }
+.wconfirm .source { margin: 10px 20px 0; background: var(--bg); padding: 10px 12px; }
+.wconfirm-foot { padding: 10px 20px 12px; font-size: 12.5px; color: var(--ink-3); }
+.wconfirm .dock-row { display: flex; gap: 10px; }
+.wconfirm .dock-row .btn { flex: 1; }
+.wconfirm-head { flex-direction: row; justify-content: space-between; align-items: baseline; }
+.wfiles { margin: 10px 20px 0; border-top: 1px solid var(--rule); }
+.wfile { border-bottom: 1px solid var(--rule); padding: 9px 0; }
+.wfile-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--ink-2); }
+.wfile-row em { font-style: normal; color: var(--ink-3); margin-left: 6px; }
+.wfile .source { margin: 8px 0 0; }
+
+
+/* ---- history and effort additions ---- */
+.cmp-meta { font-size: 11.5px; color: var(--ink-3); padding: 0 10px 2px; }
+.hrow { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: baseline; padding: 10px 20px; border-bottom: 1px solid var(--rule); position: relative; }
+.hrow-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.hrow-main b { font-weight: 450; font-size: 15px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hrow-main span { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hrow-flag { color: var(--ink-2) !important; font-size: 11.5px !important; }
+.hrow-time { font-size: 12px; color: var(--ink-3); }
+.hrow-cur { grid-column: 2; font-size: 11px; color: var(--ink-2); justify-self: end; }
+.hrow.is-cur { background: var(--sunken); }
+.hrow.swiped { transform: translateX(-76px); }
+.hrow-del { position: absolute; top: 0; bottom: 0; right: -76px; width: 76px; border: 0; background: var(--out); color: #fff; font: inherit; font-size: 14px; }
+.search-mini { margin: 4px 20px 6px; padding: 8px 12px; background: var(--sunken); font-size: 14px; color: var(--ink-3); }
+.note-line { margin: 14px 20px; padding: 10px 12px; background: var(--sunken); font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+.grab { width: 36px; height: 5px; border-radius: 3px; background: var(--rule-strong); margin: 8px auto 6px; }
+.sheet { overflow: hidden; }
+</style>
+<div class="toolbar">
+<button aria-pressed="true" id="theme-light" type="button">浅色</button>
+<button aria-pressed="false" id="theme-dark" type="button">深色</button>
+<button aria-pressed="false" id="full-length" type="button">全长</button>
+<span class="spacer"></span>
+<span class="hint">账本助手 · 历史对话与思考强度 · 结平 + Liquid Glass</span>
+</div>
+<header class="gallery-head">
+<h1>结平 · 助手历史与思考强度</h1>
+<p>账本助手的对话不再只活在内存里：每次对话按账本存在本机，可以随时开新对话，也能翻回旧对话接着问。模型设置里加一项思考强度，只列出所选模型支持的档位。</p>
+<div class="invwrap"><table class="inv">
+<thead><tr><th>决定</th><th>做法</th><th>理由</th></tr></thead>
+<tbody>
+<tr><td>入口</td><td>右上角在「新对话」左边加一个历史按钮，点开是底部弹出的列表</td><td>不离开当前页；和「新对话」放在一起，一眼能看出是同一件事的两面</td></tr>
+<tr><td>列表</td><td>按 今天 / 昨天 / 更早 分组；每行是第一个问题，下面一行是最后的回答或结果，右边时间；当前对话用凹陷底色</td><td>结平不用卡片；问题本身就是最好的标题，不需要另起名字</td></tr>
+<tr><td>存放</td><td>每个对话一份 JSON，放在这本账本的 runtime 目录下，不进 Git 同步、备份或导出；左滑删除，设置里可以清空</td><td>和草稿副本同一个位置；账本数据本来就在本机，不会多出一份同步到别处的拷贝</td></tr>
+<tr><td>后台中的对话</td><td>正在回答的对话也在列表里，显示当前步骤；切到别的对话不打断它，答完照常通知</td><td>和上一阶段的后台运行一致</td></tr>
+<tr><td>未写入的草稿</td><td>离开或重开对话时，没写入的草稿改动放弃，旧对话里留一行说明</td><td>草稿是对话期间账本的副本，隔一段时间几乎一定过期；直接让助手重做更安全</td></tr>
+<tr><td>思考强度</td><td>模型与密钥里一行「思考强度」：关 / 最少 / 低 / 中 / 高 / 超高 / 最大，按模型列出；默认「中」；输入框上方和回答页脚写出当前档位</td><td>不同模型档位不同，只显示能用的；换模型时自动取最接近的一档</td></tr>
+<tr><td>自定义服务</td><td>自定义接口也能选档位，但只给到「高」；服务不支持时由服务端忽略</td><td>自建网关无法事先知道模型是否支持推理</td></tr>
+</tbody></table></div>
+</header>
+<section class="section"><h2>历史对话</h2><p>右上角三个按钮：历史、新对话、模型与密钥。历史从底部弹出，点一行切过去，左滑删除。</p>
+<div class="grid"><figure class="screen"><figcaption>对话 <span>浅色 · 右上角多了历史</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账本助手</h1><span class="g gcap"><button aria-label="历史对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M3.2 10a6.8 6.8 0 1 0 2-4.8"></path><path d="M3 2.8v3h3"></path><path d="M10 6.3V10l2.6 1.6"></path></svg></button><button aria-label="新对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button><button aria-label="模型与密钥" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button></span></div></div>
+<div class="scroll">
+<div class="msg-user">十月吃饭花了多少？比九月多吗</div><div class="tools"><button aria-expanded="false" class="tools-head" type="button"><span>读取了账本 3 次</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button></div><div class="msg-ai"><p>十月餐饮一共 <b class="num v-out">¥2,486.40</b>，比九月的 <b class="num">¥2,031.70</b> 多 <b class="num">¥454.70</b>（+22%）。</p><p>多出来的主要是两笔聚餐。</p></div><div class="ans-foot"><span class="meta2 num">3 次读取 · 思考 中 · 9.4 s</span></div>
+</div>
+<div class="sheet-actions g gdock composer" data-empty="true"><div class="cmp-meta">Claude Sonnet 4.5 · 思考 中</div><div class="cmp-row"><span class="cmp-ph">问问账本，比如「上个月餐饮花了多少」</span><button aria-label="发送" class="sendbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg></button></div></div>
+<div class="homebar"></div>
+</div></figure><figure class="screen"><figcaption>历史对话 <span>浅色 · 底部弹出</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账本助手</h1><span class="g gcap"><button aria-label="历史对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M3.2 10a6.8 6.8 0 1 0 2-4.8"></path><path d="M3 2.8v3h3"></path><path d="M10 6.3V10l2.6 1.6"></path></svg></button><button aria-label="新对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button><button aria-label="模型与密钥" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button></span></div></div>
+<div class="scroll">
+<div class="msg-user">十月吃饭花了多少？比九月多吗</div><div class="tools"><button aria-expanded="false" class="tools-head" type="button"><span>读取了账本 3 次</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button></div><div class="msg-ai"><p>十月餐饮一共 <b class="num v-out">¥2,486.40</b>，比九月的 <b class="num">¥2,031.70</b> 多 <b class="num">¥454.70</b>（+22%）。</p><p>多出来的主要是两笔聚餐。</p></div><div class="ans-foot"><span class="meta2 num">3 次读取 · 思考 中 · 9.4 s</span></div>
+</div>
+<div class="scrim"><div class="sheet gsheet g tall"><div class="grab"></div><div class="sheet-nav"><span></span><span class="g gcap navcap"><button class="iconbtn" aria-label="新对话" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button></span></div><h2 style="padding:0 20px 6px">历史对话<span class="meta2">6 个 · 只存在本机</span></h2><div class="search-mini">搜索问题和回答</div><div class="group">今天</div><div class="hrow is-cur"><div class="hrow-main"><b>十月吃饭花了多少？比九月多吗</b><span>十月餐饮一共 ¥2,486.40，比九月多 ¥454.70</span></div><span class="hrow-time num">09:38</span><span class="hrow-cur">当前</span></div><div class="hrow"><div class="hrow-main"><b>把上个月的打车都归到交通</b><span>改动已写入 · 2 个文件</span></div><span class="hrow-time num">08:12</span></div><div class="group">昨天</div><div class="hrow"><div class="hrow-main"><b>信用卡这个月还要还多少</b><span>招行信用卡本期应还 ¥6,120.55</span></div><span class="hrow-time num">21:47</span></div><div class="hrow"><div class="hrow-main"><b>2026 年每个月的结余</b><span>1–10 月结余合计 ¥48,300</span><span class="hrow-flag">有未写入的草稿</span></div><span class="hrow-time num">12:05</span></div><div class="group">更早</div><div class="hrow"><div class="hrow-main"><b>最近 10 笔餐饮</b><span>10-29 巷口小馆 −42.00 …</span></div><span class="hrow-time num">10-27</span></div><div class="hrow"><div class="hrow-main"><b>帮我核一下支付宝余额</b><span>对上了，差额 0.00</span></div><span class="hrow-time num">10-21</span></div><div class="detail" style="padding:12px 20px 18px"><p class="meta2">左滑删除一条。对话跟着账本存在本机，不进 Git 同步和备份。</p></div></div></div><div class="homebar"></div>
+</div></figure><figure class="screen"><figcaption>历史对话 <span>深色 · 左滑删除、后台在答</span></figcaption><div class="phone glass" data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账本助手</h1><span class="g gcap"><button aria-label="历史对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M3.2 10a6.8 6.8 0 1 0 2-4.8"></path><path d="M3 2.8v3h3"></path><path d="M10 6.3V10l2.6 1.6"></path></svg></button><button aria-label="新对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button><button aria-label="模型与密钥" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button></span></div></div>
+<div class="scroll">
+<div class="msg-user">十月吃饭花了多少？比九月多吗</div><div class="tools"><button aria-expanded="false" class="tools-head" type="button"><span>读取了账本 3 次</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button></div><div class="msg-ai"><p>十月餐饮一共 <b class="num v-out">¥2,486.40</b>，比九月的 <b class="num">¥2,031.70</b> 多 <b class="num">¥454.70</b>（+22%）。</p><p>多出来的主要是两笔聚餐。</p></div><div class="ans-foot"><span class="meta2 num">3 次读取 · 思考 中 · 9.4 s</span></div>
+</div>
+<div class="scrim"><div class="sheet gsheet g tall"><div class="grab"></div><h2 style="padding:8px 20px 6px">历史对话<span class="meta2">4 个</span></h2><div class="group">今天</div><div class="hrow is-cur"><div class="hrow-main"><b>十月吃饭花了多少？比九月多吗</b><span>十月餐饮一共 ¥2,486.40</span></div><span class="hrow-time num">09:38</span><span class="hrow-cur">当前</span></div><div class="hrow swiped"><div class="hrow-main"><b>把上个月的打车都归到交通</b><span>改动已写入 · 2 个文件</span></div><span class="hrow-time num">08:12</span><button class="hrow-del" type="button">删除</button></div><div class="group">昨天</div><div class="hrow"><div class="hrow-main"><b>信用卡这个月还要还多少</b><span>招行信用卡本期应还 ¥6,120.55</span></div><span class="hrow-time num">21:47</span></div><div class="hrow is-running"><div class="hrow-main"><b>把十月的外卖拆成餐饮和配送费</b><span><i class="spin sm"></i> 正在回答 · 修改文件 · 2026/10.bean</span></div><span class="hrow-time num">刚刚</span></div><div class="detail" style="padding:12px 20px 18px"><p class="meta2">正在回答的对话也在列表里；切过去不会打断它。</p></div></div></div><div class="homebar"></div>
+</div></figure></div></section>
+<section class="section"><h2>旧对话与思考强度</h2><p>重开旧对话能接着问。没写入的草稿改动会被放弃并留一行说明。思考强度只列出当前模型支持的档位。</p>
+<div class="grid"><figure class="screen"><figcaption>打开旧对话 <span>浅色 · 草稿已过期</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账本助手</h1><span class="g gcap"><button aria-label="历史对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M3.2 10a6.8 6.8 0 1 0 2-4.8"></path><path d="M3 2.8v3h3"></path><path d="M10 6.3V10l2.6 1.6"></path></svg></button><button aria-label="新对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button><button aria-label="模型与密钥" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button></span></div></div>
+<div class="scroll">
+<div class="msg-user">2026 年每个月的结余</div><div class="msg-ai"><p>1–10 月结余合计 <b class="num v-in">¥48,300</b>，三月最少。</p></div><div class="msg-user">把三月那笔重复的房租删掉</div><div class="msg-ai"><p>找到了 03-01 和 03-02 两笔相同的房租，草稿里删掉了后一笔。</p></div><div class="note-line">昨天 12:05 · 这次的草稿改动没有写入，回到对话后已放弃。需要的话让助手重新改一次。</div>
+</div>
+<div class="sheet-actions g gdock composer" data-empty="true"><div class="cmp-meta">Claude Sonnet 4.5 · 思考 中</div><div class="cmp-row"><span class="cmp-ph">接着问…</span><button aria-label="发送" class="sendbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg></button></div></div>
+<div class="homebar"></div>
+</div></figure><figure class="screen"><figcaption>模型与密钥 <span>浅色 · 新增思考强度</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">模型与密钥</h1></div></div>
+<div class="scroll">
+<div class="group">模型</div>
+<div class="row"><div class="body"><div class="label">服务商</div></div><span class="value">Anthropic</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
+<div class="row"><div class="body"><div class="label">模型</div><span class="hint mono">claude-sonnet-4-5</span></div><span class="value">Claude Sonnet 4.5</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
+<div class="row"><div class="body"><div class="label">思考强度</div><span class="hint">越高越慢、越贵，复杂的批量改动更稳</span></div><span class="value">中</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
+<div class="group">密钥</div>
+<div class="field-row"><span class="k">API Key</span><span class="v small mono">sk-ant-…3f9a</span></div>
+</div>
+<div class="homebar"></div>
+</div></figure><figure class="screen"><figcaption>思考强度 <span>深色 · 按模型列出档位</span></figcaption><div class="phone glass" data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">思考强度</h1></div></div>
+<div class="scroll">
+<div class="group">Claude Sonnet 4.5 支持</div><div class="row"><div class="body"><div class="label">关</div><span class=hint>不思考，直接回答和调用工具</span></div></div><div class="row"><div class="body"><div class="label">最少</div></div></div><div class="row"><div class="body"><div class="label">低</div><span class=hint>简单查询</span></div></div><div class="row"><div class="body"><div class="label">中</div><span class=hint>默认。大多数查账和单笔修改</span></div><span class=value><svg fill="none" height="14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="14"><path d="m3 8.5 3.2 3L13 4.5"></path></svg></span></div><div class="row"><div class="body"><div class="label">高</div><span class=hint>跨多个文件的批量修改</span></div></div><div class="detail" style="padding:12px 20px"><p class="meta2">只列出当前模型支持的档位。换到不支持这一档的模型时，自动用最接近的一档；比如 GPT-4o 只有「关」，Claude Opus 5 还有「超高」「最大」。</p></div>
+</div>
+<div class="homebar"></div>
+</div></figure></div></section>
+<script>
+(function () {
+  var body = document.body;
+  var lightBtn = document.getElementById('theme-light');
+  var darkBtn = document.getElementById('theme-dark');
+  var fullBtn = document.getElementById('full-length');
+  fullBtn.addEventListener('click', function () {
+    var on = fullBtn.getAttribute('aria-pressed') !== 'true';
+    fullBtn.setAttribute('aria-pressed', String(on));
+    body.dataset.length = on ? 'full' : 'screen';
+  });
+  function setGallery(theme) {
+    body.dataset.gallery = theme;
+    darkBtn.setAttribute('aria-pressed', String(theme === 'dark'));
+    lightBtn.setAttribute('aria-pressed', String(theme !== 'dark'));
+  }
+  lightBtn.addEventListener('click', function () { setGallery('light'); });
+  darkBtn.addEventListener('click', function () { setGallery('dark'); });
+  document.querySelectorAll('.disclose, .tools-head').forEach(function (b) {
+    b.addEventListener('click', function () {
+      b.setAttribute('aria-expanded', String(b.getAttribute('aria-expanded') !== 'true'));
+    });
+  });
+  document.querySelectorAll('.seg, .seg-inline').forEach(function (seg) {
+    seg.querySelectorAll('button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        seg.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-selected', String(x === btn)); });
+      });
+    });
+  });
+})();
+</script>
+<script>document.body.dataset.gallery=document.body.dataset.gallery||"light";</script>

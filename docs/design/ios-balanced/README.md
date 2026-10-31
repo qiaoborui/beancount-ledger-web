@@ -14,6 +14,9 @@ replacement, but as an alternative answer to the same product.
   next-phase write confirmation (10 frames)
 - [`agent-entry.html`](agent-entry.html) — where 账本助手 lives: ask from the
   search button (recommended), an optional tab, or a per-page button (9 frames)
+- [`agent-history.html`](agent-history.html) — 账本助手 conversation history
+  (a history sheet beside 新对话, reopening an old chat) and the thinking-effort
+  setting (6 frames)
 - [`splash.html`](splash.html) — the launch animation, drawn on a canvas
 - [`styles.css`](styles.css) — every token and component in this document
 - [`batch1/`](batch1/) — the first batch: overview, transactions, analysis,
