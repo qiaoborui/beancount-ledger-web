@@ -158,7 +158,7 @@ final class LedgerAgentTests: XCTestCase {
     @MainActor
     func testConversationAppendsRepliesAndKeepsFailedQuestions() async throws {
         let conversation = LedgerAgentConversation()
-        conversation.send("这个月花了多少") { _, history in
+        conversation.send("这个月花了多少") { _, history, _ in
             XCTAssertTrue(history.isEmpty)
             return .init(ok: true, reply: "共 2,486.40 元。", toolCalls: [.init(name: "get_ledger_summary", isError: false)])
         }
@@ -167,7 +167,7 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(conversation.messages.map(\.text), ["这个月花了多少", "共 2,486.40 元。"])
         XCTAssertEqual(conversation.messages.last?.toolCalls.count, 1)
 
-        conversation.send("再看看上个月") { _, history in
+        conversation.send("再看看上个月") { _, history, _ in
             XCTAssertEqual(history.count, 2)
             return .init(ok: false, error: "401 invalid x-api-key")
         }
@@ -177,7 +177,7 @@ final class LedgerAgentTests: XCTestCase {
         if case .invalidKey = error {} else { XCTFail("auth failure not classified: \(error)") }
 
         // Retrying the same question replaces it instead of repeating it.
-        conversation.send("再看看上个月") { _, _ in .init(ok: true, reply: "上月 2,031.70 元。") }
+        conversation.send("再看看上个月") { _, _, _ in .init(ok: true, reply: "上月 2,031.70 元。") }
         try await waitUntilIdle(conversation)
         XCTAssertEqual(conversation.messages.map(\.text), ["这个月花了多少", "共 2,486.40 元。", "再看看上个月", "上月 2,031.70 元。"])
 
@@ -188,7 +188,7 @@ final class LedgerAgentTests: XCTestCase {
     @MainActor
     func testStoppedTurnDropsALateReply() async throws {
         let conversation = LedgerAgentConversation()
-        conversation.send("慢问题") { _, _ in
+        conversation.send("慢问题") { _, _, _ in
             try? await Task.sleep(nanoseconds: 50_000_000)
             return .init(ok: true, reply: "迟到的回答")
         }
@@ -222,6 +222,209 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertNotEqual(requests[0]["turnId"] as? String, requests[1]["turnId"] as? String)
         let replaced = await engine.replaced
         XCTAssertEqual(replaced, [nil, "h1"])
+    }
+
+    func testFileDiffShowsChangedLinesWithContext() {
+        let before = (1...20).map { "line \($0)" }.joined(separator: "\n") + "\n"
+        let after = before.replacingOccurrences(of: "line 3\n", with: "line three\n")
+            .replacingOccurrences(of: "line 18\n", with: "line 18\nline 18b\n")
+        let diff = LedgerAgentFileDiff(path: "main.bean", before: Data(before.utf8), after: Data(after.utf8))
+        XCTAssertEqual(diff.change, .modified)
+        XCTAssertEqual(diff.added, 2)
+        XCTAssertEqual(diff.removed, 1)
+        XCTAssertEqual(diff.lines.map(\.kind), [.context, .context, .removed, .added, .context, .context, .gap,
+                                               .context, .context, .added, .context, .context])
+        XCTAssertEqual(diff.lines[2].text, "line 3")
+        XCTAssertEqual(diff.lines[3].text, "line three")
+        XCTAssertEqual(diff.lines[6].text, "11 行未改动")
+
+        let created = LedgerAgentFileDiff(path: "2026/02.bean", before: nil, after: Data("a\nb\n".utf8))
+        XCTAssertEqual(created.change, .added)
+        XCTAssertEqual(created.lines.map(\.kind), [.added, .added])
+    }
+
+    func testDraftMirrorCopiesChangedBeanFilesAndRemovesMissingOnes() throws {
+        let draft = try root(), stage = try root()
+        let fm = FileManager.default
+        try fm.createDirectory(at: draft.appendingPathComponent("2026"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: stage.appendingPathComponent("old"), withIntermediateDirectories: true)
+        try Data("same".utf8).write(to: draft.appendingPathComponent("main.bean"))
+        try Data("same".utf8).write(to: stage.appendingPathComponent("main.bean"))
+        try Data("new".utf8).write(to: draft.appendingPathComponent("2026/02.bean"))
+        try Data("gone".utf8).write(to: stage.appendingPathComponent("old/gone.bean"))
+        try Data("keep".utf8).write(to: stage.appendingPathComponent("receipt.pdf"))
+        let stamp = try fm.attributesOfItem(atPath: stage.appendingPathComponent("main.bean").path)[.modificationDate] as? Date
+
+        try LedgerAgentDraftMirror.apply(from: draft, to: stage)
+
+        XCTAssertEqual(try LedgerAgentDraftMirror.beanFiles(in: stage), ["main.bean", "2026/02.bean"])
+        XCTAssertEqual(try Data(contentsOf: stage.appendingPathComponent("2026/02.bean")), Data("new".utf8))
+        XCTAssertTrue(fm.fileExists(atPath: stage.appendingPathComponent("receipt.pdf").path))
+        // An unchanged file is not rewritten, so it is not a change candidate.
+        XCTAssertEqual(try fm.attributesOfItem(atPath: stage.appendingPathComponent("main.bean").path)[.modificationDate] as? Date, stamp)
+    }
+
+    @MainActor
+    func testConversationReviewsAnEditedTurnAndWritesOnlyOnConfirm() async throws {
+        let ledger = FakeDraftLedger()
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.send("午饭改成 26") { message, _, draft in
+            XCTAssertEqual(message, "午饭改成 26")
+            XCTAssertEqual(draft?.lastPathComponent, "draft-1")
+            return .init(ok: true, reply: "改动已准备好。", edited: true)
+        }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.pending?.status, .ready)
+        XCTAssertEqual(conversation.pending?.review?.files.map(\.path), ["main.bean"])
+        let writesBefore = await ledger.writes
+        XCTAssertEqual(writesBefore, 0)
+
+        conversation.write()
+        for _ in 0..<200 where conversation.pending != nil { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertNil(conversation.pending)
+        XCTAssertEqual(conversation.written?.files.count, 1)
+        let writes = await ledger.writes
+        XCTAssertEqual(writes, 1)
+
+        // The next question tells the model its change was written, and reuses the draft.
+        conversation.send("好了吗") { message, _, draft in
+            XCTAssertTrue(message.hasSuffix("好了吗"))
+            XCTAssertTrue(message.contains("已写入账本"))
+            XCTAssertEqual(draft?.lastPathComponent, "draft-1")
+            return .init(ok: true, reply: "好了。")
+        }
+        try await waitUntilIdle(conversation)
+        XCTAssertNil(conversation.pending)
+        let opened = await ledger.opened
+        XCTAssertEqual(opened, 1)
+    }
+
+    @MainActor
+    func testConversationReportsAStaleDraftAndStartsOverOnDiscard() async throws {
+        let ledger = FakeDraftLedger()
+        await ledger.failReview(with: .stale)
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.send("批量改分类") { _, _, _ in .init(ok: true, reply: "改好了。", edited: true) }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.pending, .init(review: nil, status: .stale))
+
+        conversation.discard()
+        XCTAssertNil(conversation.pending)
+        conversation.send("重新来") { message, _, draft in
+            XCTAssertTrue(message.contains("放弃"))
+            XCTAssertEqual(draft?.lastPathComponent, "draft-2")
+            return .init(ok: true, reply: "好。")
+        }
+        try await waitUntilIdle(conversation)
+        conversation.reset()
+        for _ in 0..<200 { if await ledger.closed == 1 { break }; try await Task.sleep(nanoseconds: 5_000_000) }
+        let closed = await ledger.closed
+        XCTAssertEqual(closed, 1)
+    }
+
+    func testRepositoryWritesAnAgentDraftThroughThePreparedPath() async throws {
+        let catalog = LocalLedgerCatalog(rootDirectory: try root(), engine: HandleEngine(), validator: { root, entry in
+            let text = try String(contentsOf: root.appendingPathComponent(entry), encoding: .utf8)
+            if text.contains("Expenses:Nope") { throw LocalLedgerError.invalidConfiguration("unknown account Expenses:Nope") }
+        })
+        let descriptor = try await catalog.create(name: "Agent draft")
+        let repository = catalog.repository(for: descriptor)
+        let draft = try await repository.openAgentDraft()
+        let main = draft.root.appendingPathComponent("main.bean")
+        let original = try String(contentsOf: main, encoding: .utf8)
+        let noChange = try await repository.reviewAgentDraft(draft)
+        XCTAssertNil(noChange)
+
+        // The turn sends the draft as its scratch copy.
+        let recorder = RequestRecorder()
+        let runner = LedgerAgentRunner(run: { data in
+            _ = await recorder.record(data)
+            return Data(#"{"version":1,"ok":true,"reply":"ok","edited":true}"#.utf8)
+        }, cancel: { _ in })
+        let response = try await repository.runAgentTurn(message: "记一笔", history: [],
+            choice: .init(provider: "anthropic", model: "claude-sonnet-4-5"), apiKey: "k", sensitiveUnlocked: true,
+            draft: draft.root, runner: runner)
+        XCTAssertTrue(response.edited)
+        let requests = await recorder.requests
+        let sent = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(requests.first)) as? [String: Any])
+        XCTAssertEqual(sent["scratchRoot"] as? String, draft.root.path)
+
+        try Data((original + "\n2026-10-31 open Expenses:Nope\n").utf8).write(to: main)
+        do {
+            _ = try await repository.reviewAgentDraft(draft)
+            XCTFail("an invalid draft was prepared")
+        } catch let error as LedgerAgentEditError {
+            guard case .invalid = error else { return XCTFail("\(error)") }
+        }
+        try Data((original + "\n2026-10-31 open Expenses:Food CNY\n").utf8).write(to: main)
+        try FileManager.default.createDirectory(at: draft.root.appendingPathComponent("2026"), withIntermediateDirectories: true)
+        try Data("; 新文件\n".utf8).write(to: draft.root.appendingPathComponent("2026/02.bean"))
+        let prepared = try await repository.reviewAgentDraft(draft)
+        let review = try XCTUnwrap(prepared)
+        XCTAssertEqual(review.files.map(\.path), ["2026/02.bean", "main.bean"])
+        XCTAssertEqual(review.files.first?.change, .added)
+        let before = try await repository.readFile(path: "main.bean").text
+        XCTAssertFalse(before.contains("Expenses:Food"))
+
+        let rebased = try await repository.writeAgentDraft(review, draft: draft)
+        XCTAssertNotEqual(rebased.baseRevisionID, draft.baseRevisionID)
+        let after = try await repository.readFile(path: "main.bean").text
+        XCTAssertTrue(after.contains("Expenses:Food"))
+        let created = try await repository.readFile(path: "2026/02.bean").text
+        XCTAssertEqual(created, "; 新文件\n")
+        let clean = try await repository.reviewAgentDraft(rebased)
+        XCTAssertNil(clean)
+
+        // A commit from elsewhere makes the rebased draft stale.
+        let other = try await repository.openAgentDraft()
+        try Data("; 别处\n".utf8).write(to: other.root.appendingPathComponent("other.bean"))
+        let otherReview = try await repository.reviewAgentDraft(other)
+        _ = try await repository.writeAgentDraft(try XCTUnwrap(otherReview), draft: other)
+        try Data("; 晚了\n".utf8).write(to: draft.root.appendingPathComponent("late.bean"))
+        do {
+            _ = try await repository.reviewAgentDraft(rebased)
+            XCTFail("a stale draft was prepared")
+        } catch let error as LedgerAgentEditError {
+            XCTAssertEqual(error, .stale)
+        }
+        let fresh = try await repository.discardAgentDraft(nil, draft: rebased)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fresh.root.appendingPathComponent("late.bean").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.root.appendingPathComponent("other.bean").path))
+        await repository.closeAgentDraft(fresh)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fresh.root.path))
+    }
+
+    // MARK: Fixtures
+
+    private actor FakeDraftLedger {
+        var opened = 0, writes = 0, closed = 0
+        private var reviewError: LedgerAgentEditError?
+        func failReview(with error: LedgerAgentEditError) { reviewError = error }
+
+        nonisolated var editor: LedgerAgentEditor {
+            LedgerAgentEditor(
+                open: { await self.open() },
+                review: { try await self.review($0) },
+                write: { _, draft in await self.write(draft) },
+                discard: { _, _ in await self.open() },
+                close: { _ in await self.close() })
+        }
+
+        private func open() -> LedgerAgentDraft {
+            opened += 1
+            return .init(id: UUID(), root: URL(fileURLWithPath: "/tmp/draft-\(opened)"), baseRevisionID: UUID())
+        }
+        private func review(_ draft: LedgerAgentDraft) throws -> LedgerAgentReview? {
+            if let reviewError { throw reviewError }
+            return .init(id: UUID(), files: [.init(path: "main.bean", before: Data("a\n".utf8), after: Data("b\n".utf8))])
+        }
+        private func write(_ draft: LedgerAgentDraft) -> LedgerAgentDraft {
+            writes += 1
+            return .init(id: draft.id, root: draft.root, baseRevisionID: UUID())
+        }
+        private func close() { closed += 1 }
     }
 
     // MARK: Fixtures

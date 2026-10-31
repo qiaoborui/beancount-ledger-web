@@ -19,12 +19,18 @@ struct LedgerAgentToolCall: Decodable, Equatable, Sendable {
         case "validate_bql": String(localized: "校验 BQL")
         case "get_bql_capabilities": String(localized: "BQL 能力")
         case "get_accounts": String(localized: "账户")
+        case "list_files": String(localized: "列出文件")
+        case "read_file": String(localized: "读取文件")
+        case "edit_file": String(localized: "修改文件")
+        case "write_file": String(localized: "写入草稿")
+        case "bean_check": String(localized: "校验账本")
         default: name
         }
         if name == "get_ledger_summary", let start = argument("start"), let end = argument("end") {
             return base + " · " + String(localized: "\(Self.shortDate(start)) 至 \(Self.shortDate(end))")
         }
         if name == "search_transactions", let query = argument("query") { return base + " · " + query }
+        if ["read_file", "edit_file", "write_file"].contains(name), let path = argument("path") { return base + " · " + path }
         return base
     }
 
@@ -152,6 +158,8 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     var custom: LedgerAgentModelChoice.CustomEndpoint? = nil
     let history: [HistoryEntry]
     let message: String
+    /// The private ledger copy this turn may edit; nil keeps the turn read-only.
+    var scratchRoot: String? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {
@@ -161,12 +169,14 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
     var error: String? = nil
     var cancelled: Bool? = nil
     var modelUnavailable: Bool? = nil
+    /// The turn wrote to its scratch copy, even if it then failed.
+    var edited = false
 
-    private enum CodingKeys: String, CodingKey { case ok, reply, toolCalls, error, cancelled, modelUnavailable }
+    private enum CodingKeys: String, CodingKey { case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited }
     init(ok: Bool, reply: String? = nil, toolCalls: [LedgerAgentToolCall] = [], error: String? = nil,
-         cancelled: Bool? = nil, modelUnavailable: Bool? = nil) {
+         cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false) {
         self.ok = ok; self.reply = reply; self.toolCalls = toolCalls; self.error = error
-        self.cancelled = cancelled; self.modelUnavailable = modelUnavailable
+        self.cancelled = cancelled; self.modelUnavailable = modelUnavailable; self.edited = edited
     }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -176,6 +186,7 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
         error = try container.decodeIfPresent(String.self, forKey: .error)
         cancelled = try container.decodeIfPresent(Bool.self, forKey: .cancelled)
         modelUnavailable = try container.decodeIfPresent(Bool.self, forKey: .modelUnavailable)
+        edited = try container.decodeIfPresent(Bool.self, forKey: .edited) ?? false
     }
 }
 
@@ -265,8 +276,66 @@ enum LedgerAgentHistory {
     }
 }
 
+/// The private copy of the ledger one conversation lets the Agent edit. It
+/// starts as the committed generation `baseRevisionID` names.
+struct LedgerAgentDraft: Equatable, Sendable {
+    let id: UUID
+    let root: URL
+    let baseRevisionID: UUID
+}
+
+/// What the draft amounts to against the committed ledger, ready to write.
+/// `id` names the prepared change the repository holds for the commit.
+struct LedgerAgentReview: Equatable, Sendable {
+    let id: UUID
+    let files: [LedgerAgentFileDiff]
+    var added: Int { files.reduce(0) { $0 + $1.added } }
+    var removed: Int { files.reduce(0) { $0 + $1.removed } }
+}
+
+enum LedgerAgentEditError: LocalizedError, Equatable {
+    /// The ledger was committed to since the draft was copied.
+    case stale
+    /// The draft does not pass the app's own Beancount validation.
+    case invalid(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .stale: String(localized: "账本在对话期间有了新的改动，这份草稿不能直接写入")
+        case let .invalid(message): message
+        }
+    }
+}
+
+/// The ledger side of editing: the draft copy, the change it amounts to, and
+/// the existing validated commit. Tests substitute it.
+struct LedgerAgentEditor: Sendable {
+    var open: @Sendable () async throws -> LedgerAgentDraft
+    /// nil when the draft equals the committed ledger.
+    var review: @Sendable (LedgerAgentDraft) async throws -> LedgerAgentReview?
+    /// Commits the reviewed change and returns the draft rebased on it.
+    var write: @Sendable (LedgerAgentReview, LedgerAgentDraft) async throws -> LedgerAgentDraft
+    /// Drops the change and returns a fresh copy of the current ledger.
+    var discard: @Sendable (LedgerAgentReview?, LedgerAgentDraft) async throws -> LedgerAgentDraft
+    var close: @Sendable (LedgerAgentDraft) async -> Void
+}
+
+/// The change card under the conversation.
+struct LedgerAgentPendingEdit: Equatable {
+    enum Status: Equatable {
+        case ready
+        case invalid(String)
+        case stale
+        case writing
+        case failed(String)
+    }
+    var review: LedgerAgentReview?
+    var status: Status
+}
+
 /// The in-memory conversation behind the Agent screen. Nothing is written to
-/// disk; leaving the screen or starting a new chat drops it.
+/// the ledger without the change card's confirmation; leaving the screen or
+/// starting a new chat drops the conversation and its draft.
 @MainActor
 final class LedgerAgentConversation: ObservableObject {
     enum Phase: Equatable {
@@ -277,27 +346,61 @@ final class LedgerAgentConversation: ObservableObject {
 
     @Published private(set) var messages: [LedgerAgentMessage] = []
     @Published private(set) var phase: Phase = .idle
+    @Published private(set) var pending: LedgerAgentPendingEdit?
+    /// The last change written from this conversation, until the next turn.
+    @Published private(set) var written: LedgerAgentReview?
     private var task: Task<Void, Never>?
+    private var draft: LedgerAgentDraft?
+    /// Told to the model with the next question, so it knows what became of
+    /// the change it proposed.
+    private var note: String?
+    /// Bumped by `reset`, so work started before it does not land after it.
+    private var epoch = 0
+    private var reopening: Task<LedgerAgentDraft?, Never>?
+    var editor: LedgerAgentEditor?
 
     var isRunning: Bool { if case .running = phase { true } else { false } }
+    var isWriting: Bool { pending?.status == .writing }
 
-    typealias Send = @Sendable (_ message: String, _ history: [LedgerAgentTurnRequest.HistoryEntry]) async throws -> LedgerAgentTurnResponse
+    typealias Send = @Sendable (_ message: String, _ history: [LedgerAgentTurnRequest.HistoryEntry],
+                                _ draft: URL?) async throws -> LedgerAgentTurnResponse
+
+    private struct Outcome: Sendable {
+        let response: LedgerAgentTurnResponse
+        let draft: LedgerAgentDraft?
+        let review: Result<LedgerAgentReview?, Error>?
+    }
 
     /// Starts a turn. The question shows at once; the reply, or the failure,
-    /// replaces the running state when the turn ends.
+    /// replaces the running state when the turn ends. A turn that edited the
+    /// draft is reviewed before the running state ends.
     func send(_ raw: String, using send: @escaping Send) {
         let question = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty, !isRunning else { return }
+        guard !question.isEmpty, !isRunning, !isWriting else { return }
         let history = LedgerAgentHistory.entries(from: messages)
         if case let .failed(_, previous) = phase, messages.last?.role == .user, messages.last?.text == previous {
             messages.removeLast()
         }
         messages.append(.init(role: .user, text: question))
+        written = nil
         let started = Date()
         phase = .running(since: started)
+        let editor = editor, existing = draft, reopening = reopening
+        let message = note.map { $0 + "\n\n" + question } ?? question
         task = Task { [weak self] in
-            let outcome: Result<LedgerAgentTurnResponse, Error>
-            do { outcome = .success(try await send(question, history)) } catch { outcome = .failure(error) }
+            let outcome: Result<Outcome, Error>
+            do {
+                // A copy that cannot be made leaves the turn read-only.
+                var draft = existing
+                if draft == nil, let reopening { draft = await reopening.value }
+                if draft == nil, let editor { draft = try? await editor.open() }
+                let response = try await send(message, history, draft?.root)
+                var review: Result<LedgerAgentReview?, Error>?
+                if response.edited, let editor, let draft {
+                    do { review = .success(try await editor.review(draft)) } catch { review = .failure(error) }
+                }
+                outcome = .success(.init(response: response, draft: draft, review: review))
+            } catch { outcome = .failure(error) }
             self?.finish(outcome, question: question, started: started)
         }
     }
@@ -315,20 +418,85 @@ final class LedgerAgentConversation: ObservableObject {
         task = nil
         messages = []
         phase = .idle
+        pending = nil
+        written = nil
+        note = nil
+        epoch += 1
+        if let editor {
+            let draft = draft, reopening = reopening
+            Task {
+                if let draft { await editor.close(draft) }
+                if let reopened = await reopening?.value { await editor.close(reopened) }
+            }
+        }
+        draft = nil
+        reopening = nil
     }
 
-    private func finish(_ outcome: Result<LedgerAgentTurnResponse, Error>, question: String, started: Date) {
-        guard case let .running(since) = phase, since == started else { return }
+    /// Commits the reviewed change through the ledger's validated write path.
+    func write() {
+        guard let editor, let draft, let review = pending?.review, pending?.status == .ready, !isRunning else { return }
+        pending?.status = .writing
+        let epoch = epoch
+        Task { [weak self] in
+            do {
+                let next = try await editor.write(review, draft)
+                guard let self, self.epoch == epoch else { return await editor.close(next) }
+                self.draft = next
+                self.pending = nil
+                self.written = review
+                self.note = String(localized: "（系统提示：上一轮的草稿改动已写入账本，草稿与账本现在一致。）")
+            } catch {
+                guard self?.epoch == epoch else { return }
+                self?.pending?.status = error as? LedgerAgentEditError == .stale ? .stale : .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Drops the change; the draft starts again from the current ledger.
+    func discard() {
+        guard let editor, let draft, !isRunning, !isWriting else { return }
+        let review = pending?.review
+        pending = nil
+        note = String(localized: "（系统提示：用户放弃了上一轮的草稿改动，草稿已恢复为当前账本。）")
+        self.draft = nil
+        // The next turn waits for the fresh copy instead of making its own.
+        reopening = Task { try? await editor.discard(review, draft) }
+    }
+
+    private func finish(_ outcome: Result<Outcome, Error>, question: String, started: Date) {
+        guard case let .running(since) = phase, since == started else {
+            // A stopped or reset turn may still have opened a copy.
+            if case let .success(turn) = outcome, let opened = turn.draft, opened != draft, let editor {
+                Task { await editor.close(opened) }
+            }
+            return
+        }
         task = nil
+        if case let .success(turn) = outcome {
+            if draft == nil { draft = turn.draft }
+            reopening = nil
+            switch turn.review {
+            case nil: break
+            case let .success(review)?:
+                pending = review.map { .init(review: $0, status: .ready) }
+            case let .failure(error)?:
+                switch error as? LedgerAgentEditError {
+                case .stale?: pending = .init(review: nil, status: .stale)
+                default: pending = .init(review: nil, status: .invalid(error.localizedDescription))
+                }
+            }
+        }
         switch outcome {
-        case let .success(response) where response.ok:
-            messages.append(.init(role: .assistant, text: response.reply ?? "", toolCalls: response.toolCalls,
+        case let .success(turn) where turn.response.ok:
+            note = nil
+            messages.append(.init(role: .assistant, text: turn.response.reply ?? "", toolCalls: turn.response.toolCalls,
                                   duration: Date().timeIntervalSince(started)))
             phase = .idle
-        case let .success(response) where response.cancelled == true:
+        case let .success(turn) where turn.response.cancelled == true:
             phase = .idle
-        case let .success(response):
-            phase = .failed(LedgerAgentError.classify(response.error ?? String(localized: "模型没有返回回答")), question: question)
+        case let .success(turn):
+            phase = .failed(LedgerAgentError.classify(turn.response.error ?? String(localized: "模型没有返回回答")), question: question)
         case let .failure(error as LedgerAgentError):
             phase = .failed(error, question: question)
         case let .failure(error) where error is CancellationError:
@@ -336,6 +504,80 @@ final class LedgerAgentConversation: ObservableObject {
         case let .failure(error):
             phase = .failed(.failed(error.localizedDescription), question: question)
         }
+    }
+}
+
+/// One file of a pending change: what happened to it and the changed lines
+/// with a little context, in the order a unified diff shows them.
+struct LedgerAgentFileDiff: Identifiable, Equatable, Sendable {
+    enum Change: Equatable, Sendable { case added, removed, modified }
+    struct Line: Equatable, Sendable {
+        enum Kind: Equatable, Sendable { case context, added, removed, gap }
+        let kind: Kind
+        let text: String
+    }
+
+    var id: String { path }
+    let path: String
+    let change: Change
+    let added: Int
+    let removed: Int
+    let lines: [Line]
+
+    static let contextLines = 2
+    static let maximumLines = 400
+
+    init(path: String, before: Data?, after: Data?) {
+        self.path = path
+        change = before == nil ? .added : after == nil ? .removed : .modified
+        let old = Self.lines(before), new = Self.lines(after)
+        let difference = new.difference(from: old)
+        var removedOffsets = Set<Int>(), insertedOffsets = Set<Int>()
+        for step in difference {
+            switch step {
+            case let .remove(offset, _, _): removedOffsets.insert(offset)
+            case let .insert(offset, _, _): insertedOffsets.insert(offset)
+            }
+        }
+        added = insertedOffsets.count
+        removed = removedOffsets.count
+        // Interleave both sides: removals before the insertions that replace them.
+        var all: [Line] = []
+        var i = 0, j = 0
+        while i < old.count || j < new.count {
+            if i < old.count, removedOffsets.contains(i) {
+                all.append(.init(kind: .removed, text: old[i])); i += 1
+            } else if j < new.count, insertedOffsets.contains(j) {
+                all.append(.init(kind: .added, text: new[j])); j += 1
+            } else {
+                all.append(.init(kind: .context, text: i < old.count ? old[i] : new[j])); i += 1; j += 1
+            }
+        }
+        var keep = [Bool](repeating: false, count: all.count)
+        for (index, line) in all.enumerated() where line.kind != .context {
+            for near in max(0, index - Self.contextLines)...min(all.count - 1, index + Self.contextLines) { keep[near] = true }
+        }
+        var shown: [Line] = []
+        var skipped = 0
+        for (index, line) in all.enumerated() {
+            guard keep[index] else { skipped += 1; continue }
+            if skipped > 0, !shown.isEmpty { shown.append(.init(kind: .gap, text: String(localized: "\(skipped) 行未改动"))) }
+            skipped = 0
+            shown.append(line)
+        }
+        if shown.count > Self.maximumLines {
+            let hidden = shown[Self.maximumLines...].filter { $0.kind == .added || $0.kind == .removed }.count
+            shown = Array(shown.prefix(Self.maximumLines))
+            shown.append(.init(kind: .gap, text: String(localized: "还有 \(hidden) 行改动未显示")))
+        }
+        lines = shown
+    }
+
+    private static func lines(_ data: Data?) -> [String] {
+        guard let data, !data.isEmpty else { return [] }
+        var text = String(decoding: data, as: UTF8.self)
+        if text.hasSuffix("\n") { text.removeLast() }
+        return text.components(separatedBy: "\n")
     }
 }
 
@@ -523,4 +765,96 @@ enum LedgerAgentCrashReport {
         let blocks = text.components(separatedBy: "\n\ngoroutine ")
         return blocks.prefix(2).joined(separator: "\n\ngoroutine ")
     }
+}
+
+/// Brings a stage in line with an Agent draft: every ledger file the draft has
+/// is copied when it differs, and every one it no longer has is removed.
+/// Only .bean files outside hidden directories count; anything else in the
+/// stage is left as committed.
+enum LedgerAgentDraftMirror {
+    static func apply(from draft: URL, to stage: URL, fileManager: FileManager = .default) throws {
+        let source = try beanFiles(in: draft, fileManager: fileManager)
+        let target = try beanFiles(in: stage, fileManager: fileManager)
+        for path in source.sorted() {
+            let data = try Data(contentsOf: draft.appendingPathComponent(path))
+            let destination = stage.appendingPathComponent(path)
+            if target.contains(path), (try? Data(contentsOf: destination)) == data { continue }
+            try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: destination)
+        }
+        for path in target.subtracting(source) {
+            try fileManager.removeItem(at: stage.appendingPathComponent(path))
+        }
+    }
+
+    static func beanFiles(in root: URL, fileManager: FileManager = .default) throws -> Set<String> {
+        let base = root.resolvingSymlinksInPath().standardizedFileURL.path
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey]
+        guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: Array(keys),
+                                                      options: [.skipsHiddenFiles]) else { return [] }
+        var paths = Set<String>()
+        while let url = enumerator.nextObject() as? URL {
+            guard url.pathExtension == "bean" else { continue }
+            let values = try url.resourceValues(forKeys: keys)
+            guard values.isSymbolicLink != true, values.isRegularFile == true else { continue }
+            let path = url.resolvingSymlinksInPath().standardizedFileURL.path
+            guard path.hasPrefix(base + "/") else { continue }
+            paths.insert(String(path.dropFirst(base.count + 1)))
+        }
+        return paths
+    }
+}
+
+extension LedgerAgentEditor {
+    static func live(_ repository: LocalLedgerRepository) -> LedgerAgentEditor {
+        LedgerAgentEditor(
+            open: { try await repository.openAgentDraft() },
+            review: { try await repository.reviewAgentDraft($0) },
+            write: { try await repository.writeAgentDraft($0, draft: $1) },
+            discard: { try await repository.discardAgentDraft($0, draft: $1) },
+            close: { await repository.closeAgentDraft($0) })
+    }
+}
+
+/// bean_check: the native loop calls back into the app's embedded Beancount
+/// validator, so the Agent checks its draft with the same rules a commit uses.
+enum LedgerAgentChecker {
+    static func install() { _ = installed }
+
+    private static let installed: Void = {
+        #if canImport(LedgerCore)
+        MobileagentSetChecker(Bridge())
+        #endif
+    }()
+
+    /// Runs a validation to completion for a caller that cannot await.
+    static func check(workspace: URL, entrypoint: String) -> String {
+        let result = Box()
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            do { try await EmbeddedBeancountValidator.shared.validate(workspace: workspace, entryFile: entrypoint) }
+            catch { result.set(error.localizedDescription) }
+            done.signal()
+        }
+        done.wait()
+        return result.value
+    }
+
+    private final class Box: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored = ""
+        var value: String { lock.withLock { stored } }
+        func set(_ message: String) { lock.withLock { stored = message } }
+    }
+
+    #if canImport(LedgerCore)
+    /// Called on a Go goroutine's thread, never on the main thread or the
+    /// cooperative pool, so blocking it on the validator is safe.
+    private final class Bridge: NSObject, MobileagentCheckerProtocol {
+        func check(_ workspaceRoot: String?, entrypoint: String?) -> String {
+            LedgerAgentChecker.check(workspace: URL(fileURLWithPath: workspaceRoot ?? "", isDirectory: true),
+                                     entrypoint: entrypoint ?? "main.bean")
+        }
+    }
+    #endif
 }
