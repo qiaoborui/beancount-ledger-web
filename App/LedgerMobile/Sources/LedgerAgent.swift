@@ -534,7 +534,6 @@ struct LedgerAgentPendingEdit: Equatable {
     var status: Status
 }
 
-<<<<<<< HEAD
 /// One conversation behind the Agent screen. Nothing is written to the
 /// ledger without the change card's confirmation. `LedgerAgentSessions` keeps
 /// it beyond the screen, so a turn keeps running when the user leaves the
@@ -543,15 +542,6 @@ struct LedgerAgentPendingEdit: Equatable {
 final class LedgerAgentConversation: ObservableObject {
     let id: UUID
     let createdAt: Date
-=======
-/// The in-memory conversation behind the Agent screen. Nothing is written to
-/// the ledger without the change card's confirmation. It outlives the screen,
-/// so a turn keeps running when the user leaves the page or the app; starting
-/// a new chat or switching ledgers drops the conversation and its draft.
-@MainActor
-final class LedgerAgentConversation: ObservableObject {
-    static let shared = LedgerAgentConversation()
->>>>>>> origin/main
 
     enum Phase: Equatable {
         case idle
@@ -567,16 +557,11 @@ final class LedgerAgentConversation: ObservableObject {
     /// What the running turn is doing now; nil before its first event.
     @Published private(set) var step: LedgerAgentStep?
     private(set) var stepCount = 0
-<<<<<<< HEAD
     /// Shown above a reopened conversation whose change was never written.
     private(set) var restoredNotice: String?
     /// Told when a turn, a write or a discard settles, so the conversation
     /// can be saved.
     var onSettled: ((LedgerAgentConversation) -> Void)?
-=======
-    /// The ledger this conversation and its draft belong to.
-    private(set) var ledgerID: UUID?
->>>>>>> origin/main
     /// True while the Agent screen shows this conversation.
     var isOnScreen = false
     weak var lifecycle: LedgerAgentLifecycle?
@@ -602,7 +587,6 @@ final class LedgerAgentConversation: ObservableObject {
                                          _ draft: URL?, _ report: @escaping LedgerAgentSteps.Handler) async throws
         -> LedgerAgentTurnResponse
 
-<<<<<<< HEAD
     init(id: UUID = UUID(), createdAt: Date = Date()) {
         self.id = id
         self.createdAt = createdAt
@@ -630,13 +614,6 @@ final class LedgerAgentConversation: ObservableObject {
             id: id, createdAt: createdAt, updatedAt: date,
             messages: messages.map { .init(role: $0.role.rawValue, text: $0.text, toolCalls: $0.toolCalls, duration: $0.duration) },
             unwrittenChange: pending?.review != nil || draftUnreviewed)
-=======
-    /// Drops the conversation when the screen now shows another ledger.
-    func bind(ledger id: UUID) {
-        guard ledgerID != id else { return }
-        if ledgerID != nil { reset() }
-        ledgerID = id
->>>>>>> origin/main
     }
 
     private struct Outcome: Sendable {
@@ -724,13 +701,9 @@ final class LedgerAgentConversation: ObservableObject {
     private func endRunning(_ ending: LedgerAgentTurnEnding) {
         if ending == .stopped || ending == .interrupted, draft != nil { draftUnreviewed = true }
         step = nil
-<<<<<<< HEAD
         restoredNotice = nil
         lifecycle?.turnEnded(ending)
         onSettled?(self)
-=======
-        lifecycle?.turnEnded(ending)
->>>>>>> origin/main
     }
 
     func reset() {
@@ -738,10 +711,7 @@ final class LedgerAgentConversation: ObservableObject {
         task = nil
         if isRunning { lifecycle?.turnEnded(.stopped) }
         step = nil
-<<<<<<< HEAD
         restoredNotice = nil
-=======
->>>>>>> origin/main
         draftUnreviewed = false
         messages = []
         phase = .idle

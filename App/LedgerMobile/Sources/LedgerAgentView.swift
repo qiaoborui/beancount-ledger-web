@@ -35,13 +35,7 @@ private struct LedgerAgentChatScreen: View {
     @ObservedObject var conversation: LedgerAgentConversation
     @EnvironmentObject private var session: LedgerSession
     @ObservedObject private var settings = LedgerAgentSettings.shared
-<<<<<<< HEAD
     @ObservedObject private var sessions = LedgerAgentSessions.shared
-=======
-    /// Shared, so a turn keeps going when this page closes or the app leaves
-    /// the screen; `LedgerAgentBackgroundRun` holds it while it runs there.
-    @ObservedObject private var conversation = LedgerAgentConversation.shared
->>>>>>> origin/main
     @State private var draft = ""
     @State private var historyPresented = false
     @State private var settingsPresented = false
@@ -72,23 +66,10 @@ private struct LedgerAgentChatScreen: View {
         .fullScreenCover(item: $bookkeeping) { prefill in
             NaturalLanguageBookkeepingView(onSaved: { bookkeeping = nil }, initialInput: prefill.text)
         }
-<<<<<<< HEAD
         .onAppear {
             conversation.isOnScreen = true
             LedgerAgentBackgroundRun.shared.conversationSeen()
         }
-=======
-        // The lock and privacy cover hide this page; the conversation stays,
-        // so a turn sent before leaving the app still lands here. Another
-        // ledger starts a new one.
-        .task(id: session.localRepository?.descriptor.id) {
-            if let id = session.localRepository?.descriptor.id { conversation.bind(ledger: id) }
-        }
-        .onAppear {
-            conversation.isOnScreen = true
-            LedgerAgentBackgroundRun.shared.conversationSeen()
-        }
->>>>>>> origin/main
         .onDisappear { conversation.isOnScreen = false }
         .task {
             guard crashReport == nil, let repository = session.localRepository else { return }
@@ -316,23 +297,14 @@ private struct LedgerAgentChatScreen: View {
             settingsPresented = true
             return
         }
-<<<<<<< HEAD
         let choice = settings.choice, thinking = settings.effectiveThinking
-=======
-        let choice = settings.choice
-        conversation.bind(ledger: repository.descriptor.id)
->>>>>>> origin/main
         conversation.editor = .live(repository)
         conversation.lifecycle = LedgerAgentBackgroundRun.shared
         LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
         conversation.send(question, reporting: { message, history, draftRoot, report in
             try await repository.runAgentTurn(message: message, history: history, choice: choice,
-<<<<<<< HEAD
                                               apiKey: key, sensitiveUnlocked: true, thinking: thinking,
                                               draft: draftRoot, onStep: report)
-=======
-                                              apiKey: key, sensitiveUnlocked: true, draft: draftRoot, onStep: report)
->>>>>>> origin/main
         })
         draft = ""
     }
