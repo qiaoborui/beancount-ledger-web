@@ -11,7 +11,9 @@ struct LedgerAgentView: View {
     var isRoot = false
     @EnvironmentObject private var session: LedgerSession
     @ObservedObject private var settings = LedgerAgentSettings.shared
-    @StateObject private var conversation = LedgerAgentConversation()
+    /// Shared, so a turn keeps going when this page closes or the app leaves
+    /// the screen; `LedgerAgentBackgroundRun` holds it while it runs there.
+    @ObservedObject private var conversation = LedgerAgentConversation.shared
     @State private var draft = ""
     @State private var settingsPresented = false
     @State private var bookkeeping: BookkeepingPrefill?
@@ -36,10 +38,17 @@ struct LedgerAgentView: View {
         .fullScreenCover(item: $bookkeeping) { prefill in
             NaturalLanguageBookkeepingView(onSaved: { bookkeeping = nil }, initialInput: prefill.text)
         }
-        // Locking hides the ledger everywhere; the questions go with it.
-        .onChange(of: session.privacyShielded) { _, shielded in
-            if shielded { conversation.reset() }
+        // The lock and privacy cover hide this page; the conversation stays,
+        // so a turn sent before leaving the app still lands here. Another
+        // ledger starts a new one.
+        .task(id: session.localRepository?.descriptor.id) {
+            if let id = session.localRepository?.descriptor.id { conversation.bind(ledger: id) }
         }
+        .onAppear {
+            conversation.isOnScreen = true
+            LedgerAgentBackgroundRun.shared.conversationSeen()
+        }
+        .onDisappear { conversation.isOnScreen = false }
         .task {
             guard crashReport == nil, let repository = session.localRepository else { return }
             crashReport = LedgerAgentCrashReport.take(
@@ -117,7 +126,7 @@ struct LedgerAgentView: View {
                     }
                     switch conversation.phase {
                     case .idle: EmptyView()
-                    case .running: LedgerAgentRunning()
+                    case .running: LedgerAgentRunning(step: conversation.step)
                     case let .failed(error, question): failure(error, question: question)
                     }
                     Color.clear.frame(height: 1).id(Self.bottomID)
@@ -177,7 +186,7 @@ struct LedgerAgentView: View {
 
     private func failure(_ error: LedgerAgentError, question: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(error == .notConfigured ? error.localizedDescription : String(localized: "模型服务拒绝了这次请求"))
+            Text(error == .notConfigured || error == .interrupted ? error.localizedDescription : String(localized: "模型服务拒绝了这次请求"))
                 .balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.expense)
             Text(failureDetail(error)).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
                 .textSelection(.enabled)
@@ -200,6 +209,7 @@ struct LedgerAgentView: View {
         case .notConfigured: String(localized: "还没有为当前服务商保存 API Key。")
         case let .invalidKey(message): String(localized: "API Key 无效或已过期。") + " " + message
         case let .failed(message): message
+        case .interrupted: String(localized: "草稿里已有的改动会保留，点重试接着做。")
         }
         return reason + " " + String(localized: "账本没有被写入，问题还在输入框里。")
     }
@@ -253,11 +263,14 @@ struct LedgerAgentView: View {
             return
         }
         let choice = settings.choice
-        if conversation.editor == nil { conversation.editor = .live(repository) }
-        conversation.send(question) { message, history, draftRoot in
+        conversation.bind(ledger: repository.descriptor.id)
+        conversation.editor = .live(repository)
+        conversation.lifecycle = LedgerAgentBackgroundRun.shared
+        LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
+        conversation.send(question, reporting: { message, history, draftRoot, report in
             try await repository.runAgentTurn(message: message, history: history, choice: choice,
-                                              apiKey: key, sensitiveUnlocked: true, draft: draftRoot)
-        }
+                                              apiKey: key, sensitiveUnlocked: true, draft: draftRoot, onStep: report)
+        })
         draft = ""
     }
 
@@ -604,12 +617,15 @@ private struct LedgerAgentReplyBlock: View {
 }
 
 private struct LedgerAgentRunning: View {
+    let step: LedgerAgentStep?
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             ProgressView().controlSize(.small).tint(BalancedPalette.meta).padding(.top, 2)
             VStack(alignment: .leading, spacing: 3) {
-                Text("正在查询账本").balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
-                Text("助手可能会读取几次，期间不会改动账本").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                Text(step?.title ?? String(localized: "正在查询账本")).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
+                    .lineLimit(1)
+                Text("可以离开这一页或切到后台，答完会通知你").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             }
         }
         .accessibilityElement(children: .combine)

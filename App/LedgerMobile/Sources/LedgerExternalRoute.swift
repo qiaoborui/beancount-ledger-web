@@ -26,9 +26,9 @@ enum LedgerExternalRoute: Equatable, Sendable {
             query[item.name] = value
         }
         switch host {
-        case "overview", "imports":
+        case "overview", "imports", "agent":
             guard query.isEmpty else { return nil }
-            return .page(host == "overview" ? .overview : .imports)
+            return .page(host == "overview" ? .overview : host == "imports" ? .imports : .agent)
         case "accounts":
             guard !query.isEmpty else { return .page(.accounts) }
             guard Set(query.keys).isSubset(of: ["account", "currency"]),

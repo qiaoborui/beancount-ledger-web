@@ -1180,7 +1180,8 @@ actor LocalLedgerRepository: LedgerRepository {
     /// native turn.
     func runAgentTurn(message: String, history: [LedgerAgentTurnRequest.HistoryEntry],
                       choice: LedgerAgentModelChoice, apiKey: String, sensitiveUnlocked: Bool,
-                      draft: URL? = nil, runner: LedgerAgentRunner = .native) async throws -> LedgerAgentTurnResponse {
+                      draft: URL? = nil, runner: LedgerAgentRunner = .native,
+                      onStep: LedgerAgentSteps.Handler? = nil) async throws -> LedgerAgentTurnResponse {
         if draft != nil { LedgerAgentChecker.install() }
         let engine = engine, entrypoint = descriptor.entrypoint
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
@@ -1197,6 +1198,8 @@ actor LocalLedgerRepository: LedgerRepository {
                     custom: choice.isCustom ? choice.custom : nil, history: history, message: message,
                     scratchRoot: draft?.path)
                 let encoded = try JSONEncoder().encode(request)
+                if let onStep { LedgerAgentSteps.observe(turnID, onStep) }
+                defer { LedgerAgentSteps.stop(turnID) }
                 let data = try await withTaskCancellationHandler {
                     try await runner.run(encoded)
                 } onCancel: { runner.cancel(turnID) }

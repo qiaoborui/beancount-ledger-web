@@ -194,19 +194,22 @@ enum LedgerAgentError: LocalizedError, Equatable {
     case notConfigured
     case invalidKey(String)
     case failed(String)
+    /// The system took back the app's background time before the turn ended.
+    case interrupted
 
     var errorDescription: String? {
         switch self {
         case .notConfigured: String(localized: "请先设置模型与 API Key")
         case .invalidKey: String(localized: "API Key 无效或已过期")
         case let .failed(message): message
+        case .interrupted: String(localized: "App 在后台的时间用完了，这次回答被中断")
         }
     }
 
     /// The provider's own words, shown under the headline.
     var detail: String? {
         switch self {
-        case .notConfigured: nil
+        case .notConfigured, .interrupted: nil
         case let .invalidKey(message), let .failed(message): message
         }
     }
@@ -243,6 +246,99 @@ struct LedgerAgentRunner: Sendable {
         MobileagentCancelTurn(turnID)
         #endif
     })
+}
+
+/// What a running turn is doing now, as the native loop reports it: a request
+/// to the model, or a tool it started.
+struct LedgerAgentStep: Equatable, Sendable {
+    enum Kind: String, Decodable, Sendable { case model, tool }
+    let kind: Kind
+    var call: LedgerAgentToolCall? = nil
+
+    var title: String {
+        guard kind == .tool, let call else { return String(localized: "正在思考") }
+        return call.title
+    }
+
+    /// One event of the native loop; nil for a version or kind this build
+    /// does not know.
+    static func decode(_ json: String) -> LedgerAgentStep? {
+        struct Event: Decodable {
+            let version: Int
+            let kind: Kind
+            var name: String?
+            var arguments: BQLCell?
+        }
+        guard let event = try? JSONDecoder().decode(Event.self, from: Data(json.utf8)), event.version == 1 else { return nil }
+        switch event.kind {
+        case .model: return .init(kind: .model)
+        case .tool:
+            guard let name = event.name, !name.isEmpty else { return nil }
+            return .init(kind: .tool, call: .init(name: name, arguments: event.arguments, isError: false))
+        }
+    }
+}
+
+/// Routes the native loop's step events to the turn that asked for them.
+/// Events arrive on a Go goroutine's thread, in order for each turn.
+enum LedgerAgentSteps {
+    typealias Handler = @Sendable (LedgerAgentStep) -> Void
+
+    static func observe(_ turnID: String, _ handler: @escaping Handler) {
+        _ = installed
+        handlers.set(turnID, handler)
+    }
+
+    static func stop(_ turnID: String) { handlers.set(turnID, nil) }
+
+    static func deliver(turnID: String, json: String) {
+        guard let handler = handlers.get(turnID), let step = LedgerAgentStep.decode(json) else { return }
+        handler(step)
+    }
+
+    private static let handlers = Handlers()
+
+    private static let installed: Void = {
+        #if canImport(LedgerCore)
+        MobileagentSetObserver(Bridge())
+        #endif
+    }()
+
+    private final class Handlers: @unchecked Sendable {
+        private let lock = NSLock()
+        private var byTurn: [String: Handler] = [:]
+        func get(_ turnID: String) -> Handler? { lock.withLock { byTurn[turnID] } }
+        func set(_ turnID: String, _ handler: Handler?) { lock.withLock { byTurn[turnID] = handler } }
+    }
+
+    #if canImport(LedgerCore)
+    private final class Bridge: NSObject, MobileagentObserverProtocol {
+        func event(_ turnID: String?, eventJSON: String?) {
+            LedgerAgentSteps.deliver(turnID: turnID ?? "", json: eventJSON ?? "")
+        }
+    }
+    #endif
+}
+
+/// What became of a turn, for whatever keeps it alive and reports it while
+/// the app is away from the screen.
+enum LedgerAgentTurnEnding: Equatable, Sendable {
+    case answered(String)
+    /// The reply, and how many files the change card shows.
+    case changeReady(String, files: Int)
+    case failed(String)
+    case interrupted
+    case stopped
+}
+
+/// Holds a running turn in the background and reports how it ends. The
+/// conversation tells it each transition; it may call `interrupt()` when the
+/// system wants the time back.
+@MainActor
+protocol LedgerAgentLifecycle: AnyObject {
+    func turnStarted(question: String, conversation: LedgerAgentConversation)
+    func turnStepped(_ step: LedgerAgentStep, count: Int)
+    func turnEnded(_ ending: LedgerAgentTurnEnding)
 }
 
 /// Turns the visible conversation into the history the next turn replays.
@@ -334,10 +430,13 @@ struct LedgerAgentPendingEdit: Equatable {
 }
 
 /// The in-memory conversation behind the Agent screen. Nothing is written to
-/// the ledger without the change card's confirmation; leaving the screen or
-/// starting a new chat drops the conversation and its draft.
+/// the ledger without the change card's confirmation. It outlives the screen,
+/// so a turn keeps running when the user leaves the page or the app; starting
+/// a new chat or switching ledgers drops the conversation and its draft.
 @MainActor
 final class LedgerAgentConversation: ObservableObject {
+    static let shared = LedgerAgentConversation()
+
     enum Phase: Equatable {
         case idle
         case running(since: Date)
@@ -349,7 +448,18 @@ final class LedgerAgentConversation: ObservableObject {
     @Published private(set) var pending: LedgerAgentPendingEdit?
     /// The last change written from this conversation, until the next turn.
     @Published private(set) var written: LedgerAgentReview?
+    /// What the running turn is doing now; nil before its first event.
+    @Published private(set) var step: LedgerAgentStep?
+    private(set) var stepCount = 0
+    /// The ledger this conversation and its draft belong to.
+    private(set) var ledgerID: UUID?
+    /// True while the Agent screen shows this conversation.
+    var isOnScreen = false
+    weak var lifecycle: LedgerAgentLifecycle?
     private var task: Task<Void, Never>?
+    /// A stopped or interrupted turn may have edited the draft without a card
+    /// showing it, so the next turn reviews the draft even if it edits nothing.
+    private var draftUnreviewed = false
     private var draft: LedgerAgentDraft?
     /// Told to the model with the next question, so it knows what became of
     /// the change it proposed.
@@ -364,6 +474,16 @@ final class LedgerAgentConversation: ObservableObject {
 
     typealias Send = @Sendable (_ message: String, _ history: [LedgerAgentTurnRequest.HistoryEntry],
                                 _ draft: URL?) async throws -> LedgerAgentTurnResponse
+    typealias SendReporting = @Sendable (_ message: String, _ history: [LedgerAgentTurnRequest.HistoryEntry],
+                                         _ draft: URL?, _ report: @escaping LedgerAgentSteps.Handler) async throws
+        -> LedgerAgentTurnResponse
+
+    /// Drops the conversation when the screen now shows another ledger.
+    func bind(ledger id: UUID) {
+        guard ledgerID != id else { return }
+        if ledgerID != nil { reset() }
+        ledgerID = id
+    }
 
     private struct Outcome: Sendable {
         let response: LedgerAgentTurnResponse
@@ -375,6 +495,11 @@ final class LedgerAgentConversation: ObservableObject {
     /// replaces the running state when the turn ends. A turn that edited the
     /// draft is reviewed before the running state ends.
     func send(_ raw: String, using send: @escaping Send) {
+        self.send(raw, reporting: { message, history, draft, _ in try await send(message, history, draft) })
+    }
+
+    /// Starts a turn whose native loop reports each step it takes.
+    func send(_ raw: String, reporting send: @escaping SendReporting) {
         let question = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty, !isRunning, !isWriting else { return }
         let history = LedgerAgentHistory.entries(from: messages)
@@ -385,8 +510,14 @@ final class LedgerAgentConversation: ObservableObject {
         written = nil
         let started = Date()
         phase = .running(since: started)
-        let editor = editor, existing = draft, reopening = reopening
+        step = nil
+        stepCount = 0
+        let editor = editor, existing = draft, reopening = reopening, unreviewed = draftUnreviewed
         let message = note.map { $0 + "\n\n" + question } ?? question
+        let report: LedgerAgentSteps.Handler = { [weak self] step in
+            Task { @MainActor in self?.advance(step, started: started) }
+        }
+        lifecycle?.turnStarted(question: question, conversation: self)
         task = Task { [weak self] in
             let outcome: Result<Outcome, Error>
             do {
@@ -394,9 +525,9 @@ final class LedgerAgentConversation: ObservableObject {
                 var draft = existing
                 if draft == nil, let reopening { draft = await reopening.value }
                 if draft == nil, let editor { draft = try? await editor.open() }
-                let response = try await send(message, history, draft?.root)
+                let response = try await send(message, history, draft?.root, report)
                 var review: Result<LedgerAgentReview?, Error>?
-                if response.edited, let editor, let draft {
+                if response.edited || unreviewed, let editor, let draft {
                     do { review = .success(try await editor.review(draft)) } catch { review = .failure(error) }
                 }
                 outcome = .success(.init(response: response, draft: draft, review: review))
@@ -411,11 +542,43 @@ final class LedgerAgentConversation: ObservableObject {
         guard isRunning else { return }
         // A stopped question stays visible; it is not resent as history.
         phase = .idle
+        endRunning(.stopped)
+    }
+
+    /// Ends the running turn because the app is losing its background time.
+    /// The question comes back for a retry; the draft keeps what the turn
+    /// already changed, and the next turn is told so.
+    func interrupt() {
+        guard isRunning else { return }
+        task?.cancel()
+        task = nil
+        let question = messages.last { $0.role == .user }?.text ?? ""
+        phase = .failed(.interrupted, question: question)
+        if draft != nil {
+            note = String(localized: "（系统提示：上一轮回答被系统中断，草稿里可能已有部分改动；继续之前请先查看草稿的现状。）")
+        }
+        endRunning(.interrupted)
+    }
+
+    private func advance(_ step: LedgerAgentStep, started: Date) {
+        guard case let .running(since) = phase, since == started else { return }
+        self.step = step
+        stepCount += 1
+        lifecycle?.turnStepped(step, count: stepCount)
+    }
+
+    private func endRunning(_ ending: LedgerAgentTurnEnding) {
+        if ending == .stopped || ending == .interrupted, draft != nil { draftUnreviewed = true }
+        step = nil
+        lifecycle?.turnEnded(ending)
     }
 
     func reset() {
         task?.cancel()
         task = nil
+        if isRunning { lifecycle?.turnEnded(.stopped) }
+        step = nil
+        draftUnreviewed = false
         messages = []
         phase = .idle
         pending = nil
@@ -476,6 +639,7 @@ final class LedgerAgentConversation: ObservableObject {
         if case let .success(turn) = outcome {
             if draft == nil { draft = turn.draft }
             reopening = nil
+            if turn.review != nil { draftUnreviewed = false }
             switch turn.review {
             case nil: break
             case let .success(review)?:
@@ -490,19 +654,31 @@ final class LedgerAgentConversation: ObservableObject {
         switch outcome {
         case let .success(turn) where turn.response.ok:
             note = nil
-            messages.append(.init(role: .assistant, text: turn.response.reply ?? "", toolCalls: turn.response.toolCalls,
+            let reply = turn.response.reply ?? ""
+            messages.append(.init(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
                                   duration: Date().timeIntervalSince(started)))
             phase = .idle
+            if let review = pending?.review {
+                endRunning(.changeReady(reply, files: review.files.count))
+            } else {
+                endRunning(.answered(reply))
+            }
         case let .success(turn) where turn.response.cancelled == true:
             phase = .idle
+            endRunning(.stopped)
         case let .success(turn):
-            phase = .failed(LedgerAgentError.classify(turn.response.error ?? String(localized: "模型没有返回回答")), question: question)
+            let error = LedgerAgentError.classify(turn.response.error ?? String(localized: "模型没有返回回答"))
+            phase = .failed(error, question: question)
+            endRunning(.failed(error.localizedDescription))
         case let .failure(error as LedgerAgentError):
             phase = .failed(error, question: question)
+            endRunning(.failed(error.localizedDescription))
         case let .failure(error) where error is CancellationError:
             phase = .idle
+            endRunning(.stopped)
         case let .failure(error):
             phase = .failed(.failed(error.localizedDescription), question: question)
+            endRunning(.failed(error.localizedDescription))
         }
     }
 }
