@@ -1,0 +1,488 @@
+<title>结平 助手入口</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="batch1/styles.css">
+<style>
+<style>
+/* Liquid Glass layer over the Balanced batch-1 frames (iOS 26 only).
+   Content is untouched; only the control layer changes. */
+:root { --gal-bg: #e8e4dc; --gal-ink: #14100c; --gal-ink-3: #6f675a; --gal-line: rgba(20, 16, 12, 0.14); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gal-bg: #e8e4dc; } }
+:root[data-theme="dark"] { --gal-bg: #e8e4dc; }
+body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.invwrap { overflow-x: auto; margin-top: 22px; }
+.inv { border-collapse: collapse; width: 100%; max-width: 980px; font-size: 13.5px; }
+.inv th { text-align: left; font-weight: 500; font-size: 12px; color: var(--gal-ink-3); padding: 8px 16px 8px 0; border-bottom: 1px solid var(--gal-line); }
+.inv td { padding: 9px 16px 9px 0; border-bottom: 1px solid var(--gal-line); vertical-align: top; }
+.inv td:first-child { white-space: nowrap; font-weight: 500; }
+.pill-yes, .pill-no { font-size: 12px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.pill-yes { background: rgba(13, 83, 70, 0.12); }
+.pill-no { background: rgba(20, 16, 12, 0.08); color: var(--gal-ink-3); }
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; max-width: 1000px; }
+.rules h3 { font-size: 14.5px; font-weight: 600; margin: 0 0 6px; }
+.rules p { font-size: 13.5px; line-height: 1.6; margin: 0; color: #57504a; }
+
+/* glass material, per theme */
+.phone.glass {
+  --glass-fill: color-mix(in srgb, var(--bg) 60%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.78);
+  --glass-hi: rgba(255, 255, 255, 0.85);
+  --glass-shadow: 0 8px 24px -10px rgba(20, 16, 12, 0.3), 0 1px 2px rgba(20, 16, 12, 0.08);
+  --glass-sel: rgba(20, 16, 12, 0.08);
+}
+.phone.glass[data-theme='dark'] {
+  --glass-fill: color-mix(in srgb, #2b2825 55%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.16);
+  --glass-hi: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.7);
+  --glass-sel: rgba(246, 243, 238, 0.12);
+}
+.phone.glass .g {
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: blur(16px) saturate(1.7);
+  backdrop-filter: blur(16px) saturate(1.7);
+  border: 0.5px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--glass-shadow);
+}
+
+/* content runs full-bleed under the chrome, inset so nothing rests under it */
+.phone.glass > .scroll { position: absolute; inset: 0; padding-top: 112px; padding-bottom: 112px; }
+.phone.glass:not(:has(> .tabbar)) > .scroll { padding-bottom: 40px; }
+.phone.glass:has(> .gdock) > .scroll { padding-bottom: 116px; }
+.gtop { position: absolute; top: 0; left: 0; right: 0; z-index: 4; background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 85%, transparent) 60%, transparent 100%); }
+.gtop::before { content: ''; position: absolute; inset: 0; z-index: -1; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+.phone.glass .appbar { gap: 8px; }
+.phone.glass .gcap { display: inline-flex; align-items: center; height: 44px; border-radius: 22px; padding: 0 2px; flex: none; }
+.phone.glass .gcap .iconbtn { width: 40px; }
+.phone.glass .gperiod { padding: 0 14px; color: var(--ink); }
+.phone.glass .appbar .back.gcircle { width: 44px; height: 44px; border-radius: 50%; margin-left: 0; }
+.phone.glass .appbar .back.text.gcircle { width: auto; border-radius: 22px; padding: 0 14px; }
+
+/* tab bar: system glass capsule floating over the content */
+.phone.glass > .tabbar { position: absolute; left: 16px; right: 16px; bottom: 26px; height: 62px; border-radius: 31px; padding: 0 6px; z-index: 4; border-top: 0; }
+.phone.glass .tab[aria-current='page'] { background: var(--glass-sel); border-radius: 26px; margin: 5px 0; }
+.phone.glass .tab[aria-current='page'] .icon::after { display: none; }
+.phone.glass > .homebar { position: absolute; left: 0; right: 0; bottom: 0; background: transparent; z-index: 5; }
+
+/* search field and filter segment */
+.phone.glass .search.g { border-radius: 20px; }
+.phone.glass .seg { margin: 4px 20px 10px; padding: 3px; gap: 2px; display: flex; border-radius: 20px; border-bottom: 0;
+  background: var(--glass-fill); -webkit-backdrop-filter: blur(16px) saturate(1.7); backdrop-filter: blur(16px) saturate(1.7);
+  border: 0.5px solid var(--glass-edge); box-shadow: inset 0 1px 0 var(--glass-hi), var(--glass-shadow); }
+.phone.glass .seg button { display: flex; align-items: center; flex: 1 1 auto; justify-content: center; border-radius: 17px; min-height: 34px; padding: 0 10px; gap: 4px; white-space: nowrap; }
+.phone.glass .seg button[aria-selected='true'] { background: var(--glass-sel); }
+.phone.glass .seg button[aria-selected='true']::after { display: none; }
+
+/* sheets: glass shell with inset corners; the reading area stays paper */
+.phone.glass .scrim { background: rgba(20, 16, 12, 0.22); padding: 0 8px 8px; }
+.phone.glass[data-theme='dark'] .scrim { background: rgba(0, 0, 0, 0.42); }
+.phone.glass .sheet.gsheet { border-radius: 34px; border-top: 0.5px solid var(--glass-edge); --glass-fill: color-mix(in srgb, var(--bg) 88%, transparent); }
+.phone.glass .sheet .btn { border-radius: 23px; }
+
+/* docked bottom actions: floating glass panel */
+.phone.glass > .gdock { position: absolute; left: 12px; right: 12px; bottom: 30px; z-index: 4; border-radius: 28px; padding: 10px !important; }
+.phone.glass > .gdock .btn { border-radius: 23px; }
+.phone.glass > .gdock .btn:not(.primary) { background: transparent; }
+
+
+
+/* ---- import-flow additions (tokens from batch1, glass from glass.html) ---- */
+.toolbar a { font-size: 13px; color: #14100c; }
+.flow { display: flex; flex-wrap: wrap; gap: 6px 0; align-items: stretch; max-width: 1100px; margin: 18px 0 6px; padding: 0; list-style: none; counter-reset: st; }
+.flow li { flex: 1 1 150px; min-width: 0; padding: 10px 14px 12px; border-top: 2px solid #14100c; font-size: 13px; line-height: 1.5; color: #57504a; counter-increment: st; }
+.flow li b { display: block; color: #14100c; font-size: 14px; margin-bottom: 2px; }
+.flow li b::before { content: counter(st) "  "; color: #6f675a; font-weight: 500; font-variant-numeric: tabular-nums; }
+.phone.glass > .gdock { display: flex; flex-direction: column; gap: 8px; }
+.gdock .dock-row { display: flex; gap: 10px; }
+.gdock .dock-status { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); padding: 4px 6px 2px; }
+.gdock .dock-status b { display: block; color: var(--ink); font-weight: 600; font-size: 13px; }
+.phone.glass:has(> .gdock.has-status) > .scroll { padding-bottom: 190px; }
+.row .hint.mono, .mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3); }
+.row .value.strong { color: var(--ink); font-weight: 500; }
+.row .value + .value { margin-left: -2px; }
+.fresh { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+.fresh i { width: 6px; height: 6px; border-radius: 50%; display: block; }
+.v-out-bg { background: var(--out); } .v-in-bg { background: var(--in); } .edge-bg { background: var(--edge); }
+.spin { display: inline-block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--rule-strong); border-top-color: var(--ink); animation: spin 0.9s linear infinite; vertical-align: middle; }
+.spin.sm { width: 12px; height: 12px; border-width: 1.5px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.doc { padding: 12px 20px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 3px; }
+.doc-top { display: flex; gap: 10px; align-items: baseline; font-size: 15px; }
+.doc-top b { font-weight: 500; }
+.doc-top span, .meta2 { font-size: 12.5px; color: var(--ink-3); }
+.field-row .v.small { font-size: 14.5px; color: var(--ink); }
+.field-row.two { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
+.mono-s { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); margin-left: 4px; }
+.sugg { font-size: 12.5px; color: var(--ink-3); margin-left: 8px; border-bottom: 1px dashed var(--edge); }
+.input { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--edge); padding-bottom: 6px; font-size: 16px; min-height: 30px; }
+.caret-line { width: 1.5px; height: 18px; background: var(--ink); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.switch { flex: none; width: 46px; height: 28px; border-radius: 14px; background: var(--rule-strong); position: relative; }
+.switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--bg); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.switch[data-on='true'] { background: var(--ink); }
+.switch[data-on='true']::after { left: 21px; }
+.filehead { padding: 8px 20px 16px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid var(--rule); }
+.filehead b { font-size: 15.5px; font-weight: 500; word-break: break-all; }
+.filehead span { font-size: 12.5px; color: var(--ink-3); }
+.steps { padding: 8px 20px; }
+.step { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding: 12px 0; position: relative; }
+.step i { width: 14px; height: 14px; margin-top: 3px; border: 1px solid var(--edge); border-radius: 50%; display: block; position: relative; }
+.step[data-s='done'] i { background: var(--ink); border-color: var(--ink); }
+.step[data-s='done'] i::after { content: ''; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--bg); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.step[data-s='now'] i { border: 2px solid var(--rule-strong); border-top-color: var(--ink); animation: spin 0.9s linear infinite; }
+.step b { display: block; font-size: 15px; font-weight: 500; }
+.step[data-s='todo'] b { color: var(--ink-3); font-weight: 450; }
+.step span { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 3px; }
+.errblock { padding: 16px 20px; border-bottom: 1px solid var(--rule); }
+.errblock b { font-size: 15px; font-weight: 600; display: block; margin-bottom: 6px; }
+.errblock p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.disclose { color: var(--ink-2); }
+.disclose span { text-align: left; }
+.detail { padding: 2px 20px 12px; font-size: 12.5px; color: var(--ink-2); line-height: 1.55; background: var(--bg); }
+.detail .kv { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; color: var(--ink-3); }
+.detail .kv span:last-child { color: var(--ink-2); text-align: right; }
+.detail p { margin: 6px 0 0; padding-left: 10px; border-left: 1px solid var(--rule-strong); }
+.ailine { display: flex; align-items: center; gap: 8px; padding: 10px 20px; font-size: 12.5px; color: var(--ink-3); border-top: 1px solid var(--rule); }
+.ailine .linkbtn { margin-left: auto; }
+.linkbtn { font: inherit; font-size: 12.5px; background: none; border: 0; color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule-strong); text-underline-offset: 3px; padding: 6px 0; cursor: pointer; }
+.phone.glass .seg { position: sticky; top: 108px; z-index: 2; }
+.imp { cursor: pointer; }
+.imp .imp-main { min-width: 0; }
+.imp .cat .ai { font-family: var(--font-sans); font-size: 10px; font-weight: 600; letter-spacing: .06em; color: var(--ink-3); border: 1px solid var(--rule-strong); padding: 0 3px; margin-left: 6px; vertical-align: 1px; }
+.imp .cat .tags { font-family: var(--font-sans); font-size: 11.5px; color: var(--ink-3); margin-left: 6px; }
+.imp .need { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--ink); }
+.imp .need::before { content: ''; display: inline-block; width: 6px; height: 6px; border: 1.5px solid var(--ink); border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.imp[data-pending='true'] .cat { color: var(--ink); }
+.picks { margin-top: 10px; }
+.picks-k { display: block; font-size: 11.5px; color: var(--ink-3); margin-bottom: 6px; }
+.picks-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.sheet .picks { padding: 10px 20px 12px; margin: 0; border-bottom: 1px solid var(--rule); }
+.pick { font: inherit; display: inline-flex; align-items: baseline; gap: 6px; min-height: 34px; padding: 6px 10px; border: 1px solid var(--edge); background: transparent; color: var(--ink); font-size: 13px; cursor: pointer; text-align: left; }
+.pick .pct { font-size: 11.5px; color: var(--ink-3); }
+.pick[aria-pressed='true'] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.pick[aria-pressed='true'] .pct { color: var(--bg); opacity: .7; }
+.sheet.tall { max-height: 88%; }
+.sheet-nav { display: flex; align-items: center; justify-content: space-between; padding: 0 14px 6px 20px; font-size: 12.5px; color: var(--ink-3); }
+.navcap { height: 38px !important; }
+.navcap .iconbtn { width: 40px; height: 38px; color: var(--ink); }
+.sheet h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.amt-h { font-weight: 500; }
+.source.diff { white-space: normal; display: flex; flex-direction: column; font-size: 11px; line-height: 1.7; margin-top: 12px; }
+.source.diff span { white-space: pre; }
+.d-meta { color: var(--ink-3); }
+.d-add { color: var(--in); }
+.d-ctx { color: var(--ink-3); }
+.donehead { padding: 18px 20px 20px; }
+.donehead .dr { display: block; width: 40px; height: 5px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); margin-bottom: 16px; }
+.donehead h2 { margin: 0 0 6px; font-size: 22px; font-weight: 500; letter-spacing: -0.02em; }
+.donehead p { margin: 0; font-size: 13.5px; color: var(--ink-3); }
+.cmp { overflow-x: auto; margin-top: 18px; }
+
+
+/* ---- ledger agent additions ---- */
+.msg-user { margin: 10px 20px 4px auto; max-width: 78%; width: fit-content; background: var(--sunken); padding: 10px 14px; font-size: 15px; line-height: 1.5; color: var(--ink); }
+.msg-ai { padding: 4px 20px 2px; font-size: 15px; line-height: 1.6; color: var(--ink); }
+.msg-ai p { margin: 8px 0; }
+.msg-ai b { font-weight: 500; }
+.v-out { color: var(--out); } .v-in { color: var(--in); }
+.tools { margin: 10px 20px 2px; border-left: 1px solid var(--rule-strong); padding-left: 12px; }
+.tools-head { font: inherit; display: flex; align-items: center; gap: 6px; width: 100%; min-height: 32px; background: none; border: 0; padding: 0; color: var(--ink-3); font-size: 12.5px; cursor: pointer; text-align: left; }
+.tools-head .chev { width: 6px; transition: transform .18s; }
+.tools-head[aria-expanded='true'] .chev { transform: rotate(90deg); }
+.tools-list { display: none; padding-bottom: 6px; }
+.tools-head[aria-expanded='true'] + .tools-list { display: block; }
+.tool { display: grid; grid-template-columns: 14px 1fr; gap: 10px; padding: 5px 0; }
+.tool i { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); margin-top: 6px; display: block; }
+.tool b { display: block; font-size: 13.5px; font-weight: 450; color: var(--ink-2); }
+.tool .mono { font-size: 11px; }
+.tool-detail { margin: 6px 0 2px 24px; padding: 8px 10px; background: var(--sunken); line-height: 1.6; }
+.ans-tbl { margin: 6px 0; border-top: 1px solid var(--rule); }
+.ans-r { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 14px; }
+.ans-r .num { font-variant-numeric: tabular-nums; }
+.ans-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 20px 8px; }
+.meta2 { font-size: 12px; color: var(--ink-3); }
+.sugg-list { display: flex; flex-direction: column; }
+.sugg-row { font: inherit; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--rule); min-height: 44px; padding: 10px 20px; font-size: 15px; color: var(--ink); cursor: pointer; }
+.modelline { padding: 14px 20px; font-size: 12px; color: var(--ink-3); }
+.composer .cmp-row { display: flex; align-items: center; gap: 10px; padding-left: 10px; min-height: 44px; }
+.cmp-ph { flex: 1; font-size: 15px; color: var(--ink-3); }
+.cmp-text { flex: 1; font-size: 15px; color: var(--ink); }
+.sendbtn { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--ink); color: var(--bg); display: grid; place-items: center; cursor: pointer; }
+.composer[data-empty='true'] .sendbtn { opacity: .38; }
+.source { margin: 8px 20px; }
+.source span { display: block; white-space: pre; }
+.dock-inline { display: flex; gap: 10px; padding: 4px 20px 12px; }
+.dock-inline .btn { flex: 1; }
+.d-del { color: var(--out); }
+.wconfirm { margin: 10px 0 4px; background: var(--sunken); }
+.wconfirm-head { display: flex; flex-direction: column; gap: 3px; padding: 14px 20px 0; }
+.wconfirm-head b { font-size: 15px; font-weight: 500; }
+.wconfirm .source { margin: 10px 20px 0; background: var(--bg); padding: 10px 12px; }
+.wconfirm-foot { padding: 10px 20px 12px; font-size: 12.5px; color: var(--ink-3); }
+.wconfirm .dock-row { display: flex; gap: 10px; }
+.wconfirm .dock-row .btn { flex: 1; }
+
+
+/* ---- entry study additions ---- */
+.phone.glass > .tabbar.withsearch { right: 90px; }
+.phone.glass > .gsearch { position: absolute; right: 16px; bottom: 26px; width: 62px; height: 62px; border-radius: 50%; z-index: 4; display: grid; place-items: center; color: var(--ink); cursor: pointer; padding: 0; }
+.phone.glass > .gsearch.ring { outline: 2px solid var(--ink); outline-offset: 3px; }
+.gsearchbar { position: absolute; left: 16px; right: 16px; bottom: 26px; z-index: 4; display: flex; gap: 10px; align-items: center; }
+.gsearchbar .gmini { flex: none; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; color: var(--ink); padding: 0; }
+.gsearchbar .gfield { flex: 1; min-width: 0; height: 52px; border-radius: 26px; display: flex; align-items: center; gap: 8px; padding: 0 16px; color: var(--ink-3); }
+.gsearchbar .gfield .cmp-text, .gsearchbar .gfield .cmp-ph { flex: none; }
+.ask-row { display: flex; align-items: center; gap: 12px; margin: 6px 20px 4px; padding: 12px 14px; background: var(--sunken); cursor: pointer; }
+.ask-row .ask-ic { flex: none; color: var(--ink); display: grid; place-items: center; }
+.ask-row .ask-b { flex: 1; min-width: 0; }
+.ask-row b { display: block; font-size: 15px; font-weight: 500; color: var(--ink); }
+.ask-row span { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 2px; }
+.ask-row kbd { font: inherit; font-size: 11.5px; color: var(--ink-3); border: 1px solid var(--rule-strong); padding: 1px 6px; }
+.recent-q { display: flex; align-items: center; gap: 10px; padding: 11px 20px; border-bottom: 1px solid var(--rule); font-size: 15px; color: var(--ink); }
+.recent-q svg { color: var(--ink-3); flex: none; }
+.appbar .gspark { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: var(--ink); margin-left: auto; padding: 0; }
+.ctx-chip { display: inline-flex; gap: 6px; align-items: center; margin: 12px 20px 0; padding: 4px 10px; font-size: 12.5px; color: var(--ink-2); border: 1px solid var(--rule-strong); }
+.md-h { margin: 14px 0 4px; font-size: 15.5px; font-weight: 600; color: var(--ink); }
+.md-tbl { width: 100%; border-collapse: collapse; margin: 4px 0 8px; font-size: 14px; }
+.md-tbl th { text-align: left; font-weight: 500; font-size: 12.5px; color: var(--ink-3); padding: 6px 12px 6px 0; border-bottom: 1px solid var(--rule-strong); }
+.md-tbl td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--rule); }
+.md-tbl .r { text-align: right; padding-right: 0; }
+.md-ul { margin: 4px 0; padding-left: 0; list-style: none; }
+.md-ul li { position: relative; padding-left: 18px; margin: 4px 0; }
+.md-ul li::before { content: '•'; position: absolute; left: 2px; color: var(--ink-3); }
+.verdict { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; margin-left: 8px; vertical-align: 2px; border: 1px solid currentColor; }
+.verdict.yes { color: var(--gal-ink); }
+.verdict.no { color: var(--gal-ink-3); }
+.phone.glass > .gdock.above-tabs { bottom: 100px; }
+.phone.glass:has(> .gdock.above-tabs) > .scroll { padding-bottom: 180px; }
+.tabcfg .row .check { margin-left: auto; font-size: 13px; color: var(--ink-3); }
+.tabcfg .row[data-on='true'] .check { color: var(--ink); font-weight: 600; }
+
+</style>
+<div class="toolbar">
+<button aria-pressed="true" id="theme-light" type="button">浅色</button>
+<button aria-pressed="false" id="theme-dark" type="button">深色</button>
+<button aria-pressed="false" id="full-length" type="button">全长</button>
+<span class="spacer"></span>
+<span class="hint">账本助手入口 · 结平 + Liquid Glass · 状态栏 09:41</span>
+</div>
+<header class="gallery-head">
+<h1>结平 · 账本助手放在哪</h1>
+<p>现在助手藏在「更多 → 账本工具」里，要点两下才能到。这里比较三种更近的入口。推荐 A：右下角的搜索本来就在每个主页面上，把它变成「搜索流水，或直接问账本」，不加任何新按钮。B 可以和 A 同时做，给想把助手常驻底部的人一个选项。</p>
+<div class="invwrap"><table class="inv">
+<thead><tr><th>方案</th><th>入口</th><th>好处</th><th>代价</th></tr></thead>
+<tbody>
+<tr><td>A 搜索里直接问<span class="verdict yes">推荐</span></td><td>右下角搜索按钮。输入像问题的句子时，最上面出现「问账本助手」，按「前往」提问</td><td>每个主页面都有，一下就到；不占标签、不加按钮；搜索和提问本来就是同一个动作「我想找点什么」</td><td>要判断一句话更像关键词还是问题；关键词时这一行退到不显眼的位置，避免误触</td></tr>
+<tr><td>B 放进标签栏<span class="verdict yes">可选</span></td><td>更多 → 标签栏，把「账本助手」选进 3 个位置之一</td><td>已有标签配置，改动很小；常驻底部，对话不会因为切页面而离开</td><td>标签只有 3 个，放进去就要挤掉概览、流水或账户之一，所以不做成默认</td></tr>
+<tr><td>C 每页右上角<span class="verdict no">不推荐</span></td><td>每个主页面标题旁一个助手按钮，打开时带上当前页面（如「概览 · 10 月」）</td><td>能问「这一页」：分析页上问「餐饮为什么多」最顺手</td><td>每页多一个按钮，和结平「不加装饰」的原则冲突；带页面上下文要给每页写摘要。可以以后在分析页单独加</td></tr>
+</tbody></table></div>
+</header>
+<section class="section"><h2>A · 搜索里直接问（推荐）</h2><p>搜索按钮在 iOS 26 上浮在标签栏右边，每个主页面都看得到。点开后，空状态先给几个常问的问题。输入问题时最上面是「问账本助手」，下面照常列出匹配的流水；输入关键词时，这一行降成普通的一行。</p>
+<div class="grid"><figure class="screen"><figcaption>概览 <span>浅色 · 右下角就是入口</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><h1 class="title">概览</h1></div></div>
+<div class="scroll">
+<div class="settle"><div class="settle-total" style="border-top:0"><dt>净值</dt><dd class="num"><span class="cur">¥</span>169,170.20</dd></div></div>
+<div class="sechead"><h3>支出分类</h3><span class="aside"><span class="num">6,862.40</span> CNY</span></div>
+<table class="tbl"><thead><tr><th scope="col">分类</th><th scope="col">金额</th><th scope="col" style="padding-right:20px">占比</th></tr></thead><tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">55.4%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">2,486.40</td><td class="share num">36.2%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">8.4%</td></tr>
+</tbody></table>
+<div class="sechead"><h3>最近流水</h3><span class="aside"><a class="link" href="#a">全部</a></span></div>
+<div class="daysep"><b>10/28</b> 周三</div>
+<div class="txn"><div class="body"><div class="who">城市书房</div><div class="note">年度阅读计划</div></div><div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div></div>
+<div class="daysep"><b>10/26</b> 周一</div>
+<div class="txn"><div class="body"><div class="who">山野烤肉</div><div class="note">同事聚餐</div></div><div class="val"><span class="amt num">−318.00</span><span class="cat">餐饮</span></div></div>
+</div>
+<nav class="tabbar g withsearch"><button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button><button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button><button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button><button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button></nav><button aria-label="搜索" class="g gsearch ring" type="button"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.7" viewbox="0 0 17 17" width="20"><circle cx="7.2" cy="7.2" r="5.2"></circle><path d="m11.2 11.2 4 4"></path></svg></button>
+<div class="homebar"></div>
+</div></figure><figure class="screen"><figcaption>搜索 <span>浅色 · 点开后</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><h1 class="title">搜索</h1></div></div>
+<div class="scroll">
+<div class="group" style="padding-top:8px">问账本助手</div>
+<div class="recent-q"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M10 2.5c.5 3.6 1.9 5 5.5 5.5-3.6.5-5 1.9-5.5 5.5-.5-3.6-1.9-5-5.5-5.5 3.6-.5 5-1.9 5.5-5.5z"></path><path d="M15.5 13c.2 1.4.8 2 2.2 2.2-1.4.2-2 .8-2.2 2.2-.2-1.4-.8-2-2.2-2.2 1.4-.2 2-.8 2.2-2.2z"></path></svg><span>这个月还能花多少</span></div>
+<div class="recent-q"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M10 2.5c.5 3.6 1.9 5 5.5 5.5-3.6.5-5 1.9-5.5 5.5-.5-3.6-1.9-5-5.5-5.5 3.6-.5 5-1.9 5.5-5.5z"></path><path d="M15.5 13c.2 1.4.8 2 2.2 2.2-1.4.2-2 .8-2.2 2.2-.2-1.4-.8-2-2.2-2.2 1.4-.2 2-.8 2.2-2.2z"></path></svg><span>上个月餐饮比平时多吗</span></div>
+<div class="recent-q"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M10 2.5c.5 3.6 1.9 5 5.5 5.5-3.6.5-5 1.9-5.5 5.5-.5-3.6-1.9-5-5.5-5.5 3.6-.5 5-1.9 5.5-5.5z"></path><path d="M15.5 13c.2 1.4.8 2 2.2 2.2-1.4.2-2 .8-2.2 2.2-.2-1.4-.8-2-2.2-2.2 1.4-.2 2-.8 2.2-2.2z"></path></svg><span>招行信用卡这期要还多少</span></div>
+<div class="group">最近搜索</div>
+<div class="recent-q"><svg fill="none" height="15" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 16 16" width="15"><circle cx="8" cy="8" r="6"></circle><path d="M8 4.8V8l2.2 1.4"></path></svg><span>巷口小馆</span></div>
+<div class="recent-q"><svg fill="none" height="15" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 16 16" width="15"><circle cx="8" cy="8" r="6"></circle><path d="M8 4.8V8l2.2 1.4"></path></svg><span>#出差</span></div>
+<div class="note">输入商户、备注或标签会直接找流水；输入一个问题，就交给账本助手回答。</div>
+</div>
+<div class="gsearchbar"><button aria-label="返回标签" class="g gmini" type="button"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></button><div class="g gfield"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.7" viewbox="0 0 17 17" width="20"><circle cx="7.2" cy="7.2" r="5.2"></circle><path d="m11.2 11.2 4 4"></path></svg><span class="cmp-ph">搜索流水，或直接问账本</span></div></div>
+<div class="homebar"></div>
+</div></figure><figure class="screen"><figcaption>搜索 <span>浅色 · 输入了一个问题</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><h1 class="title">搜索</h1></div></div>
+<div class="scroll">
+<div class="ask-row"><span class="ask-ic"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M10 2.5c.5 3.6 1.9 5 5.5 5.5-3.6.5-5 1.9-5.5 5.5-.5-3.6-1.9-5-5.5-5.5 3.6-.5 5-1.9 5.5-5.5z"></path><path d="M15.5 13c.2 1.4.8 2 2.2 2.2-1.4.2-2 .8-2.2 2.2-.2-1.4-.8-2-2.2-2.2 1.4-.2 2-.8 2.2-2.2z"></path></svg></span><div class="ask-b"><b>问账本助手</b><span>「十月吃饭花了多少，比九月多吗」</span></div><kbd>前往</kbd></div>
+<div class="group">匹配的流水 · 0 笔</div>
+<div class="note" style="margin-top:0">没有商户或备注包含这句话。问题类的输入会把「问账本助手」放在最上面，按键盘上的「前往」直接提问。</div>
+</div>
+<div class="gsearchbar"><button aria-label="返回标签" class="g gmini" type="button"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></button><div class="g gfield"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.7" viewbox="0 0 17 17" width="20"><circle cx="7.2" cy="7.2" r="5.2"></circle><path d="m11.2 11.2 4 4"></path></svg><span class="cmp-text">十月吃饭花了多少，比九月多吗</span><i class="caret-line"></i></div></div>
+<div class="homebar"></div>
+</div></figure><figure class="screen"><figcaption>搜索 <span>深色 · 输入了一个关键词</span></figcaption><div class="phone glass" data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><h1 class="title">搜索</h1></div></div>
+<div class="scroll">
+<div class="ask-row" style="background:none;border-bottom:1px solid var(--rule);padding-left:0;padding-right:0"><span class="ask-ic"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M10 2.5c.5 3.6 1.9 5 5.5 5.5-3.6.5-5 1.9-5.5 5.5-.5-3.6-1.9-5-5.5-5.5 3.6-.5 5-1.9 5.5-5.5z"></path><path d="M15.5 13c.2 1.4.8 2 2.2 2.2-1.4.2-2 .8-2.2 2.2-.2-1.4-.8-2-2.2-2.2 1.4-.2 2-.8 2.2-2.2z"></path></svg></span><div class="ask-b"><b>问账本助手</b><span>「巷口小馆」</span></div><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></div>
+<div class="group">匹配的流水 · 3 笔</div>
+<div class="daysep"><b>10/12</b> 周一</div>
+<div class="txn"><div class="body"><div class="who">巷口小馆</div><div class="note">部门聚餐</div></div><div class="val"><span class="amt num">−236.00</span><span class="cat">餐饮</span></div></div>
+<div class="daysep"><b>09/18</b> 周五</div>
+<div class="txn"><div class="body"><div class="who">巷口小馆</div><div class="note">午饭</div></div><div class="val"><span class="amt num">−42.00</span><span class="cat">餐饮</span></div></div>
+</div>
+<div class="gsearchbar"><button aria-label="返回标签" class="g gmini" type="button"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></button><div class="g gfield"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.7" viewbox="0 0 17 17" width="20"><circle cx="7.2" cy="7.2" r="5.2"></circle><path d="m11.2 11.2 4 4"></path></svg><span class="cmp-text">巷口小馆</span><i class="caret-line"></i></div></div>
+<div class="homebar"></div>
+</div></figure><figure class="screen"><figcaption>账本助手 <span>浅色 · 从搜索进入</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账本助手</h1><span class="g gcap"><button aria-label="新对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button><button aria-label="模型与密钥" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button></span></div></div>
+<div class="scroll">
+<div class="msg-user">十月吃饭花了多少？比九月多吗</div><div class="tools"><button aria-expanded="false" class="tools-head" type="button"><span>读取了账本 3 次</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button></div><div class="msg-ai"><p>十月餐饮一共 <b class="num v-out">¥2,486.40</b>，比九月的 <b class="num">¥2,031.70</b> 多 <b class="num">¥454.70</b>（+22%）。</p>
+<h4 class="md-h">多出来的两笔</h4>
+<table class="md-tbl"><thead><tr><th>日期</th><th>商户</th><th class="r">金额</th></tr></thead><tbody><tr><td class="num">10-12</td><td>巷口小馆</td><td class="r num v-out">−236.00</td></tr><tr><td class="num">10-26</td><td>山野烤肉</td><td class="r num v-out">−318.00</td></tr></tbody></table>
+<ul class="md-ul"><li>工作日午饭和九月基本持平，日均 <span class="num">¥42</span></li><li>外卖少了 3 单</li></ul></div><div class="ans-foot"><button class="linkbtn" type="button">在流水中查看</button><span class="meta2 num">3 次读取 · 6.2 s</span></div>
+</div>
+<div class="sheet-actions g gdock composer" data-empty="true"><div class="cmp-row"><span class="cmp-ph">继续问</span><button aria-label="发送" class="sendbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg></button></div></div>
+<div class="homebar"></div>
+</div></figure></div></section>
+<section class="section"><h2>B · 放进标签栏（可选）</h2><p>作为标签时没有返回按钮，切到别的标签再回来，对话还在。默认不放，在「更多 → 标签栏」里自己选。</p>
+<div class="grid"><figure class="screen"><figcaption>账本助手 <span>浅色 · 作为一个标签</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><h1 class="title">账本助手</h1><span class="g gcap"><button aria-label="新对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button><button aria-label="模型与密钥" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button></span></div></div>
+<div class="scroll">
+<div class="msg-user">十月吃饭花了多少？比九月多吗</div><div class="tools"><button aria-expanded="false" class="tools-head" type="button"><span>读取了账本 3 次</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button></div><div class="msg-ai"><p>十月餐饮一共 <b class="num v-out">¥2,486.40</b>，比九月的 <b class="num">¥2,031.70</b> 多 <b class="num">¥454.70</b>（+22%）。</p>
+<h4 class="md-h">多出来的两笔</h4>
+<table class="md-tbl"><thead><tr><th>日期</th><th>商户</th><th class="r">金额</th></tr></thead><tbody><tr><td class="num">10-12</td><td>巷口小馆</td><td class="r num v-out">−236.00</td></tr><tr><td class="num">10-26</td><td>山野烤肉</td><td class="r num v-out">−318.00</td></tr></tbody></table>
+<ul class="md-ul"><li>工作日午饭和九月基本持平，日均 <span class="num">¥42</span></li><li>外卖少了 3 单</li></ul></div><div class="ans-foot"><button class="linkbtn" type="button">在流水中查看</button><span class="meta2 num">3 次读取 · 6.2 s</span></div>
+</div>
+<div class="sheet-actions g gdock composer above-tabs" data-empty="true"><div class="cmp-row"><span class="cmp-ph">继续问</span><button aria-label="发送" class="sendbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg></button></div></div><nav class="tabbar g withsearch"><button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button><button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button><button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M10 2.5c.5 3.6 1.9 5 5.5 5.5-3.6.5-5 1.9-5.5 5.5-.5-3.6-1.9-5-5.5-5.5 3.6-.5 5-1.9 5.5-5.5z"></path><path d="M15.5 13c.2 1.4.8 2 2.2 2.2-1.4.2-2 .8-2.2 2.2-.2-1.4-.8-2-2.2-2.2 1.4-.2 2-.8 2.2-2.2z"></path></svg></span>助手</button><button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button></nav><button aria-label="搜索" class="g gsearch" type="button"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.7" viewbox="0 0 17 17" width="20"><circle cx="7.2" cy="7.2" r="5.2"></circle><path d="m11.2 11.2 4 4"></path></svg></button>
+<div class="homebar"></div>
+</div></figure><figure class="screen"><figcaption>标签栏 <span>浅色 · 更多 → 标签栏</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">标签栏</h1></div></div>
+<div class="scroll">
+<div class="group">最多放 3 个，另外两个固定是「更多」和「搜索」</div><div class="tabcfg"><div class="row" data-on="true"><div class="body"><div class="label">财务概览</div><span class="hint">净值与本期收支</span></div><span class="check">已放入</span></div><div class="row" data-on="true"><div class="body"><div class="label">交易账本</div><span class="hint">全部流水</span></div><span class="check">已放入</span></div><div class="row" data-on="true"><div class="body"><div class="label">账本助手</div><span class="hint">用对话查询账本</span></div><span class="check">已放入</span></div><div class="row" data-on="false"><div class="body"><div class="label">账户</div><span class="hint">余额与核平</span></div><span class="check">放入</span></div><div class="row" data-on="false"><div class="body"><div class="label">收支分析</div><span class="hint">分类与趋势</span></div><span class="check">放入</span></div><div class="row" data-on="false"><div class="body"><div class="label">BQL 查询</div><span class="hint">查询与历史</span></div><span class="check">放入</span></div></div><div class="note">已经有这套配置，只要把「账本助手」加进可选列表。</div>
+</div>
+
+<div class="homebar"></div>
+</div></figure></div></section>
+<section class="section"><h2>C · 每页右上角（不推荐）</h2><p>画出来作对比。它的长处是能带上当前页面的上下文，这一点以后可以只在收支分析页上做成一个「问问这张图」的链接，不必每页都放按钮。</p>
+<div class="grid"><figure class="screen"><figcaption>概览 <span>浅色 · 每个页面右上角一个按钮</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><h1 class="title">概览</h1><button aria-label="问账本助手" class="g gspark" type="button"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M10 2.5c.5 3.6 1.9 5 5.5 5.5-3.6.5-5 1.9-5.5 5.5-.5-3.6-1.9-5-5.5-5.5 3.6-.5 5-1.9 5.5-5.5z"></path><path d="M15.5 13c.2 1.4.8 2 2.2 2.2-1.4.2-2 .8-2.2 2.2-.2-1.4-.8-2-2.2-2.2 1.4-.2 2-.8 2.2-2.2z"></path></svg></button></div></div>
+<div class="scroll">
+<div class="settle"><div class="settle-total" style="border-top:0"><dt>净值</dt><dd class="num"><span class="cur">¥</span>169,170.20</dd></div></div>
+<div class="sechead"><h3>支出分类</h3><span class="aside"><span class="num">6,862.40</span> CNY</span></div>
+<table class="tbl"><thead><tr><th scope="col">分类</th><th scope="col">金额</th><th scope="col" style="padding-right:20px">占比</th></tr></thead><tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">55.4%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">2,486.40</td><td class="share num">36.2%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">8.4%</td></tr>
+</tbody></table>
+<div class="sechead"><h3>最近流水</h3><span class="aside"><a class="link" href="#a">全部</a></span></div>
+<div class="daysep"><b>10/28</b> 周三</div>
+<div class="txn"><div class="body"><div class="who">城市书房</div><div class="note">年度阅读计划</div></div><div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div></div>
+<div class="daysep"><b>10/26</b> 周一</div>
+<div class="txn"><div class="body"><div class="who">山野烤肉</div><div class="note">同事聚餐</div></div><div class="val"><span class="amt num">−318.00</span><span class="cat">餐饮</span></div></div>
+</div>
+<nav class="tabbar g withsearch"><button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button><button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button><button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button><button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button></nav><button aria-label="搜索" class="g gsearch" type="button"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.7" viewbox="0 0 17 17" width="20"><circle cx="7.2" cy="7.2" r="5.2"></circle><path d="m11.2 11.2 4 4"></path></svg></button>
+<div class="homebar"></div>
+</div></figure><figure class="screen"><figcaption>账本助手 <span>浅色 · 带上当前页面</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><h1 class="title">账本助手</h1><span class="g gcap"><button aria-label="新对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button><button aria-label="模型与密钥" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button></span></div></div>
+<div class="scroll">
+<div class="ctx-chip">关于：概览 · 10 月 <span aria-hidden="true">×</span></div><div class="sugg-list" style="margin-top:12px"><button class="sugg-row" type="button">这个月支出主要花在哪</button><button class="sugg-row" type="button">餐饮为什么比上个月多</button><button class="sugg-row" type="button">净值变化来自哪几个账户</button></div>
+</div>
+<div class="sheet-actions g gdock composer" data-empty="true"><div class="cmp-row"><span class="cmp-ph">问问这一页</span><button aria-label="发送" class="sendbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg></button></div></div>
+<div class="homebar"></div>
+</div></figure></div></section>
+<script>
+(function () {
+  var body = document.body;
+  var lightBtn = document.getElementById('theme-light');
+  var darkBtn = document.getElementById('theme-dark');
+  var fullBtn = document.getElementById('full-length');
+  fullBtn.addEventListener('click', function () {
+    var on = fullBtn.getAttribute('aria-pressed') !== 'true';
+    fullBtn.setAttribute('aria-pressed', String(on));
+    body.dataset.length = on ? 'full' : 'screen';
+  });
+  function setGallery(theme) {
+    body.dataset.gallery = theme;
+    darkBtn.setAttribute('aria-pressed', String(theme === 'dark'));
+    lightBtn.setAttribute('aria-pressed', String(theme !== 'dark'));
+  }
+  lightBtn.addEventListener('click', function () { setGallery('light'); });
+  darkBtn.addEventListener('click', function () { setGallery('dark'); });
+  document.querySelectorAll('.disclose, .tools-head').forEach(function (b) {
+    b.addEventListener('click', function () {
+      b.setAttribute('aria-expanded', String(b.getAttribute('aria-expanded') !== 'true'));
+    });
+  });
+  document.querySelectorAll('.seg, .seg-inline').forEach(function (seg) {
+    seg.querySelectorAll('button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        seg.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-selected', String(x === btn)); });
+      });
+    });
+  });
+})();
+</script>
+<script>document.body.dataset.gallery=document.body.dataset.gallery||"light";</script>
+
