@@ -9,6 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -110,6 +113,27 @@ var streamFn agent.StreamFn = ai.StreamSimple
 // resolveModel is replaced by tests with a deterministic model.
 var resolveModel = func(provider, model string) *ai.Model { return ai.GetBuiltinModel(provider, model) }
 
+// CrashLogName is the file in the runtime root that receives the report of
+// a fatal Go error. A goroutine panic aborts the whole app in a bound
+// library, so the shell reads this file on the next launch to show it.
+const CrashLogName = "agent-crash.log"
+
+var crashOutput sync.Once
+
+func captureCrashes(runtimeRoot string) {
+	if runtimeRoot == "" {
+		return
+	}
+	crashOutput.Do(func() {
+		file, err := os.OpenFile(filepath.Join(runtimeRoot, CrashLogName), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			return
+		}
+		defer file.Close()
+		_ = debug.SetCrashOutput(file, debug.CrashOptions{})
+	})
+}
+
 // runningTurns maps a request's turnId to the cancel function of its turn.
 var runningTurns sync.Map
 
@@ -201,6 +225,7 @@ func runTurn(ctx context.Context, cancel context.CancelFunc, requestJSON string)
 	if request.Version != 1 {
 		return "", calls, errors.New("supported Agent request version is 1")
 	}
+	captureCrashes(request.RuntimeRoot)
 	if request.TurnID != "" {
 		if _, loaded := runningTurns.LoadOrStore(request.TurnID, cancel); loaded {
 			return "", calls, errors.New("turnId is already running")

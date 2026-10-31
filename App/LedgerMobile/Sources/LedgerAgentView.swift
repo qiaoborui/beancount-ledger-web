@@ -12,6 +12,7 @@ struct LedgerAgentView: View {
     @State private var draft = ""
     @State private var settingsPresented = false
     @State private var bookkeeping: BookkeepingPrefill?
+    @State private var crashReport: String?
     @FocusState private var composerFocused: Bool
 
     private struct BookkeepingPrefill: Identifiable {
@@ -36,7 +37,33 @@ struct LedgerAgentView: View {
         .onChange(of: session.privacyShielded) { _, shielded in
             if shielded { conversation.reset() }
         }
+        .task {
+            guard crashReport == nil, let repository = session.localRepository else { return }
+            crashReport = LedgerAgentCrashReport.take(
+                runtimeRoot: repository.workspace.rootDirectory.appendingPathComponent("runtime"))
+        }
         .accessibilityIdentifier("ledger-agent")
+    }
+
+    /// Shown once after the native core aborted the app during a turn.
+    private func crashBand(_ report: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("上次回答时 App 意外退出").balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.expense)
+            Text("下面是设备端引擎留下的诊断信息，不含 API Key。复制后发给开发者可以定位原因。")
+                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            ScrollView {
+                Text(report).balancedMono(size: 11).foregroundStyle(BalancedPalette.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 180)
+            HStack(spacing: 10) {
+                Button("复制诊断信息") { UIPasteboard.general.string = report }.buttonStyle(.balanced(.outline))
+                Button("关闭") { crashReport = nil }.buttonStyle(.balanced(.quiet))
+            }
+        }
+        .balancedBand()
+        .accessibilityIdentifier("ledger-agent-crash")
     }
 
     private var actions: some View {
@@ -69,6 +96,7 @@ struct LedgerAgentView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
+                    if let crashReport { crashBand(crashReport) }
                     if conversation.messages.isEmpty && !conversation.isRunning { emptyState }
                     ForEach(conversation.messages) { message in
                         switch message.role {

@@ -106,6 +106,15 @@ final class LedgerAgentTests: XCTestCase {
             custom: .init(api: .openAIResponses, baseURL: "https://gw.example.com/v1")))
     }
 
+    func testCrashReportShowsOnce() throws {
+        let runtime = try root()
+        XCTAssertNil(LedgerAgentCrashReport.take(runtimeRoot: runtime))
+        try Data("panic: boom\n\ngoroutine 7 [running]:\n".utf8)
+            .write(to: runtime.appendingPathComponent(LedgerAgentCrashReport.fileName))
+        XCTAssertEqual(LedgerAgentCrashReport.take(runtimeRoot: runtime)?.hasPrefix("panic: boom"), true)
+        XCTAssertNil(LedgerAgentCrashReport.take(runtimeRoot: runtime))
+    }
+
     func testErrorsClassifyAuthFailures() {
         XCTAssertEqual(LedgerAgentError.classify("401 Unauthorized: invalid x-api-key"), .invalidKey("401 Unauthorized: invalid x-api-key"))
         XCTAssertEqual(LedgerAgentError.classify("context deadline exceeded"), .failed("context deadline exceeded"))
