@@ -1175,11 +1175,13 @@ actor LocalLedgerRepository: LedgerRepository {
         return result
     }
     /// Runs one on-device Agent turn against the current committed generation.
-    /// The Agent reads through its own read-only tools and never stages or
-    /// publishes; a stopped task cancels the native turn.
+    /// The Agent reads through its query tools; with a draft it also edits that
+    /// private copy, and never stages or publishes. A stopped task cancels the
+    /// native turn.
     func runAgentTurn(message: String, history: [LedgerAgentTurnRequest.HistoryEntry],
                       choice: LedgerAgentModelChoice, apiKey: String, sensitiveUnlocked: Bool,
-                      runner: LedgerAgentRunner = .native) async throws -> LedgerAgentTurnResponse {
+                      draft: URL? = nil, runner: LedgerAgentRunner = .native) async throws -> LedgerAgentTurnResponse {
+        if draft != nil { LedgerAgentChecker.install() }
         let engine = engine, entrypoint = descriptor.entrypoint
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
         return try await workspace.withCurrentSnapshot { _, root in
@@ -1192,7 +1194,8 @@ actor LocalLedgerRepository: LedgerRepository {
                 let request = LedgerAgentTurnRequest(turnId: turnID, workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                     entrypoint: entrypoint, modelHandle: handle, sensitiveUnlocked: sensitiveUnlocked,
                     provider: choice.provider, model: choice.model, apiKey: apiKey,
-                    custom: choice.isCustom ? choice.custom : nil, history: history, message: message)
+                    custom: choice.isCustom ? choice.custom : nil, history: history, message: message,
+                    scratchRoot: draft?.path)
                 let encoded = try JSONEncoder().encode(request)
                 let data = try await withTaskCancellationHandler {
                     try await runner.run(encoded)
@@ -1204,6 +1207,75 @@ actor LocalLedgerRepository: LedgerRepository {
             }
             throw LedgerAgentError.failed(String(localized: "账本模型暂时不可用，请稍后重试"))
         }
+    }
+
+    /// A private copy of the current ledger for one Agent conversation.
+    func openAgentDraft() async throws -> LedgerAgentDraft {
+        await workspace.removeAgentDrafts(olderThan: Date().addingTimeInterval(-24 * 60 * 60))
+        let id = UUID()
+        let (revision, root) = try await workspace.makeAgentDraft(id: id)
+        return LedgerAgentDraft(id: id, root: root, baseRevisionID: revision.id)
+    }
+
+    func closeAgentDraft(_ draft: LedgerAgentDraft) async {
+        await workspace.removeAgentDraft(id: draft.id)
+    }
+
+    /// Stages the draft's ledger files over the generation it was copied from
+    /// and validates the result, exactly like any other prepared write. nil
+    /// when the draft matches the ledger.
+    func reviewAgentDraft(_ draft: LedgerAgentDraft) async throws -> LedgerAgentReview? {
+        let validator = validator, entrypoint = descriptor.entrypoint, source = draft.root
+        let files: LocalLedgerWorkspace.PreparedFiles
+        do {
+            files = try await workspace.prepare(expectedRevisionID: draft.baseRevisionID, mutateStage: { stage in
+                try LedgerAgentDraftMirror.apply(from: source, to: stage)
+            }, validator: { root in try await validator(root, entrypoint) })
+        } catch LocalLedgerWorkspace.WorkspaceError.staleRevision {
+            throw LedgerAgentEditError.stale
+        } catch let error as LocalLedgerWorkspace.WorkspaceError {
+            throw error
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw LedgerAgentEditError.invalid(error.localizedDescription)
+        }
+        guard !files.files.isEmpty else { return nil }
+        let preview = PreparedBookkeepingChange(id: UUID(), ledgerID: descriptor.id, draftRevision: UUID(),
+            files: files, createdAt: Date())
+        preparedOperations = preparedOperations.filter { Date().timeIntervalSince($0.value.preview.createdAt) < 900 }
+        if preparedOperations.count >= 4 { preparedOperations.removeAll() }
+        preparedOperations[preview.id] = .init(preview: preview, importID: nil, result: nil)
+        return LedgerAgentReview(id: preview.id, files: files.files.map {
+            LedgerAgentFileDiff(path: $0.path, before: $0.before, after: $0.after)
+        })
+    }
+
+    /// Commits a reviewed draft through the validated, atomic write path. The
+    /// draft then already matches the new generation, so it is rebased on it.
+    func writeAgentDraft(_ review: LedgerAgentReview, draft: LedgerAgentDraft) async throws -> LedgerAgentDraft {
+        var id = review.id
+        if preparedOperations[id].map({ Date().timeIntervalSince($0.preview.createdAt) >= 900 }) ?? true {
+            // The card outlived its prepared change; prepare it again, and
+            // write only if it is still the change the card shows.
+            guard let fresh = try await reviewAgentDraft(draft), fresh.files == review.files else {
+                throw BookkeepingError.expiredPreview
+            }
+            id = fresh.id
+        }
+        guard let operation = preparedOperations[id] else { throw BookkeepingError.expiredPreview }
+        do { _ = try await commitPrepared(operation.preview) } catch LocalLedgerWorkspace.WorkspaceError.staleRevision {
+            throw LedgerAgentEditError.stale
+        }
+        guard let revision = presentedRevisionID else { throw LocalLedgerError.previewRequired }
+        return LedgerAgentDraft(id: draft.id, root: draft.root, baseRevisionID: revision)
+    }
+
+    /// Drops a reviewed change and refreshes the draft from the current ledger.
+    func discardAgentDraft(_ review: LedgerAgentReview?, draft: LedgerAgentDraft) async throws -> LedgerAgentDraft {
+        if let review, let operation = preparedOperations[review.id] { await discardPrepared(operation.preview) }
+        let (revision, root) = try await workspace.makeAgentDraft(id: draft.id)
+        return LedgerAgentDraft(id: draft.id, root: root, baseRevisionID: revision.id)
     }
 
     private func readSnapshot(_ path: String, method: String = "GET", query: [String: String] = [:],

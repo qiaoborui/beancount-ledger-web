@@ -223,6 +223,12 @@ body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px,
 .wconfirm-foot { padding: 10px 20px 12px; font-size: 12.5px; color: var(--ink-3); }
 .wconfirm .dock-row { display: flex; gap: 10px; }
 .wconfirm .dock-row .btn { flex: 1; }
+.wconfirm-head { flex-direction: row; justify-content: space-between; align-items: baseline; }
+.wfiles { margin: 10px 20px 0; border-top: 1px solid var(--rule); }
+.wfile { border-bottom: 1px solid var(--rule); padding: 9px 0; }
+.wfile-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--ink-2); }
+.wfile-row em { font-style: normal; color: var(--ink-3); margin-left: 6px; }
+.wfile .source { margin: 8px 0 0; }
 
 </style>
 <div class="toolbar">
@@ -243,7 +249,7 @@ body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px,
 <tr><td>工具调用</td><td>回答上方一行「读取了账本 N 次」，展开后列出每次读取和 BQL 原文</td><td>能核对答案从哪里来，又不干扰阅读；BQL 和工具名用等宽字体，和账户路径一样</td></tr>
 <tr><td>输入框</td><td>底部玻璃浮层，右边一个圆形墨色按钮；回答中变成停止</td><td>和导入页的底部浮层同一套控件；最后一条消息能完整滚到浮层上方</td></tr>
 <tr><td>模型与 Key</td><td>右上角设置：服务商、模型、API Key（存钥匙串）、发给模型的内容、可用工具</td><td>Key 不随账本同步；把会发什么写清楚，而不是只放一句「注重隐私」</td></tr>
-<tr><td>写入</td><td>这一版只读：给出 beancount 草稿，引导到「记一笔」；下一阶段在对话里出确认块</td><td>和「先预览、校验后写入」的现有规则一致</td></tr>
+<tr><td>写入</td><td>助手像 coding agent 一样读、改、新建 .bean 文件并跑 bean check，但只改一份草稿副本；回答后出改动卡，按文件列出增删行，点「写入账本」才走现有的校验、原子提交</td><td>和「先预览、校验后写入」的现有规则一致；批量和大范围改动用同一套工具</td></tr>
 <tr><td>隐私锁定</td><td>锁定时整页被隐私遮罩盖住，不显示历史问题；未解锁时不开放账本工具</td><td>和其他页面的锁定规则一致</td></tr>
 <tr><td>对话记录</td><td>只在本次打开期间保留在内存里；右上角「新对话」清空</td><td>先不把问答写到磁盘，避免账本数据出现在另一个地方</td></tr>
 </tbody></table></div>
@@ -403,7 +409,7 @@ body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px,
 <div class="sheet-actions g gdock composer" data-empty="true"><div class="cmp-row"><span class="cmp-ph">问问账本，比如「上个月餐饮花了多少」</span><button aria-label="发送" class="sendbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg></button></div></div>
 <div class="homebar"></div>
 </div></figure></div></section>
-<section class="section"><h2>边界情况</h2><p>这一版只读：写入请求会给出 beancount 草稿，引导到「记一笔」。出错时说清楚原因，并保留输入。最后一帧是下一阶段的写入确认，先画出来对齐方向，这次不实现。</p>
+<section class="section"><h2>边界情况</h2><p>这一版只读：写入请求会给出 beancount 草稿，引导到「记一笔」。出错时说清楚原因，并保留输入。最后一帧是写入确认：改动卡按文件列出增删行数，展开看 diff，底部写明校验结果；账本在对话期间变了就只能放弃重来。</p>
 <div class="grid"><figure class="screen"><figcaption>写入请求 <span>浅色 · 只读版本</span></figcaption><div class="phone glass" data-theme="light">
 <div class="gtop"><div class="statusbar">
 <span class="num">09:41</span>
@@ -433,7 +439,7 @@ body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px,
 </div>
 <div class="sheet-actions g gdock composer"><div class="cmp-row"><span class="cmp-text">这个月花了多少</span><button aria-label="发送" class="sendbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg></button></div></div>
 <div class="homebar"></div>
-</div></figure><figure class="screen"><figcaption>写入确认 <span>浅色 · 下一阶段</span></figcaption><div class="phone glass" data-theme="light">
+</div></figure><figure class="screen"><figcaption>写入确认 <span>浅色 · 多文件改动</span></figcaption><div class="phone glass" data-theme="light">
 <div class="gtop"><div class="statusbar">
 <span class="num">09:41</span>
 <span class="indicators">
@@ -443,12 +449,9 @@ body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px,
 </span>
 </div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账本助手</h1><span class="g gcap"><button aria-label="新对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button><button aria-label="模型与密钥" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button></span></div></div>
 <div class="scroll">
-<div class="msg-user">把 10-12 巷口小馆那笔改到「聚餐」</div><div class="tools"><button aria-expanded="false" class="tools-head" type="button"><span>读取了账本 2 次</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button><div class="tools-list"><div class="tool" data-s="done"><i></i><div><b>搜索流水 · 巷口小馆</b><span class="mono">search_transactions</span></div></div><div class="tool" data-s="done"><i></i><div><b>账户</b><span class="mono">get_accounts</span></div></div></div></div><div class="msg-ai"><p>找到一笔，改动如下：</p></div><div class="wconfirm"><div class="wconfirm-head"><b>修改 1 笔交易</b><span class="mono">transactions/2026-10.bean</span></div>
-<div class="source diff"><span class="d-ctx">2026-10-12 * "巷口小馆" "晚饭"</span><span class="d-del">-  Expenses:Food:Dinner    236.00 CNY</span><span class="d-add">+  Expenses:Food:Social    236.00 CNY</span><span class="d-ctx">   Assets:Alipay:Balance  -236.00 CNY</span></div>
-<div class="wconfirm-foot">本机引擎校验通过后才写入，并生成一个可撤回的提交。</div>
-<div class="dock-row" style="padding:0 20px 14px"><button class="btn" type="button">不改</button><button class="btn primary" type="button">确认写入</button></div></div>
+<div class="msg-user">把 10-12 巷口小馆那笔改到「聚餐」</div><div class="tools"><button aria-expanded="false" class="tools-head" type="button"><span>读取了账本 2 次</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button><div class="tools-list"><div class="tool" data-s="done"><i></i><div><b>搜索流水 · 巷口小馆</b><span class="mono">search_transactions</span></div></div><div class="tool" data-s="done"><i></i><div><b>账户</b><span class="mono">get_accounts</span></div></div></div></div><div class="msg-ai"><p>10 月有 3 笔巷口小馆，都改到了 <code>Expenses:Food:Social</code>，并把 11 月的新流水拆到了单独的文件。bean check 已通过，确认后写入。</p></div><div class="wconfirm"><div class="wconfirm-head"><b>改动 2 个文件</b><span class="mono"><span class="d-add">+9</span> <span class="d-del">−3</span></span></div><div class="wfiles"><div class="wfile" data-open="true"><div class="wfile-row"><span class="mono">transactions/2026-10.bean</span><span class="mono"><span class="d-add">+3</span> <span class="d-del">−3</span></span></div><div class="source diff"><span class="d-ctx">  2026-10-12 * "巷口小馆" "晚饭"</span><span class="d-del">- Expenses:Food:Dinner    236.00 CNY</span><span class="d-add">+ Expenses:Food:Social    236.00 CNY</span><span class="d-ctx">  …</span><span class="d-ctx">  2026-10-19 * "巷口小馆"</span><span class="d-del">- Expenses:Food:Dinner    128.00 CNY</span><span class="d-add">+ Expenses:Food:Social    128.00 CNY</span><span class="d-ctx">  另 1 处</span></div></div><div class="wfile"><div class="wfile-row"><span class="mono">transactions/2026-11.bean <em>新文件</em></span><span class="mono"><span class="d-add">+6</span></span></div></div></div><div class="wconfirm-foot">bean check 通过 · 写入时会再校验一次，账本在对话期间有变化就需要重来。</div><div class="dock-row" style="padding:0 20px 14px"><button class="btn" type="button">放弃改动</button><button class="btn primary" type="button">写入账本</button></div></div>
 </div>
-<div class="sheet-actions g gdock composer" data-empty="true"><div class="cmp-row"><span class="cmp-ph">等待你确认…</span><button aria-label="发送" class="sendbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg></button></div></div>
+<div class="sheet-actions g gdock composer" data-empty="true"><div class="cmp-row"><span class="cmp-ph">还要怎么改…</span><button aria-label="发送" class="sendbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg></button></div></div>
 <div class="homebar"></div>
 </div></figure></div></section>
 <script>

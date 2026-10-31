@@ -1,10 +1,12 @@
 #if os(iOS)
 import SwiftUI
 
-/// 账本助手 — a read-only conversation over the local ledger. The design is
+/// 账本助手 — a conversation over the local ledger. The design is
 /// `docs/design/ios-balanced/agent.html`: questions sit in a sunken block on
 /// the right, replies run on the page with a collapsible list of the reads
 /// behind them, and the composer is the glass dock used by the import flow.
+/// The Agent edits a private draft of the ledger; the change card under the
+/// conversation is the only way that draft reaches the ledger.
 struct LedgerAgentView: View {
     var isRoot = false
     @EnvironmentObject private var session: LedgerSession
@@ -77,7 +79,7 @@ struct LedgerAgentView: View {
                     Image(systemName: "square.and.pencil").font(.system(size: 16)).frame(width: 44, height: 44)
                         .foregroundStyle(BalancedPalette.ink)
                 }
-                .disabled(conversation.messages.isEmpty && !conversation.isRunning)
+                .disabled(conversation.messages.isEmpty && !conversation.isRunning && conversation.pending == nil)
                 .accessibilityLabel("新对话")
                 .accessibilityIdentifier("ledger-agent-new")
             }
@@ -105,6 +107,14 @@ struct LedgerAgentView: View {
                         case .assistant: LedgerAgentAnswer(message: message) { bookkeeping = .init(text: question(before: message)) }
                         }
                     }
+                    if let pending = conversation.pending {
+                        LedgerAgentChangeCard(pending: pending, isBusy: conversation.isRunning,
+                                              onWrite: conversation.write, onDiscard: conversation.discard)
+                    } else if let written = conversation.written {
+                        Label(String(localized: "已写入账本 · \(written.files.count) 个文件"), systemImage: "checkmark")
+                            .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                            .accessibilityIdentifier("ledger-agent-written")
+                    }
                     switch conversation.phase {
                     case .idle: EmptyView()
                     case .running: LedgerAgentRunning()
@@ -118,6 +128,9 @@ struct LedgerAgentView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: conversation.messages.count) { _, _ in
+                withAnimation(.snappy) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            }
+            .onChange(of: conversation.pending) { _, _ in
                 withAnimation(.snappy) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
             .onChange(of: conversation.phase) { _, phase in
@@ -134,14 +147,14 @@ struct LedgerAgentView: View {
         String(localized: "这个月花了多少，主要花在哪"),
         String(localized: "最近 10 笔餐饮"),
         String(localized: "信用卡这个月还要还多少"),
-        String(localized: "今年每个月的结余"),
+        String(localized: "把上个月的打车都归到交通"),
     ]
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("想查什么？").balancedFont(size: 22, weight: .semibold).foregroundStyle(BalancedPalette.ink)
                 .padding(.top, 24)
-            Text("只读查询，结果来自本机账本。").balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
+            Text("可以查账，也可以让它改账；改动先进草稿，你确认后才写入。").balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
                 .padding(.top, 6)
             BalancedSectionLabel(text: String(localized: "试试")).padding(.top, 22)
             ForEach(Self.suggestions, id: \.self) { suggestion in
@@ -188,7 +201,7 @@ struct LedgerAgentView: View {
         case let .invalidKey(message): String(localized: "API Key 无效或已过期。") + " " + message
         case let .failed(message): message
         }
-        return reason + " " + String(localized: "账本没有改动，问题还在输入框里。")
+        return reason + " " + String(localized: "账本没有被写入，问题还在输入框里。")
     }
 
     private var composer: some View {
@@ -199,7 +212,8 @@ struct LedgerAgentView: View {
                     .padding(.horizontal, 6)
             }
             HStack(alignment: .bottom, spacing: 10) {
-                TextField(String(localized: "问问账本，比如「上个月餐饮花了多少」"), text: $draft, axis: .vertical)
+                TextField(conversation.pending == nil ? String(localized: "问问账本，比如「上个月餐饮花了多少」")
+                          : String(localized: "还要怎么改…"), text: $draft, axis: .vertical)
                     .balancedFont(size: 15)
                     .lineLimit(1...5)
                     .focused($composerFocused)
@@ -239,9 +253,10 @@ struct LedgerAgentView: View {
             return
         }
         let choice = settings.choice
-        conversation.send(question) { message, history in
+        if conversation.editor == nil { conversation.editor = .live(repository) }
+        conversation.send(question) { message, history, draftRoot in
             try await repository.runAgentTurn(message: message, history: history, choice: choice,
-                                              apiKey: key, sensitiveUnlocked: true)
+                                              apiKey: key, sensitiveUnlocked: true, draft: draftRoot)
         }
         draft = ""
     }
@@ -294,7 +309,7 @@ private struct LedgerAgentAnswer: View {
                 withAnimation(.snappy(duration: 0.2)) { toolsExpanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
-                    Text("读取了账本 \(message.toolCalls.count) 次").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                    Text(toolsSummary).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(BalancedPalette.edge)
                         .rotationEffect(.degrees(toolsExpanded ? 180 : 0))
@@ -332,14 +347,166 @@ private struct LedgerAgentAnswer: View {
         }
     }
 
+    private var toolsSummary: String {
+        let edits = message.toolCalls.filter { ["edit_file", "write_file"].contains($0.name) && !$0.isError }.count
+        return edits == 0
+            ? String(localized: "读取了账本 \(message.toolCalls.count) 次")
+            : String(localized: "调用了 \(message.toolCalls.count) 次工具，改了草稿 \(edits) 处")
+    }
+
     private var footer: String? {
         guard let duration = message.duration else { return nil }
         let seconds = duration.formatted(.number.precision(.fractionLength(1)))
         return message.toolCalls.isEmpty
             ? String(localized: "\(seconds) 秒")
-            : String(localized: "\(message.toolCalls.count) 次读取 · \(seconds) 秒")
+            : String(localized: "\(message.toolCalls.count) 次工具调用 · \(seconds) 秒")
     }
 
+}
+
+/// The draft's change against the ledger: files with their line counts, an
+/// expandable diff each, the validation result, and the only write button.
+private struct LedgerAgentChangeCard: View {
+    let pending: LedgerAgentPendingEdit
+    let isBusy: Bool
+    let onWrite: () -> Void
+    let onDiscard: () -> Void
+    @State private var expanded: Set<String> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title).balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                Spacer(minLength: 12)
+                if let review = pending.review { counts(review.added, review.removed) }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            if let review = pending.review {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(review.files) { file in fileRow(file, single: review.files.count == 1) }
+                }
+                .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+            }
+            Text(note).balancedFont(size: 12.5).foregroundStyle(noteColor)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            HStack(spacing: 10) {
+                Button(pending.review == nil ? String(localized: "放弃草稿") : String(localized: "放弃改动"), action: onDiscard)
+                    .buttonStyle(.balanced(.outline))
+                    .accessibilityIdentifier("ledger-agent-discard")
+                if pending.review != nil {
+                    Button(action: onWrite) {
+                        if pending.status == .writing { ProgressView() } else { Text("写入账本") }
+                    }
+                    .buttonStyle(.balanced(.primary))
+                    .disabled(pending.status != .ready)
+                    .accessibilityIdentifier("ledger-agent-write")
+                }
+            }
+            .disabled(isBusy || pending.status == .writing)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 14)
+        }
+        .background(BalancedPalette.sunken)
+        .accessibilityIdentifier("ledger-agent-change")
+    }
+
+    private var title: String {
+        switch pending.status {
+        case .stale: String(localized: "账本已经变了")
+        case .invalid: String(localized: "草稿没有通过校验")
+        default: String(localized: "改动 \(pending.review?.files.count ?? 0) 个文件")
+        }
+    }
+
+    private var note: String {
+        switch pending.status {
+        case .ready: String(localized: "校验通过。写入时会再校验一次，并生成一个可撤回的提交。")
+        case .writing: String(localized: "正在写入…")
+        case let .invalid(message): message + "\n" + String(localized: "可以让助手接着修，或者放弃草稿。")
+        case .stale: String(localized: "对话期间账本有了新的改动，这份草稿不能直接写入。放弃后助手会基于最新账本重做。")
+        case let .failed(message): String(localized: "没有写入：") + message
+        }
+    }
+
+    private var noteColor: Color {
+        switch pending.status {
+        case .invalid, .stale, .failed: BalancedPalette.expense
+        default: BalancedPalette.meta
+        }
+    }
+
+    private func counts(_ added: Int, _ removed: Int) -> some View {
+        HStack(spacing: 6) {
+            if added > 0 { Text(verbatim: "+\(added)").foregroundStyle(BalancedPalette.income) }
+            if removed > 0 { Text(verbatim: "−\(removed)").foregroundStyle(BalancedPalette.expense) }
+        }
+        .balancedMono(size: 12)
+    }
+
+    private func fileRow(_ file: LedgerAgentFileDiff, single: Bool) -> some View {
+        let open = single || expanded.contains(file.path)
+        return VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.snappy(duration: 0.2)) {
+                    if expanded.contains(file.path) { expanded.remove(file.path) } else { expanded.insert(file.path) }
+                }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(file.path).balancedMono(size: 12).foregroundStyle(BalancedPalette.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    switch file.change {
+                    case .added: Text("新文件").balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                    case .removed: Text("删除").balancedFont(size: 11.5).foregroundStyle(BalancedPalette.expense)
+                    case .modified: EmptyView()
+                    }
+                    Spacer(minLength: 8)
+                    counts(file.added, file.removed)
+                    if !single {
+                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(BalancedPalette.edge)
+                            .rotationEffect(.degrees(open ? 180 : 0))
+                    }
+                }
+                .frame(minHeight: 32)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(single)
+            .accessibilityValue(open ? "已展开" : "已收起")
+            if open { diff(file) }
+        }
+        .padding(.vertical, 4)
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+    }
+
+    private func diff(_ file: LedgerAgentFileDiff) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(Array(file.lines.enumerated()), id: \.offset) { _, line in
+                    switch line.kind {
+                    case .context: Text(verbatim: "  " + line.text).foregroundStyle(BalancedPalette.meta)
+                    case .added: Text(verbatim: "+ " + line.text).foregroundStyle(BalancedPalette.income)
+                    case .removed: Text(verbatim: "- " + line.text).foregroundStyle(BalancedPalette.expense)
+                    case .gap: Text(verbatim: "  … " + line.text).foregroundStyle(BalancedPalette.edge)
+                    }
+                }
+            }
+            .balancedMono(size: 11.5)
+            .textSelection(.enabled)
+            .fixedSize()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BalancedPalette.page)
+        .padding(.bottom, 8)
+    }
 }
 
 /// One Markdown block of a reply.
