@@ -66,6 +66,12 @@ whose id shares the longest prefix with it. Like a custom endpoint, it is offere
 efforts up to high, and the provider ignores them if the model cannot reason.
 Favorites keep their provider and endpoint, and each one uses that provider's key.
 
+A reply can carry charts. The system prompt teaches the model a fenced `chart`
+block of JSON (bar, line or pie; labels plus series of values), and the chat page
+draws it with Swift Charts. A block that fails validation shows as code, so a bad
+spec stays visible. The prompt also tells the model not to refer to a chart it did
+not write.
+
 ## Product decision
 
 The architecture uses an app-managed local Beancount workspace. SwiftUI reads

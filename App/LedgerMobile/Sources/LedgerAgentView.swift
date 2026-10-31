@@ -1,4 +1,5 @@
 #if os(iOS)
+import Charts
 import SwiftUI
 
 /// 账本助手 — a conversation over the local ledger. The design is
@@ -624,6 +625,8 @@ private struct LedgerAgentReplyBlock: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .balancedBand()
+        case let .chart(chart):
+            LedgerAgentChartView(chart: chart)
         }
     }
 
@@ -647,6 +650,74 @@ private struct LedgerAgentReplyBlock: View {
 
     private static func isAmount(_ cell: String) -> Bool {
         cell.replacingOccurrences(of: "*", with: "").range(of: #"^[-+¥$€£]?\s?-?[\d,]+(\.\d+)?\s?([A-Z]{3}|元|%)?$"#, options: .regularExpression) != nil
+    }
+}
+
+/// A chart the reply asked for, drawn with Swift Charts in the page's ink.
+private struct LedgerAgentChartView: View {
+    let chart: LedgerAgentChart
+    private static let palette: [Color] = [BalancedPalette.ink, BalancedPalette.expense, BalancedPalette.income,
+                                           BalancedPalette.meta, BalancedPalette.secondary, BalancedPalette.edge,
+                                           BalancedPalette.ruleStrong, BalancedPalette.rule]
+
+    private var names: [String] { chart.type == .pie ? chart.labels : chart.series.map(\.name) }
+    private var colors: [Color] { names.indices.map { Self.palette[$0 % Self.palette.count] } }
+    private var showsLegend: Bool { chart.type == .pie || chart.series.count > 1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title = chart.title, !title.isEmpty {
+                Text(verbatim: title).balancedFont(size: 14, weight: .semibold).foregroundStyle(BalancedPalette.ink)
+            }
+            plot
+                .chartForegroundStyleScale(domain: names, range: colors)
+                .chartLegend(showsLegend ? .visible : .hidden)
+                .chartLegend(position: .bottom, alignment: .leading)
+                .frame(height: chart.type == .pie ? 220 : 200)
+            if let unit = chart.unit, !unit.isEmpty, chart.type != .pie {
+                Text(verbatim: String(localized: "单位：\(unit)")).balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta)
+            }
+        }
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(verbatim: chart.title ?? String(localized: "图表")))
+    }
+
+    @ViewBuilder private var plot: some View {
+        let points = chart.points
+        switch chart.type {
+        case .bar:
+            Chart(points) { point in
+                if chart.stacked == false {
+                    BarMark(x: .value("项目", point.label), y: .value("金额", point.value))
+                        .foregroundStyle(by: .value("系列", point.series))
+                        .position(by: .value("系列", point.series))
+                } else {
+                    BarMark(x: .value("项目", point.label), y: .value("金额", point.value))
+                        .foregroundStyle(by: .value("系列", point.series))
+                }
+            }
+            .chartXAxis { AxisMarks { AxisValueLabel().font(.system(size: 10.5)) } }
+            .chartYAxis { AxisMarks { AxisGridLine(); AxisValueLabel().font(.system(size: 10.5)) } }
+        case .line:
+            Chart(points) { point in
+                LineMark(x: .value("项目", point.label), y: .value("金额", point.value))
+                    .foregroundStyle(by: .value("系列", point.series))
+                    .interpolationMethod(.monotone)
+                PointMark(x: .value("项目", point.label), y: .value("金额", point.value))
+                    .foregroundStyle(by: .value("系列", point.series))
+                    .symbolSize(18)
+            }
+            .chartXAxis { AxisMarks { AxisValueLabel().font(.system(size: 10.5)) } }
+            .chartYAxis { AxisMarks { AxisGridLine(); AxisValueLabel().font(.system(size: 10.5)) } }
+        case .pie:
+            Chart(points) { point in
+                SectorMark(angle: .value("金额", point.value), innerRadius: .ratio(0.58), angularInset: 1.5)
+                    .cornerRadius(3)
+                    .foregroundStyle(by: .value("项目", point.label))
+            }
+        }
     }
 }
 

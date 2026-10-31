@@ -893,6 +893,62 @@ struct LedgerAgentFileDiff: Identifiable, Equatable, Sendable {
     }
 }
 
+/// A chart the model asks the app to draw, written in its reply as a fenced
+/// `chart` block of JSON. A block that does not decode, or does not add up,
+/// shows as code instead.
+struct LedgerAgentChart: Codable, Equatable, Sendable {
+    enum Kind: String, Codable, Sendable { case bar, line, pie }
+    struct Series: Codable, Equatable, Sendable {
+        var name: String
+        var values: [Double]
+    }
+
+    var type: Kind
+    var title: String? = nil
+    var unit: String? = nil
+    /// Bars of different series stack unless this is false.
+    var stacked: Bool? = nil
+    var labels: [String]
+    var series: [Series]
+
+    static let maximumLabels = 60
+    static let maximumSeries = 8
+
+    init?(json: String) {
+        guard let chart = try? JSONDecoder().decode(Self.self, from: Data(json.utf8)), chart.isValid else { return nil }
+        self = chart
+    }
+
+    init(type: Kind, title: String? = nil, unit: String? = nil, stacked: Bool? = nil, labels: [String], series: [Series]) {
+        self.type = type
+        self.title = title
+        self.unit = unit
+        self.stacked = stacked
+        self.labels = labels
+        self.series = series
+    }
+
+    private var isValid: Bool {
+        guard !labels.isEmpty, labels.count <= Self.maximumLabels, !series.isEmpty, series.count <= Self.maximumSeries,
+              Set(labels).count == labels.count else { return false }
+        if type == .pie, series.count != 1 { return false }
+        return series.allSatisfy { $0.values.count == labels.count && $0.values.allSatisfy(\.isFinite) }
+            && (type != .pie || series[0].values.allSatisfy { $0 >= 0 })
+    }
+
+    /// One mark per label and series, in label order.
+    struct Point: Identifiable, Equatable, Sendable {
+        var id: String { series + "\u{1F}" + label }
+        let label: String
+        let series: String
+        let value: Double
+    }
+
+    var points: [Point] {
+        series.flatMap { entry in zip(labels, entry.values).map { Point(label: $0, series: entry.name, value: $1) } }
+    }
+}
+
 /// Splits a reply into prose and fenced code, and finds the beancount entry a
 /// read-only reply suggests for a write request.
 enum LedgerAgentReplyText {
@@ -906,6 +962,7 @@ enum LedgerAgentReplyText {
         case table(header: [String], rows: [[String]])
         case rule
         case code(String)
+        case chart(LedgerAgentChart)
     }
 
     struct ListItem: Equatable, Sendable {
@@ -918,18 +975,26 @@ enum LedgerAgentReplyText {
         var segments: [Segment] = []
         var lines: [Substring] = []
         var inCode = false
+        var language = ""
         func flush() {
             if inCode {
-                segments.append(.code(lines.joined(separator: "\n")))
+                let code = lines.joined(separator: "\n")
+                if language == "chart", let chart = LedgerAgentChart(json: code) {
+                    segments.append(.chart(chart))
+                } else {
+                    segments.append(.code(code))
+                }
             } else {
                 segments.append(contentsOf: blocks(lines))
             }
             lines = []
         }
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") {
                 flush()
                 inCode.toggle()
+                language = inCode ? trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces).lowercased() : ""
             } else {
                 lines.append(line)
             }

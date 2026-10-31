@@ -89,6 +89,32 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(LedgerAgentReplyText.segments("#话题 不是标题\n**加粗**开头"), [.prose("#话题 不是标题\n**加粗**开头")])
     }
 
+    func testChartBlocksBecomeChartsAndBadOnesStayCode() {
+        let reply = """
+        近两个月：
+        ```chart
+        {"type":"bar","title":"餐饮","unit":"元","labels":["9月","10月"],
+         "series":[{"name":"餐厅","values":[1934.5,1744]},{"name":"买菜","values":[620,580]}]}
+        ```
+        餐厅在下降。
+        """
+        let chart = LedgerAgentChart(type: .bar, title: "餐饮", unit: "元", labels: ["9月", "10月"],
+                                     series: [.init(name: "餐厅", values: [1934.5, 1744]), .init(name: "买菜", values: [620, 580])])
+        XCTAssertEqual(LedgerAgentReplyText.segments(reply).filter { $0 != .prose("") && $0 != .code("") },
+                       [.prose("近两个月："), .chart(chart), .prose("餐厅在下降。")])
+        XCTAssertEqual(chart.points.count, 4)
+        XCTAssertEqual(chart.points.first, .init(label: "9月", series: "餐厅", value: 1934.5))
+
+        // Values that do not match the labels, a pie with two series, or a
+        // negative slice are shown as the code the model wrote.
+        for json in [#"{"type":"bar","labels":["a","b"],"series":[{"name":"x","values":[1]}]}"#,
+                     #"{"type":"pie","labels":["a"],"series":[{"name":"x","values":[1]},{"name":"y","values":[2]}]}"#,
+                     #"{"type":"pie","labels":["a","b"],"series":[{"name":"x","values":[1,-2]}]}"#,
+                     #"{"type":"radar","labels":["a"],"series":[{"name":"x","values":[1]}]}"#] {
+            XCTAssertEqual(LedgerAgentReplyText.segments("```chart\n\(json)\n```").filter { $0 != .prose("") }, [.code(json)], json)
+        }
+    }
+
     func testTurnRequestEncodesOnlyFieldsTheNativeDecoderAccepts() throws {
         let request = LedgerAgentTurnRequest(turnId: "t", workspaceRoot: "/w", runtimeRoot: "/r", entrypoint: "main.bean",
             modelHandle: "h", sensitiveUnlocked: true, provider: "anthropic", model: "claude-sonnet-4-5", apiKey: "k",
