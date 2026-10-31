@@ -24,10 +24,8 @@ struct MoreView: View {
                     accessibilityIdentifier: "more-analysis-\(kind.rawValue)")
             }} header: { TerminalSectionLabel(text: String(localized: "财务分析")) }
             Section {
-                if session.isLocal {
-                    NavigationLink { LedgerAgentView() } label: {
-                        MoreNavigationRow(index: "00", icon: "bubble.left.and.text.bubble.right", title: String(localized: "账本助手"), detail: String(localized: "用对话查询账本 · 只读"))
-                    }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).listRowSeparator(.hidden).navigationLinkIndicatorVisibility(.hidden).accessibilityIdentifier("more-agent")
+                if session.isLocal, !session.compactTabDestinations.contains(.agent) {
+                    MoreDestinationButton(destination: .agent, detail: String(localized: "用对话查询账本 · 只读"), accessibilityIdentifier: "more-agent")
                 }
                 NavigationLink { CategoriesManagementView() } label: {
                     MoreNavigationRow(index: "01", icon: "tag", title: String(localized: "分类管理"), detail: String(localized: "查看与新增收支分类"))
@@ -86,7 +84,7 @@ private struct MoreDestinationButton: View {
         }.buttonStyle(.plain).listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).listRowSeparator(.hidden).accessibilityIdentifier(accessibilityIdentifier ?? "more-\(destination.rawValue)")
     }
     private var index: String {
-        switch destination { case .overview: "01"; case .transactions: "02"; case .accounts: "03"; case .assets: "01"; case .incomeExpense: "02"; case .investments: "03"; case .search: "01"; case .imports: "02"; case .currencies: "03"; case .query: "04"; case .settings: "00" }
+        switch destination { case .overview: "01"; case .transactions: "02"; case .accounts: "03"; case .assets: "01"; case .incomeExpense: "02"; case .investments: "03"; case .search: "01"; case .imports: "02"; case .currencies: "03"; case .query: "04"; case .agent: "00"; case .settings: "00" }
     }
 }
 

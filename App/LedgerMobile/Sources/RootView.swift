@@ -531,6 +531,7 @@ struct LedgerDestinationView: View {
         case .investments: LedgerAnalysisView(kind: .investments, isRoot: isRoot)
         case .currencies: CurrencyAnalysisView(isRoot: isRoot)
         case .query: BQLQueryView(isRoot: isRoot)
+        case .agent: LedgerAgentView(isRoot: isRoot)
         case .imports: ImportHistoryView(isRoot: isRoot)
         case .transactions: TransactionsView(isRoot: isRoot)
         case .accounts: AccountsView(isRoot: isRoot)
@@ -562,6 +563,7 @@ private struct LedgerRegularShell: View {
                     sidebarRow(.imports)
                     sidebarRow(.currencies)
                     sidebarRow(.query)
+                    sidebarRow(.agent)
                 }
                 Section { sidebarRow(.settings) }
             }

@@ -7,6 +7,7 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
     case investments
     case currencies
     case query
+    case agent
     case imports
     case transactions
     case accounts
@@ -26,6 +27,7 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
         case .investments: String(localized: "投资")
         case .currencies: String(localized: "货币与汇率")
         case .query: String(localized: "查询")
+        case .agent: String(localized: "账本助手")
         case .imports: String(localized: "导入")
         case .transactions: String(localized: "交易账本")
         case .accounts: String(localized: "账户")
@@ -42,6 +44,7 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
         case .investments: String(localized: "投资")
         case .currencies: String(localized: "货币")
         case .query: String(localized: "查询")
+        case .agent: String(localized: "助手")
         case .imports: String(localized: "导入")
         case .transactions: String(localized: "交易")
         case .accounts: String(localized: "账户")
@@ -58,6 +61,7 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
         case .investments: "chart.pie"
         case .currencies: "coloncurrencysign"
         case .query: "cylinder.split.1x2"
+        case .agent: "bubble.left.and.text.bubble.right"
         case .imports: "tray.and.arrow.down"
         case .transactions: "list.bullet"
         case .accounts: "book.closed"

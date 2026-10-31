@@ -47,6 +47,14 @@ final class LedgerModelsTests: XCTestCase {
         )
     }
 
+    func testAgentCanBeChosenAsACompactTab() {
+        XCTAssertTrue(LedgerDestination.compactTabCandidates.contains(.agent))
+        XCTAssertEqual(LedgerDestination.normalizedCompactTabs([.overview, .transactions, .agent]), [.overview, .transactions, .agent])
+        XCTAssertEqual(LedgerDestination.agent.compactSelection(in: [.overview, .transactions, .agent]), .agent)
+        XCTAssertEqual(LedgerDestination.agent.compactSelection(in: LedgerDestination.defaultCompactTabs), .settings)
+        XCTAssertEqual(LedgerDestination.stored("agent"), .agent)
+    }
+
     func testPasskeyAssertionUsesUnpaddedBase64URLWebAuthnJSON() throws {
         let assertion = PasskeyAssertion(
             credentialID: Data([0xFB, 0xFF]),

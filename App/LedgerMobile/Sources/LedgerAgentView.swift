@@ -6,6 +6,7 @@ import SwiftUI
 /// the right, replies run on the page with a collapsible list of the reads
 /// behind them, and the composer is the glass dock used by the import flow.
 struct LedgerAgentView: View {
+    var isRoot = false
     @EnvironmentObject private var session: LedgerSession
     @ObservedObject private var settings = LedgerAgentSettings.shared
     @StateObject private var conversation = LedgerAgentConversation()
@@ -25,7 +26,7 @@ struct LedgerAgentView: View {
             if settings.isReady { chat } else { LedgerAgentIntro { settingsPresented = true } }
         }
         .background(BalancedPalette.page)
-        .terminalPageChrome(String(localized: "账本助手"), isRoot: false, showsSync: false, actions: AnyView(actions), balanced: true)
+        .terminalPageChrome(String(localized: "账本助手"), isRoot: isRoot, showsSync: false, actions: AnyView(actions), balanced: true)
         .sheet(isPresented: $settingsPresented) {
             NavigationStack { LedgerAgentSettingsView() }
                 .ledgerPrivacyProtectedSheet()
