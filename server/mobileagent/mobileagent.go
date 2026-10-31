@@ -139,7 +139,14 @@ var runningTurns sync.Map
 
 // RunTurnJSON runs one user turn to completion and returns the final reply.
 // The call blocks; the shell runs it off the main thread.
-func RunTurnJSON(requestJSON string) (responseJSON string) {
+func RunTurnJSON(requestJSON string) string {
+	// Swift calls in through a cgo callback, whose goroutine is locked to the calling thread. PiG drives its stream with iter.Pull coroutines, and the runtime aborts the process when a goroutine on another thread resumes a coroutine created on a locked one, so the turn runs on a goroutine of its own.
+	done := make(chan string, 1)
+	go func() { done <- runTurnJSON(requestJSON) }()
+	return <-done
+}
+
+func runTurnJSON(requestJSON string) (responseJSON string) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			responseJSON = encode(turnResponseV1{Version: 1, ToolCalls: []toolCallV1{}, Error: fmt.Sprint(recovered)})
