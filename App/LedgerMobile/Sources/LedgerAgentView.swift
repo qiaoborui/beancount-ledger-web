@@ -277,21 +277,7 @@ private struct LedgerAgentAnswer: View {
         VStack(alignment: .leading, spacing: 12) {
             if !message.toolCalls.isEmpty { tools }
             ForEach(Array(LedgerAgentReplyText.segments(message.text).enumerated()), id: \.offset) { _, segment in
-                switch segment {
-                case let .prose(text):
-                    Text(Self.markdown(text)).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
-                        .lineSpacing(3)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                case let .code(code):
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        Text(code).balancedMono(size: 12.5).foregroundStyle(BalancedPalette.ink)
-                            .textSelection(.enabled)
-                            .fixedSize()
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .balancedBand()
-                }
+                LedgerAgentReplyBlock(segment: segment)
             }
             if LedgerAgentReplyText.beancountDraft(in: message.text) != nil {
                 Button("用「记一笔」录入", action: onRecord).buttonStyle(.balanced(.outline))
@@ -353,9 +339,99 @@ private struct LedgerAgentAnswer: View {
             : String(localized: "\(message.toolCalls.count) 次读取 · \(seconds) 秒")
     }
 
-    private static func markdown(_ text: String) -> AttributedString {
+}
+
+/// One Markdown block of a reply.
+private struct LedgerAgentReplyBlock: View {
+    let segment: LedgerAgentReplyText.Segment
+
+    var body: some View {
+        switch segment {
+        case let .prose(text):
+            prose(text)
+        case let .heading(level, text):
+            Text(Self.inline(text))
+                .balancedFont(size: level == 1 ? 19 : level == 2 ? 17 : 15.5, weight: .semibold, relativeTo: .headline)
+                .foregroundStyle(BalancedPalette.ink)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+                .accessibilityAddTraits(.isHeader)
+        case let .list(_, items):
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(item.marker)
+                            .balancedFont(size: 15, weight: item.marker.hasSuffix(".") ? .medium : .regular)
+                            .monospacedDigit()
+                            .foregroundStyle(BalancedPalette.meta)
+                            .frame(minWidth: 14, alignment: .trailing)
+                        prose(item.text)
+                    }
+                    .padding(.leading, CGFloat(min(item.depth, 4)) * 16)
+                }
+            }
+        case let .quote(text):
+            prose(text, color: BalancedPalette.secondary)
+                .padding(.leading, 12)
+                .overlay(alignment: .leading) { BalancedPalette.ruleStrong.frame(width: 2) }
+        case let .table(header, rows):
+            ScrollView(.horizontal, showsIndicators: false) {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 0) {
+                    GridRow {
+                        ForEach(Array(header.enumerated()), id: \.offset) { column, cell in
+                            Text(Self.inline(cell)).balancedFont(size: 13, weight: .medium).foregroundStyle(BalancedPalette.meta)
+                                .padding(.vertical, 6)
+                                .gridColumnAlignment(Self.isAmountColumn(column, rows) ? .trailing : .leading)
+                        }
+                    }
+                    BalancedPalette.ruleStrong.frame(height: 1).gridCellUnsizedAxes(.horizontal)
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                        GridRow {
+                            ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                                Text(Self.inline(cell)).balancedFont(size: 14).monospacedDigit().foregroundStyle(BalancedPalette.ink)
+                                    .padding(.vertical, 7)
+                            }
+                        }
+                        BalancedPalette.rule.frame(height: 1).gridCellUnsizedAxes(.horizontal)
+                    }
+                }
+                .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        case .rule:
+            BalancedPalette.rule.frame(height: 1).padding(.vertical, 4)
+        case let .code(code):
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(code).balancedMono(size: 12.5).foregroundStyle(BalancedPalette.ink)
+                    .textSelection(.enabled)
+                    .fixedSize()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .balancedBand()
+        }
+    }
+
+    private func prose(_ text: String, color: Color = BalancedPalette.ink) -> some View {
+        Text(Self.inline(text)).balancedFont(size: 15).foregroundStyle(color)
+            .lineSpacing(3)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private static func inline(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(text)
+    }
+
+    /// Amount columns align right so their digits line up.
+    private static func isAmountColumn(_ column: Int, _ rows: [[String]]) -> Bool {
+        let cells = rows.map { $0[column] }.filter { !$0.isEmpty }
+        return !cells.isEmpty && cells.allSatisfy(isAmount)
+    }
+
+    private static func isAmount(_ cell: String) -> Bool {
+        cell.replacingOccurrences(of: "*", with: "").range(of: #"^[-+¥$€£]?\s?-?[\d,]+(\.\d+)?\s?([A-Z]{3}|元|%)?$"#, options: .regularExpression) != nil
     }
 }
 

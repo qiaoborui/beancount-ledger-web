@@ -342,9 +342,22 @@ final class LedgerAgentConversation: ObservableObject {
 /// Splits a reply into prose and fenced code, and finds the beancount entry a
 /// read-only reply suggests for a write request.
 enum LedgerAgentReplyText {
+    /// A block of a reply's Markdown. Text inside a block keeps its inline
+    /// Markdown (emphasis, code spans, links) for the view to render.
     enum Segment: Equatable, Sendable {
         case prose(String)
+        case heading(level: Int, text: String)
+        case list(ordered: Bool, items: [ListItem])
+        case quote(String)
+        case table(header: [String], rows: [[String]])
+        case rule
         case code(String)
+    }
+
+    struct ListItem: Equatable, Sendable {
+        var marker: String
+        var text: String
+        var depth: Int
     }
 
     static func segments(_ text: String) -> [Segment] {
@@ -352,14 +365,12 @@ enum LedgerAgentReplyText {
         var lines: [Substring] = []
         var inCode = false
         func flush() {
-            let joined = lines.joined(separator: "\n")
-            lines = []
             if inCode {
-                segments.append(.code(joined))
+                segments.append(.code(lines.joined(separator: "\n")))
             } else {
-                let prose = joined.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !prose.isEmpty { segments.append(.prose(prose)) }
+                segments.append(contentsOf: blocks(lines))
             }
+            lines = []
         }
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
             if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
@@ -372,6 +383,106 @@ enum LedgerAgentReplyText {
         // An unclosed fence still shows as code.
         flush()
         return segments
+    }
+
+    private static func blocks(_ lines: [Substring]) -> [Segment] {
+        var blocks: [Segment] = []
+        var paragraph: [String] = []
+        var quote: [String] = []
+        var items: [ListItem] = []
+        var ordered = false
+        func close() {
+            let prose = paragraph.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !prose.isEmpty { blocks.append(.prose(prose)) }
+            if !quote.isEmpty { blocks.append(.quote(quote.joined(separator: "\n"))) }
+            if !items.isEmpty { blocks.append(.list(ordered: ordered, items: items)) }
+            paragraph = []
+            quote = []
+            items = []
+        }
+        var index = 0
+        while index < lines.count {
+            let raw = String(lines[index])
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            index += 1
+            if line.isEmpty {
+                close()
+            } else if let heading = heading(line) {
+                close()
+                blocks.append(heading)
+            } else if line.range(of: #"^([-*_])(\s*\1){2,}$"#, options: .regularExpression) != nil {
+                close()
+                blocks.append(.rule)
+            } else if line.contains("|"), index < lines.count, isTableDivider(String(lines[index])) {
+                close()
+                var rows: [[String]] = []
+                index += 1
+                while index < lines.count, lines[index].contains("|") {
+                    rows.append(cells(String(lines[index])))
+                    index += 1
+                }
+                let header = cells(line)
+                blocks.append(.table(header: header, rows: rows.map { row in
+                    Array((row + Array(repeating: "", count: max(0, header.count - row.count))).prefix(header.count))
+                }))
+            } else if line.hasPrefix(">") {
+                if quote.isEmpty { close() }
+                quote.append(String(line.dropFirst()).trimmingCharacters(in: .whitespaces))
+            } else if let item = listItem(raw) {
+                if items.isEmpty {
+                    close()
+                    ordered = item.marker.hasSuffix(".")
+                }
+                items.append(item)
+            } else if !items.isEmpty, raw.first == " " || raw.first == "\t" {
+                // An indented line continues the item above it.
+                items[items.count - 1].text += "\n" + line
+            } else {
+                if !quote.isEmpty || !items.isEmpty { close() }
+                paragraph.append(raw)
+            }
+        }
+        close()
+        return blocks
+    }
+
+    private static func heading(_ line: String) -> Segment? {
+        let level = line.prefix { $0 == "#" }.count
+        guard (1...6).contains(level) else { return nil }
+        let rest = line.dropFirst(level)
+        guard rest.first == " " else { return nil }
+        let text = rest.trimmingCharacters(in: .whitespaces)
+        return .heading(level: level, text: text.replacingOccurrences(of: #"\s+#+$"#, with: "", options: .regularExpression))
+    }
+
+    private static func listItem(_ raw: String) -> ListItem? {
+        let indent = raw.prefix { $0 == " " || $0 == "\t" }.reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
+        let line = raw.trimmingCharacters(in: .whitespaces)
+        if let range = line.range(of: #"^[-*+]\s+"#, options: .regularExpression) {
+            var text = String(line[range.upperBound...])
+            var marker = "•"
+            if text.hasPrefix("[ ] ") || text.hasPrefix("[x] ") || text.hasPrefix("[X] ") {
+                marker = text.hasPrefix("[ ]") ? "☐" : "☑"
+                text.removeFirst(4)
+            }
+            return ListItem(marker: marker, text: text, depth: indent / 2)
+        }
+        if let range = line.range(of: #"^\d{1,3}[.)]\s+"#, options: .regularExpression) {
+            let marker = line[range].trimmingCharacters(in: .whitespaces)
+            return ListItem(marker: String(marker.dropLast()) + ".", text: String(line[range.upperBound...]), depth: indent / 2)
+        }
+        return nil
+    }
+
+    private static func isTableDivider(_ line: String) -> Bool {
+        line.contains("-") && line.range(of: #"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$"#, options: .regularExpression) != nil
+    }
+
+    private static func cells(_ line: String) -> [String] {
+        var trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("|") { trimmed.removeFirst() }
+        if trimmed.hasSuffix("|") { trimmed.removeLast() }
+        return trimmed.split(separator: "|", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
     /// The first fenced block that opens with a dated transaction header.

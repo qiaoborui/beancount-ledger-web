@@ -54,6 +54,41 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertNil(LedgerAgentReplyText.beancountDraft(in: "十月餐饮一共 ¥2,486.40。"))
     }
 
+    func testReplySegmentsParseBlockMarkdown() {
+        let reply = """
+        ## 十月支出
+        一共 **¥2,486.40**，比九月少一些。
+        - 餐饮 ¥1,120.00
+          含外卖
+        - 交通
+          1. 地铁
+          2. 打车
+        - [x] 已对账
+
+        | 分类 | 金额 |
+        |:---|---:|
+        | 餐饮 | 1,120.00 |
+        | 交通 | 86.50 | 多余 |
+        ---
+        > 只读了已提交的账本。
+        """
+        XCTAssertEqual(LedgerAgentReplyText.segments(reply), [
+            .heading(level: 2, text: "十月支出"),
+            .prose("一共 **¥2,486.40**，比九月少一些。"),
+            .list(ordered: false, items: [
+                .init(marker: "•", text: "餐饮 ¥1,120.00\n含外卖", depth: 0),
+                .init(marker: "•", text: "交通", depth: 0),
+                .init(marker: "1.", text: "地铁", depth: 1),
+                .init(marker: "2.", text: "打车", depth: 1),
+                .init(marker: "☑", text: "已对账", depth: 0),
+            ]),
+            .table(header: ["分类", "金额"], rows: [["餐饮", "1,120.00"], ["交通", "86.50"]]),
+            .rule,
+            .quote("只读了已提交的账本。"),
+        ])
+        XCTAssertEqual(LedgerAgentReplyText.segments("#话题 不是标题\n**加粗**开头"), [.prose("#话题 不是标题\n**加粗**开头")])
+    }
+
     func testTurnRequestEncodesOnlyFieldsTheNativeDecoderAccepts() throws {
         let request = LedgerAgentTurnRequest(turnId: "t", workspaceRoot: "/w", runtimeRoot: "/r", entrypoint: "main.bean",
             modelHandle: "h", sensitiveUnlocked: true, provider: "anthropic", model: "claude-sonnet-4-5", apiKey: "k",
