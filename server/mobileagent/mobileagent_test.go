@@ -79,6 +79,9 @@ func TestRunTurnCallsLedgerToolsAndReturnsReply(t *testing.T) {
 	if len(response.ToolCalls) != 1 || response.ToolCalls[0].Name != "get_accounts" || response.ToolCalls[0].IsError {
 		t.Fatalf("unexpected tool calls: %+v", response.ToolCalls)
 	}
+	if string(response.ToolCalls[0].Arguments) != `{"activeOnly":true}` {
+		t.Fatalf("tool call arguments = %s", response.ToolCalls[0].Arguments)
+	}
 	if !strings.Contains(seenToolOutput, "Expenses:Food") {
 		t.Fatalf("model did not receive ledger accounts: %s", seenToolOutput)
 	}
@@ -109,6 +112,28 @@ func TestRunTurnRejectsStagingAndEndpointFields(t *testing.T) {
 		if response := runTurnFor(t, request); response.OK || response.Error == "" {
 			t.Fatalf("request %v accepted: %+v", extra, response)
 		}
+	}
+}
+
+func TestCancelTurnStopsARunningTurn(t *testing.T) {
+	useFaux(t)
+	started := make(chan struct{})
+	// The model call blocks until the turn's context ends, like a slow provider.
+	streamFn = func(ctx context.Context, _ *ai.Model, _ ai.TranscriptContext, _ ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	done := make(chan turnResponseV1)
+	go func() {
+		done <- runTurnFor(t, map[string]any{"version": 1, "turnId": "turn-1", "workspaceRoot": committedWorkspace(t),
+			"provider": "faux", "model": "faux-1", "message": "这个月花了多少"})
+	}()
+	<-started
+	CancelTurn("turn-1")
+	response := <-done
+	if response.OK || !response.Cancelled {
+		t.Fatalf("turn was not cancelled: %+v", response)
 	}
 }
 
@@ -181,5 +206,37 @@ func TestReadToolsRunAgainstTheCommittedGeneration(t *testing.T) {
 	joined := strings.Join(outputs, "\n")
 	if !strings.Contains(joined, "25") || !strings.Contains(joined, `"file":"main.bean"`) || strings.Contains(joined, "generations") {
 		t.Fatalf("tool outputs miss the amount or expose the container path: %s", joined)
+	}
+}
+
+func TestModelCatalogOffersKeyProviders(t *testing.T) {
+	var catalog struct {
+		Providers []struct {
+			ID     string
+			Models []struct{ ID string }
+		}
+	}
+	if err := json.Unmarshal([]byte(ModelCatalogJSON()), &catalog); err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Providers) != len(catalogProviders) || catalog.Providers[0].ID != "anthropic" {
+		t.Fatalf("providers = %+v", catalog.Providers)
+	}
+	for _, provider := range catalog.Providers {
+		if len(provider.Models) == 0 {
+			t.Fatalf("provider %s lists no models", provider.ID)
+		}
+		if resolveModel(provider.ID, provider.Models[0].ID) == nil {
+			t.Fatalf("%s/%s does not resolve", provider.ID, provider.Models[0].ID)
+		}
+	}
+}
+
+func TestRunTurnReportsAnUnavailableModelHandle(t *testing.T) {
+	useFaux(t)
+	response := runTurnFor(t, map[string]any{"version": 1, "workspaceRoot": committedWorkspace(t), "modelHandle": "gone",
+		"provider": "faux", "model": "faux-1", "message": "hi"})
+	if response.OK || !response.ModelUnavailable {
+		t.Fatalf("stale handle not reported: %+v", response)
 	}
 }

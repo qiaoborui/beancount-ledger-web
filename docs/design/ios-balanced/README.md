@@ -9,6 +9,9 @@ replacement, but as an alternative answer to the same product.
   layer (draft)
 - [`import.html`](import.html) — the bill-import flow, redesigned: import home,
   parsing, review, batch edit and editor, write and result (14 frames)
+- [`agent.html`](agent.html) — 账本助手, the read-only on-device Agent: entry,
+  first use, model and key settings, conversation, running, error, and the
+  next-phase write confirmation (10 frames)
 - [`splash.html`](splash.html) — the launch animation, drawn on a canvas
 - [`styles.css`](styles.css) — every token and component in this document
 - [`batch1/`](batch1/) — the first batch: overview, transactions, analysis,

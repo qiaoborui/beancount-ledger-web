@@ -6,6 +6,8 @@ struct NaturalLanguageBookkeepingView: View {
     @ObservedObject private var settings = BookkeepingSettings.shared
     @ObservedObject private var classificationSettings = ImportClassificationSettings.shared
     var onSaved: (() -> Void)? = nil
+    /// Prefills the sentence, for example a write request the Agent declined.
+    var initialInput = ""
 
     @State private var input = ""
     @State private var draft: BookkeepingDraft?
@@ -102,6 +104,7 @@ struct NaturalLanguageBookkeepingView: View {
                 }
             }
             .background(BalancedPalette.page.ignoresSafeArea())
+            .onAppear { if input.isEmpty { input = initialInput } }
             .navigationTitle("用一句话记账")
             .terminalNativeChrome()
             .navigationBarTitleDisplayMode(.inline)

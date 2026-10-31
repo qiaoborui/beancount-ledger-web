@@ -51,6 +51,11 @@ protocol LocalLedgerEngine: Sendable {
     func promoteRetainedStageModel(ledgerRoot: URL, runtimeRoot: URL, entrypoint: String, generationRoot: URL) async
     /// Releases the retained stage model when a publish is cancelled or fails.
     func discardRetainedStageModel(ledgerRoot: URL, entrypoint: String) async
+    /// The registered model of a committed generation, registering it first if
+    /// needed, for a caller that reads it outside this engine (the on-device
+    /// Agent). `replacing` names a handle the core reported unavailable, which
+    /// is dropped first. Nil when the engine has no native models.
+    func committedModelHandle(for request: LocalLedgerEngineRequest, replacing stale: String?) async throws -> String?
 }
 
 extension LocalLedgerEngine {
@@ -62,6 +67,7 @@ extension LocalLedgerEngine {
     // generation then registers through the normal path on its first read.
     func promoteRetainedStageModel(ledgerRoot: URL, runtimeRoot: URL, entrypoint: String, generationRoot: URL) async {}
     func discardRetainedStageModel(ledgerRoot: URL, entrypoint: String) async {}
+    func committedModelHandle(for request: LocalLedgerEngineRequest, replacing stale: String?) async throws -> String? { nil }
 }
 
 /// Retain the native envelope until the caller knows its result type. Only the
@@ -447,6 +453,39 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         return result
         #else
         throw LocalLedgerError.runtimeUnavailable
+        #endif
+    }
+
+    /// The core keeps a resolved model alive for the reader that resolved it,
+    /// so the Agent resolves the handle once per turn and then reads without
+    /// holding the gate for the whole (minutes-long) conversation turn.
+    func committedModelHandle(for original: LocalLedgerEngineRequest, replacing stale: String?) async throws -> String? {
+        #if canImport(LedgerCore)
+        let request = normalized(original)
+        guard !request.staging else { return nil }
+        await LocalModelRequestGate.shared.acquireWrite()
+        do {
+            try Task.checkCancellation()
+            if let stale, cachedHandle(request)?.handle == stale {
+                forget(stale)
+                releaseHandle(stale, request: request)
+            }
+            let handle: String
+            if let cached = cachedHandle(request) {
+                handle = cached.handle
+            } else {
+                let registered = try await register(request)
+                remember(registered.handle, version: registered.version, request: request)
+                handle = registered.handle
+            }
+            await LocalModelRequestGate.shared.releaseWrite()
+            return handle
+        } catch {
+            await LocalModelRequestGate.shared.releaseWrite()
+            throw error
+        }
+        #else
+        return nil
         #endif
     }
 
