@@ -7,6 +7,9 @@ replacement, but as an alternative answer to the same product.
 - [`index.html`](index.html) — the remaining screens (20 frames, light and dark)
 - [`glass.html`](glass.html) — batch 1 with the iOS 26 Liquid Glass control
   layer (draft)
+- [`home-glass.html`](home-glass.html) — the overview page under Liquid Glass:
+  no full-bleed fills or hairlines, so the glass bars refract one paper colour
+  (current vs. two options, light and dark)
 - [`import.html`](import.html) — the bill-import flow, redesigned: import home,
   parsing, review, batch edit and editor, write and result (14 frames)
 - [`agent.html`](agent.html) — 账本助手, the read-only on-device Agent: entry,

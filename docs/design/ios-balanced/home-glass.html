@@ -1,0 +1,1328 @@
+<title>结平 首页配色</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="batch1/styles.css">
+<style>/* Liquid Glass layer over the Balanced batch-1 frames (iOS 26 only).
+   Content is untouched; only the control layer changes. */
+:root { --gal-bg: #e8e4dc; --gal-ink: #14100c; --gal-ink-3: #6f675a; --gal-line: rgba(20, 16, 12, 0.14); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gal-bg: #e8e4dc; } }
+:root[data-theme="dark"] { --gal-bg: #e8e4dc; }
+body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.invwrap { overflow-x: auto; margin-top: 22px; }
+.inv { border-collapse: collapse; width: 100%; max-width: 980px; font-size: 13.5px; }
+.inv th { text-align: left; font-weight: 500; font-size: 12px; color: var(--gal-ink-3); padding: 8px 16px 8px 0; border-bottom: 1px solid var(--gal-line); }
+.inv td { padding: 9px 16px 9px 0; border-bottom: 1px solid var(--gal-line); vertical-align: top; }
+.inv td:first-child { white-space: nowrap; font-weight: 500; }
+.pill-yes, .pill-no { font-size: 12px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.pill-yes { background: rgba(13, 83, 70, 0.12); }
+.pill-no { background: rgba(20, 16, 12, 0.08); color: var(--gal-ink-3); }
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; max-width: 1000px; }
+.rules h3 { font-size: 14.5px; font-weight: 600; margin: 0 0 6px; }
+.rules p { font-size: 13.5px; line-height: 1.6; margin: 0; color: #57504a; }
+
+/* glass material, per theme */
+.phone.glass {
+  --glass-fill: color-mix(in srgb, var(--bg) 60%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.78);
+  --glass-hi: rgba(255, 255, 255, 0.85);
+  --glass-shadow: 0 8px 24px -10px rgba(20, 16, 12, 0.3), 0 1px 2px rgba(20, 16, 12, 0.08);
+  --glass-sel: rgba(20, 16, 12, 0.08);
+}
+.phone.glass[data-theme='dark'] {
+  --glass-fill: color-mix(in srgb, #2b2825 55%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.16);
+  --glass-hi: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.7);
+  --glass-sel: rgba(246, 243, 238, 0.12);
+}
+.phone.glass .g {
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: blur(16px) saturate(1.7);
+  backdrop-filter: blur(16px) saturate(1.7);
+  border: 0.5px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--glass-shadow);
+}
+
+/* content runs full-bleed under the chrome, inset so nothing rests under it */
+.phone.glass > .scroll { position: absolute; inset: 0; padding-top: 112px; padding-bottom: 112px; }
+.phone.glass:not(:has(> .tabbar)) > .scroll { padding-bottom: 40px; }
+.phone.glass:has(> .gdock) > .scroll { padding-bottom: 116px; }
+.gtop { position: absolute; top: 0; left: 0; right: 0; z-index: 4; background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 85%, transparent) 60%, transparent 100%); }
+.gtop::before { content: ''; position: absolute; inset: 0; z-index: -1; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+.phone.glass .appbar { gap: 8px; }
+.phone.glass .gcap { display: inline-flex; align-items: center; height: 44px; border-radius: 22px; padding: 0 2px; flex: none; }
+.phone.glass .gcap .iconbtn { width: 40px; }
+.phone.glass .gperiod { padding: 0 14px; color: var(--ink); }
+.phone.glass .appbar .back.gcircle { width: 44px; height: 44px; border-radius: 50%; margin-left: 0; }
+.phone.glass .appbar .back.text.gcircle { width: auto; border-radius: 22px; padding: 0 14px; }
+
+/* tab bar: system glass capsule floating over the content */
+.phone.glass > .tabbar { position: absolute; left: 16px; right: 16px; bottom: 26px; height: 62px; border-radius: 31px; padding: 0 6px; z-index: 4; border-top: 0; }
+.phone.glass .tab[aria-current='page'] { background: var(--glass-sel); border-radius: 26px; margin: 5px 0; }
+.phone.glass .tab[aria-current='page'] .icon::after { display: none; }
+.phone.glass > .homebar { position: absolute; left: 0; right: 0; bottom: 0; background: transparent; z-index: 5; }
+
+/* search field and filter segment */
+.phone.glass .search.g { border-radius: 20px; }
+.phone.glass .seg { margin: 4px 20px 10px; padding: 3px; gap: 2px; display: flex; border-radius: 20px; border-bottom: 0;
+  background: var(--glass-fill); -webkit-backdrop-filter: blur(16px) saturate(1.7); backdrop-filter: blur(16px) saturate(1.7);
+  border: 0.5px solid var(--glass-edge); box-shadow: inset 0 1px 0 var(--glass-hi), var(--glass-shadow); }
+.phone.glass .seg button { display: flex; align-items: center; flex: 1 1 auto; justify-content: center; border-radius: 17px; min-height: 34px; padding: 0 10px; gap: 4px; white-space: nowrap; }
+.phone.glass .seg button[aria-selected='true'] { background: var(--glass-sel); }
+.phone.glass .seg button[aria-selected='true']::after { display: none; }
+
+/* sheets: glass shell with inset corners; the reading area stays paper */
+.phone.glass .scrim { background: rgba(20, 16, 12, 0.22); padding: 0 8px 8px; }
+.phone.glass[data-theme='dark'] .scrim { background: rgba(0, 0, 0, 0.42); }
+.phone.glass .sheet.gsheet { border-radius: 34px; border-top: 0.5px solid var(--glass-edge); --glass-fill: color-mix(in srgb, var(--bg) 88%, transparent); }
+.phone.glass .sheet .btn { border-radius: 23px; }
+
+/* docked bottom actions: floating glass panel */
+.phone.glass > .gdock { position: absolute; left: 12px; right: 12px; bottom: 30px; z-index: 4; border-radius: 28px; padding: 10px !important; }
+.phone.glass > .gdock .btn { border-radius: 23px; }
+.phone.glass > .gdock .btn:not(.primary) { background: transparent; }
+
+body { background: var(--gal-bg); }
+/* tables do not inherit colour in quirks mode */
+.phone .tbl { color: var(--ink); }
+.gallery-head ol { font-size: 14px; line-height: 1.7; max-width: 760px; padding-left: 20px; margin: 10px 0 0; }
+.verdict { font-size: 14px; line-height: 1.65; max-width: 760px; margin: 8px 0 0; }
+
+/* ---- shared by both new variants ----------------------------------------
+   1. no hairline runs edge to edge: every rule stops 20pt short of the
+      screen, so nothing slices across the tab-bar capsule's rounded ends
+   2. the retained bar is a 6pt capsule pair instead of a 10pt black/red slab */
+.v-new .settle { border-top: 0 !important; }
+.v-new .band { border-top: 0; }
+.v-new .bar { height: 6px; gap: 3px; }
+.v-new .bar i { border-radius: 3px; }
+.v-new .band-foot .key::before, .v-new .key::before { border-radius: 50%; width: 8px; height: 8px; }
+.v-new .tbl { width: calc(100% - 40px); margin: 0 20px; }
+.v-new .tbl th:first-child, .v-new .tbl .cat { padding-left: 0; }
+.v-new .tbl th:last-child, .v-new .tbl .share { padding-right: 0 !important; }
+.v-new .txn { margin: 0 20px; padding-left: 0; padding-right: 0; }
+
+/* ---- A: 内嵌纸签 — the settle wells float inset with continuous corners --- */
+.v-a .settle { margin: 4px 12px 0; border-radius: 24px; padding: 18px 16px 16px; }
+.v-a .band { padding: 20px 20px 18px; }
+
+/* ---- B: 一张纸 — one surface, no fills at all ----------------------------- */
+.v-b .settle { background: transparent; padding: 18px 20px 20px; }
+.v-b .band, .v-b .band + .settle {
+  background: linear-gradient(var(--rule), var(--rule)) 20px 0 / calc(100% - 40px) 1px no-repeat;
+}
+.v-b .band { padding: 20px 20px 22px; }
+</style>
+
+<div class="toolbar">
+<button aria-pressed="false" id="full-length" type="button">全长</button>
+<span class="spacer"></span>
+<span class="hint">首页 · Liquid Glass 下的配色 · 内容与结平第一批一致</span>
+</div>
+<header class="gallery-head">
+<h1>结平 · 首页在玻璃下的配色</h1>
+<p>真机上概览页滚动时，玻璃顶栏和标签栏会把下面的内容放大、折射。现在的首页是一条条铺满屏宽的色带：浅米色的结算区、白纸、再一块米色，中间夹着 10pt 的黑红留存条，还有通栏的分隔线。它们一滑到玻璃下面，玻璃就被切成上下两种颜色，胶囊两端的折射又把横线弯成弧线，看起来像几种颜色交叉在一起。</p>
+<p>这一版<b>不删任何内容</b>：资产负债结算、留存率、收支结算、支出分类、最近流水都在，顺序不变。只改三件事：</p>
+<ol>
+<li><b>不再有通栏的色块。</b>米色结算区要么收成左右内缩的圆角纸签（方案 A），要么干脆去掉底色、和页面同一张纸（方案 B）。玻璃下面始终只有一种底色。</li>
+<li><b>不再有通栏的线。</b>分类表、流水的分隔线左右各留 20pt，不再从屏幕边缘穿过标签栏胶囊的圆头。</li>
+<li><b>留存条变轻。</b>10pt 的黑红方块改成 6pt 的圆头细条，颜色含义不变（墨色留存、赭色支出），面积小了很多。</li>
+</ol>
+<p class="verdict">推荐 <b>方案 B（一张纸）</b>：它是唯一能保证玻璃下面永远只有一种底色的做法，也最符合结平「不用容器分层次」的原则。方案 A 保留了结算区的米色识别度，但圆角纸签的上下边仍会从玻璃下面经过。浏览器里的玻璃只是近似，真机折射更明显。</p>
+</header>
+
+<section class="section">
+<h2>现状</h2>
+<p>现在的首页：通栏米色结算区、黑红留存条、通栏分隔线</p>
+<div class="grid">
+<figure class="screen">
+<figcaption>概览 <span>浅色 · 顶部</span></figcaption>
+<div class="phone glass " data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">概览</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" style="position:relative" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+</button></span>
+</div></div>
+
+<div class="scroll">
+<div class="settle">
+<div class="settle-head">
+<span class="lede">资产负债结算</span>
+<span class="num">2026-08-31</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>资产</dt>
+<dd class="num">172,069.20</dd>
+</div>
+<div class="settle-row">
+<dt>负债</dt>
+<dd class="num v-out">−2,899.00</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净值</dt>
+<dd class="num"><span class="cur">¥</span>169,170.20</dd>
+</div>
+</div>
+<div class="band">
+<div class="band-head">
+<span>本期留存率<br/><span style="font-size:11.5px">8 月 · 净结余 ÷ 收入</span></span>
+<b class="num">89.0<small>%</small></b>
+</div>
+<div aria-label="收入 50,500.00 中留存 44,948.20，支出 5,551.80" class="bar" role="img">
+<i class="kept" style="flex: 89.0"></i>
+<i class="spent" style="flex: 11.0"></i>
+</div>
+<div class="band-foot">
+<span><i class="key"></i>留存 <span class="v num">44,948.20</span></span>
+<span><i class="key k-out"></i>支出 <span class="v num">5,551.80</span></span>
+</div>
+</div>
+<div class="settle" style="border-top:1px solid var(--rule)">
+<div class="settle-head">
+<span class="lede">本期收支结算</span>
+<span class="num">8 月</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>期初净资产</dt>
+<dd class="num">124,222.00</dd>
+</div>
+<div class="settle-row">
+<dt>收入</dt>
+<dd class="num">+50,500.00</dd>
+</div>
+<div class="settle-row">
+<dt>支出</dt>
+<dd class="num">−5,551.80</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净结余</dt>
+<dd class="num v-in">+44,948.20</dd>
+</div>
+</div>
+<div class="sechead">
+<h3>支出分类</h3>
+<span class="aside"><span class="num">5,551.80</span> CNY</span>
+</div>
+<table class="tbl">
+<thead>
+<tr>
+<th scope="col">分类</th>
+<th scope="col">金额</th>
+<th scope="col" style="padding-right:20px">占比</th>
+</tr>
+</thead>
+<tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">68.4%</td></tr>
+<tr><td class="cat">食材</td><td class="amt">611.80</td><td class="share num">11.0%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">10.4%</td></tr>
+<tr><td class="cat">图书</td><td class="amt">328.00</td><td class="share num">5.9%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">236.00</td><td class="share num">4.3%</td></tr>
+</tbody>
+</table>
+<div class="sechead">
+<h3>最近流水</h3>
+<span class="aside"><a class="link" href="#txn">全部 10 笔</a></span>
+</div>
+<div class="daysep"><b>08/28</b> 周五</div>
+<div class="txn">
+<div class="body">
+<div class="who">城市书房</div>
+<div class="note">年度阅读计划</div>
+</div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三</div>
+<div class="txn">
+<div class="body">
+<div class="who">青禾市场</div>
+<div class="note">周末食材</div>
+</div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一</div>
+<div class="txn">
+<div class="body">
+<div class="who">全球指数基金</div>
+<div class="note"><span class="flow">日常账户 → 全球指数基金</span></div>
+</div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">转账</span></div>
+</div>
+<div class="note">本月尚无未平账目。Git 远端于 09:35 同步，待提交 2 笔。</div>
+</div>
+<nav class="tabbar g">
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+<figure class="screen">
+<figcaption>概览 <span>浅色 · 滚动中</span></figcaption>
+<div class="phone glass " data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">概览</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" style="position:relative" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+</button></span>
+</div></div>
+
+<div class="scroll" data-scroll="170">
+<div class="settle">
+<div class="settle-head">
+<span class="lede">资产负债结算</span>
+<span class="num">2026-08-31</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>资产</dt>
+<dd class="num">172,069.20</dd>
+</div>
+<div class="settle-row">
+<dt>负债</dt>
+<dd class="num v-out">−2,899.00</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净值</dt>
+<dd class="num"><span class="cur">¥</span>169,170.20</dd>
+</div>
+</div>
+<div class="band">
+<div class="band-head">
+<span>本期留存率<br/><span style="font-size:11.5px">8 月 · 净结余 ÷ 收入</span></span>
+<b class="num">89.0<small>%</small></b>
+</div>
+<div aria-label="收入 50,500.00 中留存 44,948.20，支出 5,551.80" class="bar" role="img">
+<i class="kept" style="flex: 89.0"></i>
+<i class="spent" style="flex: 11.0"></i>
+</div>
+<div class="band-foot">
+<span><i class="key"></i>留存 <span class="v num">44,948.20</span></span>
+<span><i class="key k-out"></i>支出 <span class="v num">5,551.80</span></span>
+</div>
+</div>
+<div class="settle" style="border-top:1px solid var(--rule)">
+<div class="settle-head">
+<span class="lede">本期收支结算</span>
+<span class="num">8 月</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>期初净资产</dt>
+<dd class="num">124,222.00</dd>
+</div>
+<div class="settle-row">
+<dt>收入</dt>
+<dd class="num">+50,500.00</dd>
+</div>
+<div class="settle-row">
+<dt>支出</dt>
+<dd class="num">−5,551.80</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净结余</dt>
+<dd class="num v-in">+44,948.20</dd>
+</div>
+</div>
+<div class="sechead">
+<h3>支出分类</h3>
+<span class="aside"><span class="num">5,551.80</span> CNY</span>
+</div>
+<table class="tbl">
+<thead>
+<tr>
+<th scope="col">分类</th>
+<th scope="col">金额</th>
+<th scope="col" style="padding-right:20px">占比</th>
+</tr>
+</thead>
+<tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">68.4%</td></tr>
+<tr><td class="cat">食材</td><td class="amt">611.80</td><td class="share num">11.0%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">10.4%</td></tr>
+<tr><td class="cat">图书</td><td class="amt">328.00</td><td class="share num">5.9%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">236.00</td><td class="share num">4.3%</td></tr>
+</tbody>
+</table>
+<div class="sechead">
+<h3>最近流水</h3>
+<span class="aside"><a class="link" href="#txn">全部 10 笔</a></span>
+</div>
+<div class="daysep"><b>08/28</b> 周五</div>
+<div class="txn">
+<div class="body">
+<div class="who">城市书房</div>
+<div class="note">年度阅读计划</div>
+</div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三</div>
+<div class="txn">
+<div class="body">
+<div class="who">青禾市场</div>
+<div class="note">周末食材</div>
+</div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一</div>
+<div class="txn">
+<div class="body">
+<div class="who">全球指数基金</div>
+<div class="note"><span class="flow">日常账户 → 全球指数基金</span></div>
+</div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">转账</span></div>
+</div>
+<div class="note">本月尚无未平账目。Git 远端于 09:35 同步，待提交 2 笔。</div>
+</div>
+<nav class="tabbar g">
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+<figure class="screen">
+<figcaption>概览 <span>深色 · 滚动中</span></figcaption>
+<div class="phone glass " data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">概览</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" style="position:relative" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+<svg class="dot" height="7" style="position:absolute;top:8px;right:8px" viewbox="0 0 7 7" width="7"><circle cx="3.5" cy="3.5" fill="var(--out)" r="3.5"></circle></svg>
+</button></span>
+</div></div>
+
+<div class="scroll" data-scroll="170">
+<div class="settle">
+<div class="settle-head">
+<span class="lede">资产负债结算</span>
+<span class="num">2026-08-31</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row"><dt>资产</dt><dd class="num">172,069.20</dd></div>
+<div class="settle-row"><dt>负债</dt><dd class="num v-out">−2,899.00</dd></div>
+</dl>
+<div class="settle-total">
+<dt>净值</dt>
+<dd class="num"><span class="cur">¥</span>169,170.20</dd>
+</div>
+</div>
+<div class="band">
+<div class="band-head">
+<span>本期留存率<br/><span style="font-size:11.5px">8 月 · 净结余 ÷ 收入</span></span>
+<b class="num">89.0<small>%</small></b>
+</div>
+<div aria-label="收入 50,500.00 中留存 44,948.20，支出 5,551.80" class="bar" role="img">
+<i class="kept" style="flex: 89.0"></i>
+<i class="spent" style="flex: 11.0"></i>
+</div>
+<div class="band-foot">
+<span><i class="key"></i>留存 <span class="v num">44,948.20</span></span>
+<span><i class="key k-out"></i>支出 <span class="v num">5,551.80</span></span>
+</div>
+</div>
+<div class="settle" style="border-top:1px solid var(--rule)">
+<div class="settle-head">
+<span class="lede">本期收支结算</span>
+<span class="num">8 月</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row"><dt>期初净资产</dt><dd class="num">124,222.00</dd></div>
+<div class="settle-row"><dt>收入</dt><dd class="num">+50,500.00</dd></div>
+<div class="settle-row"><dt>支出</dt><dd class="num">−5,551.80</dd></div>
+</dl>
+<div class="settle-total">
+<dt>净结余</dt>
+<dd class="num v-in">+44,948.20</dd>
+</div>
+</div>
+<div class="sechead">
+<h3>支出分类</h3>
+<span class="aside"><span class="num">5,551.80</span> CNY</span>
+</div>
+<table class="tbl">
+<thead>
+<tr><th scope="col">分类</th><th scope="col">金额</th><th scope="col" style="padding-right:20px">占比</th></tr>
+</thead>
+<tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">68.4%</td></tr>
+<tr><td class="cat">食材</td><td class="amt">611.80</td><td class="share num">11.0%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">10.4%</td></tr>
+<tr><td class="cat">图书</td><td class="amt">328.00</td><td class="share num">5.9%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">236.00</td><td class="share num">4.3%</td></tr>
+</tbody>
+</table>
+<div class="sechead">
+<h3>最近流水</h3>
+<span class="aside"><a class="link" href="#txn">全部 10 笔</a></span>
+</div>
+<div class="daysep"><b>08/28</b> 周五</div>
+<div class="txn">
+<div class="body"><div class="who">城市书房</div><div class="note">年度阅读计划</div></div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三</div>
+<div class="txn">
+<div class="body"><div class="who">青禾市场</div><div class="note">周末食材</div></div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一</div>
+<div class="txn">
+<div class="body"><div class="who">全球指数基金</div><div class="note"><span class="flow">日常账户 → 全球指数基金</span></div></div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">转账</span></div>
+</div>
+<div class="note">本月尚无未平账目。Git 远端于 09:35 同步，待提交 2 笔。</div>
+</div>
+<nav class="tabbar g">
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+</div>
+</section>
+<section class="section">
+<h2>方案 A · 内嵌纸签</h2>
+<p>结算区左右各缩 12pt、24pt 连续圆角，留存条变细，分隔线内缩</p>
+<div class="grid">
+<figure class="screen">
+<figcaption>概览 <span>浅色 · 顶部</span></figcaption>
+<div class="phone glass v-new v-a" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">概览</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" style="position:relative" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+</button></span>
+</div></div>
+
+<div class="scroll">
+<div class="settle">
+<div class="settle-head">
+<span class="lede">资产负债结算</span>
+<span class="num">2026-08-31</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>资产</dt>
+<dd class="num">172,069.20</dd>
+</div>
+<div class="settle-row">
+<dt>负债</dt>
+<dd class="num v-out">−2,899.00</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净值</dt>
+<dd class="num"><span class="cur">¥</span>169,170.20</dd>
+</div>
+</div>
+<div class="band">
+<div class="band-head">
+<span>本期留存率<br/><span style="font-size:11.5px">8 月 · 净结余 ÷ 收入</span></span>
+<b class="num">89.0<small>%</small></b>
+</div>
+<div aria-label="收入 50,500.00 中留存 44,948.20，支出 5,551.80" class="bar" role="img">
+<i class="kept" style="flex: 89.0"></i>
+<i class="spent" style="flex: 11.0"></i>
+</div>
+<div class="band-foot">
+<span><i class="key"></i>留存 <span class="v num">44,948.20</span></span>
+<span><i class="key k-out"></i>支出 <span class="v num">5,551.80</span></span>
+</div>
+</div>
+<div class="settle" style="border-top:1px solid var(--rule)">
+<div class="settle-head">
+<span class="lede">本期收支结算</span>
+<span class="num">8 月</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>期初净资产</dt>
+<dd class="num">124,222.00</dd>
+</div>
+<div class="settle-row">
+<dt>收入</dt>
+<dd class="num">+50,500.00</dd>
+</div>
+<div class="settle-row">
+<dt>支出</dt>
+<dd class="num">−5,551.80</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净结余</dt>
+<dd class="num v-in">+44,948.20</dd>
+</div>
+</div>
+<div class="sechead">
+<h3>支出分类</h3>
+<span class="aside"><span class="num">5,551.80</span> CNY</span>
+</div>
+<table class="tbl">
+<thead>
+<tr>
+<th scope="col">分类</th>
+<th scope="col">金额</th>
+<th scope="col" style="padding-right:20px">占比</th>
+</tr>
+</thead>
+<tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">68.4%</td></tr>
+<tr><td class="cat">食材</td><td class="amt">611.80</td><td class="share num">11.0%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">10.4%</td></tr>
+<tr><td class="cat">图书</td><td class="amt">328.00</td><td class="share num">5.9%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">236.00</td><td class="share num">4.3%</td></tr>
+</tbody>
+</table>
+<div class="sechead">
+<h3>最近流水</h3>
+<span class="aside"><a class="link" href="#txn">全部 10 笔</a></span>
+</div>
+<div class="daysep"><b>08/28</b> 周五</div>
+<div class="txn">
+<div class="body">
+<div class="who">城市书房</div>
+<div class="note">年度阅读计划</div>
+</div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三</div>
+<div class="txn">
+<div class="body">
+<div class="who">青禾市场</div>
+<div class="note">周末食材</div>
+</div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一</div>
+<div class="txn">
+<div class="body">
+<div class="who">全球指数基金</div>
+<div class="note"><span class="flow">日常账户 → 全球指数基金</span></div>
+</div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">转账</span></div>
+</div>
+<div class="note">本月尚无未平账目。Git 远端于 09:35 同步，待提交 2 笔。</div>
+</div>
+<nav class="tabbar g">
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+<figure class="screen">
+<figcaption>概览 <span>浅色 · 滚动中</span></figcaption>
+<div class="phone glass v-new v-a" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">概览</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" style="position:relative" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+</button></span>
+</div></div>
+
+<div class="scroll" data-scroll="170">
+<div class="settle">
+<div class="settle-head">
+<span class="lede">资产负债结算</span>
+<span class="num">2026-08-31</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>资产</dt>
+<dd class="num">172,069.20</dd>
+</div>
+<div class="settle-row">
+<dt>负债</dt>
+<dd class="num v-out">−2,899.00</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净值</dt>
+<dd class="num"><span class="cur">¥</span>169,170.20</dd>
+</div>
+</div>
+<div class="band">
+<div class="band-head">
+<span>本期留存率<br/><span style="font-size:11.5px">8 月 · 净结余 ÷ 收入</span></span>
+<b class="num">89.0<small>%</small></b>
+</div>
+<div aria-label="收入 50,500.00 中留存 44,948.20，支出 5,551.80" class="bar" role="img">
+<i class="kept" style="flex: 89.0"></i>
+<i class="spent" style="flex: 11.0"></i>
+</div>
+<div class="band-foot">
+<span><i class="key"></i>留存 <span class="v num">44,948.20</span></span>
+<span><i class="key k-out"></i>支出 <span class="v num">5,551.80</span></span>
+</div>
+</div>
+<div class="settle" style="border-top:1px solid var(--rule)">
+<div class="settle-head">
+<span class="lede">本期收支结算</span>
+<span class="num">8 月</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>期初净资产</dt>
+<dd class="num">124,222.00</dd>
+</div>
+<div class="settle-row">
+<dt>收入</dt>
+<dd class="num">+50,500.00</dd>
+</div>
+<div class="settle-row">
+<dt>支出</dt>
+<dd class="num">−5,551.80</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净结余</dt>
+<dd class="num v-in">+44,948.20</dd>
+</div>
+</div>
+<div class="sechead">
+<h3>支出分类</h3>
+<span class="aside"><span class="num">5,551.80</span> CNY</span>
+</div>
+<table class="tbl">
+<thead>
+<tr>
+<th scope="col">分类</th>
+<th scope="col">金额</th>
+<th scope="col" style="padding-right:20px">占比</th>
+</tr>
+</thead>
+<tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">68.4%</td></tr>
+<tr><td class="cat">食材</td><td class="amt">611.80</td><td class="share num">11.0%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">10.4%</td></tr>
+<tr><td class="cat">图书</td><td class="amt">328.00</td><td class="share num">5.9%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">236.00</td><td class="share num">4.3%</td></tr>
+</tbody>
+</table>
+<div class="sechead">
+<h3>最近流水</h3>
+<span class="aside"><a class="link" href="#txn">全部 10 笔</a></span>
+</div>
+<div class="daysep"><b>08/28</b> 周五</div>
+<div class="txn">
+<div class="body">
+<div class="who">城市书房</div>
+<div class="note">年度阅读计划</div>
+</div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三</div>
+<div class="txn">
+<div class="body">
+<div class="who">青禾市场</div>
+<div class="note">周末食材</div>
+</div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一</div>
+<div class="txn">
+<div class="body">
+<div class="who">全球指数基金</div>
+<div class="note"><span class="flow">日常账户 → 全球指数基金</span></div>
+</div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">转账</span></div>
+</div>
+<div class="note">本月尚无未平账目。Git 远端于 09:35 同步，待提交 2 笔。</div>
+</div>
+<nav class="tabbar g">
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+<figure class="screen">
+<figcaption>概览 <span>深色 · 滚动中</span></figcaption>
+<div class="phone glass v-new v-a" data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">概览</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" style="position:relative" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+<svg class="dot" height="7" style="position:absolute;top:8px;right:8px" viewbox="0 0 7 7" width="7"><circle cx="3.5" cy="3.5" fill="var(--out)" r="3.5"></circle></svg>
+</button></span>
+</div></div>
+
+<div class="scroll" data-scroll="170">
+<div class="settle">
+<div class="settle-head">
+<span class="lede">资产负债结算</span>
+<span class="num">2026-08-31</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row"><dt>资产</dt><dd class="num">172,069.20</dd></div>
+<div class="settle-row"><dt>负债</dt><dd class="num v-out">−2,899.00</dd></div>
+</dl>
+<div class="settle-total">
+<dt>净值</dt>
+<dd class="num"><span class="cur">¥</span>169,170.20</dd>
+</div>
+</div>
+<div class="band">
+<div class="band-head">
+<span>本期留存率<br/><span style="font-size:11.5px">8 月 · 净结余 ÷ 收入</span></span>
+<b class="num">89.0<small>%</small></b>
+</div>
+<div aria-label="收入 50,500.00 中留存 44,948.20，支出 5,551.80" class="bar" role="img">
+<i class="kept" style="flex: 89.0"></i>
+<i class="spent" style="flex: 11.0"></i>
+</div>
+<div class="band-foot">
+<span><i class="key"></i>留存 <span class="v num">44,948.20</span></span>
+<span><i class="key k-out"></i>支出 <span class="v num">5,551.80</span></span>
+</div>
+</div>
+<div class="settle" style="border-top:1px solid var(--rule)">
+<div class="settle-head">
+<span class="lede">本期收支结算</span>
+<span class="num">8 月</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row"><dt>期初净资产</dt><dd class="num">124,222.00</dd></div>
+<div class="settle-row"><dt>收入</dt><dd class="num">+50,500.00</dd></div>
+<div class="settle-row"><dt>支出</dt><dd class="num">−5,551.80</dd></div>
+</dl>
+<div class="settle-total">
+<dt>净结余</dt>
+<dd class="num v-in">+44,948.20</dd>
+</div>
+</div>
+<div class="sechead">
+<h3>支出分类</h3>
+<span class="aside"><span class="num">5,551.80</span> CNY</span>
+</div>
+<table class="tbl">
+<thead>
+<tr><th scope="col">分类</th><th scope="col">金额</th><th scope="col" style="padding-right:20px">占比</th></tr>
+</thead>
+<tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">68.4%</td></tr>
+<tr><td class="cat">食材</td><td class="amt">611.80</td><td class="share num">11.0%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">10.4%</td></tr>
+<tr><td class="cat">图书</td><td class="amt">328.00</td><td class="share num">5.9%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">236.00</td><td class="share num">4.3%</td></tr>
+</tbody>
+</table>
+<div class="sechead">
+<h3>最近流水</h3>
+<span class="aside"><a class="link" href="#txn">全部 10 笔</a></span>
+</div>
+<div class="daysep"><b>08/28</b> 周五</div>
+<div class="txn">
+<div class="body"><div class="who">城市书房</div><div class="note">年度阅读计划</div></div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三</div>
+<div class="txn">
+<div class="body"><div class="who">青禾市场</div><div class="note">周末食材</div></div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一</div>
+<div class="txn">
+<div class="body"><div class="who">全球指数基金</div><div class="note"><span class="flow">日常账户 → 全球指数基金</span></div></div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">转账</span></div>
+</div>
+<div class="note">本月尚无未平账目。Git 远端于 09:35 同步，待提交 2 笔。</div>
+</div>
+<nav class="tabbar g">
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+</div>
+</section>
+<section class="section">
+<h2>方案 B · 一张纸（推荐）</h2>
+<p>结算区去掉底色，靠内缩的细线和墨色合计线分组，玻璃下只有一种纸色</p>
+<div class="grid">
+<figure class="screen">
+<figcaption>概览 <span>浅色 · 顶部</span></figcaption>
+<div class="phone glass v-new v-b" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">概览</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" style="position:relative" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+</button></span>
+</div></div>
+
+<div class="scroll">
+<div class="settle">
+<div class="settle-head">
+<span class="lede">资产负债结算</span>
+<span class="num">2026-08-31</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>资产</dt>
+<dd class="num">172,069.20</dd>
+</div>
+<div class="settle-row">
+<dt>负债</dt>
+<dd class="num v-out">−2,899.00</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净值</dt>
+<dd class="num"><span class="cur">¥</span>169,170.20</dd>
+</div>
+</div>
+<div class="band">
+<div class="band-head">
+<span>本期留存率<br/><span style="font-size:11.5px">8 月 · 净结余 ÷ 收入</span></span>
+<b class="num">89.0<small>%</small></b>
+</div>
+<div aria-label="收入 50,500.00 中留存 44,948.20，支出 5,551.80" class="bar" role="img">
+<i class="kept" style="flex: 89.0"></i>
+<i class="spent" style="flex: 11.0"></i>
+</div>
+<div class="band-foot">
+<span><i class="key"></i>留存 <span class="v num">44,948.20</span></span>
+<span><i class="key k-out"></i>支出 <span class="v num">5,551.80</span></span>
+</div>
+</div>
+<div class="settle" style="border-top:1px solid var(--rule)">
+<div class="settle-head">
+<span class="lede">本期收支结算</span>
+<span class="num">8 月</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>期初净资产</dt>
+<dd class="num">124,222.00</dd>
+</div>
+<div class="settle-row">
+<dt>收入</dt>
+<dd class="num">+50,500.00</dd>
+</div>
+<div class="settle-row">
+<dt>支出</dt>
+<dd class="num">−5,551.80</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净结余</dt>
+<dd class="num v-in">+44,948.20</dd>
+</div>
+</div>
+<div class="sechead">
+<h3>支出分类</h3>
+<span class="aside"><span class="num">5,551.80</span> CNY</span>
+</div>
+<table class="tbl">
+<thead>
+<tr>
+<th scope="col">分类</th>
+<th scope="col">金额</th>
+<th scope="col" style="padding-right:20px">占比</th>
+</tr>
+</thead>
+<tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">68.4%</td></tr>
+<tr><td class="cat">食材</td><td class="amt">611.80</td><td class="share num">11.0%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">10.4%</td></tr>
+<tr><td class="cat">图书</td><td class="amt">328.00</td><td class="share num">5.9%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">236.00</td><td class="share num">4.3%</td></tr>
+</tbody>
+</table>
+<div class="sechead">
+<h3>最近流水</h3>
+<span class="aside"><a class="link" href="#txn">全部 10 笔</a></span>
+</div>
+<div class="daysep"><b>08/28</b> 周五</div>
+<div class="txn">
+<div class="body">
+<div class="who">城市书房</div>
+<div class="note">年度阅读计划</div>
+</div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三</div>
+<div class="txn">
+<div class="body">
+<div class="who">青禾市场</div>
+<div class="note">周末食材</div>
+</div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一</div>
+<div class="txn">
+<div class="body">
+<div class="who">全球指数基金</div>
+<div class="note"><span class="flow">日常账户 → 全球指数基金</span></div>
+</div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">转账</span></div>
+</div>
+<div class="note">本月尚无未平账目。Git 远端于 09:35 同步，待提交 2 笔。</div>
+</div>
+<nav class="tabbar g">
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+<figure class="screen">
+<figcaption>概览 <span>浅色 · 滚动中</span></figcaption>
+<div class="phone glass v-new v-b" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">概览</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" style="position:relative" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+</button></span>
+</div></div>
+
+<div class="scroll" data-scroll="170">
+<div class="settle">
+<div class="settle-head">
+<span class="lede">资产负债结算</span>
+<span class="num">2026-08-31</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>资产</dt>
+<dd class="num">172,069.20</dd>
+</div>
+<div class="settle-row">
+<dt>负债</dt>
+<dd class="num v-out">−2,899.00</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净值</dt>
+<dd class="num"><span class="cur">¥</span>169,170.20</dd>
+</div>
+</div>
+<div class="band">
+<div class="band-head">
+<span>本期留存率<br/><span style="font-size:11.5px">8 月 · 净结余 ÷ 收入</span></span>
+<b class="num">89.0<small>%</small></b>
+</div>
+<div aria-label="收入 50,500.00 中留存 44,948.20，支出 5,551.80" class="bar" role="img">
+<i class="kept" style="flex: 89.0"></i>
+<i class="spent" style="flex: 11.0"></i>
+</div>
+<div class="band-foot">
+<span><i class="key"></i>留存 <span class="v num">44,948.20</span></span>
+<span><i class="key k-out"></i>支出 <span class="v num">5,551.80</span></span>
+</div>
+</div>
+<div class="settle" style="border-top:1px solid var(--rule)">
+<div class="settle-head">
+<span class="lede">本期收支结算</span>
+<span class="num">8 月</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>期初净资产</dt>
+<dd class="num">124,222.00</dd>
+</div>
+<div class="settle-row">
+<dt>收入</dt>
+<dd class="num">+50,500.00</dd>
+</div>
+<div class="settle-row">
+<dt>支出</dt>
+<dd class="num">−5,551.80</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净结余</dt>
+<dd class="num v-in">+44,948.20</dd>
+</div>
+</div>
+<div class="sechead">
+<h3>支出分类</h3>
+<span class="aside"><span class="num">5,551.80</span> CNY</span>
+</div>
+<table class="tbl">
+<thead>
+<tr>
+<th scope="col">分类</th>
+<th scope="col">金额</th>
+<th scope="col" style="padding-right:20px">占比</th>
+</tr>
+</thead>
+<tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">68.4%</td></tr>
+<tr><td class="cat">食材</td><td class="amt">611.80</td><td class="share num">11.0%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">10.4%</td></tr>
+<tr><td class="cat">图书</td><td class="amt">328.00</td><td class="share num">5.9%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">236.00</td><td class="share num">4.3%</td></tr>
+</tbody>
+</table>
+<div class="sechead">
+<h3>最近流水</h3>
+<span class="aside"><a class="link" href="#txn">全部 10 笔</a></span>
+</div>
+<div class="daysep"><b>08/28</b> 周五</div>
+<div class="txn">
+<div class="body">
+<div class="who">城市书房</div>
+<div class="note">年度阅读计划</div>
+</div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三</div>
+<div class="txn">
+<div class="body">
+<div class="who">青禾市场</div>
+<div class="note">周末食材</div>
+</div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一</div>
+<div class="txn">
+<div class="body">
+<div class="who">全球指数基金</div>
+<div class="note"><span class="flow">日常账户 → 全球指数基金</span></div>
+</div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">转账</span></div>
+</div>
+<div class="note">本月尚无未平账目。Git 远端于 09:35 同步，待提交 2 笔。</div>
+</div>
+<nav class="tabbar g">
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+<figure class="screen">
+<figcaption>概览 <span>深色 · 滚动中</span></figcaption>
+<div class="phone glass v-new v-b" data-theme="dark">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">概览</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" style="position:relative" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+<svg class="dot" height="7" style="position:absolute;top:8px;right:8px" viewbox="0 0 7 7" width="7"><circle cx="3.5" cy="3.5" fill="var(--out)" r="3.5"></circle></svg>
+</button></span>
+</div></div>
+
+<div class="scroll" data-scroll="170">
+<div class="settle">
+<div class="settle-head">
+<span class="lede">资产负债结算</span>
+<span class="num">2026-08-31</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row"><dt>资产</dt><dd class="num">172,069.20</dd></div>
+<div class="settle-row"><dt>负债</dt><dd class="num v-out">−2,899.00</dd></div>
+</dl>
+<div class="settle-total">
+<dt>净值</dt>
+<dd class="num"><span class="cur">¥</span>169,170.20</dd>
+</div>
+</div>
+<div class="band">
+<div class="band-head">
+<span>本期留存率<br/><span style="font-size:11.5px">8 月 · 净结余 ÷ 收入</span></span>
+<b class="num">89.0<small>%</small></b>
+</div>
+<div aria-label="收入 50,500.00 中留存 44,948.20，支出 5,551.80" class="bar" role="img">
+<i class="kept" style="flex: 89.0"></i>
+<i class="spent" style="flex: 11.0"></i>
+</div>
+<div class="band-foot">
+<span><i class="key"></i>留存 <span class="v num">44,948.20</span></span>
+<span><i class="key k-out"></i>支出 <span class="v num">5,551.80</span></span>
+</div>
+</div>
+<div class="settle" style="border-top:1px solid var(--rule)">
+<div class="settle-head">
+<span class="lede">本期收支结算</span>
+<span class="num">8 月</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row"><dt>期初净资产</dt><dd class="num">124,222.00</dd></div>
+<div class="settle-row"><dt>收入</dt><dd class="num">+50,500.00</dd></div>
+<div class="settle-row"><dt>支出</dt><dd class="num">−5,551.80</dd></div>
+</dl>
+<div class="settle-total">
+<dt>净结余</dt>
+<dd class="num v-in">+44,948.20</dd>
+</div>
+</div>
+<div class="sechead">
+<h3>支出分类</h3>
+<span class="aside"><span class="num">5,551.80</span> CNY</span>
+</div>
+<table class="tbl">
+<thead>
+<tr><th scope="col">分类</th><th scope="col">金额</th><th scope="col" style="padding-right:20px">占比</th></tr>
+</thead>
+<tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">68.4%</td></tr>
+<tr><td class="cat">食材</td><td class="amt">611.80</td><td class="share num">11.0%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">10.4%</td></tr>
+<tr><td class="cat">图书</td><td class="amt">328.00</td><td class="share num">5.9%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">236.00</td><td class="share num">4.3%</td></tr>
+</tbody>
+</table>
+<div class="sechead">
+<h3>最近流水</h3>
+<span class="aside"><a class="link" href="#txn">全部 10 笔</a></span>
+</div>
+<div class="daysep"><b>08/28</b> 周五</div>
+<div class="txn">
+<div class="body"><div class="who">城市书房</div><div class="note">年度阅读计划</div></div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三</div>
+<div class="txn">
+<div class="body"><div class="who">青禾市场</div><div class="note">周末食材</div></div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一</div>
+<div class="txn">
+<div class="body"><div class="who">全球指数基金</div><div class="note"><span class="flow">日常账户 → 全球指数基金</span></div></div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">转账</span></div>
+</div>
+<div class="note">本月尚无未平账目。Git 远端于 09:35 同步，待提交 2 笔。</div>
+</div>
+<nav class="tabbar g">
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+</div>
+</section>
+
+<script>
+document.querySelectorAll('[data-scroll]').forEach(function (el) { el.scrollTop = +el.dataset.scroll; });
+(function () {
+  var b = document.getElementById('full-length');
+  b.addEventListener('click', function () {
+    var on = b.getAttribute('aria-pressed') !== 'true';
+    b.setAttribute('aria-pressed', String(on));
+    document.body.dataset.length = on ? 'full' : 'screen';
+  });
+})();
+</script>
+
+<script>document.body.dataset.gallery=document.body.dataset.gallery||"light";</script>
