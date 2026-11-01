@@ -105,7 +105,7 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
         let detail = concealsContent ? String(localized: "正在处理（第 \(count) 步）") : step.title
         if #available(iOS 26.0, *), let task = continued as? BGContinuedProcessingTask {
             task.updateTitle(String(localized: "账本助手正在处理"), subtitle: detail)
-            advanceProgress(task, by: 20)
+            advanceProgress(task, stepped: true)
         }
         updateActivity(.init(phase: .running, detail: detail, steps: count))
     }
@@ -211,7 +211,7 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
                     return
                 }
                 if #available(iOS 26.0, *), let task = self.continued as? BGContinuedProcessingTask {
-                    self.advanceProgress(task, by: 1)
+                    self.advanceProgress(task, stepped: false)
                 }
             }
         }
@@ -277,7 +277,7 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
                 LedgerAgentBackgroundRun.shared.continuedExpired()
             }
         }
-        task.progress.totalUnitCount = 1000
+        task.progress.totalUnitCount = Self.progressUnits
         task.progress.completedUnitCount = 0
     }
 
@@ -297,15 +297,23 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
         updateActivity(.init(phase: .running, detail: String(localized: "正在后台继续处理"), steps: steps))
     }
 
+    /// Fine enough that the bar can keep moving for hours.
+    static let progressUnits: Int64 = 1_000_000
+
     /// Progress the loop cannot measure: it approaches the end over the
-    /// turn's ten-minute limit and never stands still, and each step jumps
-    /// it ahead a little.
+    /// turn's ten-minute limit, and each step takes a fifteenth of what is
+    /// left. It must never stand still, because the system expires a
+    /// continued task whose progress stops: the old 1000-unit bar reached its
+    /// cap after a few dozen steps and froze there. Every tick still takes a
+    /// sliver of what is left, so the bar creeps on however long it runs.
     @available(iOS 26.0, *)
-    private func advanceProgress(_ task: BGContinuedProcessingTask, by minimum: Int64) {
+    private func advanceProgress(_ task: BGContinuedProcessingTask, stepped: Bool) {
         let elapsed = Date().timeIntervalSince(startedAt)
-        let target = Int64(950 * (1 - exp(-elapsed / 180)))
-        let next = max(task.progress.completedUnitCount + minimum, target)
-        task.progress.completedUnitCount = min(next, task.progress.totalUnitCount - 10)
+        let total = task.progress.totalUnitCount
+        let done = task.progress.completedUnitCount
+        let target = Int64(Double(total) * 0.97 * (1 - exp(-elapsed / 180)))
+        let minimum = max(1, (total - done) / (stepped ? 15 : 600))
+        task.progress.completedUnitCount = min(max(done + minimum, target), total - 1)
     }
 
     /// Carries the task the launch handler gets to the main actor, where it
