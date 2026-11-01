@@ -33,6 +33,7 @@ struct LedgerMobileApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .ledgerSoftTopEdge()
                 .environmentObject(session)
                 .task {
                     session.startLocalAutomaticSyncServices()

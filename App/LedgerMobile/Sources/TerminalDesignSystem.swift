@@ -179,6 +179,7 @@ struct TerminalPageChrome: ViewModifier {
                     }
                 }
             }
+            .ledgerSoftTopEdge()
             .ledgerGlassTopBar {
                 if horizontalSizeClass != .regular {
                     // `.appbar` (styles.css): `padding: 4px var(--pad) 10px`
@@ -459,6 +460,7 @@ struct TerminalNativeChrome: ViewModifier {
             .background(TerminalPalette.page)
             .tint(TerminalPalette.accent)
             .ledgerGlassNavigationBar()
+            .ledgerSoftTopEdge()
             .toolbarColorScheme(nil, for: .navigationBar)
             .listStyle(.plain)
             .listSectionSpacing(8)
