@@ -193,12 +193,12 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
     }
 
     /// Progress the loop cannot measure: it approaches the end over the
-    /// turn's three-minute limit and never stands still, and each step jumps
+    /// turn's ten-minute limit and never stands still, and each step jumps
     /// it ahead a little.
     @available(iOS 26.0, *)
     private func advanceProgress(_ task: BGContinuedProcessingTask, by minimum: Int64) {
         let elapsed = Date().timeIntervalSince(startedAt)
-        let target = Int64(950 * (1 - exp(-elapsed / 90)))
+        let target = Int64(950 * (1 - exp(-elapsed / 180)))
         let next = max(task.progress.completedUnitCount + minimum, target)
         task.progress.completedUnitCount = min(next, task.progress.totalUnitCount - 10)
     }

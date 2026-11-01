@@ -67,6 +67,10 @@ final class LedgerAgentSessions: ObservableObject {
         var load: @Sendable () async -> [Data]
         var remove: @Sendable (UUID) async -> Void
         var removeAll: @Sendable () async -> Void
+        /// The model-facing transcript, stored apart from the record so the
+        /// history list stays small; `remove` drops it too.
+        var saveTranscript: @Sendable (UUID, Data) async throws -> Void = { _, _ in }
+        var loadTranscript: @Sendable (UUID) async -> Data? = { _ in nil }
     }
 
     @Published private(set) var current: LedgerAgentConversation
@@ -117,7 +121,15 @@ final class LedgerAgentSessions: ObservableObject {
         guard id != current.id else { return }
         if let background, background.id == id { return show(background) }
         guard let record = saved.first(where: { $0.id == id }) else { return }
-        show(LedgerAgentConversation(restoring: record))
+        let reopened = LedgerAgentConversation(restoring: record)
+        show(reopened)
+        // A transcript dropped with an unwritten change no longer matches
+        // the ledger the model will read; the visible history is enough.
+        guard !record.unwrittenChange, let storage else { return }
+        Task { [weak reopened] in
+            guard let data = await storage.loadTranscript(id) else { return }
+            reopened?.adoptTranscript(String(decoding: data, as: UTF8.self))
+        }
     }
 
     /// After a notification about the conversation in the background, show it.
@@ -189,8 +201,10 @@ final class LedgerAgentSessions: ObservableObject {
         merge([record])
         guard let storage, let data = try? Self.encoder.encode(record) else { return }
         let removed = prune()
+        let transcript = conversation.transcript.map { Data($0.utf8) }
         Task {
             try? await storage.save(record.id, data)
+            if let transcript { try? await storage.saveTranscript(record.id, transcript) }
             for id in removed { await storage.remove(id) }
         }
     }
@@ -231,6 +245,8 @@ extension LedgerAgentSessions.Storage {
             save: { try await workspace.saveAgentConversation(id: $0, data: $1) },
             load: { await workspace.agentConversations() },
             remove: { await workspace.removeAgentConversation(id: $0) },
-            removeAll: { await workspace.removeAgentConversations() })
+            removeAll: { await workspace.removeAgentConversations() },
+            saveTranscript: { try await workspace.saveAgentTranscript(id: $0, data: $1) },
+            loadTranscript: { await workspace.agentTranscript(id: $0) })
     }
 }

@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/MichaelKinsy/PiG/agent"
@@ -24,10 +25,22 @@ import (
 )
 
 const (
-	maxTurns        = 12
+	maxTurns        = 20
 	maxEditTurns    = 40
 	maxMessageBytes = 12000
-	turnTimeout     = 3 * time.Minute
+	// turnTimeout is the hard bound of a whole turn. Stalls are caught much
+	// sooner by the network budgets in transport.go; this only stops a
+	// model that keeps working without converging.
+	turnTimeout = 10 * time.Minute
+	// bonusTurns are what a turn gets after its tool budget is spent, to
+	// answer from what it already read.
+	bonusTurns = 2
+)
+
+// Prompts the loop adds on its own when a turn ends without an answer.
+const (
+	nudgeEmptyReply = "（系统提示：上一条回复没有任何文字。请直接用中文回答用户的问题；需要的数据已经在上面的工具结果里。）"
+	nudgeToolBudget = "（系统提示：这一轮的工具调用次数已经用完，不能再调用工具。请根据已经取得的结果直接用中文回答；没查完的部分说明还缺什么。）"
 )
 
 type turnRequestV1 struct {
@@ -52,9 +65,15 @@ type turnRequestV1 struct {
 	// edit with file tools. The shell diffs it against the committed
 	// generation and writes the change only after the user confirms.
 	ScratchRoot string `json:"scratchRoot,omitempty"`
-	// History is the prior visible conversation; tool calls are not replayed.
+	// History is the prior visible conversation without tool calls, for a
+	// conversation that has no transcript yet (one saved by an older build).
 	History []historyMessageV1 `json:"history"`
-	Message string             `json:"message"`
+	// Transcript is the transcript the previous turn of this conversation
+	// returned, sent back unchanged; it replaces History when present.
+	Transcript string `json:"transcript,omitempty"`
+	// ConversationID keys the provider's prompt cache to the conversation.
+	ConversationID string `json:"conversationId,omitempty"`
+	Message        string `json:"message"`
 }
 
 type customEndpointV1 struct {
@@ -138,6 +157,11 @@ type turnResponseV1 struct {
 	// Edited reports that a file tool changed the scratch copy this turn.
 	Edited bool   `json:"edited,omitempty"`
 	Error  string `json:"error,omitempty"`
+	// Transcript is everything the model saw and said, tool calls, results
+	// and reasoning included, for the shell to send with the next question.
+	// Only an answered turn returns one; after a failure the shell keeps the
+	// previous transcript.
+	Transcript string `json:"transcript,omitempty"`
 }
 
 // streamFn is replaced by tests with a deterministic provider.
@@ -170,6 +194,14 @@ func captureCrashes(runtimeRoot string) {
 // runningTurns maps a request's turnId to the cancel function of its turn.
 var runningTurns sync.Map
 
+// earlyCancels holds turnIds that were cancelled before their turn started,
+// with the time of the cancel. The shell cancels from a task-cancellation
+// handler that can fire before the native call registers its turn; without
+// this the stopped turn would run to the end unseen.
+var earlyCancels sync.Map
+
+const earlyCancelTTL = 10 * time.Minute
+
 // RunTurnJSON runs one user turn to completion and returns the final reply.
 // The call blocks; the shell runs it off the main thread.
 func RunTurnJSON(requestJSON string) string {
@@ -187,24 +219,53 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), turnTimeout)
 	defer cancel()
-	reply, calls, edited, err := runTurn(ctx, cancel, requestJSON)
+	network := newTurnHTTP()
+	defer network.close()
+	reply, transcript, calls, edited, err := runTurn(ctx, cancel, network, requestJSON)
 	// A failed or cancelled turn may still have edited the scratch copy.
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return encode(turnResponseV1{Version: 1, Cancelled: true, ToolCalls: calls, Edited: edited, Error: "cancelled"})
 	}
 	if err != nil {
-		return encode(turnResponseV1{Version: 1, ToolCalls: calls, Edited: edited, Error: err.Error(),
+		return encode(turnResponseV1{Version: 1, ToolCalls: calls, Edited: edited, Error: turnErrorText(ctx, network, err),
 			ModelUnavailable: errors.Is(err, app.ErrLocalModelUnavailable)})
 	}
-	return encode(turnResponseV1{Version: 1, OK: true, Reply: reply, ToolCalls: calls, Edited: edited})
+	return encode(turnResponseV1{Version: 1, OK: true, Reply: reply, ToolCalls: calls, Edited: edited, Transcript: transcript})
 }
 
-// CancelTurn stops the running turn started with turnID. Unknown or finished
-// turns are ignored.
+// turnErrorText says why a turn failed in words the user can act on; the
+// provider's own message follows when there is one.
+func turnErrorText(ctx context.Context, network *turnHTTP, err error) string {
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		return fmt.Sprintf("这一轮超过 %d 分钟还没有答完，已经停止。可以把问题拆小一点再问。", int(turnTimeout/time.Minute))
+	case network.stalled.Load():
+		return fmt.Sprintf("模型服务 %d 秒没有任何响应，连接已断开（网络切换或服务繁忙时常见）。点重试即可。（%s）",
+			int(streamIdleTimeout/time.Second), err.Error())
+	case errors.Is(err, agent.ErrMaxTurnsReached) || strings.Contains(err.Error(), agent.ErrMaxTurnsReached.Error()):
+		return "这一轮调用工具的次数太多，仍然没有得到答案。可以把问题说得更具体一些再试。"
+	}
+	return err.Error()
+}
+
+// CancelTurn stops the running turn started with turnID. A turn that has not
+// started yet is stopped as soon as it does; finished turns are ignored.
 func CancelTurn(turnID string) {
+	if turnID == "" {
+		return
+	}
 	if cancel, ok := runningTurns.LoadAndDelete(turnID); ok {
 		cancel.(context.CancelFunc)()
+		return
 	}
+	now := time.Now()
+	earlyCancels.Store(turnID, now)
+	earlyCancels.Range(func(key, value any) bool {
+		if now.Sub(value.(time.Time)) > earlyCancelTTL {
+			earlyCancels.Delete(key)
+		}
+		return true
+	})
 }
 
 // catalogProviders are the PiG providers the settings screen offers, in order.
@@ -258,39 +319,43 @@ func ToolCatalogJSON() string {
 	return encode(map[string]any{"version": 1, "tools": tools})
 }
 
-func runTurn(ctx context.Context, cancel context.CancelFunc, requestJSON string) (reply string, calls []toolCallV1, edited bool, err error) {
-	reply, calls, scratch, err := runTurnIn(ctx, cancel, requestJSON)
+func runTurn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (reply, transcript string, calls []toolCallV1, edited bool, err error) {
+	reply, transcript, calls, scratch, err := runTurnIn(ctx, cancel, network, requestJSON)
 	if scratch != nil {
 		edited = scratch.wasEdited()
 		scratch.close()
 	}
-	return reply, calls, edited, err
+	return reply, transcript, calls, edited, err
 }
 
-func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON string) (string, []toolCallV1, *scratch, error) {
+func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (string, string, []toolCallV1, *scratch, error) {
 	calls := []toolCallV1{}
 	var files *scratch
 	decoder := json.NewDecoder(strings.NewReader(requestJSON))
 	decoder.DisallowUnknownFields()
 	var request turnRequestV1
 	if err := decoder.Decode(&request); err != nil {
-		return "", calls, files, fmt.Errorf("invalid Agent request: %w", err)
+		return "", "", calls, files, fmt.Errorf("invalid Agent request: %w", err)
 	}
 	if request.Version != 1 {
-		return "", calls, files, errors.New("supported Agent request version is 1")
+		return "", "", calls, files, errors.New("supported Agent request version is 1")
 	}
 	captureCrashes(request.RuntimeRoot)
 	if request.TurnID != "" {
 		if _, loaded := runningTurns.LoadOrStore(request.TurnID, cancel); loaded {
-			return "", calls, files, errors.New("turnId is already running")
+			return "", "", calls, files, errors.New("turnId is already running")
 		}
 		defer runningTurns.Delete(request.TurnID)
+		if _, cancelled := earlyCancels.LoadAndDelete(request.TurnID); cancelled {
+			cancel()
+			return "", "", calls, files, context.Canceled
+		}
 	}
 	feed := openEventFeed(request.TurnID)
 	defer feed.close()
 	message := strings.TrimSpace(request.Message)
 	if message == "" || len(message) > maxMessageBytes {
-		return "", calls, files, errors.New("message is required and must be at most 12000 bytes")
+		return "", "", calls, files, errors.New("message is required and must be at most 12000 bytes")
 	}
 	var model *ai.Model
 	var err error
@@ -299,23 +364,23 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON strin
 	assumed := request.Provider == customProvider
 	if request.Provider == customProvider {
 		if model, err = customModel(request.Model, request.Custom); err != nil {
-			return "", calls, files, err
+			return "", "", calls, files, err
 		}
 	} else if request.Custom != nil {
-		return "", calls, files, errors.New("custom is only valid with provider custom")
+		return "", "", calls, files, errors.New("custom is only valid with provider custom")
 	} else if model = resolveModel(request.Provider, request.Model); model == nil {
 		if model = listedModel(request.Provider, request.Model); model == nil {
-			return "", calls, files, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
+			return "", "", calls, files, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
 		}
 		assumed = true
 	}
 	thinking, err := thinkingLevel(model, request.Thinking, assumed)
 	if err != nil {
-		return "", calls, files, err
+		return "", "", calls, files, err
 	}
 	session, err := app.OpenLocalAgentSession(request.LocalRequest, request.SensitiveUnlocked)
 	if err != nil {
-		return "", calls, files, err
+		return "", "", calls, files, err
 	}
 	specs := app.LocalAgentToolSpecs()
 	tools := make([]agent.AgentTool, 0, len(specs)+5)
@@ -327,7 +392,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON strin
 	turns := maxTurns
 	if request.ScratchRoot != "" {
 		if files, err = editableScratch(request); err != nil {
-			return "", calls, nil, err
+			return "", "", calls, nil, err
 		}
 		for _, tool := range files.tools() {
 			tools = append(tools, tool)
@@ -335,23 +400,35 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON strin
 		}
 		turns = maxEditTurns
 	}
-	history, err := historyMessages(request.History)
+	systemPrompt := app.LocalAgentSystemPrompt(files != nil)
+	history, err := priorMessages(request, systemPrompt)
 	if err != nil {
-		return "", calls, files, err
+		return "", "", calls, files, err
 	}
 	key := request.APIKey
 	var argumentsMu sync.Mutex
 	arguments := map[string]json.RawMessage{}
+	// toolsSpent is set when the turn ran out of model calls: tools are then
+	// refused and the model answers from what it has.
+	var toolsSpent atomic.Bool
+	var bonusCalls atomic.Int32
 	runner, err := agent.NewAgent(agent.AgentOptions{
 		InitialState:  &agent.AgentInitialState{Messages: history},
 		Model:         model,
 		Tools:         tools,
-		SystemPrompt:  app.LocalAgentSystemPrompt(files != nil),
+		SystemPrompt:  systemPrompt,
 		MaxTurns:      turns,
 		ThinkingLevel: thinking,
 		StreamFn: func(ctx context.Context, model *ai.Model, transcript ai.TranscriptContext, options ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
+			if toolsSpent.Load() && bonusCalls.Add(1) > bonusTurns {
+				return nil, agent.ErrMaxTurnsReached
+			}
 			feed.send(turnEventV1{Kind: "model"})
-			return streamFn(ctx, model, transcript, options)
+			if options.Fetch == nil {
+				options.Fetch = network.client
+			}
+			delay := providerMaxRetryDelayMs
+			return streamFn(ai.WithProviderRequestRetry(ctx, providerRetries, &delay), model, transcript, options)
 		},
 		GetAPIKey: func(string) (string, error) { return key, nil },
 		// Defense in depth: the loop must never run a tool outside the catalog.
@@ -362,33 +439,115 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, requestJSON strin
 			if !allowed[name] {
 				return agent.ToolCallHookResult{Block: true, Reason: "tool is not available on this device"}
 			}
+			if toolsSpent.Load() {
+				return agent.ToolCallHookResult{Block: true, Reason: "这一轮的工具调用次数已用完，请直接回答"}
+			}
 			feed.send(turnEventV1{Kind: "tool", Name: name, Arguments: append(json.RawMessage(nil), args...)})
 			return agent.ToolCallHookResult{}
 		}},
 	})
 	if err != nil {
-		return "", calls, files, err
+		return "", "", calls, files, err
+	}
+	if request.ConversationID != "" {
+		runner.SetSessionID(request.ConversationID)
+	}
+	// A run returns the whole transcript, which starts with the one the turn
+	// was given; this turn's calls are the results after those.
+	priorResults := 0
+	for _, message := range history {
+		if message.ToolResult != nil {
+			priorResults++
+		}
+	}
+	seenResults := 0
+	collect := func(produced []agent.AgentMessage) {
+		argumentsMu.Lock()
+		defer argumentsMu.Unlock()
+		results := 0
+		for _, produced := range produced {
+			result := produced.ToolResult
+			if result == nil {
+				continue
+			}
+			results++
+			if results <= priorResults || results <= seenResults {
+				continue
+			}
+			seenResults = results
+			calls = append(calls, toolCallV1{Name: result.ToolName, Arguments: arguments[result.ToolCallID], IsError: result.IsError})
+		}
 	}
 	produced, err := runner.Send(ctx, message)
-	for _, produced := range produced {
-		if result := produced.ToolResult; result != nil {
-			argumentsMu.Lock()
-			calls = append(calls, toolCallV1{Name: result.ToolName, Arguments: arguments[result.ToolCallID], IsError: result.IsError})
-			argumentsMu.Unlock()
-		}
+	collect(produced)
+	// A turn that spent its tool budget, or ended without a word, gets one
+	// more request asking for the answer, instead of leaving the user with
+	// an error or an empty reply.
+	nudge := ""
+	if errors.Is(err, agent.ErrMaxTurnsReached) && ctx.Err() == nil {
+		toolsSpent.Store(true)
+		nudge = nudgeToolBudget
+	} else if err == nil && needsAnswer(produced) {
+		nudge = nudgeEmptyReply
+	}
+	if nudge != "" {
+		produced, err = runner.Send(ctx, nudge)
+		collect(produced)
 	}
 	if err != nil {
-		return "", calls, files, err
+		return "", "", calls, files, err
 	}
+	reply, err := finalReply(produced)
+	if err != nil {
+		return "", "", calls, files, err
+	}
+	// The whole transcript goes back to the shell, which sends it with the
+	// next question unchanged: the provider then sees the same prefix every
+	// turn and serves it from its prompt cache.
+	transcript, err := encodeTranscript(runner.Messages())
+	if err != nil {
+		return reply, "", calls, files, nil
+	}
+	return reply, transcript, calls, files, nil
+}
+
+// lastAssistant is the final model message of a run, if any.
+func lastAssistant(produced []agent.AgentMessage) *agent.AssistantMessage {
 	for index := len(produced) - 1; index >= 0; index-- {
 		if assistant := produced[index].Assistant; assistant != nil {
-			if assistant.ErrorMessage != "" {
-				return "", calls, files, errors.New(assistant.ErrorMessage)
-			}
-			return assistantText(assistant.Content), calls, files, nil
+			return assistant
 		}
 	}
-	return "", calls, files, errors.New("the model returned no reply")
+	return nil
+}
+
+// needsAnswer reports a run that finished cleanly without any text for the
+// user, as reasoning models sometimes do after a tool call.
+func needsAnswer(produced []agent.AgentMessage) bool {
+	assistant := lastAssistant(produced)
+	return assistant != nil && assistant.ErrorMessage == "" && assistant.StopReason != ai.StopReasonLength &&
+		strings.TrimSpace(assistantText(assistant.Content)) == ""
+}
+
+func finalReply(produced []agent.AgentMessage) (string, error) {
+	assistant := lastAssistant(produced)
+	if assistant == nil {
+		return "", errors.New("模型没有返回回答")
+	}
+	if assistant.ErrorMessage != "" {
+		return "", errors.New(assistant.ErrorMessage)
+	}
+	text := strings.TrimSpace(assistantText(assistant.Content))
+	switch {
+	case text != "" && assistant.StopReason == ai.StopReasonLength:
+		return text + "\n\n（回答达到模型的输出长度上限，后面被截断了。）", nil
+	case text != "":
+		return text, nil
+	case assistant.StopReason == ai.StopReasonLength:
+		return "", errors.New("模型的输出达到长度上限，没有留下回答（思考强度较高时常见）。可以调低思考强度再试。")
+	default:
+		return "", errors.New("模型这次没有给出文字回答，点重试再问一次。")
+	}
 }
 
 // editableScratch opens the scratch copy named by request. It must be an
@@ -411,18 +570,53 @@ func editableScratch(request turnRequestV1) (*scratch, error) {
 	return openScratch(dir, entrypoint)
 }
 
+// priorMessages is what the turn starts from: the transcript the previous
+// turn returned, trimmed when it outgrew its budget, or for a conversation
+// without one, its visible history.
+func priorMessages(request turnRequestV1, systemPrompt string) ([]agent.AgentMessage, error) {
+	if strings.TrimSpace(request.Transcript) != "" {
+		if messages, err := decodeTranscript(request.Transcript); err == nil {
+			return withSystemPrompt(trimTranscript(messages, transcriptBudget), systemPrompt), nil
+		}
+		// An unreadable transcript (another build's format) costs the
+		// conversation its tool results, not the turn.
+	}
+	return historyMessages(request.History)
+}
+
+// historyMessages replays the visible conversation. Providers reject empty
+// turns and some reject two turns of one role in a row, so empty entries are
+// dropped and neighbours of one role are joined.
 func historyMessages(history []historyMessageV1) ([]agent.AgentMessage, error) {
-	messages := make([]agent.AgentMessage, 0, len(history))
-	timestamp := time.Now().UnixMilli()
+	type turn struct{ role, content string }
+	var turns []turn
 	for _, entry := range history {
-		switch entry.Role {
+		if entry.Role != "user" && entry.Role != "assistant" {
+			return nil, fmt.Errorf("unsupported history role %q", entry.Role)
+		}
+		content := strings.TrimSpace(entry.Content)
+		if content == "" {
+			continue
+		}
+		if last := len(turns) - 1; last >= 0 && turns[last].role == entry.Role {
+			turns[last].content += "\n\n" + content
+			continue
+		}
+		turns = append(turns, turn{entry.Role, content})
+	}
+	// The new question follows, so the replay must not end on a question.
+	if last := len(turns) - 1; last >= 0 && turns[last].role == "user" {
+		turns = turns[:last]
+	}
+	messages := make([]agent.AgentMessage, 0, len(turns))
+	timestamp := time.Now().UnixMilli()
+	for _, entry := range turns {
+		switch entry.role {
 		case "user":
-			messages = append(messages, agent.AgentMessage{User: &agent.UserMessage{Role: "user", Content: ai.UserText(entry.Content), Timestamp: timestamp}})
+			messages = append(messages, agent.AgentMessage{User: &agent.UserMessage{Role: "user", Content: ai.UserText(entry.content), Timestamp: timestamp}})
 		case "assistant":
 			messages = append(messages, agent.AgentMessage{Assistant: &agent.AssistantMessage{Role: "assistant",
-				Content: []ai.AssistantContentBlock{ai.TextContent{Text: entry.Content}}, StopReason: ai.StopReasonStop, Timestamp: timestamp}})
-		default:
-			return nil, fmt.Errorf("unsupported history role %q", entry.Role)
+				Content: []ai.AssistantContentBlock{ai.TextContent{Text: entry.content}}, StopReason: ai.StopReasonStop, Timestamp: timestamp}})
 		}
 	}
 	return messages, nil

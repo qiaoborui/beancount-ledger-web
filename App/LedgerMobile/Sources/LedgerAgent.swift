@@ -265,6 +265,12 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     let message: String
     /// The private ledger copy this turn may edit; nil keeps the turn read-only.
     var scratchRoot: String? = nil
+    /// What the previous answered turn returned, sent back unchanged so the
+    /// model sees its earlier tool results and the provider can serve the
+    /// unchanged prefix from its prompt cache. Replaces `history` when set.
+    var transcript: String? = nil
+    /// Keys the provider's prompt cache to the conversation.
+    var conversationId: String? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {
@@ -276,12 +282,16 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
     var modelUnavailable: Bool? = nil
     /// The turn wrote to its scratch copy, even if it then failed.
     var edited = false
+    /// The whole conversation as the model saw it, for the next turn. Only
+    /// an answered turn has one.
+    var transcript: String? = nil
 
-    private enum CodingKeys: String, CodingKey { case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited }
+    private enum CodingKeys: String, CodingKey { case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited, transcript }
     init(ok: Bool, reply: String? = nil, toolCalls: [LedgerAgentToolCall] = [], error: String? = nil,
-         cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false) {
+         cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false, transcript: String? = nil) {
         self.ok = ok; self.reply = reply; self.toolCalls = toolCalls; self.error = error
         self.cancelled = cancelled; self.modelUnavailable = modelUnavailable; self.edited = edited
+        self.transcript = transcript
     }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -292,6 +302,7 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
         cancelled = try container.decodeIfPresent(Bool.self, forKey: .cancelled)
         modelUnavailable = try container.decodeIfPresent(Bool.self, forKey: .modelUnavailable)
         edited = try container.decodeIfPresent(Bool.self, forKey: .edited) ?? false
+        transcript = try container.decodeIfPresent(String.self, forKey: .transcript)
     }
 }
 
@@ -319,6 +330,34 @@ enum LedgerAgentError: LocalizedError, Equatable {
         }
     }
 
+    /// The one-line headline above the provider's words: what kind of
+    /// failure this is, so the user knows whether a retry will help.
+    var headline: String {
+        switch self {
+        case .notConfigured, .interrupted: return localizedDescription
+        case .invalidKey: return String(localized: "API Key 无效或已过期")
+        case let .failed(message):
+            let lowered = message.lowercased()
+            func has(_ words: [String]) -> Bool { words.contains { lowered.contains($0) } }
+            if has(["没有任何响应", "超过", "太久", "timeout", "timed out", "deadline", "stalled", "超时"]) {
+                return String(localized: "模型服务长时间没有响应")
+            }
+            if has(["429", "rate limit", "rate_limit", "too many requests", "quota", "insufficient_quota", "余额"]) {
+                return String(localized: "模型服务限流或额度不足")
+            }
+            if has(["500", "502", "503", "504", "529", "overloaded", "unavailable", "bad gateway"]) {
+                return String(localized: "模型服务暂时不可用")
+            }
+            if has(["connection", "network", "no such host", "eof", "broken pipe", "tls", "dial tcp", "terminated", "offline"]) {
+                return String(localized: "网络连接出了问题")
+            }
+            if has(["没有给出文字回答", "没有返回回答", "长度上限", "工具的次数太多"]) {
+                return String(localized: "这次没有得到回答")
+            }
+            return String(localized: "模型服务拒绝了这次请求")
+        }
+    }
+
     /// Provider errors arrive as text; an auth failure is the one the screen
     /// offers a direct fix for.
     static func classify(_ message: String) -> LedgerAgentError {
@@ -334,14 +373,18 @@ struct LedgerAgentRunner: Sendable {
     var run: @Sendable (Data) async throws -> Data
     var cancel: @Sendable (String) -> Void
 
+    /// The native loop stops a turn after ten minutes on its own. If it has
+    /// still not returned this long after that, the screen stops waiting.
+    static let nativeDeadline: TimeInterval = 11 * 60
+
     static let native = LedgerAgentRunner(run: { request in
         #if canImport(LedgerCore)
         // A turn blocks for as long as the model takes; keep it off the
-        // cooperative pool.
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: Data(MobileagentRunTurnJSON(String(decoding: request, as: UTF8.self)).utf8))
-            }
+        // cooperative pool. The deadline is the last line of defence: the
+        // screen must never wait forever, even on a call that never returns.
+        let turnID = (try? JSONDecoder().decode(TurnID.self, from: request))?.turnId ?? ""
+        return try await withDeadline(nativeDeadline, onTimeout: { MobileagentCancelTurn(turnID) }) {
+            Data(MobileagentRunTurnJSON(String(decoding: request, as: UTF8.self)).utf8)
         }
         #else
         throw LocalLedgerError.runtimeUnavailable
@@ -351,6 +394,43 @@ struct LedgerAgentRunner: Sendable {
         MobileagentCancelTurn(turnID)
         #endif
     })
+
+    private struct TurnID: Decodable { let turnId: String }
+
+    /// Runs a blocking call on a global queue and returns its result, or
+    /// throws once `seconds` pass first. The call keeps its thread until it
+    /// returns; its late result is dropped.
+    static func withDeadline(_ seconds: TimeInterval, onTimeout: @escaping @Sendable () -> Void,
+                             _ work: @escaping @Sendable () -> Data) async throws -> Data {
+        let gate = ResumeOnce()
+        return try await withCheckedThrowingContinuation { continuation in
+            gate.set(continuation)
+            DispatchQueue.global(qos: .userInitiated).async {
+                gate.resume(with: .success(work()))
+            }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + seconds) {
+                if gate.resume(with: .failure(LedgerAgentError.failed(String(localized: "这一轮等了太久还没有结束，已经放弃等待。点重试再问一次。")))) {
+                    onTimeout()
+                }
+            }
+        }
+    }
+
+    private final class ResumeOnce: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Data, Error>?
+        func set(_ continuation: CheckedContinuation<Data, Error>) { lock.withLock { self.continuation = continuation } }
+        /// True when this call was the one that resumed.
+        @discardableResult
+        func resume(with result: Result<Data, Error>) -> Bool {
+            let pending: CheckedContinuation<Data, Error>? = lock.withLock {
+                defer { continuation = nil }
+                return continuation
+            }
+            pending?.resume(with: result)
+            return pending != nil
+        }
+    }
 }
 
 /// What a running turn is doing now, as the native loop reports it: a request
@@ -460,7 +540,10 @@ enum LedgerAgentHistory {
             switch message.role {
             case .user: pendingUser = message
             case .assistant:
-                guard let user = pendingUser else { continue }
+                // An empty reply is not worth replaying, and providers reject
+                // an empty assistant turn.
+                guard let user = pendingUser,
+                      !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 pairs.append([.init(role: "user", content: user.text), .init(role: "assistant", content: message.text)])
                 pendingUser = nil
             }
@@ -556,6 +639,14 @@ final class LedgerAgentConversation: ObservableObject {
     @Published private(set) var written: LedgerAgentReview?
     /// What the running turn is doing now; nil before its first event.
     @Published private(set) var step: LedgerAgentStep?
+    /// Everything the model saw and said so far, tool results included, as
+    /// the last answered turn returned it. The next turn sends it back so
+    /// follow-ups build on earlier reads; nil until a turn is answered (and
+    /// for a conversation saved by an older build, which replays its visible
+    /// history instead). A failed or stopped turn leaves it as it was.
+    private(set) var transcript: String?
+    /// When the running turn last reported a step, or started.
+    private(set) var stepSince: Date?
     private(set) var stepCount = 0
     /// Shown above a reopened conversation whose change was never written.
     private(set) var restoredNotice: String?
@@ -607,6 +698,13 @@ final class LedgerAgentConversation: ObservableObject {
         }
     }
 
+    /// Takes the transcript saved with a reopened conversation, unless a turn
+    /// has already answered without it.
+    func adoptTranscript(_ saved: String) {
+        guard transcript == nil, !saved.isEmpty else { return }
+        transcript = saved
+    }
+
     /// What to save, or nil while nothing has been asked.
     func saved(at date: Date = Date()) -> LedgerAgentSavedConversation? {
         guard !messages.isEmpty else { return nil }
@@ -624,15 +722,18 @@ final class LedgerAgentConversation: ObservableObject {
 
     /// Starts a turn. The question shows at once; the reply, or the failure,
     /// replaces the running state when the turn ends. A turn that edited the
-    /// draft is reviewed before the running state ends.
-    func send(_ raw: String, using send: @escaping Send) {
+    /// draft is reviewed before the running state ends. False when the turn
+    /// could not start, so the composer keeps the question.
+    @discardableResult
+    func send(_ raw: String, using send: @escaping Send) -> Bool {
         self.send(raw, reporting: { message, history, draft, _ in try await send(message, history, draft) })
     }
 
     /// Starts a turn whose native loop reports each step it takes.
-    func send(_ raw: String, reporting send: @escaping SendReporting) {
+    @discardableResult
+    func send(_ raw: String, reporting send: @escaping SendReporting) -> Bool {
         let question = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty, !isRunning, !isWriting else { return }
+        guard !question.isEmpty, !isRunning, !isWriting else { return false }
         let history = LedgerAgentHistory.entries(from: messages)
         if case let .failed(_, previous) = phase, messages.last?.role == .user, messages.last?.text == previous {
             messages.removeLast()
@@ -642,6 +743,7 @@ final class LedgerAgentConversation: ObservableObject {
         let started = Date()
         phase = .running(since: started)
         step = nil
+        stepSince = started
         stepCount = 0
         let editor = editor, existing = draft, reopening = reopening, unreviewed = draftUnreviewed
         let message = note.map { $0 + "\n\n" + question } ?? question
@@ -665,6 +767,7 @@ final class LedgerAgentConversation: ObservableObject {
             } catch { outcome = .failure(error) }
             self?.finish(outcome, question: question, started: started)
         }
+        return true
     }
 
     func stop() {
@@ -693,6 +796,7 @@ final class LedgerAgentConversation: ObservableObject {
 
     private func advance(_ step: LedgerAgentStep, started: Date) {
         guard case let .running(since) = phase, since == started else { return }
+        stepSince = Date()
         self.step = step
         stepCount += 1
         lifecycle?.turnStepped(step, count: stepCount)
@@ -701,6 +805,7 @@ final class LedgerAgentConversation: ObservableObject {
     private func endRunning(_ ending: LedgerAgentTurnEnding) {
         if ending == .stopped || ending == .interrupted, draft != nil { draftUnreviewed = true }
         step = nil
+        stepSince = nil
         restoredNotice = nil
         lifecycle?.turnEnded(ending)
         onSettled?(self)
@@ -718,6 +823,7 @@ final class LedgerAgentConversation: ObservableObject {
         pending = nil
         written = nil
         note = nil
+        transcript = nil
         epoch += 1
         if let editor {
             let draft = draft, reopening = reopening
@@ -763,6 +869,10 @@ final class LedgerAgentConversation: ObservableObject {
         onSettled?(self)
     }
 
+    private static func hasText(_ reply: String?) -> Bool {
+        !(reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private func finish(_ outcome: Result<Outcome, Error>, question: String, started: Date) {
         guard case let .running(since) = phase, since == started else {
             // A stopped or reset turn may still have opened a copy.
@@ -788,9 +898,11 @@ final class LedgerAgentConversation: ObservableObject {
             }
         }
         switch outcome {
-        case let .success(turn) where turn.response.ok:
+        case let .success(turn) where turn.response.ok && (Self.hasText(turn.response.reply) || pending?.review != nil):
             note = nil
-            let reply = turn.response.reply ?? ""
+            if let next = turn.response.transcript, !next.isEmpty { transcript = next }
+            let reply = Self.hasText(turn.response.reply) ? turn.response.reply ?? ""
+                : String(localized: "改动已经准备好，请在下方查看并确认。")
             messages.append(.init(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
                                   duration: Date().timeIntervalSince(started)))
             phase = .idle
@@ -803,7 +915,9 @@ final class LedgerAgentConversation: ObservableObject {
             phase = .idle
             endRunning(.stopped)
         case let .success(turn):
-            let error = LedgerAgentError.classify(turn.response.error ?? String(localized: "模型没有返回回答"))
+            // An answer without any text reads as no answer at all; say so and
+            // offer a retry instead of drawing an empty reply.
+            let error = LedgerAgentError.classify(turn.response.error ?? String(localized: "模型这次没有给出文字回答，点重试再问一次。"))
             phase = .failed(error, question: question)
             endRunning(.failed(error.localizedDescription))
         case let .failure(error as LedgerAgentError):
