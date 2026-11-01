@@ -36,7 +36,7 @@ struct OverviewView: View {
         }
     }
 
-    // MARK: Settlement blocks (design batch 1, `.settle` / `.band`)
+    // MARK: Settlement blocks (design batch 1 `.settle` / `.band`, glass palette in docs/design/ios-balanced/home-glass.html)
 
     /// Preset ranges end on the first day after the period; show the last day it covers.
     private func periodEndLabel(_ ledger: LedgerBootstrap) -> String {
@@ -82,20 +82,20 @@ struct OverviewView: View {
                 }
             }.padding(.bottom, 12)
             GeometryReader { proxy in
-                HStack(spacing: 2) {
-                    BalancedPalette.ink.frame(width: max(0, (proxy.size.width - 2) * ratio))
-                    BalancedPalette.expense.frame(maxWidth: .infinity)
+                HStack(spacing: 3) {
+                    Capsule().fill(BalancedPalette.ink).frame(width: max(0, (proxy.size.width - 3) * ratio))
+                    Capsule().fill(BalancedPalette.expense).frame(maxWidth: .infinity)
                 }
-            }.frame(height: 10).padding(.bottom, 12).accessibilityHidden(true)
+            }.frame(height: 6).padding(.bottom, 12).accessibilityHidden(true)
             HStack {
                 legend(String(localized: "留存"), value: retained, color: BalancedPalette.ink, currency: ledger.summary.currency)
                 Spacer(minLength: 16)
                 legend(String(localized: "支出"), value: ledger.summary.expense, color: BalancedPalette.expense, currency: ledger.summary.currency)
             }
         }
-        .padding(EdgeInsets(top: 18, leading: 20, bottom: 20, trailing: 20))
+        .padding(EdgeInsets(top: 20, leading: 20, bottom: 22, trailing: 20))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+        .overlay(alignment: .top) { insetRule }
     }
 
     private func cashflow(_ ledger: LedgerBootstrap) -> some View {
@@ -113,7 +113,7 @@ struct OverviewView: View {
             settleTotal(String(localized: "净结余"), amount(abs(net), currency: currency, prefix: net >= 0 ? "+" : "−", size: 30, weight: .medium,
                 color: net >= 0 ? BalancedPalette.income : BalancedPalette.expense))
         }
-        .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+        .overlay(alignment: .top) { insetRule }
     }
 
     private func settle<Rows: View, Total: View>(title: String, aside: String, @ViewBuilder rows: () -> Rows, @ViewBuilder total: () -> Total) -> some View {
@@ -126,10 +126,14 @@ struct OverviewView: View {
             rows()
             total()
         }
-        .padding(EdgeInsets(top: 20, leading: 20, bottom: 18, trailing: 20))
+        .padding(EdgeInsets(top: 18, leading: 20, bottom: 20, trailing: 20))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BalancedPalette.sunken)
     }
+
+    /// Under Liquid Glass nothing on this page runs edge to edge: full-bleed
+    /// fills and hairlines were what the tab bar and top bar refracted into
+    /// stripes. One paper surface; every rule stops 20pt short of the screen.
+    private var insetRule: some View { BalancedPalette.rule.frame(height: 1).padding(.horizontal, 20) }
 
     private func settleRow(_ label: String, _ value: Text) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
@@ -168,7 +172,7 @@ struct OverviewView: View {
 
     private func legend(_ title: String, value: Int, color: Color, currency: String) -> some View {
         HStack(spacing: 6) {
-            Rectangle().fill(color).frame(width: 9, height: 9)
+            Circle().fill(color).frame(width: 8, height: 8)
             Text(title).balancedFont(size: 13).foregroundStyle(BalancedPalette.secondary)
             amount(value, currency: currency, size: 13, weight: .medium, color: BalancedPalette.secondary)
         }
@@ -202,7 +206,7 @@ struct OverviewView: View {
                 spendingRow { Text("分类") } amount: { Text("金额") } share: { Text("占比") }
                     .balancedFont(size: 12, weight: .medium).foregroundStyle(BalancedPalette.meta)
                     .padding(.bottom, 8)
-                    .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                    .overlay(alignment: .bottom) { insetRule }
                 ForEach(categories) { item in
                     spendingRow {
                         Text(item.label).balancedFont(size: 14.5).foregroundStyle(BalancedPalette.ink).lineLimit(2)
@@ -213,7 +217,7 @@ struct OverviewView: View {
                             .balancedFont(size: 14.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                     }
                     .padding(.vertical, 11)
-                    .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                    .overlay(alignment: .bottom) { insetRule }
                 }
             }
         }
@@ -383,7 +387,7 @@ private struct BalancedTransactionRow: View {
             }.frame(minWidth: 104, alignment: .trailing)
         }
         .padding(.horizontal, 20).padding(.vertical, 12).frame(minHeight: 56)
-        .overlay(alignment: .bottom) { if showsRule { BalancedPalette.rule.frame(height: 1) } }
+        .overlay(alignment: .bottom) { if showsRule { BalancedPalette.rule.frame(height: 1).padding(.horizontal, 20) } }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
