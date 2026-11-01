@@ -458,13 +458,26 @@ struct LedgerAgentRunner: Sendable {
 /// What a running turn is doing now, as the native loop reports it: a request
 /// to the model, or a tool it started.
 struct LedgerAgentStep: Equatable, Sendable {
-    enum Kind: String, Decodable, Sendable { case model, tool }
+    /// `preparing` is the app's own work before the native loop sends its
+    /// first event: copying the draft, loading the ledger, starting the loop.
+    /// On a conversation's first question that can take a while on a large
+    /// ledger, and without it the screen showed nothing changing.
+    enum Kind: String, Decodable, Sendable { case model, tool, preparing }
     let kind: Kind
     var call: LedgerAgentToolCall? = nil
+    var detail: String? = nil
+
+    static func preparing(_ detail: String) -> LedgerAgentStep { .init(kind: .preparing, detail: detail) }
+    static var copyingDraft: LedgerAgentStep { .preparing(String(localized: "正在准备账本草稿")) }
+    static var loadingLedger: LedgerAgentStep { .preparing(String(localized: "正在加载账本")) }
+    static var startingLoop: LedgerAgentStep { .preparing(String(localized: "正在连接模型")) }
 
     var title: String {
-        guard kind == .tool, let call else { return String(localized: "正在思考") }
-        return call.title
+        switch kind {
+        case .preparing: return detail ?? String(localized: "正在准备")
+        case .tool: return call?.title ?? String(localized: "正在思考")
+        case .model: return String(localized: "正在思考")
+        }
     }
 
     /// One event of the native loop; nil for a version or kind this build
@@ -479,6 +492,7 @@ struct LedgerAgentStep: Equatable, Sendable {
         guard let event = try? JSONDecoder().decode(Event.self, from: Data(json.utf8)), event.version == 1 else { return nil }
         switch event.kind {
         case .model: return .init(kind: .model)
+        case .preparing: return nil
         case .tool:
             guard let name = event.name, !name.isEmpty else { return nil }
             return .init(kind: .tool, call: .init(name: name, arguments: event.arguments, isError: false))
@@ -830,6 +844,7 @@ final class LedgerAgentConversation: ObservableObject {
             do {
                 // A copy that cannot be made leaves the turn read-only.
                 var draft = existing
+                if draft == nil, reopening != nil || editor != nil { report(.copyingDraft) }
                 if draft == nil, let reopening { draft = await reopening.value }
                 if draft == nil, let editor { draft = try? await editor.open() }
                 let response = try await send(message, history, draft?.root, report)
@@ -888,7 +903,7 @@ final class LedgerAgentConversation: ObservableObject {
         guard case let .running(since) = phase, since == started else { return }
         stepSince = Date()
         self.step = step
-        stepCount += 1
+        if step.kind != .preparing { stepCount += 1 }
         lifecycle?.turnStepped(step, count: stepCount)
     }
 

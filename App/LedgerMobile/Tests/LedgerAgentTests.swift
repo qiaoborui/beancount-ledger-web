@@ -583,6 +583,30 @@ final class LedgerAgentTests: XCTestCase {
     }
 
     @MainActor
+    func testFirstQuestionShowsItsPreparationWithoutCountingIt() async throws {
+        let ledger = FakeDraftLedger()
+        let lifecycle = RecordingLifecycle()
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.lifecycle = lifecycle
+        conversation.send("第一个问题", reporting: { _, _, _, report in
+            report(.loadingLedger)
+            report(.init(kind: .model))
+            try? await Task.sleep(nanoseconds: 30_000_000)
+            return .init(ok: true, reply: "好。")
+        })
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(Array(lifecycle.events.prefix(4)),
+                       ["started 第一个问题", "step 0 正在准备账本草稿", "step 0 正在加载账本", "step 1 正在思考"])
+        XCTAssertNil(LedgerAgentStep.decode(#"{"version":1,"kind":"preparing"}"#))
+
+        // The draft is open now, so the next question has nothing to copy.
+        conversation.send("第二个问题") { _, _, _ in .init(ok: true, reply: "好。") }
+        try await waitUntilIdle(conversation)
+        XCTAssertFalse(lifecycle.events.dropFirst(4).contains { $0.contains("正在准备账本草稿") })
+    }
+
+    @MainActor
     func testInterruptedTurnResumesOnceAndStopsLooping() async throws {
         let conversation = LedgerAgentConversation()
         let slow: LedgerAgentConversation.Send = { _, _, _ in

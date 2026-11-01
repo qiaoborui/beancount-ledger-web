@@ -191,8 +191,8 @@ private struct LedgerAgentChatScreen: View {
                     }
                     switch conversation.phase {
                     case .idle: EmptyView()
-                    case let .running(since): LedgerAgentRunning(step: conversation.step, since: since,
-                                                                 stepSince: conversation.stepSince ?? since)
+                    case let .running(since): LedgerAgentRunning(step: conversation.step, steps: conversation.stepCount,
+                                                                 since: since, stepSince: conversation.stepSince ?? since)
                     case let .failed(error, question): failure(error, question: question)
                     }
                     Color.clear.frame(height: 1).id(Self.bottomID)
@@ -928,6 +928,8 @@ private struct LedgerAgentChartView: View {
 /// been quiet for a while, that stopping and asking again is an option.
 private struct LedgerAgentRunning: View {
     let step: LedgerAgentStep?
+    /// Model calls and tools so far.
+    let steps: Int
     let since: Date
     let stepSince: Date
 
@@ -942,9 +944,15 @@ private struct LedgerAgentRunning: View {
                 let quiet = context.date.timeIntervalSince(stepSince)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(step?.title ?? String(localized: "正在查询账本")).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
+                        Text(step?.title ?? String(localized: "正在准备")).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
                             .lineLimit(1)
                         Text("\(max(elapsed, 0)) 秒").balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                    }
+                    // Which step, and how long this one has been going, so a
+                    // slow model reads as slow rather than stuck.
+                    if steps > 0 {
+                        Text("第 \(steps) 步 · 这一步 \(max(Int(quiet.rounded(.down)), 0)) 秒")
+                            .balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
                     }
                     if quiet >= Self.slowAfter {
                         Text("模型这一步比较慢。网络不好时可以点停止，再发一次。")

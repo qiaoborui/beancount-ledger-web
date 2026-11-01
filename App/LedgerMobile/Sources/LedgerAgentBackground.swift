@@ -102,7 +102,8 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
     func turnStepped(_ step: LedgerAgentStep, count: Int) {
         steps = count
         thawedAt = nil
-        let detail = concealsContent ? String(localized: "正在处理（第 \(count) 步）") : step.title
+        let detail = !concealsContent ? step.title
+            : count == 0 ? String(localized: "正在准备") : String(localized: "正在处理（第 \(count) 步）")
         if #available(iOS 26.0, *), let task = continued as? BGContinuedProcessingTask {
             task.updateTitle(String(localized: "账本助手正在处理"), subtitle: detail)
             advanceProgress(task, stepped: true)

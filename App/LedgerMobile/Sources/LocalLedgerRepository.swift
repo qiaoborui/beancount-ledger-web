@@ -1190,6 +1190,8 @@ actor LocalLedgerRepository: LedgerRepository {
         return try await workspace.withCurrentSnapshot { _, root in
             let model = LocalLedgerEngineRequest(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                 entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
+            // The first turn after launch parses the whole ledger here.
+            onStep?(.loadingLedger)
             var handle = try await engine.committedModelHandle(for: model, replacing: nil)
             // One retry: the core may have evicted the model since it was cached.
             for attempt in 0..<2 {
@@ -1203,7 +1205,10 @@ actor LocalLedgerRepository: LedgerRepository {
                     conversationId: conversationID?.uuidString,
                     attachments: attachments.isEmpty ? nil : attachments)
                 let encoded = try JSONEncoder().encode(request)
-                if let onStep { LedgerAgentSteps.observe(turnID, onStep) }
+                if let onStep {
+                    onStep(.startingLoop)
+                    LedgerAgentSteps.observe(turnID, onStep)
+                }
                 defer { LedgerAgentSteps.stop(turnID) }
                 let data = try await withTaskCancellationHandler {
                     try await runner.run(encoded)
