@@ -330,7 +330,9 @@ final class LocalLedgerSessionTests: XCTestCase {
             widgetCredentialStore: InertWidgetStore())
         await first.openLocalLedger(descriptor)
         let summary = try XCTUnwrap(first.ledger?.summary)
+        XCTAssertFalse(first.retainsLockedPresentation, "An unlocked shell is not a locked retained presentation")
         await first.lock()
+        XCTAssertTrue(first.retainsLockedPresentation, "A local lock keeps the shell mounted under the lock surface")
         // Drop the saved startup page so the cold launch must run the interpreter.
         let workspaceRoot = catalogRoot.appendingPathComponent(descriptor.id.uuidString)
         for name in [".bootstrap-page-presentation", ".bootstrap-page-presentation.json"] {
@@ -354,6 +356,7 @@ final class LocalLedgerSessionTests: XCTestCase {
         await fulfillment(of: [authenticating, bootstrapping], timeout: 3)
         XCTAssertEqual(reopened.phase, .checking, "The parallel read must not leave the startup surface")
         XCTAssertNil(reopened.ledger, "Nothing may be published before authentication succeeds")
+        XCTAssertFalse(reopened.retainsLockedPresentation)
         XCTAssertFalse(reopened.amountsVisible)
         await gate.release()
         await starting.value
@@ -364,6 +367,7 @@ final class LocalLedgerSessionTests: XCTestCase {
         XCTAssertEqual(phases, [.checking, .ready])
         reopened.chooseLedger()
         first.chooseLedger()
+        XCTAssertFalse(first.retainsLockedPresentation, "Leaving the ledger releases the retained shell")
     }
 
     func testLocalPrivacySwitchPersistsAcrossColdLaunchAndRestoresProtection() async throws {

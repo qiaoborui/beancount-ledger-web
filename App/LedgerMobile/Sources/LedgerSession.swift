@@ -257,6 +257,16 @@ final class LedgerSession: ObservableObject {
     }
 
     var localTransactionPresentationRevision: UUID? { localPresentation?.revisionID }
+
+    /// A local session locked over the presentation it keeps in memory (the same
+    /// condition `restoreRetainedLocalLedger` unlocks into). The shell stays
+    /// mounted under the lock surface so an unlock reveals it instead of
+    /// rebuilding every tab; nothing in it is readable until `phase == .ready`.
+    var retainsLockedPresentation: Bool {
+        guard case .locked = phase, case let .local(id) = location,
+              localPresentation?.ledgerID == id, let ledger, ledger.sensitiveUnlocked else { return false }
+        return true
+    }
     @Published private(set) var localTransactionReloadID = 0
 
     // Bounded reads. These do not replace bootstrap/global arrays or grant

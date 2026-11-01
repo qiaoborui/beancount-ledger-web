@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct RootView: View {
     @State private var showsLaunchAnimation = true
@@ -22,7 +23,16 @@ struct RootView: View {
         ZStack {
             LedgerPalette.canvas.ignoresSafeArea()
 
-            Group {
+            ZStack {
+                // One `if` keeps the shell's identity across ready → locked → ready.
+                // A locked local session that retains its presentation keeps the
+                // shell mounted under the opaque lock surface, so unlocking shows it
+                // at once instead of rebuilding every tab and re-reading each page.
+                if session.phase == .ready || session.retainsLockedPresentation {
+                    MainTabView()
+                        .accessibilityHidden(session.phase != .ready)
+                        .allowsHitTesting(session.phase == .ready)
+                }
                 switch session.phase {
                 case .configuration:
                     LedgerLibraryView()
@@ -37,8 +47,9 @@ struct RootView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case let .locked(authenticated):
                     LoginView(authenticated: authenticated)
+                        .background(LedgerPalette.canvas.ignoresSafeArea())
                 case .ready:
-                    MainTabView()
+                    EmptyView()
                 }
 
             }
@@ -86,6 +97,13 @@ struct RootView: View {
         // local path is excluded here because it presents one authenticated frame;
         // its cover lifts on the scope above instead.
         .animation(session.isLocal || reduceMotion ? nil : .easeOut(duration: 0.18), value: session.phase)
+        .onChange(of: session.phase) { _, phase in
+            // Unmounting the shell used to take its sheets, alerts and pickers with
+            // it. A retained shell must drop them itself, or they would stay above
+            // the lock surface (not every sheet carries the privacy cover).
+            guard case .locked = phase, session.retainsLockedPresentation else { return }
+            LedgerPresentedControllers.dismissAll()
+        }
         .onAppear {
             if let tab = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--tab=") })?.replacingOccurrences(of: "--tab=", with: "") {
                 session.primaryDestinationID = tab
@@ -470,6 +488,11 @@ private struct MainTabView: View {
         }
         .ledgerTimeRangeSheet()
         .task(id: session.pendingExternalRoute?.id) { await session.applyPendingExternalRoute() }
+        // The shell now outlives a lock, so a route that arrived while locked is
+        // applied on unlock rather than on the next mount.
+        .onChange(of: session.phase) { _, phase in
+            if phase == .ready { Task { await session.applyPendingExternalRoute() } }
+        }
         .onChange(of: session.isRangeLoading) { _, loading in
             if !loading { Task { await session.applyPendingExternalRoute() } }
         }
@@ -616,5 +639,19 @@ struct RootView_Previews: PreviewProvider {
     static var previews: some View {
         RootView()
             .environmentObject(LedgerSession(defaults: UserDefaults(suiteName: "preview-config")!))
+    }
+}
+
+/// Dismisses everything the app presented (sheets, alerts, pickers) in every
+/// window, without animation, so nothing stays above the lock surface.
+@MainActor
+enum LedgerPresentedControllers {
+    static func dismissAll() {
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            for window in scene.windows {
+                guard let root = window.rootViewController, root.presentedViewController != nil else { continue }
+                root.dismiss(animated: false)
+            }
+        }
     }
 }
