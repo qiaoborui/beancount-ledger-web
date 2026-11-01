@@ -48,6 +48,7 @@ private struct LedgerAgentChatScreen: View {
     @State private var attaching = false
     @State private var attachError: String?
     @FocusState private var composerFocused: Bool
+    @Environment(\.scenePhase) private var scenePhase
 
     private struct BookkeepingPrefill: Identifiable {
         let id = UUID()
@@ -87,8 +88,22 @@ private struct LedgerAgentChatScreen: View {
         .onAppear {
             conversation.isOnScreen = true
             LedgerAgentBackgroundRun.shared.conversationSeen()
+            resumeIfInterrupted()
         }
         .onDisappear { conversation.isOnScreen = false }
+        // A turn the system cut short goes on by itself once the user is
+        // back on this screen with the ledger unlocked.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { resumeIfInterrupted() }
+        }
+        .onChange(of: session.privacyShielded) { _, shielded in
+            if !shielded { resumeIfInterrupted() }
+        }
+        // A turn found dead after a freeze is interrupted while the user
+        // may already be looking.
+        .onChange(of: conversation.phase) { _, phase in
+            if case .failed(.interrupted, _) = phase { resumeIfInterrupted() }
+        }
         .task {
             guard crashReport == nil, let repository = session.localRepository else { return }
             crashReport = LedgerAgentCrashReport.take(
@@ -176,8 +191,8 @@ private struct LedgerAgentChatScreen: View {
                     }
                     switch conversation.phase {
                     case .idle: EmptyView()
-                    case let .running(since): LedgerAgentRunning(step: conversation.step, since: since,
-                                                                 stepSince: conversation.stepSince ?? since)
+                    case let .running(since): LedgerAgentRunning(step: conversation.step, steps: conversation.stepCount,
+                                                                 since: since, stepSince: conversation.stepSince ?? since)
                     case let .failed(error, question): failure(error, question: question)
                     }
                     Color.clear.frame(height: 1).id(Self.bottomID)
@@ -263,7 +278,9 @@ private struct LedgerAgentChatScreen: View {
         case .notConfigured: String(localized: "还没有为当前服务商保存 API Key。")
         case let .invalidKey(message): String(localized: "API Key 无效或已过期。") + " " + message
         case let .failed(message): message
-        case .interrupted: String(localized: "草稿里已有的改动会保留，点重试接着做。")
+        case .interrupted:
+            (LedgerAgentBackgroundRun.shared.interruptionCause.map { $0 + String(localized: "。") } ?? "")
+                + String(localized: "草稿里已有的改动会保留，点重试接着做。")
         }
         return reason + " " + String(localized: "账本没有被写入，问题还在输入框里。")
     }
@@ -415,7 +432,13 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
-    private func send(_ text: String) {
+    private func resumeIfInterrupted() {
+        guard conversation.isOnScreen, scenePhase == .active, !session.privacyShielded, !sessions.busyElsewhere,
+              !attaching, settings.hasKey, let question = conversation.takeResumableQuestion() else { return }
+        send(question, clearsComposer: draft == question)
+    }
+
+    private func send(_ text: String, clearsComposer: Bool = true) {
         var question = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if question.isEmpty, !conversation.staged.isEmpty { question = Self.reconcileQuestion }
         guard !question.isEmpty, !conversation.isRunning, !sessions.busyElsewhere, !attaching else { return }
@@ -431,6 +454,7 @@ private struct LedgerAgentChatScreen: View {
         conversation.editor = .live(repository)
         conversation.lifecycle = LedgerAgentBackgroundRun.shared
         LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
+        LedgerAgentBackgroundRun.shared.keepsAwake = settings.keepsAwake
         let started = conversation.send(question, reporting: { message, history, draftRoot, report in
             try await repository.runAgentTurn(message: message, history: history, choice: choice,
                                               apiKey: key, sensitiveUnlocked: true, thinking: thinking,
@@ -438,7 +462,7 @@ private struct LedgerAgentChatScreen: View {
                                               conversationID: conversationID, attachments: attachments,
                                               onStep: report)
         })
-        if started { draft = "" }
+        if started, clearsComposer { draft = "" }
     }
 
     private func question(before answer: LedgerAgentMessage) -> String {
@@ -904,6 +928,8 @@ private struct LedgerAgentChartView: View {
 /// been quiet for a while, that stopping and asking again is an option.
 private struct LedgerAgentRunning: View {
     let step: LedgerAgentStep?
+    /// Model calls and tools so far.
+    let steps: Int
     let since: Date
     let stepSince: Date
 
@@ -918,9 +944,15 @@ private struct LedgerAgentRunning: View {
                 let quiet = context.date.timeIntervalSince(stepSince)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(step?.title ?? String(localized: "正在查询账本")).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
+                        Text(step?.title ?? String(localized: "正在准备")).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
                             .lineLimit(1)
                         Text("\(max(elapsed, 0)) 秒").balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                    }
+                    // Which step, and how long this one has been going, so a
+                    // slow model reads as slow rather than stuck.
+                    if steps > 0 {
+                        Text("第 \(steps) 步 · 这一步 \(max(Int(quiet.rounded(.down)), 0)) 秒")
+                            .balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
                     }
                     if quiet >= Self.slowAfter {
                         Text("模型这一步比较慢。网络不好时可以点停止，再发一次。")
@@ -1098,6 +1130,12 @@ struct LedgerAgentSettingsView: View {
                 }
             } header: { Text("密钥") } footer: {
                 Text("每个服务商的 Key 分开存放在本机钥匙串，不随账本导出、备份或 Git 同步。调用费用记在你的模型账户上。")
+            }
+            Section {
+                Toggle("后台保持运行", isOn: Binding(get: { settings.keepsAwake }, set: { settings.setKeepsAwake($0) }))
+                    .accessibilityIdentifier("ledger-agent-keep-awake")
+            } header: { Text("后台") } footer: {
+                Text("回答期间在后台播放无声音频，锁屏后助手也能一直做完，不影响你正在听的音乐。关掉后只能用系统给的后台时间，较长的回答可能被中断；被中断的回答回到 App 时会自动接着做。")
             }
             Section("发给模型的内容") {
                 Text("你的问题、本次对话，以及助手调用工具后得到的结果（例如汇总金额、匹配到的流水）。不会发送整本账本文件，也不会发送 Git 凭据或本机路径。")

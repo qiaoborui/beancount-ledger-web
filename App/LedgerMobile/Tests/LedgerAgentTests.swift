@@ -582,6 +582,93 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(lifecycle.events.last, "ended changeReady(\"改好了。\", files: 1)")
     }
 
+    @MainActor
+    func testFirstQuestionShowsItsPreparationWithoutCountingIt() async throws {
+        let ledger = FakeDraftLedger()
+        let lifecycle = RecordingLifecycle()
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.lifecycle = lifecycle
+        conversation.send("第一个问题", reporting: { _, _, _, report in
+            report(.loadingLedger)
+            report(.init(kind: .model))
+            try? await Task.sleep(nanoseconds: 30_000_000)
+            return .init(ok: true, reply: "好。")
+        })
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(Array(lifecycle.events.prefix(4)),
+                       ["started 第一个问题", "step 0 正在准备账本草稿", "step 0 正在加载账本", "step 1 正在思考"])
+        XCTAssertNil(LedgerAgentStep.decode(#"{"version":1,"kind":"preparing"}"#))
+
+        // The draft is open now, so the next question has nothing to copy.
+        conversation.send("第二个问题") { _, _, _ in .init(ok: true, reply: "好。") }
+        try await waitUntilIdle(conversation)
+        XCTAssertFalse(lifecycle.events.dropFirst(4).contains { $0.contains("正在准备账本草稿") })
+    }
+
+    @MainActor
+    func testInterruptedTurnResumesOnceAndStopsLooping() async throws {
+        let conversation = LedgerAgentConversation()
+        let slow: LedgerAgentConversation.Send = { _, _, _ in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            return .init(ok: true, reply: "迟到")
+        }
+        XCTAssertNil(conversation.takeResumableQuestion())
+        for _ in 0..<LedgerAgentConversation.maximumResumes {
+            conversation.send("长问题", using: slow)
+            conversation.interrupt()
+            XCTAssertEqual(conversation.takeResumableQuestion(), "长问题")
+            XCTAssertNil(conversation.takeResumableQuestion())
+        }
+        // Cut short again right after its resumes: the user retries by hand.
+        conversation.send("长问题", using: slow)
+        conversation.interrupt()
+        XCTAssertNil(conversation.takeResumableQuestion())
+
+        // An answer earns it fresh resumes.
+        conversation.send("长问题") { _, _, _ in .init(ok: true, reply: "好。") }
+        try await waitUntilIdle(conversation)
+        conversation.send("下一个", using: slow)
+        conversation.interrupt()
+        XCTAssertEqual(conversation.takeResumableQuestion(), "下一个")
+
+        // A stop is the user's own choice and is never resumed.
+        conversation.send("再一个", using: slow)
+        conversation.stop()
+        XCTAssertNil(conversation.takeResumableQuestion())
+    }
+
+    @MainActor
+    func testFailureAfterAFreezeCountsAsAnInterruption() async throws {
+        let lifecycle = FrozenLifecycle()
+        let conversation = LedgerAgentConversation()
+        conversation.lifecycle = lifecycle
+        conversation.send("冻住了") { _, _, _ in throw URLError(.networkConnectionLost) }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.phase, .failed(.interrupted, question: "冻住了"))
+        XCTAssertEqual(lifecycle.ended, [.interrupted])
+        XCTAssertEqual(conversation.takeResumableQuestion(), "冻住了")
+
+        // A refused key is still the key's fault.
+        conversation.send("冻住了") { _, _, _ in .init(ok: false, error: "401 invalid api key") }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.phase, .failed(.invalidKey("401 invalid api key"), question: "冻住了"))
+
+        // Without a freeze a network failure is reported as it is.
+        lifecycle.frozen = false
+        conversation.send("冻住了") { _, _, _ in throw URLError(.networkConnectionLost) }
+        try await waitUntilIdle(conversation)
+        guard case .failed(.failed, _) = conversation.phase else { return XCTFail("\(conversation.phase)") }
+    }
+
+    #if os(iOS)
+    func testInterruptionNotificationNamesTheCause() {
+        let summary = LedgerAgentBackgroundRun.summary(.interrupted, concealed: true, cause: "后台保活被来电或其他 App 的声音打断")
+        XCTAssertEqual(summary.phase, .interrupted)
+        XCTAssertTrue(summary.body.hasPrefix("后台保活被来电"))
+    }
+    #endif
+
     func testThinkingClampsLikeTheNativeLoop() {
         XCTAssertEqual(LedgerAgentThinking.max.clamped(to: [.off, .minimal, .low, .medium, .high]), .high)
         XCTAssertEqual(LedgerAgentThinking.off.clamped(to: [.low, .medium, .high]), .low)
@@ -801,6 +888,16 @@ final class LedgerAgentTests: XCTestCase {
         func turnStarted(question: String, conversation: LedgerAgentConversation) { events.append("started " + question) }
         func turnStepped(_ step: LedgerAgentStep, count: Int) { events.append("step \(count) \(step.title)") }
         func turnEnded(_ ending: LedgerAgentTurnEnding) { events.append("ended \(ending)") }
+    }
+
+    @MainActor
+    private final class FrozenLifecycle: LedgerAgentLifecycle {
+        var frozen = true
+        var ended: [LedgerAgentTurnEnding] = []
+        var turnWasSuspended: Bool { frozen }
+        func turnStarted(question: String, conversation: LedgerAgentConversation) {}
+        func turnStepped(_ step: LedgerAgentStep, count: Int) {}
+        func turnEnded(_ ending: LedgerAgentTurnEnding) { ended.append(ending) }
     }
 
     private actor FakeDraftLedger {

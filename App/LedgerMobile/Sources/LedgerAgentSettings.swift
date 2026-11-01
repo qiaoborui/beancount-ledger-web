@@ -14,6 +14,10 @@ final class LedgerAgentSettings: ObservableObject {
     @Published private(set) var thinking: LedgerAgentThinking
     /// Models kept for switching from the chat page, in the order starred.
     @Published private(set) var favorites: [Favorite]
+    /// Whether a turn keeps the app awake in the background with silent
+    /// audio, instead of relying only on the time iOS grants. On by default:
+    /// without it a long turn is cut short once the phone locks.
+    @Published private(set) var keepsAwake: Bool
     /// The provider's own list, fetched on request and kept until relaunch;
     /// keyed by `listKey`.
     @Published private(set) var listed: [String: [LedgerAgentListedModel]] = [:]
@@ -27,6 +31,7 @@ final class LedgerAgentSettings: ObservableObject {
     private let customKey = "ledger.agent.custom-choice"
     private let thinkingKey = "ledger.agent.thinking"
     private let favoritesKey = "ledger.agent.favorite-models"
+    private let keepsAwakeKey = "ledger.agent.keep-awake"
     private let keyStore: (String) -> ClassificationKeyStore
     private let lister: LedgerAgentModelLister
 
@@ -57,6 +62,7 @@ final class LedgerAgentSettings: ObservableObject {
         let choice = stored.flatMap { catalog.provider($0.provider) == nil ? nil : $0 } ?? Self.defaultChoice(in: catalog)
         self.choice = choice
         thinking = defaults.string(forKey: thinkingKey).flatMap(LedgerAgentThinking.init(rawValue:)) ?? .default
+        keepsAwake = defaults.object(forKey: keepsAwakeKey) as? Bool ?? true
         hasKey = (try? keyStore(choice.provider).load()) != nil
     }
 
@@ -89,6 +95,12 @@ final class LedgerAgentSettings: ObservableObject {
         guard level != thinking else { return }
         thinking = level
         defaults.set(level.rawValue, forKey: thinkingKey)
+    }
+
+    func setKeepsAwake(_ on: Bool) {
+        guard on != keepsAwake else { return }
+        keepsAwake = on
+        defaults.set(on, forKey: keepsAwakeKey)
     }
 
     var modelTitle: String { title(for: choice) }
