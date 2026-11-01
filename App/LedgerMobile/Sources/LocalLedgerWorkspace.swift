@@ -564,6 +564,25 @@ actor LocalLedgerWorkspace {
     func removeAgentConversation(id: UUID) {
         guard let directory = try? importRuntimeDirectory("runtime/agent-history") else { return }
         removeIfPresent(directory.appendingPathComponent(id.uuidString + ".json"))
+        removeIfPresent(directory.appendingPathComponent(id.uuidString + ".transcript"))
+    }
+
+    /// The model-facing transcript of a saved conversation, kept beside it
+    /// so listing the history never reads the (much larger) transcripts.
+    func saveAgentTranscript(id: UUID, data: Data) throws {
+        let directory = try importRuntimeDirectory("runtime/agent-history")
+        try createProtectedDirectory(directory)
+        let file = directory.appendingPathComponent(id.uuidString + ".transcript")
+        if let kind = try itemKindIfPresent(at: file), kind != .regularFile { throw WorkspaceError.unsupportedItem(file.lastPathComponent) }
+        try data.write(to: file, options: .atomic)
+        try protect(file)
+    }
+
+    func agentTranscript(id: UUID) -> Data? {
+        guard let directory = try? importRuntimeDirectory("runtime/agent-history") else { return nil }
+        let file = directory.appendingPathComponent(id.uuidString + ".transcript")
+        guard (try? itemKindIfPresent(at: file)) == .regularFile else { return nil }
+        return try? Data(contentsOf: file)
     }
 
     func removeAgentConversations() {

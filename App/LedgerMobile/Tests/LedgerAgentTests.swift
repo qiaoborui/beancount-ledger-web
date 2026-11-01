@@ -367,6 +367,45 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(replaced, [nil, "h1"])
     }
 
+    func testRepositorySendsTheTranscriptAndConversation() async throws {
+        let engine = HandleEngine()
+        let catalog = LocalLedgerCatalog(rootDirectory: try root(), engine: engine, validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Agent transcript fixture")
+        let repository = catalog.repository(for: descriptor)
+        let recorder = RequestRecorder()
+        let runner = LedgerAgentRunner(run: { data in
+            _ = await recorder.record(data)
+            return Data(#"{"version":1,"ok":true,"reply":"ok","toolCalls":[],"transcript":"[2]"}"#.utf8)
+        }, cancel: { _ in })
+        let conversation = UUID()
+        let response = try await repository.runAgentTurn(message: "接着说", history: [],
+            choice: .init(provider: "anthropic", model: "claude-sonnet-4-5"), apiKey: "k", sensitiveUnlocked: true,
+            transcript: "[1]", conversationID: conversation, runner: runner)
+        XCTAssertEqual(response.transcript, "[2]")
+        let recorded = await recorder.requests
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(recorded.first)) as? [String: Any])
+        XCTAssertEqual(request["transcript"] as? String, "[1]")
+        XCTAssertEqual(request["conversationId"] as? String, conversation.uuidString)
+    }
+
+    /// Follow-ups build on the earlier turns' reads: an answered turn's
+    /// transcript is kept for the next one, a failed turn leaves it alone.
+    @MainActor
+    func testConversationKeepsTheLastAnsweredTranscript() async throws {
+        let conversation = LedgerAgentConversation()
+        conversation.send("一") { _, _, _ in .init(ok: true, reply: "答一", transcript: "[1]") }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.transcript, "[1]")
+        conversation.send("二") { _, _, _ in .init(ok: false, error: "503 overloaded") }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.transcript, "[1]")
+        conversation.send("二") { _, _, _ in .init(ok: true, reply: "答二", transcript: "[1,2]") }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.transcript, "[1,2]")
+        conversation.reset()
+        XCTAssertNil(conversation.transcript)
+    }
+
     func testFileDiffShowsChangedLinesWithContext() {
         let before = (1...20).map { "line \($0)" }.joined(separator: "\n") + "\n"
         let after = before.replacingOccurrences(of: "line 3\n", with: "line three\n")

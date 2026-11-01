@@ -299,13 +299,15 @@ private struct LedgerAgentChatScreen: View {
             return
         }
         let choice = settings.choice, thinking = settings.effectiveThinking
+        let transcript = conversation.transcript, conversationID = conversation.id
         conversation.editor = .live(repository)
         conversation.lifecycle = LedgerAgentBackgroundRun.shared
         LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
         let started = conversation.send(question, reporting: { message, history, draftRoot, report in
             try await repository.runAgentTurn(message: message, history: history, choice: choice,
                                               apiKey: key, sensitiveUnlocked: true, thinking: thinking,
-                                              draft: draftRoot, onStep: report)
+                                              draft: draftRoot, transcript: transcript,
+                                              conversationID: conversationID, onStep: report)
         })
         if started { draft = "" }
     }

@@ -65,9 +65,15 @@ type turnRequestV1 struct {
 	// edit with file tools. The shell diffs it against the committed
 	// generation and writes the change only after the user confirms.
 	ScratchRoot string `json:"scratchRoot,omitempty"`
-	// History is the prior visible conversation; tool calls are not replayed.
+	// History is the prior visible conversation without tool calls, for a
+	// conversation that has no transcript yet (one saved by an older build).
 	History []historyMessageV1 `json:"history"`
-	Message string             `json:"message"`
+	// Transcript is the transcript the previous turn of this conversation
+	// returned, sent back unchanged; it replaces History when present.
+	Transcript string `json:"transcript,omitempty"`
+	// ConversationID keys the provider's prompt cache to the conversation.
+	ConversationID string `json:"conversationId,omitempty"`
+	Message        string `json:"message"`
 }
 
 type customEndpointV1 struct {
@@ -151,6 +157,11 @@ type turnResponseV1 struct {
 	// Edited reports that a file tool changed the scratch copy this turn.
 	Edited bool   `json:"edited,omitempty"`
 	Error  string `json:"error,omitempty"`
+	// Transcript is everything the model saw and said, tool calls, results
+	// and reasoning included, for the shell to send with the next question.
+	// Only an answered turn returns one; after a failure the shell keeps the
+	// previous transcript.
+	Transcript string `json:"transcript,omitempty"`
 }
 
 // streamFn is replaced by tests with a deterministic provider.
@@ -210,7 +221,7 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 	defer cancel()
 	network := newTurnHTTP()
 	defer network.close()
-	reply, calls, edited, err := runTurn(ctx, cancel, network, requestJSON)
+	reply, transcript, calls, edited, err := runTurn(ctx, cancel, network, requestJSON)
 	// A failed or cancelled turn may still have edited the scratch copy.
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return encode(turnResponseV1{Version: 1, Cancelled: true, ToolCalls: calls, Edited: edited, Error: "cancelled"})
@@ -219,7 +230,7 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 		return encode(turnResponseV1{Version: 1, ToolCalls: calls, Edited: edited, Error: turnErrorText(ctx, network, err),
 			ModelUnavailable: errors.Is(err, app.ErrLocalModelUnavailable)})
 	}
-	return encode(turnResponseV1{Version: 1, OK: true, Reply: reply, ToolCalls: calls, Edited: edited})
+	return encode(turnResponseV1{Version: 1, OK: true, Reply: reply, ToolCalls: calls, Edited: edited, Transcript: transcript})
 }
 
 // turnErrorText says why a turn failed in words the user can act on; the
@@ -308,43 +319,43 @@ func ToolCatalogJSON() string {
 	return encode(map[string]any{"version": 1, "tools": tools})
 }
 
-func runTurn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (reply string, calls []toolCallV1, edited bool, err error) {
-	reply, calls, scratch, err := runTurnIn(ctx, cancel, network, requestJSON)
+func runTurn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (reply, transcript string, calls []toolCallV1, edited bool, err error) {
+	reply, transcript, calls, scratch, err := runTurnIn(ctx, cancel, network, requestJSON)
 	if scratch != nil {
 		edited = scratch.wasEdited()
 		scratch.close()
 	}
-	return reply, calls, edited, err
+	return reply, transcript, calls, edited, err
 }
 
-func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (string, []toolCallV1, *scratch, error) {
+func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (string, string, []toolCallV1, *scratch, error) {
 	calls := []toolCallV1{}
 	var files *scratch
 	decoder := json.NewDecoder(strings.NewReader(requestJSON))
 	decoder.DisallowUnknownFields()
 	var request turnRequestV1
 	if err := decoder.Decode(&request); err != nil {
-		return "", calls, files, fmt.Errorf("invalid Agent request: %w", err)
+		return "", "", calls, files, fmt.Errorf("invalid Agent request: %w", err)
 	}
 	if request.Version != 1 {
-		return "", calls, files, errors.New("supported Agent request version is 1")
+		return "", "", calls, files, errors.New("supported Agent request version is 1")
 	}
 	captureCrashes(request.RuntimeRoot)
 	if request.TurnID != "" {
 		if _, loaded := runningTurns.LoadOrStore(request.TurnID, cancel); loaded {
-			return "", calls, files, errors.New("turnId is already running")
+			return "", "", calls, files, errors.New("turnId is already running")
 		}
 		defer runningTurns.Delete(request.TurnID)
 		if _, cancelled := earlyCancels.LoadAndDelete(request.TurnID); cancelled {
 			cancel()
-			return "", calls, files, context.Canceled
+			return "", "", calls, files, context.Canceled
 		}
 	}
 	feed := openEventFeed(request.TurnID)
 	defer feed.close()
 	message := strings.TrimSpace(request.Message)
 	if message == "" || len(message) > maxMessageBytes {
-		return "", calls, files, errors.New("message is required and must be at most 12000 bytes")
+		return "", "", calls, files, errors.New("message is required and must be at most 12000 bytes")
 	}
 	var model *ai.Model
 	var err error
@@ -353,23 +364,23 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	assumed := request.Provider == customProvider
 	if request.Provider == customProvider {
 		if model, err = customModel(request.Model, request.Custom); err != nil {
-			return "", calls, files, err
+			return "", "", calls, files, err
 		}
 	} else if request.Custom != nil {
-		return "", calls, files, errors.New("custom is only valid with provider custom")
+		return "", "", calls, files, errors.New("custom is only valid with provider custom")
 	} else if model = resolveModel(request.Provider, request.Model); model == nil {
 		if model = listedModel(request.Provider, request.Model); model == nil {
-			return "", calls, files, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
+			return "", "", calls, files, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
 		}
 		assumed = true
 	}
 	thinking, err := thinkingLevel(model, request.Thinking, assumed)
 	if err != nil {
-		return "", calls, files, err
+		return "", "", calls, files, err
 	}
 	session, err := app.OpenLocalAgentSession(request.LocalRequest, request.SensitiveUnlocked)
 	if err != nil {
-		return "", calls, files, err
+		return "", "", calls, files, err
 	}
 	specs := app.LocalAgentToolSpecs()
 	tools := make([]agent.AgentTool, 0, len(specs)+5)
@@ -381,7 +392,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	turns := maxTurns
 	if request.ScratchRoot != "" {
 		if files, err = editableScratch(request); err != nil {
-			return "", calls, nil, err
+			return "", "", calls, nil, err
 		}
 		for _, tool := range files.tools() {
 			tools = append(tools, tool)
@@ -389,9 +400,10 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		}
 		turns = maxEditTurns
 	}
-	history, err := historyMessages(request.History)
+	systemPrompt := app.LocalAgentSystemPrompt(files != nil)
+	history, err := priorMessages(request, systemPrompt)
 	if err != nil {
-		return "", calls, files, err
+		return "", "", calls, files, err
 	}
 	key := request.APIKey
 	var argumentsMu sync.Mutex
@@ -404,7 +416,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		InitialState:  &agent.AgentInitialState{Messages: history},
 		Model:         model,
 		Tools:         tools,
-		SystemPrompt:  app.LocalAgentSystemPrompt(files != nil),
+		SystemPrompt:  systemPrompt,
 		MaxTurns:      turns,
 		ThinkingLevel: thinking,
 		StreamFn: func(ctx context.Context, model *ai.Model, transcript ai.TranscriptContext, options ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
@@ -435,15 +447,35 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		}},
 	})
 	if err != nil {
-		return "", calls, files, err
+		return "", "", calls, files, err
 	}
+	if request.ConversationID != "" {
+		runner.SetSessionID(request.ConversationID)
+	}
+	// A run returns the whole transcript, which starts with the one the turn
+	// was given; this turn's calls are the results after those.
+	priorResults := 0
+	for _, message := range history {
+		if message.ToolResult != nil {
+			priorResults++
+		}
+	}
+	seenResults := 0
 	collect := func(produced []agent.AgentMessage) {
+		argumentsMu.Lock()
+		defer argumentsMu.Unlock()
+		results := 0
 		for _, produced := range produced {
-			if result := produced.ToolResult; result != nil {
-				argumentsMu.Lock()
-				calls = append(calls, toolCallV1{Name: result.ToolName, Arguments: arguments[result.ToolCallID], IsError: result.IsError})
-				argumentsMu.Unlock()
+			result := produced.ToolResult
+			if result == nil {
+				continue
 			}
+			results++
+			if results <= priorResults || results <= seenResults {
+				continue
+			}
+			seenResults = results
+			calls = append(calls, toolCallV1{Name: result.ToolName, Arguments: arguments[result.ToolCallID], IsError: result.IsError})
 		}
 	}
 	produced, err := runner.Send(ctx, message)
@@ -463,10 +495,20 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		collect(produced)
 	}
 	if err != nil {
-		return "", calls, files, err
+		return "", "", calls, files, err
 	}
 	reply, err := finalReply(produced)
-	return reply, calls, files, err
+	if err != nil {
+		return "", "", calls, files, err
+	}
+	// The whole transcript goes back to the shell, which sends it with the
+	// next question unchanged: the provider then sees the same prefix every
+	// turn and serves it from its prompt cache.
+	transcript, err := encodeTranscript(runner.Messages())
+	if err != nil {
+		return reply, "", calls, files, nil
+	}
+	return reply, transcript, calls, files, nil
 }
 
 // lastAssistant is the final model message of a run, if any.
@@ -526,6 +568,20 @@ func editableScratch(request turnRequestV1) (*scratch, error) {
 		entrypoint = "main.bean"
 	}
 	return openScratch(dir, entrypoint)
+}
+
+// priorMessages is what the turn starts from: the transcript the previous
+// turn returned, trimmed when it outgrew its budget, or for a conversation
+// without one, its visible history.
+func priorMessages(request turnRequestV1, systemPrompt string) ([]agent.AgentMessage, error) {
+	if strings.TrimSpace(request.Transcript) != "" {
+		if messages, err := decodeTranscript(request.Transcript); err == nil {
+			return withSystemPrompt(trimTranscript(messages, transcriptBudget), systemPrompt), nil
+		}
+		// An unreadable transcript (another build's format) costs the
+		// conversation its tool results, not the turn.
+	}
+	return historyMessages(request.History)
 }
 
 // historyMessages replays the visible conversation. Providers reject empty

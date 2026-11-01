@@ -265,6 +265,12 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     let message: String
     /// The private ledger copy this turn may edit; nil keeps the turn read-only.
     var scratchRoot: String? = nil
+    /// What the previous answered turn returned, sent back unchanged so the
+    /// model sees its earlier tool results and the provider can serve the
+    /// unchanged prefix from its prompt cache. Replaces `history` when set.
+    var transcript: String? = nil
+    /// Keys the provider's prompt cache to the conversation.
+    var conversationId: String? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {
@@ -276,12 +282,16 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
     var modelUnavailable: Bool? = nil
     /// The turn wrote to its scratch copy, even if it then failed.
     var edited = false
+    /// The whole conversation as the model saw it, for the next turn. Only
+    /// an answered turn has one.
+    var transcript: String? = nil
 
-    private enum CodingKeys: String, CodingKey { case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited }
+    private enum CodingKeys: String, CodingKey { case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited, transcript }
     init(ok: Bool, reply: String? = nil, toolCalls: [LedgerAgentToolCall] = [], error: String? = nil,
-         cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false) {
+         cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false, transcript: String? = nil) {
         self.ok = ok; self.reply = reply; self.toolCalls = toolCalls; self.error = error
         self.cancelled = cancelled; self.modelUnavailable = modelUnavailable; self.edited = edited
+        self.transcript = transcript
     }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -292,6 +302,7 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
         cancelled = try container.decodeIfPresent(Bool.self, forKey: .cancelled)
         modelUnavailable = try container.decodeIfPresent(Bool.self, forKey: .modelUnavailable)
         edited = try container.decodeIfPresent(Bool.self, forKey: .edited) ?? false
+        transcript = try container.decodeIfPresent(String.self, forKey: .transcript)
     }
 }
 
@@ -628,6 +639,12 @@ final class LedgerAgentConversation: ObservableObject {
     @Published private(set) var written: LedgerAgentReview?
     /// What the running turn is doing now; nil before its first event.
     @Published private(set) var step: LedgerAgentStep?
+    /// Everything the model saw and said so far, tool results included, as
+    /// the last answered turn returned it. The next turn sends it back so
+    /// follow-ups build on earlier reads; nil until a turn is answered (and
+    /// for a conversation saved by an older build, which replays its visible
+    /// history instead). A failed or stopped turn leaves it as it was.
+    private(set) var transcript: String?
     /// When the running turn last reported a step, or started.
     private(set) var stepSince: Date?
     private(set) var stepCount = 0
@@ -679,6 +696,13 @@ final class LedgerAgentConversation: ObservableObject {
             restoredNotice = String(localized: "上次的草稿改动没有写入，重新打开后已放弃。需要的话让助手重新改一次。")
             note = String(localized: "（系统提示：这是重新打开的旧对话，之前草稿里没有写入的改动已经放弃，账本以当前内容为准。）")
         }
+    }
+
+    /// Takes the transcript saved with a reopened conversation, unless a turn
+    /// has already answered without it.
+    func adoptTranscript(_ saved: String) {
+        guard transcript == nil, !saved.isEmpty else { return }
+        transcript = saved
     }
 
     /// What to save, or nil while nothing has been asked.
@@ -799,6 +823,7 @@ final class LedgerAgentConversation: ObservableObject {
         pending = nil
         written = nil
         note = nil
+        transcript = nil
         epoch += 1
         if let editor {
             let draft = draft, reopening = reopening
@@ -875,6 +900,7 @@ final class LedgerAgentConversation: ObservableObject {
         switch outcome {
         case let .success(turn) where turn.response.ok && (Self.hasText(turn.response.reply) || pending?.review != nil):
             note = nil
+            if let next = turn.response.transcript, !next.isEmpty { transcript = next }
             let reply = Self.hasText(turn.response.reply) ? turn.response.reply ?? ""
                 : String(localized: "改动已经准备好，请在下方查看并确认。")
             messages.append(.init(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
