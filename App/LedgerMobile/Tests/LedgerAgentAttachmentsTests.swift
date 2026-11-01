@@ -14,7 +14,7 @@ final class LedgerAgentAttachmentsTests: XCTestCase {
         XCTAssertEqual(LedgerAgentAttachments.storedName(id: "a1", original: "../招行/10月.csv"), "a1-10月.csv")
         XCTAssertEqual(LedgerAgentAttachments.storedName(id: "a2", original: ".hidden"), "a2-hidden")
         XCTAssertEqual(LedgerAgentAttachments.storedName(id: "a2", original: "a:b.xlsx"), "a2-a_b.xlsx")
-        XCTAssertLessThanOrEqual(LedgerAgentAttachments.storedName(id: "a1", original: String(repeating: "长", 200) + ".pdf").count, 80)
+        XCTAssertLessThanOrEqual(LedgerAgentAttachments.storedName(id: "a1", original: String(repeating: "长", count: 200) + ".pdf").count, 80)
     }
 
     func testKindsFollowTheExtension() {
