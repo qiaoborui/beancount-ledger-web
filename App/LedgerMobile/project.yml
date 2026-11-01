@@ -82,6 +82,7 @@ targets:
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
         NSSupportsLiveActivities: true
         UIBackgroundModes:
+          - audio
           - processing
           - fetch
         BGTaskSchedulerPermittedIdentifiers:

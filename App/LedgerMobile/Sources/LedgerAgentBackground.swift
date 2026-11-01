@@ -10,16 +10,25 @@ import ActivityKit
 /// Keeps a 账本助手 turn running after the user leaves the app, and says how
 /// it ended.
 ///
-/// iOS gives an app that moves to the background about 30 seconds. A turn can
-/// take minutes, so on iOS 26 each turn is a `BGContinuedProcessingTask`: the
-/// user started it, and the system shows its progress (title, the current
-/// step) on the Lock Screen and in the Dynamic Island while it runs. The
-/// system expires a continued task that stops reporting progress, so a timer
-/// moves the progress along between the loop's own steps. Where that task is
-/// unavailable or refused, the turn holds the ordinary background grace time
-/// and shows its own Live Activity. When the time runs out either way the
-/// turn is interrupted, not left to fail on a dead connection: the question
-/// returns for a retry and the draft keeps what was already changed.
+/// iOS gives an app that moves to the background about 30 seconds, and a turn
+/// can take minutes. Three things hold it, strongest first:
+///
+/// - Silent audio (`LedgerAgentKeepAlive`, on unless the user turns it off):
+///   an app that plays audio is not suspended, so the turn runs to the end
+///   with the phone locked. A call can interrupt it; it comes back after.
+/// - On iOS 26, a `BGContinuedProcessingTask`: the user started the turn, so
+///   the system shows its progress on the Lock Screen and in the Dynamic
+///   Island. The system expires a task that stops reporting progress, so a
+///   heartbeat moves it along between the loop's own steps.
+/// - The ordinary background grace time, with a Live Activity of our own
+///   where the continued task is unavailable or was expired.
+///
+/// When everything holding the turn is gone, the turn is interrupted rather
+/// than left to fail on a dead connection: the question returns, the draft
+/// keeps what was already changed, and the Agent screen sends it again when
+/// the user comes back. The heartbeat also notices when iOS froze the app
+/// anyway, so a request that died with the freeze counts as an interruption
+/// too.
 ///
 /// A turn that ends while the Agent screen is not in front of the user posts
 /// a local notification; tapping it opens the screen.
@@ -30,10 +39,23 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
     /// Continued tasks are registered per turn under this wildcard prefix,
     /// which Info.plist permits.
     static let taskPrefix = "com.qiaoborui.ledger.mobile.agent."
+    /// A heartbeat later than this means the app was frozen in between.
+    static let suspensionGap: TimeInterval = 20
+    /// After a freeze, a turn that reports nothing for this long is taken to
+    /// have lost its connection, and is interrupted so it can start again
+    /// instead of waiting out the network timeout.
+    static let signOfLifeLimit: TimeInterval = 45
 
     /// Set from the ledger's privacy protection: the Lock Screen and
     /// notifications then say only that the assistant is working or done.
     var concealsContent = false
+    /// Set from the assistant's settings: hold turns with silent audio.
+    var keepsAwake = true
+    /// Why the last turn was interrupted, for the screen and the
+    /// notification; nil when it was not.
+    private(set) var interruptionCause: String?
+    /// Whether iOS froze the app at some point during the running turn.
+    private(set) var turnWasSuspended = false
 
     private weak var conversation: LedgerAgentConversation?
     /// From a turn's start to its end.
@@ -41,9 +63,13 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
     private var grace: UIBackgroundTaskIdentifier = .invalid
     private var startedAt = Date()
     private var steps = 0
-    private var ticker: Task<Void, Never>?
+    private var heartbeat: Task<Void, Never>?
+    /// When the heartbeat found the app had been frozen, until the turn
+    /// reports a step again.
+    private var thawedAt: Date?
     private var continued: AnyObject?
     private var continuedID: String?
+    private let keepAlive = LedgerAgentKeepAlive.shared
     #if !targetEnvironment(macCatalyst)
     private var activity: ActivityHandle?
     #endif
@@ -55,10 +81,19 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
         running = true
         startedAt = Date()
         steps = 0
+        interruptionCause = nil
+        turnWasSuspended = false
+        thawedAt = nil
         LedgerAgentNotifications.shared.requestAuthorizationIfNeeded()
-        grace = UIApplication.shared.beginBackgroundTask(withName: "ledger.agent-turn") { [weak self] in
-            MainActor.assumeIsolated { self?.graceExpired() }
+        // Started here, while the app is in front: iOS does not start new
+        // playback for an app already in the background.
+        if keepsAwake {
+            keepAlive.onLost = { [weak self] in self?.keepAliveLost() }
+            keepAlive.onRegained = nil
+            keepAlive.start()
         }
+        holdGrace()
+        startHeartbeat()
         let subtitle = concealsContent ? String(localized: "正在处理你的问题") : question
         if #available(iOS 26.0, *), submitContinued(subtitle: subtitle) { return }
         startActivity()
@@ -66,6 +101,7 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
 
     func turnStepped(_ step: LedgerAgentStep, count: Int) {
         steps = count
+        thawedAt = nil
         let detail = concealsContent ? String(localized: "正在处理（第 \(count) 步）") : step.title
         if #available(iOS 26.0, *), let task = continued as? BGContinuedProcessingTask {
             task.updateTitle(String(localized: "账本助手正在处理"), subtitle: detail)
@@ -78,7 +114,10 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
         guard running else { return }
         running = false
         let seen = UIApplication.shared.applicationState == .active && conversation?.isOnScreen == true
-        let summary = Self.summary(ending, concealed: concealsContent)
+        if ending == .interrupted, interruptionCause == nil {
+            interruptionCause = String(localized: "App 在后台的时间用完了")
+        }
+        let summary = Self.summary(ending, concealed: concealsContent, cause: interruptionCause)
         if #available(iOS 26.0, *), let task = continued as? BGContinuedProcessingTask {
             task.updateTitle(summary.title, subtitle: summary.body)
             task.progress.completedUnitCount = task.progress.totalUnitCount
@@ -105,18 +144,41 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
         LedgerAgentNotifications.shared.clearDelivered()
     }
 
-    /// The grace time is spent. A continued task keeps the app running on
-    /// its own, so only a turn without one has to stop.
+    /// Whatever is left of the background grace time. Asked again when the
+    /// silent audio is lost in the background, which leaves only this.
+    private func holdGrace() {
+        guard grace == .invalid else { return }
+        grace = UIApplication.shared.beginBackgroundTask(withName: "ledger.agent-turn") { [weak self] in
+            MainActor.assumeIsolated { self?.graceExpired() }
+        }
+    }
+
+    /// The grace time is spent. Silent audio or a continued task keeps the
+    /// app running on its own, so only a turn without either has to stop.
     private func graceExpired() {
         if grace != .invalid {
             UIApplication.shared.endBackgroundTask(grace)
             grace = .invalid
         }
-        if continued == nil { expire() }
+        guard running, continued == nil, !keepAlive.isHolding else { return }
+        expire(String(localized: "App 在后台的时间用完了"))
+    }
+
+    /// A call or another app took the audio session.
+    private func keepAliveLost() {
+        guard running else { return }
+        if continued == nil { holdGrace() }
+        interruptionCause = String(localized: "后台保活被来电或其他 App 的声音打断")
+        keepAlive.onRegained = { [weak self] in
+            // Back in time: the turn never stopped.
+            guard let self, self.running else { return }
+            self.interruptionCause = nil
+        }
     }
 
     /// The system wants the background time back.
-    private func expire() {
+    private func expire(_ cause: String) {
+        if interruptionCause == nil { interruptionCause = cause }
         if let conversation, conversation.isRunning {
             conversation.interrupt()
         } else {
@@ -124,9 +186,43 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
         }
     }
 
+    /// Ticks every two seconds while a turn runs: it keeps a continued task's
+    /// progress moving, and a tick that comes far too late means iOS froze the
+    /// app in between, whatever was meant to hold it.
+    private func startHeartbeat() {
+        heartbeat?.cancel()
+        heartbeat = Task { [weak self] in
+            var last = Date()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, self.running, !Task.isCancelled else { return }
+                let now = Date()
+                if now.timeIntervalSince(last) > Self.suspensionGap {
+                    self.turnWasSuspended = true
+                    self.thawedAt = now
+                    if self.interruptionCause == nil {
+                        self.interruptionCause = String(localized: "App 在后台被系统暂停，连接断开了")
+                    }
+                }
+                last = now
+                if let thawed = self.thawedAt, now.timeIntervalSince(thawed) > Self.signOfLifeLimit {
+                    self.thawedAt = nil
+                    self.expire(String(localized: "App 在后台被系统暂停，连接断开了"))
+                    return
+                }
+                if #available(iOS 26.0, *), let task = self.continued as? BGContinuedProcessingTask {
+                    self.advanceProgress(task, by: 1)
+                }
+            }
+        }
+    }
+
     private func finishHolding() {
-        ticker?.cancel()
-        ticker = nil
+        heartbeat?.cancel()
+        heartbeat = nil
+        keepAlive.onLost = nil
+        keepAlive.onRegained = nil
+        keepAlive.stop()
         if let continuedID {
             if #available(iOS 26.0, *), let task = continued as? BGContinuedProcessingTask {
                 task.setTaskCompleted(success: false)
@@ -178,18 +274,27 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
         task.expirationHandler = {
             Task { @MainActor in
                 guard LedgerAgentBackgroundRun.shared.continuedID == identifier else { return }
-                LedgerAgentBackgroundRun.shared.expire()
+                LedgerAgentBackgroundRun.shared.continuedExpired()
             }
         }
         task.progress.totalUnitCount = 1000
         task.progress.completedUnitCount = 0
-        ticker = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
-                guard let self, let task = self.continued as? BGContinuedProcessingTask else { return }
-                self.advanceProgress(task, by: 1)
-            }
+    }
+
+    /// The system ended the continued task early. With the silent audio
+    /// still playing the turn goes on, shown by a Live Activity instead.
+    @available(iOS 26.0, *)
+    private func continuedExpired() {
+        guard running else { return }
+        guard keepAlive.isHolding else {
+            expire(String(localized: "系统收回了后台处理时间"))
+            return
         }
+        (continued as? BGContinuedProcessingTask)?.setTaskCompleted(success: false)
+        continued = nil
+        continuedID = nil
+        startActivity()
+        updateActivity(.init(phase: .running, detail: String(localized: "正在后台继续处理"), steps: steps))
     }
 
     /// Progress the loop cannot measure: it approaches the end over the
@@ -270,7 +375,7 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
         let phase: LedgerAgentActivityAttributes.ContentState.Phase?
     }
 
-    static func summary(_ ending: LedgerAgentTurnEnding, concealed: Bool) -> Summary {
+    static func summary(_ ending: LedgerAgentTurnEnding, concealed: Bool, cause: String? = nil) -> Summary {
         switch ending {
         case let .answered(reply):
             let body = concealed ? String(localized: "打开 App 查看回答") : snippet(reply)
@@ -282,8 +387,9 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
             let body = concealed ? String(localized: "打开 App 查看原因，问题还在输入框里") : snippet(message)
             return .init(title: String(localized: "账本助手没能完成"), body: body, phase: .failed)
         case .interrupted:
+            let reason = cause ?? String(localized: "App 在后台的时间用完了")
             return .init(title: String(localized: "账本助手被中断"),
-                         body: String(localized: "App 在后台的时间用完了。回到 App 点重试即可继续，草稿里的改动会保留。"),
+                         body: reason + String(localized: "。回到 App 会自动接着做，草稿里的改动会保留。"),
                          phase: .interrupted)
         case .stopped:
             return .init(title: String(localized: "账本助手已停止"), body: "", phase: nil)

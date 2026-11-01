@@ -546,6 +546,13 @@ protocol LedgerAgentLifecycle: AnyObject {
     func turnStarted(question: String, conversation: LedgerAgentConversation)
     func turnStepped(_ step: LedgerAgentStep, count: Int)
     func turnEnded(_ ending: LedgerAgentTurnEnding)
+    /// Whether iOS suspended the app while the running turn was out, so a
+    /// failure it reports is a dead connection rather than the model's answer.
+    var turnWasSuspended: Bool { get }
+}
+
+extension LedgerAgentLifecycle {
+    var turnWasSuspended: Bool { false }
 }
 
 /// Turns the visible conversation into the history the next turn replays.
@@ -696,6 +703,13 @@ final class LedgerAgentConversation: ObservableObject {
     private var note: String?
     /// Bumped by `reset`, so work started before it does not land after it.
     private var epoch = 0
+    /// Set when a turn was cut short by the system rather than by the model
+    /// or the user, so coming back to the app can send it again on its own.
+    private(set) var resumable = false
+    /// Resumes in a row without an answer; a turn that keeps getting cut
+    /// short waits for the user's retry instead of looping.
+    private var resumes = 0
+    static let maximumResumes = 2
     private var reopening: Task<LedgerAgentDraft?, Never>?
     var editor: LedgerAgentEditor?
 
@@ -809,6 +823,7 @@ final class LedgerAgentConversation: ObservableObject {
         let report: LedgerAgentSteps.Handler = { [weak self] step in
             Task { @MainActor in self?.advance(step, started: started) }
         }
+        resumable = false
         lifecycle?.turnStarted(question: question, conversation: self)
         task = Task { [weak self] in
             let outcome: Result<Outcome, Error>
@@ -832,6 +847,8 @@ final class LedgerAgentConversation: ObservableObject {
     func stop() {
         task?.cancel()
         task = nil
+        resumable = false
+        resumes = 0
         guard isRunning else { return }
         // A stopped question stays visible; it is not resent as history.
         phase = .idle
@@ -846,11 +863,25 @@ final class LedgerAgentConversation: ObservableObject {
         task?.cancel()
         task = nil
         let question = messages.last { $0.role == .user }?.text ?? ""
+        markInterrupted(question: question)
+    }
+
+    private func markInterrupted(question: String) {
         phase = .failed(.interrupted, question: question)
+        resumable = resumes < Self.maximumResumes
         if draft != nil {
             note = String(localized: "（系统提示：上一轮回答被系统中断，草稿里可能已有部分改动；继续之前请先查看草稿的现状。）")
         }
         endRunning(.interrupted)
+    }
+
+    /// The question of a turn the system cut short, once, for the screen to
+    /// send again when the user is back; nil when there is nothing to resume.
+    func takeResumableQuestion() -> String? {
+        guard resumable, case let .failed(.interrupted, question) = phase, !question.isEmpty else { return nil }
+        resumable = false
+        resumes += 1
+        return question
     }
 
     private func advance(_ step: LedgerAgentStep, started: Date) {
@@ -874,6 +905,8 @@ final class LedgerAgentConversation: ObservableObject {
         task?.cancel()
         task = nil
         if isRunning { lifecycle?.turnEnded(.stopped) }
+        resumable = false
+        resumes = 0
         step = nil
         restoredNotice = nil
         draftUnreviewed = false
@@ -935,6 +968,22 @@ final class LedgerAgentConversation: ObservableObject {
         !(reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// A failure that a frozen connection explains: not a stop, and not a key
+    /// the provider refused.
+    private static func diedWithConnection(_ outcome: Result<Outcome, Error>) -> Bool {
+        switch outcome {
+        case let .success(turn):
+            guard !turn.response.ok, turn.response.cancelled != true else { return false }
+            if case .failed = LedgerAgentError.classify(turn.response.error ?? "") { return true }
+            return false
+        case let .failure(error as LedgerAgentError):
+            if case .failed = error { return true }
+            return false
+        case .failure(is CancellationError): return false
+        case .failure: return true
+        }
+    }
+
     private func finish(_ outcome: Result<Outcome, Error>, question: String, started: Date) {
         guard case let .running(since) = phase, since == started else {
             // A stopped or reset turn may still have opened a copy.
@@ -969,6 +1018,7 @@ final class LedgerAgentConversation: ObservableObject {
             messages.append(.init(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
                                   duration: Date().timeIntervalSince(started)))
             phase = .idle
+            resumes = 0
             if let review = pending?.review {
                 endRunning(.changeReady(reply, files: review.files.count))
             } else {
@@ -977,6 +1027,10 @@ final class LedgerAgentConversation: ObservableObject {
         case let .success(turn) where turn.response.cancelled == true:
             phase = .idle
             endRunning(.stopped)
+        case _ where lifecycle?.turnWasSuspended == true && Self.diedWithConnection(outcome):
+            // iOS froze the app while the request was out; the connection
+            // died with it, which says nothing about the question.
+            markInterrupted(question: question)
         case let .success(turn):
             // An answer without any text reads as no answer at all; say so and
             // offer a retry instead of drawing an empty reply.
