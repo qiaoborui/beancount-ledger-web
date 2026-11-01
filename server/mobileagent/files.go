@@ -1,6 +1,7 @@
 package mobileagent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
@@ -44,6 +46,7 @@ func currentChecker() Checker {
 }
 
 const (
+	maxListedFiles  = 1000
 	maxFileBytes    = 4 << 20
 	maxReadLines    = 2000
 	defaultReadSpan = 400
@@ -69,15 +72,14 @@ func openScratch(dir, entrypoint string) (*scratch, error) {
 
 func (s *scratch) close() { _ = s.root.Close() }
 
-// beanPath accepts a workspace-relative path to a .bean file.
-func beanPath(name string) (string, error) {
+// workspacePath accepts a workspace-relative path to any file that is not
+// hidden. Hidden files and folders (.git and the like) are not part of the
+// ledger the app publishes.
+func workspacePath(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	clean := path.Clean(strings.ReplaceAll(name, "\\", "/"))
 	if name == "" || path.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", fmt.Errorf("path %q must be relative to the ledger root", name)
-	}
-	if path.Ext(clean) != ".bean" {
-		return "", fmt.Errorf("path %q: only .bean files can be read or written", name)
 	}
 	for _, part := range strings.Split(clean, "/") {
 		if strings.HasPrefix(part, ".") {
@@ -87,8 +89,10 @@ func beanPath(name string) (string, error) {
 	return clean, nil
 }
 
+// read returns a text file of the scratch copy; binary files, such as a
+// saved PDF statement, can be listed, moved and deleted but not read as text.
 func (s *scratch) read(name string) (string, []byte, error) {
-	clean, err := beanPath(name)
+	clean, err := workspacePath(name)
 	if err != nil {
 		return "", nil, err
 	}
@@ -100,12 +104,30 @@ func (s *scratch) read(name string) (string, []byte, error) {
 		return "", nil, fmt.Errorf("%s is not a regular file under 4 MB", clean)
 	}
 	data, err := s.root.ReadFile(clean)
+	if err == nil && isBinary(data) {
+		return "", nil, fmt.Errorf("%s 是二进制文件，不能按文本读取或修改；可以用 move_file 移动、delete_file 删除", clean)
+	}
 	return clean, data, err
 }
 
+func isBinary(data []byte) bool {
+	if len(data) > 8000 {
+		data = data[:8000]
+		// Drop a multi-byte character cut at the boundary.
+		for trim := 0; trim < 3 && !utf8.Valid(data); trim++ {
+			data = data[:len(data)-1]
+		}
+	}
+	return bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data)
+}
+
 func (s *scratch) write(clean string, data []byte) error {
-	if len(data) > maxFileBytes {
-		return errors.New("files are limited to 4 MB")
+	return s.writeLimited(clean, data, maxFileBytes)
+}
+
+func (s *scratch) writeLimited(clean string, data []byte, limit int) error {
+	if len(data) > limit {
+		return fmt.Errorf("files are limited to %d MB", limit>>20)
 	}
 	if dir := path.Dir(clean); dir != "." {
 		if err := s.root.MkdirAll(dir, 0o700); err != nil {
@@ -143,34 +165,58 @@ func (s *scratch) tools() []agent.AgentTool {
 	}
 	return []agent.AgentTool{
 		fileTool{name: "list_files", title: "列出账本文件",
-			description: "列出账本里所有 .bean 文件和大小。入口文件是 " + s.entrypoint + "。",
-			parameters:  object(map[string]any{}), run: s.listFiles},
+			description: "列出账本目录里的文件（.bean 账本文件，以及存档的账单、导入配置等）和大小，隐藏文件除外。入口文件是 " + s.entrypoint + "。dir 只列某个子目录。",
+			parameters:  object(map[string]any{"dir": str("只列这个子目录，例如 documents")}), run: s.listFiles},
 		fileTool{name: "read_file", title: "读取文件",
-			description: "读取一个 .bean 文件，每行带行号（行号后是一个制表符，之后才是原文）。大文件用 offset 和 limit 分段读。",
+			description: "读取一个文本文件（.bean、.yaml、.csv、.md 等），每行带行号（行号后是一个制表符，之后才是原文）。大文件用 offset 和 limit 分段读。",
 			parameters: object(map[string]any{"path": str("相对账本根目录的路径"), "offset": num("从第几行开始，1 起，默认 1"),
 				"limit": num("最多读几行，默认 400，最大 2000")}, "path"), run: s.readFile},
 		fileTool{name: "edit_file", title: "修改文件",
-			description: "在一个 .bean 文件里把 old_string 精确替换为 new_string。old_string 必须和文件原文逐字一致（不含行号），且只出现一次；要替换全部出现处时设 replace_all。先 read_file 再改。",
+			description: "在一个文本文件里把 old_string 精确替换为 new_string。old_string 必须和文件原文逐字一致（不含行号），且只出现一次；要替换全部出现处时设 replace_all。先 read_file 再改。",
 			parameters: object(map[string]any{"path": str("相对账本根目录的路径"), "old_string": str("要替换的原文"),
 				"new_string": str("替换后的文本"), "replace_all": map[string]any{"type": "boolean", "description": "替换全部出现处"}},
 				"path", "old_string", "new_string"), run: s.editFile},
 		fileTool{name: "write_file", title: "写入文件",
-			description: "新建一个 .bean 文件，或用 content 整份覆盖已有文件。改已有文件的局部时用 edit_file。新文件需要被入口文件 include 才会生效。",
+			description: "新建一个文本文件，或用 content 整份覆盖已有文件。改已有文件的局部时用 edit_file。新的 .bean 文件需要被入口文件 include 才会生效。",
 			parameters:  object(map[string]any{"path": str("相对账本根目录的路径"), "content": str("完整的文件内容")}, "path", "content"),
 			run:         s.writeFile},
+		fileTool{name: "move_file", title: "移动文件",
+			description: "移动或重命名账本里的一个文件（包括二进制文件），目标目录不存在会自动创建。移动被 include 的 .bean 文件后要同步改 include 行。目标已存在时需要 overwrite。",
+			parameters: object(map[string]any{"from": str("原路径"), "to": str("新路径"),
+				"overwrite": map[string]any{"type": "boolean", "description": "目标已存在时覆盖"}}, "from", "to"), run: s.moveFile},
+		fileTool{name: "delete_file", title: "删除文件",
+			description: "删除账本里的一个文件。删除 .bean 文件前先去掉指向它的 include。",
+			parameters:  object(map[string]any{"path": str("相对账本根目录的路径")}, "path"), run: s.deleteFile},
 		fileTool{name: "bean_check", title: "校验账本",
 			description: "用 App 内置的 Beancount 校验整份草稿账本，返回错误及所在文件和行号。改完后必须调用，直到通过。",
 			parameters:  object(map[string]any{}), run: s.beanCheck, detached: true},
 	}
 }
 
-func (s *scratch) listFiles(json.RawMessage) (any, error) {
+func (s *scratch) listFiles(raw json.RawMessage) (any, error) {
 	type entry struct {
 		Path  string `json:"path"`
 		Bytes int64  `json:"bytes"`
 	}
+	var input struct {
+		Dir string `json:"dir"`
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return nil, err
+		}
+	}
+	start := "."
+	if strings.TrimSpace(input.Dir) != "" {
+		clean, err := workspacePath(input.Dir)
+		if err != nil {
+			return nil, err
+		}
+		start = clean
+	}
 	files := []entry{}
-	err := fs.WalkDir(s.root.FS(), ".", func(name string, d fs.DirEntry, err error) error {
+	truncated := false
+	err := fs.WalkDir(s.root.FS(), start, func(name string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -180,7 +226,11 @@ func (s *scratch) listFiles(json.RawMessage) (any, error) {
 			}
 			return nil
 		}
-		if d.Type().IsRegular() && path.Ext(name) == ".bean" {
+		if d.Type().IsRegular() {
+			if len(files) >= maxListedFiles {
+				truncated = true
+				return fs.SkipAll
+			}
 			info, err := d.Info()
 			if err != nil {
 				return err
@@ -189,7 +239,11 @@ func (s *scratch) listFiles(json.RawMessage) (any, error) {
 		}
 		return nil
 	})
-	return map[string]any{"entrypoint": s.entrypoint, "files": files}, err
+	result := map[string]any{"entrypoint": s.entrypoint, "files": files}
+	if truncated {
+		result["truncated"] = fmt.Sprintf("只列出前 %d 个文件；用 dir 只看某个目录", maxListedFiles)
+	}
+	return result, err
 }
 
 func (s *scratch) readFile(raw json.RawMessage) (any, error) {
@@ -275,7 +329,7 @@ func (s *scratch) writeFile(raw json.RawMessage) (any, error) {
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return nil, err
 	}
-	clean, err := beanPath(input.Path)
+	clean, err := workspacePath(input.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -372,4 +426,79 @@ func runDetached(ctx context.Context, timeout time.Duration, run func() (any, er
 	case <-timer.C:
 		return nil, fmt.Errorf("校验超过 %d 秒没有完成", int(timeout/time.Second))
 	}
+}
+
+func (s *scratch) moveFile(raw json.RawMessage) (any, error) {
+	var input struct {
+		From      string `json:"from"`
+		To        string `json:"to"`
+		Overwrite bool   `json:"overwrite"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	from, err := workspacePath(input.From)
+	if err != nil {
+		return nil, err
+	}
+	to, err := workspacePath(input.To)
+	if err != nil {
+		return nil, err
+	}
+	if from == to {
+		return nil, errors.New("from and to are the same file")
+	}
+	info, err := s.root.Lstat(from)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: %w", from, fs.ErrNotExist)
+	}
+	if existing, err := s.root.Lstat(to); err == nil {
+		if !existing.Mode().IsRegular() {
+			return nil, fmt.Errorf("%s exists and is not a file", to)
+		}
+		if !input.Overwrite {
+			return nil, fmt.Errorf("%s already exists; set overwrite to replace it", to)
+		}
+	}
+	if dir := path.Dir(to); dir != "." {
+		if err := s.root.MkdirAll(dir, 0o700); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.root.Rename(from, to); err != nil {
+		return nil, err
+	}
+	s.markEdited()
+	return map[string]any{"from": from, "to": to, "bytes": info.Size()}, nil
+}
+
+func (s *scratch) deleteFile(raw json.RawMessage) (any, error) {
+	var input struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	clean, err := workspacePath(input.Path)
+	if err != nil {
+		return nil, err
+	}
+	if clean == s.entrypoint {
+		return nil, errors.New("the entrypoint cannot be deleted")
+	}
+	info, err := s.root.Lstat(clean)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: %w", clean, fs.ErrNotExist)
+	}
+	if err := s.root.Remove(clean); err != nil {
+		return nil, err
+	}
+	s.markEdited()
+	return map[string]any{"path": clean, "deleted": true}, nil
+}
+
+func (s *scratch) markEdited() {
+	s.mu.Lock()
+	s.edited = true
+	s.mu.Unlock()
 }

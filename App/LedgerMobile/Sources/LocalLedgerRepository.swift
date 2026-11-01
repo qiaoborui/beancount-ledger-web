@@ -1181,7 +1181,8 @@ actor LocalLedgerRepository: LedgerRepository {
     func runAgentTurn(message: String, history: [LedgerAgentTurnRequest.HistoryEntry],
                       choice: LedgerAgentModelChoice, apiKey: String, sensitiveUnlocked: Bool,
                       thinking: LedgerAgentThinking? = nil, draft: URL? = nil, transcript: String? = nil,
-                      conversationID: UUID? = nil, runner: LedgerAgentRunner = .native,
+                      conversationID: UUID? = nil, attachments: [LedgerAgentAttachment.Payload] = [],
+                      runner: LedgerAgentRunner = .native,
                       onStep: LedgerAgentSteps.Handler? = nil) async throws -> LedgerAgentTurnResponse {
         if draft != nil { LedgerAgentChecker.install() }
         let engine = engine, entrypoint = descriptor.entrypoint
@@ -1199,7 +1200,8 @@ actor LocalLedgerRepository: LedgerRepository {
                     custom: choice.isCustom ? choice.custom : nil, thinking: thinking?.rawValue,
                     history: history, message: message,
                     scratchRoot: draft?.path, transcript: transcript,
-                    conversationId: conversationID?.uuidString)
+                    conversationId: conversationID?.uuidString,
+                    attachments: attachments.isEmpty ? nil : attachments)
                 let encoded = try JSONEncoder().encode(request)
                 if let onStep { LedgerAgentSteps.observe(turnID, onStep) }
                 defer { LedgerAgentSteps.stop(turnID) }
