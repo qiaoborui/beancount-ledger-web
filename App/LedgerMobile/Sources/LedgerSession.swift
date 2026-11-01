@@ -227,6 +227,23 @@ final class LedgerSession: ObservableObject {
     private var applicationBackground = false
     private var localAuthenticationForegroundWaiters: [UUID: CheckedContinuation<Void, Error>] = [:]
     private var automaticUnlockAttempted = false
+    /// Cold-launch read of the startup presentation that runs while the system
+    /// authentication sheet is up. Its result stays private to this object and is
+    /// only handed to `loadLedger` after authentication succeeded, so nothing is
+    /// published, rendered or shielded differently while the ledger is locked.
+    private struct LocalStartupPrefetch {
+        enum Result: Sendable {
+            case cached(LocalLedgerRepository.CachedStartupPresentation)
+            case page(revisionID: UUID, LocalBootstrapPage)
+        }
+        let repository: LocalLedgerRepository
+        let start: String
+        let end: String
+        let today: String
+        let valuationCurrency: String
+        let task: Task<Result?, Never>
+    }
+    private var localStartupPrefetch: LocalStartupPrefetch?
     private var systemAuthenticationInProgress = false
     private var requestGeneration = 0
     private var sessionEpoch = 0
@@ -240,6 +257,16 @@ final class LedgerSession: ObservableObject {
     }
 
     var localTransactionPresentationRevision: UUID? { localPresentation?.revisionID }
+
+    /// A local session locked over the presentation it keeps in memory (the same
+    /// condition `restoreRetainedLocalLedger` unlocks into). The shell stays
+    /// mounted under the lock surface so an unlock reveals it instead of
+    /// rebuilding every tab; nothing in it is readable until `phase == .ready`.
+    var retainsLockedPresentation: Bool {
+        guard case .locked = phase, case let .local(id) = location,
+              localPresentation?.ledgerID == id, let ledger, ledger.sensitiveUnlocked else { return false }
+        return true
+    }
     @Published private(set) var localTransactionReloadID = 0
 
     // Bounded reads. These do not replace bootstrap/global arrays or grant
@@ -670,6 +697,10 @@ final class LedgerSession: ObservableObject {
             let expectedLocation = location
             await refreshLocalLedgers()
             guard !Task.isCancelled, sessionEpoch == epoch, location == expectedLocation else { return }
+            // Read the ledger while Face ID is on screen instead of after it.
+            // Authentication used to gate the whole load, so the unlock cost was
+            // the system sheet plus a full cold read in sequence.
+            beginLocalStartupPrefetchIfNeeded()
             // Keep the startup surface mounted during automatic authentication.
             // A rejected attempt exposes the manual unlock screen in the catch path.
             await automaticallyUnlockIfNeeded()
@@ -904,7 +935,15 @@ final class LedgerSession: ObservableObject {
         localPresentation = nil
         location = .local(descriptor.id)
         localLedgerName = descriptor.name
-        repositories[.local(descriptor.id)] = localCatalog.repository(for: descriptor)
+        if let prefetched = localStartupPrefetch?.repository, prefetched.descriptor == descriptor {
+            // The startup read ran against this instance; keep it so `loadLedger`
+            // can adopt that read instead of repeating it.
+            repositories[.local(descriptor.id)] = prefetched
+        } else {
+            localStartupPrefetch?.task.cancel()
+            localStartupPrefetch = nil
+            repositories[.local(descriptor.id)] = localCatalog.repository(for: descriptor)
+        }
         // Opt-in measurement recording only (a no-op otherwise): this ledger is
         // what the next runs belong to. `LocalLedgerPerformanceRecording`
         // attaches the committed generation whose files the source-tree digest
@@ -950,8 +989,12 @@ final class LedgerSession: ObservableObject {
             }
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
             if restoreRetainedLocalLedger() { return }
-            await refreshLocalLedgers()
-            try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
+            // `start()` listed the catalog moments ago; only a later unlock rereads it.
+            let listed = location.flatMap { current in localLedgers.first { LedgerLocation.local($0.id) == current } }
+            if !coldStartup || listed == nil {
+                await refreshLocalLedgers()
+                try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
+            }
             guard case let .local(id) = location,
                   let descriptor = localLedgers.first(where: { $0.id == id }) else {
                 throw LedgerRepositoryError.capabilityUnavailable(String(localized: "找不到本地账本，请重新选择"))
@@ -1022,6 +1065,8 @@ final class LedgerSession: ObservableObject {
         defaults.removeObject(forKey: Self.backgroundGitAuthorizationKey)
         LocalLedgerBackgroundSyncService.shared.setEnabled(false)
         _ = invalidateSession()
+        localStartupPrefetch?.task.cancel()
+        localStartupPrefetch = nil
         stopImportIndexTracking()
         clearTransactionMutations()
         resetGlobalSearch()
@@ -3553,6 +3598,59 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    /// Starts the cold-launch read for the active local ledger when its open is
+    /// gated by device authentication. The read only touches the repository actor;
+    /// the session's published state is unchanged until `loadLedger` adopts it.
+    private func beginLocalStartupPrefetchIfNeeded() {
+        guard localStartupPrefetch == nil, let localCatalog, let contextURL,
+              case let .local(id) = location, localPrivacyProtectionEnabled,
+              let descriptor = localLedgers.first(where: { $0.id == id }) else { return }
+        let repository = localCatalog.repository(for: descriptor)
+        let range = selectedRange
+        let start = range.start, end = range.queryEndExclusive
+        let today = LedgerDateRange.today(now: ledgerNow())
+        let currency = storedValuationCurrency(for: contextURL)
+        let task = Task<LocalStartupPrefetch.Result?, Never>(priority: .userInitiated) {
+            do {
+                if let cached = try await repository.cachedStartupPresentation(start: start, end: end,
+                    today: today, valuationCurrency: currency) {
+                    return .cached(cached)
+                }
+                guard let revision = try await repository.workspace.currentRevision() else { return nil }
+                let page = try await repository.bootstrapPage(start: start, end: end, today: today,
+                    valuationCurrency: currency, expectedRevisionID: revision.id)
+                return .page(revisionID: revision.id, page)
+            } catch {
+                // Any failure falls back to the ordinary read after authentication.
+                return nil
+            }
+        }
+        localStartupPrefetch = LocalStartupPrefetch(repository: repository, start: start, end: end,
+            today: today, valuationCurrency: currency, task: task)
+    }
+
+    /// Hands over a finished (or still running) startup read once, provided it was
+    /// made for this repository and query and its revision is still current.
+    private func takeLocalStartupPrefetch(for repository: LocalLedgerRepository, start: String, end: String,
+                                          today: String, valuationCurrency: String) async -> LocalStartupPrefetch.Result? {
+        guard let prefetch = localStartupPrefetch else { return nil }
+        localStartupPrefetch = nil
+        guard prefetch.repository === repository, prefetch.start == start, prefetch.end == end,
+              prefetch.today == today, prefetch.valuationCurrency == valuationCurrency else {
+            prefetch.task.cancel()
+            return nil
+        }
+        guard let result = await prefetch.task.value else { return nil }
+        let revisionID: UUID
+        switch result {
+        case let .cached(presentation): revisionID = presentation.revisionID
+        case let .page(id, _): revisionID = id
+        }
+        // A sync or write may have published a newer generation while the sheet was up.
+        guard (try? await repository.workspace.currentRevision())?.id == revisionID else { return nil }
+        return result
+    }
+
     private func loadLedger(
         from contextURL: URL,
         generation: Int,
@@ -3569,13 +3667,26 @@ final class LedgerSession: ObservableObject {
         let payload: LedgerBootstrap
         let presentationRevision: UUID?
         var restoredStartup: LocalLedgerRepository.CachedStartupPresentation?
-        if let local, deferLocalDerivedRefreshes {
+        var prefetchedPage: (revisionID: UUID, page: LocalBootstrapPage)?
+        if let local {
+            switch await takeLocalStartupPrefetch(for: local, start: targetRange.start,
+                end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency) {
+            case let .cached(presentation)?: restoredStartup = presentation
+            case let .page(revisionID, page)?: prefetchedPage = (revisionID, page)
+            case nil: break
+            }
+            guard generation == requestGeneration else { return }
+        }
+        if let local, deferLocalDerivedRefreshes, restoredStartup == nil, prefetchedPage == nil {
             restoredStartup = try await local.cachedStartupPresentation(start: targetRange.start,
                 end: targetRange.queryEndExclusive, today: today, valuationCurrency: targetCurrency)
         }
         if let restoredStartup {
             payload = restoredStartup.page.bootstrap.replacingTransactions(with: restoredStartup.page.transactionPage.transactions)
             presentationRevision = restoredStartup.revisionID
+        } else if let prefetchedPage {
+            payload = prefetchedPage.page.bootstrap.replacingTransactions(with: prefetchedPage.page.transactionPage.transactions)
+            presentationRevision = prefetchedPage.revisionID
         } else if let local {
             guard let revision = try await local.workspace.currentRevision() else {
                 throw LocalLedgerError.operationFailed(String(localized: "账本版本尚未就绪"))

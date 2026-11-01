@@ -10,8 +10,9 @@ enum LedgerLaunchTiming {
 }
 
 /// Only the foreground presentation clock drives the decorative transition.
-/// An interrupted authentication scene restarts it when the app becomes active,
-/// instead of consuming the animation behind the system authentication surface.
+/// Behind the system authentication sheet the brand rests fully drawn. When the
+/// scene returns it stays settled and leaves at once: replaying the entrance after
+/// Face ID redrew the mark from nothing and held the ledger back by the whole fold.
 struct LedgerLaunchView: View {
     let contentReady: Bool
     let onFinished: () -> Void
@@ -43,6 +44,15 @@ struct LedgerLaunchView: View {
             guard scenePhase == .active else { return }
             var reset = Transaction()
             reset.disablesAnimations = true
+            if startedAt != nil {
+                // Interrupted (Face ID, passcode, app switcher): the startup cover
+                // below shows the same settled brand until the ledger is ready.
+                withTransaction(reset) {
+                    foldFinished = true
+                    holdFinished = true
+                }
+                return
+            }
             withTransaction(reset) {
                 fading = false
                 foldFinished = false
