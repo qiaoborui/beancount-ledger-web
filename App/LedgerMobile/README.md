@@ -349,6 +349,29 @@ bash scripts/build-ios-ipa.sh --private-local /absolute/path/to/new-output-direc
 The parent directory must exist and the output directory must be new. The
 explicit private-use flag preserves the public distribution gate.
 
+### Install straight from the Mac
+
+`scripts/serve-ipa.py` serves a packaged directory to the phone over the local
+network and renders a page with an install button per IPA:
+
+```sh
+python3 scripts/serve-ipa.py /absolute/path/to/new-output-directory
+```
+
+The page prints the LAN address to open on the phone. Its **用 SideStore 安装**
+button opens `sidestore://install?url=<ipa url>`, so SideStore downloads and
+signs the build without copying a file across. AltStore gets the same link
+through `altstore://`, and there is a plain download for any other client. The
+page also shows each build's version, build number, bundle id and SHA-256, which
+is the quickest way to confirm the phone installed the build just packaged.
+
+The server reads the version and bundle id out of the archive itself, so no
+side files are needed. It binds all interfaces by default; keep it to a trusted
+network, and stop it with Ctrl-C when the install is done. An `itms-services`
+manifest is generated as well, but iOS only follows that over HTTPS with a
+trusted certificate: pass `--public-url https://…` when serving through a
+tunnel.
+
 The workflow uses a dedicated Apple Silicon Mac runner with labels
 `self-hosted`, `macOS`, `ARM64`, and `ledger-ios`. It selects the newest Xcode in
 `/Applications`, including beta releases, through the job's `DEVELOPER_DIR`.
