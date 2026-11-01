@@ -413,6 +413,11 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 			tools = append(tools, tool)
 			allowed[tool.Name()] = true
 		}
+		if files != nil {
+			tool := attached.saveTool(files)
+			tools = append(tools, tool)
+			allowed[tool.Name()] = true
+		}
 		systemPrompt += attachmentPrompt
 		message = withAttachmentNote(attached, message)
 	}

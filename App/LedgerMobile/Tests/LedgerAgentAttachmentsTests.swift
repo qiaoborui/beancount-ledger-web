@@ -188,3 +188,25 @@ final class LedgerAgentAttachmentsTests: XCTestCase {
         return url
     }
 }
+
+final class LedgerAgentBinaryDiffTests: XCTestCase {
+    func testABinaryFileShowsItsSizeInsteadOfLines() {
+        let saved = LedgerAgentFileDiff(path: "documents/statements/2026-10.pdf", before: nil,
+                                        after: Data([0x25, 0x50, 0x44, 0x46, 0, 0xFF, 0x10]))
+        XCTAssertEqual(saved.change, .added)
+        XCTAssertEqual(saved.added, 0)
+        XCTAssertEqual(saved.lines.count, 1)
+        XCTAssertTrue(saved.lines[0].text.hasPrefix("二进制文件"))
+        let text = LedgerAgentFileDiff(path: "notes.md", before: nil, after: Data("对账\n".utf8))
+        XCTAssertEqual(text.added, 1)
+        XCTAssertFalse(LedgerAgentFileDiff.isBinary(Data(String(repeating: "账", count: 4000).utf8)))
+    }
+
+    func testFileToolTitles() throws {
+        let calls = try JSONDecoder().decode([LedgerAgentToolCall].self, from: Data("""
+        [{"name":"save_attachment","arguments":{"id":"a1","path":"documents/a.pdf"},"isError":false},
+         {"name":"move_file","arguments":{"from":"a.pdf","to":"b/a.pdf"},"isError":false}]
+        """.utf8))
+        XCTAssertEqual(calls.map(\.title), ["附件存入账本 · documents/a.pdf", "移动文件 · a.pdf → b/a.pdf"])
+    }
+}

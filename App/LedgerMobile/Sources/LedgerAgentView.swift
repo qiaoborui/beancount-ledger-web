@@ -570,7 +570,9 @@ private struct LedgerAgentAnswer: View {
     }
 
     private var toolsSummary: String {
-        let edits = message.toolCalls.filter { ["edit_file", "write_file"].contains($0.name) && !$0.isError }.count
+        let edits = message.toolCalls.filter {
+            ["edit_file", "write_file", "move_file", "delete_file", "save_attachment"].contains($0.name) && !$0.isError
+        }.count
         if edits == 0, message.toolCalls.contains(where: { $0.name == "reconcile_attachment" }) {
             return String(localized: "读取附件和账本 \(message.toolCalls.count) 次")
         }

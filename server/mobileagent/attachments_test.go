@@ -383,3 +383,109 @@ func must(value any, err error) any {
 }
 
 var _ = context.Background
+
+func TestSaveAttachmentCopiesTheOriginalIntoTheDraft(t *testing.T) {
+	runtime := t.TempDir()
+	original := append([]byte("%PDF-1.7\n"), 0, 1, 2, 0xff)
+	path := writeAttachment(t, runtime, "a1-bill.pdf", original)
+	set := mustOpen(t, runtime, attachmentV1{ID: "a1", Name: "招行10月.pdf", Path: path})
+	dir := scratchCopy(t)
+	files, err := openScratch(dir, "main.bean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.close()
+	result := asJSON(t, must(set.saveInto(files, []byte(`{"id":"a1","path":"documents/statements/2026-10-招行"}`))))
+	if result["path"] != "documents/statements/2026-10-招行.pdf" {
+		t.Fatalf("extension not kept: %v", result)
+	}
+	saved, err := os.ReadFile(filepath.Join(dir, "documents", "statements", "2026-10-招行.pdf"))
+	if err != nil || string(saved) != string(original) {
+		t.Fatalf("the original bytes were not saved: %v", err)
+	}
+	if !files.wasEdited() {
+		t.Fatal("saving did not mark the draft edited")
+	}
+	if _, err := set.saveInto(files, []byte(`{"id":"a1","path":"documents/statements/2026-10-招行.pdf"}`)); err == nil {
+		t.Fatal("an existing file was overwritten without overwrite")
+	}
+	for _, target := range []string{"../out.pdf", ".git/x.pdf", "main.bean"} {
+		raw, _ := json.Marshal(map[string]any{"id": "a1", "path": target, "overwrite": true})
+		if _, err := set.saveInto(files, raw); err == nil {
+			t.Errorf("save to %q was allowed", target)
+		}
+	}
+
+	// The other file tools see the saved file as a binary file.
+	listed := asJSON(t, must(files.listFiles([]byte(`{"dir":"documents"}`))))
+	if got := listed["files"].([]any); len(got) != 1 {
+		t.Fatalf("list_files under documents: %v", got)
+	}
+	if _, err := files.readFile([]byte(`{"path":"documents/statements/2026-10-招行.pdf"}`)); err == nil || !strings.Contains(err.Error(), "二进制") {
+		t.Fatalf("binary read: %v", err)
+	}
+	moved := asJSON(t, must(files.moveFile([]byte(`{"from":"documents/statements/2026-10-招行.pdf","to":"statements/cmb/2026-10.pdf"}`))))
+	if moved["to"] != "statements/cmb/2026-10.pdf" {
+		t.Fatalf("move: %v", moved)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "statements", "cmb", "2026-10.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := files.deleteFile([]byte(`{"path":"main.bean"}`)); err == nil {
+		t.Fatal("the entrypoint was deleted")
+	}
+	must(files.deleteFile([]byte(`{"path":"statements/cmb/2026-10.pdf"}`)))
+	if _, err := os.Stat(filepath.Join(dir, "statements", "cmb", "2026-10.pdf")); !os.IsNotExist(err) {
+		t.Fatalf("delete left the file: %v", err)
+	}
+}
+
+func TestTextToolsWorkOnNonBeanFiles(t *testing.T) {
+	files, err := openScratch(scratchCopy(t), "main.bean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.close()
+	must(files.writeFile([]byte(`{"path":"notes/对账.md","content":"十月已对账"}`)))
+	must(files.editFile([]byte(`{"path":"notes/对账.md","old_string":"十月","new_string":"10 月"}`)))
+	read := asJSON(t, must(files.readFile([]byte(`{"path":"notes/对账.md"}`))))
+	if !strings.Contains(read["content"].(string), "10 月已对账") {
+		t.Fatalf("read back: %v", read)
+	}
+}
+
+func TestSaveAttachmentIsOfferedOnlyWithADraft(t *testing.T) {
+	ledger := t.TempDir()
+	root := filepath.Join(ledger, "generations", "initial", "workspace")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.bean"), []byte(testLedger), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := filepath.Join(ledger, "runtime")
+	path := writeAttachment(t, runtime, "bill.pdf", []byte("%PDF"))
+	draft := filepath.Join(runtime, "agent", "d1", "workspace")
+	if err := os.CopyFS(draft, os.DirFS(root)); err != nil {
+		t.Fatal(err)
+	}
+	for _, withDraft := range []bool{false, true} {
+		var offered []string
+		useFaux(t, ai.FauxFactoryStep(func(request ai.TranscriptContext, _ ai.StreamOptions, _ *ai.FauxProviderState, _ *ai.Model) (ai.AssistantMessage, error) {
+			offered = offeredTools(request)
+			return ai.FauxResponse{Content: []ai.FauxContentBlock{ai.FauxText("好")}, StopReason: "stop"}.AssistantMessage(), nil
+		}))
+		request := map[string]any{"version": 1, "workspaceRoot": root, "runtimeRoot": runtime, "provider": "faux", "model": "faux-1",
+			"message": "存一下", "attachments": []map[string]any{{"id": "a1", "name": "bill.pdf", "path": path}}}
+		if withDraft {
+			request["scratchRoot"] = draft
+		}
+		if response := runTurnFor(t, request); !response.OK {
+			t.Fatalf("turn failed: %+v", response)
+		}
+		has := strings.Contains(strings.Join(offered, ","), "save_attachment")
+		if has != withDraft {
+			t.Fatalf("draft=%v offered=%v", withDraft, offered)
+		}
+	}
+}

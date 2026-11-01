@@ -425,7 +425,7 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(created.lines.map(\.kind), [.added, .added])
     }
 
-    func testDraftMirrorCopiesChangedBeanFilesAndRemovesMissingOnes() throws {
+    func testDraftMirrorCopiesChangedFilesAndRemovesMissingOnes() throws {
         let draft = try root(), stage = try root()
         let fm = FileManager.default
         try fm.createDirectory(at: draft.appendingPathComponent("2026"), withIntermediateDirectories: true)
@@ -434,14 +434,20 @@ final class LedgerAgentTests: XCTestCase {
         try Data("same".utf8).write(to: stage.appendingPathComponent("main.bean"))
         try Data("new".utf8).write(to: draft.appendingPathComponent("2026/02.bean"))
         try Data("gone".utf8).write(to: stage.appendingPathComponent("old/gone.bean"))
-        try Data("keep".utf8).write(to: stage.appendingPathComponent("receipt.pdf"))
+        try Data("moved".utf8).write(to: stage.appendingPathComponent("receipt.pdf"))
+        try Data([0, 1, 2]).write(to: draft.appendingPathComponent("2026/receipt.pdf"))
+        try Data("hidden".utf8).write(to: stage.appendingPathComponent(".keep"))
         let stamp = try fm.attributesOfItem(atPath: stage.appendingPathComponent("main.bean").path)[.modificationDate] as? Date
 
         try LedgerAgentDraftMirror.apply(from: draft, to: stage)
 
-        XCTAssertEqual(try LedgerAgentDraftMirror.beanFiles(in: stage), ["main.bean", "2026/02.bean"])
+        XCTAssertEqual(try LedgerAgentDraftMirror.files(in: stage), ["main.bean", "2026/02.bean", "2026/receipt.pdf"])
         XCTAssertEqual(try Data(contentsOf: stage.appendingPathComponent("2026/02.bean")), Data("new".utf8))
-        XCTAssertTrue(fm.fileExists(atPath: stage.appendingPathComponent("receipt.pdf").path))
+        XCTAssertEqual(try Data(contentsOf: stage.appendingPathComponent("2026/receipt.pdf")), Data([0, 1, 2]))
+        // A file the draft no longer has was moved or deleted there; hidden
+        // files are not the Agent's and stay.
+        XCTAssertFalse(fm.fileExists(atPath: stage.appendingPathComponent("receipt.pdf").path))
+        XCTAssertTrue(fm.fileExists(atPath: stage.appendingPathComponent(".keep").path))
         // An unchanged file is not rewritten, so it is not a change candidate.
         XCTAssertEqual(try fm.attributesOfItem(atPath: stage.appendingPathComponent("main.bean").path)[.modificationDate] as? Date, stamp)
     }

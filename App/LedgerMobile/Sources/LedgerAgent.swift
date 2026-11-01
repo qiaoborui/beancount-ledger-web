@@ -28,13 +28,19 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         case "read_attachment": String(localized: "读取附件")
         case "reconcile_attachment": String(localized: "对账")
         case "view_attachment_image": String(localized: "查看图片")
+        case "save_attachment": String(localized: "附件存入账本")
+        case "move_file": String(localized: "移动文件")
+        case "delete_file": String(localized: "删除文件")
         default: name
         }
         if name == "get_ledger_summary", let start = argument("start"), let end = argument("end") {
             return base + " · " + String(localized: "\(Self.shortDate(start)) 至 \(Self.shortDate(end))")
         }
         if name == "search_transactions", let query = argument("query") { return base + " · " + query }
-        if ["read_file", "edit_file", "write_file"].contains(name), let path = argument("path") { return base + " · " + path }
+        if ["read_file", "edit_file", "write_file", "delete_file", "save_attachment"].contains(name), let path = argument("path") {
+            return base + " · " + path
+        }
+        if name == "move_file", let from = argument("from"), let to = argument("to") { return base + " · " + from + " → " + to }
         if name == "reconcile_attachment", let accounts = arrayArgument("accounts") { return base + " · " + accounts.joined(separator: "、") }
         if ["read_attachment", "view_attachment_image"].contains(name), let id = argument("id") { return base + " · " + id }
         return base
@@ -1013,6 +1019,14 @@ struct LedgerAgentFileDiff: Identifiable, Equatable, Sendable {
     init(path: String, before: Data?, after: Data?) {
         self.path = path
         change = before == nil ? .added : after == nil ? .removed : .modified
+        if Self.isBinary(before) || Self.isBinary(after) {
+            // A saved statement or image: say what it is, not its bytes.
+            added = 0
+            removed = 0
+            let size = ByteCountFormatter.string(fromByteCount: Int64((after ?? before)?.count ?? 0), countStyle: .file)
+            lines = [.init(kind: .gap, text: String(localized: "二进制文件 · \(size)"))]
+            return
+        }
         let old = Self.lines(before), new = Self.lines(after)
         let difference = new.difference(from: old)
         var removedOffsets = Set<Int>(), insertedOffsets = Set<Int>()
@@ -1054,6 +1068,17 @@ struct LedgerAgentFileDiff: Identifiable, Equatable, Sendable {
             shown.append(.init(kind: .gap, text: String(localized: "还有 \(hidden) 行改动未显示")))
         }
         lines = shown
+    }
+
+    static func isBinary(_ data: Data?) -> Bool {
+        guard let data, !data.isEmpty else { return false }
+        var head = Data(data.prefix(8000))
+        if head.contains(0) { return true }
+        if data.count > 8000 {
+            // A multi-byte character cut at the boundary is not binary.
+            for _ in 0..<3 where String(data: head, encoding: .utf8) == nil { head.removeLast() }
+        }
+        return String(data: head, encoding: .utf8) == nil
     }
 
     private static func lines(_ data: Data?) -> [String] {
@@ -1319,30 +1344,33 @@ enum LedgerAgentCrashReport {
 /// is copied when it differs, and every one it no longer has is removed.
 /// Only .bean files outside hidden directories count; anything else in the
 /// stage is left as committed.
+/// Carries the draft's files over a staged copy of the ledger: every file
+/// that is not hidden, so a statement the Agent saved, moved or deleted is
+/// part of the change like an edited `.bean` file. Hidden files on either
+/// side are left alone.
 enum LedgerAgentDraftMirror {
     static func apply(from draft: URL, to stage: URL, fileManager: FileManager = .default) throws {
-        let source = try beanFiles(in: draft, fileManager: fileManager)
-        let target = try beanFiles(in: stage, fileManager: fileManager)
+        let source = try files(in: draft, fileManager: fileManager)
+        let target = try files(in: stage, fileManager: fileManager)
         for path in source.sorted() {
-            let data = try Data(contentsOf: draft.appendingPathComponent(path))
+            let origin = draft.appendingPathComponent(path)
             let destination = stage.appendingPathComponent(path)
-            if target.contains(path), (try? Data(contentsOf: destination)) == data { continue }
+            if target.contains(path), fileManager.contentsEqual(atPath: origin.path, andPath: destination.path) { continue }
             try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try data.write(to: destination)
+            try Data(contentsOf: origin).write(to: destination)
         }
         for path in target.subtracting(source) {
             try fileManager.removeItem(at: stage.appendingPathComponent(path))
         }
     }
 
-    static func beanFiles(in root: URL, fileManager: FileManager = .default) throws -> Set<String> {
+    static func files(in root: URL, fileManager: FileManager = .default) throws -> Set<String> {
         let base = root.resolvingSymlinksInPath().standardizedFileURL.path
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey]
         guard let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: Array(keys),
                                                       options: [.skipsHiddenFiles]) else { return [] }
         var paths = Set<String>()
         while let url = enumerator.nextObject() as? URL {
-            guard url.pathExtension == "bean" else { continue }
             let values = try url.resourceValues(forKeys: keys)
             guard values.isSymbolicLink != true, values.isRegularFile == true else { continue }
             let path = url.resolvingSymlinksInPath().standardizedFileURL.path

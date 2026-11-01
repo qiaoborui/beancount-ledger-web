@@ -3,6 +3,10 @@ package mobileagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path"
 	"slices"
 	"strings"
 
@@ -153,4 +157,66 @@ func withAttachmentNote(a *attachments, message string) string {
 		return note + strings.TrimSpace(message)
 	}
 	return message
+}
+
+// saveTool copies an attachment's original bytes into the scratch copy, so
+// the user can keep a statement next to the ledger. Like every edit it only
+// reaches the ledger through the change card.
+func (a *attachments) saveTool(files *scratch) agent.AgentTool {
+	return fileTool{name: "save_attachment", title: "存入账本",
+		description: "把用户上传的附件原文件（原样的 PDF、Excel、图片等）复制进账本草稿的指定路径，例如 documents/statements/2026-10-招行信用卡.pdf。目标已存在时需要 overwrite。和其他改动一样，用户在改动卡片确认后才写入账本。",
+		parameters: objectParameters(map[string]any{
+			"id":        map[string]any{"type": "string", "description": "附件 id，例如 a1"},
+			"path":      map[string]any{"type": "string", "description": "相对账本根目录的目标路径，含文件名和扩展名"},
+			"overwrite": map[string]any{"type": "boolean", "description": "目标已存在时覆盖"},
+		}, []string{"id", "path"}),
+		run: func(raw json.RawMessage) (any, error) { return a.saveInto(files, raw) }}
+}
+
+func (a *attachments) saveInto(files *scratch, raw json.RawMessage) (any, error) {
+	var input struct {
+		ID        string `json:"id"`
+		Path      string `json:"path"`
+		Overwrite bool   `json:"overwrite"`
+	}
+	if err := decodeStrict(raw, &input); err != nil {
+		return nil, err
+	}
+	item, err := a.find(input.ID)
+	if err != nil {
+		return nil, err
+	}
+	clean, err := workspacePath(input.Path)
+	if err != nil {
+		return nil, err
+	}
+	if path.Ext(clean) == "" {
+		clean += attachmentExt(item)
+	}
+	if path.Ext(clean) == ".bean" {
+		return nil, errors.New("附件不能存成 .bean 文件；账本条目请用 write_file 或 edit_file 写")
+	}
+	if existing, err := files.root.Lstat(clean); err == nil {
+		if !existing.Mode().IsRegular() {
+			return nil, fmt.Errorf("%s 已存在且不是文件", clean)
+		}
+		if !input.Overwrite {
+			return nil, fmt.Errorf("%s 已存在；要覆盖请设 overwrite", clean)
+		}
+	}
+	info, err := os.Stat(item.Path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maxAttachmentBytes {
+		return nil, errors.New("附件超过 25 MB")
+	}
+	data, err := os.ReadFile(item.Path)
+	if err != nil {
+		return nil, err
+	}
+	if err := files.writeLimited(clean, data, maxAttachmentBytes); err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": item.ID, "path": clean, "bytes": len(data)}, nil
 }
