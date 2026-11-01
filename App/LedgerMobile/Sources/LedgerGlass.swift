@@ -26,6 +26,22 @@ extension View {
         }
     }
 
+    /// The app-wide top scroll edge: the soft progressive blur (the one
+    /// Messages uses) instead of the system's automatic choice, which reads
+    /// as a hard divider on newer systems. The style is inherited by every
+    /// scroll view below the modifier, so it is applied once at the scene root
+    /// and again by the page/sheet chrome, since sheets start a new hierarchy.
+    /// Before iOS 26 there is no scroll edge effect; bars keep the flat page
+    /// fill from `ledgerGlassTopBar` / `ledgerGlassNavigationBar`.
+    @ViewBuilder
+    func ledgerSoftTopEdge() -> some View {
+        if #available(iOS 26.0, *) {
+            scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            self
+        }
+    }
+
     /// One interactive glass capsule behind a top-bar control or control group.
     @ViewBuilder
     func ledgerGlassControl() -> some View {
