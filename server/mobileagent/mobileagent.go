@@ -73,7 +73,10 @@ type turnRequestV1 struct {
 	Transcript string `json:"transcript,omitempty"`
 	// ConversationID keys the provider's prompt cache to the conversation.
 	ConversationID string `json:"conversationId,omitempty"`
-	Message        string `json:"message"`
+	// Attachments are the files of the conversation, each copied into the
+	// runtime directory by the shell; those sent with this question are new.
+	Attachments []attachmentV1 `json:"attachments,omitempty"`
+	Message     string         `json:"message"`
 }
 
 type customEndpointV1 struct {
@@ -383,8 +386,8 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		return "", "", calls, files, err
 	}
 	specs := app.LocalAgentToolSpecs()
-	tools := make([]agent.AgentTool, 0, len(specs)+5)
-	allowed := make(map[string]bool, len(specs)+5)
+	tools := make([]agent.AgentTool, 0, len(specs)+9)
+	allowed := make(map[string]bool, len(specs)+9)
 	for _, spec := range specs {
 		tools = append(tools, ledgerTool{spec: spec, session: session})
 		allowed[spec.Name] = true
@@ -400,7 +403,19 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		}
 		turns = maxEditTurns
 	}
+	attached, err := openAttachments(request.Attachments, request.RuntimeRoot, supportsImages(model) && !assumed)
+	if err != nil {
+		return "", "", calls, files, err
+	}
 	systemPrompt := app.LocalAgentSystemPrompt(files != nil)
+	if attached != nil {
+		for _, tool := range attached.tools(session) {
+			tools = append(tools, tool)
+			allowed[tool.Name()] = true
+		}
+		systemPrompt += attachmentPrompt
+		message = withAttachmentNote(attached, message)
+	}
 	history, err := priorMessages(request, systemPrompt)
 	if err != nil {
 		return "", "", calls, files, err

@@ -1,6 +1,8 @@
 #if os(iOS)
 import Charts
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 账本助手 — a conversation over the local ledger. The design is
 /// `docs/design/ios-balanced/agent.html`: questions sit in a sunken block on
@@ -41,6 +43,10 @@ private struct LedgerAgentChatScreen: View {
     @State private var settingsPresented = false
     @State private var bookkeeping: BookkeepingPrefill?
     @State private var crashReport: String?
+    @State private var choosingFiles = false
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var attaching = false
+    @State private var attachError: String?
     @FocusState private var composerFocused: Bool
 
     private struct BookkeepingPrefill: Identifiable {
@@ -62,6 +68,18 @@ private struct LedgerAgentChatScreen: View {
             NavigationStack { LedgerAgentHistoryView() }
                 .presentationDetents([.medium, .large])
                 .ledgerPrivacyProtectedSheet()
+        }
+        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: LedgerAgentAttachments.pickerTypes,
+                      allowsMultipleSelection: true) { result in
+            switch result {
+            case let .success(urls): attach(urls.map { .file($0) })
+            case let .failure(error): attachError = error.localizedDescription
+            }
+        }
+        .onChange(of: photoItems) { _, items in
+            guard !items.isEmpty else { return }
+            photoItems = []
+            attach(items.map { .photo($0) })
         }
         .fullScreenCover(item: $bookkeeping) { prefill in
             NaturalLanguageBookkeepingView(onSaved: { bookkeeping = nil }, initialInput: prefill.text)
@@ -137,7 +155,7 @@ private struct LedgerAgentChatScreen: View {
                     if conversation.messages.isEmpty && !conversation.isRunning { emptyState }
                     ForEach(conversation.messages) { message in
                         switch message.role {
-                        case .user: LedgerAgentQuestion(text: message.text)
+                        case .user: LedgerAgentQuestion(text: message.text, attachments: message.attachments)
                         case .assistant: LedgerAgentAnswer(message: message) { bookkeeping = .init(text: question(before: message)) }
                         }
                     }
@@ -198,6 +216,9 @@ private struct LedgerAgentChatScreen: View {
                 .padding(.top, 24)
             Text("可以查账，也可以让它改账；改动先进草稿，你确认后才写入。").balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
                 .padding(.top, 6)
+            Text("点输入框左边的 ＋ 上传账单（CSV、Excel、PDF 或截图），它会和账本逐笔对账。").balancedFont(size: 13.5)
+                .foregroundStyle(BalancedPalette.meta)
+                .padding(.top, 4)
             BalancedSectionLabel(text: String(localized: "试试")).padding(.top, 22)
             ForEach(Self.suggestions, id: \.self) { suggestion in
                 Button { send(suggestion) } label: {
@@ -257,15 +278,15 @@ private struct LedgerAgentChatScreen: View {
                 LedgerAgentQuickSwitch { settingsPresented = true }
                     .padding(.horizontal, 2)
             }
-            HStack(alignment: .bottom, spacing: 10) {
-                TextField(conversation.pending == nil ? String(localized: "问问账本，比如「上个月餐饮花了多少」")
-                          : String(localized: "还要怎么改…"), text: $draft, axis: .vertical)
+            if !conversation.staged.isEmpty || attaching || attachError != nil { stagedFiles }
+            HStack(alignment: .bottom, spacing: 4) {
+                attachMenu
+                TextField(placeholder, text: $draft, axis: .vertical)
                     .balancedFont(size: 15)
                     .lineLimit(1...5)
                     .focused($composerFocused)
                     .submitLabel(.send)
                     .padding(.vertical, 11)
-                    .padding(.leading, 6)
                     .accessibilityIdentifier("ledger-agent-input")
                 Button {
                     if conversation.isRunning { conversation.stop() } else { send(draft) }
@@ -279,19 +300,125 @@ private struct LedgerAgentChatScreen: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!conversation.isRunning && (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sessions.busyElsewhere))
-                .opacity(!conversation.isRunning && (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sessions.busyElsewhere) ? 0.38 : 1)
+                .disabled(!conversation.isRunning && !canSend)
+                .opacity(!conversation.isRunning && !canSend ? 0.38 : 1)
                 .accessibilityLabel(conversation.isRunning ? "停止" : "发送")
                 .accessibilityIdentifier("ledger-agent-send")
             }
         }
-        .padding(EdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 8))
+        .padding(EdgeInsets(top: 8, leading: 6, bottom: 8, trailing: 8))
         .ledgerGlassDock()
     }
 
+    private var placeholder: String {
+        if !conversation.staged.isEmpty { return String(localized: "说说要对哪个账户，或直接发送") }
+        return conversation.pending == nil ? String(localized: "问问账本，比如「上个月餐饮花了多少」")
+            : String(localized: "还要怎么改…")
+    }
+
+    private var canSend: Bool {
+        guard !sessions.busyElsewhere, !attaching else { return false }
+        return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !conversation.staged.isEmpty
+    }
+
+    private static let reconcileQuestion = String(localized: "帮我把附件和账本对一下账，列出对不上的地方")
+
+    // MARK: Attachments
+
+    private var attachMenu: some View {
+        Menu {
+            Button { choosingFiles = true } label: { Label("选择文件（CSV、Excel、PDF）", systemImage: "doc") }
+            PhotosPicker(selection: $photoItems, maxSelectionCount: 6, matching: .images) {
+                Label("从相册选截图或照片", systemImage: "photo.on.rectangle")
+            }
+        } label: {
+            Image(systemName: "plus").font(.system(size: 17, weight: .medium))
+                .foregroundStyle(BalancedPalette.ink)
+                .frame(width: 40, height: 44)
+                .contentShape(Rectangle())
+        }
+        .disabled(!conversation.canAttach || attaching || conversation.isRunning)
+        .accessibilityLabel("添加附件")
+        .accessibilityIdentifier("ledger-agent-attach")
+    }
+
+    private var stagedFiles: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(conversation.staged) { file in
+                    LedgerAgentAttachmentChip(name: file.name, symbol: file.symbol, detail: file.detail) {
+                        conversation.unstage(file.id)
+                    }
+                }
+                if attaching {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("正在读取附件…").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 44)
+                }
+                if let attachError {
+                    Button { self.attachError = nil } label: {
+                        Label(attachError, systemImage: "exclamationmark.circle")
+                            .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.expense)
+                            .lineLimit(2)
+                            .frame(maxWidth: 260, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("轻点关闭")
+                }
+            }
+            .padding(.horizontal, 8)
+        }
+        .accessibilityIdentifier("ledger-agent-staged")
+    }
+
+    private enum Pick {
+        case file(URL)
+        case photo(PhotosPickerItem)
+    }
+
+    /// Copies the picked files into the conversation's attachment folder one
+    /// by one, so each gets the next id, and reads PDFs and images on the way.
+    private func attach(_ picks: [Pick]) {
+        guard let repository = session.localRepository, !attaching else { return }
+        let conversation = conversation
+        let workspace = repository.workspace
+        attaching = true
+        attachError = nil
+        Task { @MainActor in
+            defer { attaching = false }
+            do {
+                let directory = try await workspace.agentAttachmentDirectory(id: conversation.id)
+                for (index, pick) in picks.enumerated() {
+                    guard conversation.canAttach else { throw LedgerAgentAttachmentError.tooMany }
+                    let id = LedgerAgentAttachments.nextID(after: conversation.allAttachments)
+                    let attachment: LedgerAgentAttachment
+                    switch pick {
+                    case let .file(url):
+                        attachment = try await LedgerAgentAttachments.importFile(at: url, id: id, into: directory)
+                    case let .photo(item):
+                        guard let data = try await item.loadTransferable(type: Data.self) else {
+                            throw LedgerAgentAttachmentError.unreadable(String(localized: "照片没有可读取的数据"))
+                        }
+                        let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+                        let name = String(localized: "图片\(index + 1)") + "." + ext
+                        attachment = try await LedgerAgentAttachments.importImage(data, name: name, id: id, into: directory)
+                    }
+                    conversation.stage(attachment)
+                }
+                try? await workspace.protectAgentAttachments(id: conversation.id)
+            } catch {
+                attachError = error.localizedDescription
+            }
+        }
+    }
+
     private func send(_ text: String) {
-        let question = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty, !conversation.isRunning, !sessions.busyElsewhere else { return }
+        var question = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if question.isEmpty, !conversation.staged.isEmpty { question = Self.reconcileQuestion }
+        guard !question.isEmpty, !conversation.isRunning, !sessions.busyElsewhere, !attaching else { return }
         guard let repository = session.localRepository, !session.privacyShielded else { return }
         let key: String
         do { key = try settings.apiKey() } catch {
@@ -300,6 +427,7 @@ private struct LedgerAgentChatScreen: View {
         }
         let choice = settings.choice, thinking = settings.effectiveThinking
         let transcript = conversation.transcript, conversationID = conversation.id
+        let attachments = conversation.attachmentPayloads(in: repository.workspace.agentAttachmentLocation(id: conversationID))
         conversation.editor = .live(repository)
         conversation.lifecycle = LedgerAgentBackgroundRun.shared
         LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
@@ -307,7 +435,8 @@ private struct LedgerAgentChatScreen: View {
             try await repository.runAgentTurn(message: message, history: history, choice: choice,
                                               apiKey: key, sensitiveUnlocked: true, thinking: thinking,
                                               draft: draftRoot, transcript: transcript,
-                                              conversationID: conversationID, onStep: report)
+                                              conversationID: conversationID, attachments: attachments,
+                                              onStep: report)
         })
         if started { draft = "" }
     }
@@ -319,18 +448,60 @@ private struct LedgerAgentChatScreen: View {
 }
 
 /// A question: right-aligned in the sunken well, never a bubble with a tail.
+/// Files sent with it are listed above the text.
 private struct LedgerAgentQuestion: View {
     let text: String
+    var attachments: [String] = []
     var body: some View {
         HStack {
             Spacer(minLength: 48)
-            Text(text).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
-                .textSelection(.enabled)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(BalancedPalette.sunken)
-                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+            VStack(alignment: .trailing, spacing: 6) {
+                ForEach(Array(attachments.enumerated()), id: \.offset) { _, name in
+                    Label(name, systemImage: LedgerAgentAttachments.kind(of: name) == .image ? "photo" : "doc")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                Text(text).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
+                    .textSelection(.enabled)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(BalancedPalette.sunken)
+            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
         }
+    }
+}
+
+/// A file waiting to be sent with the next question.
+private struct LedgerAgentAttachmentChip: View {
+    let name: String
+    let symbol: String
+    let detail: String
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol).font(.system(size: 14)).foregroundStyle(BalancedPalette.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).balancedFont(size: 13).foregroundStyle(BalancedPalette.ink)
+                    .lineLimit(1).truncationMode(.middle)
+                Text(detail).balancedFont(size: 11).foregroundStyle(BalancedPalette.meta).lineLimit(1)
+            }
+            .frame(maxWidth: 180, alignment: .leading)
+            Button(action: onRemove) {
+                Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(BalancedPalette.meta)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("移除 \(name)")
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 2)
+        .frame(minHeight: 44)
+        .background(BalancedPalette.sunken)
+        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
     }
 }
 
@@ -400,6 +571,9 @@ private struct LedgerAgentAnswer: View {
 
     private var toolsSummary: String {
         let edits = message.toolCalls.filter { ["edit_file", "write_file"].contains($0.name) && !$0.isError }.count
+        if edits == 0, message.toolCalls.contains(where: { $0.name == "reconcile_attachment" }) {
+            return String(localized: "读取附件和账本 \(message.toolCalls.count) 次")
+        }
         return edits == 0
             ? String(localized: "读取了账本 \(message.toolCalls.count) 次")
             : String(localized: "调用了 \(message.toolCalls.count) 次工具，改了草稿 \(edits) 处")

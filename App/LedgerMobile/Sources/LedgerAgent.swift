@@ -24,6 +24,10 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         case "edit_file": String(localized: "修改文件")
         case "write_file": String(localized: "写入草稿")
         case "bean_check": String(localized: "校验账本")
+        case "list_attachments": String(localized: "查看附件")
+        case "read_attachment": String(localized: "读取附件")
+        case "reconcile_attachment": String(localized: "对账")
+        case "view_attachment_image": String(localized: "查看图片")
         default: name
         }
         if name == "get_ledger_summary", let start = argument("start"), let end = argument("end") {
@@ -31,6 +35,8 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         }
         if name == "search_transactions", let query = argument("query") { return base + " · " + query }
         if ["read_file", "edit_file", "write_file"].contains(name), let path = argument("path") { return base + " · " + path }
+        if name == "reconcile_attachment", let accounts = arrayArgument("accounts") { return base + " · " + accounts.joined(separator: "、") }
+        if ["read_attachment", "view_attachment_image"].contains(name), let id = argument("id") { return base + " · " + id }
         return base
     }
 
@@ -38,6 +44,12 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
     var source: String? {
         guard name == "run_bql" || name == "validate_bql" else { return nil }
         return argument("query")
+    }
+
+    private func arrayArgument(_ key: String) -> [String]? {
+        guard case let .object(values)? = arguments, case let .array(items)? = values[key] else { return nil }
+        let strings = items.compactMap { item -> String? in if case let .string(value) = item { value } else { nil } }
+        return strings.isEmpty ? nil : strings
     }
 
     private func argument(_ key: String) -> String? {
@@ -60,6 +72,8 @@ struct LedgerAgentMessage: Identifiable, Equatable, Sendable {
     let text: String
     var toolCalls: [LedgerAgentToolCall] = []
     var duration: TimeInterval? = nil
+    /// Names of the files sent with a question.
+    var attachments: [String] = []
 }
 
 /// The provider and model a turn uses. The key travels separately.
@@ -271,6 +285,8 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     var transcript: String? = nil
     /// Keys the provider's prompt cache to the conversation.
     var conversationId: String? = nil
+    /// Every file of the conversation; those sent with this question are new.
+    var attachments: [LedgerAgentAttachment.Payload]? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {
@@ -650,6 +666,14 @@ final class LedgerAgentConversation: ObservableObject {
     private(set) var stepCount = 0
     /// Shown above a reopened conversation whose change was never written.
     private(set) var restoredNotice: String?
+    /// Files the model can read: sent with an earlier question, or with the
+    /// one now running.
+    @Published private(set) var attachments: [LedgerAgentAttachment] = []
+    /// Files picked for the next question, shown above the composer.
+    @Published private(set) var staged: [LedgerAgentAttachment] = []
+    /// Attached files no answered turn has told the model about yet; they
+    /// stay new until a turn answers, so a retry announces them again.
+    private(set) var unannounced: Set<String> = []
     /// Told when a turn, a write or a discard settles, so the conversation
     /// can be saved.
     var onSettled: ((LedgerAgentConversation) -> Void)?
@@ -689,9 +713,11 @@ final class LedgerAgentConversation: ObservableObject {
         self.init(id: saved.id, createdAt: saved.createdAt)
         messages = saved.messages.compactMap { stored in
             LedgerAgentMessage.Role(rawValue: stored.role).map {
-                LedgerAgentMessage(role: $0, text: stored.text, toolCalls: stored.toolCalls, duration: stored.duration)
+                LedgerAgentMessage(role: $0, text: stored.text, toolCalls: stored.toolCalls, duration: stored.duration,
+                                   attachments: stored.attachments ?? [])
             }
         }
+        attachments = saved.attachments ?? []
         if saved.unwrittenChange {
             restoredNotice = String(localized: "上次的草稿改动没有写入，重新打开后已放弃。需要的话让助手重新改一次。")
             note = String(localized: "（系统提示：这是重新打开的旧对话，之前草稿里没有写入的改动已经放弃，账本以当前内容为准。）")
@@ -710,8 +736,30 @@ final class LedgerAgentConversation: ObservableObject {
         guard !messages.isEmpty else { return nil }
         return LedgerAgentSavedConversation(
             id: id, createdAt: createdAt, updatedAt: date,
-            messages: messages.map { .init(role: $0.role.rawValue, text: $0.text, toolCalls: $0.toolCalls, duration: $0.duration) },
-            unwrittenChange: pending?.review != nil || draftUnreviewed)
+            messages: messages.map { .init(role: $0.role.rawValue, text: $0.text, toolCalls: $0.toolCalls, duration: $0.duration,
+                                           attachments: $0.attachments.isEmpty ? nil : $0.attachments) },
+            unwrittenChange: pending?.review != nil || draftUnreviewed,
+            attachments: attachments.isEmpty ? nil : attachments)
+    }
+
+    /// Every file, attached or staged, for the id of the next one.
+    var allAttachments: [LedgerAgentAttachment] { attachments + staged }
+
+    var canAttach: Bool { allAttachments.count < LedgerAgentAttachments.maximumCount && !isWriting }
+
+    func stage(_ attachment: LedgerAgentAttachment) {
+        guard !allAttachments.contains(where: { $0.id == attachment.id }) else { return }
+        staged.append(attachment)
+    }
+
+    func unstage(_ id: String) {
+        staged.removeAll { $0.id == id }
+    }
+
+    /// What the next turn sends: every file, with the staged and the not yet
+    /// announced ones marked new.
+    func attachmentPayloads(in directory: URL) -> [LedgerAgentAttachment.Payload] {
+        allAttachments.map { $0.payload(in: directory, isNew: unannounced.contains($0.id) || staged.contains($0)) }
     }
 
     private struct Outcome: Sendable {
@@ -735,10 +783,15 @@ final class LedgerAgentConversation: ObservableObject {
         let question = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty, !isRunning, !isWriting else { return false }
         let history = LedgerAgentHistory.entries(from: messages)
+        var sentFiles: [String] = []
         if case let .failed(_, previous) = phase, messages.last?.role == .user, messages.last?.text == previous {
-            messages.removeLast()
+            sentFiles = messages.removeLast().attachments
         }
-        messages.append(.init(role: .user, text: question))
+        sentFiles += staged.map(\.name)
+        unannounced.formUnion(staged.map(\.id))
+        attachments += staged
+        staged = []
+        messages.append(.init(role: .user, text: question, attachments: sentFiles))
         written = nil
         let started = Date()
         phase = .running(since: started)
@@ -824,6 +877,9 @@ final class LedgerAgentConversation: ObservableObject {
         written = nil
         note = nil
         transcript = nil
+        attachments = []
+        staged = []
+        unannounced = []
         epoch += 1
         if let editor {
             let draft = draft, reopening = reopening
@@ -900,6 +956,7 @@ final class LedgerAgentConversation: ObservableObject {
         switch outcome {
         case let .success(turn) where turn.response.ok && (Self.hasText(turn.response.reply) || pending?.review != nil):
             note = nil
+            unannounced = []
             if let next = turn.response.transcript, !next.isEmpty { transcript = next }
             let reply = Self.hasText(turn.response.reply) ? turn.response.reply ?? ""
                 : String(localized: "改动已经准备好，请在下方查看并确认。")

@@ -19,7 +19,7 @@ const (
 )
 
 func encodeTranscript(messages []agent.AgentMessage) (string, error) {
-	raw, err := json.Marshal(messages)
+	raw, err := json.Marshal(stripImages(messages))
 	if err != nil {
 		return "", err
 	}

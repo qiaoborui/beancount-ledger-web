@@ -75,9 +75,10 @@ func LocalAgentSystemPrompt(canEdit bool) string {
 // LocalAgentSession executes Agent tools against one pinned committed
 // generation. It never stages or publishes a workspace.
 type LocalAgentSession struct {
-	tools map[string]agentTool
-	page  AgentPageContext
-	root  string
+	tools  map[string]agentTool
+	page   AgentPageContext
+	root   string
+	server *Server
 }
 
 // OpenLocalAgentSession pins the committed generation named by input. The
@@ -115,7 +116,7 @@ func OpenLocalAgentSession(input LocalRequest, sensitiveUnlocked bool) (*LocalAg
 	for _, name := range localAgentToolNames {
 		tools[name] = all[name]
 	}
-	return &LocalAgentSession{tools: tools, page: AgentPageContext{SensitiveUnlocked: sensitiveUnlocked}, root: cfg.LedgerRoot}, nil
+	return &LocalAgentSession{tools: tools, page: AgentPageContext{SensitiveUnlocked: sensitiveUnlocked}, root: cfg.LedgerRoot, server: server}, nil
 }
 
 // Execute validates the arguments against the tool schema and returns the

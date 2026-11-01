@@ -7,6 +7,7 @@ require (
 	github.com/MichaelKinsy/PiG v0.5.3
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/deb-sig/double-entry-generator/v2 v2.15.1
+	github.com/extrame/xls v0.0.2-0.20200426124601-4a6cf263071b
 	github.com/gin-contrib/gzip v1.2.6
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-git/go-git/v5 v5.16.5
@@ -19,6 +20,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/viper v1.14.0
+	github.com/xuri/excelize/v2 v2.5.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.60.0
 	golang.org/x/oauth2 v0.37.0
@@ -59,7 +61,6 @@ require (
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/extrame/goyymmdd v0.0.0-20210114090516-7cc815f00d1a // indirect
 	github.com/extrame/ole2 v0.0.0-20160812065207-d69429661ad7 // indirect
-	github.com/extrame/xls v0.0.2-0.20200426124601-4a6cf263071b // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
@@ -148,7 +149,6 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/xuri/efp v0.0.0-20210322160811-ab561f5b45e3 // indirect
-	github.com/xuri/excelize/v2 v2.5.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/zclconf/go-cty v1.14.4 // indirect
 	github.com/zclconf/go-cty-yaml v1.1.0 // indirect
