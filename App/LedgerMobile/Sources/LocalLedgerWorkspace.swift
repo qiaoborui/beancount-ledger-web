@@ -562,9 +562,48 @@ actor LocalLedgerWorkspace {
     }
 
     func removeAgentConversation(id: UUID) {
+        removeAgentAttachments(id: id)
         guard let directory = try? importRuntimeDirectory("runtime/agent-history") else { return }
         removeIfPresent(directory.appendingPathComponent(id.uuidString + ".json"))
         removeIfPresent(directory.appendingPathComponent(id.uuidString + ".transcript"))
+    }
+
+    /// runtime/agent-attachments/<id>: the files attached to one Agent
+    /// conversation. Like the history it lives outside every generation, so
+    /// a statement never enters a commit, a backup or Git sync.
+    func agentAttachmentDirectory(id: UUID) throws -> URL {
+        let directory = try importRuntimeDirectory("runtime/agent-attachments/" + id.uuidString)
+        try createProtectedDirectory(directory)
+        return directory
+    }
+
+    /// Where `agentAttachmentDirectory(id:)` keeps a conversation's files,
+    /// without creating it.
+    nonisolated func agentAttachmentLocation(id: UUID) -> URL {
+        rootDirectory.appendingPathComponent("runtime/agent-attachments/" + id.uuidString, isDirectory: true)
+    }
+
+    /// Applies the workspace's file protection to what was just attached.
+    func protectAgentAttachments(id: UUID) throws {
+        let directory = try importRuntimeDirectory("runtime/agent-attachments/" + id.uuidString)
+        guard try itemKindIfPresent(at: directory) == .directory else { return }
+        try protectTree(at: directory)
+    }
+
+    func removeAgentAttachments(id: UUID) {
+        guard let directory = try? importRuntimeDirectory("runtime/agent-attachments/" + id.uuidString) else { return }
+        removeIfPresent(directory)
+    }
+
+    /// Drops the attachments of conversations that no longer exist, such as
+    /// files picked in a conversation that was never sent.
+    func removeAgentAttachments(keeping ids: Set<UUID>) {
+        guard let parent = try? importRuntimeDirectory("runtime/agent-attachments"),
+              let names = try? fileManager.contentsOfDirectory(atPath: parent.path) else { return }
+        for name in names {
+            guard let id = UUID(uuidString: name), !ids.contains(id) else { continue }
+            removeIfPresent(parent.appendingPathComponent(name))
+        }
     }
 
     /// The model-facing transcript of a saved conversation, kept beside it
@@ -586,6 +625,7 @@ actor LocalLedgerWorkspace {
     }
 
     func removeAgentConversations() {
+        if let attachments = try? importRuntimeDirectory("runtime/agent-attachments") { removeIfPresent(attachments) }
         guard let directory = try? importRuntimeDirectory("runtime/agent-history") else { return }
         removeIfPresent(directory)
     }

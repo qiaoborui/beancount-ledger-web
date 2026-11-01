@@ -7,6 +7,8 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
         let text: String
         var toolCalls: [LedgerAgentToolCall] = []
         var duration: TimeInterval? = nil
+        /// Names of the files sent with a question; absent in older saves.
+        var attachments: [String]? = nil
     }
 
     var version = 1
@@ -17,6 +19,8 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
     /// The conversation had a change on its card, or possibly in its draft,
     /// that was never written when it was last saved.
     var unwrittenChange = false
+    /// The files attached to the conversation; absent in older saves.
+    var attachments: [LedgerAgentAttachment]? = nil
 
     /// The first question names the conversation.
     var title: String {
@@ -71,6 +75,8 @@ final class LedgerAgentSessions: ObservableObject {
         /// history list stays small; `remove` drops it too.
         var saveTranscript: @Sendable (UUID, Data) async throws -> Void = { _, _ in }
         var loadTranscript: @Sendable (UUID) async -> Data? = { _ in nil }
+        /// Drops attachment files of conversations other than these.
+        var sweepAttachments: @Sendable (Set<UUID>) async -> Void = { _ in }
     }
 
     @Published private(set) var current: LedgerAgentConversation
@@ -109,6 +115,8 @@ final class LedgerAgentSessions: ObservableObject {
             let records = await storage.load().compactMap { try? Self.decoder.decode(LedgerAgentSavedConversation.self, from: $0) }
             guard let self, self.ledgerID == id else { return }
             self.merge(records)
+            let keep = Set(records.map(\.id) + [self.current.id, self.background?.id].compactMap { $0 })
+            await storage.sweepAttachments(keep)
         }
     }
 
@@ -247,6 +255,7 @@ extension LedgerAgentSessions.Storage {
             remove: { await workspace.removeAgentConversation(id: $0) },
             removeAll: { await workspace.removeAgentConversations() },
             saveTranscript: { try await workspace.saveAgentTranscript(id: $0, data: $1) },
-            loadTranscript: { await workspace.agentTranscript(id: $0) })
+            loadTranscript: { await workspace.agentTranscript(id: $0) },
+            sweepAttachments: { await workspace.removeAgentAttachments(keeping: $0) })
     }
 }

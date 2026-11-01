@@ -110,7 +110,7 @@ func TestFileToolsRejectPathsOutsideTheLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer files.close()
-	for _, name := range []string{"../secret.bean", outside, "notes.txt", ".git/config.bean", "link.bean", ""} {
+	for _, name := range []string{"../secret.bean", outside, ".git/config", ".hidden/notes.txt", "link.bean", ""} {
 		raw, _ := json.Marshal(map[string]any{"path": name})
 		if _, err := files.readFile(raw); err == nil {
 			t.Errorf("read %q was allowed", name)
