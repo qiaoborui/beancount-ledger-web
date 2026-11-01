@@ -319,6 +319,53 @@ final class LocalLedgerSessionTests: XCTestCase {
         first.chooseLedger()
     }
 
+    func testColdLaunchReadsLedgerWhileAuthenticationIsPendingWithoutRevealingIt() async throws {
+        let fixture = try fixture()
+        let catalogRoot = fixture.root.appendingPathComponent("managed")
+        let catalog = LocalLedgerCatalog(rootDirectory: catalogRoot, engine: ResumeEngine(), validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Parallel cold launch")
+        let first = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+            defaults: fixture.defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+            widgetCredentialStore: InertWidgetStore())
+        await first.openLocalLedger(descriptor)
+        let summary = try XCTUnwrap(first.ledger?.summary)
+        await first.lock()
+        // Drop the saved startup page so the cold launch must run the interpreter.
+        let workspaceRoot = catalogRoot.appendingPathComponent(descriptor.id.uuidString)
+        for name in [".bootstrap-page-presentation", ".bootstrap-page-presentation.json"] {
+            try? FileManager.default.removeItem(at: workspaceRoot.appendingPathComponent(name))
+        }
+
+        let engine = ResumeEngine()
+        let bootstrapping = expectation(description: "cold read started before authentication finished")
+        await engine.observeBootstrap(bootstrapping)
+        let reopenedCatalog = LocalLedgerCatalog(rootDirectory: catalogRoot, engine: engine, validator: { _, _ in })
+        let authenticating = expectation(description: "cold authentication pending")
+        let gate = Gate(authenticating)
+        let reopened = LedgerSession(localOnly: true, localCatalog: reopenedCatalog, localAuthenticator: Authenticator(gate: gate),
+            defaults: fixture.defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+            widgetCredentialStore: InertWidgetStore())
+        var phases: [LedgerSession.Phase] = []
+        let observation = reopened.$phase.removeDuplicates().sink { phases.append($0) }
+        defer { observation.cancel() }
+        let starting = Task { await reopened.start() }
+        await fulfillment(of: [authenticating, bootstrapping], timeout: 3)
+        XCTAssertEqual(reopened.phase, .checking, "The parallel read must not leave the startup surface")
+        XCTAssertNil(reopened.ledger, "Nothing may be published before authentication succeeds")
+        XCTAssertFalse(reopened.amountsVisible)
+        await gate.release()
+        await starting.value
+        XCTAssertEqual(reopened.phase, .ready)
+        XCTAssertEqual(reopened.ledger?.summary, summary)
+        let calls = await engine.bootstrapCalls
+        XCTAssertEqual(calls, 1, "Unlock must adopt the read made during authentication instead of repeating it")
+        XCTAssertEqual(phases, [.checking, .ready])
+        reopened.chooseLedger()
+        first.chooseLedger()
+    }
+
     func testLocalPrivacySwitchPersistsAcrossColdLaunchAndRestoresProtection() async throws {
         let fixture = try fixture()
         let catalog = LocalLedgerCatalog(rootDirectory: fixture.root.appendingPathComponent("managed"),
