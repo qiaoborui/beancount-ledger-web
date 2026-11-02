@@ -854,13 +854,15 @@ final class LedgerAgentTests: XCTestCase {
         let otherReview = try await repository.reviewAgentDraft(other)
         _ = try await repository.writeAgentDraft(try XCTUnwrap(otherReview), draft: other)
         try Data("; 晚了\n".utf8).write(to: draft.root.appendingPathComponent("late.bean"))
-        let merged = try XCTUnwrap(try await repository.reviewAgentDraft(rebased))
+        let mergedPrepared = try await repository.reviewAgentDraft(rebased)
+        let merged = try XCTUnwrap(mergedPrepared)
         XCTAssertEqual(merged.files.map(\.path), ["late.bean"])
 
         // The ledger moves again after the card was drawn: writing merges again.
         let third = try await repository.openAgentDraft()
         try Data("; 第三处\n".utf8).write(to: third.root.appendingPathComponent("third.bean"))
-        _ = try await repository.writeAgentDraft(try XCTUnwrap(try await repository.reviewAgentDraft(third)), draft: third)
+        let thirdReview = try await repository.reviewAgentDraft(third)
+        _ = try await repository.writeAgentDraft(try XCTUnwrap(thirdReview), draft: third)
         let afterMerge = try await repository.writeAgentDraft(merged, draft: rebased)
         for path in ["late.bean", "other.bean", "third.bean"] {
             XCTAssertTrue(FileManager.default.fileExists(atPath: afterMerge.root.appendingPathComponent(path).path), path)
@@ -884,12 +886,14 @@ final class LedgerAgentTests: XCTestCase {
         let seed = try await repository.openAgentDraft()
         let ledger = (1...12).map { "; 第 \($0) 行" }.joined(separator: "\n") + "\n"
         try Data(ledger.utf8).write(to: seed.root.appendingPathComponent("2026.bean"))
-        _ = try await repository.writeAgentDraft(try XCTUnwrap(try await repository.reviewAgentDraft(seed)), draft: seed)
+        let seedReview = try await repository.reviewAgentDraft(seed)
+        _ = try await repository.writeAgentDraft(try XCTUnwrap(seedReview), draft: seed)
 
         func commitElsewhere(_ text: String) async throws {
             let other = try await repository.openAgentDraft()
             try Data(text.utf8).write(to: other.root.appendingPathComponent("2026.bean"))
-            _ = try await repository.writeAgentDraft(try XCTUnwrap(try await repository.reviewAgentDraft(other)), draft: other)
+            let otherReview = try await repository.reviewAgentDraft(other)
+            _ = try await repository.writeAgentDraft(try XCTUnwrap(otherReview), draft: other)
         }
 
         // Different lines of one file, and both appending at the end.
@@ -897,7 +901,8 @@ final class LedgerAgentTests: XCTestCase {
         let file = draft.root.appendingPathComponent("2026.bean")
         try Data(ledger.replacingOccurrences(of: "; 第 2 行", with: "; 助手改了第 2 行").appending("; 助手追加\n").utf8).write(to: file)
         try await commitElsewhere(ledger.replacingOccurrences(of: "; 第 10 行", with: "; 别处改了第 10 行").appending("; 别处追加\n"))
-        let review = try XCTUnwrap(try await repository.reviewAgentDraft(draft))
+        let reviewPrepared = try await repository.reviewAgentDraft(draft)
+        let review = try XCTUnwrap(reviewPrepared)
         let next = try await repository.writeAgentDraft(review, draft: draft)
         let written = try await repository.readFile(path: "2026.bean").text
         for line in ["; 助手改了第 2 行", "; 别处改了第 10 行", "; 别处追加", "; 助手追加"] {
@@ -926,7 +931,8 @@ final class LedgerAgentTests: XCTestCase {
         let current = try await repository.readFile(path: "2026.bean").text
         XCTAssertEqual(try String(contentsOf: rebased.root.appendingPathComponent("2026.bean"), encoding: .utf8), current)
         XCTAssertTrue(FileManager.default.fileExists(atPath: rebased.root.appendingPathComponent("notes.bean").path))
-        let remaining = try XCTUnwrap(try await repository.reviewAgentDraft(rebased))
+        let remainingPrepared = try await repository.reviewAgentDraft(rebased)
+        let remaining = try XCTUnwrap(remainingPrepared)
         XCTAssertEqual(remaining.files.map(\.path), ["notes.bean"])
         let unchanged = try await repository.rebaseAgentDraft(rebased)
         XCTAssertEqual(unchanged.0, rebased)
