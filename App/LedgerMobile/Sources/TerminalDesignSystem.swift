@@ -81,8 +81,8 @@ struct TerminalPageChrome: ViewModifier {
     private var titleText: some View {
         Text(compactTitle ?? title)
             .accessibilityLabel(title)
-            .balancedFont(size: 17, weight: .medium)
-            .tracking(-0.085)
+            .balancedSerif(size: BalancedDisplay.pageTitle, relativeTo: .title2)
+            .tracking(-0.3)
             .foregroundStyle(BalancedPalette.ink)
             .lineLimit(1)
     }

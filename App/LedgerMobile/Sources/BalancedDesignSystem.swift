@@ -78,6 +78,23 @@ enum BalancedReading {
     }
 }
 
+/// Anthropic-style hierarchy: page titles, section heads and hero figures are
+/// set in the serif at regular weight and separated by size and space, not by
+/// bolder sans. Rows, labels, controls and list amounts stay in Plex Sans.
+enum BalancedDisplay {
+    static let pageTitle: CGFloat = 22
+    static let sectionHead: CGFloat = 18
+    /// `.sechead` padding: roomier than the old 26/10 so sections breathe.
+    static let sectionInsets = EdgeInsets(top: 34, leading: 20, bottom: 12, trailing: 20)
+}
+
+extension View {
+    /// Source Serif 4 (CJK falls back to PingFang). Titles and section heads.
+    func balancedSerif(size: CGFloat, weight: BalancedSerifWeight = .regular, relativeTo: Font.TextStyle = .title3) -> some View {
+        font(BalancedReading.font(weight, size: size, relativeTo: relativeTo))
+    }
+}
+
 /// IBM Plex Sans at a design size that still follows Dynamic Type via
 /// `Font.custom(_:size:relativeTo:)`.
 struct BalancedFontModifier: ViewModifier {

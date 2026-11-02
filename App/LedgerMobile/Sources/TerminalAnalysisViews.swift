@@ -170,10 +170,10 @@ private struct TerminalReportChart: View {
 @MainActor
 private func balancedSechead(_ title: String, aside: String) -> some View {
     HStack(alignment: .firstTextBaseline, spacing: 14) {
-        Text(title).balancedFont(size: 15, weight: .medium).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
+        Text(title).balancedSerif(size: BalancedDisplay.sectionHead).foregroundStyle(BalancedPalette.ink)
         Spacer(minLength: 0)
         Text(aside).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-    }.padding(EdgeInsets(top: 26, leading: 20, bottom: 10, trailing: 20))
+    }.padding(BalancedDisplay.sectionInsets)
 }
 
 /// `.metric` cell: label, 22/500 tabular value, sub caption. Two per row with
@@ -450,14 +450,14 @@ struct TerminalIncomeExpenseReport: View {
     private var expenseComposition: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text("支出构成").balancedFont(size: 15, weight: .medium).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
+                Text("支出构成").balancedSerif(size: BalancedDisplay.sectionHead).foregroundStyle(BalancedPalette.ink)
                 Spacer(minLength: 0)
                 HStack(spacing: 4) {
                     Text(session.amountsVisible ? MoneyText.format(minorUnits: statement.totalExpense, currency: currency, showsCurrency: false) : "••••••")
                         .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                     Text(currency).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                 }
-            }.padding(EdgeInsets(top: 26, leading: 20, bottom: 10, trailing: 20))
+            }.padding(BalancedDisplay.sectionInsets)
             if statement.expenseAnalytics.isEmpty {
                 empty(String(localized: "所选区间暂无支出"))
             } else {
@@ -758,16 +758,21 @@ struct TerminalAssetsReport: View {
     /// currency symbol except when `currencySymbol` marks a verified total.
     private func amount(_ minorUnits: Int, prefix: String = "", size: CGFloat = 15, weight: BalancedWeight = .text,
                         color: Color = BalancedPalette.ink, currencySymbol: Bool = false) -> Text {
-        let font = Font.custom(weight.sansPostscriptName, size: size, relativeTo: size > 20 ? .title : .body)
+        // Hero figures (> 20pt) take the serif at regular weight, the way
+        // Anthropic sets its large numbers; row amounts stay Plex.
+        let hero = size > 20
+        let font = hero ? BalancedReading.font(size: size, relativeTo: .title)
+            : Font.custom(weight.sansPostscriptName, size: size, relativeTo: .body)
         guard session.amountsVisible else { return Text("••••••").font(font).foregroundColor(color) }
         let number = MoneyText.format(minorUnits: abs(minorUnits), currency: currency, showsCurrency: false)
         var text = Text(prefix).font(font).foregroundColor(color)
         if currencySymbol {
             text = text + Text(MoneyText.currencySymbol(for: currency))
-                .font(.custom(BalancedWeight.text.sansPostscriptName, size: size * 0.62, relativeTo: .body)).foregroundColor(BalancedPalette.meta)
+                .font(hero ? BalancedReading.font(size: size * 0.62) : .custom(BalancedWeight.text.sansPostscriptName, size: size * 0.62, relativeTo: .body))
+                .foregroundColor(BalancedPalette.meta)
         }
         text = text + Text(number).font(font).foregroundColor(color)
-        return (size > 20 ? text.tracking(-0.025 * size) : text).monospacedDigit()
+        return (hero ? text.tracking(-0.02 * size) : text).monospacedDigit()
     }
 
     // MARK: Composition band (`.band`, `.bar`, `.key`)
@@ -866,14 +871,14 @@ struct TerminalAssetsReport: View {
     private var netWorthTrend: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text("净值走势").balancedFont(size: 15, weight: .medium).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
+                Text("净值走势").balancedSerif(size: BalancedDisplay.sectionHead).foregroundStyle(BalancedPalette.ink)
                 Spacer(minLength: 0)
                 HStack(spacing: 14) {
                     trendChoice(String(localized: "月末"), value: true)
                     trendChoice(String(localized: "每日"), value: false)
                 }
                 Text(session.amountsVisible ? "月度期末 · \(currency)" : "月度期末").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-            }.padding(EdgeInsets(top: 26, leading: 20, bottom: 10, trailing: 20))
+            }.padding(BalancedDisplay.sectionInsets)
             if points.isEmpty {
                 Text("所选范围暂无净值趋势").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                     .padding(EdgeInsets(top: 4, leading: 20, bottom: 16, trailing: 20))

@@ -535,7 +535,7 @@ private struct BalancedLedgerTransactionRow: View {
                 Text(presentation.kind == .transfer ? String(localized: "转账") : visual.categoryLabel).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
             }
         }
-        .padding(.vertical, 11)
+        .padding(.vertical, 14)
         .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
         .contentShape(Rectangle())
     }

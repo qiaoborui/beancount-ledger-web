@@ -74,11 +74,11 @@ struct OverviewView: View {
                 }.foregroundStyle(BalancedPalette.meta)
                 Spacer(minLength: 0)
                 if session.amountsVisible {
-                    (Text(String(format: "%.1f", ratio * 100)).font(.custom(BalancedWeight.medium.sansPostscriptName, size: 21, relativeTo: .title3)).tracking(-0.42).foregroundColor(BalancedPalette.ink)
+                    (Text(String(format: "%.1f", ratio * 100)).font(BalancedReading.font(size: 24, relativeTo: .title3)).tracking(-0.36).foregroundColor(BalancedPalette.ink)
                      + Text(" %").font(.custom(BalancedWeight.text.sansPostscriptName, size: 12, relativeTo: .caption)).foregroundColor(BalancedPalette.meta))
                         .monospacedDigit()
                 } else {
-                    Text("••••").balancedFont(size: 21, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                    Text("••••").balancedSerif(size: 24).foregroundStyle(BalancedPalette.ink)
                 }
             }.padding(.bottom, 12)
             GeometryReader { proxy in
@@ -119,10 +119,10 @@ struct OverviewView: View {
     private func settle<Rows: View, Total: View>(title: String, aside: String, @ViewBuilder rows: () -> Rows, @ViewBuilder total: () -> Total) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(title).balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.secondary)
+                Text(title).balancedSerif(size: BalancedDisplay.sectionHead).foregroundStyle(BalancedPalette.ink)
                 Spacer(minLength: 0)
                 Text(aside).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
-            }.padding(.bottom, 14)
+            }.padding(.bottom, 16)
             rows()
             total()
         }
@@ -158,16 +158,21 @@ struct OverviewView: View {
     /// appears only on a total, at 0.62em in ink-3; the sign stays full size.
     private func amount(_ minorUnits: Int, currency: String, prefix: String = "", size: CGFloat = 15, weight: BalancedWeight = .text,
                         color: Color = BalancedPalette.ink, currencySymbol: Bool = false) -> Text {
-        let font = Font.custom(weight.sansPostscriptName, size: size, relativeTo: size > 20 ? .title : .body)
+        // Hero figures (> 20pt) take the serif at regular weight, the way
+        // Anthropic sets its large numbers; row amounts stay Plex.
+        let hero = size > 20
+        let font = hero ? BalancedReading.font(size: size, relativeTo: .title)
+            : Font.custom(weight.sansPostscriptName, size: size, relativeTo: .body)
         guard session.amountsVisible else { return Text("••••••").font(font).foregroundColor(color) }
         let number = MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: false)
         var text = Text(prefix).font(font).foregroundColor(color)
         if currencySymbol {
             text = text + Text(MoneyText.currencySymbol(for: currency))
-                .font(.custom(BalancedWeight.text.sansPostscriptName, size: size * 0.62, relativeTo: .body)).foregroundColor(BalancedPalette.meta)
+                .font(hero ? BalancedReading.font(size: size * 0.62) : .custom(BalancedWeight.text.sansPostscriptName, size: size * 0.62, relativeTo: .body))
+                .foregroundColor(BalancedPalette.meta)
         }
         text = text + Text(number).font(font).foregroundColor(color)
-        return (size > 20 ? text.tracking(-0.025 * size) : text).monospacedDigit()
+        return (hero ? text.tracking(-0.02 * size) : text).monospacedDigit()
     }
 
     private func legend(_ title: String, value: Int, color: Color, currency: String) -> some View {
@@ -182,10 +187,10 @@ struct OverviewView: View {
 
     private func sectionHead(_ title: String, @ViewBuilder aside: () -> some View) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text(title).balancedFont(size: 15, weight: .medium).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
+            Text(title).balancedSerif(size: BalancedDisplay.sectionHead).foregroundStyle(BalancedPalette.ink)
             Spacer(minLength: 0)
             aside()
-        }.padding(EdgeInsets(top: 26, leading: 20, bottom: 10, trailing: 20))
+        }.padding(BalancedDisplay.sectionInsets)
     }
 
     private func spending(_ categories: [OverviewCategorySpending], currency: String) -> some View {
@@ -386,7 +391,7 @@ private struct BalancedTransactionRow: View {
                 Text(p.kind == .transfer ? String(localized: "转账") : visual.categoryLabel).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).lineLimit(1)
             }.frame(minWidth: 104, alignment: .trailing)
         }
-        .padding(.horizontal, 20).padding(.vertical, 12).frame(minHeight: 56)
+        .padding(.horizontal, 20).padding(.vertical, 14).frame(minHeight: 56)
         .overlay(alignment: .bottom) { if showsRule { BalancedPalette.rule.frame(height: 1).padding(.horizontal, 20) } }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
