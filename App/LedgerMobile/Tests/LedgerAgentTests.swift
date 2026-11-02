@@ -489,14 +489,14 @@ final class LedgerAgentTests: XCTestCase {
     }
 
     @MainActor
-    func testConversationReportsAStaleDraftAndStartsOverOnDiscard() async throws {
+    func testConversationReportsAConflictingDraftAndStartsOverOnDiscard() async throws {
         let ledger = FakeDraftLedger()
-        await ledger.failReview(with: .stale)
+        await ledger.failReview(with: .conflict(["main.bean"]))
         let conversation = LedgerAgentConversation()
         conversation.editor = ledger.editor
         conversation.send("批量改分类") { _, _, _ in .init(ok: true, reply: "改好了。", edited: true) }
         try await waitUntilIdle(conversation)
-        XCTAssertEqual(conversation.pending, .init(review: nil, status: .stale))
+        XCTAssertEqual(conversation.pending, .init(review: nil, status: .conflict(["main.bean"])))
 
         conversation.discard()
         XCTAssertNil(conversation.pending)
@@ -847,23 +847,168 @@ final class LedgerAgentTests: XCTestCase {
         let clean = try await repository.reviewAgentDraft(rebased)
         XCTAssertNil(clean)
 
-        // A commit from elsewhere makes the rebased draft stale.
+        // A commit from elsewhere after the draft was copied is kept: the
+        // draft is merged onto it instead of being refused.
         let other = try await repository.openAgentDraft()
         try Data("; 别处\n".utf8).write(to: other.root.appendingPathComponent("other.bean"))
         let otherReview = try await repository.reviewAgentDraft(other)
         _ = try await repository.writeAgentDraft(try XCTUnwrap(otherReview), draft: other)
         try Data("; 晚了\n".utf8).write(to: draft.root.appendingPathComponent("late.bean"))
-        do {
-            _ = try await repository.reviewAgentDraft(rebased)
-            XCTFail("a stale draft was prepared")
-        } catch let error as LedgerAgentEditError {
-            XCTAssertEqual(error, .stale)
+        let mergedPrepared = try await repository.reviewAgentDraft(rebased)
+        let merged = try XCTUnwrap(mergedPrepared)
+        XCTAssertEqual(merged.files.map(\.path), ["late.bean"])
+
+        // The ledger moves again after the card was drawn: writing merges again.
+        let third = try await repository.openAgentDraft()
+        try Data("; 第三处\n".utf8).write(to: third.root.appendingPathComponent("third.bean"))
+        let thirdReview = try await repository.reviewAgentDraft(third)
+        _ = try await repository.writeAgentDraft(try XCTUnwrap(thirdReview), draft: third)
+        let afterMerge = try await repository.writeAgentDraft(merged, draft: rebased)
+        for path in ["late.bean", "other.bean", "third.bean"] {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: afterMerge.root.appendingPathComponent(path).path), path)
+            _ = try await repository.readFile(path: path)
         }
-        let fresh = try await repository.discardAgentDraft(nil, draft: rebased)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: fresh.root.appendingPathComponent("late.bean").path))
+        let settled = try await repository.reviewAgentDraft(afterMerge)
+        XCTAssertNil(settled)
+
+        try Data("; 不要了\n".utf8).write(to: afterMerge.root.appendingPathComponent("dropped.bean"))
+        let fresh = try await repository.discardAgentDraft(nil, draft: afterMerge)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fresh.root.appendingPathComponent("dropped.bean").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.root.appendingPathComponent("other.bean").path))
         await repository.closeAgentDraft(fresh)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fresh.root.path))
+    }
+
+    func testRepositoryMergesTheSameFileAndRefusesOnlyTheSameLines() async throws {
+        let catalog = LocalLedgerCatalog(rootDirectory: try root(), engine: HandleEngine(), validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Agent merge")
+        let repository = catalog.repository(for: descriptor)
+        let seed = try await repository.openAgentDraft()
+        let ledger = (1...12).map { "; 第 \($0) 行" }.joined(separator: "\n") + "\n"
+        try Data(ledger.utf8).write(to: seed.root.appendingPathComponent("2026.bean"))
+        let seedReview = try await repository.reviewAgentDraft(seed)
+        _ = try await repository.writeAgentDraft(try XCTUnwrap(seedReview), draft: seed)
+
+        func commitElsewhere(_ text: String) async throws {
+            let other = try await repository.openAgentDraft()
+            try Data(text.utf8).write(to: other.root.appendingPathComponent("2026.bean"))
+            let otherReview = try await repository.reviewAgentDraft(other)
+            _ = try await repository.writeAgentDraft(try XCTUnwrap(otherReview), draft: other)
+        }
+
+        // Different lines of one file, and both appending at the end.
+        let draft = try await repository.openAgentDraft()
+        let file = draft.root.appendingPathComponent("2026.bean")
+        try Data(ledger.replacingOccurrences(of: "; 第 2 行", with: "; 助手改了第 2 行").appending("; 助手追加\n").utf8).write(to: file)
+        try await commitElsewhere(ledger.replacingOccurrences(of: "; 第 10 行", with: "; 别处改了第 10 行").appending("; 别处追加\n"))
+        let reviewPrepared = try await repository.reviewAgentDraft(draft)
+        let review = try XCTUnwrap(reviewPrepared)
+        let next = try await repository.writeAgentDraft(review, draft: draft)
+        let written = try await repository.readFile(path: "2026.bean").text
+        for line in ["; 助手改了第 2 行", "; 别处改了第 10 行", "; 别处追加", "; 助手追加"] {
+            XCTAssertTrue(written.contains(line), line)
+        }
+        XCTAssertLessThan(try XCTUnwrap(written.range(of: "; 别处追加")).lowerBound,
+                          try XCTUnwrap(written.range(of: "; 助手追加")).lowerBound)
+        XCTAssertEqual(try String(contentsOf: next.root.appendingPathComponent("2026.bean"), encoding: .utf8), written)
+
+        // The same line changed on both sides is a conflict.
+        try Data(written.replacingOccurrences(of: "; 第 5 行", with: "; 助手改了第 5 行").utf8)
+            .write(to: next.root.appendingPathComponent("2026.bean"))
+        try Data("; 助手新文件\n".utf8).write(to: next.root.appendingPathComponent("notes.bean"))
+        try await commitElsewhere(written.replacingOccurrences(of: "; 第 5 行", with: "; 别处改了第 5 行"))
+        do {
+            _ = try await repository.reviewAgentDraft(next)
+            XCTFail("a conflicting draft was prepared")
+        } catch let error as LedgerAgentEditError {
+            XCTAssertEqual(error, .conflict(["2026.bean"]))
+        }
+
+        // The next turn's rebase keeps what merges and hands back the rest.
+        let (rebased, dropped) = try await repository.rebaseAgentDraft(next)
+        XCTAssertEqual(dropped, ["2026.bean"])
+        XCTAssertNotEqual(rebased.baseRevisionID, next.baseRevisionID)
+        let current = try await repository.readFile(path: "2026.bean").text
+        XCTAssertEqual(try String(contentsOf: rebased.root.appendingPathComponent("2026.bean"), encoding: .utf8), current)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: rebased.root.appendingPathComponent("notes.bean").path))
+        let remainingPrepared = try await repository.reviewAgentDraft(rebased)
+        let remaining = try XCTUnwrap(remainingPrepared)
+        XCTAssertEqual(remaining.files.map(\.path), ["notes.bean"])
+        let unchanged = try await repository.rebaseAgentDraft(rebased)
+        XCTAssertEqual(unchanged.0, rebased)
+        XCTAssertTrue(unchanged.dropped.isEmpty)
+    }
+
+    func testMergeTakesEachSidesChangeAndRefusesOverlaps() {
+        let base = Data("a\nb\nc\nd\ne\n".utf8)
+        func merge(_ ours: String?, _ theirs: String?, path: String = "x.bean", base: Data? = base) -> LedgerAgentMerge.FileResult {
+            LedgerAgentMerge.merge(path: path, base: base, ours: ours.map { Data($0.utf8) }, theirs: theirs.map { Data($0.utf8) })
+        }
+        XCTAssertEqual(merge("A\nb\nc\nd\ne\n", "a\nb\nc\nd\nE\n"), .merged(Data("A\nb\nc\nd\nE\n".utf8)))
+        XCTAssertEqual(merge("a\nB\nc\nd\ne\n", "a\nX\nc\nd\ne\n"), .conflict)
+        XCTAssertEqual(merge("a\nb\nc\nd\ne\nours\n", "a\nb\nc\nd\ne\ntheirs\n"),
+                       .merged(Data("a\nb\nc\nd\ne\ntheirs\nours\n".utf8)))
+        // Outside .bean files, insertions at the same place are a conflict.
+        XCTAssertEqual(merge("a\nb\nc\nd\ne\nours\n", "a\nb\nc\nd\ne\ntheirs\n", path: "notes.md"), .conflict)
+        // The same change on both sides, and a change on one side only.
+        XCTAssertEqual(merge("a\nB\nc\nd\ne\n", "a\nB\nc\nd\ne\n"), .merged(Data("a\nB\nc\nd\ne\n".utf8)))
+        XCTAssertEqual(merge("a\nb\nc\nd\ne\n", "a\nb\nC\nd\ne\n"), .merged(Data("a\nb\nC\nd\ne\n".utf8)))
+        // Deleted on one side and edited on the other.
+        XCTAssertEqual(merge(nil, "a\nB\nc\nd\ne\n"), .conflict)
+        XCTAssertEqual(merge(nil, "a\nb\nc\nd\ne\n"), .merged(nil))
+        // Both created the file.
+        XCTAssertEqual(merge("x\n", "y\n", path: "new.bean", base: nil), .merged(Data("y\nx\n".utf8)))
+        // A binary file changed on both sides.
+        XCTAssertEqual(LedgerAgentMerge.merge(path: "s.pdf", base: Data([0, 1]), ours: Data([0, 2]), theirs: Data([0, 3])), .conflict)
+        // The final newline one side added is kept.
+        XCTAssertEqual(merge("a\nb\nc\nd\ne\nf", "A\nb\nc\nd\ne\n", base: Data("a\nb\nc\nd\ne".utf8)),
+                       .merged(Data("A\nb\nc\nd\ne\nf\n".utf8)))
+    }
+
+    @MainActor
+    func testAutoWriteCommitsAReadyChangeWithoutTheCard() async throws {
+        let ledger = FakeDraftLedger()
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.autoWrites = true
+        conversation.send("记一笔") { _, _, _ in .init(ok: true, reply: "好了。", edited: true) }
+        try await waitUntilIdle(conversation)
+        for _ in 0..<200 where conversation.pending != nil { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertNil(conversation.pending)
+        XCTAssertEqual(conversation.written?.files.count, 1)
+        let writes = await ledger.writes
+        XCTAssertEqual(writes, 1)
+
+        // A conflict still stops for the user.
+        await ledger.failReview(with: .conflict(["main.bean"]))
+        conversation.send("再改") { _, _, _ in .init(ok: true, reply: "改了。", edited: true) }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.pending?.status, .conflict(["main.bean"]))
+        let after = await ledger.writes
+        XCTAssertEqual(after, 1)
+    }
+
+    @MainActor
+    func testTurnRebasesTheDraftAndTellsTheModelWhatItDropped() async throws {
+        let ledger = FakeDraftLedger()
+        await ledger.dropOnRebase(["2026/10.bean"])
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.send("记一笔") { message, _, _ in
+            XCTAssertFalse(message.contains("冲突"))
+            return .init(ok: true, reply: "好了。", edited: true)
+        }
+        try await waitUntilIdle(conversation)
+        conversation.send("接着改") { message, _, _ in
+            XCTAssertTrue(message.contains("2026/10.bean"))
+            XCTAssertTrue(message.hasSuffix("接着改"))
+            return .init(ok: true, reply: "重新改好了。")
+        }
+        try await waitUntilIdle(conversation)
+        // The rebased draft is reviewed again even though the turn edited nothing.
+        let reviews = await ledger.reviews
+        XCTAssertEqual(reviews, 2)
+        XCTAssertNotNil(conversation.pending?.review)
     }
 
     // MARK: Fixtures
@@ -901,9 +1046,11 @@ final class LedgerAgentTests: XCTestCase {
     }
 
     private actor FakeDraftLedger {
-        var opened = 0, writes = 0, closed = 0
+        var opened = 0, writes = 0, closed = 0, reviews = 0
         private var reviewError: LedgerAgentEditError?
+        private var dropped: [String] = []
         func failReview(with error: LedgerAgentEditError) { reviewError = error }
+        func dropOnRebase(_ paths: [String]) { dropped = paths }
 
         nonisolated var editor: LedgerAgentEditor {
             LedgerAgentEditor(
@@ -911,7 +1058,16 @@ final class LedgerAgentTests: XCTestCase {
                 review: { try await self.review($0) },
                 write: { _, draft in await self.write(draft) },
                 discard: { _, _ in await self.open() },
-                close: { _ in await self.close() })
+                close: { _ in await self.close() },
+                rebase: { await self.rebase($0) })
+        }
+
+        /// The first rebase finds the ledger unmoved; later ones move it on.
+        private var rebases = 0
+        private func rebase(_ draft: LedgerAgentDraft) -> (LedgerAgentDraft, dropped: [String]) {
+            rebases += 1
+            guard rebases > 1, !dropped.isEmpty else { return (draft, []) }
+            return (.init(id: draft.id, root: draft.root, baseRevisionID: UUID()), dropped)
         }
 
         private func open() -> LedgerAgentDraft {
@@ -919,6 +1075,7 @@ final class LedgerAgentTests: XCTestCase {
             return .init(id: UUID(), root: URL(fileURLWithPath: "/tmp/draft-\(opened)"), baseRevisionID: UUID())
         }
         private func review(_ draft: LedgerAgentDraft) throws -> LedgerAgentReview? {
+            reviews += 1
             if let reviewError { throw reviewError }
             return .init(id: UUID(), files: [.init(path: "main.bean", before: Data("a\n".utf8), after: Data("b\n".utf8))])
         }
