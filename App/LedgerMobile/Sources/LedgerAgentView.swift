@@ -452,6 +452,7 @@ private struct LedgerAgentChatScreen: View {
         let transcript = conversation.transcript, conversationID = conversation.id
         let attachments = conversation.attachmentPayloads(in: repository.workspace.agentAttachmentLocation(id: conversationID))
         conversation.editor = .live(repository)
+        conversation.autoWrites = settings.autoWrites
         conversation.lifecycle = LedgerAgentBackgroundRun.shared
         LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
         LedgerAgentBackgroundRun.shared.keepsAwake = settings.keepsAwake
@@ -595,7 +596,7 @@ private struct LedgerAgentAnswer: View {
 
     private var toolsSummary: String {
         let edits = message.toolCalls.filter {
-            ["edit_file", "write_file", "move_file", "delete_file", "save_attachment"].contains($0.name) && !$0.isError
+            ["edit_file", "write_file", "move_file", "copy_file", "delete_file", "save_attachment"].contains($0.name) && !$0.isError
         }.count
         if edits == 0, message.toolCalls.contains(where: { $0.name == "reconcile_attachment" }) {
             return String(localized: "读取附件和账本 \(message.toolCalls.count) 次")
@@ -669,7 +670,7 @@ private struct LedgerAgentChangeCard: View {
 
     private var title: String {
         switch pending.status {
-        case .stale: String(localized: "账本已经变了")
+        case .conflict: String(localized: "和账本的新改动冲突")
         case .invalid: String(localized: "草稿没有通过校验")
         default: String(localized: "改动 \(pending.review?.files.count ?? 0) 个文件")
         }
@@ -680,14 +681,14 @@ private struct LedgerAgentChangeCard: View {
         case .ready: String(localized: "校验通过。写入时会再校验一次，并生成一个可撤回的提交。")
         case .writing: String(localized: "正在写入…")
         case let .invalid(message): message + "\n" + String(localized: "可以让助手接着修，或者放弃草稿。")
-        case .stale: String(localized: "对话期间账本有了新的改动，这份草稿不能直接写入。放弃后助手会基于最新账本重做。")
+        case let .conflict(paths): String(localized: "对话期间账本有了新的改动，和草稿改到了同一处：\(paths.joined(separator: "、"))。可以让助手基于最新账本重改这些地方，或者放弃草稿。")
         case let .failed(message): String(localized: "没有写入：") + message
         }
     }
 
     private var noteColor: Color {
         switch pending.status {
-        case .invalid, .stale, .failed: BalancedPalette.expense
+        case .invalid, .conflict, .failed: BalancedPalette.expense
         default: BalancedPalette.meta
         }
     }
@@ -1136,6 +1137,12 @@ struct LedgerAgentSettingsView: View {
                     .accessibilityIdentifier("ledger-agent-keep-awake")
             } header: { Text("后台") } footer: {
                 Text("回答期间在后台播放无声音频，锁屏后助手也能一直做完，不影响你正在听的音乐。关掉后只能用系统给的后台时间，较长的回答可能被中断；被中断的回答回到 App 时会自动接着做。")
+            }
+            Section {
+                Toggle("改完自动写入", isOn: Binding(get: { settings.autoWrites }, set: { settings.setAutoWrites($0) }))
+                    .accessibilityIdentifier("ledger-agent-auto-write")
+            } header: { Text("写入") } footer: {
+                Text("打开后，助手的改动通过校验就直接写入账本，不再弹出确认卡片。每次写入都是一个单独的提交，可以在历史里撤回。和账本新改动冲突或校验没通过时，仍然停下来让你处理。")
             }
             Section("发给模型的内容") {
                 Text("你的问题、本次对话，以及助手调用工具后得到的结果（例如汇总金额、匹配到的流水）。不会发送整本账本文件，也不会发送 Git 凭据或本机路径。")

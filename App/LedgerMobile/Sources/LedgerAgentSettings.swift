@@ -18,6 +18,10 @@ final class LedgerAgentSettings: ObservableObject {
     /// audio, instead of relying only on the time iOS grants. On by default:
     /// without it a long turn is cut short once the phone locks.
     @Published private(set) var keepsAwake: Bool
+    /// Whether a change that passes validation is written at once, without
+    /// the change card's confirmation. Off by default; every write is still a
+    /// separate, revertible commit.
+    @Published private(set) var autoWrites: Bool
     /// The provider's own list, fetched on request and kept until relaunch;
     /// keyed by `listKey`.
     @Published private(set) var listed: [String: [LedgerAgentListedModel]] = [:]
@@ -32,6 +36,7 @@ final class LedgerAgentSettings: ObservableObject {
     private let thinkingKey = "ledger.agent.thinking"
     private let favoritesKey = "ledger.agent.favorite-models"
     private let keepsAwakeKey = "ledger.agent.keep-awake"
+    private let autoWritesKey = "ledger.agent.auto-write"
     private let keyStore: (String) -> ClassificationKeyStore
     private let lister: LedgerAgentModelLister
 
@@ -63,6 +68,7 @@ final class LedgerAgentSettings: ObservableObject {
         self.choice = choice
         thinking = defaults.string(forKey: thinkingKey).flatMap(LedgerAgentThinking.init(rawValue:)) ?? .default
         keepsAwake = defaults.object(forKey: keepsAwakeKey) as? Bool ?? true
+        autoWrites = defaults.bool(forKey: autoWritesKey)
         hasKey = (try? keyStore(choice.provider).load()) != nil
     }
 
@@ -101,6 +107,12 @@ final class LedgerAgentSettings: ObservableObject {
         guard on != keepsAwake else { return }
         keepsAwake = on
         defaults.set(on, forKey: keepsAwakeKey)
+    }
+
+    func setAutoWrites(_ on: Bool) {
+        guard on != autoWrites else { return }
+        autoWrites = on
+        defaults.set(on, forKey: autoWritesKey)
     }
 
     var modelTitle: String { title(for: choice) }

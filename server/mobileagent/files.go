@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -58,8 +59,10 @@ type scratch struct {
 	root       *os.Root
 	dir        string
 	entrypoint string
-	mu         sync.Mutex
-	edited     bool
+	// committed is the generation the read tools use, for draft_changes.
+	committed string
+	mu        sync.Mutex
+	edited    bool
 }
 
 func openScratch(dir, entrypoint string) (*scratch, error) {
@@ -165,8 +168,16 @@ func (s *scratch) tools() []agent.AgentTool {
 	}
 	return []agent.AgentTool{
 		fileTool{name: "list_files", title: "列出账本文件",
-			description: "列出账本目录里的文件（.bean 账本文件，以及存档的账单、导入配置等）和大小，隐藏文件除外。入口文件是 " + s.entrypoint + "。dir 只列某个子目录。",
-			parameters:  object(map[string]any{"dir": str("只列这个子目录，例如 documents")}), run: s.listFiles},
+			description: "列出账本目录里的文件（.bean 账本文件，以及存档的账单、导入配置等）和大小，隐藏文件除外。入口文件是 " + s.entrypoint + "。dir 只列某个子目录；pattern 按 glob 过滤，例如 **/*.bean、documents/**/*.pdf、2026/*.bean。",
+			parameters: object(map[string]any{"dir": str("只列这个子目录，例如 documents"),
+				"pattern": str("glob 过滤：* 和 ? 不跨目录，** 跨目录，{a,b} 任选；不含 / 时匹配任意目录下的文件名")}), run: s.listFiles},
+		fileTool{name: "grep_files", title: "搜索文件内容",
+			description: "在账本目录的文本文件里按正则（RE2 语法）搜索，返回「路径:行号:内容」。可以用 path 限定目录或文件、glob 限定文件（如 *.bean）、context 带上前后几行。找交易、账户、payee、include 或配置时先用它，不要逐个 read_file。",
+			parameters: object(map[string]any{"pattern": str("正则表达式，例如 Expenses:Food 或 ^2026-10-\\d+ \\*"),
+				"path": str("只搜这个目录或文件"), "glob": str("只搜匹配的文件，例如 *.bean"),
+				"ignore_case": map[string]any{"type": "boolean", "description": "忽略大小写"},
+				"context":     num("每处匹配前后各带几行，最多 5"),
+				"max_results": num("最多返回几处匹配，默认 100，最多 300")}, "pattern"), run: s.grepFiles},
 		fileTool{name: "read_file", title: "读取文件",
 			description: "读取一个文本文件（.bean、.yaml、.csv、.md 等），每行带行号（行号后是一个制表符，之后才是原文）。大文件用 offset 和 limit 分段读。",
 			parameters: object(map[string]any{"path": str("相对账本根目录的路径"), "offset": num("从第几行开始，1 起，默认 1"),
@@ -180,13 +191,20 @@ func (s *scratch) tools() []agent.AgentTool {
 			description: "新建一个文本文件，或用 content 整份覆盖已有文件。改已有文件的局部时用 edit_file。新的 .bean 文件需要被入口文件 include 才会生效。",
 			parameters:  object(map[string]any{"path": str("相对账本根目录的路径"), "content": str("完整的文件内容")}, "path", "content"),
 			run:         s.writeFile},
+		fileTool{name: "copy_file", title: "复制文件",
+			description: "复制账本里的一个文件（包括二进制文件），目标目录不存在会自动创建。目标已存在时需要 overwrite。",
+			parameters: object(map[string]any{"from": str("原路径"), "to": str("新路径"),
+				"overwrite": map[string]any{"type": "boolean", "description": "目标已存在时覆盖"}}, "from", "to"), run: s.copyFile},
 		fileTool{name: "move_file", title: "移动文件",
-			description: "移动或重命名账本里的一个文件（包括二进制文件），目标目录不存在会自动创建。移动被 include 的 .bean 文件后要同步改 include 行。目标已存在时需要 overwrite。",
+			description: "移动或重命名账本里的一个文件（包括二进制文件）或整个目录，目标目录不存在会自动创建。移动被 include 的 .bean 文件后要同步改 include 行（可以先 grep_files 找 include）。文件的目标已存在时需要 overwrite；目录的目标必须不存在。",
 			parameters: object(map[string]any{"from": str("原路径"), "to": str("新路径"),
 				"overwrite": map[string]any{"type": "boolean", "description": "目标已存在时覆盖"}}, "from", "to"), run: s.moveFile},
 		fileTool{name: "delete_file", title: "删除文件",
 			description: "删除账本里的一个文件。删除 .bean 文件前先去掉指向它的 include。",
 			parameters:  object(map[string]any{"path": str("相对账本根目录的路径")}, "path"), run: s.deleteFile},
+		fileTool{name: "draft_changes", title: "查看草稿改动",
+			description: "像 git status 加 git diff：列出草稿相对账本还没写入的改动（新增、修改、删除的文件，各自增删几行），并给出文本文件的差异。包括之前几轮里还没写入的改动。path 只看某个文件或目录。",
+			parameters:  object(map[string]any{"path": str("只看这个文件或目录")}), run: s.draftChanges},
 		fileTool{name: "bean_check", title: "校验账本",
 			description: "用 App 内置的 Beancount 校验整份草稿账本，返回错误及所在文件和行号。改完后必须调用，直到通过。",
 			parameters:  object(map[string]any{}), run: s.beanCheck, detached: true},
@@ -199,10 +217,18 @@ func (s *scratch) listFiles(raw json.RawMessage) (any, error) {
 		Bytes int64  `json:"bytes"`
 	}
 	var input struct {
-		Dir string `json:"dir"`
+		Dir     string `json:"dir"`
+		Pattern string `json:"pattern"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &input); err != nil {
+			return nil, err
+		}
+	}
+	var pattern *regexp.Regexp
+	if strings.TrimSpace(input.Pattern) != "" {
+		var err error
+		if pattern, err = globRegexp(input.Pattern); err != nil {
 			return nil, err
 		}
 	}
@@ -226,7 +252,7 @@ func (s *scratch) listFiles(raw json.RawMessage) (any, error) {
 			}
 			return nil
 		}
-		if d.Type().IsRegular() {
+		if d.Type().IsRegular() && (pattern == nil || pattern.MatchString(name)) {
 			if len(files) >= maxListedFiles {
 				truncated = true
 				return fs.SkipAll
@@ -449,6 +475,9 @@ func (s *scratch) moveFile(raw json.RawMessage) (any, error) {
 		return nil, errors.New("from and to are the same file")
 	}
 	info, err := s.root.Lstat(from)
+	if err == nil && info.IsDir() {
+		return s.moveDirectory(from, to)
+	}
 	if err != nil || !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s: %w", from, fs.ErrNotExist)
 	}

@@ -48,11 +48,12 @@ func LocalAgentToolSpecs() []LocalAgentToolSpec {
 func LocalAgentSystemPrompt(canEdit bool) string {
 	writing := "4. 当前版本只读：不能新增、修改、删除或冲销交易，也不能改账户。用户提出写入请求时，说明暂不支持，并可以给出建议的分录文本。"
 	if canEdit {
-		writing = `4. 修改账本时用文件工具：list_files 和 read_file 查看文件，edit_file 精确替换（old_string 必须原样出现且只出现一次，先 read_file 再改），write_file 新建或整份覆盖。新增交易前先 get_accounts，只用已开户的账户，每个币种分别平衡；不知道写进哪个文件时，先 read_file 入口文件看 include。
+		writing = `4. 修改账本时用文件工具，像在本地仓库里一样操作：list_files（可用 pattern 按 glob 找文件）和 grep_files（正则搜索内容，找交易、账户、include 时优先用）定位，read_file 查看，edit_file 精确替换（old_string 必须原样出现且只出现一次，先 read_file 再改），write_file 新建或整份覆盖。新增交易前先 get_accounts，只用已开户的账户，每个币种分别平衡；不知道写进哪个文件时，先 read_file 入口文件看 include。
    改完必须调用 bean_check，有错就根据报错修正再检查，直到通过。
-   你改的是一份草稿副本：回答结束后，App 会把改动以差异卡片展示给用户，用户点「写入账本」才会真正写入。所以不能说「已记账」或「已写入」，只能说改动已准备好、请确认。不要在回复里重复整段分录或差异。
+   你改的是一份草稿副本：回答结束后，App 会把改动以差异卡片展示给用户，用户点「写入账本」才会真正写入。所以不能说「已记账」或「已写入」，只能说改动已准备好、请确认（用户打开了自动写入时，校验通过后 App 会直接写入，可以说「校验通过后会自动写入」）。不要在回复里重复整段分录或差异。
    查询类工具（BQL、搜索、汇总、账户）读取的是改动前的账本，看不到草稿里的改动。
-   账本目录里除了 .bean 还可以放其他文件（存档的账单、导入配置、笔记等）：move_file 移动或重命名，delete_file 删除；二进制文件不能按文本读写。用户上传的附件可以用 save_attachment 原样存进账本，例如 documents/statements/ 下，文件名写清楚机构和月份；需要时再写一条 document 指令关联到账户。`
+   draft_changes 查看草稿里还没写入的全部改动（含之前几轮的），相当于 git status 加 git diff。如果账本在对话期间被别处改过，App 会在每轮开始前把草稿合并到最新账本上。
+   账本目录里除了 .bean 还可以放其他文件（存档的账单、导入配置、笔记等）：copy_file 复制，move_file 移动或重命名（文件或整个目录），delete_file 删除；二进制文件不能按文本读写。用户上传的附件可以用 save_attachment 原样存进账本，例如 documents/statements/ 下，文件名写清楚机构和月份；需要时再写一条 document 指令关联到账户。`
 	}
 	return `你是记账 App 内的账本 Agent，只能通过工具读取当前设备上的 Beancount 账本，不能编造账本数据。
 
