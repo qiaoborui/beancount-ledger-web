@@ -30,7 +30,10 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         case "view_attachment_image": String(localized: "查看图片")
         case "save_attachment": String(localized: "附件存入账本")
         case "move_file": String(localized: "移动文件")
+        case "copy_file": String(localized: "复制文件")
         case "delete_file": String(localized: "删除文件")
+        case "grep_files": String(localized: "搜索文件")
+        case "draft_changes": String(localized: "查看草稿改动")
         default: name
         }
         if name == "get_ledger_summary", let start = argument("start"), let end = argument("end") {
@@ -40,7 +43,9 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         if ["read_file", "edit_file", "write_file", "delete_file", "save_attachment"].contains(name), let path = argument("path") {
             return base + " · " + path
         }
-        if name == "move_file", let from = argument("from"), let to = argument("to") { return base + " · " + from + " → " + to }
+        if name == "grep_files", let pattern = argument("pattern") { return base + " · " + pattern }
+        if name == "list_files", let pattern = argument("pattern") { return base + " · " + pattern }
+        if name == "move_file" || name == "copy_file", let from = argument("from"), let to = argument("to") { return base + " · " + from + " → " + to }
         if name == "reconcile_attachment", let accounts = arrayArgument("accounts") { return base + " · " + accounts.joined(separator: "、") }
         if ["read_attachment", "view_attachment_image"].contains(name), let id = argument("id") { return base + " · " + id }
         return base
@@ -621,14 +626,15 @@ struct LedgerAgentReview: Equatable, Sendable {
 }
 
 enum LedgerAgentEditError: LocalizedError, Equatable {
-    /// The ledger was committed to since the draft was copied.
-    case stale
+    /// The ledger was committed to since the draft was copied, and those
+    /// commits changed the same lines (or the same binary file) as the draft.
+    case conflict([String])
     /// The draft does not pass the app's own Beancount validation.
     case invalid(String)
 
     var errorDescription: String? {
         switch self {
-        case .stale: String(localized: "账本在对话期间有了新的改动，这份草稿不能直接写入")
+        case let .conflict(paths): String(localized: "账本在对话期间有了新的改动，和草稿改到了同一处：\(paths.joined(separator: "、"))")
         case let .invalid(message): message
         }
     }
@@ -638,13 +644,19 @@ enum LedgerAgentEditError: LocalizedError, Equatable {
 /// the existing validated commit. Tests substitute it.
 struct LedgerAgentEditor: Sendable {
     var open: @Sendable () async throws -> LedgerAgentDraft
-    /// nil when the draft equals the committed ledger.
+    /// nil when the draft equals the committed ledger. A draft copied from an
+    /// older generation is merged onto the current one first.
     var review: @Sendable (LedgerAgentDraft) async throws -> LedgerAgentReview?
     /// Commits the reviewed change and returns the draft rebased on it.
     var write: @Sendable (LedgerAgentReview, LedgerAgentDraft) async throws -> LedgerAgentDraft
     /// Drops the change and returns a fresh copy of the current ledger.
     var discard: @Sendable (LedgerAgentReview?, LedgerAgentDraft) async throws -> LedgerAgentDraft
     var close: @Sendable (LedgerAgentDraft) async -> Void
+    /// Carries the draft's changes over commits made since it was copied, so
+    /// a turn sees the current ledger. Files whose changes conflict take the
+    /// ledger's content and are returned, so the model can redo them. The
+    /// draft comes back unchanged when the ledger has not moved.
+    var rebase: @Sendable (LedgerAgentDraft) async throws -> (LedgerAgentDraft, dropped: [String]) = { ($0, []) }
 }
 
 /// The change card under the conversation.
@@ -652,7 +664,7 @@ struct LedgerAgentPendingEdit: Equatable {
     enum Status: Equatable {
         case ready
         case invalid(String)
-        case stale
+        case conflict([String])
         case writing
         case failed(String)
     }
@@ -833,6 +845,7 @@ final class LedgerAgentConversation: ObservableObject {
         stepSince = started
         stepCount = 0
         let editor = editor, existing = draft, reopening = reopening, unreviewed = draftUnreviewed
+        let hadChange = pending != nil
         let message = note.map { $0 + "\n\n" + question } ?? question
         let report: LedgerAgentSteps.Handler = { [weak self] step in
             Task { @MainActor in self?.advance(step, started: started) }
@@ -847,9 +860,24 @@ final class LedgerAgentConversation: ObservableObject {
                 if draft == nil, reopening != nil || editor != nil { report(.copyingDraft) }
                 if draft == nil, let reopening { draft = await reopening.value }
                 if draft == nil, let editor { draft = try? await editor.open() }
+                // The ledger may have moved on since the draft was copied (a
+                // change written by hand, a sync, an import): carry the draft
+                // over it, so the turn reads the current ledger.
+                var message = message
+                // A change card drawn against the older ledger is drawn again.
+                var redraw = false
+                if let editor, let copied = draft, let rebased = try? await editor.rebase(copied) {
+                    draft = rebased.0
+                    redraw = rebased.0.baseRevisionID != copied.baseRevisionID && (hadChange || !rebased.dropped.isEmpty)
+                    if !rebased.dropped.isEmpty {
+                        let files = rebased.dropped.joined(separator: "、")
+                        message = String(localized: "（系统提示：账本在草稿之后有了新的改动，和你在这些文件里的修改冲突：\(files)。这些文件已恢复为账本当前的内容，你之前对它们的修改需要重新做。）")
+                            + "\n\n" + message
+                    }
+                }
                 let response = try await send(message, history, draft?.root, report)
                 var review: Result<LedgerAgentReview?, Error>?
-                if response.edited || unreviewed, let editor, let draft {
+                if response.edited || unreviewed || redraw, let editor, let draft {
                     do { review = .success(try await editor.review(draft)) } catch { review = .failure(error) }
                 }
                 outcome = .success(.init(response: response, draft: draft, review: review))
@@ -962,7 +990,11 @@ final class LedgerAgentConversation: ObservableObject {
                 self.onSettled?(self)
             } catch {
                 guard self?.epoch == epoch else { return }
-                self?.pending?.status = error as? LedgerAgentEditError == .stale ? .stale : .failed(error.localizedDescription)
+                if case let .conflict(paths)? = error as? LedgerAgentEditError {
+                    self?.pending?.status = .conflict(paths)
+                } else {
+                    self?.pending?.status = .failed(error.localizedDescription)
+                }
             }
         }
     }
@@ -1002,14 +1034,19 @@ final class LedgerAgentConversation: ObservableObject {
     private func finish(_ outcome: Result<Outcome, Error>, question: String, started: Date) {
         guard case let .running(since) = phase, since == started else {
             // A stopped or reset turn may still have opened a copy.
-            if case let .success(turn) = outcome, let opened = turn.draft, opened != draft, let editor {
-                Task { await editor.close(opened) }
+            if case let .success(turn) = outcome, let opened = turn.draft {
+                if opened.id == draft?.id {
+                    // The same draft, rebased on a newer ledger by the turn.
+                    draft = opened
+                } else if let editor {
+                    Task { await editor.close(opened) }
+                }
             }
             return
         }
         task = nil
         if case let .success(turn) = outcome {
-            if draft == nil { draft = turn.draft }
+            if let opened = turn.draft { draft = opened }
             reopening = nil
             if turn.review != nil { draftUnreviewed = false }
             switch turn.review {
@@ -1018,7 +1055,7 @@ final class LedgerAgentConversation: ObservableObject {
                 pending = review.map { .init(review: $0, status: .ready) }
             case let .failure(error)?:
                 switch error as? LedgerAgentEditError {
-                case .stale?: pending = .init(review: nil, status: .stale)
+                case let .conflict(paths)?: pending = .init(review: nil, status: .conflict(paths))
                 default: pending = .init(review: nil, status: .invalid(error.localizedDescription))
                 }
             }
@@ -1450,6 +1487,141 @@ enum LedgerAgentDraftMirror {
     }
 }
 
+/// Carries an Agent draft over a ledger that moved on since the draft was
+/// copied, like a rebase: the draft's own changes (draft against `base`, the
+/// generation it was copied from) are replayed on top of the current ledger.
+/// A file only one side changed takes that side. A file both changed is
+/// merged line by line, and only changes to the same lines are a conflict.
+/// In `.bean` files, lines both sides inserted at the same place are both
+/// kept (the ledger's first), since the order of entries does not matter to
+/// Beancount; a binary file both sides changed is always a conflict.
+enum LedgerAgentMerge {
+    enum FileResult: Equatable {
+        /// The merged content; nil when the file ends up deleted.
+        case merged(Data?)
+        case conflict
+    }
+
+    /// The merged tree, as the paths whose merged content differs from
+    /// `current` (nil deletes) and the paths that conflict.
+    struct Plan: Equatable {
+        var changes: [String: Data?] = [:]
+        var conflicts: [String] = []
+    }
+
+    static func plan(base: URL, draft: URL, current: URL, fileManager: FileManager = .default) throws -> Plan {
+        let baseFiles = try LedgerAgentDraftMirror.files(in: base, fileManager: fileManager)
+        let draftFiles = try LedgerAgentDraftMirror.files(in: draft, fileManager: fileManager)
+        var plan = Plan()
+        for path in baseFiles.union(draftFiles).sorted() {
+            let inBase = baseFiles.contains(path), inDraft = draftFiles.contains(path)
+            if inBase, inDraft, fileManager.contentsEqual(atPath: base.appendingPathComponent(path).path,
+                                                          andPath: draft.appendingPathComponent(path).path) { continue }
+            let read = { (root: URL) throws -> Data? in
+                let url = root.appendingPathComponent(path)
+                guard fileManager.fileExists(atPath: url.path) else { return nil }
+                return try Data(contentsOf: url)
+            }
+            let theirs = try read(current)
+            let ancestor: Data? = try inBase ? read(base) : nil
+            let ours: Data? = try inDraft ? read(draft) : nil
+            switch merge(path: path, base: ancestor, ours: ours, theirs: theirs) {
+            case .conflict: plan.conflicts.append(path)
+            case let .merged(data) where data != theirs: plan.changes.updateValue(data, forKey: path)
+            case .merged: break
+            }
+        }
+        return plan
+    }
+
+    /// Writes a plan's changes into a tree that holds `current`'s files.
+    static func apply(_ changes: [String: Data?], to root: URL, fileManager: FileManager = .default) throws {
+        for (path, data) in changes.sorted(by: { $0.key < $1.key }) {
+            let url = root.appendingPathComponent(path)
+            if let data {
+                try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try data.write(to: url)
+            } else if fileManager.fileExists(atPath: url.path) {
+                try fileManager.removeItem(at: url)
+            }
+        }
+    }
+
+    static func merge(path: String, base: Data?, ours: Data?, theirs: Data?) -> FileResult {
+        if ours == base { return .merged(theirs) }
+        if theirs == base || theirs == ours { return .merged(ours) }
+        // Both sides changed the file, and differently. A deletion against an
+        // edit, or any binary file, cannot be merged by lines.
+        guard let ours, let theirs, let o = Text(base ?? Data()), let a = Text(ours), let b = Text(theirs),
+              let lines = mergeLines(base: o.lines, ours: a.lines, theirs: b.lines,
+                                     keepsBothInsertions: path.hasSuffix(".bean")) else { return .conflict }
+        let newline = a.endsWithNewline != o.endsWithNewline ? a.endsWithNewline : b.endsWithNewline
+        return .merged(Data((lines.joined(separator: "\n") + (newline && !lines.isEmpty ? "\n" : "")).utf8))
+    }
+
+    private struct Text {
+        let lines: [String]
+        let endsWithNewline: Bool
+
+        init?(_ data: Data) {
+            guard !LedgerAgentFileDiff.isBinary(data), let text = String(data: data, encoding: .utf8) else { return nil }
+            var lines = text.components(separatedBy: "\n")
+            if lines.last == "" { lines.removeLast() }
+            self.lines = lines
+            endsWithNewline = text.hasSuffix("\n")
+        }
+    }
+
+    /// diff3 over lines: walks the stretches every side agrees on, and takes
+    /// whichever side changed each stretch in between. nil on a conflict.
+    static func mergeLines(base o: [String], ours a: [String], theirs b: [String], keepsBothInsertions: Bool) -> [String]? {
+        let ma = matches(o, a), mb = matches(o, b)
+        var merged: [String] = []
+        var i = 0, j = 0, k = 0
+        while true {
+            while i < o.count, ma[i] == j, mb[i] == k {
+                merged.append(o[i]); i += 1; j += 1; k += 1
+            }
+            if i == o.count, j == a.count, k == b.count { return merged }
+            // The next base line both sides kept ends the changed stretch.
+            var next = i
+            while next < o.count, ma[next] == nil || mb[next] == nil { next += 1 }
+            let nj = next < o.count ? ma[next]! : a.count
+            let nk = next < o.count ? mb[next]! : b.count
+            let chunkO = Array(o[i..<next]), chunkA = Array(a[j..<nj]), chunkB = Array(b[k..<nk])
+            if chunkA == chunkO {
+                merged += chunkB
+            } else if chunkB == chunkO || chunkA == chunkB {
+                merged += chunkA
+            } else if keepsBothInsertions, chunkO.isEmpty {
+                merged += chunkB + chunkA
+            } else {
+                return nil
+            }
+            i = next; j = nj; k = nk
+        }
+    }
+
+    /// For each line of `old`, the line of `new` it is kept as, if any.
+    private static func matches(_ old: [String], _ new: [String]) -> [Int?] {
+        var removed = Set<Int>(), inserted = Set<Int>()
+        for change in new.difference(from: old) {
+            switch change {
+            case let .remove(offset, _, _): removed.insert(offset)
+            case let .insert(offset, _, _): inserted.insert(offset)
+            }
+        }
+        var result = [Int?](repeating: nil, count: old.count)
+        var j = 0
+        for i in old.indices where !removed.contains(i) {
+            while inserted.contains(j) { j += 1 }
+            result[i] = j
+            j += 1
+        }
+        return result
+    }
+}
+
 extension LedgerAgentEditor {
     static func live(_ repository: LocalLedgerRepository) -> LedgerAgentEditor {
         LedgerAgentEditor(
@@ -1457,7 +1629,8 @@ extension LedgerAgentEditor {
             review: { try await repository.reviewAgentDraft($0) },
             write: { try await repository.writeAgentDraft($0, draft: $1) },
             discard: { try await repository.discardAgentDraft($0, draft: $1) },
-            close: { await repository.closeAgentDraft($0) })
+            close: { await repository.closeAgentDraft($0) },
+            rebase: { try await repository.rebaseAgentDraft($0) })
     }
 }
 

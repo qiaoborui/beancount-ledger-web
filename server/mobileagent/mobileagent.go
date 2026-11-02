@@ -386,8 +386,8 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		return "", "", calls, files, err
 	}
 	specs := app.LocalAgentToolSpecs()
-	tools := make([]agent.AgentTool, 0, len(specs)+9)
-	allowed := make(map[string]bool, len(specs)+9)
+	tools := make([]agent.AgentTool, 0, len(specs)+12)
+	allowed := make(map[string]bool, len(specs)+12)
 	for _, spec := range specs {
 		tools = append(tools, ledgerTool{spec: spec, session: session})
 		allowed[spec.Name] = true
@@ -587,7 +587,12 @@ func editableScratch(request turnRequestV1) (*scratch, error) {
 	if entrypoint == "" {
 		entrypoint = "main.bean"
 	}
-	return openScratch(dir, entrypoint)
+	files, err := openScratch(dir, entrypoint)
+	if err != nil {
+		return nil, err
+	}
+	files.committed = request.WorkspaceRoot
+	return files, nil
 }
 
 // priorMessages is what the turn starts from: the transcript the previous

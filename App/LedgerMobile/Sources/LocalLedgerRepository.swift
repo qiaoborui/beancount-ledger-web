@@ -1234,25 +1234,41 @@ actor LocalLedgerRepository: LedgerRepository {
         await workspace.removeAgentDraft(id: draft.id)
     }
 
-    /// Stages the draft's ledger files over the generation it was copied from
-    /// and validates the result, exactly like any other prepared write. nil
-    /// when the draft matches the ledger.
+    /// Stages the draft over the current ledger and validates the result,
+    /// exactly like any other prepared write. A draft copied from the current
+    /// generation is mirrored as it is; one copied from an older generation is
+    /// merged onto the current one (`LedgerAgentMerge`), so commits made in the
+    /// meantime are kept, and only changes to the same lines are refused.
+    /// nil when the draft matches the ledger.
     func reviewAgentDraft(_ draft: LedgerAgentDraft) async throws -> LedgerAgentReview? {
         let validator = validator, entrypoint = descriptor.entrypoint, source = draft.root
-        let files: LocalLedgerWorkspace.PreparedFiles
-        do {
-            files = try await workspace.prepare(expectedRevisionID: draft.baseRevisionID, mutateStage: { stage in
-                try LedgerAgentDraftMirror.apply(from: source, to: stage)
-            }, validator: { root in try await validator(root, entrypoint) })
-        } catch LocalLedgerWorkspace.WorkspaceError.staleRevision {
-            throw LedgerAgentEditError.stale
-        } catch let error as LocalLedgerWorkspace.WorkspaceError {
-            throw error
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            throw LedgerAgentEditError.invalid(error.localizedDescription)
+        var prepared: LocalLedgerWorkspace.PreparedFiles?
+        // Another commit can land between reading the revision and staging it.
+        for attempt in 0..<3 where prepared == nil {
+            let current = try await workspace.currentRevision()?.id ?? draft.baseRevisionID
+            var base: URL?
+            if current != draft.baseRevisionID { base = try await workspace.committedTree(revisionID: draft.baseRevisionID) }
+            let ancestor = base
+            do {
+                prepared = try await workspace.prepare(expectedRevisionID: current, mutateStage: { stage in
+                    guard let base = ancestor else { return try LedgerAgentDraftMirror.apply(from: source, to: stage) }
+                    let plan = try LedgerAgentMerge.plan(base: base, draft: source, current: stage)
+                    guard plan.conflicts.isEmpty else { throw LedgerAgentEditError.conflict(plan.conflicts) }
+                    try LedgerAgentMerge.apply(plan.changes, to: stage)
+                }, validator: { root in try await validator(root, entrypoint) })
+            } catch LocalLedgerWorkspace.WorkspaceError.staleRevision where attempt < 2 {
+                continue
+            } catch let error as LedgerAgentEditError {
+                throw error
+            } catch let error as LocalLedgerWorkspace.WorkspaceError {
+                throw error
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw LedgerAgentEditError.invalid(error.localizedDescription)
+            }
         }
+        guard let files = prepared else { throw LocalLedgerWorkspace.WorkspaceError.staleRevision }
         guard !files.files.isEmpty else { return nil }
         let preview = PreparedBookkeepingChange(id: UUID(), ledgerID: descriptor.id, draftRevision: UUID(),
             files: files, createdAt: Date())
@@ -1264,24 +1280,54 @@ actor LocalLedgerRepository: LedgerRepository {
         })
     }
 
-    /// Commits a reviewed draft through the validated, atomic write path. The
-    /// draft then already matches the new generation, so it is rebased on it.
+    /// Commits a reviewed draft through the validated, atomic write path, and
+    /// returns the draft rebased on the new generation. When the ledger moved
+    /// on after the card was prepared (or the card outlived its prepared
+    /// change), the draft is merged onto the current ledger again and written
+    /// if that merge is clean.
     func writeAgentDraft(_ review: LedgerAgentReview, draft: LedgerAgentDraft) async throws -> LedgerAgentDraft {
-        var id = review.id
-        if preparedOperations[id].map({ Date().timeIntervalSince($0.preview.createdAt) >= 900 }) ?? true {
-            // The card outlived its prepared change; prepare it again, and
-            // write only if it is still the change the card shows.
-            guard let fresh = try await reviewAgentDraft(draft), fresh.files == review.files else {
-                throw BookkeepingError.expiredPreview
+        var operation = preparedOperations[review.id].flatMap {
+            Date().timeIntervalSince($0.preview.createdAt) < 900 ? $0 : nil
+        }
+        for attempt in 0..<2 {
+            if operation == nil {
+                // Nothing left to write: the ledger already holds the change.
+                guard let fresh = try await reviewAgentDraft(draft) else { return try await refreshAgentDraft(draft) }
+                operation = preparedOperations[fresh.id]
             }
-            id = fresh.id
+            guard let prepared = operation else { throw BookkeepingError.expiredPreview }
+            do {
+                _ = try await commitPrepared(prepared.preview)
+            } catch LocalLedgerWorkspace.WorkspaceError.staleRevision where attempt == 0 {
+                operation = nil
+                continue
+            }
+            guard prepared.preview.files.revisionID == draft.baseRevisionID else {
+                // Merged onto commits the draft does not have: copy the result.
+                return try await refreshAgentDraft(draft)
+            }
+            guard let revision = presentedRevisionID else { throw LocalLedgerError.previewRequired }
+            return LedgerAgentDraft(id: draft.id, root: draft.root, baseRevisionID: revision)
         }
-        guard let operation = preparedOperations[id] else { throw BookkeepingError.expiredPreview }
-        do { _ = try await commitPrepared(operation.preview) } catch LocalLedgerWorkspace.WorkspaceError.staleRevision {
-            throw LedgerAgentEditError.stale
-        }
-        guard let revision = presentedRevisionID else { throw LocalLedgerError.previewRequired }
-        return LedgerAgentDraft(id: draft.id, root: draft.root, baseRevisionID: revision)
+        throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+    }
+
+    /// Carries the draft's own changes over every commit made since it was
+    /// copied: the draft becomes the current ledger plus those changes. A file
+    /// whose changes conflict takes the ledger's content and is returned.
+    func rebaseAgentDraft(_ draft: LedgerAgentDraft) async throws -> (LedgerAgentDraft, dropped: [String]) {
+        guard let current = try await workspace.currentRevision(), current.id != draft.baseRevisionID else { return (draft, []) }
+        let base = try await workspace.committedTree(revisionID: draft.baseRevisionID)
+        let theirs = try await workspace.committedTree(revisionID: current.id)
+        let plan = try LedgerAgentMerge.plan(base: base, draft: draft.root, current: theirs)
+        try LedgerAgentDraftMirror.apply(from: theirs, to: draft.root)
+        try LedgerAgentMerge.apply(plan.changes, to: draft.root)
+        return (LedgerAgentDraft(id: draft.id, root: draft.root, baseRevisionID: current.id), plan.conflicts)
+    }
+
+    private func refreshAgentDraft(_ draft: LedgerAgentDraft) async throws -> LedgerAgentDraft {
+        let (revision, root) = try await workspace.makeAgentDraft(id: draft.id)
+        return LedgerAgentDraft(id: draft.id, root: root, baseRevisionID: revision.id)
     }
 
     /// Drops a reviewed change and refreshes the draft from the current ledger.

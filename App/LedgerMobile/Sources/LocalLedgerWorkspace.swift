@@ -521,6 +521,16 @@ actor LocalLedgerWorkspace {
         return (revision, workspace)
     }
 
+    /// The committed tree of a revision, read-only: an Agent draft's common
+    /// ancestor when it is merged onto a ledger that moved on. Every
+    /// generation is immutable and kept, so it can be read without the lock.
+    func committedTree(revisionID: UUID) throws -> URL {
+        try prepareLayout()
+        let workspace = generationDirectory(for: revisionID).appendingPathComponent("workspace", isDirectory: true)
+        guard try itemKindIfPresent(at: workspace) == .directory else { throw WorkspaceError.missingRevision }
+        return workspace
+    }
+
     func removeAgentDraft(id: UUID) {
         guard let container = try? agentDraftDirectory(id) else { return }
         removeIfPresent(container)

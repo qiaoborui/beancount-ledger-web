@@ -595,7 +595,7 @@ private struct LedgerAgentAnswer: View {
 
     private var toolsSummary: String {
         let edits = message.toolCalls.filter {
-            ["edit_file", "write_file", "move_file", "delete_file", "save_attachment"].contains($0.name) && !$0.isError
+            ["edit_file", "write_file", "move_file", "copy_file", "delete_file", "save_attachment"].contains($0.name) && !$0.isError
         }.count
         if edits == 0, message.toolCalls.contains(where: { $0.name == "reconcile_attachment" }) {
             return String(localized: "读取附件和账本 \(message.toolCalls.count) 次")
@@ -669,7 +669,7 @@ private struct LedgerAgentChangeCard: View {
 
     private var title: String {
         switch pending.status {
-        case .stale: String(localized: "账本已经变了")
+        case .conflict: String(localized: "和账本的新改动冲突")
         case .invalid: String(localized: "草稿没有通过校验")
         default: String(localized: "改动 \(pending.review?.files.count ?? 0) 个文件")
         }
@@ -680,14 +680,14 @@ private struct LedgerAgentChangeCard: View {
         case .ready: String(localized: "校验通过。写入时会再校验一次，并生成一个可撤回的提交。")
         case .writing: String(localized: "正在写入…")
         case let .invalid(message): message + "\n" + String(localized: "可以让助手接着修，或者放弃草稿。")
-        case .stale: String(localized: "对话期间账本有了新的改动，这份草稿不能直接写入。放弃后助手会基于最新账本重做。")
+        case let .conflict(paths): String(localized: "对话期间账本有了新的改动，和草稿改到了同一处：\(paths.joined(separator: "、"))。可以让助手基于最新账本重改这些地方，或者放弃草稿。")
         case let .failed(message): String(localized: "没有写入：") + message
         }
     }
 
     private var noteColor: Color {
         switch pending.status {
-        case .invalid, .stale, .failed: BalancedPalette.expense
+        case .invalid, .conflict, .failed: BalancedPalette.expense
         default: BalancedPalette.meta
         }
     }
