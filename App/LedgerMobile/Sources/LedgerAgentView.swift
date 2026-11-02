@@ -486,6 +486,7 @@ private struct LedgerAgentQuestion: View {
                         .lineLimit(1).truncationMode(.middle)
                 }
                 Text(text).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
+                    .lineSpacing(4)
                     .textSelection(.enabled)
             }
             .padding(.horizontal, 14)
@@ -536,7 +537,7 @@ private struct LedgerAgentAnswer: View {
     @State private var toolsExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             if !message.toolCalls.isEmpty { tools }
             ForEach(Array(LedgerAgentReplyText.segments(message.text).enumerated()), id: \.offset) { _, segment in
                 LedgerAgentReplyBlock(segment: segment)
@@ -770,7 +771,7 @@ private struct LedgerAgentReplyBlock: View {
             prose(text)
         case let .heading(level, text):
             Text(Self.inline(text))
-                .balancedFont(size: level == 1 ? 19 : level == 2 ? 17 : 15.5, weight: .semibold, relativeTo: .headline)
+                .font(BalancedReading.font(.semibold, size: level == 1 ? 20 : level == 2 ? 18 : 16.5, relativeTo: .headline))
                 .foregroundStyle(BalancedPalette.ink)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -781,7 +782,7 @@ private struct LedgerAgentReplyBlock: View {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(item.marker)
-                            .balancedFont(size: 15, weight: item.marker.hasSuffix(".") ? .medium : .regular)
+                            .balancedFont(size: BalancedReading.size, weight: item.marker.hasSuffix(".") ? .medium : .regular)
                             .monospacedDigit()
                             .foregroundStyle(BalancedPalette.meta)
                             .frame(minWidth: 14, alignment: .trailing)
@@ -834,15 +835,28 @@ private struct LedgerAgentReplyBlock: View {
     }
 
     private func prose(_ text: String, color: Color = BalancedPalette.ink) -> some View {
-        Text(Self.inline(text)).balancedFont(size: 15).foregroundStyle(color)
-            .lineSpacing(3)
+        Text(Self.inline(text, serif: true)).font(BalancedReading.font()).foregroundStyle(color)
+            .lineSpacing(BalancedReading.lineSpacing)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private static func inline(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+    /// Inline Markdown. In serif runs, `**bold**` is pinned to the bundled
+    /// Semibold face instead of letting the system synthesise a Bold that
+    /// isn't shipped; CJK inside it still falls back to PingFang.
+    private static func inline(_ text: String, serif: Bool = false) -> AttributedString {
+        var string = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(text)
+        guard serif else { return string }
+        for run in string.runs where run.inlinePresentationIntent?.contains(.stronglyEmphasized) == true {
+            // The face carries the weight; drop the intent so SwiftUI doesn't
+            // synthesise a heavier Bold on top of Semibold.
+            var intent = run.inlinePresentationIntent ?? []
+            intent.remove(.stronglyEmphasized)
+            string[run.range].inlinePresentationIntent = intent.isEmpty ? nil : intent
+            string[run.range].font = BalancedReading.font(.semibold)
+        }
+        return string
     }
 
     /// Amount columns align right so their digits line up.

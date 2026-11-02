@@ -79,6 +79,8 @@
 		<string>IBMPlexSans-SemiBold.ttf</string>
 		<string>IBMPlexMono-Regular.ttf</string>
 		<string>IBMPlexMono-Medium.ttf</string>
+		<string>SourceSerif4-Regular.ttf</string>
+		<string>SourceSerif4-Semibold.ttf</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

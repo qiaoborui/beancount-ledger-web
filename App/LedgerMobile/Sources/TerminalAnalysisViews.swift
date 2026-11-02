@@ -170,7 +170,7 @@ private struct TerminalReportChart: View {
 @MainActor
 private func balancedSechead(_ title: String, aside: String) -> some View {
     HStack(alignment: .firstTextBaseline, spacing: 14) {
-        Text(title).balancedFont(size: 15, weight: .semibold).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
+        Text(title).balancedFont(size: 15, weight: .medium).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
         Spacer(minLength: 0)
         Text(aside).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
     }.padding(EdgeInsets(top: 26, leading: 20, bottom: 10, trailing: 20))
@@ -450,7 +450,7 @@ struct TerminalIncomeExpenseReport: View {
     private var expenseComposition: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text("支出构成").balancedFont(size: 15, weight: .semibold).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
+                Text("支出构成").balancedFont(size: 15, weight: .medium).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
                 Spacer(minLength: 0)
                 HStack(spacing: 4) {
                     Text(session.amountsVisible ? MoneyText.format(minorUnits: statement.totalExpense, currency: currency, showsCurrency: false) : "••••••")
@@ -575,7 +575,7 @@ struct TerminalIncomeExpenseReport: View {
                     Button { session.navigateToTransactions(account: item.account) } label: {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(item.payee.isEmpty ? item.narration : item.payee)
-                                .balancedFont(size: 15.5, weight: .medium).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                                .balancedFont(size: 15.5, weight: .text).foregroundStyle(BalancedPalette.ink).lineLimit(1)
                             Text(item.date + " · " + (session.amountsVisible ? MoneyText.format(minorUnits: item.amount, currency: data.dashboard.currency, showsCurrency: false) : "••••••"))
                                 .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                         }
@@ -866,7 +866,7 @@ struct TerminalAssetsReport: View {
     private var netWorthTrend: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text("净值走势").balancedFont(size: 15, weight: .semibold).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
+                Text("净值走势").balancedFont(size: 15, weight: .medium).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
                 Spacer(minLength: 0)
                 HStack(spacing: 14) {
                     trendChoice(String(localized: "月末"), value: true)

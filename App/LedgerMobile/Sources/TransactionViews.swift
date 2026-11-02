@@ -515,7 +515,7 @@ private struct BalancedLedgerTransactionRow: View {
             : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
         layout {
             VStack(alignment: .leading, spacing: 3) {
-                Text(presentation.title).balancedFont(size: 15.5, weight: .medium)
+                Text(presentation.title).balancedFont(size: 15.5, weight: .text)
                     .foregroundStyle(BalancedPalette.ink).lineLimit(2)
                 if let transferPath {
                     Text(transferPath).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta).lineLimit(2)

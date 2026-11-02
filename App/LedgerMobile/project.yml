@@ -61,6 +61,8 @@ targets:
           - IBMPlexSans-SemiBold.ttf
           - IBMPlexMono-Regular.ttf
           - IBMPlexMono-Medium.ttf
+          - SourceSerif4-Regular.ttf
+          - SourceSerif4-Semibold.ttf
         CFBundleURLTypes:
           - CFBundleURLName: com.qiaoborui.ledger.mobile
             CFBundleURLSchemes:
