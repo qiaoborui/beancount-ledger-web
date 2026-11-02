@@ -935,7 +935,7 @@ final class LedgerAgentTests: XCTestCase {
 
     func testMergeTakesEachSidesChangeAndRefusesOverlaps() {
         let base = Data("a\nb\nc\nd\ne\n".utf8)
-        func merge(_ path: String = "x.bean", _ ours: String?, _ theirs: String?, base: Data? = base) -> LedgerAgentMerge.FileResult {
+        func merge(_ ours: String?, _ theirs: String?, path: String = "x.bean", base: Data? = base) -> LedgerAgentMerge.FileResult {
             LedgerAgentMerge.merge(path: path, base: base, ours: ours.map { Data($0.utf8) }, theirs: theirs.map { Data($0.utf8) })
         }
         XCTAssertEqual(merge("A\nb\nc\nd\ne\n", "a\nb\nc\nd\nE\n"), .merged(Data("A\nb\nc\nd\nE\n".utf8)))
@@ -943,7 +943,7 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(merge("a\nb\nc\nd\ne\nours\n", "a\nb\nc\nd\ne\ntheirs\n"),
                        .merged(Data("a\nb\nc\nd\ne\ntheirs\nours\n".utf8)))
         // Outside .bean files, insertions at the same place are a conflict.
-        XCTAssertEqual(merge("notes.md", "a\nb\nc\nd\ne\nours\n", "a\nb\nc\nd\ne\ntheirs\n"), .conflict)
+        XCTAssertEqual(merge("a\nb\nc\nd\ne\nours\n", "a\nb\nc\nd\ne\ntheirs\n", path: "notes.md"), .conflict)
         // The same change on both sides, and a change on one side only.
         XCTAssertEqual(merge("a\nB\nc\nd\ne\n", "a\nB\nc\nd\ne\n"), .merged(Data("a\nB\nc\nd\ne\n".utf8)))
         XCTAssertEqual(merge("a\nb\nc\nd\ne\n", "a\nb\nC\nd\ne\n"), .merged(Data("a\nb\nC\nd\ne\n".utf8)))
@@ -951,7 +951,7 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(merge(nil, "a\nB\nc\nd\ne\n"), .conflict)
         XCTAssertEqual(merge(nil, "a\nb\nc\nd\ne\n"), .merged(nil))
         // Both created the file.
-        XCTAssertEqual(merge("new.bean", "x\n", "y\n", base: nil), .merged(Data("y\nx\n".utf8)))
+        XCTAssertEqual(merge("x\n", "y\n", path: "new.bean", base: nil), .merged(Data("y\nx\n".utf8)))
         // A binary file changed on both sides.
         XCTAssertEqual(LedgerAgentMerge.merge(path: "s.pdf", base: Data([0, 1]), ours: Data([0, 2]), theirs: Data([0, 3])), .conflict)
         // The final newline one side added is kept.
