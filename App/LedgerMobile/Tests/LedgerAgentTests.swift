@@ -966,6 +966,29 @@ final class LedgerAgentTests: XCTestCase {
     }
 
     @MainActor
+    func testAutoWriteCommitsAReadyChangeWithoutTheCard() async throws {
+        let ledger = FakeDraftLedger()
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.autoWrites = true
+        conversation.send("记一笔") { _, _, _ in .init(ok: true, reply: "好了。", edited: true) }
+        try await waitUntilIdle(conversation)
+        for _ in 0..<200 where conversation.pending != nil { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertNil(conversation.pending)
+        XCTAssertEqual(conversation.written?.files.count, 1)
+        let writes = await ledger.writes
+        XCTAssertEqual(writes, 1)
+
+        // A conflict still stops for the user.
+        await ledger.failReview(with: .conflict(["main.bean"]))
+        conversation.send("再改") { _, _, _ in .init(ok: true, reply: "改了。", edited: true) }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.pending?.status, .conflict(["main.bean"]))
+        let after = await ledger.writes
+        XCTAssertEqual(after, 1)
+    }
+
+    @MainActor
     func testTurnRebasesTheDraftAndTellsTheModelWhatItDropped() async throws {
         let ledger = FakeDraftLedger()
         await ledger.dropOnRebase(["2026/10.bean"])

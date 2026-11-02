@@ -718,6 +718,9 @@ final class LedgerAgentConversation: ObservableObject {
     var onSettled: ((LedgerAgentConversation) -> Void)?
     /// True while the Agent screen shows this conversation.
     var isOnScreen = false
+    /// Writes a validated change as soon as a turn produces it, instead of
+    /// waiting for the change card's confirmation.
+    var autoWrites = false
     weak var lifecycle: LedgerAgentLifecycle?
     private var task: Task<Void, Never>?
     /// A stopped or interrupted turn may have edited the draft without a card
@@ -1099,6 +1102,7 @@ final class LedgerAgentConversation: ObservableObject {
             phase = .failed(.failed(error.localizedDescription), question: question)
             endRunning(.failed(error.localizedDescription))
         }
+        if autoWrites, pending?.status == .ready, !isRunning { write() }
     }
 }
 
