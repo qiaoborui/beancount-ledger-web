@@ -51,6 +51,33 @@ enum BalancedMonoWeight {
     }
 }
 
+/// Source Serif 4 — the reading voice, after Claude's replies: a serif for
+/// Latin letters and digits, with CJK falling through the system cascade to
+/// PingFang (the same pairing claude.ai shows on Apple devices). Used only for
+/// the ledger agent's prose; lists, amounts and controls stay in Plex Sans.
+enum BalancedSerifWeight {
+    case regular
+    case semibold
+
+    var postscriptName: String {
+        switch self {
+        case .regular: "SourceSerif4-Regular"
+        case .semibold: "SourceSerif4-Semibold"
+        }
+    }
+}
+
+/// Reading text: 16pt, about 1.75 line height. Source Serif 4's natural line
+/// is ~1.37em, so 6pt of extra spacing lands near 28pt per line.
+enum BalancedReading {
+    static let size: CGFloat = 16
+    static let lineSpacing: CGFloat = 6
+
+    static func font(_ weight: BalancedSerifWeight = .regular, size: CGFloat = size, relativeTo: Font.TextStyle = .body) -> Font {
+        .custom(weight.postscriptName, size: size, relativeTo: relativeTo)
+    }
+}
+
 /// IBM Plex Sans at a design size that still follows Dynamic Type via
 /// `Font.custom(_:size:relativeTo:)`.
 struct BalancedFontModifier: ViewModifier {

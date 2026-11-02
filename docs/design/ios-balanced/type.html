@@ -1,0 +1,2662 @@
+<title>结平 字体</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;450;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Noto+Serif+SC:wght@400;500;600&family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ==========================================================================
+   Balanced — Beancount Ledger Web, iOS
+   Design language: the double-entry equation as the interface's spine.
+   ========================================================================== */
+
+:root {
+  --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --measure: 393px;
+
+  /* device chrome is theme-independent */
+  --bezel: #0b0a09;
+  --bezel-edge: rgba(255, 255, 255, 0.14);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 40px 24px 96px;
+  background: #e8e5df;
+  font-family: var(--font-sans);
+  color: #14100c;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ---------- gallery chrome ------------------------------------------------ */
+
+.gallery-head {
+  max-width: 1180px;
+  margin: 0 auto 36px;
+}
+
+.gallery-head h1 {
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 10px;
+}
+
+.gallery-head p {
+  margin: 0 0 6px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #57504a;
+  max-width: 62ch;
+}
+
+.gallery-head .rule-set {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  font-size: 12.5px;
+  color: #57504a;
+}
+
+.gallery-head .rule-set b {
+  font-weight: 600;
+  color: #14100c;
+}
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: 1180px;
+  margin: 0 auto 32px;
+  padding: 10px;
+  background: rgba(232, 229, 223, 0.86);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(20, 16, 12, 0.1);
+}
+
+.toolbar button {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 14px;
+  min-height: 36px;
+  border: 1px solid rgba(20, 16, 12, 0.18);
+  border-radius: 2px;
+  background: transparent;
+  color: #14100c;
+  cursor: pointer;
+}
+
+.toolbar button[aria-pressed='true'] {
+  background: #14100c;
+  color: #fbfaf8;
+  border-color: #14100c;
+}
+
+.toolbar button:focus-visible {
+  outline: 2px solid #14100c;
+  outline-offset: 2px;
+}
+
+.toolbar .spacer {
+  flex: 1;
+}
+
+.toolbar .hint {
+  font-size: 12.5px;
+  color: #57504a;
+}
+
+.section {
+  max-width: 1180px;
+  margin: 0 auto 12px;
+  padding-top: 34px;
+  border-top: 1px solid rgba(20, 16, 12, 0.14);
+}
+
+.section > h2 {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 4px;
+}
+
+.section > p {
+  margin: 0 0 26px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #57504a;
+  max-width: 68ch;
+}
+
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 40px 44px;
+  align-items: flex-start;
+}
+
+figure.screen {
+  margin: 0;
+  width: var(--measure);
+}
+
+figure.screen > figcaption {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #3d3831;
+  margin-bottom: 10px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+figure.screen > figcaption span {
+  font-weight: 400;
+  color: #6f675a;
+}
+
+/* ---------- the phone ----------------------------------------------------- */
+
+.phone {
+  width: var(--measure);
+  height: 852px;
+  background: var(--bg);
+  color: var(--ink);
+  border-radius: 46px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 0 0 9px var(--bezel),
+    0 0 0 10px rgba(255, 255, 255, 0.08),
+    0 30px 60px -18px rgba(20, 16, 12, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  isolation: isolate;
+}
+
+.phone[data-theme='light'] {
+  --bg: #fbfaf8;
+  --sunken: #f1efe9;
+  --ink: #14100c;
+  --ink-2: #453e36;
+  --ink-3: #6f675a;
+  --rule: #e2ded4;
+  --rule-strong: #c8c2b4;
+
+  /* the boundary that makes a control exist: the checkbox, the button,
+     the field underline, the segmented group. Meets 3:1 against --bg
+     and --sunken in both themes. Decorative hairlines use --rule /
+     --rule-strong and are deliberately far quieter. */
+  --edge: #88837a;
+  --in: #0d5346;
+  --out: #96401f;
+  --press: rgba(20, 16, 12, 0.05);
+}
+
+.phone[data-theme='dark'] {
+  --bg: #121110;
+  --sunken: #1b1918;
+  --ink: #f6f3ee;
+  --ink-2: #c4bcb0;
+  --ink-3: #9a9086;
+  --rule: #2b2825;
+  --rule-strong: #423c36;
+  --edge: #78746e;
+  --in: #4fbfab;
+  --out: #cf7a52;
+  --press: rgba(246, 243, 238, 0.07);
+}
+
+/* every numeric readout is tabular */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* ---------- status bar ---------------------------------------------------- */
+
+.statusbar {
+  flex: none;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 30px 0 36px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+.statusbar .indicators {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusbar svg {
+  display: block;
+}
+
+/* ---------- app bar ------------------------------------------------------- */
+
+.appbar {
+  flex: none;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 16px 10px;
+}
+
+.appbar .title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.appbar .back {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  margin-left: -6px;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+}
+
+/* a back control that carries a word instead of a chevron */
+.appbar .back.text {
+  width: auto;
+  padding: 0 6px 0 2px;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.appbar .actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: -6px;
+}
+
+/* the period control: a hairline underline, no capsule, no chevron plate */
+.period {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 0 2px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.period .caret {
+  color: var(--ink-3);
+}
+
+.iconbtn {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.iconbtn:focus-visible,
+.period:focus-visible,
+.seg button:focus-visible,
+.tab:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -4px;
+}
+
+/* sync marks the one place colour is allowed outside an opposed pair */
+.iconbtn .dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+/* ---------- scroll body --------------------------------------------------- */
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  padding-bottom: 18px;
+}
+
+.scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Review aid: release every frame to its full content height so a whole page
+   can be read at once. The device viewport is the real deliverable; this is
+   only for inspecting the prototype. */
+body[data-length='full'] .phone {
+  height: auto;
+  max-height: none;
+}
+
+body[data-length='full'] .phone .scroll {
+  overflow: visible;
+  flex: none;
+}
+
+body[data-length='full'] figcaption::after {
+  content: ' · 全长预览';
+  color: var(--ink-3);
+}
+
+.pad {
+  padding: 0 20px;
+}
+
+/* ---------- the settle block --------------------------------------------- */
+
+/*
+  The signature device. A double-entry equation is *read*, not summarised:
+  rows, a rule, then the total the rows produce. It replaces the
+  "big number + small label" hero everywhere a balance is reported.
+*/
+
+.settle {
+  background: var(--sunken);
+  padding: 20px 20px 18px;
+}
+
+.settle-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.settle-head .lede {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+.settle-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  font-size: 15px;
+}
+
+.settle-row dt {
+  color: var(--ink-2);
+  margin: 0;
+}
+
+.settle-row dd {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 450;
+}
+
+.settle-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ink);
+}
+
+.settle-total dt {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.settle-total dd {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+}
+
+.settle-total dd .cur {
+  font-size: 0.62em;
+  font-weight: 450;
+  letter-spacing: 0;
+  color: var(--ink-3);
+  margin-right: 1px;
+}
+
+/* the only colour pairs in the system: --in against --out, never alone */
+.v-in {
+  color: var(--in);
+}
+
+.v-out {
+  color: var(--out);
+}
+
+/* ---------- retained band ------------------------------------------------- */
+
+.band {
+  padding: 18px 20px 20px;
+  border-top: 1px solid var(--rule);
+}
+
+.band-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.band-head b {
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.band-head b small {
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0;
+  color: var(--ink-3);
+  margin-left: 5px;
+}
+
+.bar {
+  display: flex;
+  height: 10px;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+}
+
+.bar .kept {
+  background: var(--ink);
+}
+
+.bar .spent {
+  background: var(--out);
+}
+
+.band-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.band-foot span {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.band-foot .k {
+  width: 26px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+.band-foot .v {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.key::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  background: var(--c, var(--ink));
+}
+
+.key.k-out::before {
+  background: var(--out);
+}
+
+.key.k-in::before {
+  background: var(--in);
+}
+
+/* ---------- section head -------------------------------------------------- */
+
+.sechead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 26px 20px 10px;
+}
+
+.sechead h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+}
+
+.sechead .aside {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.sechead .aside a,
+.link {
+  color: var(--ink-2);
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule-strong);
+  padding-bottom: 1px;
+}
+
+.headline {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin: -2px 0 12px;
+}
+
+/* ---------- tables -------------------------------------------------------- */
+
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+}
+
+.tbl caption {
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  padding: 0 20px 8px;
+}
+
+.tbl th {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-3);
+  text-align: right;
+  padding: 0 20px 8px 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.tbl th:first-child {
+  text-align: left;
+  padding-left: 20px;
+}
+
+.tbl td {
+  padding: 11px 20px;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: baseline;
+}
+
+.tbl tr:last-child td {
+  border-bottom: 0;
+}
+
+.tbl .cat {
+  padding-left: 20px;
+}
+
+.tbl .amt {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  white-space: nowrap;
+  padding-right: 8px;
+}
+
+.tbl .share {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+  width: 62px;
+  padding-right: 20px;
+}
+
+/* a share column doubles as a proportion readout, not a bar chart */
+.tbl .cat .path {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  /* account paths are long single tokens; let them break rather than push
+     the table past the frame */
+  overflow-wrap: anywhere;
+}
+
+/* ---------- transaction rows ---------------------------------------------- */
+
+.daysep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 20px 6px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.daysep::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+
+.daysep b {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.txn {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 20px;
+  min-height: 56px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.txn:last-child {
+  border-bottom: 0;
+}
+
+.txn .body {
+  flex: 1;
+  min-width: 0;
+}
+
+.txn .who {
+  font-size: 15.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.txn .note {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.txn .val {
+  flex: none;
+  text-align: right;
+  min-width: 104px;
+}
+
+.txn .val .amt {
+  display: block;
+  font-size: 15.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.txn .val .cat {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 3px;
+  white-space: nowrap;
+}
+
+/* a transfer is a movement, not a cost: it is drawn, not coloured */
+.flow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+/* ---------- metrics ------------------------------------------------------- */
+
+.metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--rule);
+}
+
+.metric {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.metric:nth-child(odd) {
+  border-right: 1px solid var(--rule);
+}
+
+.metric dt {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin: 0 0 7px;
+}
+
+.metric dd {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric .sub {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 7px;
+  font-variant-numeric: normal;
+}
+
+/* ---------- charts -------------------------------------------------------- */
+
+.chart {
+  padding: 4px 20px 8px;
+}
+
+.chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.chart-foot {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  padding: 10px 20px 6px;
+}
+
+.chart-note {
+  padding: 0 20px 4px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+/* disclosure row: charts expose their numbers */
+.disclose {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 20px;
+  min-height: 44px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--rule);
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.disclose:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -4px;
+}
+
+.disclose .chev {
+  transition: transform 0.18s ease;
+}
+
+.disclose[aria-expanded='true'] .chev {
+  transform: rotate(90deg);
+}
+
+/* ---------- account rows -------------------------------------------------- */
+
+.acct {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 15px 20px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.acct .name {
+  flex: 1;
+  min-width: 0;
+  font-size: 15.5px;
+  font-weight: 500;
+}
+
+.acct .name em {
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-left: 5px;
+}
+
+.acct .sub {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-top: 4px;
+  font-family: var(--font-mono);
+}
+
+.acct .bal {
+  font-size: 15.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.acct.child {
+  padding-left: 34px;
+  background: var(--sunken);
+}
+
+.acct.child .name {
+  font-size: 14.5px;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+/* ---------- segmented control --------------------------------------------- */
+
+.seg {
+  display: flex;
+  gap: 22px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--rule);
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.seg::-webkit-scrollbar {
+  display: none;
+}
+
+.seg button {
+  flex: none;
+  position: relative;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 14.5px;
+  color: var(--ink-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.seg button[aria-selected='true'] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.seg button[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--ink);
+}
+
+.seg button .n {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- search -------------------------------------------------------- */
+
+.search {
+  margin: 4px 20px 14px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 40px;
+  padding: 0 12px;
+  background: var(--sunken);
+  color: var(--ink-3);
+  font-size: 14.5px;
+}
+
+/* ---------- list rows (More) ---------------------------------------------- */
+
+.group {
+  padding: 24px 20px 6px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 20px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.row .body {
+  flex: 1;
+  min-width: 0;
+}
+
+.row .label {
+  font-size: 15.5px;
+  letter-spacing: -0.005em;
+}
+
+.row .hint {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-top: 3px;
+}
+
+.row .value {
+  font-size: 14px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.row .chev {
+  flex: none;
+  color: var(--edge);
+}
+
+/* ---------- tab bar ------------------------------------------------------- */
+
+.tabbar {
+  flex: none;
+  height: 62px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--rule);
+  padding-bottom: 0;
+  background: var(--bg);
+}
+
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 6px 0 8px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.tab[aria-current='page'] {
+  color: var(--ink);
+}
+
+.tab[aria-current='page'] .icon {
+  position: relative;
+}
+
+.tab .icon {
+  display: grid;
+  place-items: center;
+  height: 20px;
+}
+
+/* the current destination is marked by a rule under the glyph, matching
+   the underline used by segmented controls and the period control */
+.tab[aria-current='page'] .icon::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  translate: -50% 0;
+  bottom: -7px;
+  width: 16px;
+  height: 2px;
+  background: var(--ink);
+}
+
+.homebar {
+  flex: none;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+
+.homebar::after {
+  content: '';
+  width: 134px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--ink);
+  opacity: 0.3;
+}
+
+/* ---------- sheets and overlays ------------------------------------------- */
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 16, 12, 0.42);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  z-index: 5;
+}
+
+.phone[data-theme='dark'] .scrim {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.sheet {
+  background: var(--bg);
+  border-top: 1px solid var(--rule);
+  padding: 10px 0 22px;
+  max-height: 78%;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.sheet::-webkit-scrollbar {
+  display: none;
+}
+
+.sheet .grabber {
+  width: 38px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rule-strong);
+  margin: 0 auto 12px;
+}
+
+.sheet h2 {
+  margin: 0;
+  padding: 0 20px 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sheet .sheet-sub {
+  padding: 0 20px 14px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.opt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  min-height: 48px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 15px;
+  color: var(--ink-2);
+}
+
+.opt .mark {
+  flex: none;
+  width: 14px;
+  color: var(--ink);
+}
+
+.opt[aria-selected='true'] {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.range {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 20px 16px;
+}
+
+.range .field {
+  flex: 1;
+  border-bottom: 1px solid var(--edge);
+  padding-bottom: 8px;
+}
+
+.range .field .k {
+  display: block;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-bottom: 5px;
+}
+
+.range .field .v {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.range .to {
+  color: var(--ink-3);
+  font-size: 12.5px;
+  padding-top: 20px;
+}
+
+.sheet-actions {
+  display: flex;
+  gap: 10px;
+  padding: 16px 20px 0;
+}
+
+.btn {
+  flex: 1;
+  min-height: 46px;
+  border: 1px solid var(--edge);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn.primary {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+/* ---------- bookkeeping draft --------------------------------------------- */
+
+.field-row {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.field-row .k {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
+
+.field-row .v {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.field-row .v.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.7;
+}
+
+.seg-inline {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--edge);
+  width: fit-content;
+}
+
+.seg-inline button {
+  font: inherit;
+  font-size: 13.5px;
+  padding: 7px 16px;
+  min-height: 36px;
+  border: 0;
+  border-right: 1px solid var(--edge);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.seg-inline button:last-child {
+  border-right: 0;
+}
+
+.seg-inline button[aria-selected='true'] {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+/* the source preview: the only place monospace carries real weight,
+   because it is literally the file that will be written */
+.source {
+  margin: 16px 20px 0;
+  padding: 14px 16px;
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--ink-2);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.source b {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.confirm {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 16px 20px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+/* ---------- import review ------------------------------------------------- */
+
+.imp {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--rule);
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.imp .box {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--edge);
+  position: relative;
+  top: 2px;
+}
+
+.imp[data-state='on'] .box {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.imp .who {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.imp .meta {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.imp .cat {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-top: 5px;
+  display: block;
+}
+
+.imp .amt {
+  font-size: 15px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.imp[data-state='off'] .who,
+.imp[data-state='off'] .amt {
+  color: var(--ink-3);
+}
+
+.warn {
+  margin: 0;
+  padding: 12px 20px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  background: var(--sunken);
+  border-bottom: 1px solid var(--rule);
+}
+
+/* ---------- empty and error states ---------------------------------------- */
+
+.empty {
+  padding: 44px 20px;
+  text-align: left;
+}
+
+.empty h4 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.empty p {
+  margin: 0 0 18px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+  max-width: 30ch;
+}
+
+.note {
+  padding: 12px 20px 20px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* ---------- motion -------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+}
+
+/* the one orchestrated moment: the settle block's total resolves on load */
+@keyframes settle-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.settle-total dd {
+  animation: settle-in 0.42s cubic-bezier(0.2, 0.7, 0.3, 1) 0.12s both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settle-total dd {
+    animation: none;
+  }
+}
+
+/* ---------- dark gallery shell -------------------------------------------- */
+
+body[data-gallery='dark'] {
+  background: #1c1a18;
+  color: #f6f3ee;
+}
+
+body[data-gallery='dark'] .gallery-head p,
+body[data-gallery='dark'] .gallery-head .rule-set,
+body[data-gallery='dark'] .section > p,
+body[data-gallery='dark'] .toolbar .hint {
+  color: #a29a90;
+}
+
+body[data-gallery='dark'] .gallery-head .rule-set b,
+body[data-gallery='dark'] .toolbar button {
+  color: #f6f3ee;
+}
+
+body[data-gallery='dark'] .section {
+  border-top-color: rgba(246, 243, 238, 0.16);
+}
+
+body[data-gallery='dark'] .toolbar {
+  background: rgba(28, 26, 24, 0.86);
+  border-bottom-color: rgba(246, 243, 238, 0.14);
+}
+
+body[data-gallery='dark'] .toolbar button {
+  border-color: rgba(246, 243, 238, 0.24);
+}
+
+body[data-gallery='dark'] .toolbar button[aria-pressed='true'] {
+  background: #f6f3ee;
+  color: #1c1a18;
+  border-color: #f6f3ee;
+}
+
+body[data-gallery='dark'] figure.screen > figcaption {
+  color: #d6cfc6;
+}
+
+body[data-gallery='dark'] figure.screen > figcaption span {
+  color: #9a9086;
+}
+
+</style>
+<style>
+
+<style>
+/* Liquid Glass layer over the Balanced batch-1 frames (iOS 26 only).
+   Content is untouched; only the control layer changes. */
+:root { --gal-bg: #e8e4dc; --gal-ink: #14100c; --gal-ink-3: #6f675a; --gal-line: rgba(20, 16, 12, 0.14); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gal-bg: #e8e4dc; } }
+:root[data-theme="dark"] { --gal-bg: #e8e4dc; }
+body { background: var(--gal-bg); color: var(--gal-ink); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.invwrap { overflow-x: auto; margin-top: 22px; }
+.inv { border-collapse: collapse; width: 100%; max-width: 980px; font-size: 13.5px; }
+.inv th { text-align: left; font-weight: 500; font-size: 12px; color: var(--gal-ink-3); padding: 8px 16px 8px 0; border-bottom: 1px solid var(--gal-line); }
+.inv td { padding: 9px 16px 9px 0; border-bottom: 1px solid var(--gal-line); vertical-align: top; }
+.inv td:first-child { white-space: nowrap; font-weight: 500; }
+.pill-yes, .pill-no { font-size: 12px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.pill-yes { background: rgba(13, 83, 70, 0.12); }
+.pill-no { background: rgba(20, 16, 12, 0.08); color: var(--gal-ink-3); }
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; max-width: 1000px; }
+.rules h3 { font-size: 14.5px; font-weight: 600; margin: 0 0 6px; }
+.rules p { font-size: 13.5px; line-height: 1.6; margin: 0; color: #57504a; }
+
+/* glass material, per theme */
+.phone.glass {
+  --glass-fill: color-mix(in srgb, var(--bg) 60%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.78);
+  --glass-hi: rgba(255, 255, 255, 0.85);
+  --glass-shadow: 0 8px 24px -10px rgba(20, 16, 12, 0.3), 0 1px 2px rgba(20, 16, 12, 0.08);
+  --glass-sel: rgba(20, 16, 12, 0.08);
+}
+.phone.glass[data-theme='dark'] {
+  --glass-fill: color-mix(in srgb, #2b2825 55%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.16);
+  --glass-hi: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.7);
+  --glass-sel: rgba(246, 243, 238, 0.12);
+}
+.phone.glass .g {
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: blur(16px) saturate(1.7);
+  backdrop-filter: blur(16px) saturate(1.7);
+  border: 0.5px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--glass-shadow);
+}
+
+/* content runs full-bleed under the chrome, inset so nothing rests under it */
+.phone.glass > .scroll { position: absolute; inset: 0; padding-top: 112px; padding-bottom: 112px; }
+.phone.glass:not(:has(> .tabbar)) > .scroll { padding-bottom: 40px; }
+.phone.glass:has(> .gdock) > .scroll { padding-bottom: 116px; }
+.gtop { position: absolute; top: 0; left: 0; right: 0; z-index: 4; background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 85%, transparent) 60%, transparent 100%); }
+.gtop::before { content: ''; position: absolute; inset: 0; z-index: -1; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+.phone.glass .appbar { gap: 8px; }
+.phone.glass .gcap { display: inline-flex; align-items: center; height: 44px; border-radius: 22px; padding: 0 2px; flex: none; }
+.phone.glass .gcap .iconbtn { width: 40px; }
+.phone.glass .gperiod { padding: 0 14px; color: var(--ink); }
+.phone.glass .appbar .back.gcircle { width: 44px; height: 44px; border-radius: 50%; margin-left: 0; }
+.phone.glass .appbar .back.text.gcircle { width: auto; border-radius: 22px; padding: 0 14px; }
+
+/* tab bar: system glass capsule floating over the content */
+.phone.glass > .tabbar { position: absolute; left: 16px; right: 16px; bottom: 26px; height: 62px; border-radius: 31px; padding: 0 6px; z-index: 4; border-top: 0; }
+.phone.glass .tab[aria-current='page'] { background: var(--glass-sel); border-radius: 26px; margin: 5px 0; }
+.phone.glass .tab[aria-current='page'] .icon::after { display: none; }
+.phone.glass > .homebar { position: absolute; left: 0; right: 0; bottom: 0; background: transparent; z-index: 5; }
+
+/* search field and filter segment */
+.phone.glass .search.g { border-radius: 20px; }
+.phone.glass .seg { margin: 4px 20px 10px; padding: 3px; gap: 2px; display: flex; border-radius: 20px; border-bottom: 0;
+  background: var(--glass-fill); -webkit-backdrop-filter: blur(16px) saturate(1.7); backdrop-filter: blur(16px) saturate(1.7);
+  border: 0.5px solid var(--glass-edge); box-shadow: inset 0 1px 0 var(--glass-hi), var(--glass-shadow); }
+.phone.glass .seg button { display: flex; align-items: center; flex: 1 1 auto; justify-content: center; border-radius: 17px; min-height: 34px; padding: 0 10px; gap: 4px; white-space: nowrap; }
+.phone.glass .seg button[aria-selected='true'] { background: var(--glass-sel); }
+.phone.glass .seg button[aria-selected='true']::after { display: none; }
+
+/* sheets: glass shell with inset corners; the reading area stays paper */
+.phone.glass .scrim { background: rgba(20, 16, 12, 0.22); padding: 0 8px 8px; }
+.phone.glass[data-theme='dark'] .scrim { background: rgba(0, 0, 0, 0.42); }
+.phone.glass .sheet.gsheet { border-radius: 34px; border-top: 0.5px solid var(--glass-edge); --glass-fill: color-mix(in srgb, var(--bg) 88%, transparent); }
+.phone.glass .sheet .btn { border-radius: 23px; }
+
+/* docked bottom actions: floating glass panel */
+.phone.glass > .gdock { position: absolute; left: 12px; right: 12px; bottom: 30px; z-index: 4; border-radius: 28px; padding: 10px !important; }
+.phone.glass > .gdock .btn { border-radius: 23px; }
+.phone.glass > .gdock .btn:not(.primary) { background: transparent; }
+
+
+
+/* ---- import-flow additions (tokens from batch1, glass from glass.html) ---- */
+.toolbar a { font-size: 13px; color: #14100c; }
+.flow { display: flex; flex-wrap: wrap; gap: 6px 0; align-items: stretch; max-width: 1100px; margin: 18px 0 6px; padding: 0; list-style: none; counter-reset: st; }
+.flow li { flex: 1 1 150px; min-width: 0; padding: 10px 14px 12px; border-top: 2px solid #14100c; font-size: 13px; line-height: 1.5; color: #57504a; counter-increment: st; }
+.flow li b { display: block; color: #14100c; font-size: 14px; margin-bottom: 2px; }
+.flow li b::before { content: counter(st) "  "; color: #6f675a; font-weight: 500; font-variant-numeric: tabular-nums; }
+.phone.glass > .gdock { display: flex; flex-direction: column; gap: 8px; }
+.gdock .dock-row { display: flex; gap: 10px; }
+.gdock .dock-status { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); padding: 4px 6px 2px; }
+.gdock .dock-status b { display: block; color: var(--ink); font-weight: 600; font-size: 13px; }
+.phone.glass:has(> .gdock.has-status) > .scroll { padding-bottom: 190px; }
+.row .hint.mono, .mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3); }
+.row .value.strong { color: var(--ink); font-weight: 500; }
+.row .value + .value { margin-left: -2px; }
+.fresh { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+.fresh i { width: 6px; height: 6px; border-radius: 50%; display: block; }
+.v-out-bg { background: var(--out); } .v-in-bg { background: var(--in); } .edge-bg { background: var(--edge); }
+.spin { display: inline-block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--rule-strong); border-top-color: var(--ink); animation: spin 0.9s linear infinite; vertical-align: middle; }
+.spin.sm { width: 12px; height: 12px; border-width: 1.5px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.doc { padding: 12px 20px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 3px; }
+.doc-top { display: flex; gap: 10px; align-items: baseline; font-size: 15px; }
+.doc-top b { font-weight: 500; }
+.doc-top span, .meta2 { font-size: 12.5px; color: var(--ink-3); }
+.field-row .v.small { font-size: 14.5px; color: var(--ink); }
+.field-row.two { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
+.mono-s { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); margin-left: 4px; }
+.sugg { font-size: 12.5px; color: var(--ink-3); margin-left: 8px; border-bottom: 1px dashed var(--edge); }
+.input { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--edge); padding-bottom: 6px; font-size: 16px; min-height: 30px; }
+.caret-line { width: 1.5px; height: 18px; background: var(--ink); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.switch { flex: none; width: 46px; height: 28px; border-radius: 14px; background: var(--rule-strong); position: relative; }
+.switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--bg); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.switch[data-on='true'] { background: var(--ink); }
+.switch[data-on='true']::after { left: 21px; }
+.filehead { padding: 8px 20px 16px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid var(--rule); }
+.filehead b { font-size: 15.5px; font-weight: 500; word-break: break-all; }
+.filehead span { font-size: 12.5px; color: var(--ink-3); }
+.steps { padding: 8px 20px; }
+.step { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding: 12px 0; position: relative; }
+.step i { width: 14px; height: 14px; margin-top: 3px; border: 1px solid var(--edge); border-radius: 50%; display: block; position: relative; }
+.step[data-s='done'] i { background: var(--ink); border-color: var(--ink); }
+.step[data-s='done'] i::after { content: ''; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--bg); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.step[data-s='now'] i { border: 2px solid var(--rule-strong); border-top-color: var(--ink); animation: spin 0.9s linear infinite; }
+.step b { display: block; font-size: 15px; font-weight: 500; }
+.step[data-s='todo'] b { color: var(--ink-3); font-weight: 450; }
+.step span { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 3px; }
+.errblock { padding: 16px 20px; border-bottom: 1px solid var(--rule); }
+.errblock b { font-size: 15px; font-weight: 600; display: block; margin-bottom: 6px; }
+.errblock p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.disclose { color: var(--ink-2); }
+.disclose span { text-align: left; }
+.detail { padding: 2px 20px 12px; font-size: 12.5px; color: var(--ink-2); line-height: 1.55; background: var(--bg); }
+.detail .kv { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; color: var(--ink-3); }
+.detail .kv span:last-child { color: var(--ink-2); text-align: right; }
+.detail p { margin: 6px 0 0; padding-left: 10px; border-left: 1px solid var(--rule-strong); }
+.ailine { display: flex; align-items: center; gap: 8px; padding: 10px 20px; font-size: 12.5px; color: var(--ink-3); border-top: 1px solid var(--rule); }
+.ailine .linkbtn { margin-left: auto; }
+.linkbtn { font: inherit; font-size: 12.5px; background: none; border: 0; color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule-strong); text-underline-offset: 3px; padding: 6px 0; cursor: pointer; }
+.phone.glass .seg { position: sticky; top: 108px; z-index: 2; }
+.imp { cursor: pointer; }
+.imp .imp-main { min-width: 0; }
+.imp .cat .ai { font-family: var(--font-sans); font-size: 10px; font-weight: 600; letter-spacing: .06em; color: var(--ink-3); border: 1px solid var(--rule-strong); padding: 0 3px; margin-left: 6px; vertical-align: 1px; }
+.imp .cat .tags { font-family: var(--font-sans); font-size: 11.5px; color: var(--ink-3); margin-left: 6px; }
+.imp .need { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--ink); }
+.imp .need::before { content: ''; display: inline-block; width: 6px; height: 6px; border: 1.5px solid var(--ink); border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.imp[data-pending='true'] .cat { color: var(--ink); }
+.picks { margin-top: 10px; }
+.picks-k { display: block; font-size: 11.5px; color: var(--ink-3); margin-bottom: 6px; }
+.picks-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.sheet .picks { padding: 10px 20px 12px; margin: 0; border-bottom: 1px solid var(--rule); }
+.pick { font: inherit; display: inline-flex; align-items: baseline; gap: 6px; min-height: 34px; padding: 6px 10px; border: 1px solid var(--edge); background: transparent; color: var(--ink); font-size: 13px; cursor: pointer; text-align: left; }
+.pick .pct { font-size: 11.5px; color: var(--ink-3); }
+.pick[aria-pressed='true'] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.pick[aria-pressed='true'] .pct { color: var(--bg); opacity: .7; }
+.sheet.tall { max-height: 88%; }
+.sheet-nav { display: flex; align-items: center; justify-content: space-between; padding: 0 14px 6px 20px; font-size: 12.5px; color: var(--ink-3); }
+.navcap { height: 38px !important; }
+.navcap .iconbtn { width: 40px; height: 38px; color: var(--ink); }
+.sheet h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.amt-h { font-weight: 500; }
+.source.diff { white-space: normal; display: flex; flex-direction: column; font-size: 11px; line-height: 1.7; margin-top: 12px; }
+.source.diff span { white-space: pre; }
+.d-meta { color: var(--ink-3); }
+.d-add { color: var(--in); }
+.d-ctx { color: var(--ink-3); }
+.donehead { padding: 18px 20px 20px; }
+.donehead .dr { display: block; width: 40px; height: 5px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); margin-bottom: 16px; }
+.donehead h2 { margin: 0 0 6px; font-size: 22px; font-weight: 500; letter-spacing: -0.02em; }
+.donehead p { margin: 0; font-size: 13.5px; color: var(--ink-3); }
+.cmp { overflow-x: auto; margin-top: 18px; }
+
+
+/* ---- ledger agent additions ---- */
+.msg-user { margin: 10px 20px 4px auto; max-width: 78%; width: fit-content; background: var(--sunken); padding: 10px 14px; font-size: 15px; line-height: 1.5; color: var(--ink); }
+.msg-ai { padding: 4px 20px 2px; font-size: 15px; line-height: 1.6; color: var(--ink); }
+.msg-ai p { margin: 8px 0; }
+.msg-ai b { font-weight: 500; }
+.v-out { color: var(--out); } .v-in { color: var(--in); }
+.tools { margin: 10px 20px 2px; border-left: 1px solid var(--rule-strong); padding-left: 12px; }
+.tools-head { font: inherit; display: flex; align-items: center; gap: 6px; width: 100%; min-height: 32px; background: none; border: 0; padding: 0; color: var(--ink-3); font-size: 12.5px; cursor: pointer; text-align: left; }
+.tools-head .chev { width: 6px; transition: transform .18s; }
+.tools-head[aria-expanded='true'] .chev { transform: rotate(90deg); }
+.tools-list { display: none; padding-bottom: 6px; }
+.tools-head[aria-expanded='true'] + .tools-list { display: block; }
+.tool { display: grid; grid-template-columns: 14px 1fr; gap: 10px; padding: 5px 0; }
+.tool i { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); margin-top: 6px; display: block; }
+.tool b { display: block; font-size: 13.5px; font-weight: 450; color: var(--ink-2); }
+.tool .mono { font-size: 11px; }
+.tool-detail { margin: 6px 0 2px 24px; padding: 8px 10px; background: var(--sunken); line-height: 1.6; }
+.ans-tbl { margin: 6px 0; border-top: 1px solid var(--rule); }
+.ans-r { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 14px; }
+.ans-r .num { font-variant-numeric: tabular-nums; }
+.ans-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 20px 8px; }
+.meta2 { font-size: 12px; color: var(--ink-3); }
+.sugg-list { display: flex; flex-direction: column; }
+.sugg-row { font: inherit; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--rule); min-height: 44px; padding: 10px 20px; font-size: 15px; color: var(--ink); cursor: pointer; }
+.modelline { padding: 14px 20px; font-size: 12px; color: var(--ink-3); }
+.composer .cmp-row { display: flex; align-items: center; gap: 10px; padding-left: 10px; min-height: 44px; }
+.cmp-ph { flex: 1; font-size: 15px; color: var(--ink-3); }
+.cmp-text { flex: 1; font-size: 15px; color: var(--ink); }
+.sendbtn { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--ink); color: var(--bg); display: grid; place-items: center; cursor: pointer; }
+.composer[data-empty='true'] .sendbtn { opacity: .38; }
+.source { margin: 8px 20px; }
+.source span { display: block; white-space: pre; }
+.dock-inline { display: flex; gap: 10px; padding: 4px 20px 12px; }
+.dock-inline .btn { flex: 1; }
+.d-del { color: var(--out); }
+.wconfirm { margin: 10px 0 4px; background: var(--sunken); }
+.wconfirm-head { display: flex; flex-direction: column; gap: 3px; padding: 14px 20px 0; }
+.wconfirm-head b { font-size: 15px; font-weight: 500; }
+.wconfirm .source { margin: 10px 20px 0; background: var(--bg); padding: 10px 12px; }
+.wconfirm-foot { padding: 10px 20px 12px; font-size: 12.5px; color: var(--ink-3); }
+.wconfirm .dock-row { display: flex; gap: 10px; }
+.wconfirm .dock-row .btn { flex: 1; }
+.wconfirm-head { flex-direction: row; justify-content: space-between; align-items: baseline; }
+.wfiles { margin: 10px 20px 0; border-top: 1px solid var(--rule); }
+.wfile { border-bottom: 1px solid var(--rule); padding: 9px 0; }
+.wfile-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--ink-2); }
+.wfile-row em { font-style: normal; color: var(--ink-3); margin-left: 6px; }
+.wfile .source { margin: 8px 0 0; }
+
+
+</style>
+<style>
+body { background: var(--gal-bg); }
+/* tables do not inherit colour in quirks mode */
+.phone .tbl { color: var(--ink); }
+.gallery-head ol { font-size: 14px; line-height: 1.7; max-width: 760px; padding-left: 20px; margin: 10px 0 0; }
+.verdict { font-size: 14px; line-height: 1.65; max-width: 760px; margin: 8px 0 0; }
+
+/* ---- shared by both new variants ----------------------------------------
+   1. no hairline runs edge to edge: every rule stops 20pt short of the
+      screen, so nothing slices across the tab-bar capsule's rounded ends
+   2. the retained bar is a 6pt capsule pair instead of a 10pt black/red slab */
+.v-new .settle { border-top: 0 !important; }
+.v-new .band { border-top: 0; }
+.v-new .bar { height: 6px; gap: 3px; }
+.v-new .bar i { border-radius: 3px; }
+.v-new .band-foot .key::before, .v-new .key::before { border-radius: 50%; width: 8px; height: 8px; }
+.v-new .tbl { width: calc(100% - 40px); margin: 0 20px; }
+.v-new .tbl th:first-child, .v-new .tbl .cat { padding-left: 0; }
+.v-new .tbl th:last-child, .v-new .tbl .share { padding-right: 0 !important; }
+.v-new .txn { margin: 0 20px; padding-left: 0; padding-right: 0; }
+
+/* ---- A: 内嵌纸签 — the settle wells float inset with continuous corners --- */
+.v-a .settle { margin: 4px 12px 0; border-radius: 24px; padding: 18px 16px 16px; }
+.v-a .band { padding: 20px 20px 18px; }
+
+/* ---- B: 一张纸 — one surface, no fills at all ----------------------------- */
+.v-b .settle { background: transparent; padding: 18px 20px 20px; }
+.v-b .band, .v-b .band + .settle {
+  background: linear-gradient(var(--rule), var(--rule)) 20px 0 / calc(100% - 40px) 1px no-repeat;
+}
+.v-b .band { padding: 20px 20px 22px; }
+
+</style>
+<style>
+/* ---- typography layer --------------------------------------------------
+   Frames are the approved Balanced + glass frames, unchanged. Only font
+   family, size, weight and leading change below, scoped per variant. */
+:root {
+  --font-sans: 'IBM Plex Sans', 'PingFang SC', 'Noto Sans SC', -apple-system, sans-serif;
+  --serif-latin: 'Source Serif 4', Georgia;
+  --reply-a: var(--serif-latin), 'PingFang SC', 'Noto Sans SC', serif;
+  --reply-b: var(--serif-latin), 'Noto Serif SC', 'Songti SC', serif;
+}
+body { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+/* A and B share the rhythm: lighter CJK weights, roomier reading text */
+.t-a .txn .who, .t-b .txn .who,
+.t-a .acct .name, .t-b .acct .name { font-weight: 400; }
+.t-a .sechead h3, .t-b .sechead h3 { font-weight: 500; }
+.t-a .appbar .title, .t-b .appbar .title { font-weight: 500; }
+.t-a .msg-user, .t-b .msg-user { font-size: 15px; line-height: 1.6; }
+.t-a .msg-ai, .t-b .msg-ai { font-size: 16px; line-height: 1.75; }
+.t-a .msg-ai p, .t-b .msg-ai p { margin: 0 0 14px; }
+.t-a .msg-ai { font-family: var(--reply-a); }
+.t-b .msg-ai { font-family: var(--reply-b); }
+.t-a .msg-ai b, .t-b .msg-ai b { font-weight: 600; }
+.t-a .ans-r, .t-b .ans-r { font-family: var(--font-sans); font-size: 14px; }
+
+/* B only: Chinese serif on titles and section heads */
+.t-b .appbar .title, .t-b .sechead h3, .t-b .settle-head .lede { font-family: var(--reply-b); font-weight: 600; letter-spacing: 0; }
+
+/* ---- research block ---- */
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 22px 32px; max-width: 1080px; margin-top: 8px; }
+.facts h3 { font-size: 14.5px; font-weight: 600; margin: 0 0 6px; }
+.facts p { font-size: 13.5px; line-height: 1.65; margin: 0; color: #57504a; }
+.facts a { color: inherit; }
+.spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; max-width: 1180px; }
+.spec-card { background: #fbfaf8; padding: 18px 20px 20px; min-width: 0; }
+.spec-card .lab { font-size: 12px; color: #6f675a; margin: 0 0 10px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.spec-card .lab b { color: #14100c; font-weight: 600; }
+.spec-card p { margin: 0 0 12px; color: #14100c; }
+.sp-cur { font-family: var(--font-sans); font-size: 15px; line-height: 1.6; }
+.sp-a { font-family: var(--reply-a); font-size: 16px; line-height: 1.75; }
+.sp-b { font-family: var(--reply-b); font-size: 16px; line-height: 1.75; }
+.sp-news { font-family: 'Newsreader', 'PingFang SC', 'Noto Sans SC', serif; font-size: 16.5px; line-height: 1.75; }
+.cost { border-collapse: collapse; width: 100%; max-width: 980px; font-size: 13.5px; }
+.cost th { text-align: left; font-weight: 500; font-size: 12px; color: #6f675a; padding: 8px 16px 8px 0; border-bottom: 1px solid rgba(20,16,12,.14); }
+.cost td { padding: 9px 16px 9px 0; border-bottom: 1px solid rgba(20,16,12,.14); vertical-align: top; line-height: 1.55; }
+.cost td:first-child { white-space: nowrap; font-weight: 500; }
+.tblwrap { overflow-x: auto; }
+</style>
+
+<div class="toolbar">
+<button aria-pressed="false" id="full-length" type="button">全长</button>
+<span class="spacer"></span>
+<span class="hint">字体 · 按 Claude 的中文排法 · 画面沿用已定稿的玻璃版</span>
+</div>
+
+<header class="gallery-head">
+<h1>结平 · 照 Claude 的样子排中文</h1>
+<p>先说结论：Claude 网页和 App 上那种舒服的中文，用的就是苹方。Anthropic 自己的字体（Anthropic Sans / Serif / Mono）只覆盖拉丁字母和数字，中文全部落到系统的苹方上。结平现在的中文也是苹方，所以差别不在中文字体本身，而在三件事：</p>
+<ol>
+<li><b>字重轻。</b>Claude 的正文和列表标题都是常规体（400），层级靠字号和颜色。结平的流水、账户名用的是苹方中黑（500），一屏下来偏重。</li>
+<li><b>行距松。</b>Claude 的回答是 16pt、约 1.7 倍行高。结平助手回答是 15pt、约 1.6 倍。</li>
+<li><b>西文用衬线。</b>Claude 回答里的英文、数字是衬线体，和苹方混排时西文显得更“书面”，中文反而显得更干净。Anthropic Serif 不对外授权，最接近又能合法打包的是 Source Serif 4（OFL 授权）。</li>
+</ol>
+<p class="verdict">推荐 <b>方案 A</b>：中文保持苹方，界面字重减一档，助手回答换成「Source Serif 4 + 苹方」、16pt、1.75 倍行高。这就是 Claude 实际的搭配，App 只多约 0.5 MB。方案 B 在此基础上把标题和回答的中文换成思源宋体，更有书卷气，但离 Claude 远了一步，还要多带 5 MB 左右的字体。</p>
+</header>
+
+<section class="section">
+<h2>调研</h2>
+<p>Claude / Anthropic 现在用的字体，以及哪些能放进结平</p>
+<div class="facts">
+<div><h3>Claude 的字体</h3><p>2025 年起 claude.ai 用自有的 Anthropic Sans（界面、用户消息）、Anthropic Serif（回答、大标题）、Anthropic Mono（代码）。更早是 Styrene B + Tiempos / Copernicus。都是商业或自有字体，不能打包进别的 App。</p></div>
+<div><h3>Claude 的中文</h3><p>Anthropic 的字体只有拉丁字符。回答区的字体栈里，中文段落排在第一位的是 PingFang SC，其次是微软雅黑、Noto Sans CJK。所以苹果设备上 Claude 的中文就是苹方。社区里有插件把它换成思源宋体，正是因为原生是黑体。</p></div>
+<div><h3>能合法打包的</h3><p>Source Serif 4、Newsreader（西文衬线，OFL）；Noto Serif SC / 思源宋体（中文衬线，OFL）。苹方是系统字体，直接用，不打包也不能打包。</p></div>
+<div><h3>来源</h3><p><a href="https://github.com/Azzoril/claude-font-fix">claude-font-fix</a>（claude.ai 的中文回退栈）、<a href="https://github.com/zyyhsot-gh/claude-cjk-serif">claude-cjk-serif</a>（Anthropic 三套字体的分工）、<a href="https://wtfont.app/site/claude.ai">wtfont · claude.ai</a>、<a href="https://siteprint.app/design/claude/">siteprint · Claude</a>。</p></div>
+</div>
+</section>
+
+<section class="section">
+<h2>同一段回答，四种排法</h2>
+<p>同一段账本助手的回答。苹果设备上看到的中文是苹方；其他设备上用 Noto Sans SC 代替</p>
+<div class="spec-grid">
+<div class="spec-card"><div class="lab"><b>现状</b><span>Plex Sans + 苹方 · 15 / 1.6</span></div>
+<p class="sp-cur">十月 Food 一共 2,486.40 CNY，比九月的 2,031.70 多 454.70（+22%）。多出来的主要是两笔聚餐：巷口小馆和山野烤肉。</p>
+<p class="sp-cur">工作日午饭和九月基本持平，日均 42 元。要不要我把这两笔标成 #social？</p></div>
+<div class="spec-card"><div class="lab"><b>A · Claude 的搭配（推荐）</b><span>Source Serif 4 + 苹方 · 16 / 1.75</span></div>
+<p class="sp-a">十月 Food 一共 2,486.40 CNY，比九月的 2,031.70 多 454.70（+22%）。多出来的主要是两笔聚餐：巷口小馆和山野烤肉。</p>
+<p class="sp-a">工作日午饭和九月基本持平，日均 42 元。要不要我把这两笔标成 #social？</p></div>
+<div class="spec-card"><div class="lab"><b>A′ · 换一款西文</b><span>Newsreader + 苹方 · 16.5 / 1.75</span></div>
+<p class="sp-news">十月 Food 一共 2,486.40 CNY，比九月的 2,031.70 多 454.70（+22%）。多出来的主要是两笔聚餐：巷口小馆和山野烤肉。</p>
+<p class="sp-news">工作日午饭和九月基本持平，日均 42 元。要不要我把这两笔标成 #social？</p></div>
+<div class="spec-card"><div class="lab"><b>B · 中文宋体</b><span>Source Serif 4 + 思源宋体 · 16 / 1.75</span></div>
+<p class="sp-b">十月 Food 一共 2,486.40 CNY，比九月的 2,031.70 多 454.70（+22%）。多出来的主要是两笔聚餐：巷口小馆和山野烤肉。</p>
+<p class="sp-b">工作日午饭和九月基本持平，日均 42 元。要不要我把这两笔标成 #social？</p></div>
+</div>
+</section>
+
+<section class="section">
+<h2>现状</h2>
+<p>已定稿的玻璃版：Plex Sans + 苹方，流水和账户名用中黑，助手回答 15pt</p>
+<div class="grid t-cur">
+<figure class="screen">
+<figcaption>概览 <span>浅色 · 顶部</span></figcaption>
+<div class="phone glass v-new v-b" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">概览</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" style="position:relative" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+</button></span>
+</div></div>
+
+<div class="scroll">
+<div class="settle">
+<div class="settle-head">
+<span class="lede">资产负债结算</span>
+<span class="num">2026-08-31</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>资产</dt>
+<dd class="num">172,069.20</dd>
+</div>
+<div class="settle-row">
+<dt>负债</dt>
+<dd class="num v-out">−2,899.00</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净值</dt>
+<dd class="num"><span class="cur">¥</span>169,170.20</dd>
+</div>
+</div>
+<div class="band">
+<div class="band-head">
+<span>本期留存率<br/><span style="font-size:11.5px">8 月 · 净结余 ÷ 收入</span></span>
+<b class="num">89.0<small>%</small></b>
+</div>
+<div aria-label="收入 50,500.00 中留存 44,948.20，支出 5,551.80" class="bar" role="img">
+<i class="kept" style="flex: 89.0"></i>
+<i class="spent" style="flex: 11.0"></i>
+</div>
+<div class="band-foot">
+<span><i class="key"></i>留存 <span class="v num">44,948.20</span></span>
+<span><i class="key k-out"></i>支出 <span class="v num">5,551.80</span></span>
+</div>
+</div>
+<div class="settle" style="border-top:1px solid var(--rule)">
+<div class="settle-head">
+<span class="lede">本期收支结算</span>
+<span class="num">8 月</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>期初净资产</dt>
+<dd class="num">124,222.00</dd>
+</div>
+<div class="settle-row">
+<dt>收入</dt>
+<dd class="num">+50,500.00</dd>
+</div>
+<div class="settle-row">
+<dt>支出</dt>
+<dd class="num">−5,551.80</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净结余</dt>
+<dd class="num v-in">+44,948.20</dd>
+</div>
+</div>
+<div class="sechead">
+<h3>支出分类</h3>
+<span class="aside"><span class="num">5,551.80</span> CNY</span>
+</div>
+<table class="tbl">
+<thead>
+<tr>
+<th scope="col">分类</th>
+<th scope="col">金额</th>
+<th scope="col" style="padding-right:20px">占比</th>
+</tr>
+</thead>
+<tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">68.4%</td></tr>
+<tr><td class="cat">食材</td><td class="amt">611.80</td><td class="share num">11.0%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">10.4%</td></tr>
+<tr><td class="cat">图书</td><td class="amt">328.00</td><td class="share num">5.9%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">236.00</td><td class="share num">4.3%</td></tr>
+</tbody>
+</table>
+<div class="sechead">
+<h3>最近流水</h3>
+<span class="aside"><a class="link" href="#txn">全部 10 笔</a></span>
+</div>
+<div class="daysep"><b>08/28</b> 周五</div>
+<div class="txn">
+<div class="body">
+<div class="who">城市书房</div>
+<div class="note">年度阅读计划</div>
+</div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三</div>
+<div class="txn">
+<div class="body">
+<div class="who">青禾市场</div>
+<div class="note">周末食材</div>
+</div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一</div>
+<div class="txn">
+<div class="body">
+<div class="who">全球指数基金</div>
+<div class="note"><span class="flow">日常账户 → 全球指数基金</span></div>
+</div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">转账</span></div>
+</div>
+<div class="note">本月尚无未平账目。Git 远端于 09:35 同步，待提交 2 笔。</div>
+</div>
+<nav class="tabbar g">
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+<figure class="screen">
+<figcaption>流水 <span>浅色 · 全部</span></figcaption>
+<div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">流水</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+</button><button aria-label="更多操作" class="iconbtn" type="button">
+<svg fill="currentColor" height="19" viewbox="0 0 20 20" width="19"><circle cx="4.5" cy="10" r="1.5"></circle><circle cx="10" cy="10" r="1.5"></circle><circle cx="15.5" cy="10" r="1.5"></circle></svg>
+</button></span>
+
+</div></div>
+
+<div class="scroll">
+<div class="search g">
+<svg fill="none" height="17" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 17 17" width="17"><circle cx="7.2" cy="7.2" r="5.2"></circle><path d="m11.2 11.2 4 4"></path></svg>
+            商户、备注或标签
+          </div>
+<div class="seg" role="tablist">
+<button aria-selected="true" role="tab">全部<span class="n">10</span></button>
+<button aria-selected="false" role="tab">支出<span class="n">6</span></button>
+<button aria-selected="false" role="tab">收入<span class="n">2</span></button>
+<button aria-selected="false" role="tab">转账<span class="n">2</span></button>
+</div>
+<div class="daysep"><b>08/28</b> 周五 <span style="margin-left:auto;color:var(--ink-2)">支出 328.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">城市书房</div><div class="note">年度阅读计划 · 日常账户</div></div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三 <span style="margin-left:auto;color:var(--ink-2)">支出 186.80</span></div>
+<div class="txn">
+<div class="body"><div class="who">青禾市场</div><div class="note">周末食材 · 日常账户</div></div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一 <span style="margin-left:auto;color:var(--ink-3)">转账，不计收支</span></div>
+<div class="txn">
+<div class="body"><div class="who">全球指数基金</div><div class="note"><span class="flow">日常账户 → 全球指数基金</span></div></div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">月度定投</span></div>
+</div>
+<div class="daysep"><b>08/21</b> 周五 <span style="margin-left:auto;color:var(--ink-2)">支出 576.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">云端出行</div><div class="note">差旅交通 · 日常账户</div></div>
+<div class="val"><span class="amt num">−576.00</span><span class="cat">交通 › 公共交通</span></div>
+</div>
+<div class="daysep"><b>08/18</b> 周二 <span style="margin-left:auto;color:var(--in)">收入 48,000.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">工资</div><div class="note">八月薪资 · 日常账户</div></div>
+<div class="val"><span class="amt num v-in">+48,000.00</span><span class="cat">收入 › 工资</span></div>
+</div>
+<div class="daysep"><b>08/15</b> 周六 <span style="margin-left:auto;color:var(--ink-3)">转账，不计收支</span></div>
+<div class="txn">
+<div class="body"><div class="who">教育储备</div><div class="note"><span class="flow">日常账户 → 家庭长期储备</span></div></div>
+<div class="val"><span class="amt num">20,000.00</span><span class="cat">家庭长期计划</span></div>
+</div>
+<div class="daysep"><b>08/12</b> 周三 <span style="margin-left:auto;color:var(--ink-2)">支出 236.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">巷口小馆</div><div class="note">朋友聚餐 · 日常账户</div></div>
+<div class="val"><span class="amt num">−236.00</span><span class="cat">餐饮</span></div>
+</div>
+<div class="daysep"><b>08/08</b> 周六 <span style="margin-left:auto;color:var(--ink-2)">支出 3,800.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">房东</div><div class="note">八月房租 · 日常账户</div></div>
+<div class="val"><span class="amt num">−3,800.00</span><span class="cat">住房 › 房租</span></div>
+</div>
+<div class="daysep"><b>08/05</b> 周三 <span style="margin-left:auto;color:var(--ink-2)">支出 425.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">果蔬店</div><div class="note">季度囤货 · 信用卡</div></div>
+<div class="val"><span class="amt num">−425.00</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/02</b> 周日 <span style="margin-left:auto;color:var(--in)">收入 2,500.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">报销款</div><div class="note">七月差旅报销 · 日常账户</div></div>
+<div class="val"><span class="amt num v-in">+2,500.00</span><span class="cat">收入 › 其他</span></div>
+</div>
+<div class="note">本页 10 笔已全部加载。长按可多选，左滑显示改分类与对账。</div>
+</div>
+<nav class="tabbar g">
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+<figure class="screen"><figcaption>对话 <span>浅色 · 一次回答</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账本助手</h1><span class="g gcap"><button aria-label="新对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button><button aria-label="模型与密钥" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button></span></div></div>
+<div class="scroll">
+<div class="msg-user">十月吃饭花了多少？比九月多吗</div><div class="tools"><button aria-expanded="false" class="tools-head" type="button"><span>读取了账本 3 次</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button><div class="tools-list"><div class="tool" data-s="done"><i></i><div><b>汇总 · 10-01 至 10-31</b><span class="mono">get_ledger_summary</span></div></div><div class="tool" data-s="done"><i></i><div><b>汇总 · 09-01 至 09-30</b><span class="mono">get_ledger_summary</span></div></div><div class="tool" data-s="done"><i></i><div><b>BQL · 按商户分组</b><span class="mono">run_bql</span></div></div></div></div><div class="msg-ai"><p>十月餐饮一共 <b class="num v-out">¥2,486.40</b>，比九月的 <b class="num">¥2,031.70</b> 多 <b class="num">¥454.70</b>（+22%）。</p>
+<p>多出来的主要是两笔聚餐：</p>
+<div class="ans-tbl"><div class="ans-r"><span>10-12 巷口小馆</span><span class="num v-out">−236.00</span></div><div class="ans-r"><span>10-26 山野烤肉</span><span class="num v-out">−318.00</span></div></div>
+<p>工作日午饭和九月基本持平，日均 <span class="num">¥42</span>。</p></div><div class="ans-foot"><button class="linkbtn" type="button">在流水中查看</button><span class="meta2 num">3 次读取 · 6.2 s</span></div>
+</div>
+<div class="sheet-actions g gdock composer" data-empty="true"><div class="cmp-row"><span class="cmp-ph">问问账本，比如「上个月餐饮花了多少」</span><button aria-label="发送" class="sendbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg></button></div></div>
+<div class="homebar"></div>
+</div></figure>
+</div>
+</section>
+
+<section class="section">
+<h2>方案 A · Claude 的搭配（推荐）</h2>
+<p>中文仍是苹方。流水、账户名降到常规体，页面标题和分区标题减一档；助手回答换成衬线西文 + 苹方，16pt、1.75 倍行高。金额、表格、代码不变</p>
+<div class="grid t-a">
+<figure class="screen">
+<figcaption>概览 <span>浅色 · 顶部</span></figcaption>
+<div class="phone glass v-new v-b" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">概览</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" style="position:relative" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+</button></span>
+</div></div>
+
+<div class="scroll">
+<div class="settle">
+<div class="settle-head">
+<span class="lede">资产负债结算</span>
+<span class="num">2026-08-31</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>资产</dt>
+<dd class="num">172,069.20</dd>
+</div>
+<div class="settle-row">
+<dt>负债</dt>
+<dd class="num v-out">−2,899.00</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净值</dt>
+<dd class="num"><span class="cur">¥</span>169,170.20</dd>
+</div>
+</div>
+<div class="band">
+<div class="band-head">
+<span>本期留存率<br/><span style="font-size:11.5px">8 月 · 净结余 ÷ 收入</span></span>
+<b class="num">89.0<small>%</small></b>
+</div>
+<div aria-label="收入 50,500.00 中留存 44,948.20，支出 5,551.80" class="bar" role="img">
+<i class="kept" style="flex: 89.0"></i>
+<i class="spent" style="flex: 11.0"></i>
+</div>
+<div class="band-foot">
+<span><i class="key"></i>留存 <span class="v num">44,948.20</span></span>
+<span><i class="key k-out"></i>支出 <span class="v num">5,551.80</span></span>
+</div>
+</div>
+<div class="settle" style="border-top:1px solid var(--rule)">
+<div class="settle-head">
+<span class="lede">本期收支结算</span>
+<span class="num">8 月</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>期初净资产</dt>
+<dd class="num">124,222.00</dd>
+</div>
+<div class="settle-row">
+<dt>收入</dt>
+<dd class="num">+50,500.00</dd>
+</div>
+<div class="settle-row">
+<dt>支出</dt>
+<dd class="num">−5,551.80</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净结余</dt>
+<dd class="num v-in">+44,948.20</dd>
+</div>
+</div>
+<div class="sechead">
+<h3>支出分类</h3>
+<span class="aside"><span class="num">5,551.80</span> CNY</span>
+</div>
+<table class="tbl">
+<thead>
+<tr>
+<th scope="col">分类</th>
+<th scope="col">金额</th>
+<th scope="col" style="padding-right:20px">占比</th>
+</tr>
+</thead>
+<tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">68.4%</td></tr>
+<tr><td class="cat">食材</td><td class="amt">611.80</td><td class="share num">11.0%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">10.4%</td></tr>
+<tr><td class="cat">图书</td><td class="amt">328.00</td><td class="share num">5.9%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">236.00</td><td class="share num">4.3%</td></tr>
+</tbody>
+</table>
+<div class="sechead">
+<h3>最近流水</h3>
+<span class="aside"><a class="link" href="#txn">全部 10 笔</a></span>
+</div>
+<div class="daysep"><b>08/28</b> 周五</div>
+<div class="txn">
+<div class="body">
+<div class="who">城市书房</div>
+<div class="note">年度阅读计划</div>
+</div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三</div>
+<div class="txn">
+<div class="body">
+<div class="who">青禾市场</div>
+<div class="note">周末食材</div>
+</div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一</div>
+<div class="txn">
+<div class="body">
+<div class="who">全球指数基金</div>
+<div class="note"><span class="flow">日常账户 → 全球指数基金</span></div>
+</div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">转账</span></div>
+</div>
+<div class="note">本月尚无未平账目。Git 远端于 09:35 同步，待提交 2 笔。</div>
+</div>
+<nav class="tabbar g">
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+<figure class="screen">
+<figcaption>流水 <span>浅色 · 全部</span></figcaption>
+<div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">流水</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+</button><button aria-label="更多操作" class="iconbtn" type="button">
+<svg fill="currentColor" height="19" viewbox="0 0 20 20" width="19"><circle cx="4.5" cy="10" r="1.5"></circle><circle cx="10" cy="10" r="1.5"></circle><circle cx="15.5" cy="10" r="1.5"></circle></svg>
+</button></span>
+
+</div></div>
+
+<div class="scroll">
+<div class="search g">
+<svg fill="none" height="17" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 17 17" width="17"><circle cx="7.2" cy="7.2" r="5.2"></circle><path d="m11.2 11.2 4 4"></path></svg>
+            商户、备注或标签
+          </div>
+<div class="seg" role="tablist">
+<button aria-selected="true" role="tab">全部<span class="n">10</span></button>
+<button aria-selected="false" role="tab">支出<span class="n">6</span></button>
+<button aria-selected="false" role="tab">收入<span class="n">2</span></button>
+<button aria-selected="false" role="tab">转账<span class="n">2</span></button>
+</div>
+<div class="daysep"><b>08/28</b> 周五 <span style="margin-left:auto;color:var(--ink-2)">支出 328.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">城市书房</div><div class="note">年度阅读计划 · 日常账户</div></div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三 <span style="margin-left:auto;color:var(--ink-2)">支出 186.80</span></div>
+<div class="txn">
+<div class="body"><div class="who">青禾市场</div><div class="note">周末食材 · 日常账户</div></div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一 <span style="margin-left:auto;color:var(--ink-3)">转账，不计收支</span></div>
+<div class="txn">
+<div class="body"><div class="who">全球指数基金</div><div class="note"><span class="flow">日常账户 → 全球指数基金</span></div></div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">月度定投</span></div>
+</div>
+<div class="daysep"><b>08/21</b> 周五 <span style="margin-left:auto;color:var(--ink-2)">支出 576.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">云端出行</div><div class="note">差旅交通 · 日常账户</div></div>
+<div class="val"><span class="amt num">−576.00</span><span class="cat">交通 › 公共交通</span></div>
+</div>
+<div class="daysep"><b>08/18</b> 周二 <span style="margin-left:auto;color:var(--in)">收入 48,000.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">工资</div><div class="note">八月薪资 · 日常账户</div></div>
+<div class="val"><span class="amt num v-in">+48,000.00</span><span class="cat">收入 › 工资</span></div>
+</div>
+<div class="daysep"><b>08/15</b> 周六 <span style="margin-left:auto;color:var(--ink-3)">转账，不计收支</span></div>
+<div class="txn">
+<div class="body"><div class="who">教育储备</div><div class="note"><span class="flow">日常账户 → 家庭长期储备</span></div></div>
+<div class="val"><span class="amt num">20,000.00</span><span class="cat">家庭长期计划</span></div>
+</div>
+<div class="daysep"><b>08/12</b> 周三 <span style="margin-left:auto;color:var(--ink-2)">支出 236.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">巷口小馆</div><div class="note">朋友聚餐 · 日常账户</div></div>
+<div class="val"><span class="amt num">−236.00</span><span class="cat">餐饮</span></div>
+</div>
+<div class="daysep"><b>08/08</b> 周六 <span style="margin-left:auto;color:var(--ink-2)">支出 3,800.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">房东</div><div class="note">八月房租 · 日常账户</div></div>
+<div class="val"><span class="amt num">−3,800.00</span><span class="cat">住房 › 房租</span></div>
+</div>
+<div class="daysep"><b>08/05</b> 周三 <span style="margin-left:auto;color:var(--ink-2)">支出 425.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">果蔬店</div><div class="note">季度囤货 · 信用卡</div></div>
+<div class="val"><span class="amt num">−425.00</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/02</b> 周日 <span style="margin-left:auto;color:var(--in)">收入 2,500.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">报销款</div><div class="note">七月差旅报销 · 日常账户</div></div>
+<div class="val"><span class="amt num v-in">+2,500.00</span><span class="cat">收入 › 其他</span></div>
+</div>
+<div class="note">本页 10 笔已全部加载。长按可多选，左滑显示改分类与对账。</div>
+</div>
+<nav class="tabbar g">
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+<figure class="screen"><figcaption>对话 <span>浅色 · 一次回答</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账本助手</h1><span class="g gcap"><button aria-label="新对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button><button aria-label="模型与密钥" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button></span></div></div>
+<div class="scroll">
+<div class="msg-user">十月吃饭花了多少？比九月多吗</div><div class="tools"><button aria-expanded="false" class="tools-head" type="button"><span>读取了账本 3 次</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button><div class="tools-list"><div class="tool" data-s="done"><i></i><div><b>汇总 · 10-01 至 10-31</b><span class="mono">get_ledger_summary</span></div></div><div class="tool" data-s="done"><i></i><div><b>汇总 · 09-01 至 09-30</b><span class="mono">get_ledger_summary</span></div></div><div class="tool" data-s="done"><i></i><div><b>BQL · 按商户分组</b><span class="mono">run_bql</span></div></div></div></div><div class="msg-ai"><p>十月餐饮一共 <b class="num v-out">¥2,486.40</b>，比九月的 <b class="num">¥2,031.70</b> 多 <b class="num">¥454.70</b>（+22%）。</p>
+<p>多出来的主要是两笔聚餐：</p>
+<div class="ans-tbl"><div class="ans-r"><span>10-12 巷口小馆</span><span class="num v-out">−236.00</span></div><div class="ans-r"><span>10-26 山野烤肉</span><span class="num v-out">−318.00</span></div></div>
+<p>工作日午饭和九月基本持平，日均 <span class="num">¥42</span>。</p></div><div class="ans-foot"><button class="linkbtn" type="button">在流水中查看</button><span class="meta2 num">3 次读取 · 6.2 s</span></div>
+</div>
+<div class="sheet-actions g gdock composer" data-empty="true"><div class="cmp-row"><span class="cmp-ph">问问账本，比如「上个月餐饮花了多少」</span><button aria-label="发送" class="sendbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg></button></div></div>
+<div class="homebar"></div>
+</div></figure>
+</div>
+</section>
+
+<section class="section">
+<h2>方案 B · 标题和回答用宋体</h2>
+<p>在 A 的基础上，页面标题、分区标题和助手回答的中文换成思源宋体。列表、金额、按钮仍是苹方和 Plex</p>
+<div class="grid t-b">
+<figure class="screen">
+<figcaption>概览 <span>浅色 · 顶部</span></figcaption>
+<div class="phone glass v-new v-b" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">概览</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" style="position:relative" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+</button></span>
+</div></div>
+
+<div class="scroll">
+<div class="settle">
+<div class="settle-head">
+<span class="lede">资产负债结算</span>
+<span class="num">2026-08-31</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>资产</dt>
+<dd class="num">172,069.20</dd>
+</div>
+<div class="settle-row">
+<dt>负债</dt>
+<dd class="num v-out">−2,899.00</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净值</dt>
+<dd class="num"><span class="cur">¥</span>169,170.20</dd>
+</div>
+</div>
+<div class="band">
+<div class="band-head">
+<span>本期留存率<br/><span style="font-size:11.5px">8 月 · 净结余 ÷ 收入</span></span>
+<b class="num">89.0<small>%</small></b>
+</div>
+<div aria-label="收入 50,500.00 中留存 44,948.20，支出 5,551.80" class="bar" role="img">
+<i class="kept" style="flex: 89.0"></i>
+<i class="spent" style="flex: 11.0"></i>
+</div>
+<div class="band-foot">
+<span><i class="key"></i>留存 <span class="v num">44,948.20</span></span>
+<span><i class="key k-out"></i>支出 <span class="v num">5,551.80</span></span>
+</div>
+</div>
+<div class="settle" style="border-top:1px solid var(--rule)">
+<div class="settle-head">
+<span class="lede">本期收支结算</span>
+<span class="num">8 月</span>
+</div>
+<dl style="margin:0">
+<div class="settle-row">
+<dt>期初净资产</dt>
+<dd class="num">124,222.00</dd>
+</div>
+<div class="settle-row">
+<dt>收入</dt>
+<dd class="num">+50,500.00</dd>
+</div>
+<div class="settle-row">
+<dt>支出</dt>
+<dd class="num">−5,551.80</dd>
+</div>
+</dl>
+<div class="settle-total">
+<dt>净结余</dt>
+<dd class="num v-in">+44,948.20</dd>
+</div>
+</div>
+<div class="sechead">
+<h3>支出分类</h3>
+<span class="aside"><span class="num">5,551.80</span> CNY</span>
+</div>
+<table class="tbl">
+<thead>
+<tr>
+<th scope="col">分类</th>
+<th scope="col">金额</th>
+<th scope="col" style="padding-right:20px">占比</th>
+</tr>
+</thead>
+<tbody>
+<tr><td class="cat">住房 › 房租</td><td class="amt">3,800.00</td><td class="share num">68.4%</td></tr>
+<tr><td class="cat">食材</td><td class="amt">611.80</td><td class="share num">11.0%</td></tr>
+<tr><td class="cat">交通 › 公共交通</td><td class="amt">576.00</td><td class="share num">10.4%</td></tr>
+<tr><td class="cat">图书</td><td class="amt">328.00</td><td class="share num">5.9%</td></tr>
+<tr><td class="cat">餐饮</td><td class="amt">236.00</td><td class="share num">4.3%</td></tr>
+</tbody>
+</table>
+<div class="sechead">
+<h3>最近流水</h3>
+<span class="aside"><a class="link" href="#txn">全部 10 笔</a></span>
+</div>
+<div class="daysep"><b>08/28</b> 周五</div>
+<div class="txn">
+<div class="body">
+<div class="who">城市书房</div>
+<div class="note">年度阅读计划</div>
+</div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三</div>
+<div class="txn">
+<div class="body">
+<div class="who">青禾市场</div>
+<div class="note">周末食材</div>
+</div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一</div>
+<div class="txn">
+<div class="body">
+<div class="who">全球指数基金</div>
+<div class="note"><span class="flow">日常账户 → 全球指数基金</span></div>
+</div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">转账</span></div>
+</div>
+<div class="note">本月尚无未平账目。Git 远端于 09:35 同步，待提交 2 笔。</div>
+</div>
+<nav class="tabbar g">
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+<figure class="screen">
+<figcaption>流水 <span>浅色 · 全部</span></figcaption>
+<div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar">
+<h1 class="title">流水</h1>
+<span class="period g gcap gperiod">2026 年 8 月
+            <svg class="caret" fill="none" height="6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 10 6" width="10"><path d="M1 1.2 5 4.8 9 1.2"></path></svg>
+</span>
+<span class="g gcap"><button aria-label="账本状态：与远端一致" class="iconbtn" type="button">
+<svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M16.5 7.5A7 7 0 0 0 4.2 5.6M3.5 12.5a7 7 0 0 0 12.3 1.9"></path><path d="M16.8 3.6v4h-4M3.2 16.4v-4h4"></path></svg>
+</button><button aria-label="更多操作" class="iconbtn" type="button">
+<svg fill="currentColor" height="19" viewbox="0 0 20 20" width="19"><circle cx="4.5" cy="10" r="1.5"></circle><circle cx="10" cy="10" r="1.5"></circle><circle cx="15.5" cy="10" r="1.5"></circle></svg>
+</button></span>
+
+</div></div>
+
+<div class="scroll">
+<div class="search g">
+<svg fill="none" height="17" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 17 17" width="17"><circle cx="7.2" cy="7.2" r="5.2"></circle><path d="m11.2 11.2 4 4"></path></svg>
+            商户、备注或标签
+          </div>
+<div class="seg" role="tablist">
+<button aria-selected="true" role="tab">全部<span class="n">10</span></button>
+<button aria-selected="false" role="tab">支出<span class="n">6</span></button>
+<button aria-selected="false" role="tab">收入<span class="n">2</span></button>
+<button aria-selected="false" role="tab">转账<span class="n">2</span></button>
+</div>
+<div class="daysep"><b>08/28</b> 周五 <span style="margin-left:auto;color:var(--ink-2)">支出 328.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">城市书房</div><div class="note">年度阅读计划 · 日常账户</div></div>
+<div class="val"><span class="amt num">−328.00</span><span class="cat">图书</span></div>
+</div>
+<div class="daysep"><b>08/26</b> 周三 <span style="margin-left:auto;color:var(--ink-2)">支出 186.80</span></div>
+<div class="txn">
+<div class="body"><div class="who">青禾市场</div><div class="note">周末食材 · 日常账户</div></div>
+<div class="val"><span class="amt num">−186.80</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/24</b> 周一 <span style="margin-left:auto;color:var(--ink-3)">转账，不计收支</span></div>
+<div class="txn">
+<div class="body"><div class="who">全球指数基金</div><div class="note"><span class="flow">日常账户 → 全球指数基金</span></div></div>
+<div class="val"><span class="amt num">15,000.00</span><span class="cat">月度定投</span></div>
+</div>
+<div class="daysep"><b>08/21</b> 周五 <span style="margin-left:auto;color:var(--ink-2)">支出 576.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">云端出行</div><div class="note">差旅交通 · 日常账户</div></div>
+<div class="val"><span class="amt num">−576.00</span><span class="cat">交通 › 公共交通</span></div>
+</div>
+<div class="daysep"><b>08/18</b> 周二 <span style="margin-left:auto;color:var(--in)">收入 48,000.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">工资</div><div class="note">八月薪资 · 日常账户</div></div>
+<div class="val"><span class="amt num v-in">+48,000.00</span><span class="cat">收入 › 工资</span></div>
+</div>
+<div class="daysep"><b>08/15</b> 周六 <span style="margin-left:auto;color:var(--ink-3)">转账，不计收支</span></div>
+<div class="txn">
+<div class="body"><div class="who">教育储备</div><div class="note"><span class="flow">日常账户 → 家庭长期储备</span></div></div>
+<div class="val"><span class="amt num">20,000.00</span><span class="cat">家庭长期计划</span></div>
+</div>
+<div class="daysep"><b>08/12</b> 周三 <span style="margin-left:auto;color:var(--ink-2)">支出 236.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">巷口小馆</div><div class="note">朋友聚餐 · 日常账户</div></div>
+<div class="val"><span class="amt num">−236.00</span><span class="cat">餐饮</span></div>
+</div>
+<div class="daysep"><b>08/08</b> 周六 <span style="margin-left:auto;color:var(--ink-2)">支出 3,800.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">房东</div><div class="note">八月房租 · 日常账户</div></div>
+<div class="val"><span class="amt num">−3,800.00</span><span class="cat">住房 › 房租</span></div>
+</div>
+<div class="daysep"><b>08/05</b> 周三 <span style="margin-left:auto;color:var(--ink-2)">支出 425.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">果蔬店</div><div class="note">季度囤货 · 信用卡</div></div>
+<div class="val"><span class="amt num">−425.00</span><span class="cat">食材</span></div>
+</div>
+<div class="daysep"><b>08/02</b> 周日 <span style="margin-left:auto;color:var(--in)">收入 2,500.00</span></div>
+<div class="txn">
+<div class="body"><div class="who">报销款</div><div class="note">七月差旅报销 · 日常账户</div></div>
+<div class="val"><span class="amt num v-in">+2,500.00</span><span class="cat">收入 › 其他</span></div>
+</div>
+<div class="note">本页 10 笔已全部加载。长按可多选，左滑显示改分类与对账。</div>
+</div>
+<nav class="tabbar g">
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M3 8.6 10 3l7 5.6V16a1 1 0 0 1-1 1h-3.6v-5H7.6v5H4a1 1 0 0 1-1-1z"></path></svg></span>概览</button>
+<button aria-current="page" class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" viewbox="0 0 20 20" width="20"><path d="M4 5.5h12M4 10h12M4 14.5h8"></path></svg></span>流水</button>
+<button class="tab" type="button"><span class="icon"><svg fill="none" height="20" stroke="currentColor" stroke-width="1.5" viewbox="0 0 20 20" width="20"><rect height="10" rx="1.5" width="14" x="3" y="5"></rect><path d="M3 9h14"></path></svg></span>账户</button>
+<button class="tab" type="button"><span class="icon"><svg fill="currentColor" height="20" viewbox="0 0 20 20" width="20"><circle cx="5" cy="10" r="1.4"></circle><circle cx="10" cy="10" r="1.4"></circle><circle cx="15" cy="10" r="1.4"></circle></svg></span>更多</button>
+</nav>
+<div class="homebar"></div>
+</div>
+</figure>
+<figure class="screen"><figcaption>对话 <span>浅色 · 一次回答</span></figcaption><div class="phone glass" data-theme="light">
+<div class="gtop"><div class="statusbar">
+<span class="num">09:41</span>
+<span class="indicators">
+<svg fill="currentColor" height="12" viewbox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>
+<svg fill="currentColor" height="12" viewbox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>
+<svg height="13" viewbox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect><path d="M23 4.5v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity=".4"></path></svg>
+</span>
+</div><div class="appbar"><span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span><h1 class="title">账本助手</h1><span class="g gcap"><button aria-label="新对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewbox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button><button aria-label="模型与密钥" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 20 20" width="19"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"></path><circle cx="13" cy="6" r="2"></circle><circle cx="7" cy="14" r="2"></circle></svg></button></span></div></div>
+<div class="scroll">
+<div class="msg-user">十月吃饭花了多少？比九月多吗</div><div class="tools"><button aria-expanded="false" class="tools-head" type="button"><span>读取了账本 3 次</span><svg class="chev" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-width="1.6" viewbox="0 0 7 12" width="7"><path d="m1 1 5 5-5 5"></path></svg></button><div class="tools-list"><div class="tool" data-s="done"><i></i><div><b>汇总 · 10-01 至 10-31</b><span class="mono">get_ledger_summary</span></div></div><div class="tool" data-s="done"><i></i><div><b>汇总 · 09-01 至 09-30</b><span class="mono">get_ledger_summary</span></div></div><div class="tool" data-s="done"><i></i><div><b>BQL · 按商户分组</b><span class="mono">run_bql</span></div></div></div></div><div class="msg-ai"><p>十月餐饮一共 <b class="num v-out">¥2,486.40</b>，比九月的 <b class="num">¥2,031.70</b> 多 <b class="num">¥454.70</b>（+22%）。</p>
+<p>多出来的主要是两笔聚餐：</p>
+<div class="ans-tbl"><div class="ans-r"><span>10-12 巷口小馆</span><span class="num v-out">−236.00</span></div><div class="ans-r"><span>10-26 山野烤肉</span><span class="num v-out">−318.00</span></div></div>
+<p>工作日午饭和九月基本持平，日均 <span class="num">¥42</span>。</p></div><div class="ans-foot"><button class="linkbtn" type="button">在流水中查看</button><span class="meta2 num">3 次读取 · 6.2 s</span></div>
+</div>
+<div class="sheet-actions g gdock composer" data-empty="true"><div class="cmp-row"><span class="cmp-ph">问问账本，比如「上个月餐饮花了多少」</span><button aria-label="发送" class="sendbtn" type="button"><svg fill="none" height="16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 16 16" width="16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg></button></div></div>
+<div class="homebar"></div>
+</div></figure>
+</div>
+</section>
+
+<section class="section">
+<h2>代价</h2>
+<p>要打包进 App 的字体和体积。苹方是系统字体，不计入</p>
+<div class="tblwrap"><table class="cost">
+<thead><tr><th>方案</th><th>新增字体</th><th>约增体积</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>A</td><td>Source Serif 4 常规、半粗（只留拉丁、数字、标点）</td><td>约 0.5 MB</td><td>OFL，可裁剪、可商用。只用在助手回答，其余界面不动</td></tr>
+<tr><td>B</td><td>A + Noto Serif SC 常规、半粗，裁到常用 6,763 字</td><td>约 5–6 MB</td><td>OFL。生僻字（商户名里常见）会回落到苹方，同一行里可能宋黑混排；全量字体每个字重 10 MB 以上，不建议</td></tr>
+</tbody></table></div>
+</section>
+
+<script>
+document.querySelectorAll('[data-scroll]').forEach(function (el) { el.scrollTop = +el.dataset.scroll; });
+(function () {
+  var b = document.getElementById('full-length');
+  b.addEventListener('click', function () {
+    var on = b.getAttribute('aria-pressed') !== 'true';
+    b.setAttribute('aria-pressed', String(on));
+    document.body.dataset.length = on ? 'full' : 'screen';
+  });
+})();
+document.body.dataset.gallery = document.body.dataset.gallery || 'light';
+</script>

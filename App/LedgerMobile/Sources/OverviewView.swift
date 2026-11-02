@@ -182,7 +182,7 @@ struct OverviewView: View {
 
     private func sectionHead(_ title: String, @ViewBuilder aside: () -> some View) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text(title).balancedFont(size: 15, weight: .semibold).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
+            Text(title).balancedFont(size: 15, weight: .medium).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
             Spacer(minLength: 0)
             aside()
         }.padding(EdgeInsets(top: 26, leading: 20, bottom: 10, trailing: 20))
@@ -377,7 +377,7 @@ private struct BalancedTransactionRow: View {
         let visual = TransactionVisualCategory.resolve(transaction: transaction, presentation: p, accountLabels: accountLabels)
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(p.title).balancedFont(size: 15.5, weight: .medium).tracking(-0.08).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                Text(p.title).balancedFont(size: 15.5, weight: .text).tracking(-0.08).foregroundStyle(BalancedPalette.ink).lineLimit(1)
                 Text(p.subtitle).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta).lineLimit(1)
             }.frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 3) {
