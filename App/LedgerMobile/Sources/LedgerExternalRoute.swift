@@ -5,6 +5,8 @@ enum LedgerExternalRoute: Equatable, Sendable {
     case account(String, String)
     case transactions(String)
     case search(String)
+    /// A question for the ledger assistant, from Siri or a shortcut.
+    case agent(String)
 
     var destination: LedgerDestination {
         switch self {
@@ -12,6 +14,7 @@ enum LedgerExternalRoute: Equatable, Sendable {
         case .account: .accounts
         case .transactions: .transactions
         case .search: .search
+        case .agent: .agent
         }
     }
 
@@ -26,6 +29,10 @@ enum LedgerExternalRoute: Equatable, Sendable {
             query[item.name] = value
         }
         switch host {
+        case "agent" where !query.isEmpty:
+            guard Set(query.keys) == ["q"], let question = query["q"],
+                  question.utf8.count <= 4000, !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return .agent(question)
         case "overview", "imports", "agent":
             guard query.isEmpty else { return nil }
             return .page(host == "overview" ? .overview : host == "imports" ? .imports : .agent)
@@ -58,6 +65,11 @@ enum LedgerExternalRoute: Equatable, Sendable {
         guard let date = formatter.date(from: text), formatter.string(from: date) == text else { return nil }
         return date
     }
+}
+
+struct LedgerAgentPendingQuestion: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let text: String
 }
 
 struct LedgerExternalRouteRequest: Identifiable, Equatable, Sendable {

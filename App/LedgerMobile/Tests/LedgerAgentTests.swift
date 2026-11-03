@@ -1011,6 +1011,127 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertNotNil(conversation.pending?.review)
     }
 
+    // MARK: Ask, undo and links
+
+    func testTurnResponseDecodesAnAskCard() throws {
+        let json = #"{"ok":true,"reply":"归到哪？","ask":{"question":"归到哪？","options":["餐饮","交通"],"multiple":true}}"#
+        let response = try JSONDecoder().decode(LedgerAgentTurnResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(response.ask, .init(question: "归到哪？", options: ["餐饮", "交通"], multiple: true))
+        XCTAssertEqual(response.ask?.answer(["交通", "餐饮"]), "餐饮、交通")
+        let broken = #"{"ok":true,"reply":"归到哪？","ask":{"question":1}}"#
+        XCTAssertNil(try JSONDecoder().decode(LedgerAgentTurnResponse.self, from: Data(broken.utf8)).ask)
+    }
+
+    @MainActor
+    func testAskCardStaysWithTheReplyAndSurvivesASave() async throws {
+        let conversation = LedgerAgentConversation()
+        let ask = LedgerAgentAsk(question: "10-05 的 25 元归到哪？", options: ["餐饮", "交通"])
+        conversation.send("帮我分类") { _, _, _ in .init(ok: true, reply: ask.question, ask: ask) }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.messages.last?.ask, ask)
+        let saved = try XCTUnwrap(conversation.saved())
+        let decoded = try JSONDecoder().decode(LedgerAgentSavedConversation.self, from: JSONEncoder().encode(saved))
+        XCTAssertEqual(LedgerAgentConversation(restoring: decoded).messages.last?.ask, ask)
+    }
+
+    @MainActor
+    func testWrittenChangeIsRecordedAndCanBeUndone() async throws {
+        let ledger = FakeDraftLedger()
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.send("午饭改成 26") { _, _, _ in .init(ok: true, reply: "改动已准备好。", edited: true) }
+        try await waitUntilIdle(conversation)
+        conversation.write()
+        for _ in 0..<200 where conversation.messages.last?.write == nil { try await Task.sleep(nanoseconds: 5_000_000) }
+        let reply = try XCTUnwrap(conversation.messages.last)
+        XCTAssertEqual(reply.write?.files, ["main.bean"])
+        XCTAssertTrue(conversation.canUndo(reply))
+
+        conversation.undo(reply)
+        for _ in 0..<200 where conversation.messages.last?.write?.undoneAt == nil { try await Task.sleep(nanoseconds: 5_000_000) }
+        let undone = try XCTUnwrap(conversation.messages.last)
+        XCTAssertNotNil(undone.write?.undoneAt)
+        XCTAssertFalse(conversation.canUndo(undone))
+        let undos = await ledger.undos
+        XCTAssertEqual(undos, 1)
+        let saved = try XCTUnwrap(conversation.saved())
+        XCTAssertNotNil(saved.messages.last?.write?.undoneAt)
+
+        // The model hears about the undo with the next question.
+        conversation.send("现在呢") { message, _, _ in
+            XCTAssertTrue(message.contains("撤销"))
+            XCTAssertTrue(message.hasSuffix("现在呢"))
+            return .init(ok: true, reply: "已恢复。")
+        }
+        try await waitUntilIdle(conversation)
+    }
+
+    @MainActor
+    func testUndoThatConflictsSaysWhichFiles() async throws {
+        let ledger = FakeDraftLedger()
+        await ledger.failUndo(with: .conflict(["2026/10.bean"]))
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.send("改") { _, _, _ in .init(ok: true, reply: "好了。", edited: true) }
+        try await waitUntilIdle(conversation)
+        conversation.write()
+        for _ in 0..<200 where conversation.messages.last?.write == nil { try await Task.sleep(nanoseconds: 5_000_000) }
+        conversation.undo(try XCTUnwrap(conversation.messages.last))
+        for _ in 0..<200 where conversation.undoFailure == nil { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertTrue(conversation.undoFailure?.text.contains("2026/10.bean") == true)
+        XCTAssertNil(conversation.messages.last?.write?.undoneAt)
+    }
+
+    func testRepositoryUndoesAWrittenDraftAndKeepsLaterCommits() async throws {
+        let catalog = LocalLedgerCatalog(rootDirectory: try root(), engine: HandleEngine(), validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Agent undo")
+        let repository = catalog.repository(for: descriptor)
+        let draft = try await repository.openAgentDraft()
+        let main = draft.root.appendingPathComponent("main.bean")
+        let original = try String(contentsOf: main, encoding: .utf8)
+        let added = "; 助手加的一行"
+        try Data((original + "\n" + added + "\n").utf8).write(to: main)
+        try Data("; 新文件\n".utf8).write(to: draft.root.appendingPathComponent("agent.bean"))
+        let prepared = try await repository.reviewAgentDraft(draft)
+        let review = try XCTUnwrap(prepared)
+        _ = try await repository.writeAgentDraft(review, draft: draft)
+        let written = await repository.agentWrite(for: review)
+        let revisions = try XCTUnwrap(written)
+        XCTAssertNotEqual(revisions.parent, revisions.revision)
+        let taken = await repository.agentWrite(for: review)
+        XCTAssertNil(taken)
+
+        // A later commit elsewhere survives the undo.
+        let other = try await repository.openAgentDraft()
+        try Data("; 别处\n".utf8).write(to: other.root.appendingPathComponent("other.bean"))
+        let otherReview = try await repository.reviewAgentDraft(other)
+        _ = try await repository.writeAgentDraft(try XCTUnwrap(otherReview), draft: other)
+
+        let record = LedgerAgentWriteRecord(parent: revisions.parent, revision: revisions.revision,
+                                            files: review.files.map(\.path), writtenAt: Date())
+        try await repository.undoAgentWrite(record)
+        let restored = try await repository.readFile(path: "main.bean").text
+        XCTAssertFalse(restored.contains(added))
+        let files = try await repository.files()
+        XCTAssertFalse(files.contains("agent.bean"))
+        XCTAssertTrue(files.contains("other.bean"))
+        // Undoing again finds nothing left to reverse.
+        try await repository.undoAgentWrite(record)
+    }
+
+    func testLedgerLinksAreEncodedForMarkdown() {
+        let text = "看 [这些](ledger://search?q=payee:美团 AND (narration:午饭)) 和 [账户](ledger://accounts?account=Expenses:Food)。"
+        let encoded = LedgerAgentReplyText.encodingLedgerLinks(text)
+        XCTAssertTrue(encoded.contains("](ledger://search?q=payee:%E7%BE%8E%E5%9B%A2%20AND%20%28narration:%E5%8D%88%E9%A5%AD%29)"), encoded)
+        XCTAssertTrue(encoded.contains("](ledger://accounts?account=Expenses:Food)"), encoded)
+        XCTAssertTrue(encoded.hasSuffix("。"))
+        let url = URL(string: "ledger://search?q=payee:%E7%BE%8E%E5%9B%A2%20AND%20%28narration:%E5%8D%88%E9%A5%AD%29")!
+        XCTAssertEqual(LedgerExternalRoute.parse(url), .search("payee:美团 AND (narration:午饭)"))
+        // Already encoded targets are left as they are.
+        XCTAssertEqual(LedgerAgentReplyText.encodingLedgerLinks(encoded), encoded)
+        XCTAssertEqual(LedgerAgentReplyText.encodingLedgerLinks("没有链接"), "没有链接")
+    }
+
     // MARK: Fixtures
 
     private actor MemoryConversationStore {
@@ -1046,8 +1167,10 @@ final class LedgerAgentTests: XCTestCase {
     }
 
     private actor FakeDraftLedger {
-        var opened = 0, writes = 0, closed = 0, reviews = 0
+        var opened = 0, writes = 0, closed = 0, reviews = 0, undos = 0
         private var reviewError: LedgerAgentEditError?
+        private var undoError: LedgerAgentEditError?
+        func failUndo(with error: LedgerAgentEditError) { undoError = error }
         private var dropped: [String] = []
         func failReview(with error: LedgerAgentEditError) { reviewError = error }
         func dropOnRebase(_ paths: [String]) { dropped = paths }
@@ -1059,7 +1182,14 @@ final class LedgerAgentTests: XCTestCase {
                 write: { _, draft in await self.write(draft) },
                 discard: { _, _ in await self.open() },
                 close: { _ in await self.close() },
-                rebase: { await self.rebase($0) })
+                rebase: { await self.rebase($0) },
+                written: { _ in (UUID(), UUID()) },
+                undo: { _ in try await self.undo() })
+        }
+
+        private func undo() throws {
+            if let undoError { throw undoError }
+            undos += 1
         }
 
         /// The first rebase finds the ledger unmoved; later ones move it on.

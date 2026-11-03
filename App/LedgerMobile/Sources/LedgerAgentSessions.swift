@@ -11,6 +11,10 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
         var attachments: [String]? = nil
         /// The turn behind an answer changed memory.md; absent when not.
         var memory: Bool? = nil
+        /// The choices a reply asked the user to pick from.
+        var ask: LedgerAgentAsk? = nil
+        /// The change written to the ledger after a reply.
+        var write: LedgerAgentWriteRecord? = nil
     }
 
     var version = 1
@@ -89,6 +93,9 @@ final class LedgerAgentSessions: ObservableObject {
     /// A conversation the user moved away from while it was answering. It
     /// stays until it ends and the user opens it, or another takes its place.
     @Published private(set) var background: LedgerAgentConversation?
+    /// A question from Siri or a shortcut for the conversation on screen to
+    /// send once it can.
+    @Published var queuedQuestion: String?
     private var ledgerID: UUID?
     private var storage: Storage?
     private var loading: Task<Void, Never>?

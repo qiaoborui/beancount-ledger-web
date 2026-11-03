@@ -3342,6 +3342,14 @@ final class LedgerSession: ObservableObject {
     }
 
     @Published private(set) var pendingExternalRoute: LedgerExternalRouteRequest?
+    /// A question for the ledger assistant that arrived from Siri, a
+    /// shortcut or a ledger://agent?q= link, until the assistant takes it.
+    @Published private(set) var pendingAgentQuestion: LedgerAgentPendingQuestion?
+
+    func takePendingAgentQuestion() -> String? {
+        defer { pendingAgentQuestion = nil }
+        return pendingAgentQuestion?.text
+    }
     @Published var externalAccount: LedgerExternalAccount?
     @Published var globalSearchQuery = ""
     @Published var globalSearchScope: LedgerGlobalSearchScope = .all
@@ -3392,6 +3400,8 @@ final class LedgerSession: ObservableObject {
             }
         case let .search(query):
             prepareExternalSearch(query)
+        case let .agent(question):
+            pendingAgentQuestion = LedgerAgentPendingQuestion(text: question)
         }
         if pendingExternalRoute?.id == request.id { pendingExternalRoute = nil }
     }

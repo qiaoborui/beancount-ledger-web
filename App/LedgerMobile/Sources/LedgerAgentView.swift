@@ -29,6 +29,13 @@ struct LedgerAgentView: View {
                     sessions.bind(ledger: repository.descriptor.id, storage: .live(repository))
                 }
             }
+            // A question from Siri, a shortcut or a ledger://agent?q= link
+            // starts a conversation of its own, unless one is answering.
+            .task(id: session.pendingAgentQuestion?.id) {
+                guard let question = session.takePendingAgentQuestion() else { return }
+                if !sessions.current.isRunning, !sessions.busyElsewhere { sessions.startNew() }
+                sessions.queuedQuestion = question
+            }
     }
 }
 
@@ -51,6 +58,7 @@ private struct LedgerAgentChatScreen: View {
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var attaching = false
     @State private var attachError: String?
+    @State private var inboxItems: [LedgerSharedImportInbox.Item] = []
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
@@ -102,7 +110,10 @@ private struct LedgerAgentChatScreen: View {
         // A turn the system cut short goes on by itself once the user is
         // back on this screen with the ledger unlocked.
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { resumeIfInterrupted() }
+            if phase == .active {
+                resumeIfInterrupted()
+                refreshInbox()
+            }
             if phase == .background { awaySince = Date() }
             if phase == .active, let away = awaySince {
                 awaySince = nil
@@ -129,7 +140,30 @@ private struct LedgerAgentChatScreen: View {
             crashReport = LedgerAgentCrashReport.take(
                 runtimeRoot: repository.workspace.rootDirectory.appendingPathComponent("runtime"))
         }
+        .task { refreshInbox() }
+        .onChange(of: sessions.queuedQuestion) { _, _ in sendQueuedQuestion() }
+        .onAppear { sendQueuedQuestion() }
+        // Links in replies point into the ledger (a day's transactions, an
+        // account, a search) and open the page they name.
+        .environment(\.openURL, OpenURLAction { url in
+            guard url.scheme?.lowercased() == "ledger" else { return .systemAction }
+            session.openWidgetURL(url)
+            return .handled
+        })
         .accessibilityIdentifier("ledger-agent")
+    }
+
+    /// Sends the question Siri or a shortcut left for this screen, or puts it
+    /// in the composer when it cannot be sent yet.
+    private func sendQueuedQuestion() {
+        guard let question = sessions.queuedQuestion else { return }
+        sessions.queuedQuestion = nil
+        if settings.isReady, !conversation.isRunning, !sessions.busyElsewhere, !session.privacyShielded,
+           settings.hasKey {
+            send(question, clearsComposer: false)
+        } else {
+            draft = question
+        }
     }
 
     /// Shown once after the native core aborted the app during a turn.
@@ -191,9 +225,18 @@ private struct LedgerAgentChatScreen: View {
                     ForEach(conversation.messages) { message in
                         switch message.role {
                         case .user: LedgerAgentQuestion(text: message.text, attachments: message.attachments)
-                        case .assistant: LedgerAgentAnswer(message: message, onMemory: { memoryPresented = true }) {
-                            bookkeeping = .init(text: question(before: message))
-                        }
+                        case .assistant:
+                            LedgerAgentAnswer(
+                                message: message,
+                                asksNow: message.id == conversation.messages.last?.id && !conversation.isRunning
+                                    && !sessions.busyElsewhere,
+                                undoing: conversation.undoing == message.id,
+                                canUndo: conversation.canUndo(message),
+                                undoFailure: conversation.undoFailure?.message == message.id ? conversation.undoFailure?.text : nil,
+                                onMemory: { memoryPresented = true },
+                                onRecord: { bookkeeping = .init(text: question(before: message)) },
+                                onAnswer: { send($0, clearsComposer: false) },
+                                onUndo: { undo(message) })
                         }
                     }
                     if let notice = conversation.restoredNotice {
@@ -206,10 +249,11 @@ private struct LedgerAgentChatScreen: View {
                     if let pending = conversation.pending {
                         LedgerAgentChangeCard(pending: pending, isBusy: conversation.isRunning,
                                               onWrite: conversation.write, onDiscard: conversation.discard)
-                    } else if let written = conversation.written {
+                    } else if let written = conversation.written,
+                              conversation.messages.last(where: { $0.role == .assistant })?.write == nil {
+                        // Written without a record to undo it by.
                         Label(String(localized: "已写入账本 · \(written.files.count) 个文件"), systemImage: "checkmark")
                             .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
-                            .accessibilityIdentifier("ledger-agent-written")
                     }
                     if !conversation.isRunning, conversation.answerCount >= LedgerAgentRecap.minimumAnswers || conversation.recap != nil {
                         LedgerAgentRecapCard(recap: conversation.recap, isCurrent: conversation.recapIsCurrent,
@@ -460,6 +504,17 @@ private struct LedgerAgentChatScreen: View {
             PhotosPicker(selection: $photoItems, maxSelectionCount: 6, matching: .images) {
                 Label("从相册选截图或照片", systemImage: "photo.on.rectangle")
             }
+            // Bills shared into Ledger from another app wait in the import
+            // inbox; the assistant can reconcile them from there.
+            if !inboxItems.isEmpty {
+                Menu {
+                    ForEach(inboxItems) { item in
+                        Button(item.name) { attach([.inbox(item)]) }
+                    }
+                } label: {
+                    Label("待导入收件箱里的账单", systemImage: "tray")
+                }
+            }
         } label: {
             Image(systemName: "plus").font(.system(size: 17, weight: .medium))
                 .foregroundStyle(BalancedPalette.ink)
@@ -506,6 +561,22 @@ private struct LedgerAgentChatScreen: View {
     private enum Pick {
         case file(URL)
         case photo(PhotosPickerItem)
+        case inbox(LedgerSharedImportInbox.Item)
+    }
+
+    /// Files shared into Ledger that are waiting in the import inbox.
+    private func refreshInbox() {
+        let items = (try? LedgerSharedImportInbox.appInbox().items()) ?? []
+        let readable = items.filter { LedgerAgentAttachments.kind(of: $0.name) != nil }
+        if readable != inboxItems { inboxItems = readable }
+    }
+
+    /// Undoes the change written after `message`. A reopened conversation
+    /// has no editor until it asks something, so it gets one here.
+    private func undo(_ message: LedgerAgentMessage) {
+        guard let repository = session.localRepository, !session.privacyShielded else { return }
+        if conversation.editor == nil { conversation.editor = .live(repository) }
+        conversation.undo(message)
     }
 
     /// Copies the picked files into the conversation's attachment folder one
@@ -534,6 +605,12 @@ private struct LedgerAgentChatScreen: View {
                         let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
                         let name = String(localized: "图片\(index + 1)") + "." + ext
                         attachment = try await LedgerAgentAttachments.importImage(data, name: name, id: id, into: directory)
+                    case let .inbox(item):
+                        guard let kind = LedgerAgentAttachments.kind(of: item.name) else {
+                            throw LedgerAgentAttachmentError.unsupported(item.name)
+                        }
+                        let data = try LedgerSharedImportInbox.appInbox().read(item)
+                        attachment = try await LedgerAgentAttachments.store(data, name: item.name, kind: kind, id: id, into: directory)
                     }
                     conversation.stage(attachment)
                 }
@@ -646,9 +723,18 @@ private struct LedgerAgentAttachmentChip: View {
 /// A reply on the page, with the reads behind it folded above.
 private struct LedgerAgentAnswer: View {
     let message: LedgerAgentMessage
+    /// The reply is the last message and nothing is running, so its choices
+    /// can still be picked.
+    var asksNow = false
+    var undoing = false
+    var canUndo = false
+    var undoFailure: String? = nil
     var onMemory: () -> Void = {}
     let onRecord: () -> Void
+    var onAnswer: (String) -> Void = { _ in }
+    var onUndo: () -> Void = {}
     @State private var toolsExpanded = false
+    @State private var picked: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -656,10 +742,12 @@ private struct LedgerAgentAnswer: View {
             ForEach(Array(LedgerAgentReplyText.segments(message.text).enumerated()), id: \.offset) { _, segment in
                 LedgerAgentReplyBlock(segment: segment)
             }
+            if let ask = message.ask, asksNow { choices(ask) }
             if LedgerAgentReplyText.beancountDraft(in: message.text) != nil {
                 Button("用「记一笔」录入", action: onRecord).buttonStyle(.balanced(.outline))
                     .accessibilityIdentifier("ledger-agent-record")
             }
+            if let write = message.write { writeRow(write) }
             if message.rememberedMemory {
                 Button(action: onMemory) {
                     Label("已更新记忆", systemImage: "brain")
@@ -673,6 +761,83 @@ private struct LedgerAgentAnswer: View {
             }
             if let footer { Text(footer).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta) }
         }
+    }
+
+    /// The options of an `ask_user` card. One tap answers a single choice;
+    /// several choices are ticked, then sent together.
+    private func choices(_ ask: LedgerAgentAsk) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(ask.options, id: \.self) { option in
+                Button {
+                    if ask.allowsMultiple {
+                        if picked.contains(option) { picked.remove(option) } else { picked.insert(option) }
+                    } else {
+                        onAnswer(option)
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        if ask.allowsMultiple {
+                            Image(systemName: picked.contains(option) ? "checkmark.square.fill" : "square")
+                                .font(.system(size: 15)).foregroundStyle(BalancedPalette.ink)
+                        }
+                        Text(option).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 12)
+                        if !ask.allowsMultiple {
+                            Image(systemName: "arrow.up").font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(BalancedPalette.edge)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 44)
+                    .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("ledger-agent-choice")
+            }
+            HStack(spacing: 10) {
+                Text(ask.allowsMultiple ? String(localized: "可多选；也可以直接在下面输入") : String(localized: "也可以直接在下面输入"))
+                    .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                Spacer(minLength: 8)
+                if ask.allowsMultiple {
+                    Button("发送") { onAnswer(ask.answer(picked)) }
+                        .buttonStyle(.balanced(.primary))
+                        .disabled(picked.isEmpty)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+        .background(BalancedPalette.sunken)
+        .accessibilityIdentifier("ledger-agent-ask")
+    }
+
+    /// What was written after this reply, with the way back.
+    private func writeRow(_ write: LedgerAgentWriteRecord) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                if write.undoneAt != nil {
+                    Label(String(localized: "已撤销这次写入 · \(write.files.count) 个文件"), systemImage: "arrow.uturn.backward")
+                        .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                } else {
+                    Label(String(localized: "已写入账本 · \(write.files.count) 个文件"), systemImage: "checkmark")
+                        .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                    Spacer(minLength: 8)
+                    Button(action: onUndo) {
+                        if undoing { ProgressView().controlSize(.small) } else { Text("撤销") }
+                    }
+                    .buttonStyle(.balanced(.quiet))
+                    .disabled(!canUndo)
+                    .accessibilityIdentifier("ledger-agent-undo")
+                }
+            }
+            if let undoFailure {
+                Text(undoFailure).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.expense)
+                    .textSelection(.enabled)
+            }
+        }
+        .accessibilityIdentifier("ledger-agent-written")
     }
 
     private var tools: some View {
@@ -970,8 +1135,12 @@ private struct LedgerAgentReplyBlock: View {
     /// Semibold face instead of letting the system synthesise a Bold that
     /// isn't shipped; CJK inside it still falls back to PingFang.
     private static func inline(_ text: String, serif: Bool = false) -> AttributedString {
+        let text = LedgerAgentReplyText.encodingLedgerLinks(text)
         var string = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(text)
+        for run in string.runs where run.link != nil {
+            string[run.range].underlineStyle = .single
+        }
         guard serif else { return string }
         for run in string.runs where run.inlinePresentationIntent?.contains(.stronglyEmphasized) == true {
             // The face carries the weight; drop the intent so SwiftUI doesn't
@@ -1294,7 +1463,7 @@ struct LedgerAgentSettingsView: View {
                 Toggle("改完自动写入", isOn: Binding(get: { settings.autoWrites }, set: { settings.setAutoWrites($0) }))
                     .accessibilityIdentifier("ledger-agent-auto-write")
             } header: { Text("写入") } footer: {
-                Text("打开后，助手的改动通过校验就直接写入账本，不再弹出确认卡片。每次写入都是一个单独的提交，可以在历史里撤回。和账本新改动冲突或校验没通过时，仍然停下来让你处理。")
+                Text("打开后，助手的改动通过校验就直接写入账本，不再弹出确认卡片。每次写入都是一个单独的提交，回答下方的「撤销」可以把它退回去。和账本新改动冲突或校验没通过时，仍然停下来让你处理。")
             }
             Section("发给模型的内容") {
                 Text("你的问题、本次对话，以及助手调用工具后得到的结果（例如汇总金额、匹配到的流水）。不会发送整本账本文件，也不会发送 Git 凭据或本机路径。")
@@ -1303,6 +1472,7 @@ struct LedgerAgentSettingsView: View {
                 tool(String(localized: "汇总与搜索流水"), "get_ledger_summary · search_transactions")
                 tool(String(localized: "BQL 查询"), "run_bql · validate_bql · get_bql_capabilities")
                 tool(String(localized: "账户"), "get_accounts")
+                tool(String(localized: "向你提问（选项卡）"), "ask_user")
                 if settings.usesMemory { tool(String(localized: "记忆"), "edit_memory · write_memory") }
             }
         }
