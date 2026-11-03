@@ -22,6 +22,11 @@ final class LedgerAgentSettings: ObservableObject {
     /// the change card's confirmation. Off by default; every write is still a
     /// separate, revertible commit.
     @Published private(set) var autoWrites: Bool
+    /// Whether turns read and keep the ledger's memory.md. On by default.
+    @Published private(set) var usesMemory: Bool
+    /// Whether the screen asks the model for suggestions, the next question
+    /// and recaps on its own. On by default; each is a small extra request.
+    @Published private(set) var assists: Bool
     /// The provider's own list, fetched on request and kept until relaunch;
     /// keyed by `listKey`.
     @Published private(set) var listed: [String: [LedgerAgentListedModel]] = [:]
@@ -37,6 +42,8 @@ final class LedgerAgentSettings: ObservableObject {
     private let favoritesKey = "ledger.agent.favorite-models"
     private let keepsAwakeKey = "ledger.agent.keep-awake"
     private let autoWritesKey = "ledger.agent.auto-write"
+    private let usesMemoryKey = "ledger.agent.memory"
+    private let assistsKey = "ledger.agent.assists"
     private let keyStore: (String) -> ClassificationKeyStore
     private let lister: LedgerAgentModelLister
 
@@ -69,6 +76,8 @@ final class LedgerAgentSettings: ObservableObject {
         thinking = defaults.string(forKey: thinkingKey).flatMap(LedgerAgentThinking.init(rawValue:)) ?? .default
         keepsAwake = defaults.object(forKey: keepsAwakeKey) as? Bool ?? true
         autoWrites = defaults.bool(forKey: autoWritesKey)
+        usesMemory = defaults.object(forKey: usesMemoryKey) as? Bool ?? true
+        assists = defaults.object(forKey: assistsKey) as? Bool ?? true
         hasKey = (try? keyStore(choice.provider).load()) != nil
     }
 
@@ -113,6 +122,18 @@ final class LedgerAgentSettings: ObservableObject {
         guard on != autoWrites else { return }
         autoWrites = on
         defaults.set(on, forKey: autoWritesKey)
+    }
+
+    func setUsesMemory(_ on: Bool) {
+        guard on != usesMemory else { return }
+        usesMemory = on
+        defaults.set(on, forKey: usesMemoryKey)
+    }
+
+    func setAssists(_ on: Bool) {
+        guard on != assists else { return }
+        assists = on
+        defaults.set(on, forKey: assistsKey)
     }
 
     var modelTitle: String { title(for: choice) }

@@ -85,6 +85,8 @@ struct LedgerAgentMessage: Identifiable, Equatable, Sendable {
     var duration: TimeInterval? = nil
     /// Names of the files sent with a question.
     var attachments: [String] = []
+    /// The turn behind this answer changed the ledger's memory.md.
+    var rememberedMemory = false
 }
 
 /// The provider and model a turn uses. The key travels separately.
@@ -298,6 +300,8 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     var conversationId: String? = nil
     /// Every file of the conversation; those sent with this question are new.
     var attachments: [LedgerAgentAttachment.Payload]? = nil
+    /// The ledger's memory.md; nil turns memory off for the turn.
+    var memoryPath: String? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {
@@ -312,13 +316,18 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
     /// The whole conversation as the model saw it, for the next turn. Only
     /// an answered turn has one.
     var transcript: String? = nil
+    /// The turn rewrote memory.md, even if it then failed.
+    var memoryUpdated = false
 
-    private enum CodingKeys: String, CodingKey { case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited, transcript }
+    private enum CodingKeys: String, CodingKey {
+        case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited, transcript, memoryUpdated
+    }
     init(ok: Bool, reply: String? = nil, toolCalls: [LedgerAgentToolCall] = [], error: String? = nil,
-         cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false, transcript: String? = nil) {
+         cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false, transcript: String? = nil,
+         memoryUpdated: Bool = false) {
         self.ok = ok; self.reply = reply; self.toolCalls = toolCalls; self.error = error
         self.cancelled = cancelled; self.modelUnavailable = modelUnavailable; self.edited = edited
-        self.transcript = transcript
+        self.transcript = transcript; self.memoryUpdated = memoryUpdated
     }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -330,6 +339,7 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
         modelUnavailable = try container.decodeIfPresent(Bool.self, forKey: .modelUnavailable)
         edited = try container.decodeIfPresent(Bool.self, forKey: .edited) ?? false
         transcript = try container.decodeIfPresent(String.self, forKey: .transcript)
+        memoryUpdated = try container.decodeIfPresent(Bool.self, forKey: .memoryUpdated) ?? false
     }
 }
 
@@ -710,6 +720,16 @@ final class LedgerAgentConversation: ObservableObject {
     @Published private(set) var attachments: [LedgerAgentAttachment] = []
     /// Files picked for the next question, shown above the composer.
     @Published private(set) var staged: [LedgerAgentAttachment] = []
+    /// What the user will most likely say next, shown faintly in the
+    /// composer; nil until predicted after an answer.
+    @Published private(set) var nextSuggestion: String?
+    /// The recap at the bottom of the conversation, and whether one is
+    /// being written.
+    @Published private(set) var recap: LedgerAgentRecap?
+    @Published private(set) var recapping = false
+    @Published private(set) var recapError: String?
+    /// Reopened from the history, so the screen recaps it on arrival.
+    private(set) var restored = false
     /// Attached files no answered turn has told the model about yet; they
     /// stay new until a turn answers, so a retry announces them again.
     private(set) var unannounced: Set<String> = []
@@ -763,10 +783,12 @@ final class LedgerAgentConversation: ObservableObject {
         messages = saved.messages.compactMap { stored in
             LedgerAgentMessage.Role(rawValue: stored.role).map {
                 LedgerAgentMessage(role: $0, text: stored.text, toolCalls: stored.toolCalls, duration: stored.duration,
-                                   attachments: stored.attachments ?? [])
+                                   attachments: stored.attachments ?? [], rememberedMemory: stored.memory ?? false)
             }
         }
         attachments = saved.attachments ?? []
+        recap = saved.recap
+        restored = true
         if saved.unwrittenChange {
             restoredNotice = String(localized: "上次的草稿改动没有写入，重新打开后已放弃。需要的话让助手重新改一次。")
             note = String(localized: "（系统提示：这是重新打开的旧对话，之前草稿里没有写入的改动已经放弃，账本以当前内容为准。）")
@@ -786,9 +808,11 @@ final class LedgerAgentConversation: ObservableObject {
         return LedgerAgentSavedConversation(
             id: id, createdAt: createdAt, updatedAt: date,
             messages: messages.map { .init(role: $0.role.rawValue, text: $0.text, toolCalls: $0.toolCalls, duration: $0.duration,
-                                           attachments: $0.attachments.isEmpty ? nil : $0.attachments) },
+                                           attachments: $0.attachments.isEmpty ? nil : $0.attachments,
+                                           memory: $0.rememberedMemory ? true : nil) },
             unwrittenChange: pending?.review != nil || draftUnreviewed,
-            attachments: attachments.isEmpty ? nil : attachments)
+            attachments: attachments.isEmpty ? nil : attachments,
+            recap: recap)
     }
 
     /// Every file, attached or staged, for the id of the next one.
@@ -842,6 +866,7 @@ final class LedgerAgentConversation: ObservableObject {
         staged = []
         messages.append(.init(role: .user, text: question, attachments: sentFiles))
         written = nil
+        nextSuggestion = nil
         let started = Date()
         phase = .running(since: started)
         step = nil
@@ -888,6 +913,58 @@ final class LedgerAgentConversation: ObservableObject {
             self?.finish(outcome, question: question, started: started)
         }
         return true
+    }
+
+    // MARK: Suggestions and recap
+
+    typealias Assist<Output> = @Sendable (_ history: [LedgerAgentTurnRequest.HistoryEntry]) async throws -> Output
+
+    /// Answers so far; a recap needs at least `LedgerAgentRecap.minimumAnswers`.
+    var answerCount: Int { messages.filter { $0.role == .assistant }.count }
+
+    /// The recap covers every message on screen.
+    var recapIsCurrent: Bool { recap?.messageCount == messages.count }
+
+    /// Whether a recap could say something the screen does not.
+    var wantsRecap: Bool { answerCount >= LedgerAgentRecap.minimumAnswers && !recapIsCurrent && !isRunning }
+
+    /// The visible conversation, for the small requests around it.
+    var visibleHistory: [LedgerAgentTurnRequest.HistoryEntry] {
+        messages.map { .init(role: $0.role.rawValue, content: $0.text) }
+    }
+
+    /// Predicts the next question after the last answer. A result that
+    /// arrives after anything else happened is dropped.
+    func predictNext(using suggest: @escaping Assist<[String]>) {
+        guard messages.last?.role == .assistant, !isRunning, nextSuggestion == nil else { return }
+        let epoch = epoch, count = messages.count, history = visibleHistory
+        Task { [weak self] in
+            let next = try? await suggest(history).first
+            guard let self, self.epoch == epoch, self.messages.count == count, !self.isRunning else { return }
+            self.nextSuggestion = next
+        }
+    }
+
+    /// Writes a recap of the conversation for its bottom; it is saved with
+    /// the conversation.
+    func summarize(using write: @escaping Assist<String>) {
+        guard !recapping, !isRunning, !messages.isEmpty else { return }
+        let epoch = epoch, count = messages.count, history = visibleHistory
+        recapping = true
+        recapError = nil
+        Task { [weak self] in
+            let result: Result<String, Error>
+            do { result = .success(try await write(history)) } catch { result = .failure(error) }
+            guard let self, self.epoch == epoch else { return }
+            self.recapping = false
+            switch result {
+            case let .success(text):
+                self.recap = LedgerAgentRecap(text: text, messageCount: count, createdAt: Date())
+                self.onSettled?(self)
+            case let .failure(error):
+                self.recapError = error.localizedDescription
+            }
+        }
     }
 
     func stop() {
@@ -965,6 +1042,10 @@ final class LedgerAgentConversation: ObservableObject {
         attachments = []
         staged = []
         unannounced = []
+        nextSuggestion = nil
+        recap = nil
+        recapping = false
+        recapError = nil
         epoch += 1
         if let editor {
             let draft = draft, reopening = reopening
@@ -1071,7 +1152,8 @@ final class LedgerAgentConversation: ObservableObject {
             let reply = Self.hasText(turn.response.reply) ? turn.response.reply ?? ""
                 : String(localized: "改动已经准备好，请在下方查看并确认。")
             messages.append(.init(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
-                                  duration: Date().timeIntervalSince(started)))
+                                  duration: Date().timeIntervalSince(started),
+                                  rememberedMemory: turn.response.memoryUpdated))
             phase = .idle
             resumes = 0
             if let review = pending?.review {

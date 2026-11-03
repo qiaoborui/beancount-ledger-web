@@ -640,6 +640,61 @@ actor LocalLedgerWorkspace {
         removeIfPresent(directory)
     }
 
+    /// runtime/agent-memory.md: the ledger Agent's memory.md, which every
+    /// turn reads and its memory tools rewrite. Like the history it stays
+    /// outside every generation, so it never enters a commit, a backup or
+    /// Git sync.
+    nonisolated var agentMemoryLocation: URL {
+        rootDirectory.appendingPathComponent("runtime/agent-memory.md", isDirectory: false)
+    }
+
+    /// The runtime directory exists before a turn may write memory.md there.
+    func prepareAgentMemory() throws -> URL {
+        try createProtectedDirectory(try importRuntimeDirectory("runtime"))
+        let file = agentMemoryLocation
+        if let kind = try itemKindIfPresent(at: file), kind != .regularFile { throw WorkspaceError.unsupportedItem(file.lastPathComponent) }
+        return file
+    }
+
+    /// memory.md, or empty when there is none.
+    func agentMemory() -> String {
+        guard (try? itemKindIfPresent(at: agentMemoryLocation)) == .regularFile,
+              let data = try? Data(contentsOf: agentMemoryLocation) else { return "" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Replaces memory.md as the user edited it; empty text removes it.
+    func saveAgentMemory(_ text: String) throws {
+        let file = try prepareAgentMemory()
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return removeIfPresent(file) }
+        try Data((trimmed + "\n").utf8).write(to: file, options: .atomic)
+        try protect(file)
+    }
+
+    /// Applies the workspace's file protection to a memory.md the native
+    /// core just wrote.
+    func protectAgentMemory() {
+        guard (try? itemKindIfPresent(at: agentMemoryLocation)) == .regularFile else { return }
+        try? protect(agentMemoryLocation)
+    }
+
+    /// runtime/agent-starters.json: the saved 试试 suggestions.
+    func agentStarters() -> Data? {
+        guard let file = try? importRuntimeDirectory("runtime").appendingPathComponent("agent-starters.json"),
+              (try? itemKindIfPresent(at: file)) == .regularFile else { return nil }
+        return try? Data(contentsOf: file)
+    }
+
+    func saveAgentStarters(_ data: Data) throws {
+        let directory = try importRuntimeDirectory("runtime")
+        try createProtectedDirectory(directory)
+        let file = directory.appendingPathComponent("agent-starters.json")
+        if let kind = try itemKindIfPresent(at: file), kind != .regularFile { throw WorkspaceError.unsupportedItem(file.lastPathComponent) }
+        try data.write(to: file, options: .atomic)
+        try protect(file)
+    }
+
     private func agentDraftDirectory(_ id: UUID) throws -> URL {
         try importRuntimeDirectory("runtime/agent/" + id.uuidString)
     }
