@@ -38,8 +38,12 @@ private struct LedgerAgentChatScreen: View {
     @EnvironmentObject private var session: LedgerSession
     @ObservedObject private var settings = LedgerAgentSettings.shared
     @ObservedObject private var sessions = LedgerAgentSessions.shared
+    @ObservedObject private var starters = LedgerAgentStarters.shared
     @State private var draft = ""
     @State private var historyPresented = false
+    @State private var memoryPresented = false
+    /// When the app last left the screen, for a recap on a long absence.
+    @State private var awaySince: Date?
     @State private var settingsPresented = false
     @State private var bookkeeping: BookkeepingPrefill?
     @State private var crashReport: String?
@@ -63,6 +67,10 @@ private struct LedgerAgentChatScreen: View {
         .terminalPageChrome(String(localized: "账本助手"), isRoot: isRoot, showsSync: false, actions: AnyView(actions), balanced: true)
         .sheet(isPresented: $settingsPresented) {
             NavigationStack { LedgerAgentSettingsView() }
+                .ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: $memoryPresented) {
+            NavigationStack { LedgerAgentMemoryView() }
                 .ledgerPrivacyProtectedSheet()
         }
         .sheet(isPresented: $historyPresented) {
@@ -95,7 +103,19 @@ private struct LedgerAgentChatScreen: View {
         // back on this screen with the ledger unlocked.
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { resumeIfInterrupted() }
+            if phase == .background { awaySince = Date() }
+            if phase == .active, let away = awaySince {
+                awaySince = nil
+                if Date().timeIntervalSince(away) >= Self.recapAfterAbsence { recapIfWanted() }
+            }
         }
+        // A conversation reopened from the history is recapped on arrival,
+        // and an empty one offers fresh suggestions.
+        .task(id: conversation.id) {
+            if conversation.restored { recapIfWanted() }
+            if conversation.messages.isEmpty { refreshStarters() }
+        }
+        .onChange(of: conversation.messages.count) { _, _ in predictNext() }
         .onChange(of: session.privacyShielded) { _, shielded in
             if !shielded { resumeIfInterrupted() }
         }
@@ -171,7 +191,9 @@ private struct LedgerAgentChatScreen: View {
                     ForEach(conversation.messages) { message in
                         switch message.role {
                         case .user: LedgerAgentQuestion(text: message.text, attachments: message.attachments)
-                        case .assistant: LedgerAgentAnswer(message: message) { bookkeeping = .init(text: question(before: message)) }
+                        case .assistant: LedgerAgentAnswer(message: message, onMemory: { memoryPresented = true }) {
+                            bookkeeping = .init(text: question(before: message))
+                        }
                         }
                     }
                     if let notice = conversation.restoredNotice {
@@ -188,6 +210,11 @@ private struct LedgerAgentChatScreen: View {
                         Label(String(localized: "已写入账本 · \(written.files.count) 个文件"), systemImage: "checkmark")
                             .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                             .accessibilityIdentifier("ledger-agent-written")
+                    }
+                    if !conversation.isRunning, conversation.answerCount >= LedgerAgentRecap.minimumAnswers || conversation.recap != nil {
+                        LedgerAgentRecapCard(recap: conversation.recap, isCurrent: conversation.recapIsCurrent,
+                                             isWorking: conversation.recapping, error: conversation.recapError,
+                                             onSummarize: summarize)
                     }
                     switch conversation.phase {
                     case .idle: EmptyView()
@@ -208,6 +235,9 @@ private struct LedgerAgentChatScreen: View {
             .onChange(of: conversation.pending) { _, _ in
                 withAnimation(.snappy) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
+            .onChange(of: conversation.recap) { _, _ in
+                withAnimation(.snappy) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            }
             .onChange(of: conversation.phase) { _, phase in
                 if case let .failed(_, question) = phase, draft.isEmpty { draft = question }
                 withAnimation(.snappy) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
@@ -218,12 +248,8 @@ private struct LedgerAgentChatScreen: View {
 
     private static let bottomID = "ledger-agent-bottom"
 
-    private static let suggestions = [
-        String(localized: "这个月花了多少，主要花在哪"),
-        String(localized: "最近 10 笔餐饮"),
-        String(localized: "信用卡这个月还要还多少"),
-        String(localized: "把上个月的打车都归到交通"),
-    ]
+    /// A recap is written when the user comes back after this long.
+    private static let recapAfterAbsence: TimeInterval = 10 * 60
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -234,8 +260,25 @@ private struct LedgerAgentChatScreen: View {
             Text("点输入框左边的 ＋ 上传账单（CSV、Excel、PDF 或截图），它会和账本逐笔对账。").balancedFont(size: 13.5)
                 .foregroundStyle(BalancedPalette.meta)
                 .padding(.top, 4)
-            BalancedSectionLabel(text: String(localized: "试试")).padding(.top, 22)
-            ForEach(Self.suggestions, id: \.self) { suggestion in
+            HStack(alignment: .lastTextBaseline) {
+                BalancedSectionLabel(text: String(localized: "试试"))
+                Spacer()
+                if starters.loading {
+                    ProgressView().controlSize(.mini)
+                } else if settings.assists {
+                    Button { refreshStarters(force: true) } label: {
+                        Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(BalancedPalette.meta)
+                            .frame(width: 32, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("换一批")
+                    .accessibilityIdentifier("ledger-agent-starters-refresh")
+                }
+            }
+            .padding(.top, 22)
+            ForEach(starters.suggestions, id: \.self) { suggestion in
                 Button { send(suggestion) } label: {
                     HStack {
                         Text(suggestion).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
@@ -298,15 +341,31 @@ private struct LedgerAgentChatScreen: View {
             if !conversation.staged.isEmpty || attaching || attachError != nil { stagedFiles }
             HStack(alignment: .bottom, spacing: 4) {
                 attachMenu
-                TextField(placeholder, text: $draft, axis: .vertical)
+                TextField(text: $draft, prompt: Text(ghost ?? placeholder)
+                    .foregroundStyle(ghost == nil ? BalancedPalette.meta : BalancedPalette.edge), axis: .vertical) {
+                    Text(placeholder)
+                }
                     .balancedFont(size: 15)
                     .lineLimit(1...5)
                     .focused($composerFocused)
                     .submitLabel(.send)
                     .padding(.vertical, 11)
                     .accessibilityIdentifier("ledger-agent-input")
+                if let ghost {
+                    // Puts the suggestion in the field for editing; the send
+                    // button sends it as it is.
+                    Button { draft = ghost; composerFocused = true } label: {
+                        Image(systemName: "text.insert").font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(BalancedPalette.meta)
+                            .frame(width: 32, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("编辑建议：\(ghost)")
+                    .accessibilityIdentifier("ledger-agent-ghost-edit")
+                }
                 Button {
-                    if conversation.isRunning { conversation.stop() } else { send(draft) }
+                    if conversation.isRunning { conversation.stop() } else { send(draft.isEmpty ? ghost ?? "" : draft) }
                 } label: {
                     Image(systemName: conversation.isRunning ? "stop.fill" : "arrow.up")
                         .font(.system(size: 15, weight: .semibold))
@@ -335,7 +394,60 @@ private struct LedgerAgentChatScreen: View {
 
     private var canSend: Bool {
         guard !sessions.busyElsewhere, !attaching else { return false }
-        return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !conversation.staged.isEmpty
+        return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !conversation.staged.isEmpty || ghost != nil
+    }
+
+    /// The suggestion shown faintly in an empty composer: the likely next
+    /// question after an answer, or the first starter in a new conversation.
+    private var ghost: String? {
+        guard settings.assists, draft.isEmpty, conversation.staged.isEmpty, !conversation.isRunning,
+              !sessions.busyElsewhere else { return nil }
+        if conversation.messages.isEmpty { return starters.isDynamic ? starters.suggestions.first : nil }
+        guard case .idle = conversation.phase else { return nil }
+        return conversation.nextSuggestion
+    }
+
+    // MARK: Suggestions and recap
+
+    private func refreshStarters(force: Bool = false) {
+        guard settings.assists, settings.hasKey, let repository = session.localRepository, !session.privacyShielded,
+              let key = try? settings.apiKey() else { return }
+        let choice = settings.choice, usesMemory = settings.usesMemory
+        let recent = sessions.recentQuestions()
+        let workspace = repository.workspace
+        let source = LedgerAgentStarters.Source(
+            load: { await workspace.agentStarters().flatMap { try? LedgerAgentAssistCoding.decoder.decode(LedgerAgentStarterCache.self, from: $0) } },
+            save: { cache in
+                guard let data = try? LedgerAgentAssistCoding.encoder.encode(cache) else { return }
+                try? await workspace.saveAgentStarters(data)
+            },
+            state: { await repository.agentStarterState() },
+            fetch: { try await repository.agentStarterSuggestions(choice: choice, apiKey: key, recent: recent, usesMemory: usesMemory) })
+        starters.refresh(ledger: repository.descriptor.id, source: source, force: force)
+    }
+
+    private func predictNext() {
+        guard settings.assists, settings.hasKey, let repository = session.localRepository,
+              let key = try? settings.apiKey() else { return }
+        let choice = settings.choice, usesMemory = settings.usesMemory
+        conversation.predictNext { history in
+            try await repository.agentNextSuggestions(history: history, choice: choice, apiKey: key, usesMemory: usesMemory)
+        }
+    }
+
+    /// Recaps on its own only when the recap would add something and the
+    /// user allows the extra requests.
+    private func recapIfWanted() {
+        guard settings.assists, conversation.wantsRecap, !session.privacyShielded else { return }
+        summarize()
+    }
+
+    private func summarize() {
+        guard settings.hasKey, let repository = session.localRepository, let key = try? settings.apiKey() else { return }
+        let choice = settings.choice
+        conversation.summarize { history in
+            try await repository.agentRecap(history: history, choice: choice, apiKey: key)
+        }
     }
 
     private static let reconcileQuestion = String(localized: "帮我把附件和账本对一下账，列出对不上的地方")
@@ -448,7 +560,7 @@ private struct LedgerAgentChatScreen: View {
             settingsPresented = true
             return
         }
-        let choice = settings.choice, thinking = settings.effectiveThinking
+        let choice = settings.choice, thinking = settings.effectiveThinking, usesMemory = settings.usesMemory
         let transcript = conversation.transcript, conversationID = conversation.id
         let attachments = conversation.attachmentPayloads(in: repository.workspace.agentAttachmentLocation(id: conversationID))
         conversation.editor = .live(repository)
@@ -461,7 +573,7 @@ private struct LedgerAgentChatScreen: View {
                                               apiKey: key, sensitiveUnlocked: true, thinking: thinking,
                                               draft: draftRoot, transcript: transcript,
                                               conversationID: conversationID, attachments: attachments,
-                                              onStep: report)
+                                              usesMemory: usesMemory, onStep: report)
         })
         if started, clearsComposer { draft = "" }
     }
@@ -534,6 +646,7 @@ private struct LedgerAgentAttachmentChip: View {
 /// A reply on the page, with the reads behind it folded above.
 private struct LedgerAgentAnswer: View {
     let message: LedgerAgentMessage
+    var onMemory: () -> Void = {}
     let onRecord: () -> Void
     @State private var toolsExpanded = false
 
@@ -546,6 +659,17 @@ private struct LedgerAgentAnswer: View {
             if LedgerAgentReplyText.beancountDraft(in: message.text) != nil {
                 Button("用「记一笔」录入", action: onRecord).buttonStyle(.balanced(.outline))
                     .accessibilityIdentifier("ledger-agent-record")
+            }
+            if message.rememberedMemory {
+                Button(action: onMemory) {
+                    Label("已更新记忆", systemImage: "brain")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                        .frame(minHeight: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("查看和编辑记忆")
+                .accessibilityIdentifier("ledger-agent-memory-updated")
             }
             if let footer { Text(footer).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta) }
         }
@@ -1147,6 +1271,20 @@ struct LedgerAgentSettingsView: View {
                 Text("每个服务商的 Key 分开存放在本机钥匙串，不随账本导出、备份或 Git 同步。调用费用记在你的模型账户上。")
             }
             Section {
+                NavigationLink {
+                    LedgerAgentMemoryView()
+                } label: {
+                    Label("记忆", systemImage: "brain")
+                }
+                .accessibilityIdentifier("ledger-agent-memory")
+                Toggle("使用记忆", isOn: Binding(get: { settings.usesMemory }, set: { settings.setUsesMemory($0) }))
+                    .accessibilityIdentifier("ledger-agent-uses-memory")
+                Toggle("智能建议与回顾", isOn: Binding(get: { settings.assists }, set: { settings.setAssists($0) }))
+                    .accessibilityIdentifier("ledger-agent-assists")
+            } header: { Text("记忆与建议") } footer: {
+                Text("记忆是这本账的 memory.md：你的偏好、常用的账户和分类、常做的事。助手每次回答都会读，你说「记住」或纠正它时会自己更新。只存在本机，不随 Git 同步。智能建议会根据账本和记忆生成「试试」、在输入框里预测下一句、回来时总结对话，每次都是一个不带思考的小请求。")
+            }
+            Section {
                 Toggle("后台保持运行", isOn: Binding(get: { settings.keepsAwake }, set: { settings.setKeepsAwake($0) }))
                     .accessibilityIdentifier("ledger-agent-keep-awake")
             } header: { Text("后台") } footer: {
@@ -1165,6 +1303,7 @@ struct LedgerAgentSettingsView: View {
                 tool(String(localized: "汇总与搜索流水"), "get_ledger_summary · search_transactions")
                 tool(String(localized: "BQL 查询"), "run_bql · validate_bql · get_bql_capabilities")
                 tool(String(localized: "账户"), "get_accounts")
+                if settings.usesMemory { tool(String(localized: "记忆"), "edit_memory · write_memory") }
             }
         }
         .font(.subheadline)
