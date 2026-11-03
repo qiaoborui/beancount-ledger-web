@@ -76,7 +76,10 @@ type turnRequestV1 struct {
 	// Attachments are the files of the conversation, each copied into the
 	// runtime directory by the shell; those sent with this question are new.
 	Attachments []attachmentV1 `json:"attachments,omitempty"`
-	Message     string         `json:"message"`
+	// MemoryPath is the ledger's memory.md, which the system prompt carries
+	// and the memory tools rewrite; empty turns memory off.
+	MemoryPath string `json:"memoryPath,omitempty"`
+	Message    string `json:"message"`
 }
 
 type customEndpointV1 struct {
@@ -158,8 +161,10 @@ type turnResponseV1 struct {
 	Reply            string       `json:"reply,omitempty"`
 	ToolCalls        []toolCallV1 `json:"toolCalls"`
 	// Edited reports that a file tool changed the scratch copy this turn.
-	Edited bool   `json:"edited,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Edited bool `json:"edited,omitempty"`
+	// MemoryUpdated reports that the turn rewrote memory.md.
+	MemoryUpdated bool   `json:"memoryUpdated,omitempty"`
+	Error         string `json:"error,omitempty"`
 	// Transcript is everything the model saw and said, tool calls, results
 	// and reasoning included, for the shell to send with the next question.
 	// Only an answered turn returns one; after a failure the shell keeps the
@@ -227,16 +232,17 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 	defer cancel()
 	network := newTurnHTTP()
 	defer network.close()
-	reply, transcript, calls, edited, ask, err := runTurn(ctx, cancel, network, requestJSON)
-	// A failed or cancelled turn may still have edited the scratch copy.
+	reply, transcript, calls, edited, remembered, ask, err := runTurn(ctx, cancel, network, requestJSON)
+	// A failed or cancelled turn may still have edited the scratch copy or
+	// the memory.
 	if errors.Is(ctx.Err(), context.Canceled) {
-		return encode(turnResponseV1{Version: 1, Cancelled: true, ToolCalls: calls, Edited: edited, Error: "cancelled"})
+		return encode(turnResponseV1{Version: 1, Cancelled: true, ToolCalls: calls, Edited: edited, MemoryUpdated: remembered, Error: "cancelled"})
 	}
 	if err != nil {
-		return encode(turnResponseV1{Version: 1, ToolCalls: calls, Edited: edited, Error: turnErrorText(ctx, network, err),
+		return encode(turnResponseV1{Version: 1, ToolCalls: calls, Edited: edited, MemoryUpdated: remembered, Error: turnErrorText(ctx, network, err),
 			ModelUnavailable: errors.Is(err, app.ErrLocalModelUnavailable)})
 	}
-	return encode(turnResponseV1{Version: 1, OK: true, Reply: reply, ToolCalls: calls, Edited: edited, Transcript: transcript, Ask: ask})
+	return encode(turnResponseV1{Version: 1, OK: true, Reply: reply, ToolCalls: calls, Edited: edited, MemoryUpdated: remembered, Transcript: transcript, Ask: ask})
 }
 
 // turnErrorText says why a turn failed in words the user can act on; the
@@ -325,16 +331,19 @@ func ToolCatalogJSON() string {
 	return encode(map[string]any{"version": 1, "tools": tools})
 }
 
-func runTurn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (reply, transcript string, calls []toolCallV1, edited bool, ask *askV1, err error) {
-	reply, transcript, calls, scratch, ask, err := runTurnIn(ctx, cancel, network, requestJSON)
+func runTurn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (reply, transcript string, calls []toolCallV1, edited, remembered bool, ask *askV1, err error) {
+	var memory *memoryFile
+	reply, transcript, calls, scratch, ask, err := runTurnIn(ctx, cancel, network, requestJSON, &memory)
 	if scratch != nil {
 		edited = scratch.wasEdited()
 		scratch.close()
 	}
-	return reply, transcript, calls, edited, ask, err
+	return reply, transcript, calls, edited, memory != nil && memory.wasUpdated(), ask, err
 }
 
-func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (string, string, []toolCallV1, *scratch, *askV1, error) {
+// runTurnIn runs the turn; memory receives the turn's memory file as soon as
+// it is open, so a failed turn still reports a memory it changed.
+func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string, memory **memoryFile) (string, string, []toolCallV1, *scratch, *askV1, error) {
 	calls := []toolCallV1{}
 	var files *scratch
 	decoder := json.NewDecoder(strings.NewReader(requestJSON))
@@ -363,22 +372,9 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	if message == "" || len(message) > maxMessageBytes {
 		return "", "", calls, files, nil, errors.New("message is required and must be at most 12000 bytes")
 	}
-	var model *ai.Model
-	var err error
-	// assumed is set for a model whose abilities nobody describes: a custom
-	// endpoint, or one the provider listed but the catalog does not know.
-	assumed := request.Provider == customProvider
-	if request.Provider == customProvider {
-		if model, err = customModel(request.Model, request.Custom); err != nil {
-			return "", "", calls, files, nil, err
-		}
-	} else if request.Custom != nil {
-		return "", "", calls, files, nil, errors.New("custom is only valid with provider custom")
-	} else if model = resolveModel(request.Provider, request.Model); model == nil {
-		if model = listedModel(request.Provider, request.Model); model == nil {
-			return "", "", calls, files, nil, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
-		}
-		assumed = true
+	model, assumed, err := requestModel(request.Provider, request.Model, request.Custom)
+	if err != nil {
+		return "", "", calls, files, nil, err
 	}
 	thinking, err := thinkingLevel(model, request.Thinking, assumed)
 	if err != nil {
@@ -415,6 +411,17 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		return "", "", calls, files, nil, err
 	}
 	systemPrompt := app.LocalAgentSystemPrompt(files != nil)
+	var remembered *memoryFile
+	if request.MemoryPath != "" {
+		if remembered, err = openMemory(request.MemoryPath); err != nil {
+			return "", "", calls, files, nil, err
+		}
+		*memory = remembered
+		for _, tool := range remembered.tools() {
+			tools = append(tools, tool)
+			allowed[tool.Name()] = true
+		}
+	}
 	if attached != nil {
 		for _, tool := range attached.tools(session) {
 			tools = append(tools, tool)
@@ -427,6 +434,10 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		}
 		systemPrompt += attachmentPrompt
 		message = withAttachmentNote(attached, message)
+	}
+	if remembered != nil {
+		// Last, so the rules and tools before it stay one cacheable prefix.
+		systemPrompt += remembered.prompt()
 	}
 	history, err := priorMessages(request, systemPrompt)
 	if err != nil {
@@ -581,6 +592,26 @@ func finalReply(produced []agent.AgentMessage) (string, error) {
 	default:
 		return "", errors.New("模型这次没有给出文字回答，点重试再问一次。")
 	}
+}
+
+// requestModel resolves the model a request names. assumed is set for a
+// model whose abilities nobody describes: a custom endpoint, or one the
+// provider listed but the catalog does not know.
+func requestModel(provider, id string, custom *customEndpointV1) (*ai.Model, bool, error) {
+	if provider == customProvider {
+		model, err := customModel(id, custom)
+		return model, true, err
+	}
+	if custom != nil {
+		return nil, false, errors.New("custom is only valid with provider custom")
+	}
+	if model := resolveModel(provider, id); model != nil {
+		return model, false, nil
+	}
+	if model := listedModel(provider, id); model != nil {
+		return model, true, nil
+	}
+	return nil, false, fmt.Errorf("unknown model %s/%s", provider, id)
 }
 
 // editableScratch opens the scratch copy named by request. It must be an

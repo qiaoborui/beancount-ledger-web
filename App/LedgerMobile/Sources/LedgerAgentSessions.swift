@@ -9,6 +9,8 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
         var duration: TimeInterval? = nil
         /// Names of the files sent with a question; absent in older saves.
         var attachments: [String]? = nil
+        /// The turn behind an answer changed memory.md; absent when not.
+        var memory: Bool? = nil
         /// The choices a reply asked the user to pick from.
         var ask: LedgerAgentAsk? = nil
         /// The change written to the ledger after a reply.
@@ -25,6 +27,8 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
     var unwrittenChange = false
     /// The files attached to the conversation; absent in older saves.
     var attachments: [LedgerAgentAttachment]? = nil
+    /// The recap at the bottom of the conversation, if one was written.
+    var recap: LedgerAgentRecap? = nil
 
     /// The first question names the conversation.
     var title: String {
@@ -99,6 +103,20 @@ final class LedgerAgentSessions: ObservableObject {
     init() {
         current = LedgerAgentConversation()
         wire(current)
+    }
+
+    /// Questions asked lately, newest first, so suggestions do not repeat
+    /// them.
+    func recentQuestions(limit: Int = 12) -> [String] {
+        var seen = Set<String>()
+        var questions: [String] = []
+        let live = [current, background].compactMap { $0 }.flatMap { $0.messages.filter { $0.role == .user }.map(\.text).reversed() }
+        let stored = saved.flatMap { $0.messages.filter { $0.role == LedgerAgentMessage.Role.user.rawValue }.map(\.text).reversed() }
+        for question in live + stored where seen.insert(question).inserted {
+            questions.append(question)
+            if questions.count == limit { break }
+        }
+        return questions
     }
 
     /// Another conversation is answering, so the one on screen cannot ask.

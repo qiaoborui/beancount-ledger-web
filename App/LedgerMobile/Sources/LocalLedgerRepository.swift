@@ -1185,11 +1185,16 @@ actor LocalLedgerRepository: LedgerRepository {
                       choice: LedgerAgentModelChoice, apiKey: String, sensitiveUnlocked: Bool,
                       thinking: LedgerAgentThinking? = nil, draft: URL? = nil, transcript: String? = nil,
                       conversationID: UUID? = nil, attachments: [LedgerAgentAttachment.Payload] = [],
-                      runner: LedgerAgentRunner = .native,
+                      usesMemory: Bool = false, runner: LedgerAgentRunner = .native,
                       onStep: LedgerAgentSteps.Handler? = nil) async throws -> LedgerAgentTurnResponse {
         if draft != nil { LedgerAgentChecker.install() }
         let engine = engine, entrypoint = descriptor.entrypoint
         let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
+        // A memory that cannot be prepared costs the turn its memory, not the turn.
+        let memoryPath: String?
+        if usesMemory { memoryPath = try? await workspace.prepareAgentMemory().path } else { memoryPath = nil }
+        let memoryWorkspace = workspace
+        defer { if memoryPath != nil { Task { await memoryWorkspace.protectAgentMemory() } } }
         return try await workspace.withCurrentSnapshot { _, root in
             let model = LocalLedgerEngineRequest(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
                 entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
@@ -1206,7 +1211,8 @@ actor LocalLedgerRepository: LedgerRepository {
                     history: history, message: message,
                     scratchRoot: draft?.path, transcript: transcript,
                     conversationId: conversationID?.uuidString,
-                    attachments: attachments.isEmpty ? nil : attachments)
+                    attachments: attachments.isEmpty ? nil : attachments,
+                    memoryPath: memoryPath)
                 let encoded = try JSONEncoder().encode(request)
                 if let onStep {
                     onStep(.startingLoop)
@@ -1223,6 +1229,54 @@ actor LocalLedgerRepository: LedgerRepository {
             }
             throw LedgerAgentError.failed(String(localized: "账本模型暂时不可用，请稍后重试"))
         }
+    }
+
+    /// Questions to suggest before anything is asked, drawn from this and
+    /// last month, the latest transactions, memory.md and recent questions.
+    func agentStarterSuggestions(choice: LedgerAgentModelChoice, apiKey: String, recent: [String], usesMemory: Bool,
+                                 count: Int = 4, assistant: LedgerAgentAssistant = .native) async throws -> [String] {
+        let engine = engine, entrypoint = descriptor.entrypoint
+        let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
+        let memoryPath = usesMemory ? workspace.agentMemoryLocation.path : nil
+        return try await workspace.withCurrentSnapshot { _, root in
+            let model = LocalLedgerEngineRequest(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+                entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
+            let handle = try await engine.committedModelHandle(for: model, replacing: nil)
+            let request = LedgerAgentAssistRequest(workspaceRoot: root.path, runtimeRoot: runtimeRoot, entrypoint: entrypoint,
+                modelHandle: handle, provider: choice.provider, model: choice.model, apiKey: apiKey,
+                custom: choice.isCustom ? choice.custom : nil, memoryPath: memoryPath,
+                recent: recent.isEmpty ? nil : recent, count: count)
+            let data = try await assistant.suggest(try JSONEncoder().encode(request))
+            return try LedgerAgentAssistant.decode(data).suggestions ?? []
+        }
+    }
+
+    /// The likely next questions after the last answer, most likely first.
+    func agentNextSuggestions(history: [LedgerAgentTurnRequest.HistoryEntry], choice: LedgerAgentModelChoice, apiKey: String,
+                              usesMemory: Bool, assistant: LedgerAgentAssistant = .native) async throws -> [String] {
+        let request = LedgerAgentAssistRequest(provider: choice.provider, model: choice.model, apiKey: apiKey,
+            custom: choice.isCustom ? choice.custom : nil,
+            memoryPath: usesMemory ? workspace.agentMemoryLocation.path : nil, history: history)
+        let data = try await assistant.suggest(try JSONEncoder().encode(request))
+        return try LedgerAgentAssistant.decode(data).suggestions ?? []
+    }
+
+    /// A short recap of a conversation, one point per line.
+    func agentRecap(history: [LedgerAgentTurnRequest.HistoryEntry], choice: LedgerAgentModelChoice, apiKey: String,
+                    assistant: LedgerAgentAssistant = .native) async throws -> String {
+        let request = LedgerAgentAssistRequest(provider: choice.provider, model: choice.model, apiKey: apiKey,
+            custom: choice.isCustom ? choice.custom : nil, history: history)
+        let data = try await assistant.recap(try JSONEncoder().encode(request))
+        guard let recap = try LedgerAgentAssistant.decode(data).recap, !recap.isEmpty else {
+            throw LedgerAgentError.failed(String(localized: "模型没有写出回顾"))
+        }
+        return recap
+    }
+
+    /// What decides whether saved starter suggestions are still current.
+    func agentStarterState() async -> (revisionID: String?, memoryDigest: Int) {
+        let revision = try? await workspace.currentRevision()?.id.uuidString
+        return (revision, LedgerAgentStarterCache.digest(await workspace.agentMemory()))
     }
 
     /// A private copy of the current ledger for one Agent conversation.
