@@ -34,6 +34,7 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         case "delete_file": String(localized: "删除文件")
         case "grep_files": String(localized: "搜索文件")
         case "draft_changes": String(localized: "查看草稿改动")
+        case "ask_user": String(localized: "向你提问")
         default: name
         }
         if name == "get_ledger_summary", let start = argument("start"), let end = argument("end") {
@@ -75,6 +76,32 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
     }
 }
 
+/// A question the model put to the user with `ask_user`, shown as a card of
+/// choices under its reply. The pick is sent as the next question.
+struct LedgerAgentAsk: Codable, Equatable, Sendable {
+    let question: String
+    let options: [String]
+    var multiple: Bool? = nil
+
+    var allowsMultiple: Bool { multiple == true }
+
+    /// The question sent for the picked options, in the card's order.
+    func answer(_ picked: Set<String>) -> String {
+        options.filter(picked.contains).joined(separator: "、")
+    }
+}
+
+/// A change this conversation wrote to the ledger: the generation it was
+/// written on (`parent`) and the one it made (`revision`), so it can be
+/// undone later by reversing exactly that commit.
+struct LedgerAgentWriteRecord: Codable, Equatable, Sendable {
+    let parent: UUID
+    let revision: UUID
+    let files: [String]
+    let writtenAt: Date
+    var undoneAt: Date? = nil
+}
+
 /// One visible message. Tool reads hang off the assistant reply they led to.
 struct LedgerAgentMessage: Identifiable, Equatable, Sendable {
     enum Role: String, Sendable { case user, assistant }
@@ -85,6 +112,10 @@ struct LedgerAgentMessage: Identifiable, Equatable, Sendable {
     var duration: TimeInterval? = nil
     /// Names of the files sent with a question.
     var attachments: [String] = []
+    /// The choices the reply asks the user to pick from.
+    var ask: LedgerAgentAsk? = nil
+    /// The change written to the ledger after this reply.
+    var write: LedgerAgentWriteRecord? = nil
 }
 
 /// The provider and model a turn uses. The key travels separately.
@@ -312,13 +343,17 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
     /// The whole conversation as the model saw it, for the next turn. Only
     /// an answered turn has one.
     var transcript: String? = nil
+    /// Choices the model asked the user to pick from; the reply repeats the
+    /// question.
+    var ask: LedgerAgentAsk? = nil
 
-    private enum CodingKeys: String, CodingKey { case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited, transcript }
+    private enum CodingKeys: String, CodingKey { case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited, transcript, ask }
     init(ok: Bool, reply: String? = nil, toolCalls: [LedgerAgentToolCall] = [], error: String? = nil,
-         cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false, transcript: String? = nil) {
+         cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false, transcript: String? = nil,
+         ask: LedgerAgentAsk? = nil) {
         self.ok = ok; self.reply = reply; self.toolCalls = toolCalls; self.error = error
         self.cancelled = cancelled; self.modelUnavailable = modelUnavailable; self.edited = edited
-        self.transcript = transcript
+        self.transcript = transcript; self.ask = ask
     }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -330,6 +365,8 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
         modelUnavailable = try container.decodeIfPresent(Bool.self, forKey: .modelUnavailable)
         edited = try container.decodeIfPresent(Bool.self, forKey: .edited) ?? false
         transcript = try container.decodeIfPresent(String.self, forKey: .transcript)
+        // A malformed card is dropped; the reply still carries the question.
+        ask = try? container.decodeIfPresent(LedgerAgentAsk.self, forKey: .ask)
     }
 }
 
@@ -657,6 +694,15 @@ struct LedgerAgentEditor: Sendable {
     /// ledger's content and are returned, so the model can redo them. The
     /// draft comes back unchanged when the ledger has not moved.
     var rebase: @Sendable (LedgerAgentDraft) async throws -> (LedgerAgentDraft, dropped: [String]) = { ($0, []) }
+    /// The generations a reviewed change was written on and made, once
+    /// `write` committed it; nil when it is not known.
+    var written: @Sendable (LedgerAgentReview) async -> (parent: UUID, revision: UUID)? = { _ in nil }
+    /// Reverses a written change on top of the current ledger, as a new
+    /// validated commit. Throws `.conflict` when later commits changed the
+    /// same lines.
+    var undo: @Sendable (LedgerAgentWriteRecord) async throws -> Void = { _ in
+        throw LedgerAgentEditError.invalid(String(localized: "这个账本不支持撤销"))
+    }
 }
 
 /// The change card under the conversation.
@@ -692,6 +738,15 @@ final class LedgerAgentConversation: ObservableObject {
     @Published private(set) var pending: LedgerAgentPendingEdit?
     /// The last change written from this conversation, until the next turn.
     @Published private(set) var written: LedgerAgentReview?
+    /// The message whose written change is being undone.
+    @Published private(set) var undoing: UUID?
+    /// Why the last undo did not go through, for the message it was asked on.
+    @Published private(set) var undoFailure: UndoFailure?
+
+    struct UndoFailure: Equatable {
+        let message: UUID
+        let text: String
+    }
     /// What the running turn is doing now; nil before its first event.
     @Published private(set) var step: LedgerAgentStep?
     /// Everything the model saw and said so far, tool results included, as
@@ -763,7 +818,7 @@ final class LedgerAgentConversation: ObservableObject {
         messages = saved.messages.compactMap { stored in
             LedgerAgentMessage.Role(rawValue: stored.role).map {
                 LedgerAgentMessage(role: $0, text: stored.text, toolCalls: stored.toolCalls, duration: stored.duration,
-                                   attachments: stored.attachments ?? [])
+                                   attachments: stored.attachments ?? [], ask: stored.ask, write: stored.write)
             }
         }
         attachments = saved.attachments ?? []
@@ -786,7 +841,8 @@ final class LedgerAgentConversation: ObservableObject {
         return LedgerAgentSavedConversation(
             id: id, createdAt: createdAt, updatedAt: date,
             messages: messages.map { .init(role: $0.role.rawValue, text: $0.text, toolCalls: $0.toolCalls, duration: $0.duration,
-                                           attachments: $0.attachments.isEmpty ? nil : $0.attachments) },
+                                           attachments: $0.attachments.isEmpty ? nil : $0.attachments,
+                                           ask: $0.ask, write: $0.write) },
             unwrittenChange: pending?.review != nil || draftUnreviewed,
             attachments: attachments.isEmpty ? nil : attachments)
     }
@@ -985,10 +1041,16 @@ final class LedgerAgentConversation: ObservableObject {
         Task { [weak self] in
             do {
                 let next = try await editor.write(review, draft)
+                let revisions = await editor.written(review)
                 guard let self, self.epoch == epoch else { return await editor.close(next) }
                 self.draft = next
                 self.pending = nil
                 self.written = review
+                if let revisions, let index = self.messages.lastIndex(where: { $0.role == .assistant }) {
+                    self.messages[index].write = LedgerAgentWriteRecord(
+                        parent: revisions.parent, revision: revisions.revision,
+                        files: review.files.map(\.path), writtenAt: Date())
+                }
                 self.note = String(localized: "（系统提示：上一轮的草稿改动已写入账本，草稿与账本现在一致。）")
                 self.onSettled?(self)
             } catch {
@@ -1012,6 +1074,46 @@ final class LedgerAgentConversation: ObservableObject {
         // The next turn waits for the fresh copy instead of making its own.
         reopening = Task { try? await editor.discard(review, draft) }
         onSettled?(self)
+    }
+
+    /// Whether the change written after `message` can be undone now.
+    func canUndo(_ message: LedgerAgentMessage) -> Bool {
+        guard let write = message.write, write.undoneAt == nil else { return false }
+        return undoing == nil && !isRunning && !isWriting
+    }
+
+    /// Reverses the change written after `message` as a new commit on the
+    /// current ledger. The draft follows on the next turn, which rebases it
+    /// onto the ledger, and the model is told what was undone.
+    func undo(_ message: LedgerAgentMessage) {
+        guard canUndo(message), let editor, let record = message.write else { return }
+        undoing = message.id
+        undoFailure = nil
+        let epoch = epoch, id = message.id
+        Task { [weak self] in
+            do {
+                try await editor.undo(record)
+                guard let self, self.epoch == epoch else { return }
+                self.undoing = nil
+                if let index = self.messages.firstIndex(where: { $0.id == id }) {
+                    self.messages[index].write?.undoneAt = Date()
+                }
+                if self.written != nil, self.messages.last(where: { $0.role == .assistant })?.id == id { self.written = nil }
+                let files = record.files.joined(separator: "、")
+                let undone = String(localized: "（系统提示：用户撤销了之前写入账本的一次改动（\(files)），账本已恢复到那次写入之前；之后别处的改动保留。）")
+                self.note = self.note.map { $0 + "\n" + undone } ?? undone
+                self.onSettled?(self)
+            } catch {
+                guard let self, self.epoch == epoch else { return }
+                self.undoing = nil
+                let text: String = switch error as? LedgerAgentEditError {
+                case let .conflict(paths)?:
+                    String(localized: "之后的改动动到了同一处（\(paths.joined(separator: "、"))），没法自动撤销。可以让助手手动改回去。")
+                default: error.localizedDescription
+                }
+                self.undoFailure = UndoFailure(message: id, text: text)
+            }
+        }
     }
 
     private static func hasText(_ reply: String?) -> Bool {
@@ -1071,7 +1173,7 @@ final class LedgerAgentConversation: ObservableObject {
             let reply = Self.hasText(turn.response.reply) ? turn.response.reply ?? ""
                 : String(localized: "改动已经准备好，请在下方查看并确认。")
             messages.append(.init(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
-                                  duration: Date().timeIntervalSince(started)))
+                                  duration: Date().timeIntervalSince(started), ask: turn.response.ask))
             phase = .idle
             resumes = 0
             if let review = pending?.review {
@@ -1410,6 +1512,55 @@ enum LedgerAgentReplyText {
         return trimmed.split(separator: "|", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
+    /// Percent-encodes the query of every `ledger://` link target, so a link
+    /// the model wrote with Chinese, spaces or reserved characters in it
+    /// still parses as a Markdown link. A target that is already encoded is
+    /// decoded first, so nothing is encoded twice.
+    static func encodingLedgerLinks(_ text: String) -> String {
+        guard text.contains("](ledger://") else { return text }
+        var result = ""
+        var rest = Substring(text)
+        while let open = rest.range(of: "](ledger://") {
+            result += String(rest[..<open.lowerBound])
+            result += "]("
+            let target = rest[rest.index(open.lowerBound, offsetBy: 2)...]
+            // The target ends at the parenthesis that closes the link,
+            // counting any the query itself opens.
+            var depth = 0
+            var end = target.endIndex
+            for index in target.indices {
+                if target[index] == "(" { depth += 1 } else if target[index] == ")" {
+                    if depth == 0 { end = index; break }
+                    depth -= 1
+                }
+            }
+            guard end < target.endIndex else {
+                result += String(target)
+                rest = ""
+                break
+            }
+            result += encodedLedgerURL(String(target[..<end]))
+            rest = target[end...]
+        }
+        return result + String(rest)
+    }
+
+    private static func encodedLedgerURL(_ raw: String) -> String {
+        guard let question = raw.firstIndex(of: "?") else { return raw }
+        let head = raw[..<question]
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&=+#()[]")
+        let pairs = raw[raw.index(after: question)...].split(separator: "&", omittingEmptySubsequences: false).map { pair -> String in
+            let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            let encode = { (part: Substring) -> String in
+                let plain = String(part).removingPercentEncoding ?? String(part)
+                return plain.addingPercentEncoding(withAllowedCharacters: allowed) ?? plain
+            }
+            return parts.count == 2 ? encode(parts[0]) + "=" + encode(parts[1]) : encode(parts[0])
+        }
+        return String(head) + "?" + pairs.joined(separator: "&")
+    }
+
     /// The first fenced block that opens with a dated transaction header.
     static func beancountDraft(in text: String) -> String? {
         for case let .code(code) in segments(text) {
@@ -1634,7 +1785,9 @@ extension LedgerAgentEditor {
             write: { try await repository.writeAgentDraft($0, draft: $1) },
             discard: { try await repository.discardAgentDraft($0, draft: $1) },
             close: { await repository.closeAgentDraft($0) },
-            rebase: { try await repository.rebaseAgentDraft($0) })
+            rebase: { try await repository.rebaseAgentDraft($0) },
+            written: { await repository.agentWrite(for: $0) },
+            undo: { try await repository.undoAgentWrite($0) })
     }
 }
 

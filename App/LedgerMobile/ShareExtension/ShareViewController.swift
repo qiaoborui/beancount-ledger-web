@@ -110,7 +110,8 @@ final class ShareViewController: UIViewController {
         progress.stopAnimating()
         progress.isHidden = true
         statusLabel.text = saved > 0 ? String(localized: "已保存 \(saved) 个账单文件") : String(localized: "未能保存账单")
-        detailLabel.text = [saved > 0 ? String(localized: "请打开 Ledger，在「导入」的待导入收件箱中核对并提交。") : nil, failure]
+        detailLabel.text = [saved > 0 ? String(localized: "请打开 Ledger，在「导入」的待导入收件箱中核对并提交。") : nil,
+                            saved > 0 ? String(localized: "也可以在账本助手里点 ＋，从待导入收件箱选它来对账。") : nil, failure]
             .compactMap { $0 }.joined(separator: "\n\n")
         doneButton.isHidden = false
     }

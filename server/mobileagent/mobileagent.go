@@ -165,6 +165,9 @@ type turnResponseV1 struct {
 	// Only an answered turn returns one; after a failure the shell keeps the
 	// previous transcript.
 	Transcript string `json:"transcript,omitempty"`
+	// Ask is a question the model put to the user with ask_user, to show as
+	// a card of choices; the reply then repeats its question.
+	Ask *askV1 `json:"ask,omitempty"`
 }
 
 // streamFn is replaced by tests with a deterministic provider.
@@ -224,7 +227,7 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 	defer cancel()
 	network := newTurnHTTP()
 	defer network.close()
-	reply, transcript, calls, edited, err := runTurn(ctx, cancel, network, requestJSON)
+	reply, transcript, calls, edited, ask, err := runTurn(ctx, cancel, network, requestJSON)
 	// A failed or cancelled turn may still have edited the scratch copy.
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return encode(turnResponseV1{Version: 1, Cancelled: true, ToolCalls: calls, Edited: edited, Error: "cancelled"})
@@ -233,7 +236,7 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 		return encode(turnResponseV1{Version: 1, ToolCalls: calls, Edited: edited, Error: turnErrorText(ctx, network, err),
 			ModelUnavailable: errors.Is(err, app.ErrLocalModelUnavailable)})
 	}
-	return encode(turnResponseV1{Version: 1, OK: true, Reply: reply, ToolCalls: calls, Edited: edited, Transcript: transcript})
+	return encode(turnResponseV1{Version: 1, OK: true, Reply: reply, ToolCalls: calls, Edited: edited, Transcript: transcript, Ask: ask})
 }
 
 // turnErrorText says why a turn failed in words the user can act on; the
@@ -322,43 +325,43 @@ func ToolCatalogJSON() string {
 	return encode(map[string]any{"version": 1, "tools": tools})
 }
 
-func runTurn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (reply, transcript string, calls []toolCallV1, edited bool, err error) {
-	reply, transcript, calls, scratch, err := runTurnIn(ctx, cancel, network, requestJSON)
+func runTurn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (reply, transcript string, calls []toolCallV1, edited bool, ask *askV1, err error) {
+	reply, transcript, calls, scratch, ask, err := runTurnIn(ctx, cancel, network, requestJSON)
 	if scratch != nil {
 		edited = scratch.wasEdited()
 		scratch.close()
 	}
-	return reply, transcript, calls, edited, err
+	return reply, transcript, calls, edited, ask, err
 }
 
-func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (string, string, []toolCallV1, *scratch, error) {
+func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (string, string, []toolCallV1, *scratch, *askV1, error) {
 	calls := []toolCallV1{}
 	var files *scratch
 	decoder := json.NewDecoder(strings.NewReader(requestJSON))
 	decoder.DisallowUnknownFields()
 	var request turnRequestV1
 	if err := decoder.Decode(&request); err != nil {
-		return "", "", calls, files, fmt.Errorf("invalid Agent request: %w", err)
+		return "", "", calls, files, nil, fmt.Errorf("invalid Agent request: %w", err)
 	}
 	if request.Version != 1 {
-		return "", "", calls, files, errors.New("supported Agent request version is 1")
+		return "", "", calls, files, nil, errors.New("supported Agent request version is 1")
 	}
 	captureCrashes(request.RuntimeRoot)
 	if request.TurnID != "" {
 		if _, loaded := runningTurns.LoadOrStore(request.TurnID, cancel); loaded {
-			return "", "", calls, files, errors.New("turnId is already running")
+			return "", "", calls, files, nil, errors.New("turnId is already running")
 		}
 		defer runningTurns.Delete(request.TurnID)
 		if _, cancelled := earlyCancels.LoadAndDelete(request.TurnID); cancelled {
 			cancel()
-			return "", "", calls, files, context.Canceled
+			return "", "", calls, files, nil, context.Canceled
 		}
 	}
 	feed := openEventFeed(request.TurnID)
 	defer feed.close()
 	message := strings.TrimSpace(request.Message)
 	if message == "" || len(message) > maxMessageBytes {
-		return "", "", calls, files, errors.New("message is required and must be at most 12000 bytes")
+		return "", "", calls, files, nil, errors.New("message is required and must be at most 12000 bytes")
 	}
 	var model *ai.Model
 	var err error
@@ -367,23 +370,23 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	assumed := request.Provider == customProvider
 	if request.Provider == customProvider {
 		if model, err = customModel(request.Model, request.Custom); err != nil {
-			return "", "", calls, files, err
+			return "", "", calls, files, nil, err
 		}
 	} else if request.Custom != nil {
-		return "", "", calls, files, errors.New("custom is only valid with provider custom")
+		return "", "", calls, files, nil, errors.New("custom is only valid with provider custom")
 	} else if model = resolveModel(request.Provider, request.Model); model == nil {
 		if model = listedModel(request.Provider, request.Model); model == nil {
-			return "", "", calls, files, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
+			return "", "", calls, files, nil, fmt.Errorf("unknown model %s/%s", request.Provider, request.Model)
 		}
 		assumed = true
 	}
 	thinking, err := thinkingLevel(model, request.Thinking, assumed)
 	if err != nil {
-		return "", "", calls, files, err
+		return "", "", calls, files, nil, err
 	}
 	session, err := app.OpenLocalAgentSession(request.LocalRequest, request.SensitiveUnlocked)
 	if err != nil {
-		return "", "", calls, files, err
+		return "", "", calls, files, nil, err
 	}
 	specs := app.LocalAgentToolSpecs()
 	tools := make([]agent.AgentTool, 0, len(specs)+12)
@@ -392,10 +395,14 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		tools = append(tools, ledgerTool{spec: spec, session: session})
 		allowed[spec.Name] = true
 	}
+	// ask_user is always offered: a question needs no ledger access.
+	asking := &askTool{}
+	tools = append(tools, asking)
+	allowed[asking.Name()] = true
 	turns := maxTurns
 	if request.ScratchRoot != "" {
 		if files, err = editableScratch(request); err != nil {
-			return "", "", calls, nil, err
+			return "", "", calls, nil, nil, err
 		}
 		for _, tool := range files.tools() {
 			tools = append(tools, tool)
@@ -405,7 +412,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	}
 	attached, err := openAttachments(request.Attachments, request.RuntimeRoot, supportsImages(model) && !assumed)
 	if err != nil {
-		return "", "", calls, files, err
+		return "", "", calls, files, nil, err
 	}
 	systemPrompt := app.LocalAgentSystemPrompt(files != nil)
 	if attached != nil {
@@ -423,7 +430,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	}
 	history, err := priorMessages(request, systemPrompt)
 	if err != nil {
-		return "", "", calls, files, err
+		return "", "", calls, files, nil, err
 	}
 	key := request.APIKey
 	var argumentsMu sync.Mutex
@@ -467,7 +474,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		}},
 	})
 	if err != nil {
-		return "", "", calls, files, err
+		return "", "", calls, files, nil, err
 	}
 	if request.ConversationID != "" {
 		runner.SetSessionID(request.ConversationID)
@@ -507,7 +514,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	if errors.Is(err, agent.ErrMaxTurnsReached) && ctx.Err() == nil {
 		toolsSpent.Store(true)
 		nudge = nudgeToolBudget
-	} else if err == nil && needsAnswer(produced) {
+	} else if err == nil && needsAnswer(produced) && !endsOnAsk(produced) {
 		nudge = nudgeEmptyReply
 	}
 	if nudge != "" {
@@ -515,20 +522,26 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		collect(produced)
 	}
 	if err != nil {
-		return "", "", calls, files, err
+		return "", "", calls, files, nil, err
 	}
-	reply, err := finalReply(produced)
-	if err != nil {
-		return "", "", calls, files, err
+	ask := asking.question()
+	messages := runner.Messages()
+	var reply string
+	if ask != nil && endsOnAsk(messages) {
+		// The turn ended on the question: it is the reply.
+		reply = ask.Question
+		messages = closeAsk(messages, ask)
+	} else if reply, err = finalReply(produced); err != nil {
+		return "", "", calls, files, nil, err
 	}
 	// The whole transcript goes back to the shell, which sends it with the
 	// next question unchanged: the provider then sees the same prefix every
 	// turn and serves it from its prompt cache.
-	transcript, err := encodeTranscript(runner.Messages())
+	transcript, err := encodeTranscript(messages)
 	if err != nil {
-		return reply, "", calls, files, nil
+		return reply, "", calls, files, ask, nil
 	}
-	return reply, transcript, calls, files, nil
+	return reply, transcript, calls, files, ask, nil
 }
 
 // lastAssistant is the final model message of a run, if any.

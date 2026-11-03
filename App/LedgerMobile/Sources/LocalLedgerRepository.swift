@@ -28,6 +28,9 @@ actor LocalLedgerRepository: LedgerRepository {
         let result: LocalLedgerResponse?
     }
     private var preparedOperations: [UUID: PreparedOperation] = [:]
+    /// Agent changes `writeAgentDraft` committed, by review id: the
+    /// generation each was written on and the one it made. Taken once.
+    private var agentWrites: [UUID: (parent: UUID, revision: UUID)] = [:]
 
     init(descriptor: LocalLedgerDescriptor, workspace: LocalLedgerWorkspace,
          engine: any LocalLedgerEngine = EmbeddedLocalLedgerEngine.shared,
@@ -1302,12 +1305,65 @@ actor LocalLedgerRepository: LedgerRepository {
                 operation = nil
                 continue
             }
+            if let written = presentedRevisionID {
+                if agentWrites.count >= 32 { agentWrites.removeAll() }
+                agentWrites[review.id] = (prepared.preview.files.revisionID, written)
+            }
             guard prepared.preview.files.revisionID == draft.baseRevisionID else {
                 // Merged onto commits the draft does not have: copy the result.
                 return try await refreshAgentDraft(draft)
             }
             guard let revision = presentedRevisionID else { throw LocalLedgerError.previewRequired }
             return LedgerAgentDraft(id: draft.id, root: draft.root, baseRevisionID: revision)
+        }
+        throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+    }
+
+    /// The generations a change `writeAgentDraft` committed was written on
+    /// and made, for undoing it later.
+    func agentWrite(for review: LedgerAgentReview) -> (parent: UUID, revision: UUID)? {
+        agentWrites.removeValue(forKey: review.id)
+    }
+
+    /// Reverses one written Agent change on top of the current ledger, as a
+    /// new validated commit: the change from `parent` to `revision` is
+    /// replayed backwards with the same three-way merge a draft uses, so
+    /// commits made since are kept and only edits to the same lines refuse.
+    /// Nothing is committed when the ledger already reads as before.
+    func undoAgentWrite(_ record: LedgerAgentWriteRecord) async throws {
+        let before = try await workspace.committedTree(revisionID: record.parent)
+        let after = try await workspace.committedTree(revisionID: record.revision)
+        let validator = validator, entrypoint = descriptor.entrypoint
+        for attempt in 0..<3 {
+            guard let current = try await workspace.currentRevision()?.id else { throw LocalLedgerError.previewRequired }
+            let files: LocalLedgerWorkspace.PreparedFiles
+            do {
+                files = try await workspace.prepare(expectedRevisionID: current, mutateStage: { stage in
+                    let plan = try LedgerAgentMerge.plan(base: after, draft: before, current: stage)
+                    guard plan.conflicts.isEmpty else { throw LedgerAgentEditError.conflict(plan.conflicts) }
+                    try LedgerAgentMerge.apply(plan.changes, to: stage)
+                }, validator: { root in try await validator(root, entrypoint) })
+            } catch LocalLedgerWorkspace.WorkspaceError.staleRevision where attempt < 2 {
+                continue
+            } catch let error as LedgerAgentEditError {
+                throw error
+            } catch let error as LocalLedgerWorkspace.WorkspaceError {
+                throw error
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw LedgerAgentEditError.invalid(error.localizedDescription)
+            }
+            guard !files.files.isEmpty else { return }
+            let preview = PreparedBookkeepingChange(id: UUID(), ledgerID: descriptor.id, draftRevision: UUID(),
+                files: files, createdAt: Date())
+            preparedOperations[preview.id] = .init(preview: preview, importID: nil, result: nil)
+            do {
+                _ = try await commitPrepared(preview)
+                return
+            } catch LocalLedgerWorkspace.WorkspaceError.staleRevision where attempt < 2 {
+                continue
+            }
         }
         throw LocalLedgerWorkspace.WorkspaceError.staleRevision
     }

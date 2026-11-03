@@ -57,6 +57,18 @@ final class LedgerExternalRouteTests: XCTestCase {
         XCTAssertNil(try parse("ledger://accounts?account=A&currency=" + String(repeating: "C", count: 33)))
     }
 
+    func testAgentQuestionRoute() throws {
+        var url = URLComponents()
+        url.scheme = "ledger"
+        url.host = "agent"
+        url.queryItems = [URLQueryItem(name: "q", value: "这个月花了多少 & 主要花在哪？")]
+        XCTAssertEqual(LedgerExternalRoute.parse(try XCTUnwrap(url.url)), .agent("这个月花了多少 & 主要花在哪？"))
+        XCTAssertEqual(LedgerExternalRoute.agent("x").destination, .agent)
+        for raw in ["ledger://agent?q=", "ledger://agent?q=%20", "ledger://agent?other=1", "ledger://agent?q=a&q=b", "ledger://agent?q=a&x=1"] {
+            XCTAssertNil(try parse(raw), raw)
+        }
+    }
+
     func testValidatesCalendarDayWithoutNormalizingInvalidDates() throws {
         XCTAssertEqual(try parse("ledger://transactions?date=2028-02-29"), .transactions("2028-02-29"))
         XCTAssertEqual(try parse("ledger://transactions?date=2026-12-31"), .transactions("2026-12-31"))

@@ -70,6 +70,12 @@ func LocalAgentSystemPrompt(canEdit bool) string {
 {"type":"bar","title":"近 6 个月餐饮支出","unit":"元","labels":["5月","6月"],"series":[{"name":"餐厅","values":[1820.5,1640]},{"name":"买菜","values":[171,420]}]}
 ` + "```" + `
    type 只能是 bar（柱状，多个系列默认堆叠，"stacked":false 改为并排）、line（折线）、pie（饼图，只能一个系列，值不能为负）。labels 不重复、最多 60 个；series 最多 8 个，每个的 values 与 labels 一一对应，用数字不带单位。代码块里只写一个 JSON 对象。图下面用一两句话说明结论，不要再重复整张表。没有写出 chart 代码块，就不能说「上面的图」或「已画出」。
+9. 需要用户做决定才能继续时（分类拿不准、对账时两边金额不一致要保留哪边、几种改法选哪种），调用 ask_user 展示选项卡，不要在回复里用文字列选项反问。调用后这一轮立即结束；用户的选择会作为下一条消息发来，收到后接着做。能从账本推断的不要问，一次只问一个问题。
+10. 回答里引用账本时给出可点开的链接，让用户核对来源（链接只能是下面三种，查询参数做 URL 编码，空格写 %20）：
+   - 具体交易：[10-05 午饭 25 元](ledger://transactions?date=2026-10-05)，打开当天的流水；
+   - 账户：[Expenses:Food](ledger://accounts?account=Expenses:Food)；
+   - 基于 search_transactions 的结论，在末尾附 [查看这些流水](ledger://search?q=查询)，q 用你调用 search_transactions 时的 query 原文。
+   只链接工具结果里真实出现过的日期、账户和查询；汇总数字本身不加链接，数字必须来自本轮或之前的工具结果。
 
 当前日期：` + time.Now().Format("2006-01-02") + "。"
 }
