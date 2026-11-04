@@ -64,7 +64,7 @@ struct OverviewView: View {
                 Spacer(minLength: 0)
                 Text(periodShortLabel).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
             }.padding(.bottom, 10)
-            amount(abs(net), currency: currency, prefix: net >= 0 ? "+" : "−", size: 30, weight: .medium,
+            amount(abs(net), currency: currency, prefix: net < 0 ? "−" : "", size: 30, weight: .medium,
                    color: net >= 0 ? BalancedPalette.income : BalancedPalette.expense, currencySymbol: true)
                 .lineLimit(1).minimumScaleFactor(0.45)
             Text(String(localized: "留存率") + " " + rateText)
@@ -77,9 +77,9 @@ struct OverviewView: View {
                 }
             }.frame(height: 6).padding(.top, 16).padding(.bottom, 12).accessibilityHidden(true)
             HStack {
-                legend(String(localized: "留存"), value: net, color: BalancedPalette.ink, currency: currency)
+                legend(String(localized: "留存"), color: BalancedPalette.ink)
                 Spacer(minLength: 16)
-                legend(String(localized: "支出"), value: ledger.summary.expense, color: BalancedPalette.expense, currency: currency)
+                legend(String(localized: "支出"), color: BalancedPalette.expense)
             }
         }
         .padding(EdgeInsets(top: 18, leading: 20, bottom: 22, trailing: 20))
@@ -90,8 +90,8 @@ struct OverviewView: View {
         let currency = ledger.summary.currency
         // The net total is the hero at the top of the page; this block only itemises it.
         return settle(title: String(localized: "本期收支结算"), aside: periodShortLabel) {
-            settleRow(String(localized: "收入"), amount(ledger.summary.income, currency: currency, prefix: "+"))
-            settleRow(String(localized: "支出"), amount(ledger.summary.expense, currency: currency, prefix: "−"))
+            settleRow(String(localized: "收入"), amount(ledger.summary.income, currency: currency))
+            settleRow(String(localized: "支出"), amount(ledger.summary.expense, currency: currency))
         } total: {
             EmptyView()
         }
@@ -108,7 +108,7 @@ struct OverviewView: View {
             rows()
             total()
         }
-        .padding(EdgeInsets(top: 18, leading: 20, bottom: 20, trailing: 20))
+        .padding(EdgeInsets(top: 18, leading: 20, bottom: 0, trailing: 20))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -126,7 +126,7 @@ struct OverviewView: View {
     }
 
     /// Balanced amount: proportional Plex with tabular figures. The currency symbol
-    /// appears only on a total, at 0.62em in ink-3; the sign stays full size.
+    /// appears only on a total, at 0.6em in the same face and colour, on the baseline.
     private func amount(_ minorUnits: Int, currency: String, prefix: String = "", size: CGFloat = 15, weight: BalancedWeight = .text,
                         color: Color = BalancedPalette.ink, currencySymbol: Bool = false) -> Text {
         let font = Font.custom(weight.sansPostscriptName, size: size, relativeTo: size > 20 ? .title : .body)
@@ -135,34 +135,33 @@ struct OverviewView: View {
         var text = Text(prefix).font(font).foregroundColor(color)
         if currencySymbol {
             text = text + Text(MoneyText.currencySymbol(for: currency))
-                .font(.custom(BalancedWeight.text.sansPostscriptName, size: size * 0.62, relativeTo: .body)).foregroundColor(BalancedPalette.meta)
+                .font(.custom(weight.sansPostscriptName, size: size * 0.6, relativeTo: .body)).foregroundColor(color)
         }
         text = text + Text(number).font(font).foregroundColor(color)
         return (size > 20 ? text.tracking(-0.025 * size) : text).monospacedDigit()
     }
 
-    private func legend(_ title: String, value: Int, color: Color, currency: String) -> some View {
+    private func legend(_ title: String, color: Color) -> some View {
         HStack(spacing: 6) {
             Circle().fill(color).frame(width: 8, height: 8)
             Text(title).balancedFont(size: 13).foregroundStyle(BalancedPalette.secondary)
-            amount(value, currency: currency, size: 13, weight: .medium, color: BalancedPalette.secondary)
         }
     }
 
     // MARK: Sections
 
-    private func sectionHead(_ title: String, @ViewBuilder aside: () -> some View) -> some View {
+    private func sectionHead(_ title: String, top: CGFloat = 26, @ViewBuilder aside: () -> some View) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             Text(title).balancedFont(size: 15, weight: .medium).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
             Spacer(minLength: 0)
             aside()
-        }.padding(EdgeInsets(top: 26, leading: 20, bottom: 10, trailing: 20))
+        }.padding(EdgeInsets(top: top, leading: 20, bottom: 10, trailing: 20))
     }
 
     private func spending(_ categories: [OverviewCategorySpending], currency: String) -> some View {
         let total = categories.reduce(0) { $0 + $1.totalMinorUnits }
         return VStack(alignment: .leading, spacing: 0) {
-            sectionHead(String(localized: "支出分类")) {
+            sectionHead(String(localized: "支出分类"), top: 18) {
                 if !categories.isEmpty {
                     HStack(spacing: 4) {
                         amount(total, currency: currency, size: 12.5, weight: .regular, color: BalancedPalette.meta)

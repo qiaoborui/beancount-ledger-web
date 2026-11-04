@@ -101,13 +101,13 @@ struct AccountsView: View {
                     .listRowSeparator(.hidden)
                 if history.count >= 2 {
                     AccountsNetWorthChart(points: trendRange.filter(history))
-                        .frame(height: 180)
+                        .frame(height: 160)
                         .frame(maxWidth: .infinity)
                         .listRowInsets(EdgeInsets())
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                     trendRangePicker
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 }
@@ -137,7 +137,7 @@ struct AccountsView: View {
                     }
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 4)
+                .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 0, trailing: 0))
             }
             .listRowBackground(Color.clear).listRowSeparator(.hidden)
 
@@ -158,7 +158,7 @@ struct AccountsView: View {
         .scrollContentBackground(.hidden)
         .background(BalancedPalette.page)
         .listStyle(.plain)
-        .listSectionSpacing(8)
+        .listSectionSpacing(0)
         .tint(TerminalPalette.accent)
         .accessibilityIdentifier("accounts-list")
         .terminalPageChrome(String(localized: "账户"), isRoot: isRoot, showsTimeRange: true, actions: AnyView(
@@ -1302,11 +1302,36 @@ private struct AccountRowView: View {
         return (AccountGroupSymbol.symbol(for: row.group), AccountGroupSymbol.color(for: row.group))
     }
 
-    /// One short secondary line: the account path without its root, e.g. "Bank:CMB".
-    private var subtitle: String {
-        let parts = row.account.split(separator: ":")
-        return parts.count > 1 ? parts.dropFirst().joined(separator: ":") : row.account
+    /// A short Chinese account type, guessed from the same path/label/group
+    /// signals the icon uses. `nil` hides the subtitle line.
+    private var accountType: String? {
+        let act = row.account.lowercased(), label = row.label
+        func has(_ keys: String...) -> Bool { keys.contains { act.contains($0) } }
+        if has("huabei", "baitiao") || label.contains("花呗") || label.contains("白条") { return String(localized: "信用支付") }
+        if has("credit") || label.contains("信用卡") { return String(localized: "信用卡") }
+        if has("alipay", "wechat", "wx", "wallet", "paypal") || label.contains("支付宝") || label.contains("微信") || label.contains("钱包") {
+            return String(localized: "电子钱包")
+        }
+        if has("loan", "mortgage") || label.contains("贷款") || label.contains("房贷") { return String(localized: "贷款") }
+        if has("fund") || label.contains("基金") { return String(localized: "基金") }
+        if has("stock", "broker") || label.contains("股票") || label.contains("证券") { return String(localized: "股票") }
+        if has("bank", "checking", "saving", "debit") || label.contains("银行") || label.contains("储蓄") { return String(localized: "储蓄卡") }
+        if has("cash") || label.contains("现金") { return String(localized: "现金") }
+        if has("invest") || label.contains("理财") || label.contains("投资") { return String(localized: "理财") }
+        if has("receivable") || label.contains("应收") || label.contains("借出") { return String(localized: "应收") }
+        switch row.group {
+        case "credit": return String(localized: "信用卡")
+        case "receivable": return String(localized: "应收")
+        case "wealth": return String(localized: "理财")
+        default: return nil
+        }
     }
+
+    /// Icon well: `sunken` in light mode, `rule` in dark (sunken is the card colour there).
+    private static let iconBackground = Color(uiColor: UIColor { traits in
+        // BalancedPalette.rule (dark) / BalancedPalette.sunken (light)
+        traits.userInterfaceStyle == .dark ? UIColor(hex: 0x2B2825) : UIColor(hex: 0xF1EFE9)
+    })
 
     private var balance: Int { row.periodBalancesAvailable ? row.closingValuation : row.valuation }
 
@@ -1316,7 +1341,7 @@ private struct AccountRowView: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(TerminalPalette.accent)
                 .frame(width: 36, height: 36)
-                .background(Circle().fill(BalancedPalette.sunken))
+                .background(Circle().fill(Self.iconBackground))
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -1331,11 +1356,12 @@ private struct AccountRowView: View {
                             .frame(width: 6, height: 6)
                     }
                 }
-                Text(subtitle)
-                    .balancedFont(size: 13)
-                    .foregroundStyle(BalancedPalette.meta)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                if let accountType {
+                    Text(accountType)
+                        .balancedFont(size: 13)
+                        .foregroundStyle(BalancedPalette.meta)
+                        .lineLimit(1)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
