@@ -2241,6 +2241,10 @@ private struct ImportEntryReviewRow: View {
 
     private func importAmountText(_ entry: LedgerImportEntry) -> String {
         let minorUnits = Int((entry.amount * 100).rounded())
-        return MoneyText.format(minorUnits: minorUnits, currency: entry.currency, showsCurrency: false)
+        // Direction comes from the funding posting, as the ledger will record it:
+        // money leaving the funding account is "−", money entering it is "+".
+        let fundingAmount = entry.postings.first { $0.account == entry.fundingAccount }.flatMap { Double($0.amount) } ?? 0
+        let sign = fundingAmount < 0 ? "−" : fundingAmount > 0 ? "+" : ""
+        return sign + MoneyText.format(minorUnits: minorUnits, currency: entry.currency, showsCurrency: false)
     }
 }

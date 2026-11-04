@@ -12,47 +12,53 @@ struct LedgerAgentLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: LedgerAgentActivityAttributes.self) { context in
             let phase = context.state.phase
-            HStack(spacing: 10) {
-                mark(phase)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title(phase))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(LedgerWidgetColors.ink)
-                    Text(context.state.detail)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(LedgerWidgetColors.secondary)
-                        .lineLimit(2)
+            LedgerGlassCard {
+                HStack(spacing: 12) {
+                    mark(phase)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title(phase))
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .foregroundStyle(LedgerGlass.text)
+                            .ledgerGlassTextShadow()
+                        Text(context.state.detail)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(LedgerGlass.secondary)
+                            .ledgerGlassTextShadow()
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 4)
+                    trailing(context)
                 }
-                Spacer(minLength: 4)
-                trailing(context)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .activityBackgroundTint(LedgerWidgetColors.panel)
-            .activitySystemActionForegroundColor(LedgerWidgetColors.cobalt)
+            .activityBackgroundTint(.clear)
+            .activitySystemActionForegroundColor(.white)
             .widgetURL(URL(string: "ledger://agent"))
             .accessibilityElement(children: .combine)
         } dynamicIsland: { context in
             let phase = context.state.phase
             return DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) { mark(phase) }
+                DynamicIslandExpandedRegion(.leading) { LedgerGlassBadge(symbol: symbol(phase), color: color(phase), size: 24, symbolSize: 12) }
                 DynamicIslandExpandedRegion(.trailing) { trailing(context) }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(title(phase)).font(.system(size: 13, weight: .semibold))
+                        Text(title(phase))
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(LedgerGlass.text)
                         Text(context.state.detail)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(LedgerGlass.secondary)
                             .lineLimit(2)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
                 }
             } compactLeading: {
-                Image(systemName: symbol(phase)).foregroundStyle(color(phase))
+                Image(systemName: symbol(phase)).font(.system(size: 13, weight: .semibold)).foregroundStyle(color(phase))
             } compactTrailing: {
                 if phase == .running {
                     Text(context.attributes.startedAt, style: .timer)
-                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                        .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(LedgerGlass.text)
                         .frame(maxWidth: 40)
                 } else {
                     Image(systemName: "checkmark").foregroundStyle(color(phase)).opacity(phase == .answered ? 1 : 0)
@@ -61,7 +67,7 @@ struct LedgerAgentLiveActivity: Widget {
                 Image(systemName: symbol(phase)).foregroundStyle(color(phase))
             }
             .widgetURL(URL(string: "ledger://agent"))
-            .keylineTint(LedgerWidgetColors.cobalt)
+            .keylineTint(color(phase))
         }
     }
 
@@ -69,24 +75,17 @@ struct LedgerAgentLiveActivity: Widget {
     private func trailing(_ context: ActivityViewContext<LedgerAgentActivityAttributes>) -> some View {
         if context.state.phase == .running {
             Text(context.attributes.startedAt, style: .timer)
-                .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                .foregroundStyle(LedgerWidgetColors.secondary)
+                .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(LedgerGlass.secondary)
                 .multilineTextAlignment(.trailing)
                 .frame(maxWidth: 56)
         } else if context.state.steps > 0 {
-            Text("\(context.state.steps) 步")
-                .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                .foregroundStyle(LedgerWidgetColors.secondary)
+            LedgerGlassPill(text: String(localized: "\(context.state.steps) 步"), color: LedgerGlass.secondary)
         }
     }
 
     private func mark(_ phase: Phase) -> some View {
-        Image(systemName: symbol(phase))
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(color(phase))
-            .frame(width: 30, height: 30)
-            .background(color(phase).opacity(0.11))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        LedgerGlassBadge(symbol: symbol(phase), color: color(phase))
     }
 
     private func title(_ phase: Phase) -> String {
@@ -111,10 +110,10 @@ struct LedgerAgentLiveActivity: Widget {
 
     private func color(_ phase: Phase) -> Color {
         switch phase {
-        case .running: LedgerWidgetColors.cobalt
-        case .answered: LedgerWidgetColors.success
-        case .review, .interrupted: LedgerWidgetColors.gold
-        case .failed: LedgerWidgetColors.expense
+        case .running: LedgerGlass.gold
+        case .answered: LedgerGlass.success
+        case .review, .interrupted: LedgerGlass.warning
+        case .failed: LedgerGlass.failure
         }
     }
 }

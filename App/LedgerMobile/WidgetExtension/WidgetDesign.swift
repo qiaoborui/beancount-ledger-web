@@ -424,3 +424,107 @@ enum LedgerWidgetHeat {
         String(raw.suffix(5)).replacingOccurrences(of: "-", with: "/")
     }
 }
+
+// MARK: - Glass Live Activity styling
+
+#if !targetEnvironment(macCatalyst)
+enum LedgerGlass {
+    static let text = Color.white
+    static let secondary = Color.white.opacity(0.72)
+    static let gold = Color(red: 0xE5 / 255, green: 0xB5 / 255, blue: 0x5F / 255)
+    static let success = Color(red: 0x4A / 255, green: 0xDE / 255, blue: 0x80 / 255)
+    static let warning = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
+    static let failure = Color(red: 0xF8 / 255, green: 0x71 / 255, blue: 0x71 / 255)
+    static let opaqueFill = Color(red: 0x1E / 255, green: 0x24 / 255, blue: 0x29 / 255)
+}
+
+/// Lock-screen card: clear glass on iOS 26, ultra-thin material before it, an
+/// opaque fill when Reduce Transparency is on. A faint dark base keeps white
+/// text legible over bright wallpapers.
+struct LedgerGlassCard<Content: View>: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private let content: Content
+    private let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
+
+    var body: some View {
+        content
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background { surface }
+            .overlay {
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [.white.opacity(0.55), .white.opacity(0.08), .white.opacity(0.28)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing),
+                    lineWidth: 0.75)
+            }
+            .clipShape(shape)
+            .environment(\.colorScheme, .dark)
+    }
+
+    @ViewBuilder private var surface: some View {
+        if reduceTransparency {
+            shape.fill(LedgerGlass.opaqueFill)
+        } else {
+            ZStack {
+                shape.fill(Color.black.opacity(0.12))
+                glass
+                GeometryReader { proxy in
+                    LinearGradient(colors: [.white.opacity(0.14), .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: proxy.size.height * 0.4)
+                }
+                .clipShape(shape)
+                .allowsHitTesting(false)
+            }
+        }
+    }
+
+    @ViewBuilder private var glass: some View {
+        if #available(iOS 26.0, *) {
+            Color.clear.glassEffect(.clear, in: shape)
+        } else {
+            shape.fill(.ultraThinMaterial)
+        }
+    }
+}
+
+struct LedgerGlassBadge: View {
+    let symbol: String
+    let color: Color
+    var size: CGFloat = 38
+    var symbolSize: CGFloat = 17
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: symbolSize, weight: .semibold))
+            .foregroundStyle(color)
+            .frame(width: size, height: size)
+            .background(Circle().fill(Color.white.opacity(0.16)))
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.5))
+            .accessibilityHidden(true)
+    }
+}
+
+struct LedgerGlassPill: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+            .foregroundStyle(color)
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+            .background(Capsule().fill(Color.white.opacity(0.16)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.5))
+    }
+}
+
+extension View {
+    func ledgerGlassTextShadow() -> some View {
+        shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+    }
+}
+#endif

@@ -7,27 +7,29 @@ struct ImportIndexLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: ImportIndexActivityAttributes.self) { context in
             let phase = displayPhase(context)
-            VStack(spacing: 7) {
-                HStack(spacing: 10) {
-                    statusMark(phase)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title(phase))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(LedgerWidgetColors.ink)
-                        Text(detail(context))
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(LedgerWidgetColors.secondary)
-                            .lineLimit(1)
+            LedgerGlassCard {
+                VStack(spacing: 10) {
+                    HStack(spacing: 12) {
+                        statusMark(phase)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(title(phase))
+                                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                                .foregroundStyle(LedgerGlass.text)
+                                .ledgerGlassTextShadow()
+                            Text(detail(context))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(LedgerGlass.secondary)
+                                .ledgerGlassTextShadow()
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 4)
+                        statusBadge(phase)
                     }
-                    Spacer(minLength: 4)
-                    statusBadge(phase)
+                    phaseTrack(phase)
                 }
-                phaseTrack(phase)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .activityBackgroundTint(LedgerWidgetColors.panel)
-            .activitySystemActionForegroundColor(LedgerWidgetColors.cobalt)
+            .activityBackgroundTint(.clear)
+            .activitySystemActionForegroundColor(.white)
             .widgetURL(URL(string: "ledger://imports"))
             .accessibilityElement(children: .combine)
             .accessibilityLabel(accessibilityLabel(context, phase: phase))
@@ -35,33 +37,40 @@ struct ImportIndexLiveActivity: Widget {
             let phase = displayPhase(context)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    statusMark(phase)
+                    LedgerGlassBadge(symbol: symbol(phase), color: phaseColor(phase), size: 24, symbolSize: 12)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     Text(badgeText(phase))
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(phaseColor(phase))
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 7) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(title(phase))
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(LedgerGlass.text)
                         Text(detail(context))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(LedgerGlass.secondary)
                         phaseTrack(phase)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
                 }
             } compactLeading: {
                 Image(systemName: symbol(phase))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(phaseColor(phase))
             } compactTrailing: {
                 Text(compactText(phase))
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(LedgerGlass.text)
             } minimal: {
                 Image(systemName: symbol(phase))
                     .foregroundStyle(phaseColor(phase))
             }
             .widgetURL(URL(string: "ledger://imports"))
-            .keylineTint(LedgerWidgetColors.cobalt)
+            .keylineTint(phaseColor(phase))
         }
     }
 
@@ -78,32 +87,21 @@ struct ImportIndexLiveActivity: Widget {
     }
 
     private func statusMark(_ phase: DisplayPhase) -> some View {
-        Image(systemName: symbol(phase))
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(phaseColor(phase))
-            .frame(width: 30, height: 30)
-            .background(phaseColor(phase).opacity(0.11))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        LedgerGlassBadge(symbol: symbol(phase), color: phaseColor(phase))
     }
 
     private func statusBadge(_ phase: DisplayPhase) -> some View {
-        Text(badgeText(phase))
-            .font(.system(size: 10, weight: .semibold).monospacedDigit())
-            .foregroundStyle(phaseColor(phase))
-            .padding(.horizontal, 8)
-            .frame(minHeight: 24)
-            .background(phaseColor(phase).opacity(0.10))
-            .clipShape(Capsule())
+        LedgerGlassPill(text: badgeText(phase), color: phaseColor(phase))
     }
 
     private func phaseTrack(_ phase: DisplayPhase) -> some View {
         HStack(spacing: 4) {
             Capsule()
-                .fill(phase == .indexed ? LedgerWidgetColors.success : LedgerWidgetColors.cobalt)
+                .fill(phaseColor(phase))
             Capsule()
-                .fill(phase == .indexed ? LedgerWidgetColors.success : phaseColor(phase).opacity(0.24))
+                .fill(phase == .indexed ? LedgerGlass.success : Color.white.opacity(0.18))
         }
-        .frame(height: 3)
+        .frame(height: 4)
     }
 
     private func symbol(_ phase: DisplayPhase) -> String {
@@ -143,9 +141,9 @@ struct ImportIndexLiveActivity: Widget {
 
     private func phaseColor(_ phase: DisplayPhase) -> Color {
         switch phase {
-        case .indexing: LedgerWidgetColors.cobalt
-        case .waiting: LedgerWidgetColors.gold
-        case .indexed: LedgerWidgetColors.success
+        case .indexing: LedgerGlass.gold
+        case .waiting: LedgerGlass.warning
+        case .indexed: LedgerGlass.success
         }
     }
 
