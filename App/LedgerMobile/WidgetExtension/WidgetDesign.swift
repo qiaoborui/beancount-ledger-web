@@ -444,25 +444,36 @@ enum LedgerGlass {
 struct LedgerGlassCard<Content: View>: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private let content: Content
-    private let shape = RoundedRectangle(cornerRadius: 32, style: .continuous)
+    /// Follows the system's own card corner so the glass and stroke meet the
+    /// edge exactly; a fixed radius left dark slivers in the corners.
+    private let shape = ContainerRelativeShape()
 
     init(@ViewBuilder content: () -> Content) { self.content = content() }
 
     var body: some View {
         content
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 18)
             .padding(.vertical, 16)
             .frame(minHeight: 104)
             .background { surface }
             .overlay {
-                shape.strokeBorder(
-                    LinearGradient(
-                        colors: [.white.opacity(0.55), .white.opacity(0.08), .white.opacity(0.28)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing),
-                    lineWidth: 0.75)
+                // iOS 26 glass draws its own edge highlight; only the
+                // fallback materials need a stroke.
+                if !hasNativeGlass {
+                    shape.strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(0.55), .white.opacity(0.08), .white.opacity(0.28)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing),
+                        lineWidth: 0.75)
+                }
             }
             .clipShape(shape)
             .environment(\.colorScheme, .dark)
+    }
+
+    private var hasNativeGlass: Bool {
+        if #available(iOS 26.0, *) { return !reduceTransparency }
+        return false
     }
 
     @ViewBuilder private var surface: some View {
@@ -507,8 +518,8 @@ struct LedgerLockBody<Trailing: View, Footer: View>: View {
         VStack(spacing: 10) {
             HStack {
                 Text(header)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.9))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.7))
                     .ledgerGlassTextShadow()
                 Spacer()
                 Image(systemName: "book.closed.fill")
@@ -518,18 +529,18 @@ struct LedgerLockBody<Trailing: View, Footer: View>: View {
             }
             HStack(spacing: 14) {
                 Image(systemName: symbol)
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(.system(size: 22, weight: .medium))
                     .foregroundStyle(color)
-                    .frame(width: 56, height: 56)
-                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.16)))
-                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.30), lineWidth: 0.75))
-                VStack(alignment: .leading, spacing: 4) {
+                    .frame(width: 48, height: 48)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.16)))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.30), lineWidth: 0.75))
+                VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(LedgerGlass.text)
                         .ledgerGlassTextShadow()
                     Text(detail)
-                        .font(.system(size: 15, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Color.white.opacity(0.72))
                         .ledgerGlassTextShadow()
                         .lineLimit(detailLines)
@@ -567,10 +578,10 @@ struct LedgerGlassPill: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
+            .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
             .foregroundStyle(color)
-            .padding(.horizontal, 14)
-            .frame(height: 32)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
             .background(Capsule().fill(Color.white.opacity(0.16)))
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.5))
     }

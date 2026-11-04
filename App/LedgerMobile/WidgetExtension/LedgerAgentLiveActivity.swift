@@ -35,10 +35,10 @@ struct LedgerAgentLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(title(phase))
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
                             .foregroundStyle(LedgerGlass.text)
                         Text(context.state.detail)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(LedgerGlass.secondary)
                             .lineLimit(2)
                     }
@@ -68,7 +68,7 @@ struct LedgerAgentLiveActivity: Widget {
     private func trailing(_ context: ActivityViewContext<LedgerAgentActivityAttributes>) -> some View {
         if context.state.phase == .running {
             Text(context.attributes.startedAt, style: .timer)
-                .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
+                .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle(LedgerGlass.secondary)
                 .multilineTextAlignment(.trailing)
                 .frame(maxWidth: 64)
