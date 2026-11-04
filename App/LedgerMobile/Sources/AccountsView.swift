@@ -102,14 +102,15 @@ struct AccountsView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 if history.count >= 2 {
-                    AccountsNetWorthChart(points: trendRange.filter(history))
-                        .frame(height: 160)
+                    AccountsNetWorthChart(points: trendRange.series(history), currency: valuationCurrency,
+                                          amountsVisible: session.amountsVisible)
+                        .frame(height: 168)
                         .frame(maxWidth: .infinity)
-                        .listRowInsets(EdgeInsets())
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 12))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                     trendRangePicker
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
+                        .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 0, trailing: 16))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 }
@@ -347,9 +348,11 @@ private enum AccountCardPalette {
     static let background = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x1B1918) : .white })
 }
 
-/// Full-bleed net-worth sparkline: area + line only, no axes or grid, with a
-/// dashed baseline at the first visible value. Draws even when amounts are
-/// hidden — it carries no figures.
+/// Net-worth line for the accounts page: an area and a smoothed line, a dashed
+/// baseline at the first visible value, and just enough labels to read the
+/// scale and the span. The series is thinned per window before it arrives here,
+/// so a wide range stays a shape instead of a dense ribbon. Labels mask with the
+/// amounts — the silhouette still draws.
 private struct AccountsNetWorthChart: View {
     private struct Point: Identifiable {
         let id: String
@@ -360,8 +363,11 @@ private struct AccountsNetWorthChart: View {
     private let data: [Point]
     private let lower: Double
     private let upper: Double
+    private let spansYears: Bool
+    private let currency: String
+    private let amountsVisible: Bool
 
-    init(points: [LedgerNetWorthPoint]) {
+    init(points: [LedgerNetWorthPoint], currency: String, amountsVisible: Bool) {
         let parsed: [Point] = points.compactMap { point in
             guard let date = LedgerDateRange.parse(point.date) else { return nil }
             return Point(id: point.date, date: date, value: Double(point.netWorth))
@@ -373,7 +379,17 @@ private struct AccountsNetWorthChart: View {
         let pad = span > 0 ? span * 0.08 : max(abs(maxValue) * 0.01, 1)
         lower = minValue - pad
         upper = maxValue + pad
+        let calendar = LedgerDateRange.calendar
+        let startYear = parsed.first.map { calendar.component(.year, from: $0.date) }
+        let endYear = parsed.last.map { calendar.component(.year, from: $0.date) }
+        spansYears = startYear != endYear
+        self.currency = currency
+        self.amountsVisible = amountsVisible
     }
+
+    /// Catmull-Rom (alpha 0.5, i.e. centripetal) keeps the line round without the
+    /// cusps and loops a uniform spline makes on unevenly spaced points.
+    private static let smoothing: InterpolationMethod = .catmullRom
 
     private var areaFill: LinearGradient {
         LinearGradient(colors: [BalancedPalette.income.opacity(0.18), BalancedPalette.income.opacity(0)],
@@ -388,14 +404,14 @@ private struct AccountsNetWorthChart: View {
                     yStart: .value("下限", lower),
                     yEnd: .value("净资产", point.value)
                 )
-                .interpolationMethod(.monotone)
+                .interpolationMethod(Self.smoothing)
                 .foregroundStyle(areaFill)
 
                 LineMark(
                     x: .value("日期", point.date),
                     y: .value("净资产", point.value)
                 )
-                .interpolationMethod(.monotone)
+                .interpolationMethod(Self.smoothing)
                 .foregroundStyle(BalancedPalette.income)
                 .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
             }
@@ -405,12 +421,68 @@ private struct AccountsNetWorthChart: View {
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
             }
         }
-        .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
-        .chartLegend(.hidden)
         .chartYScale(domain: lower...upper)
+        .chartXAxis { dateAxis }
+        .chartYAxis { amountAxis }
+        .chartLegend(.hidden)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("净资产趋势"))
+        .accessibilityValue(Text(accessibilityValue))
+    }
+
+    /// Three date labels are enough to place a curve in time.
+    @AxisContentBuilder
+    private var dateAxis: some AxisContent {
+        AxisMarks(position: .bottom, values: .automatic(desiredCount: 3)) { value in
+            AxisValueLabel(collisionResolution: .disabled) {
+                if let date = value.as(Date.self) {
+                    axisLabel(Text(dateLabel(date)))
+                }
+            }
+        }
+    }
+
+    /// Compact money on the trailing edge: a scale to read, not a figure.
+    @AxisContentBuilder
+    private var amountAxis: some AxisContent {
+        AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { value in
+            AxisValueLabel {
+                axisLabel(Text(amountLabel(value.as(Double.self))))
+            }
+        }
+    }
+
+    private func axisLabel(_ text: Text) -> some View {
+        text
+            .balancedFont(size: 10)
+            .monospacedDigit()
+            .foregroundStyle(BalancedPalette.meta)
+    }
+
+    /// Axis money reads compact ("28.3w") because it is a scale, not a figure.
+    private func amountLabel(_ value: Double?) -> String {
+        guard amountsVisible else { return "••••" }
+        guard let value, value.isFinite else { return "" }
+        return MoneyText.formatCompact(minorUnits: Int(value.rounded()), currency: currency)
+    }
+
+    /// Months inside one year, year and month across several.
+    private func dateLabel(_ date: Date) -> String {
+        let month = LedgerDateRange.calendar.component(.month, from: date)
+        guard spansYears else { return LedgerDateLabel.month(number: month) }
+        let year = LedgerDateRange.calendar.component(.year, from: date) % 100
+        return String(format: "%02d/%d", year, month)
+    }
+
+    private var accessibilityValue: String {
+        amountsVisible ? accessibilitySpan : String(localized: "金额已隐藏")
+    }
+
+    private var accessibilitySpan: String {
+        guard let first = data.first, let last = data.last else { return "" }
+        let start = MoneyText.formatCompact(minorUnits: Int(first.value.rounded()), currency: currency)
+        let end = MoneyText.formatCompact(minorUnits: Int(last.value.rounded()), currency: currency)
+        return "\(first.id) \(start) 至 \(last.id) \(end)"
     }
 }
 

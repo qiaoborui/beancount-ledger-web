@@ -217,6 +217,48 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(NetWorthTrendRange.oneMonth.filter([]), [])
     }
 
+    func testNetWorthTrendThinsWideWindowsToRealPoints() throws {
+        // Two years of daily closings: enough that every window must thin, and
+        // enough that no window has to repeat a point.
+        let calendar = LedgerDateRange.calendar
+        let start = try XCTUnwrap(LedgerDateRange.parse("2024-09-01"))
+        let series = (0..<731).compactMap { offset -> LedgerNetWorthPoint? in
+            guard let day = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
+            return LedgerNetWorthPoint(date: LedgerDateRange.format(day),
+                assets: offset, liabilities: 0, netWorth: offset)
+        }
+        let known = Set(series.map(\.date))
+
+        for window in NetWorthTrendRange.allCases {
+            let drawn = window.series(series)
+            XCTAssertGreaterThan(drawn.count, 2, "\(window.title) must draw a line")
+            XCTAssertLessThanOrEqual(drawn.count, window.pointBudget, "\(window.title) exceeded its budget")
+            XCTAssertEqual(drawn.last, series.last, "\(window.title) must end on the same closing point")
+            XCTAssertEqual(drawn.map(\.date), drawn.map(\.date).sorted(), "\(window.title) must stay in date order")
+            XCTAssertEqual(Set(drawn.map(\.date)).count, drawn.count, "\(window.title) repeated a date")
+            XCTAssertTrue(drawn.allSatisfy { known.contains($0.date) }, "\(window.title) invented a point")
+        }
+
+        // The one-month window still shows every day it is given.
+        let month = NetWorthTrendRange.oneMonth.series(series)
+        XCTAssertEqual(month.count, series.suffix(32).count)
+        XCTAssertEqual(month.map(\.netWorth), Array(series.suffix(32).map(\.netWorth)))
+    }
+
+    func testSampledNetWorthKeepsBothEndsAndNeverAverages() throws {
+        let series = (0..<100).map { index in
+            LedgerNetWorthPoint(date: String(format: "2026-01-%02d", index % 28 + 1),
+                assets: index, liabilities: 0, netWorth: index)
+        }
+        let sampled = LedgerNetWorthPoint.sampled(series, maxPoints: 10)
+        XCTAssertEqual(sampled.count, 10)
+        XCTAssertEqual(sampled.first, series.first)
+        XCTAssertEqual(sampled.last, series.last)
+        XCTAssertTrue(sampled.allSatisfy { series.contains($0) })
+        XCTAssertEqual(LedgerNetWorthPoint.sampled(series, maxPoints: 200), series)
+        XCTAssertEqual(LedgerNetWorthPoint.sampled(series, maxPoints: 2), [series[0], series[99]])
+    }
+
     func testAccountBalanceTrendSortsDatesAndKeepsDailyClosingBalance() throws {
         let decoded = try JSONDecoder().decode(
             LedgerAccountDetail.self,

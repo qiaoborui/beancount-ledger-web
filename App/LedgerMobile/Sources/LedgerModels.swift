@@ -1778,6 +1778,20 @@ enum NetWorthTrendRange: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Points a window may draw. A one-month window is read day by day; wider
+    /// windows are read as a shape, so they thin the series instead of folding
+    /// it into a dense ribbon.
+    var pointBudget: Int {
+        switch self {
+        case .oneMonth: 64
+        case .threeMonths: 64
+        case .sixMonths: 56
+        case .yearToDate: 48
+        case .oneYear: 48
+        case .all: 40
+        }
+    }
+
     /// Filters a date-sorted series relative to the *last* point's date, not
     /// today, so a ledger that stops last month still draws a full window.
     /// Always returns at least two points (when available) so a line can be drawn.
@@ -1793,6 +1807,33 @@ enum NetWorthTrendRange: String, CaseIterable, Identifiable {
         }
         let filtered = points.filter { $0.date >= cutoff }
         return filtered.count >= 2 ? filtered : Array(points.suffix(2))
+    }
+
+    /// The window's points, thinned to `pointBudget` for the chart.
+    func series(_ points: [LedgerNetWorthPoint]) -> [LedgerNetWorthPoint] {
+        LedgerNetWorthPoint.sampled(filter(points), maxPoints: pointBudget)
+    }
+}
+
+extension LedgerNetWorthPoint {
+    /// Evenly thins a date-ascending series, always keeping the first and last
+    /// point and never averaging: every point returned is a real ledger closing
+    /// value, so the curve cannot invent a high or a low.
+    static func sampled(_ points: [LedgerNetWorthPoint], maxPoints: Int) -> [LedgerNetWorthPoint] {
+        guard maxPoints >= 2, points.count > maxPoints else { return points }
+        let interiorCount = points.count - 2
+        let slots = maxPoints - 2
+        var sampled: [LedgerNetWorthPoint] = [points[0]]
+        var previous = 0
+        for slot in stride(from: 1, through: slots, by: 1) {
+            let position = Int((Double(slot) * Double(interiorCount) / Double(slots + 1)).rounded())
+            let index = min(max(1 + position, previous + 1), points.count - 2)
+            guard index > previous else { continue }
+            sampled.append(points[index])
+            previous = index
+        }
+        sampled.append(points[points.count - 1])
+        return sampled
     }
 }
 
