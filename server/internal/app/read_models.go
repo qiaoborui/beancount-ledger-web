@@ -21,6 +21,7 @@ type BootstrapResult struct {
 	Balances           map[string]int           `json:"balances"`
 	AccountBalances    []AccountBalance         `json:"accountBalances"`
 	NetWorthHistory    []NetWorthPoint          `json:"netWorthHistory"`
+	NetWorthTrend      []NetWorthPoint          `json:"netWorthTrend"`
 	MonthEndNetWorth   []NetWorthPoint          `json:"monthEndNetWorth"`
 	NetWorthWindows    *NetWorthWindows         `json:"netWorthWindows"`
 	CreditCards        []CreditCardAnalytics    `json:"creditCards"`

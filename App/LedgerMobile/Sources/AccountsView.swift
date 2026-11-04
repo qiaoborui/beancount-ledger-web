@@ -84,8 +84,10 @@ struct AccountsView: View {
     private var valuationCurrency: String { session.ledger?.valuationCurrency ?? "CNY" }
 
     /// Net-worth history in date order ("YYYY-MM-DD" sorts lexicographically).
+    /// The chart reads the ledger's own series, not the selected period, so the
+    /// range buttons below it stay meaningful in any month view.
     private var trendHistory: [LedgerNetWorthPoint] {
-        (session.ledger?.netWorthHistory ?? []).sorted { $0.date < $1.date }
+        session.ledger?.netWorthTrendHistory(before: session.selectedRange.queryEndExclusive) ?? []
     }
 
     var body: some View {
@@ -343,46 +345,6 @@ struct AccountsView: View {
 private enum AccountCardPalette {
     /// White in light mode, #1B1918 in dark.
     static let background = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x1B1918) : .white })
-}
-
-enum NetWorthTrendRange: String, CaseIterable, Identifiable {
-    case oneMonth, threeMonths, sixMonths, yearToDate, oneYear, all
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .oneMonth: String(localized: "1月")
-        case .threeMonths: String(localized: "3月")
-        case .sixMonths: String(localized: "6月")
-        case .yearToDate: String(localized: "今年")
-        case .oneYear: String(localized: "1年")
-        case .all: String(localized: "全部")
-        }
-    }
-
-    /// Filters date-sorted points relative to the *last* point's date, not today.
-    /// Always returns at least two points (when available) so a line can be drawn.
-    func filter(_ points: [LedgerNetWorthPoint]) -> [LedgerNetWorthPoint] {
-        guard self != .all, let last = points.last else { return points }
-        let cutoff: String
-        if self == .yearToDate {
-            cutoff = String(last.date.prefix(4)) + "-01-01"
-        } else {
-            guard let lastDate = LedgerDateRange.parse(last.date) else { return points }
-            let months: Int
-            switch self {
-            case .oneMonth: months = 1
-            case .threeMonths: months = 3
-            case .sixMonths: months = 6
-            default: months = 12
-            }
-            let start = LedgerDateRange.calendar.date(byAdding: .month, value: -months, to: lastDate) ?? lastDate
-            cutoff = LedgerDateRange.format(start)
-        }
-        let filtered = points.filter { $0.date >= cutoff }
-        return filtered.count >= 2 ? filtered : Array(points.suffix(2))
-    }
 }
 
 /// Full-bleed net-worth sparkline: area + line only, no axes or grid, with a

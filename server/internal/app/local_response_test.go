@@ -14,7 +14,7 @@ func TestLocalEmptyLedgerRequiredCollections(t *testing.T) {
 		path   string
 		arrays []string
 	}{
-		{"bootstrap", []string{"accountBalances", "netWorthHistory", "monthEndNetWorth", "creditCards", "transactions", "reconciliationRows", "accounts", "commodities", "prices", "accountStatuses", "incomeStatement.income", "incomeStatement.expense", "incomeStatement.expenseAnalytics", "incomeStatement.topPayees", "incomeStatement.topPaymentAccounts", "investments.holdings", "investments.positions", "investments.lots", "investments.quotes"}},
+		{"bootstrap", []string{"accountBalances", "netWorthHistory", "netWorthTrend", "monthEndNetWorth", "creditCards", "transactions", "reconciliationRows", "accounts", "commodities", "prices", "accountStatuses", "incomeStatement.income", "incomeStatement.expense", "incomeStatement.expenseAnalytics", "incomeStatement.topPayees", "incomeStatement.topPaymentAccounts", "investments.holdings", "investments.positions", "investments.lots", "investments.quotes"}},
 		{"summary", []string{"accountBalances", "netWorthHistory", "monthEndNetWorth", "creditCards", "commodities", "prices"}},
 		{"transactions", []string{"transactions"}},
 		{"income-statement", []string{"income", "expense", "expenseAnalytics", "topPayees", "topPaymentAccounts"}},

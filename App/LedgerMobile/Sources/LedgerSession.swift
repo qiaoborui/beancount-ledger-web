@@ -5350,6 +5350,7 @@ extension LedgerBootstrap {
             comparisons: comparisons,
             accountBalances: accountBalances,
             netWorthHistory: netWorthHistory,
+            netWorthTrend: netWorthTrend,
             monthEndNetWorth: monthEndNetWorth,
             netWorthWindows: netWorthWindows,
             transactions: transactions,
