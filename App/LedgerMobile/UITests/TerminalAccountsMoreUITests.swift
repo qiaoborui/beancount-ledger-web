@@ -12,7 +12,6 @@ final class TerminalAccountsMoreUITests: XCTestCase {
         app.buttons["accounts-add-button"].tap()
         XCTAssertTrue(app.navigationBars["新建账户"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["取消"].tap()
-        app.buttons["account-groups-toggle-all"].tap()
         let account = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'account-link-'")).firstMatch
         XCTAssertTrue(account.waitForExistence(timeout: 5), app.debugDescription)
         capture("terminal-accounts-expanded")

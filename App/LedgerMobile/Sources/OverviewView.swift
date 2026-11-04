@@ -12,7 +12,7 @@ struct OverviewView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let error = session.errorMessage { StatusBanner(message: error, onDismiss: session.dismissError).padding(.horizontal, 20).padding(.bottom, 16) }
                 if let ledger = session.ledger {
-                    balanceSheet(ledger); retention(ledger); cashflow(ledger)
+                    retentionHero(ledger); cashflow(ledger)
                     let categories = session.isLocal ? localSpendingCategories(accountLabels: labels) : spendingCategories(from: ledger.transactions, accountLabels: labels)
                     spending(categories, currency: ledger.summary.currency)
                     recentTransactions(ledger, accountLabels: labels)
@@ -38,11 +38,6 @@ struct OverviewView: View {
 
     // MARK: Settlement blocks (design batch 1 `.settle` / `.band`, glass palette in docs/design/ios-balanced/home-glass.html)
 
-    /// Preset ranges end on the first day after the period; show the last day it covers.
-    private func periodEndLabel(_ ledger: LedgerBootstrap) -> String {
-        session.selectedRange.preset == .custom ? ledger.end : LedgerReconciliationDates.previousDay(from: ledger.end)
-    }
-
     /// The design labels the period by its month alone ("8 月") when it is one month.
     private var periodShortLabel: String {
         let range = session.selectedRange
@@ -52,66 +47,53 @@ struct OverviewView: View {
         return range.displayTitle
     }
 
-    private func balanceSheet(_ ledger: LedgerBootstrap) -> some View {
-        let t = ledger.balanceSheetTotals
-        let currency = ledger.valuationCurrency
-        return settle(title: String(localized: "资产负债结算"), aside: periodEndLabel(ledger)) {
-            settleRow(String(localized: "资产"), amount(abs(t.assets), currency: currency, prefix: t.assets < 0 ? "−" : ""))
-            settleRow(String(localized: "负债"), amount(abs(t.liabilities), currency: currency, prefix: t.liabilities != 0 ? "−" : ""))
-        } total: {
-            settleTotal(String(localized: "净值"), amount(abs(t.netWorth), currency: currency, prefix: t.netWorth < 0 ? "−" : "", size: 30, weight: .medium, currencySymbol: true))
-        }
-    }
-
-    private func retention(_ ledger: LedgerBootstrap) -> some View {
-        let income = max(ledger.summary.income, 0), retained = ledger.summary.net
-        let ratio = income == 0 ? 0 : min(max(Double(retained) / Double(income), 0), 1)
+    /// The page's one headline: the period's net retention (收入 − 支出) at 30pt,
+    /// the retention rate (净结余 ÷ 收入) beneath it, then the retention bar.
+    private func retentionHero(_ ledger: LedgerBootstrap) -> some View {
+        let income = max(ledger.summary.income, 0), net = ledger.summary.net, currency = ledger.summary.currency
+        let rate: Double? = income == 0 ? nil : Double(net) / Double(income)
+        let barRatio = min(max(rate ?? 0, 0), 1)
+        let rateText: String = {
+            guard session.amountsVisible else { return "••••" }
+            guard let rate else { return "—" }
+            return String(format: "%.1f%%", rate * 100)
+        }()
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("本期留存率").balancedFont(size: 12.5)
-                    Text("\(periodShortLabel) · 净结余 ÷ 收入").balancedFont(size: 11.5)
-                }.foregroundStyle(BalancedPalette.meta)
+                Text("本期净结余").balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.secondary)
                 Spacer(minLength: 0)
-                if session.amountsVisible {
-                    (Text(String(format: "%.1f", ratio * 100)).font(.custom(BalancedWeight.medium.sansPostscriptName, size: 21, relativeTo: .title3)).tracking(-0.42).foregroundColor(BalancedPalette.ink)
-                     + Text(" %").font(.custom(BalancedWeight.text.sansPostscriptName, size: 12, relativeTo: .caption)).foregroundColor(BalancedPalette.meta))
-                        .monospacedDigit()
-                } else {
-                    Text("••••").balancedFont(size: 21, weight: .medium).foregroundStyle(BalancedPalette.ink)
-                }
-            }.padding(.bottom, 12)
+                Text(periodShortLabel).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+            }.padding(.bottom, 10)
+            amount(abs(net), currency: currency, prefix: net >= 0 ? "+" : "−", size: 30, weight: .medium,
+                   color: net >= 0 ? BalancedPalette.income : BalancedPalette.expense, currencySymbol: true)
+                .lineLimit(1).minimumScaleFactor(0.45)
+            Text(String(localized: "留存率") + " " + rateText)
+                .balancedFont(size: 15).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                .padding(.top, 4)
             GeometryReader { proxy in
                 HStack(spacing: 3) {
-                    Capsule().fill(BalancedPalette.ink).frame(width: max(0, (proxy.size.width - 3) * ratio))
+                    Capsule().fill(BalancedPalette.ink).frame(width: max(0, (proxy.size.width - 3) * barRatio))
                     Capsule().fill(BalancedPalette.expense).frame(maxWidth: .infinity)
                 }
-            }.frame(height: 6).padding(.bottom, 12).accessibilityHidden(true)
+            }.frame(height: 6).padding(.top, 16).padding(.bottom, 12).accessibilityHidden(true)
             HStack {
-                legend(String(localized: "留存"), value: retained, color: BalancedPalette.ink, currency: ledger.summary.currency)
+                legend(String(localized: "留存"), value: net, color: BalancedPalette.ink, currency: currency)
                 Spacer(minLength: 16)
-                legend(String(localized: "支出"), value: ledger.summary.expense, color: BalancedPalette.expense, currency: ledger.summary.currency)
+                legend(String(localized: "支出"), value: ledger.summary.expense, color: BalancedPalette.expense, currency: currency)
             }
         }
-        .padding(EdgeInsets(top: 20, leading: 20, bottom: 22, trailing: 20))
+        .padding(EdgeInsets(top: 18, leading: 20, bottom: 22, trailing: 20))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .top) { insetRule }
     }
 
     private func cashflow(_ ledger: LedgerBootstrap) -> some View {
-        let net = ledger.summary.net, currency = ledger.summary.currency
-        // Opening net worth is the last recorded point before the period starts; the
-        // row is omitted rather than estimated when the history doesn't reach back.
-        let opening = ledger.netWorthHistory.filter { $0.date < ledger.start }.max { $0.date < $1.date }?.netWorth
+        let currency = ledger.summary.currency
+        // The net total is the hero at the top of the page; this block only itemises it.
         return settle(title: String(localized: "本期收支结算"), aside: periodShortLabel) {
-            if let opening {
-                settleRow(String(localized: "期初净资产"), amount(abs(opening), currency: ledger.valuationCurrency, prefix: opening < 0 ? "−" : ""))
-            }
             settleRow(String(localized: "收入"), amount(ledger.summary.income, currency: currency, prefix: "+"))
             settleRow(String(localized: "支出"), amount(ledger.summary.expense, currency: currency, prefix: "−"))
         } total: {
-            settleTotal(String(localized: "净结余"), amount(abs(net), currency: currency, prefix: net >= 0 ? "+" : "−", size: 30, weight: .medium,
-                color: net >= 0 ? BalancedPalette.income : BalancedPalette.expense))
+            EmptyView()
         }
         .overlay(alignment: .top) { insetRule }
     }
@@ -141,17 +123,6 @@ struct OverviewView: View {
             Spacer(minLength: 0)
             value.lineLimit(1).minimumScaleFactor(0.6)
         }.padding(.vertical, 6)
-    }
-
-    private func settleTotal(_ label: String, _ value: Text) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
-            Text(label).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
-            Spacer(minLength: 0)
-            value.lineLimit(1).minimumScaleFactor(0.45)
-        }
-        .padding(.top, 14)
-        .overlay(alignment: .top) { BalancedPalette.ink.frame(height: 1) }
-        .padding(.top, 10)
     }
 
     /// Balanced amount: proportional Plex with tabular figures. The currency symbol
