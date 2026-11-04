@@ -444,14 +444,15 @@ enum LedgerGlass {
 struct LedgerGlassCard<Content: View>: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private let content: Content
-    private let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+    private let shape = RoundedRectangle(cornerRadius: 32, style: .continuous)
 
     init(@ViewBuilder content: () -> Content) { self.content = content() }
 
     var body: some View {
         content
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .frame(minHeight: 104)
             .background { surface }
             .overlay {
                 shape.strokeBorder(
@@ -490,6 +491,59 @@ struct LedgerGlassCard<Content: View>: View {
     }
 }
 
+/// Two-layer lock-screen body: a small header (state word + brand glyph), then
+/// a 56pt glass tile, title, detail and a trailing capsule; optional footer.
+struct LedgerLockBody<Trailing: View, Footer: View>: View {
+    let header: String
+    let symbol: String
+    let color: Color
+    let title: String
+    let detail: String
+    var detailLines: Int = 1
+    @ViewBuilder var trailing: Trailing
+    @ViewBuilder var footer: Footer
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Text(header)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.9))
+                    .ledgerGlassTextShadow()
+                Spacer()
+                Image(systemName: "book.closed.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+            }
+            HStack(spacing: 14) {
+                Image(systemName: symbol)
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(color)
+                    .frame(width: 56, height: 56)
+                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.16)))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.30), lineWidth: 0.75))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .foregroundStyle(LedgerGlass.text)
+                        .ledgerGlassTextShadow()
+                    Text(detail)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.72))
+                        .ledgerGlassTextShadow()
+                        .lineLimit(detailLines)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                trailing
+            }
+            footer
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct LedgerGlassBadge: View {
     let symbol: String
     let color: Color
@@ -513,10 +567,10 @@ struct LedgerGlassPill: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+            .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
             .foregroundStyle(color)
-            .padding(.horizontal, 10)
-            .frame(height: 26)
+            .padding(.horizontal, 14)
+            .frame(height: 32)
             .background(Capsule().fill(Color.white.opacity(0.16)))
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.5))
     }

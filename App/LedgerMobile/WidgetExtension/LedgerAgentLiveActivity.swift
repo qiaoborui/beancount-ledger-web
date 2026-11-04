@@ -13,21 +13,14 @@ struct LedgerAgentLiveActivity: Widget {
         ActivityConfiguration(for: LedgerAgentActivityAttributes.self) { context in
             let phase = context.state.phase
             LedgerGlassCard {
-                HStack(spacing: 12) {
-                    mark(phase)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(title(phase))
-                            .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundStyle(LedgerGlass.text)
-                            .ledgerGlassTextShadow()
-                        Text(context.state.detail)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(LedgerGlass.secondary)
-                            .ledgerGlassTextShadow()
-                            .lineLimit(2)
-                    }
-                    Spacer(minLength: 4)
+                LedgerLockBody(
+                    header: String(localized: "账本助手"),
+                    symbol: symbol(phase), color: color(phase),
+                    title: title(phase), detail: context.state.detail, detailLines: 2
+                ) {
                     trailing(context)
+                } footer: {
+                    EmptyView()
                 }
             }
             .activityBackgroundTint(.clear)
@@ -42,10 +35,10 @@ struct LedgerAgentLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(title(phase))
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
                             .foregroundStyle(LedgerGlass.text)
                         Text(context.state.detail)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(LedgerGlass.secondary)
                             .lineLimit(2)
                     }
@@ -75,10 +68,10 @@ struct LedgerAgentLiveActivity: Widget {
     private func trailing(_ context: ActivityViewContext<LedgerAgentActivityAttributes>) -> some View {
         if context.state.phase == .running {
             Text(context.attributes.startedAt, style: .timer)
-                .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+                .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle(LedgerGlass.secondary)
                 .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 56)
+                .frame(maxWidth: 64)
         } else if context.state.steps > 0 {
             LedgerGlassPill(text: String(localized: "\(context.state.steps) 步"), color: LedgerGlass.secondary)
         }

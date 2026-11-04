@@ -8,24 +8,14 @@ struct ImportIndexLiveActivity: Widget {
         ActivityConfiguration(for: ImportIndexActivityAttributes.self) { context in
             let phase = displayPhase(context)
             LedgerGlassCard {
-                VStack(spacing: 10) {
-                    HStack(spacing: 12) {
-                        statusMark(phase)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(title(phase))
-                                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                                .foregroundStyle(LedgerGlass.text)
-                                .ledgerGlassTextShadow()
-                            Text(detail(context))
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(LedgerGlass.secondary)
-                                .ledgerGlassTextShadow()
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 4)
-                        statusBadge(phase)
-                    }
-                    phaseTrack(phase)
+                LedgerLockBody(
+                    header: String(localized: "账本"),
+                    symbol: symbol(phase), color: phaseColor(phase),
+                    title: title(phase), detail: detail(context)
+                ) {
+                    statusBadge(phase)
+                } footer: {
+                    phaseTrack(phase).padding(.top, 2)
                 }
             }
             .activityBackgroundTint(.clear)
