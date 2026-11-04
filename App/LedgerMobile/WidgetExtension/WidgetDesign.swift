@@ -424,3 +424,172 @@ enum LedgerWidgetHeat {
         String(raw.suffix(5)).replacingOccurrences(of: "-", with: "/")
     }
 }
+
+// MARK: - Glass Live Activity styling
+
+#if !targetEnvironment(macCatalyst)
+enum LedgerGlass {
+    static let text = Color.white
+    static let secondary = Color.white.opacity(0.72)
+    static let gold = Color(red: 0xE5 / 255, green: 0xB5 / 255, blue: 0x5F / 255)
+    static let success = Color(red: 0x4A / 255, green: 0xDE / 255, blue: 0x80 / 255)
+    static let warning = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
+    static let failure = Color(red: 0xF8 / 255, green: 0x71 / 255, blue: 0x71 / 255)
+    static let opaqueFill = Color(red: 0x1E / 255, green: 0x24 / 255, blue: 0x29 / 255)
+}
+
+/// Lock-screen card: clear glass on iOS 26, ultra-thin material before it, an
+/// opaque fill when Reduce Transparency is on. A faint dark base keeps white
+/// text legible over bright wallpapers.
+struct LedgerGlassCard<Content: View>: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private let content: Content
+    /// Follows the system's own card corner so the glass and stroke meet the
+    /// edge exactly; a fixed radius left dark slivers in the corners.
+    private let shape = ContainerRelativeShape()
+
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
+
+    var body: some View {
+        content
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .frame(minHeight: 104)
+            .background { surface }
+            .overlay {
+                // iOS 26 glass draws its own edge highlight; only the
+                // fallback materials need a stroke.
+                if !hasNativeGlass {
+                    shape.strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(0.55), .white.opacity(0.08), .white.opacity(0.28)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing),
+                        lineWidth: 0.75)
+                }
+            }
+            .clipShape(shape)
+            .environment(\.colorScheme, .dark)
+    }
+
+    private var hasNativeGlass: Bool {
+        if #available(iOS 26.0, *) { return !reduceTransparency }
+        return false
+    }
+
+    @ViewBuilder private var surface: some View {
+        if reduceTransparency {
+            shape.fill(LedgerGlass.opaqueFill)
+        } else {
+            ZStack {
+                shape.fill(Color.black.opacity(0.12))
+                glass
+                GeometryReader { proxy in
+                    LinearGradient(colors: [.white.opacity(0.14), .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: proxy.size.height * 0.4)
+                }
+                .clipShape(shape)
+                .allowsHitTesting(false)
+            }
+        }
+    }
+
+    @ViewBuilder private var glass: some View {
+        if #available(iOS 26.0, *) {
+            Color.clear.glassEffect(.clear, in: shape)
+        } else {
+            shape.fill(.ultraThinMaterial)
+        }
+    }
+}
+
+/// Two-layer lock-screen body: a small header (state word + brand glyph), then
+/// a 56pt glass tile, title, detail and a trailing capsule; optional footer.
+struct LedgerLockBody<Trailing: View, Footer: View>: View {
+    let header: String
+    let symbol: String
+    let color: Color
+    let title: String
+    let detail: String
+    var detailLines: Int = 1
+    @ViewBuilder var trailing: Trailing
+    @ViewBuilder var footer: Footer
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Text(header)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.7))
+                    .ledgerGlassTextShadow()
+                Spacer()
+                Image(systemName: "book.closed.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+            }
+            HStack(spacing: 14) {
+                Image(systemName: symbol)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(color)
+                    .frame(width: 48, height: 48)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.16)))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.30), lineWidth: 0.75))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(LedgerGlass.text)
+                        .ledgerGlassTextShadow()
+                    Text(detail)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.72))
+                        .ledgerGlassTextShadow()
+                        .lineLimit(detailLines)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                trailing
+            }
+            footer
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct LedgerGlassBadge: View {
+    let symbol: String
+    let color: Color
+    var size: CGFloat = 38
+    var symbolSize: CGFloat = 17
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: symbolSize, weight: .semibold))
+            .foregroundStyle(color)
+            .frame(width: size, height: size)
+            .background(Circle().fill(Color.white.opacity(0.16)))
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.5))
+            .accessibilityHidden(true)
+    }
+}
+
+struct LedgerGlassPill: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+            .foregroundStyle(color)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(Capsule().fill(Color.white.opacity(0.16)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.5))
+    }
+}
+
+extension View {
+    func ledgerGlassTextShadow() -> some View {
+        shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+    }
+}
+#endif

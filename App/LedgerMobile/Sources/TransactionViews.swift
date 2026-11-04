@@ -497,9 +497,13 @@ private struct BalancedLedgerTransactionRow: View {
 
     private var transferPath: String? {
         guard presentation.kind == .transfer else { return nil }
-        let accounts = transaction.postings.map { accountLabels[$0.account] ?? $0.account }
-        guard accounts.count >= 2 else { return nil }
-        return accounts[0] + " → " + accounts[1]
+        // Same source as the detail page's money flow: the sign of each posting
+        // decides the direction, never the order the postings were written in.
+        let flow = TransactionMoneyFlow.build(transaction: transaction, accountLabels: accountLabels, defaultCurrency: accountCurrency)
+        guard !flow.fromLegs.isEmpty, !flow.toLegs.isEmpty else { return nil }
+        let from = flow.fromLegs.map(\.label).joined(separator: "、")
+        let to = flow.toLegs.map(\.label).joined(separator: "、")
+        return from + " → " + to
     }
 
     /// No currency symbol on row amounts — only a settle total carries one.
@@ -532,7 +536,7 @@ private struct BalancedLedgerTransactionRow: View {
                     .monospacedDigit()
                     .foregroundStyle(presentation.kind == .income ? BalancedPalette.income : BalancedPalette.ink)
                     .lineLimit(1).minimumScaleFactor(0.6)
-                Text(presentation.kind == .transfer ? String(localized: "转账") : visual.categoryLabel).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                Text(presentation.isRefund ? String(localized: "退款") : presentation.kind == .transfer ? String(localized: "转账") : visual.categoryLabel).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
             }
         }
         .padding(.vertical, 11)
