@@ -27,6 +27,15 @@ followed the header's global time range, because the chart read
 - The chart (and its picker) stays amounts-hidden safe: it draws no figures, and
   the server still returns an empty series while sensitive values are locked.
 
+## Follow-up: readable curve (commit ba44dcfc)
+
+The first cut sent the raw series to the chart, so the line was dense with sharp
+corners and had no scale. Now each window thins its series to a budget
+(`NetWorthTrendRange.pointBudget`: a month day by day, `全部` as a shape, 40-64
+points) by keeping real closing points — never averaged — draws it with
+Catmull-Rom smoothing, and labels three dates and three compact amounts. Amount
+labels mask with the ledger amounts; the silhouette stays.
+
 ## Changed files
 
 - `server/internal/app/ledger.go` — `NetWorthTrendPoints`, trend budgets.
@@ -39,7 +48,10 @@ followed the header's global time range, because the chart read
 - `App/LedgerMobile/Sources/LedgerModels.swift` — `netWorthTrend` decoding,
   `NetWorthTrendRange` (moved from `AccountsView.swift` so it is testable),
   `LedgerBootstrap.netWorthTrendHistory(before:)`.
-- `App/LedgerMobile/Sources/AccountsView.swift` — chart reads the new history.
+- `App/LedgerMobile/Sources/AccountsView.swift` — chart reads the new history,
+  thins it per window, smooths it, and draws the scale labels.
+- `App/LedgerMobile/Sources/LedgerModels.swift` — `pointBudget`, `series(_:)`,
+  `LedgerNetWorthPoint.sampled(_:maxPoints:)`.
 - `App/LedgerMobile/Sources/LedgerSession.swift` — `replacingTransactions` keeps
   the series.
 - `App/LedgerMobile/Sources/SafePreviewLedgerAPI.swift` — preview carries dated
@@ -55,14 +67,17 @@ followed the header's global time range, because the chart read
   — 879 tests, 22 skipped, 0 failures.
 - `xcodebuild -scheme LedgerMobile -destination 'generic/platform=iOS Simulator' build`
   — succeeds (covers `AccountsView.swift`, which the SwiftPM target excludes).
-- Not tested: on-device UI run, UI test suite, and a rebuilt `LedgerCore`
-  xcframework (the simulator build above linked the previously built framework,
-  so local-session payloads only show `netWorthTrend` after
-  `scripts/build-ledgercore-xcframework.sh` runs again).
+- `scripts/build-ios-ipa.sh --private-local` — packaged 0.3.0 (47) then (48)
+  successfully; ad-hoc IPA verified by the script.
+- Not tested: on-device UI run and the UI test suite. `xcodebuild test` is
+  blocked by a pre-existing app-host compile error in
+  `Tests/LedgerAgentTests.swift:666` (main-actor isolation), and a headless
+  simulator launch of the debug app fails, so the chart was reviewed from code
+  rather than a screenshot.
 
 ## Remaining steps
 
-1. Review and merge PR #597.
+1. Review and merge PR #597 (`ef103d3c` + `ba44dcfc`).
 2. When packaging, rebuild the `LedgerCore` xcframework so the embedded Go engine
    returns the new field; the app falls back to the period-scoped history
    otherwise.
