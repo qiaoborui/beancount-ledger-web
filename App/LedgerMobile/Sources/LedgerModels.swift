@@ -497,6 +497,10 @@ struct LedgerBootstrap: Decodable, Sendable {
     let comparisons: LedgerPeriodComparisons?
     let accountBalances: [AccountBalance]
     let netWorthHistory: [LedgerNetWorthPoint]
+    /// Chart-sized series across the whole ledger, independent of `start`/`end`.
+    /// Empty from servers that predate it; readers fall back to
+    /// `netWorthHistory`, which only covers the requested range.
+    let netWorthTrend: [LedgerNetWorthPoint]
     let monthEndNetWorth: [LedgerNetWorthPoint]
     let netWorthWindows: LedgerNetWorthWindows?
     let transactions: [LedgerTransaction]
@@ -515,6 +519,7 @@ struct LedgerBootstrap: Decodable, Sendable {
         case comparisons
         case accountBalances
         case netWorthHistory
+        case netWorthTrend
         case monthEndNetWorth
         case netWorthWindows
         case transactions
@@ -534,6 +539,7 @@ struct LedgerBootstrap: Decodable, Sendable {
         comparisons: LedgerPeriodComparisons? = nil,
         accountBalances: [AccountBalance],
         netWorthHistory: [LedgerNetWorthPoint] = [],
+        netWorthTrend: [LedgerNetWorthPoint] = [],
         monthEndNetWorth: [LedgerNetWorthPoint] = [],
         netWorthWindows: LedgerNetWorthWindows? = nil,
         transactions: [LedgerTransaction],
@@ -551,6 +557,7 @@ struct LedgerBootstrap: Decodable, Sendable {
         self.comparisons = comparisons
         self.accountBalances = accountBalances
         self.netWorthHistory = netWorthHistory
+        self.netWorthTrend = netWorthTrend
         self.monthEndNetWorth = monthEndNetWorth
         self.netWorthWindows = netWorthWindows
         self.transactions = transactions
@@ -571,6 +578,7 @@ struct LedgerBootstrap: Decodable, Sendable {
         comparisons = try container.decodeIfPresent(LedgerPeriodComparisons.self, forKey: .comparisons)
         accountBalances = try container.decode([AccountBalance].self, forKey: .accountBalances)
         netWorthHistory = try container.decodeIfPresent([LedgerNetWorthPoint].self, forKey: .netWorthHistory) ?? []
+        netWorthTrend = try container.decodeIfPresent([LedgerNetWorthPoint].self, forKey: .netWorthTrend) ?? []
         monthEndNetWorth = try container.decodeIfPresent([LedgerNetWorthPoint].self, forKey: .monthEndNetWorth) ?? []
         netWorthWindows = try container.decodeIfPresent(LedgerNetWorthWindows.self, forKey: .netWorthWindows)
         transactions = try container.decode([LedgerTransaction].self, forKey: .transactions)
@@ -1737,6 +1745,111 @@ struct LedgerNetWorthWindows: Decodable, Equatable, Sendable {
     let monthChange: Int?
     let sixMonth: LedgerNetWorthDelta
     let twelveMonth: LedgerNetWorthDelta
+}
+
+/// Windows offered by the accounts net-worth chart. They cut the ledger's own
+/// net-worth history rather than the page's selected period, so the curve keeps
+/// a shape of its own no matter which month the header is showing.
+enum NetWorthTrendRange: String, CaseIterable, Identifiable {
+    case oneMonth, threeMonths, sixMonths, yearToDate, oneYear, all
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .oneMonth: String(localized: "1月")
+        case .threeMonths: String(localized: "3月")
+        case .sixMonths: String(localized: "6月")
+        case .yearToDate: String(localized: "今年")
+        case .oneYear: String(localized: "1年")
+        case .all: String(localized: "全部")
+        }
+    }
+
+    /// Trailing window width in months. `nil` for the windows bounded by the
+    /// calendar year (`今年`) or by the ledger itself (`全部`).
+    private var monthsBack: Int? {
+        switch self {
+        case .oneMonth: 1
+        case .threeMonths: 3
+        case .sixMonths: 6
+        case .oneYear: 12
+        case .yearToDate, .all: nil
+        }
+    }
+
+    /// Points a window may draw. A one-month window is read day by day; wider
+    /// windows are read as a shape, so they thin the series instead of folding
+    /// it into a dense ribbon.
+    var pointBudget: Int {
+        switch self {
+        case .oneMonth: 64
+        case .threeMonths: 64
+        case .sixMonths: 56
+        case .yearToDate: 48
+        case .oneYear: 48
+        case .all: 40
+        }
+    }
+
+    /// Filters a date-sorted series relative to the *last* point's date, not
+    /// today, so a ledger that stops last month still draws a full window.
+    /// Always returns at least two points (when available) so a line can be drawn.
+    func filter(_ points: [LedgerNetWorthPoint]) -> [LedgerNetWorthPoint] {
+        guard self != .all, let last = points.last else { return points }
+        let cutoff: String
+        if self == .yearToDate {
+            cutoff = String(last.date.prefix(4)) + "-01-01"
+        } else {
+            guard let lastDate = LedgerDateRange.parse(last.date) else { return points }
+            let start = LedgerDateRange.calendar.date(byAdding: .month, value: -(monthsBack ?? 12), to: lastDate) ?? lastDate
+            cutoff = LedgerDateRange.format(start)
+        }
+        let filtered = points.filter { $0.date >= cutoff }
+        return filtered.count >= 2 ? filtered : Array(points.suffix(2))
+    }
+
+    /// The window's points, thinned to `pointBudget` for the chart.
+    func series(_ points: [LedgerNetWorthPoint]) -> [LedgerNetWorthPoint] {
+        LedgerNetWorthPoint.sampled(filter(points), maxPoints: pointBudget)
+    }
+}
+
+extension LedgerNetWorthPoint {
+    /// Evenly thins a date-ascending series, always keeping the first and last
+    /// point and never averaging: every point returned is a real ledger closing
+    /// value, so the curve cannot invent a high or a low.
+    static func sampled(_ points: [LedgerNetWorthPoint], maxPoints: Int) -> [LedgerNetWorthPoint] {
+        guard maxPoints >= 2, points.count > maxPoints else { return points }
+        let interiorCount = points.count - 2
+        let slots = maxPoints - 2
+        var sampled: [LedgerNetWorthPoint] = [points[0]]
+        var previous = 0
+        for slot in stride(from: 1, through: slots, by: 1) {
+            let position = Int((Double(slot) * Double(interiorCount) / Double(slots + 1)).rounded())
+            let index = min(max(1 + position, previous + 1), points.count - 2)
+            guard index > previous else { continue }
+            sampled.append(points[index])
+            previous = index
+        }
+        sampled.append(points[points.count - 1])
+        return sampled
+    }
+}
+
+extension LedgerBootstrap {
+    /// Net-worth history for the accounts chart. The whole-ledger series wins
+    /// when the payload carries one; it is cut at `endExclusive` so the curve
+    /// finishes on the closing figure the page shows for its period. Servers
+    /// that predate the series answer with the range-scoped history, which is
+    /// already cut and is used as-is.
+    func netWorthTrendHistory(before endExclusive: String) -> [LedgerNetWorthPoint] {
+        let sorted = (netWorthTrend.isEmpty ? netWorthHistory : netWorthTrend)
+            .sorted { $0.date < $1.date }
+        guard !netWorthTrend.isEmpty else { return sorted }
+        let scoped = sorted.filter { $0.date < endExclusive }
+        return scoped.count >= 2 ? scoped : sorted
+    }
 }
 
 struct LedgerCashflowPoint: Decodable, Equatable, Identifiable, Sendable {

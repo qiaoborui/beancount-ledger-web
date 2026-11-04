@@ -286,44 +286,28 @@ final class LedgerMobileUITests: XCTestCase {
         capture("glass-import-action-surface")
     }
 
-    func testAccountGroupsStartCollapsedAndSupportBulkToggleAndSearch() throws {
+    func testAccountGroupsAreAlwaysExpandedAndSupportSearch() throws {
         app = XCUIApplication()
         app.launchArguments = ["--safe-preview"]
         app.launch()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
         openDestination(compact: "账户", regular: "账户")
-        let toggle = app.buttons["account-groups-toggle-all"]
         let daily = app.staticTexts["日常账户"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 3))
         XCTAssertFalse(app.segmentedControls["account-category-picker"].exists)
         XCTAssertFalse(app.buttons["account-filter-assets"].exists)
-        XCTAssertEqual(toggle.label, "全部展开")
-        let cashGroup = app.buttons["account-group-cash"].firstMatch
+        // Group cards are always expanded; there is no bulk expand/collapse control.
+        let cashGroup = app.descendants(matching: .any)["account-group-cash"].firstMatch
         XCTAssertTrue(cashGroup.waitForExistence(timeout: 3))
-        capture("accounts-default-collapsed")
-        XCTAssertGreaterThanOrEqual(toggle.frame.height, 44)
-        XCTAssertLessThanOrEqual(toggle.frame.maxY, cashGroup.frame.minY)
-        XCTAssertLessThanOrEqual(cashGroup.frame.minY - toggle.frame.maxY, 12,
-            "The bulk action sits directly above the first account group")
-        XCTAssertFalse(daily.exists)
-        toggle.tap()
+        XCTAssertFalse(app.buttons["account-groups-toggle-all"].exists)
         XCTAssertTrue(daily.waitForExistence(timeout: 3))
-        XCTAssertEqual(toggle.label, "全部折叠")
-        cashGroup.tap()
-        XCTAssertFalse(daily.exists)
-        XCTAssertEqual(toggle.label, "全部展开")
-        toggle.tap()
-        XCTAssertTrue(daily.waitForExistence(timeout: 3))
-        toggle.tap()
-        XCTAssertTrue(daily.waitForNonExistence(timeout: 3))
+        capture("accounts-default-expanded")
 
         let search = revealSearch("账户名称或路径")
         search.tap()
         search.typeText("日常\n")
         XCTAssertTrue(daily.waitForExistence(timeout: 3))
         openDestination(compact: "账户", regular: "账户")
-        XCTAssertTrue(daily.waitForNonExistence(timeout: 3))
-        XCTAssertEqual(toggle.label, "全部展开")
+        XCTAssertTrue(daily.waitForExistence(timeout: 3))
     }
 
     func testNavigationTimeRangePreservesDraftAndSearchHierarchy() throws {
@@ -532,7 +516,6 @@ final class LedgerMobileUITests: XCTestCase {
 
         openDestination(compact: "账户", regular: "账户")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "选择时间范围")).firstMatch.exists)
-        app.buttons["account-groups-toggle-all"].tap()
         let longAccount = app.staticTexts["家庭长期储备与教育基金（含海外留学与应急资金）"]
         let accountsList = app.collectionViews["accounts-list"]
         for _ in 0..<4 where !longAccount.exists { accountsList.swipeUp() }
@@ -547,12 +530,10 @@ final class LedgerMobileUITests: XCTestCase {
         for _ in 0..<4 where !longAccount.exists { accountsList.swipeUp() }
         XCTAssertTrue(longAccount.waitForExistence(timeout: 3))
 
-        let wealthGroup = app.buttons["account-group-wealth"].firstMatch
+        // Group cards are always expanded: the header is static and the account stays visible.
+        let wealthGroup = app.descendants(matching: .any)["account-group-wealth"].firstMatch
         XCTAssertTrue(wealthGroup.exists)
-        wealthGroup.tap()
-        XCTAssertTrue(longAccount.waitForNonExistence(timeout: 3))
-        wealthGroup.tap()
-        XCTAssertTrue(longAccount.waitForExistence(timeout: 3))
+        XCTAssertTrue(longAccount.exists)
         capture("05-accounts")
         longAccount.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "期末余额")).firstMatch.waitForExistence(timeout: 3))

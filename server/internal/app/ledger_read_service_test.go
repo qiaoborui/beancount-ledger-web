@@ -146,6 +146,7 @@ func TestBootstrapResultJSONContract(t *testing.T) {
 		Balances:           map[string]int{},
 		AccountBalances:    []AccountBalance{},
 		NetWorthHistory:    []NetWorthPoint{},
+		NetWorthTrend:      []NetWorthPoint{},
 		MonthEndNetWorth:   []NetWorthPoint{},
 		CreditCards:        []CreditCardAnalytics{},
 		Investments:        &InvestmentSummary{},
@@ -177,7 +178,7 @@ func TestBootstrapResultJSONContract(t *testing.T) {
 	}
 	wantFields := []string{
 		"start", "end", "summary", "comparisons", "balances", "accountBalances", "netWorthHistory",
-		"monthEndNetWorth", "netWorthWindows", "creditCards", "investments", "transactions",
+		"netWorthTrend", "monthEndNetWorth", "netWorthWindows", "creditCards", "investments", "transactions",
 		"reconciliationRows", "accounts", "commodities", "prices", "valuationCurrency",
 		"incomeStatement", "accountStatuses", "ledgerVersion", "sensitiveUnlocked",
 	}

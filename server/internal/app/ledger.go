@@ -1273,6 +1273,65 @@ func netWorthHistoryInCurrencySequence(sorted iter.Seq[Transaction], prices []Pr
 	return rows
 }
 
+// Net-worth trend budgets for the accounts chart, which offers 1月…全部 windows
+// over the complete history: day resolution is kept for the three-month window
+// and every point older than that collapses to its month end. Together with the
+// point budget this keeps the bootstrap payload small on a multi-year ledger.
+const (
+	netWorthTrendRecentDays = 92
+	netWorthTrendMaxPoints  = 240
+)
+
+// NetWorthTrendPoints bounds a complete net-worth history for chart display:
+// every point inside the final netWorthTrendRecentDays, then the last point of
+// each earlier month, then a hard point budget. The bound keeps the bootstrap
+// payload small while every window the accounts chart offers stays populated.
+// `rows` must be date-ascending; dates compare as strings, which is exact for
+// "YYYY-MM-DD".
+func NetWorthTrendPoints(rows []NetWorthPoint) []NetWorthPoint {
+	if len(rows) < 2 {
+		return rows
+	}
+	cutoff := ""
+	if last, err := time.Parse("2006-01-02", rows[len(rows)-1].Date); err == nil {
+		cutoff = last.AddDate(0, 0, -netWorthTrendRecentDays).Format("2006-01-02")
+	}
+	trend := make([]NetWorthPoint, 0, netWorthTrendMaxPoints)
+	var pending *NetWorthPoint
+	pendingMonth := ""
+	for _, row := range rows {
+		if cutoff != "" && row.Date >= cutoff {
+			if pending != nil {
+				trend = append(trend, *pending)
+				pending = nil
+			}
+			trend = append(trend, row)
+			continue
+		}
+		month := row.Date
+		if len(month) > 7 {
+			month = month[:7]
+		}
+		if pending != nil && month != pendingMonth {
+			trend = append(trend, *pending)
+		}
+		copied := row
+		pending = &copied
+		pendingMonth = month
+	}
+	if pending != nil {
+		trend = append(trend, *pending)
+	}
+	if len(trend) <= netWorthTrendMaxPoints {
+		return trend
+	}
+	// A ledger longer than the budget keeps its opening point and the most
+	// recent points; 全部 stays a long-run shape rather than a dense series.
+	bounded := make([]NetWorthPoint, 0, netWorthTrendMaxPoints)
+	bounded = append(bounded, trend[0])
+	return append(bounded, trend[len(trend)-(netWorthTrendMaxPoints-1):]...)
+}
+
 func AccountDetail(account string, txns []Transaction) []AccountDetailRow {
 	sorted := append([]Transaction(nil), txns...)
 	sort.Slice(sorted, func(i, j int) bool {

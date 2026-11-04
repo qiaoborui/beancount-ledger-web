@@ -919,6 +919,16 @@ private enum SafePreviewLedgerData {
             )
         }
         let netWorthRows = dashboard(start: start, end: end, valuationCurrency: valuationCurrency).netWorthSeries
+        // The dashboard series is month-labelled; the accounts trend needs real
+        // days so its 1月…全部 windows can cut it. Reuse the same points on their
+        // month ends instead of inventing a second history.
+        let netWorthTrend = netWorthRows.compactMap { row -> LedgerNetWorthPoint? in
+            guard let month = LedgerDateRange.parse(row.date + "-01"),
+                  let monthEnd = LedgerDateRange.calendar.date(byAdding: DateComponents(month: 1, day: -1), to: month)
+            else { return nil }
+            return LedgerNetWorthPoint(date: LedgerDateRange.format(monthEnd),
+                assets: row.assets, liabilities: row.liabilities, netWorth: row.netWorth)
+        }
         let latest = netWorthRows.last
         let previous = netWorthRows.dropLast().last
         let monthChange = latest.flatMap { latest in previous.map { latest.netWorth - $0.netWorth } }
@@ -930,6 +940,7 @@ private enum SafePreviewLedgerData {
             comparisons: comparisons,
             accountBalances: valuedBalances,
             netWorthHistory: netWorthRows,
+            netWorthTrend: netWorthTrend,
             monthEndNetWorth: netWorthRows,
             netWorthWindows: LedgerNetWorthWindows(
                 latest: latest,

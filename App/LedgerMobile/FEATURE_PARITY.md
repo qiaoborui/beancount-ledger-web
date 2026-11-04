@@ -16,7 +16,7 @@ push — stay out of scope by design, not as pending work.
 | Library and local ledgers | Create, import a folder, add an HTTPS Git repository, restore a `.ledgerbackup`, switch, rename, delete | Local write | `LocalLedgerViews.swift`, `LedgerLibraryView` |
 | Overview | Balance sheet, retention, period cashflow, category spending, recent transactions | Read | `OverviewView.swift` |
 | Transactions | List with infinite scroll, keyword/type/account/tag filters, detail, fast and advanced editing, duplicate, confirmed deletion, bulk tagging, selection share/export | Read and validated write | `TransactionViews.swift`, `LedgerSession` mutations |
-| Accounts | Grouped balances with a category filter bar (全部/资金/信用/理财/应收), account detail with running history and trend, per-account reconciliation | Read and validated write | `AccountsView.swift` |
+| Accounts | Period closing net worth with a whole-ledger trend line and 1月 / 3月 / 6月 / 今年 / 1年 / 全部 windows, grouped balance cards with a category filter bar (全部/资金/信用/理财/应收), account detail with running history and trend, per-account reconciliation | Read and validated write | `AccountsView.swift` |
 | Reconciliation | Balance review across accounts, per-account actual-balance entry, difference adjustment written as a validated transaction | Write with preview | `ReconciliationView.swift` |
 | Ledger files | Browse `.bean` files under the ledger root, edit in a plain editor, validate the whole ledger, export a snapshot folder | Write with validation | `LocalLedgerFilesView`, `LocalLedgerFileEditor` |
 | Settings and privacy | Face ID/Touch ID/passcode, lock interval, app language, compact tab customization, device-local storage settings | Device/auth | `SettingsView.swift`, `LocalLedgerAuthentication.swift` |

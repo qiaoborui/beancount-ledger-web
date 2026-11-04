@@ -136,6 +136,8 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(payload.transactions.first?.editableEntry?.postings.first?.costSpec, #"{{ 123.456789 USD, 2026-05-01, "lot-a" }}"#)
         XCTAssertEqual(payload.transactions.first?.editableEntry?.postings.first?.priceKind, "unit")
         XCTAssertEqual(payload.netWorthHistory.last?.netWorth, 1_000_000)
+        XCTAssertEqual(payload.netWorthTrend.first?.date, "2026-02-28")
+        XCTAssertEqual(payload.netWorthTrend.last?.netWorth, 1_000_000)
         XCTAssertEqual(payload.monthEndNetWorth.count, 1)
         XCTAssertEqual(payload.netWorthWindows?.monthChange, 15_000)
         XCTAssertEqual(payload.commodities, ["CNY", "USD"])
@@ -154,6 +156,107 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertFalse(daily.periodBalancesAvailable)
         XCTAssertEqual(daily.closingValuation, daily.valuation)
         XCTAssertEqual(daily.periodValuationChange, 0)
+    }
+
+    func testNetWorthTrendCutsAtThePagePeriodAndFallsBackToRangeHistory() throws {
+        let trend = """
+        [
+          { "date": "2025-01-31", "assets": 10, "liabilities": 0, "netWorth": 10 },
+          { "date": "2026-06-30", "assets": 15, "liabilities": 0, "netWorth": 15 },
+          { "date": "2026-08-31", "assets": 20, "liabilities": 0, "netWorth": 20 }
+        ]
+        """
+        let full = try JSONDecoder().decode(
+            LedgerBootstrap.self,
+            from: Data(Self.trendBootstrapJSON(netWorthTrend: trend).utf8)
+        )
+        XCTAssertEqual(full.netWorthTrend.map(\.date), ["2025-01-31", "2026-06-30", "2026-08-31"])
+
+        // The curve ends on the closing figure the page shows for its period.
+        XCTAssertEqual(full.netWorthTrendHistory(before: "2026-09-01").map(\.date), full.netWorthTrend.map(\.date))
+        XCTAssertEqual(full.netWorthTrendHistory(before: "2026-07-01").map(\.date), ["2025-01-31", "2026-06-30"])
+        // A period before the series cannot leave a drawable window, so the
+        // whole series stays rather than blanking the chart.
+        XCTAssertEqual(full.netWorthTrendHistory(before: "2025-02-01").map(\.date), full.netWorthTrend.map(\.date))
+
+        let legacy = try JSONDecoder().decode(
+            LedgerBootstrap.self,
+            from: Data(Self.trendBootstrapJSON(netWorthTrend: nil).utf8)
+        )
+        XCTAssertTrue(legacy.netWorthTrend.isEmpty)
+        XCTAssertEqual(legacy.netWorthTrendHistory(before: "2026-09-01").map(\.date), ["2026-08-01"])
+    }
+
+    func testNetWorthTrendWindowsAnchorOnTheLastPoint() throws {
+        // Monthly points from 2025-01 through the series' own last point in
+        // 2026-08, so every window is measured from that point, not from today.
+        var points = (0..<20).map { offset -> LedgerNetWorthPoint in
+            let year = 2025 + offset / 12
+            let month = offset % 12 + 1
+            return LedgerNetWorthPoint(
+                date: String(format: "%04d-%02d-01", year, month),
+                assets: offset, liabilities: 0, netWorth: offset
+            )
+        }
+        let last = try XCTUnwrap(points.popLast())
+
+        XCTAssertEqual(NetWorthTrendRange.all.filter(points + [last]), points + [last])
+        XCTAssertEqual(NetWorthTrendRange.oneMonth.filter(points + [last]).map(\.date), ["2026-07-01", last.date])
+        XCTAssertEqual(NetWorthTrendRange.threeMonths.filter(points + [last]).count, 4)
+        XCTAssertEqual(NetWorthTrendRange.sixMonths.filter(points + [last]).count, 7)
+        XCTAssertEqual(NetWorthTrendRange.oneYear.filter(points + [last]).count, 13)
+        XCTAssertEqual(NetWorthTrendRange.yearToDate.filter(points + [last]).count, 8)
+        for window in NetWorthTrendRange.allCases where window != .all {
+            XCTAssertEqual(window.filter(points + [last]).last, last, "\(window.title) must end on the closing point")
+        }
+
+        // Two points is the floor: a one-point window cannot draw a line.
+        let tail = Array((points + [last]).suffix(2))
+        XCTAssertEqual(NetWorthTrendRange.oneMonth.filter(tail), tail)
+        XCTAssertEqual(NetWorthTrendRange.all.filter([last]), [last])
+        XCTAssertEqual(NetWorthTrendRange.oneMonth.filter([]), [])
+    }
+
+    func testNetWorthTrendThinsWideWindowsToRealPoints() throws {
+        // Two years of daily closings: enough that every window must thin, and
+        // enough that no window has to repeat a point.
+        let calendar = LedgerDateRange.calendar
+        let start = try XCTUnwrap(LedgerDateRange.parse("2024-09-01"))
+        let series = (0..<731).compactMap { offset -> LedgerNetWorthPoint? in
+            guard let day = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
+            return LedgerNetWorthPoint(date: LedgerDateRange.format(day),
+                assets: offset, liabilities: 0, netWorth: offset)
+        }
+        let known = Set(series.map(\.date))
+
+        for window in NetWorthTrendRange.allCases {
+            let drawn = window.series(series)
+            XCTAssertGreaterThan(drawn.count, 2, "\(window.title) must draw a line")
+            XCTAssertLessThanOrEqual(drawn.count, window.pointBudget, "\(window.title) exceeded its budget")
+            XCTAssertEqual(drawn.last, series.last, "\(window.title) must end on the same closing point")
+            XCTAssertEqual(drawn.map(\.date), drawn.map(\.date).sorted(), "\(window.title) must stay in date order")
+            XCTAssertEqual(Set(drawn.map(\.date)).count, drawn.count, "\(window.title) repeated a date")
+            XCTAssertTrue(drawn.allSatisfy { known.contains($0.date) }, "\(window.title) invented a point")
+        }
+
+        // The one-month window still shows every day it is given.
+        let month = NetWorthTrendRange.oneMonth.series(series)
+        XCTAssertEqual(month.count, series.suffix(32).count)
+        XCTAssertEqual(month.map(\.netWorth), Array(series.suffix(32).map(\.netWorth)))
+    }
+
+    func testSampledNetWorthKeepsBothEndsAndNeverAverages() throws {
+        let series = (0..<100).map { index in
+            LedgerNetWorthPoint(date: String(format: "2026-01-%02d", index % 28 + 1),
+                assets: index, liabilities: 0, netWorth: index)
+        }
+        let sampled = LedgerNetWorthPoint.sampled(series, maxPoints: 10)
+        XCTAssertEqual(sampled.count, 10)
+        XCTAssertEqual(sampled.first, series.first)
+        XCTAssertEqual(sampled.last, series.last)
+        XCTAssertTrue(sampled.allSatisfy { series.contains($0) })
+        XCTAssertEqual(LedgerNetWorthPoint.sampled(series, maxPoints: 200), series)
+        XCTAssertEqual(LedgerNetWorthPoint.sampled(series, maxPoints: 2), [series[0], series[99]])
     }
 
     func testAccountBalanceTrendSortsDatesAndKeepsDailyClosingBalance() throws {
@@ -635,6 +738,25 @@ final class LedgerModelsTests: XCTestCase {
         )
     }
 
+    private static func trendBootstrapJSON(netWorthTrend: String?) -> String {
+        let trend = netWorthTrend.map { "\n      \"netWorthTrend\": \($0)," } ?? ""
+        return """
+        {
+          "start": "2026-08-01",
+          "end": "2026-08-31",
+          "summary": { "currency": "CNY", "income": 0, "expense": 0, "net": 0 },\(trend)
+          "accountBalances": [],
+          "netWorthHistory": [
+            { "date": "2026-08-01", "assets": 20, "liabilities": 0, "netWorth": 20 }
+          ],
+          "transactions": [],
+          "accounts": [],
+          "valuationCurrency": "CNY",
+          "sensitiveUnlocked": true
+        }
+        """
+    }
+
     static let bootstrapJSON = #"""
     {
       "start": "2026-08-01",
@@ -673,6 +795,11 @@ final class LedgerModelsTests: XCTestCase {
       ],
       "netWorthHistory": [
         { "date": "2026-08-01", "assets": 1220000, "liabilities": 235000, "netWorth": 985000 },
+        { "date": "2026-08-31", "assets": 1235000, "liabilities": 235000, "netWorth": 1000000 }
+      ],
+      "netWorthTrend": [
+        { "date": "2026-02-28", "assets": 1100000, "liabilities": 235000, "netWorth": 865000 },
+        { "date": "2026-07-31", "assets": 1220000, "liabilities": 235000, "netWorth": 985000 },
         { "date": "2026-08-31", "assets": 1235000, "liabilities": 235000, "netWorth": 1000000 }
       ],
       "monthEndNetWorth": [
