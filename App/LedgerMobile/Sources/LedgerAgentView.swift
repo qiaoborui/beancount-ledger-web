@@ -55,10 +55,16 @@ private struct LedgerAgentChatScreen: View {
     @State private var bookkeeping: BookkeepingPrefill?
     @State private var crashReport: String?
     @State private var choosingFiles = false
+    /// The photo library is presented by the view, not from inside the attach
+    /// menu: a picker nested in a `Menu` is dismissed with the menu and never
+    /// appears, which made "从相册选截图或照片" look like a dead button.
+    @State private var photoLibraryPresented = false
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var attaching = false
     @State private var attachError: String?
     @State private var inboxItems: [LedgerSharedImportInbox.Item] = []
+    /// True while a drag from another app hovers the conversation.
+    @State private var dropTargeted = false
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
@@ -93,6 +99,8 @@ private struct LedgerAgentChatScreen: View {
             case let .failure(error): attachError = error.localizedDescription
             }
         }
+        .photosPicker(isPresented: $photoLibraryPresented, selection: $photoItems,
+                      maxSelectionCount: 6, matching: .images)
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             photoItems = []
@@ -287,8 +295,18 @@ private struct LedgerAgentChatScreen: View {
                 withAnimation(.snappy) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+            // Bills and screenshots can also be dragged in from Photos, Files
+            // or another window (iPad, or the Mac build).
+            .onDrop(of: Self.dropTypes, isTargeted: $dropTargeted) { providers in
+                guard !providers.isEmpty else { return false }
+                attachDropped(providers)
+                return true
+            }
+            .overlay { if dropTargeted { dropHint } }
         }
     }
+
+    private static let dropTypes: [UTType] = [.image, .fileURL]
 
     private static let bottomID = "ledger-agent-bottom"
 
@@ -501,9 +519,7 @@ private struct LedgerAgentChatScreen: View {
     private var attachMenu: some View {
         Menu {
             Button { choosingFiles = true } label: { Label("选择文件（CSV、Excel、PDF）", systemImage: "doc") }
-            PhotosPicker(selection: $photoItems, maxSelectionCount: 6, matching: .images) {
-                Label("从相册选截图或照片", systemImage: "photo.on.rectangle")
-            }
+            Button { photoLibraryPresented = true } label: { Label("从相册选截图或照片", systemImage: "photo.on.rectangle") }
             // Bills shared into Ledger from another app wait in the import
             // inbox; the assistant can reconcile them from there.
             if !inboxItems.isEmpty {
@@ -558,10 +574,100 @@ private struct LedgerAgentChatScreen: View {
         .accessibilityIdentifier("ledger-agent-staged")
     }
 
+    /// Shown while a drag hovers the conversation, so the user can let go.
+    private var dropHint: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "photo.badge.plus").font(.system(size: 24, weight: .medium))
+            Text("松开以添加图片或账单").balancedFont(size: 14, weight: .medium)
+        }
+        .foregroundStyle(BalancedPalette.ink)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 20)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(BalancedPalette.edge, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(BalancedPalette.page.opacity(0.6))
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .transition(.opacity)
+    }
+
     private enum Pick {
         case file(URL)
         case photo(PhotosPickerItem)
+        /// An image dragged in from Photos or another app: only its bytes are
+        /// available, with no file on disk to copy.
+        case imageData(Data, suggestedName: String)
         case inbox(LedgerSharedImportInbox.Item)
+    }
+
+    /// Turns what another app is dragging into attachments. A drop carries
+    /// either a file path (Files) or image bytes (Photos, Safari), so both are
+    /// tried before an item is reported as unreadable.
+    private func attachDropped(_ providers: [NSItemProvider]) {
+        guard !attaching, !providers.isEmpty else { return }
+        Task { @MainActor in
+            var picks: [Pick] = []
+            var unreadable: [String] = []
+            for (index, provider) in providers.enumerated() {
+                if let url = await Self.droppedFileURL(of: provider) {
+                    picks.append(.file(url))
+                } else if let data = await Self.droppedImageData(of: provider) {
+                    picks.append(.imageData(data, suggestedName: Self.droppedName(of: provider, index: index)))
+                } else {
+                    unreadable.append(provider.suggestedName ?? String(localized: "第 \(index + 1) 个文件"))
+                }
+            }
+            if !picks.isEmpty { attach(picks) }
+            if !unreadable.isEmpty {
+                attachError = LedgerAgentAttachmentError
+                    .unreadable(unreadable.joined(separator: "、")).localizedDescription
+            }
+        }
+    }
+
+    private static func droppedFileURL(of provider: NSItemProvider) async -> URL? {
+        guard let identifier = provider.registeredTypeIdentifiers.first(where: {
+            UTType($0)?.conforms(to: .fileURL) == true
+        }) else { return nil }
+        return await withCheckedContinuation { (continuation: CheckedContinuation<URL?, Never>) in
+            _ = provider.loadItem(forTypeIdentifier: identifier, options: nil) { item, _ in
+                if let url = item as? URL {
+                    continuation.resume(returning: url)
+                } else if let data = item as? Data,
+                          let url = URL(dataRepresentation: data, relativeTo: nil) {
+                    continuation.resume(returning: url)
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+
+    private static func droppedImageData(of provider: NSItemProvider) async -> Data? {
+        guard let identifier = provider.registeredTypeIdentifiers.first(where: {
+            UTType($0)?.conforms(to: .image) == true
+        }) else { return nil }
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
+            _ = provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
+                continuation.resume(returning: data)
+            }
+        }
+    }
+
+    /// A dropped image keeps the name the source app gave it, plus the
+    /// extension its type implies, so the attachment chip reads like the file.
+    private static func droppedName(of provider: NSItemProvider, index: Int) -> String {
+        let type = provider.registeredTypeIdentifiers
+            .compactMap { UTType($0) }
+            .first { $0.conforms(to: .image) }
+        let ext = type?.preferredFilenameExtension ?? "jpg"
+        let base = (provider.suggestedName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if base.isEmpty { return String(localized: "拖入的图片") + " \(index + 1)." + ext }
+        return (base as NSString).pathExtension.isEmpty ? base + "." + ext : base
     }
 
     /// Files shared into Ledger that are waiting in the import inbox.
@@ -582,7 +688,11 @@ private struct LedgerAgentChatScreen: View {
     /// Copies the picked files into the conversation's attachment folder one
     /// by one, so each gets the next id, and reads PDFs and images on the way.
     private func attach(_ picks: [Pick]) {
-        guard let repository = session.localRepository, !attaching else { return }
+        guard !attaching else { return }
+        guard let repository = session.localRepository else {
+            attachError = String(localized: "账本还没打开，暂时不能添加附件。")
+            return
+        }
         let conversation = conversation
         let workspace = repository.workspace
         attaching = true
@@ -605,6 +715,9 @@ private struct LedgerAgentChatScreen: View {
                         let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
                         let name = String(localized: "图片\(index + 1)") + "." + ext
                         attachment = try await LedgerAgentAttachments.importImage(data, name: name, id: id, into: directory)
+                    case let .imageData(data, suggestedName):
+                        attachment = try await LedgerAgentAttachments
+                            .importImage(data, name: suggestedName, id: id, into: directory)
                     case let .inbox(item):
                         guard let kind = LedgerAgentAttachments.kind(of: item.name) else {
                             throw LedgerAgentAttachmentError.unsupported(item.name)
