@@ -1,8 +1,7 @@
 # 20261104-accounts-net-worth-trend
 
-- Status: active — code pushed on `fix/money-flow-direction-live-activity-glass`
-  (PR #597), waiting for review/merge.
-- Last updated: 2026-11-04 22:55 UTC+8.
+- Status: completed — PR #597 squash-merged to `main` as `180aa49c`.
+- Last updated: 2026-11-05 00:05 UTC+8.
 
 ## Goal
 
@@ -77,7 +76,7 @@ labels mask with the ledger amounts; the silhouette stays.
 
 ## Remaining steps
 
-1. Review and merge PR #597 (`ef103d3c` + `ba44dcfc`).
-2. When packaging, rebuild the `LedgerCore` xcframework so the embedded Go engine
-   returns the new field; the app falls back to the period-scoped history
-   otherwise.
+1. Done: PR #597 merged (`180aa49c`). No follow-up code is pending.
+2. Packaging already rebuilds the `LedgerCore` xcframework, so the embedded Go
+   engine returns `netWorthTrend`; local ad-hoc builds 0.3.0 (47) and (48) were
+   produced from the branch that became this merge.
