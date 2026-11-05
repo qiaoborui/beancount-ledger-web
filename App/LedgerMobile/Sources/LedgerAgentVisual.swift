@@ -650,7 +650,7 @@ extension LedgerAgentChart {
 extension LedgerAgentVisual {
     /// A number with grouping and at most two decimals, as 1,820.5.
     static func plain(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(0...2)).locale(Locale(identifier: "en_US_POSIX")).grouping(.automatic))
+        value.formatted(.number.precision(.fractionLength(0...2)).locale(Locale(identifier: "en_US")).grouping(.automatic))
     }
 
     /// An amount with its unit: 1,820.5 元, or ¥1,820.5 for a sign unit.
