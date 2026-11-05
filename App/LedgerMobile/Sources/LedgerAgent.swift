@@ -1386,10 +1386,21 @@ struct LedgerAgentFileDiff: Identifiable, Equatable, Sendable {
 /// `chart` block of JSON. A block that does not decode, or does not add up,
 /// shows as code instead.
 struct LedgerAgentChart: Codable, Equatable, Sendable {
-    enum Kind: String, Codable, Sendable { case bar, line, pie }
+    /// `hbar` lays bars along the y axis; `waterfall` draws one series of
+    /// changes as floating bars from a running total.
+    enum Kind: String, Codable, Sendable { case bar, hbar, line, area, pie, waterfall }
     struct Series: Codable, Equatable, Sendable {
         var name: String
         var values: [Double]
+        /// In a bar, line or area chart, draws this series as another of
+        /// those kinds, such as a line over bars.
+        var kind: Kind? = nil
+    }
+
+    /// A horizontal reference line, such as a budget or an average.
+    struct Rule: Codable, Equatable, Sendable {
+        var value: Double
+        var label: String? = nil
     }
 
     var type: Kind
@@ -1399,28 +1410,53 @@ struct LedgerAgentChart: Codable, Equatable, Sendable {
     var stacked: Bool? = nil
     var labels: [String]
     var series: [Series]
+    /// A `ledger://` page per label, opened from the selected mark. Links
+    /// that are not ledger pages, or do not line up with the labels, are
+    /// dropped rather than failing the chart.
+    var links: [String]? = nil
+    var rules: [Rule]? = nil
 
     static let maximumLabels = 60
     static let maximumSeries = 8
+    static let maximumRules = 3
 
     init?(json: String) {
-        guard let chart = try? JSONDecoder().decode(Self.self, from: Data(json.utf8)), chart.isValid else { return nil }
+        guard var chart = try? JSONDecoder().decode(Self.self, from: Data(json.utf8)), chart.isValid else { return nil }
+        chart.links = Self.normalized(chart.links, count: chart.labels.count)
         self = chart
     }
 
-    init(type: Kind, title: String? = nil, unit: String? = nil, stacked: Bool? = nil, labels: [String], series: [Series]) {
+    init(type: Kind, title: String? = nil, unit: String? = nil, stacked: Bool? = nil, labels: [String], series: [Series],
+         links: [String]? = nil, rules: [Rule]? = nil) {
+        self.rules = rules
         self.type = type
         self.title = title
         self.unit = unit
         self.stacked = stacked
         self.labels = labels
         self.series = series
+        self.links = Self.normalized(links, count: labels.count)
     }
 
-    private var isValid: Bool {
+    private static func normalized(_ links: [String]?, count: Int) -> [String]? {
+        guard let links, links.count == count else { return nil }
+        let kept = links.map { LedgerAgentVisual.ledgerLink($0)?.absoluteString ?? "" }
+        return kept.contains { !$0.isEmpty } ? kept : nil
+    }
+
+    /// The page behind a label, if the model gave one.
+    func link(for label: String) -> URL? {
+        guard let links, let index = labels.firstIndex(of: label), !links[index].isEmpty else { return nil }
+        return URL(string: links[index])
+    }
+
+    var isValid: Bool {
         guard !labels.isEmpty, labels.count <= Self.maximumLabels, !series.isEmpty, series.count <= Self.maximumSeries,
               Set(labels).count == labels.count else { return false }
-        if type == .pie, series.count != 1 { return false }
+        if type == .pie || type == .waterfall, series.count != 1 { return false }
+        let mixable: Set<Kind> = [.bar, .line, .area]
+        if series.contains(where: { $0.kind != nil && (!mixable.contains(type) || !mixable.contains($0.kind!)) }) { return false }
+        if rules?.contains(where: { !$0.value.isFinite }) == true { return false }
         return series.allSatisfy { $0.values.count == labels.count && $0.values.allSatisfy(\.isFinite) }
             && (type != .pie || series[0].values.allSatisfy { $0 >= 0 })
     }
@@ -1435,6 +1471,38 @@ struct LedgerAgentChart: Codable, Equatable, Sendable {
 
     var points: [Point] {
         series.flatMap { entry in zip(labels, entry.values).map { Point(label: $0, series: entry.name, value: $1) } }
+    }
+
+    /// How a series is drawn: its own kind when mixed, else the chart's.
+    func kind(of seriesName: String) -> Kind {
+        series.first { $0.name == seriesName }?.kind ?? type
+    }
+
+    /// A waterfall step: where its bar starts and ends on the running total.
+    struct Step: Identifiable, Equatable, Sendable {
+        var id: String { label }
+        let label: String
+        let start: Double
+        let end: Double
+        /// 增加, 减少, or 合计 for the closing total bar.
+        let category: String
+    }
+
+    static let waterfallTotal = "合计"
+
+    /// The steps of a waterfall, closed by a total bar unless the last
+    /// label already is one.
+    var steps: [Step] {
+        guard type == .waterfall, let values = series.first?.values else { return [] }
+        var running = 0.0
+        var steps: [Step] = zip(labels, values).map { label, value in
+            defer { running += value }
+            return Step(label: label, start: running, end: running + value, category: value >= 0 ? "增加" : "减少")
+        }
+        if labels.last != Self.waterfallTotal {
+            steps.append(Step(label: Self.waterfallTotal, start: 0, end: running, category: Self.waterfallTotal))
+        }
+        return steps
     }
 }
 
@@ -1452,6 +1520,7 @@ enum LedgerAgentReplyText {
         case rule
         case code(String)
         case chart(LedgerAgentChart)
+        case visual(LedgerAgentVisual)
     }
 
     struct ListItem: Equatable, Sendable {
@@ -1470,6 +1539,8 @@ enum LedgerAgentReplyText {
                 let code = lines.joined(separator: "\n")
                 if language == "chart", let chart = LedgerAgentChart(json: code) {
                     segments.append(.chart(chart))
+                } else if language == "visual", let visual = LedgerAgentVisual(json: code) {
+                    segments.append(.visual(visual))
                 } else {
                     segments.append(.code(code))
                 }

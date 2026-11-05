@@ -244,6 +244,7 @@ private struct LedgerAgentChatScreen: View {
                                 onMemory: { memoryPresented = true },
                                 onRecord: { bookkeeping = .init(text: question(before: message)) },
                                 onAnswer: { send($0, clearsComposer: false) },
+                                onAsk: { ask($0) },
                                 onUndo: { undo(message) })
                         }
                     }
@@ -768,6 +769,16 @@ private struct LedgerAgentChatScreen: View {
         if started, clearsComposer { draft = "" }
     }
 
+    /// Sends a visual's follow-up question, or leaves it in the composer
+    /// when a turn is already running.
+    private func ask(_ question: String) {
+        if conversation.isRunning || sessions.busyElsewhere {
+            draft = question
+        } else {
+            send(question, clearsComposer: false)
+        }
+    }
+
     private func question(before answer: LedgerAgentMessage) -> String {
         guard let index = conversation.messages.firstIndex(where: { $0.id == answer.id }) else { return "" }
         return conversation.messages[..<index].last { $0.role == .user }?.text ?? ""
@@ -845,6 +856,8 @@ private struct LedgerAgentAnswer: View {
     var onMemory: () -> Void = {}
     let onRecord: () -> Void
     var onAnswer: (String) -> Void = { _ in }
+    /// A follow-up question from a visual's button.
+    var onAsk: (String) -> Void = { _ in }
     var onUndo: () -> Void = {}
     @State private var toolsExpanded = false
     @State private var picked: Set<String> = []
@@ -853,7 +866,7 @@ private struct LedgerAgentAnswer: View {
         VStack(alignment: .leading, spacing: 14) {
             if !message.toolCalls.isEmpty { tools }
             ForEach(Array(LedgerAgentReplyText.segments(message.text).enumerated()), id: \.offset) { _, segment in
-                LedgerAgentReplyBlock(segment: segment)
+                LedgerAgentReplyBlock(segment: segment, onAsk: onAsk)
             }
             if let ask = message.ask, asksNow { choices(ask) }
             if LedgerAgentReplyText.beancountDraft(in: message.text) != nil {
@@ -1167,6 +1180,7 @@ private struct LedgerAgentChangeCard: View {
 /// One Markdown block of a reply.
 private struct LedgerAgentReplyBlock: View {
     let segment: LedgerAgentReplyText.Segment
+    var onAsk: (String) -> Void = { _ in }
 
     var body: some View {
         switch segment {
@@ -1234,6 +1248,8 @@ private struct LedgerAgentReplyBlock: View {
             .balancedBand()
         case let .chart(chart):
             LedgerAgentChartView(chart: chart)
+        case let .visual(visual):
+            LedgerAgentVisualView(visual: visual, onAsk: onAsk)
         }
     }
 
@@ -1274,74 +1290,6 @@ private struct LedgerAgentReplyBlock: View {
 
     private static func isAmount(_ cell: String) -> Bool {
         cell.replacingOccurrences(of: "*", with: "").range(of: #"^[-+¥$€£]?\s?-?[\d,]+(\.\d+)?\s?([A-Z]{3}|元|%)?$"#, options: .regularExpression) != nil
-    }
-}
-
-/// A chart the reply asked for, drawn with Swift Charts in the page's ink.
-private struct LedgerAgentChartView: View {
-    let chart: LedgerAgentChart
-    private static let palette: [Color] = [BalancedPalette.ink, BalancedPalette.expense, BalancedPalette.income,
-                                           BalancedPalette.meta, BalancedPalette.secondary, BalancedPalette.edge,
-                                           BalancedPalette.ruleStrong, BalancedPalette.rule]
-
-    private var names: [String] { chart.type == .pie ? chart.labels : chart.series.map(\.name) }
-    private var colors: [Color] { names.indices.map { Self.palette[$0 % Self.palette.count] } }
-    private var showsLegend: Bool { chart.type == .pie || chart.series.count > 1 }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let title = chart.title, !title.isEmpty {
-                Text(verbatim: title).balancedFont(size: 14, weight: .semibold).foregroundStyle(BalancedPalette.ink)
-            }
-            plot
-                .chartForegroundStyleScale(domain: names, range: colors)
-                .chartLegend(showsLegend ? .visible : .hidden)
-                .chartLegend(position: .bottom, alignment: .leading)
-                .frame(height: chart.type == .pie ? 220 : 200)
-            if let unit = chart.unit, !unit.isEmpty, chart.type != .pie {
-                Text(verbatim: String(localized: "单位：\(unit)")).balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta)
-            }
-        }
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text(verbatim: chart.title ?? String(localized: "图表")))
-    }
-
-    @ViewBuilder private var plot: some View {
-        let points = chart.points
-        switch chart.type {
-        case .bar:
-            Chart(points) { point in
-                if chart.stacked == false {
-                    BarMark(x: .value("项目", point.label), y: .value("金额", point.value))
-                        .foregroundStyle(by: .value("系列", point.series))
-                        .position(by: .value("系列", point.series))
-                } else {
-                    BarMark(x: .value("项目", point.label), y: .value("金额", point.value))
-                        .foregroundStyle(by: .value("系列", point.series))
-                }
-            }
-            .chartXAxis { AxisMarks { AxisValueLabel().font(.system(size: 10.5)) } }
-            .chartYAxis { AxisMarks { AxisGridLine(); AxisValueLabel().font(.system(size: 10.5)) } }
-        case .line:
-            Chart(points) { point in
-                LineMark(x: .value("项目", point.label), y: .value("金额", point.value))
-                    .foregroundStyle(by: .value("系列", point.series))
-                    .interpolationMethod(.monotone)
-                PointMark(x: .value("项目", point.label), y: .value("金额", point.value))
-                    .foregroundStyle(by: .value("系列", point.series))
-                    .symbolSize(18)
-            }
-            .chartXAxis { AxisMarks { AxisValueLabel().font(.system(size: 10.5)) } }
-            .chartYAxis { AxisMarks { AxisGridLine(); AxisValueLabel().font(.system(size: 10.5)) } }
-        case .pie:
-            Chart(points) { point in
-                SectorMark(angle: .value("金额", point.value), innerRadius: .ratio(0.58), angularInset: 1.5)
-                    .cornerRadius(3)
-                    .foregroundStyle(by: .value("项目", point.label))
-            }
-        }
     }
 }
 
