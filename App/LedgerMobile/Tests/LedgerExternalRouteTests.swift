@@ -73,17 +73,25 @@ final class LedgerExternalRouteTests: XCTestCase {
         XCTAssertEqual(try parse("ledger://record"), .record)
         XCTAssertEqual(try parse("ledger://record/"), .record)
         XCTAssertEqual(try parse("ledger://record?mode=sentence"), .sentence)
-        XCTAssertEqual(try parse("ledger://capture"), .capture)
+        XCTAssertEqual(try parse("ledger://page?name=incomeExpense"), .page(.incomeExpense))
+        XCTAssertEqual(try parse("ledger://page?name=query"), .page(.query))
         XCTAssertEqual(LedgerExternalRoute.record.destination, .transactions)
         XCTAssertEqual(LedgerExternalRoute.sentence.destination, .transactions)
-        XCTAssertEqual(LedgerExternalRoute.capture.destination, .agent)
         for raw in ["ledger://record?mode=other", "ledger://record?mode=sentence&x=1", "ledger://record?other=1",
-                    "ledger://capture?x=1", "ledger://record?mode=sentence&mode=sentence"] {
+                    "ledger://capture", "ledger://page", "ledger://page?name=unknown", "ledger://page?name=query&x=1",
+                    "ledger://record?mode=sentence&mode=sentence"] {
             XCTAssertNil(try parse(raw), raw)
         }
         // Every link the widget and quick actions use must parse.
-        for url in LedgerQuickLink.allCases.map(\.url) {
-            XCTAssertNotNil(LedgerExternalRoute.parse(url), url.absoluteString)
+        for link in LedgerQuickLink.allCases {
+            let route = try XCTUnwrap(LedgerExternalRoute.parse(link.url), link.url.absoluteString)
+            switch link {
+            case .agent: XCTAssertEqual(route, .page(.agent))
+            case .record: XCTAssertEqual(route, .record)
+            case .sentence: XCTAssertEqual(route, .sentence)
+            case .search: XCTAssertEqual(route, .search(""))
+            default: XCTAssertEqual(route, .page(try XCTUnwrap(LedgerDestination(rawValue: link.rawValue))))
+            }
         }
         for link in LedgerQuickLink.allCases {
             XCTAssertEqual(LedgerQuickLink(shortcutType: link.shortcutType), link)
@@ -100,12 +108,11 @@ final class LedgerExternalRouteTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ExternalRouteRejectingURLProtocol.self]
         let session = LedgerSession(api: LedgerAPIClient(session: URLSession(configuration: configuration)), defaults: defaults)
-        for raw in ["ledger://record", "ledger://capture"] {
+        for raw in ["ledger://record", "ledger://record?mode=sentence"] {
             session.openWidgetURL(try XCTUnwrap(URL(string: raw)))
             XCTAssertNotNil(session.pendingExternalRoute)
             await session.applyPendingExternalRoute()
             XCTAssertNil(session.quickEntry)
-            XCTAssertNil(session.pendingAgentCapture)
         }
     }
 

@@ -30,7 +30,6 @@ struct LedgerQuickActionsBundle: WidgetBundle {
 #if !targetEnvironment(macCatalyst)
         if #available(iOS 18.0, *) {
             LedgerAgentControl()
-            LedgerCaptureControl()
             LedgerRecordControl()
         }
 #endif

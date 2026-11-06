@@ -36,15 +36,6 @@ struct LedgerAgentView: View {
                 if !sessions.current.isRunning, !sessions.busyElsewhere { sessions.startNew() }
                 sessions.queuedQuestion = question
             }
-            // 拍票据 from the widget or app icon: a fresh conversation with
-            // the camera open, so the photo is the first thing it sees.
-            .task(id: session.pendingAgentCapture?.id) {
-                guard session.takePendingAgentCapture() else { return }
-                if !sessions.current.isRunning, !sessions.busyElsewhere, !sessions.current.messages.isEmpty {
-                    sessions.startNew()
-                }
-                sessions.queuedCapture = true
-            }
     }
 }
 
@@ -114,9 +105,6 @@ private struct LedgerAgentChatScreen: View {
         .fullScreenCover(isPresented: $cameraPresented) {
             LedgerCameraPicker { data in
                 attach([.imageData(data, suggestedName: String(localized: "票据照片") + ".jpg")])
-                if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    draft = Self.captureQuestion
-                }
             }
             .ignoresSafeArea()
         }
@@ -170,8 +158,6 @@ private struct LedgerAgentChatScreen: View {
         .task { refreshInbox() }
         .onChange(of: sessions.queuedQuestion) { _, _ in sendQueuedQuestion() }
         .onAppear { sendQueuedQuestion() }
-        .onChange(of: sessions.queuedCapture) { _, _ in openQueuedCapture() }
-        .onAppear { openQueuedCapture() }
         // Links in replies point into the ledger (a day's transactions, an
         // account, a search) and open the page they name.
         .environment(\.openURL, OpenURLAction { url in
@@ -192,21 +178,6 @@ private struct LedgerAgentChatScreen: View {
             send(question, clearsComposer: false)
         } else {
             draft = question
-        }
-    }
-
-    /// Opens the camera the 拍票据 shortcut asked for, or the photo library
-    /// where there is no camera. When attachments cannot be added right now
-    /// (a turn is running, or the assistant is not set up) it does nothing.
-    private func openQueuedCapture() {
-        guard sessions.queuedCapture else { return }
-        sessions.queuedCapture = false
-        guard settings.isReady, conversation.canAttach, !attaching, !conversation.isRunning,
-              !session.privacyShielded else { return }
-        if LedgerCameraPicker.isAvailable {
-            cameraPresented = true
-        } else {
-            photoLibraryPresented = true
         }
     }
 
@@ -549,7 +520,6 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
-    private static let captureQuestion = String(localized: "帮我看看这张票据，记一笔")
     private static let reconcileQuestion = String(localized: "帮我把附件和账本对一下账，列出对不上的地方")
 
     // MARK: Attachments

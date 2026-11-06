@@ -96,8 +96,6 @@ final class LedgerAgentSessions: ObservableObject {
     /// A question from Siri or a shortcut for the conversation on screen to
     /// send once it can.
     @Published var queuedQuestion: String?
-    /// The 拍票据 shortcut asked the conversation on screen to open the camera.
-    @Published var queuedCapture = false
     private var ledgerID: UUID?
     private var storage: Storage?
     private var loading: Task<Void, Never>?

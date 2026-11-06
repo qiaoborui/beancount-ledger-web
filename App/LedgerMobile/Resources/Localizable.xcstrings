@@ -8077,16 +8077,6 @@
         }
       }
     },
-    "帮我看看这张票据，记一笔" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Read this receipt and record it"
-          }
-        }
-      }
-    },
     "常用分类" : {
       "localizations" : {
         "en" : {
@@ -9565,16 +9555,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Take photo"
-          }
-        }
-      }
-    },
-    "拍票据" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Scan receipt"
           }
         }
       }

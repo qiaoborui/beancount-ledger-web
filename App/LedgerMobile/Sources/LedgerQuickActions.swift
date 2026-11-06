@@ -10,7 +10,7 @@ final class LedgerQuickActionCenter: ObservableObject {
     static let shared = LedgerQuickActionCenter()
 
     /// Four items is what the icon menu shows above the system ones.
-    static let menu: [LedgerQuickLink] = [.agent, .capture, .record, .search]
+    static let menu: [LedgerQuickLink] = [.agent, .record, .sentence, .search]
 
     /// A link from the icon menu that the app has not opened yet.
     @Published var pending: URL?
@@ -70,8 +70,8 @@ extension LedgerBackgroundAppDelegate {
     }
 }
 
-/// The camera for 拍票据. Falls back to nothing on devices without one; the
-/// caller checks `isAvailable` and offers the photo library instead.
+/// The camera behind 拍照 in the assistant's attach menu, which is only
+/// offered where `isAvailable` is true.
 struct LedgerCameraPicker: UIViewControllerRepresentable {
     static var isAvailable: Bool { UIImagePickerController.isSourceTypeAvailable(.camera) }
 

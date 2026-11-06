@@ -314,12 +314,22 @@
         }
       }
     },
-    "一键问账本助手、拍票据或记一笔。" : {
+    "一键问账本助手、记一笔，或打开任意页面。长按可编辑每个按钮。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ask the assistant, scan a receipt or add an entry in one tap."
+            "value" : "Ask the assistant, add an entry or open any page in one tap. Long-press to edit each button."
+          }
+        }
+      }
+    },
+    "交易" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transactions"
           }
         }
       }
@@ -384,16 +394,6 @@
         }
       }
     },
-    "助手" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Assistant"
-          }
-        }
-      }
-    },
     "另有%lld个渠道" : {
       "localizations" : {
         "en" : {
@@ -434,6 +434,16 @@
         }
       }
     },
+    "大按钮" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Large button"
+          }
+        }
+      }
+    },
     "完成" : {
       "localizations" : {
         "en" : {
@@ -470,16 +480,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Import status"
-          }
-        }
-      }
-    },
-    "导入账单" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import bills"
           }
         }
       }
@@ -674,7 +674,7 @@
         }
       }
     },
-    "投资理财" : {
+    "投资" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -684,22 +684,12 @@
         }
       }
     },
-    "拍一张票据或账单，交给账本助手。" : {
+    "投资理财" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Photograph a receipt or bill for the ledger assistant."
-          }
-        }
-      }
-    },
-    "拍票据" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Scan receipt"
+            "value" : "Investments"
           }
         }
       }
@@ -730,6 +720,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "See spending, year-over-year change, and top categories by week, month, or year."
+          }
+        }
+      }
+    },
+    "按钮 1" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Button 1"
+          }
+        }
+      }
+    },
+    "按钮 2" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Button 2"
+          }
+        }
+      }
+    },
+    "按钮 3" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Button 3"
+          }
+        }
+      }
+    },
+    "按钮 4" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Button 4"
           }
         }
       }
@@ -780,6 +810,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spending overview"
+          }
+        }
+      }
+    },
+    "收支" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Income & expense"
           }
         }
       }
@@ -1060,6 +1100,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "See daily spending. Tap a date to open all of that day's expenses."
+          }
+        }
+      }
+    },
+    "查询" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Query"
+          }
+        }
+      }
+    },
+    "概览" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Overview"
           }
         }
       }
@@ -1384,6 +1444,16 @@
         }
       }
     },
+    "货币" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Currencies"
+          }
+        }
+      }
+    },
     "资产" : {
       "localizations" : {
         "en" : {
@@ -1400,6 +1470,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Asset balance"
+          }
+        }
+      }
+    },
+    "资产分析" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asset analysis"
           }
         }
       }
@@ -1490,6 +1570,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Choose a week, month, or year."
+          }
+        }
+      }
+    },
+    "选择每个按钮打开的功能或页面。小号显示大按钮和前两个圆形按钮。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose what each button opens. The small size shows the large button and the first two round ones."
           }
         }
       }

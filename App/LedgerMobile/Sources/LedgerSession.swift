@@ -3349,14 +3349,6 @@ final class LedgerSession: ObservableObject {
     /// An entry form a widget or home screen quick action asked for, shown
     /// over whichever page is open once the ledger is ready.
     @Published var quickEntry: LedgerQuickEntryRequest?
-    /// A widget or quick action asked the assistant to open the camera.
-    @Published private(set) var pendingAgentCapture: LedgerAgentPendingCapture?
-
-    func takePendingAgentCapture() -> Bool {
-        defer { pendingAgentCapture = nil }
-        return pendingAgentCapture != nil
-    }
-
     func takePendingAgentQuestion() -> String? {
         defer { pendingAgentQuestion = nil }
         return pendingAgentQuestion?.text
@@ -3420,8 +3412,6 @@ final class LedgerSession: ObservableObject {
             } else {
                 errorMessage = String(localized: "快速记账仅支持本机账本")
             }
-        case .capture:
-            pendingAgentCapture = LedgerAgentPendingCapture()
         }
         if pendingExternalRoute?.id == request.id { pendingExternalRoute = nil }
     }
