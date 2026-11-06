@@ -261,6 +261,7 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 
 	api.POST("/ai/parse", s.aiParse)
 	api.POST("/ai/agent/turn", s.aiAgentTurn)
+	api.POST("/ai/agent/session-title", s.aiAgentSessionTitle)
 	api.GET("/ai/agent/sessions/:sessionID/timeline", noStore(), s.aiAgentTimeline)
 	api.DELETE("/ai/agent/sessions/:sessionID", s.aiAgentSessionDelete)
 	api.GET("/agent/access-tokens", noStore(), s.agentAccessTokens)
