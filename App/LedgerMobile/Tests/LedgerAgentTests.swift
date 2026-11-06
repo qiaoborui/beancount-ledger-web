@@ -115,6 +115,106 @@ final class LedgerAgentTests: XCTestCase {
         }
     }
 
+    func testVisualBlocksDecodeEveryComponentAndDropWhatDoesNotFit() throws {
+        let json = """
+        {"title":"10 月支出","unit":"元","blocks":[
+         {"type":"stats","items":[{"label":"支出","value":"5,230.50","delta":-0.12,"better":"lower","link":"ledger://search?q=10月","spark":[1,2,3]},
+                                  {"label":"状态","value":"正常"},{"label":"坏的"}]},
+         {"type":"tabs","tabs":[{"label":"3 个月","blocks":[{"type":"chart","kind":"bar","labels":["8月","9月"],
+             "series":[{"name":"支出","values":[1,2]},{"name":"均值","kind":"line","values":[1.5,1.5]}],
+             "rules":[{"value":1.8,"label":"预算"}],"links":["ledger://search?q=8月","https://evil.example"]}]},
+           {"label":"6 个月","blocks":[{"type":"chart","kind":"waterfall","labels":["收入","房租"],"series":[{"name":"x","values":[100,-40]}]}]}]},
+         {"type":"row","blocks":[{"type":"kv","items":[{"label":"账户","value":"招行"},{"label":"余额","value":12.5,"tone":"good"}]},
+                                 {"type":"callout","tone":"warn","text":"有一笔重复"}]},
+         {"type":"section","title":"明细","collapsed":true,"blocks":[
+           {"type":"table","columns":["日期","分类",{"title":"金额","numeric":true}],"filter":"分类","totals":true,
+            "rows":[{"cells":["10-05","餐饮",25],"link":"ledger://transactions?date=2026-10-05"},["10-06","交通","8.5"],
+                    {"cells":["10-07","餐饮","1,200"],"children":[["","午饭","100"]]}]}]},
+         {"type":"progress","items":[{"label":"餐饮","value":1200,"target":1000},{"label":"无预算","value":1,"target":0}]},
+         {"type":"timeline","items":[{"date":"2026-10-05","title":"机票","value":1280,"tone":"bad"}]},
+         {"type":"heatmap","days":[{"date":"2026-10-02","value":3},{"date":"2026-10-01","value":5},{"date":"2026-02-30","value":1}]},
+         {"type":"compare","left":"9月","right":"10月","items":[{"label":"餐饮","left":1600,"right":1820.5}]},
+         {"type":"actions","items":[{"label":"看明细","ask":"列出餐饮"},{"label":"打开","link":"ledger://search?q=餐饮"},{"label":"外链","link":"https://x"}]},
+         {"type":"mystery"},
+         {"type":"note","text":"不含转账"}]}
+        """
+        let segments = LedgerAgentReplyText.segments("看这里：\n```visual\n\(json)\n```\n完。").filter { $0 != .prose("") }
+        XCTAssertEqual(segments.count, 3)
+        guard case let .visual(visual) = segments[1] else { return XCTFail("\(segments)") }
+        XCTAssertEqual(visual.title, "10 月支出")
+        XCTAssertEqual(visual.unit, "元")
+        // The unknown block is dropped; the other ten stay in order.
+        XCTAssertEqual(visual.blocks.count, 10)
+
+        guard case let .stats(stats) = visual.blocks[0] else { return XCTFail() }
+        XCTAssertEqual(stats.count, 2)
+        XCTAssertEqual(stats[0].value, 5230.5)
+        XCTAssertEqual(stats[0].better, .lower)
+        XCTAssertEqual(stats[0].spark, [1, 2, 3])
+        XCTAssertEqual(stats[0].link?.scheme, "ledger")
+        XCTAssertEqual(stats[1].text, "正常")
+
+        guard case let .tabs(tabs) = visual.blocks[1], case let .chart(bar) = tabs[0].blocks[0],
+              case let .chart(waterfall) = tabs[1].blocks[0] else { return XCTFail() }
+        XCTAssertEqual(tabs.map(\.label), ["3 个月", "6 个月"])
+        XCTAssertEqual(bar.kind(of: "均值"), .line)
+        XCTAssertEqual(bar.rules, [.init(value: 1.8, label: "预算")])
+        XCTAssertNotNil(bar.link(for: "8月"))
+        XCTAssertNil(bar.link(for: "9月"), "a link outside the ledger is dropped")
+        XCTAssertEqual(waterfall.steps.map(\.end), [100, 60, 60])
+        XCTAssertEqual(waterfall.steps.map(\.category), ["增加", "减少", "合计"])
+
+        guard case let .row(row) = visual.blocks[2], case let .keyValues(values) = row[0], case let .callout(callout) = row[1]
+        else { return XCTFail() }
+        XCTAssertEqual(values.items.map(\.value), ["招行", "12.5"])
+        XCTAssertEqual(values.items[1].tone, .good)
+        XCTAssertEqual(callout.kind, .warn)
+
+        guard case let .section(section) = visual.blocks[3], case let .table(table) = section.blocks[0] else { return XCTFail() }
+        XCTAssertTrue(section.collapsed)
+        XCTAssertEqual(table.columns.map(\.numeric), [false, false, true])
+        XCTAssertEqual(table.filter, 1)
+        XCTAssertEqual(table.filterValues, ["餐饮", "交通"])
+        XCTAssertEqual(table.rows[0].cells, ["10-05", "餐饮", "25"])
+        XCTAssertEqual(table.rows[2].children.count, 1)
+        XCTAssertEqual(table.totals(of: table.rows), [nil, nil, 1233.5])
+        XCTAssertEqual(table.sorted(by: 2, ascending: false).map { $0.cells[0] }, ["10-07", "10-05", "10-06"])
+
+        guard case let .progress(progress) = visual.blocks[4] else { return XCTFail() }
+        XCTAssertEqual(progress.items.count, 1, "a zero target is dropped")
+        XCTAssertEqual(progress.better, .lower)
+
+        guard case let .heatmap(heatmap) = visual.blocks[6] else { return XCTFail() }
+        XCTAssertEqual(heatmap.days.map { LedgerAgentVisual.dayString($0.date) }, ["2026-10-01", "2026-10-02"])
+        XCTAssertEqual(heatmap.link(for: heatmap.days[0])?.absoluteString, "ledger://transactions?date=2026-10-01")
+        XCTAssertEqual(LedgerAgentVisual.weekdayIndex(heatmap.days[0].date), 3, "2026-10-01 is a Thursday")
+
+        guard case let .actions(actions) = visual.blocks[8] else { return XCTFail() }
+        XCTAssertEqual(actions.map(\.label), ["看明细", "打开"])
+        XCTAssertEqual(actions[0].target, .ask("列出餐饮"))
+    }
+
+    func testVisualsWithoutUsableBlocksStayCodeAndContainersStopNesting() {
+        for json in [#"{"blocks":[]}"#, #"{"blocks":[{"type":"mystery"}]}"#, #"{"title":"x"}"#, "not json"] {
+            XCTAssertEqual(LedgerAgentReplyText.segments("```visual\n\(json)\n```").filter { $0 != .prose("") }, [.code(json)], json)
+        }
+        let note = #"{"type":"note","text":"深"}"#
+        let deep = #"{"blocks":[{"type":"row","blocks":[{"type":"section","title":"a","blocks":[{"type":"row","blocks":["# + note + #",{"type":"row","blocks":["# + note + #"]}]}]}]}]}"#
+        guard let visual = LedgerAgentVisual(json: deep), case let .row(outer) = visual.blocks[0],
+              case let .section(section) = outer[0], case let .row(inner) = section.blocks[0] else { return XCTFail() }
+        XCTAssertEqual(inner, [.note("深")], "a fourth container level is dropped")
+    }
+
+    func testVisualNumberFormatting() {
+        XCTAssertEqual(LedgerAgentVisual.amount(1820.5, unit: "元"), "1,820.5 元")
+        XCTAssertEqual(LedgerAgentVisual.amount(-12, unit: "¥"), "-¥12")
+        XCTAssertEqual(LedgerAgentVisual.percent(-0.125), "-12.5%")
+        XCTAssertEqual(LedgerAgentVisual.percent(0.3), "+30%")
+        XCTAssertEqual(LedgerAgentVisual.number("¥1,234.5 元"), 1234.5)
+        XCTAssertEqual(LedgerAgentVisual.tone(of: 5, better: .lower), .bad)
+        XCTAssertEqual(LedgerAgentVisual.tone(of: 5, better: nil), .neutral)
+    }
+
     func testTurnRequestEncodesOnlyFieldsTheNativeDecoderAccepts() throws {
         let request = LedgerAgentTurnRequest(turnId: "t", workspaceRoot: "/w", runtimeRoot: "/r", entrypoint: "main.bean",
             modelHandle: "h", sensitiveUnlocked: true, provider: "anthropic", model: "claude-sonnet-4-5", apiKey: "k",
