@@ -118,6 +118,24 @@ prompts. Web, Telegram, and the native CLI Channel preserve Bub's
 comma-prefixed command mode; those strings reach Bub's command runner without
 being rewritten as model input.
 
+## Earlier conversations
+
+Each conversation is one Bub tape. The Agent can read the older ones back
+through two local tools: `list_past_sessions` lists the newest conversations
+(current one excluded) with an opaque session handle, timestamps, turn count,
+and a clipped first question and last message; `read_past_session` returns the
+recent messages of one handle. Both are plain Bub tools, not ledger MCP tools,
+so they need no ledger checkout or Token.
+
+History is context, not state. The prompts require re-reading the ledger for
+balances and entries, and an earlier draft is never treated as already written.
+Web turns expose the history tools only after the sensitive unlock, the same gate
+as the ledger tools.
+
+The title in the web sidebar is generated separately by the Go server
+(`POST /api/ai/agent/session-title`) from the opening exchange, so a session is
+named by what it was about rather than by the raw first question.
+
 Required Agent environment:
 
 ```text

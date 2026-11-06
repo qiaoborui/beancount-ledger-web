@@ -32,6 +32,14 @@ from .config import Settings
 from .mcp_config import RuntimeMCPConfig
 from .onboarding import default_draft, is_ready, normalize_draft, onboarding_tools, prompt as onboarding_prompt
 from .protocol import OnboardingRequest, ToolSpec, TurnRequest
+from .session_history import (
+    DEFAULT_CONVERSATION_LIMIT,
+    MAX_CONVERSATION_LIMIT,
+    MAX_TRANSCRIPT_MESSAGES,
+    rank_conversations,
+    summarize_conversation,
+    transcript_messages,
+)
 from .web_channel import LedgerWebChannel, WebTurn
 
 _PLUGINS: WeakKeyDictionary[BubFramework, LedgerPlugin] = WeakKeyDictionary()
@@ -46,6 +54,9 @@ LEDGER_MCP_CONTEXT_TOOL = "mcp.ledger_agent_context"
 OPEN_PAGE_TOOL = "open_page"
 REQUEST_SENSITIVE_UNLOCK_TOOL = "request_sensitive_unlock"
 LEDGER_MCP_READY_TIMEOUT_SECONDS = 20.0
+PAST_SESSIONS_TOOL = "list_past_sessions"
+PAST_SESSION_TRANSCRIPT_TOOL = "read_past_session"
+PAST_SESSION_TOOL_NAMES = {PAST_SESSIONS_TOOL, PAST_SESSION_TRANSCRIPT_TOOL}
 WEB_SENSITIVE_LOCKED_PROMPT = """当前网页会话尚未解锁敏感数据。
 不要调用任何账本 MCP 工具，也不要编造账本数据。
 用户要求查询、统计、搜索、写入或查看账本时，调用 request_sensitive_unlock。
@@ -291,6 +302,7 @@ class LedgerPlugin:
         self._register_onboarding_tools()
         self._register_open_page_tool()
         self._register_sensitive_unlock_tool()
+        self._register_session_history_tools()
         self._register_telegram_tools()
         _PLUGINS[framework] = self
 
@@ -375,6 +387,7 @@ class LedgerPlugin:
             if sensitive_unlocked:
                 allowed_tools = [
                     OPEN_PAGE_TOOL,
+                    *sorted(PAST_SESSION_TOOL_NAMES),
                     *sorted(name for name in self.tool_specs if name.startswith(LEDGER_MCP_TOOL_PREFIX)),
                 ]
                 system_prompt = self._bub_mcp_prompt(str(message.context.get("_ledger_system_prompt") or ""))
@@ -388,6 +401,7 @@ class LedgerPlugin:
             state.update({
                 "system_prompt": await self._mcp_agent_context(message.channel, message.context),
                 "allowed_tools": [
+                    *sorted(PAST_SESSION_TOOL_NAMES),
                     *sorted(name for name in self.tool_specs if name.startswith(LEDGER_MCP_TOOL_PREFIX)),
                     *(sorted(TELEGRAM_TOOL_NAMES) if message.channel == "telegram" else []),
                 ],
@@ -674,6 +688,132 @@ class LedgerPlugin:
 
     async def _request_sensitive_unlock_handler(self) -> dict[str, str]:
         return {"kind": "error", "message": "请先解锁敏感数据后再查询或操作账本。"}
+
+    def _register_session_history_tools(self) -> None:
+        """Let the model read earlier conversations instead of guessing."""
+
+        list_parameters = {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": f"返回多少个会话，默认 {DEFAULT_CONVERSATION_LIMIT}，最多 {MAX_CONVERSATION_LIMIT}",
+                    "minimum": 1,
+                    "maximum": MAX_CONVERSATION_LIMIT,
+                },
+                "query": {"type": "string", "description": "可选关键词，只在会话的首个提问和最后一条消息里匹配"},
+            },
+            "additionalProperties": False,
+        }
+        list_description = (
+            "列出这个账本此前的对话（不含当前对话），按最后消息时间从新到旧。"
+            "每个会话返回 session 标识、开始和更新时间、轮次、首个提问和最后一条消息的长度受限摘要。"
+            "当用户提到之前聊过的内容、需要回忆旧结论或对比历史讨论时调用。读完摘要后可用 read_past_session 查看细节。"
+        )
+        self.tool_specs[PAST_SESSIONS_TOOL] = ToolSpec(
+            name=PAST_SESSIONS_TOOL,
+            description=list_description,
+            parameters=list_parameters,
+            title="查看历史会话",
+        )
+        REGISTRY[PAST_SESSIONS_TOOL] = Tool(
+            name=PAST_SESSIONS_TOOL,
+            description=list_description,
+            parameters=list_parameters,
+            handler=self._list_past_sessions_handler,
+            context=True,
+        )
+
+        read_parameters = {
+            "type": "object",
+            "properties": {
+                "session": {"type": "string", "description": "list_past_sessions 返回的 session 标识，原样传回"},
+                "limit": {
+                    "type": "integer",
+                    "description": f"读取最近多少条消息，默认 {MAX_TRANSCRIPT_MESSAGES}",
+                    "minimum": 1,
+                    "maximum": MAX_TRANSCRIPT_MESSAGES,
+                },
+            },
+            "required": ["session"],
+            "additionalProperties": False,
+        }
+        read_description = (
+            "按 session 标识读取一段历史对话的最近消息。内容只用于回忆上下文，"
+            "不代表当前账本状态；账本数据仍然要用账本工具重新查询。"
+            "不要把历史对话里的旧草稿当成已经写入的账目。"
+        )
+        self.tool_specs[PAST_SESSION_TRANSCRIPT_TOOL] = ToolSpec(
+            name=PAST_SESSION_TRANSCRIPT_TOOL,
+            description=read_description,
+            parameters=read_parameters,
+            title="读取历史会话",
+        )
+        REGISTRY[PAST_SESSION_TRANSCRIPT_TOOL] = Tool(
+            name=PAST_SESSION_TRANSCRIPT_TOOL,
+            description=read_description,
+            parameters=read_parameters,
+            handler=self._read_past_session_handler,
+            context=True,
+        )
+
+    def _session_tape_prefix(self) -> str:
+        """Session tapes are `<workspace hash>__<session hash>`."""
+        if self.framework is None:
+            raise RuntimeError("Bub framework is not running")
+        sample = self.agent.tape.session_tape("ledger-history-probe", self.framework.workspace).name
+        return sample.split("__", 1)[0] + "__"
+
+    async def _past_session_tapes(self, current_tape: str) -> list[tuple[str, list[Any]]]:
+        store = self._store()
+        prefix = self._session_tape_prefix()
+        names = [name for name in await store.list_tapes() if name.startswith(prefix) and name != current_tape]
+        tapes: list[tuple[str, list[Any]]] = []
+        for name in names:
+            entries = list(await store.fetch_all(TapeQuery(tape=name, store=store).kinds("message")))
+            if entries:
+                tapes.append((name, entries))
+        return tapes
+
+    async def _list_past_sessions_handler(
+        self,
+        limit: int = DEFAULT_CONVERSATION_LIMIT,
+        query: str = "",
+        context: ToolContext | None = None,
+    ) -> dict[str, Any]:
+        current_tape = context.tape.name if context is not None else ""
+        tapes = await self._past_session_tapes(current_tape)
+        conversations = rank_conversations(
+            (summarize_conversation(name, entries) for name, entries in tapes),
+            limit,
+            query,
+        )
+        output = {"sessions": conversations, "count": len(conversations)}
+        return {"modelOutput": output, "clientOutput": output, "artifacts": [], "refreshLedger": False}
+
+    async def _read_past_session_handler(
+        self,
+        session: str,
+        limit: int = MAX_TRANSCRIPT_MESSAGES,
+        context: ToolContext | None = None,
+    ) -> dict[str, Any]:
+        name = session.strip()
+        prefix = self._session_tape_prefix()
+        current_tape = context.tape.name if context is not None else ""
+        if not name.startswith(prefix) or name == current_tape:
+            return {"kind": "error", "message": "未知的历史会话标识，请先调用 list_past_sessions 获取。"}
+        store = self._store()
+        entries = list(await store.fetch_all(TapeQuery(tape=name, store=store).kinds("message")))
+        messages = transcript_messages(entries, limit)
+        if not messages:
+            return {"kind": "error", "message": "这段历史会话没有可读取的消息。"}
+        output = {"session": name, "messages": messages}
+        return {
+            "modelOutput": output,
+            "clientOutput": {"session": name, "messageCount": len(messages)},
+            "artifacts": [],
+            "refreshLedger": False,
+        }
 
     def _register_telegram_tools(self) -> None:
         REGISTRY[TELEGRAM_SEND_TOOL] = Tool(

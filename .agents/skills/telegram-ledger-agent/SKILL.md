@@ -200,6 +200,13 @@ For requests that would bulk rewrite files, rename existing accounts, import sta
 - Do not guess private ledger locations in Telegram.
 - Do not use an example ledger unless the user explicitly asks.
 
+## Conversation History
+
+- `list_past_sessions` lists earlier conversations (newest first, current one excluded) with a session handle, timestamps, turn count, and a clipped first question and last message.
+- `read_past_session` reads the recent messages of one handle returned by `list_past_sessions`.
+- Call them only when the user refers to something discussed before, or when an earlier conclusion is needed. Plain ledger questions re-query the ledger instead.
+- History is context, not state: re-read the ledger for balances and entries, and never treat an old draft as already written.
+
 Environment guard:
 
 ```bash

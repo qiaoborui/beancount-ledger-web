@@ -24,6 +24,8 @@ from fastmcp import FastMCP
 from ledger_agent_service.config import Settings
 from ledger_agent_service.protocol import OnboardingRequest, ToolSpec, TurnRequest
 from ledger_agent_service.runtime import (
+    PAST_SESSIONS_TOOL,
+    PAST_SESSION_TRANSCRIPT_TOOL,
     REQUEST_SENSITIVE_UNLOCK_TOOL,
     TELEGRAM_SEND_RICH_TOOL,
     TELEGRAM_SEND_TOOL,
@@ -410,6 +412,8 @@ async def test_telegram_state_exposes_bound_send_tools_and_source_message() -> N
     assert state["telegram_message_id"] == 1207
     assert set(state["allowed_tools"]) == {
         "mcp.ledger_get_accounts",
+        PAST_SESSIONS_TOOL,
+        PAST_SESSION_TRANSCRIPT_TOOL,
         TELEGRAM_SEND_TOOL,
         TELEGRAM_SEND_RICH_TOOL,
     }
@@ -421,7 +425,7 @@ async def test_telegram_state_exposes_bound_send_tools_and_source_message() -> N
     ("sensitive_unlocked", "expected"),
     [
         (False, {"open_page", REQUEST_SENSITIVE_UNLOCK_TOOL}),
-        (True, {"open_page", "mcp.ledger_get_accounts"}),
+        (True, {"open_page", PAST_SESSIONS_TOOL, PAST_SESSION_TRANSCRIPT_TOOL, "mcp.ledger_get_accounts"}),
     ],
 )
 async def test_web_state_keeps_mcp_tools_behind_sensitive_unlock(sensitive_unlocked: bool, expected: set[str]) -> None:
@@ -460,6 +464,120 @@ async def test_web_state_keeps_mcp_tools_behind_sensitive_unlock(sensitive_unloc
     else:
         assert state["system_prompt"] == WEB_SENSITIVE_LOCKED_PROMPT
         assert "mcp.ledger_get_accounts" not in state["system_prompt"]
+
+
+class FakeSessionTapeStore:
+    def __init__(self, tapes: dict[str, list[SimpleNamespace]]) -> None:
+        self.tapes = tapes
+        self.fetched: list[str] = []
+
+    async def list_tapes(self) -> list[str]:
+        return list(self.tapes)
+
+    async def fetch_all(self, query) -> list[SimpleNamespace]:
+        self.fetched.append(query.tape)
+        return self.tapes.get(query.tape, [])
+
+
+def history_plugin(tapes: dict[str, list[SimpleNamespace]]) -> tuple[LedgerPlugin, FakeSessionTapeStore]:
+    plugin = object.__new__(LedgerPlugin)
+    plugin.framework = SimpleNamespace(workspace=Path("/workspace"))
+    plugin.agent = SimpleNamespace(
+        tape=SimpleNamespace(
+            session_tape=lambda session_id, workspace: SimpleNamespace(name=f"workspace__{session_id}"),
+        )
+    )
+    store = FakeSessionTapeStore(tapes)
+    plugin.async_store = store
+    return plugin, store
+
+
+def message_entry(role: str, content: str, date: str) -> SimpleNamespace:
+    return SimpleNamespace(payload={"role": role, "content": content}, date=date)
+
+
+@pytest.mark.asyncio
+async def test_list_past_sessions_reads_other_workspace_tapes_newest_first() -> None:
+    plugin, store = history_plugin({
+        "workspace__current": [message_entry("user", "当前对话", "2026-11-05T00:00:00Z")],
+        "workspace__older": [
+            message_entry("user", "上个月的预算怎么定的？", "2026-10-01T09:00:00Z"),
+            message_entry("assistant", "按 6:3:1 分配。", "2026-10-01T09:00:04Z"),
+        ],
+        "workspace__newer": [
+            message_entry("user", "帮我看下餐饮支出", "2026-11-04T09:00:00Z"),
+            message_entry("assistant", "本月餐饮 1,280.00 元。", "2026-11-04T09:00:04Z"),
+        ],
+        "other-workspace__session": [message_entry("user", "别的账本", "2026-11-06T00:00:00Z")],
+    })
+    context = ToolContext(tape=SimpleNamespace(name="workspace__current"), state={})
+
+    result = await plugin._list_past_sessions_handler(limit=10, context=context)
+
+    sessions = result["modelOutput"]["sessions"]
+    assert [session["session"] for session in sessions] == ["workspace__newer", "workspace__older"]
+    assert sessions[0]["firstQuestion"] == "帮我看下餐饮支出"
+    assert sessions[0]["turns"] == 1
+    assert result["clientOutput"] == result["modelOutput"]
+    assert "workspace__current" not in store.fetched
+    assert "other-workspace__session" not in store.fetched
+
+
+@pytest.mark.asyncio
+async def test_list_past_sessions_filters_by_keyword_and_limit() -> None:
+    plugin, _store = history_plugin({
+        "workspace__one": [message_entry("user", "预算复盘", "2026-11-04T00:00:00Z")],
+        "workspace__two": [message_entry("user", "外卖统计", "2026-11-03T00:00:00Z")],
+        "workspace__three": [message_entry("user", "外卖明细", "2026-11-02T00:00:00Z")],
+    })
+    context = ToolContext(tape=SimpleNamespace(name="workspace__current"), state={})
+
+    filtered = await plugin._list_past_sessions_handler(query="外卖", limit=1, context=context)
+
+    assert [session["session"] for session in filtered["modelOutput"]["sessions"]] == ["workspace__two"]
+
+
+@pytest.mark.asyncio
+async def test_read_past_session_returns_transcript_and_rejects_unknown_tapes() -> None:
+    plugin, _store = history_plugin({
+        "workspace__target": [
+            message_entry("user", "上周餐饮多少？", "2026-11-04T09:00:00Z"),
+            message_entry("assistant", "上周 320.00 元。", "2026-11-04T09:00:04Z"),
+        ],
+    })
+    context = ToolContext(tape=SimpleNamespace(name="workspace__current"), state={})
+
+    result = await plugin._read_past_session_handler(session="workspace__target", context=context)
+
+    assert result["modelOutput"]["session"] == "workspace__target"
+    assert [message["content"] for message in result["modelOutput"]["messages"]] == ["上周餐饮多少？", "上周 320.00 元。"]
+    assert result["clientOutput"] == {"session": "workspace__target", "messageCount": 2}
+
+    current = await plugin._read_past_session_handler(session="workspace__current", context=context)
+    assert current["kind"] == "error"
+    foreign = await plugin._read_past_session_handler(session="other-workspace__session", context=context)
+    assert foreign["kind"] == "error"
+
+
+def test_session_history_tools_are_registered_with_ui_titles() -> None:
+    plugin = object.__new__(LedgerPlugin)
+    plugin.tool_specs = {}
+    saved = {name: REGISTRY.get(name) for name in (PAST_SESSIONS_TOOL, PAST_SESSION_TRANSCRIPT_TOOL)}
+    try:
+        plugin._register_session_history_tools()
+
+        assert plugin.tool_specs[PAST_SESSIONS_TOOL].title == "查看历史会话"
+        assert plugin.tool_specs[PAST_SESSION_TRANSCRIPT_TOOL].title == "读取历史会话"
+        assert REGISTRY[PAST_SESSIONS_TOOL].context is True
+        assert REGISTRY[PAST_SESSION_TRANSCRIPT_TOOL].context is True
+        assert REGISTRY[PAST_SESSIONS_TOOL].parameters["properties"]["limit"]["maximum"] == 25
+        assert REGISTRY[PAST_SESSION_TRANSCRIPT_TOOL].parameters["required"] == ["session"]
+    finally:
+        for name, tool in saved.items():
+            if tool is None:
+                REGISTRY.pop(name, None)
+            else:
+                REGISTRY[name] = tool
 
 
 @pytest.mark.asyncio
