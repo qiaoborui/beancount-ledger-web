@@ -30,6 +30,23 @@
         }
       }
     },
+    "NSCameraUsageDescription" : {
+      "comment" : "Privacy - Camera Usage Description",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Take photos of receipts and bills for the ledger assistant to read and record."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拍摄票据或账单照片，交给账本助手识别记账。"
+          }
+        }
+      }
+    },
     "NSFaceIDUsageDescription" : {
       "comment" : "Privacy - Face ID Usage Description",
       "localizations" : {

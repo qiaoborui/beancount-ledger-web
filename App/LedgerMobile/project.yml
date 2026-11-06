@@ -80,6 +80,7 @@ targets:
               - public.email-message
               - public.html
               - public.zip-archive
+        NSCameraUsageDescription: 拍摄票据或账单照片，交给账本助手识别记账。
         NSFaceIDUsageDescription: 使用 Face ID 解锁受保护的账本金额和财务数据。
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
         NSSupportsLiveActivities: true
@@ -143,6 +144,7 @@ targets:
       - path: Sources/LedgerLocale.swift
       - path: Sources/ImportIndexActivityAttributes.swift
       - path: Sources/LedgerAgentActivityAttributes.swift
+      - path: Sources/LedgerQuickLink.swift
     info:
       path: WidgetExtension/Info.plist
       properties:

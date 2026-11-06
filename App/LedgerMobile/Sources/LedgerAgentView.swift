@@ -60,6 +60,7 @@ private struct LedgerAgentChatScreen: View {
     /// appears, which made "从相册选截图或照片" look like a dead button.
     @State private var photoLibraryPresented = false
     @State private var photoItems: [PhotosPickerItem] = []
+    @State private var cameraPresented = false
     @State private var attaching = false
     @State private var attachError: String?
     @State private var inboxItems: [LedgerSharedImportInbox.Item] = []
@@ -101,6 +102,12 @@ private struct LedgerAgentChatScreen: View {
         }
         .photosPicker(isPresented: $photoLibraryPresented, selection: $photoItems,
                       maxSelectionCount: 6, matching: .images)
+        .fullScreenCover(isPresented: $cameraPresented) {
+            LedgerCameraPicker { data in
+                attach([.imageData(data, suggestedName: String(localized: "票据照片") + ".jpg")])
+            }
+            .ignoresSafeArea()
+        }
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             photoItems = []
@@ -521,6 +528,9 @@ private struct LedgerAgentChatScreen: View {
         Menu {
             Button { choosingFiles = true } label: { Label("选择文件（CSV、Excel、PDF）", systemImage: "doc") }
             Button { photoLibraryPresented = true } label: { Label("从相册选截图或照片", systemImage: "photo.on.rectangle") }
+            if LedgerCameraPicker.isAvailable {
+                Button { cameraPresented = true } label: { Label("拍照", systemImage: "camera") }
+            }
             // Bills shared into Ledger from another app wait in the import
             // inbox; the assistant can reconcile them from there.
             if !inboxItems.isEmpty {

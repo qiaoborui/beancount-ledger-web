@@ -7,6 +7,10 @@ enum LedgerExternalRoute: Equatable, Sendable {
     case search(String)
     /// A question for the ledger assistant, from Siri or a shortcut.
     case agent(String)
+    /// The fast editor for a new transaction, from a widget or quick action.
+    case record
+    /// 用一句话记账, the natural-language entry, from a widget or quick action.
+    case sentence
 
     var destination: LedgerDestination {
         switch self {
@@ -15,6 +19,7 @@ enum LedgerExternalRoute: Equatable, Sendable {
         case .transactions: .transactions
         case .search: .search
         case .agent: .agent
+        case .record, .sentence: .transactions
         }
     }
 
@@ -44,6 +49,15 @@ enum LedgerExternalRoute: Equatable, Sendable {
             let currency = query["currency"] ?? ""
             guard currency.count <= 32, currency.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
             return .account(account, currency)
+        case "record":
+            guard !query.isEmpty else { return .record }
+            guard query == ["mode": "sentence"] else { return nil }
+            return .sentence
+        case "page":
+            // Any tab by its stored name, for the configurable 快捷入口 widget.
+            guard Set(query.keys) == ["name"], let name = query["name"],
+                  let destination = LedgerDestination(rawValue: name) else { return nil }
+            return .page(destination)
         case "transactions":
             guard !query.isEmpty else { return .page(.transactions) }
             guard query.count == 1, let day = query["date"], date(day) != nil else { return nil }
@@ -70,6 +84,12 @@ enum LedgerExternalRoute: Equatable, Sendable {
 struct LedgerAgentPendingQuestion: Identifiable, Equatable, Sendable {
     let id = UUID()
     let text: String
+}
+
+struct LedgerQuickEntryRequest: Identifiable, Equatable, Sendable {
+    enum Kind: Equatable, Sendable { case record, sentence }
+    let id = UUID()
+    let kind: Kind
 }
 
 struct LedgerExternalRouteRequest: Identifiable, Equatable, Sendable {

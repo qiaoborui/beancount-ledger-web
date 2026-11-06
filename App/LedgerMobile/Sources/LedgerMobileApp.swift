@@ -7,6 +7,9 @@ struct LedgerMobileApp: App {
     #endif
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var session: LedgerSession
+    #if os(iOS)
+    private let quickActions = LedgerQuickActionCenter.shared
+    #endif
     @State private var didStartSession = false
 
     init() {
@@ -81,6 +84,16 @@ struct LedgerMobileApp: App {
                         session.openWidgetURL(url)
                     }
                 }
+                #if os(iOS)
+                // A long press on the app icon: opened like a widget link, so
+                // the same unlock-then-run path applies.
+                .onReceive(quickActions.$pending) { url in
+                    guard let url else { return }
+                    quickActions.pending = nil
+                    session.openWidgetURL(url)
+                }
+                .task { quickActions.installShortcutItems() }
+                #endif
         }
     }
 }

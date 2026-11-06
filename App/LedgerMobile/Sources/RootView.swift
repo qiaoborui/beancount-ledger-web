@@ -474,6 +474,13 @@ private struct MainTabView: View {
         )
     }
 
+    private func quickEntryBinding(_ kind: LedgerQuickEntryRequest.Kind) -> Binding<LedgerQuickEntryRequest?> {
+        Binding(
+            get: { session.quickEntry?.kind == kind ? session.quickEntry : nil },
+            set: { if $0 == nil, session.quickEntry?.kind == kind { session.quickEntry = nil } }
+        )
+    }
+
     var body: some View {
         Group {
             if horizontalSizeClass == .regular {
@@ -487,6 +494,19 @@ private struct MainTabView: View {
             }
         }
         .ledgerTimeRangeSheet()
+        // 记一笔 and 一句话记账 from the 快捷入口 widget or the app icon menu.
+        .sheet(item: quickEntryBinding(.record)) { _ in
+            TransactionEditorView(
+                accounts: session.ledger?.accounts ?? [],
+                commodities: session.ledger?.commodities ?? []
+            ) { entry in
+                try await session.addLocalTransaction(entry)
+            }
+            .ledgerPrivacyProtectedSheet()
+        }
+        .fullScreenCover(item: quickEntryBinding(.sentence)) { _ in
+            NaturalLanguageBookkeepingView(onSaved: { session.quickEntry = nil })
+        }
         .task(id: session.pendingExternalRoute?.id) { await session.applyPendingExternalRoute() }
         // The shell now outlives a lock, so a route that arrived while locked is
         // applied on unlock rather than on the next mount.

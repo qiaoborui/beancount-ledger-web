@@ -294,6 +294,46 @@
     "≤50" : {
       "shouldTranslate" : false
     },
+    "一句话" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sentence"
+          }
+        }
+      }
+    },
+    "一句话记账" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record in a sentence"
+          }
+        }
+      }
+    },
+    "一键问账本助手、记一笔，或打开任意页面。长按可编辑每个按钮。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask the assistant, add an entry or open any page in one tap. Long-press to edit each button."
+          }
+        }
+      }
+    },
+    "交易" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transactions"
+          }
+        }
+      }
+    },
     "估值 %@" : {
       "localizations" : {
         "en" : {
@@ -394,6 +434,16 @@
         }
       }
     },
+    "大按钮" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Large button"
+          }
+        }
+      }
+    },
     "完成" : {
       "localizations" : {
         "en" : {
@@ -410,6 +460,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Coverage dates appear after you import statements"
+          }
+        }
+      }
+    },
+    "导入" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import"
           }
         }
       }
@@ -554,6 +614,16 @@
         }
       }
     },
+    "快捷入口" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quick actions"
+          }
+        }
+      }
+    },
     "打开 Ledger 刷新" : {
       "localizations" : {
         "en" : {
@@ -574,12 +644,42 @@
         }
       }
     },
+    "打开 Ledger 的记账表单。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Ledger's entry form."
+          }
+        }
+      }
+    },
+    "打开 Ledger 的账本助手。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open the ledger assistant in Ledger."
+          }
+        }
+      }
+    },
     "打开账本查看" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Open the ledger to view"
+          }
+        }
+      }
+    },
+    "投资" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Investments"
           }
         }
       }
@@ -624,12 +724,62 @@
         }
       }
     },
+    "按钮 1" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Button 1"
+          }
+        }
+      }
+    },
+    "按钮 2" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Button 2"
+          }
+        }
+      }
+    },
+    "按钮 3" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Button 3"
+          }
+        }
+      }
+    },
+    "按钮 4" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Button 4"
+          }
+        }
+      }
+    },
     "描边为今天" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Outline marks today"
+          }
+        }
+      }
+    },
+    "搜索" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search"
           }
         }
       }
@@ -660,6 +810,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spending overview"
+          }
+        }
+      }
+    },
+    "收支" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Income & expense"
           }
         }
       }
@@ -944,6 +1104,26 @@
         }
       }
     },
+    "查询" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Query"
+          }
+        }
+      }
+    },
+    "概览" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Overview"
+          }
+        }
+      }
+    },
     "正在建立索引" : {
       "localizations" : {
         "en" : {
@@ -1194,6 +1374,16 @@
         }
       }
     },
+    "记一笔" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add an entry"
+          }
+        }
+      }
+    },
     "负债" : {
       "localizations" : {
         "en" : {
@@ -1254,6 +1444,16 @@
         }
       }
     },
+    "货币" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Currencies"
+          }
+        }
+      }
+    },
     "资产" : {
       "localizations" : {
         "en" : {
@@ -1270,6 +1470,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Asset balance"
+          }
+        }
+      }
+    },
+    "资产分析" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asset analysis"
           }
         }
       }
@@ -1364,6 +1574,16 @@
         }
       }
     },
+    "选择每个按钮打开的功能或页面。小号显示大按钮和前两个圆形按钮。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose what each button opens. The small size shows the large button and the first two round ones."
+          }
+        }
+      }
+    },
     "选择账户" : {
       "localizations" : {
         "en" : {
@@ -1390,6 +1610,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Touch and hold the widget, then choose Edit Widget"
+          }
+        }
+      }
+    },
+    "问助手" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask"
+          }
+        }
+      }
+    },
+    "问账本助手" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask the ledger assistant"
           }
         }
       }
