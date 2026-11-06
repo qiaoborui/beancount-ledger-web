@@ -294,6 +294,36 @@
     "≤50" : {
       "shouldTranslate" : false
     },
+    "一句话" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sentence"
+          }
+        }
+      }
+    },
+    "一句话记账" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record in a sentence"
+          }
+        }
+      }
+    },
+    "一键问账本助手、拍票据或记一笔。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask the assistant, scan a receipt or add an entry in one tap."
+          }
+        }
+      }
+    },
     "估值 %@" : {
       "localizations" : {
         "en" : {
@@ -350,6 +380,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Just checked"
+          }
+        }
+      }
+    },
+    "助手" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Assistant"
           }
         }
       }
@@ -414,12 +454,32 @@
         }
       }
     },
+    "导入" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import"
+          }
+        }
+      }
+    },
     "导入状态" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Import status"
+          }
+        }
+      }
+    },
+    "导入账单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import bills"
           }
         }
       }
@@ -554,6 +614,16 @@
         }
       }
     },
+    "快捷入口" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quick actions"
+          }
+        }
+      }
+    },
     "打开 Ledger 刷新" : {
       "localizations" : {
         "en" : {
@@ -574,6 +644,26 @@
         }
       }
     },
+    "打开 Ledger 的记账表单。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Ledger's entry form."
+          }
+        }
+      }
+    },
+    "打开 Ledger 的账本助手。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open the ledger assistant in Ledger."
+          }
+        }
+      }
+    },
     "打开账本查看" : {
       "localizations" : {
         "en" : {
@@ -590,6 +680,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Investments"
+          }
+        }
+      }
+    },
+    "拍一张票据或账单，交给账本助手。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photograph a receipt or bill for the ledger assistant."
+          }
+        }
+      }
+    },
+    "拍票据" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan receipt"
           }
         }
       }
@@ -630,6 +740,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Outline marks today"
+          }
+        }
+      }
+    },
+    "搜索" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search"
           }
         }
       }
@@ -1194,6 +1314,16 @@
         }
       }
     },
+    "记一笔" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add an entry"
+          }
+        }
+      }
+    },
     "负债" : {
       "localizations" : {
         "en" : {
@@ -1390,6 +1520,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Touch and hold the widget, then choose Edit Widget"
+          }
+        }
+      }
+    },
+    "问助手" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask"
+          }
+        }
+      }
+    },
+    "问账本助手" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask the ledger assistant"
           }
         }
       }

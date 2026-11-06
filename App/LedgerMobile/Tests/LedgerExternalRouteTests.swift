@@ -69,6 +69,46 @@ final class LedgerExternalRouteTests: XCTestCase {
         }
     }
 
+    func testQuickActionRoutes() throws {
+        XCTAssertEqual(try parse("ledger://record"), .record)
+        XCTAssertEqual(try parse("ledger://record/"), .record)
+        XCTAssertEqual(try parse("ledger://record?mode=sentence"), .sentence)
+        XCTAssertEqual(try parse("ledger://capture"), .capture)
+        XCTAssertEqual(LedgerExternalRoute.record.destination, .transactions)
+        XCTAssertEqual(LedgerExternalRoute.sentence.destination, .transactions)
+        XCTAssertEqual(LedgerExternalRoute.capture.destination, .agent)
+        for raw in ["ledger://record?mode=other", "ledger://record?mode=sentence&x=1", "ledger://record?other=1",
+                    "ledger://capture?x=1", "ledger://record?mode=sentence&mode=sentence"] {
+            XCTAssertNil(try parse(raw), raw)
+        }
+        // Every link the widget and quick actions use must parse.
+        for url in LedgerQuickLink.allCases.map(\.url) {
+            XCTAssertNotNil(LedgerExternalRoute.parse(url), url.absoluteString)
+        }
+        for link in LedgerQuickLink.allCases {
+            XCTAssertEqual(LedgerQuickLink(shortcutType: link.shortcutType), link)
+        }
+        XCTAssertNil(LedgerQuickLink(shortcutType: "com.example.quick.agent"))
+    }
+
+    func testQuickEntryWaitsForReadyLedger() async throws {
+        let suite = "ledger-external-quick-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defaults.set(["https://ledger.example.com"], forKey: "ledger.mobile.locally-locked-origins")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ExternalRouteRejectingURLProtocol.self]
+        let session = LedgerSession(api: LedgerAPIClient(session: URLSession(configuration: configuration)), defaults: defaults)
+        for raw in ["ledger://record", "ledger://capture"] {
+            session.openWidgetURL(try XCTUnwrap(URL(string: raw)))
+            XCTAssertNotNil(session.pendingExternalRoute)
+            await session.applyPendingExternalRoute()
+            XCTAssertNil(session.quickEntry)
+            XCTAssertNil(session.pendingAgentCapture)
+        }
+    }
+
     func testValidatesCalendarDayWithoutNormalizingInvalidDates() throws {
         XCTAssertEqual(try parse("ledger://transactions?date=2028-02-29"), .transactions("2028-02-29"))
         XCTAssertEqual(try parse("ledger://transactions?date=2026-12-31"), .transactions("2026-12-31"))

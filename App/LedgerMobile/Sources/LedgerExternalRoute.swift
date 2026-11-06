@@ -7,6 +7,12 @@ enum LedgerExternalRoute: Equatable, Sendable {
     case search(String)
     /// A question for the ledger assistant, from Siri or a shortcut.
     case agent(String)
+    /// The fast editor for a new transaction, from a widget or quick action.
+    case record
+    /// 用一句话记账, the natural-language entry, from a widget or quick action.
+    case sentence
+    /// The assistant with the camera open, to photograph a receipt or bill.
+    case capture
 
     var destination: LedgerDestination {
         switch self {
@@ -14,7 +20,8 @@ enum LedgerExternalRoute: Equatable, Sendable {
         case .account: .accounts
         case .transactions: .transactions
         case .search: .search
-        case .agent: .agent
+        case .agent, .capture: .agent
+        case .record, .sentence: .transactions
         }
     }
 
@@ -44,6 +51,13 @@ enum LedgerExternalRoute: Equatable, Sendable {
             let currency = query["currency"] ?? ""
             guard currency.count <= 32, currency.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
             return .account(account, currency)
+        case "record":
+            guard !query.isEmpty else { return .record }
+            guard query == ["mode": "sentence"] else { return nil }
+            return .sentence
+        case "capture":
+            guard query.isEmpty else { return nil }
+            return .capture
         case "transactions":
             guard !query.isEmpty else { return .page(.transactions) }
             guard query.count == 1, let day = query["date"], date(day) != nil else { return nil }
@@ -70,6 +84,16 @@ enum LedgerExternalRoute: Equatable, Sendable {
 struct LedgerAgentPendingQuestion: Identifiable, Equatable, Sendable {
     let id = UUID()
     let text: String
+}
+
+struct LedgerAgentPendingCapture: Identifiable, Equatable, Sendable {
+    let id = UUID()
+}
+
+struct LedgerQuickEntryRequest: Identifiable, Equatable, Sendable {
+    enum Kind: Equatable, Sendable { case record, sentence }
+    let id = UUID()
+    let kind: Kind
 }
 
 struct LedgerExternalRouteRequest: Identifiable, Equatable, Sendable {

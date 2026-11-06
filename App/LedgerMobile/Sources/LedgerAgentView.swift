@@ -36,6 +36,15 @@ struct LedgerAgentView: View {
                 if !sessions.current.isRunning, !sessions.busyElsewhere { sessions.startNew() }
                 sessions.queuedQuestion = question
             }
+            // 拍票据 from the widget or app icon: a fresh conversation with
+            // the camera open, so the photo is the first thing it sees.
+            .task(id: session.pendingAgentCapture?.id) {
+                guard session.takePendingAgentCapture() else { return }
+                if !sessions.current.isRunning, !sessions.busyElsewhere, !sessions.current.messages.isEmpty {
+                    sessions.startNew()
+                }
+                sessions.queuedCapture = true
+            }
     }
 }
 
@@ -60,6 +69,7 @@ private struct LedgerAgentChatScreen: View {
     /// appears, which made "从相册选截图或照片" look like a dead button.
     @State private var photoLibraryPresented = false
     @State private var photoItems: [PhotosPickerItem] = []
+    @State private var cameraPresented = false
     @State private var attaching = false
     @State private var attachError: String?
     @State private var inboxItems: [LedgerSharedImportInbox.Item] = []
@@ -101,6 +111,15 @@ private struct LedgerAgentChatScreen: View {
         }
         .photosPicker(isPresented: $photoLibraryPresented, selection: $photoItems,
                       maxSelectionCount: 6, matching: .images)
+        .fullScreenCover(isPresented: $cameraPresented) {
+            LedgerCameraPicker { data in
+                attach([.imageData(data, suggestedName: String(localized: "票据照片") + ".jpg")])
+                if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    draft = Self.captureQuestion
+                }
+            }
+            .ignoresSafeArea()
+        }
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             photoItems = []
@@ -151,6 +170,8 @@ private struct LedgerAgentChatScreen: View {
         .task { refreshInbox() }
         .onChange(of: sessions.queuedQuestion) { _, _ in sendQueuedQuestion() }
         .onAppear { sendQueuedQuestion() }
+        .onChange(of: sessions.queuedCapture) { _, _ in openQueuedCapture() }
+        .onAppear { openQueuedCapture() }
         // Links in replies point into the ledger (a day's transactions, an
         // account, a search) and open the page they name.
         .environment(\.openURL, OpenURLAction { url in
@@ -171,6 +192,21 @@ private struct LedgerAgentChatScreen: View {
             send(question, clearsComposer: false)
         } else {
             draft = question
+        }
+    }
+
+    /// Opens the camera the 拍票据 shortcut asked for, or the photo library
+    /// where there is no camera. When attachments cannot be added right now
+    /// (a turn is running, or the assistant is not set up) it does nothing.
+    private func openQueuedCapture() {
+        guard sessions.queuedCapture else { return }
+        sessions.queuedCapture = false
+        guard settings.isReady, conversation.canAttach, !attaching, !conversation.isRunning,
+              !session.privacyShielded else { return }
+        if LedgerCameraPicker.isAvailable {
+            cameraPresented = true
+        } else {
+            photoLibraryPresented = true
         }
     }
 
@@ -513,6 +549,7 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
+    private static let captureQuestion = String(localized: "帮我看看这张票据，记一笔")
     private static let reconcileQuestion = String(localized: "帮我把附件和账本对一下账，列出对不上的地方")
 
     // MARK: Attachments
@@ -521,6 +558,9 @@ private struct LedgerAgentChatScreen: View {
         Menu {
             Button { choosingFiles = true } label: { Label("选择文件（CSV、Excel、PDF）", systemImage: "doc") }
             Button { photoLibraryPresented = true } label: { Label("从相册选截图或照片", systemImage: "photo.on.rectangle") }
+            if LedgerCameraPicker.isAvailable {
+                Button { cameraPresented = true } label: { Label("拍照", systemImage: "camera") }
+            }
             // Bills shared into Ledger from another app wait in the import
             // inbox; the assistant can reconcile them from there.
             if !inboxItems.isEmpty {

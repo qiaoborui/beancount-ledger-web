@@ -1815,6 +1815,26 @@
         }
       }
     },
+    "一句话" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sentence"
+          }
+        }
+      }
+    },
+    "一句话记账" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record in a sentence"
+          }
+        }
+      }
+    },
     "一次最多为 %lld 笔交易添加标签。" : {
       "localizations" : {
         "en" : {
@@ -5115,6 +5135,16 @@
         }
       }
     },
+    "助手" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Assistant"
+          }
+        }
+      }
+    },
     "劳务咨询" : {
       "localizations" : {
         "en" : {
@@ -8047,6 +8077,16 @@
         }
       }
     },
+    "帮我看看这张票据，记一笔" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read this receipt and record it"
+          }
+        }
+      }
+    },
     "常用分类" : {
       "localizations" : {
         "en" : {
@@ -8829,6 +8869,16 @@
         }
       }
     },
+    "快速记账仅支持本机账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quick entry works with on-device ledgers only"
+          }
+        }
+      }
+    },
     "快速预设" : {
       "localizations" : {
         "en" : {
@@ -9505,6 +9555,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pull, Validate, and Push"
+          }
+        }
+      }
+    },
+    "拍照" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Take photo"
+          }
+        }
+      }
+    },
+    "拍票据" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan receipt"
           }
         }
       }
@@ -15229,6 +15299,16 @@
         }
       }
     },
+    "票据照片" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Receipt photo"
+          }
+        }
+      }
+    },
     "票据长图" : {
       "localizations" : {
         "en" : {
@@ -19675,6 +19755,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The image and text include only the first %lld of %lld transactions. Use “Export Full Markdown File” for the complete list."
+          }
+        }
+      }
+    },
+    "问账本助手" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask the ledger assistant"
           }
         }
       }
