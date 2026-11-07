@@ -8,9 +8,11 @@ final class LedgerAgentTests: XCTestCase {
         [{"name":"get_ledger_summary","arguments":{"start":"2026-10-01","end":"2026-10-31"},"isError":false},
          {"name":"search_transactions","arguments":{"query":"巷口小馆"},"isError":false},
          {"name":"run_bql","arguments":{"query":"  SELECT 1  "},"isError":true},
-         {"name":"get_accounts","isError":false}]
+         {"name":"get_accounts","isError":false},
+         {"name":"list_saved_conversations","isError":false},
+         {"name":"read_saved_conversation","arguments":{"conversation":"11111111-1111-1111-1111-111111111111"},"isError":false}]
         """.utf8))
-        XCTAssertEqual(calls.map(\.title), ["汇总 · 10-01 至 10-31", "搜索流水 · 巷口小馆", "BQL 查询", "账户"])
+        XCTAssertEqual(calls.map(\.title), ["汇总 · 10-01 至 10-31", "搜索流水 · 巷口小馆", "BQL 查询", "账户", "查看历史对话", "读取历史对话"])
         XCTAssertEqual(calls[2].source, "SELECT 1")
         XCTAssertTrue(calls[2].isError)
         XCTAssertNil(calls[0].source)
