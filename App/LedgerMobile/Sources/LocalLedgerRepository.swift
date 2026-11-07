@@ -1261,6 +1261,18 @@ actor LocalLedgerRepository: LedgerRepository {
         return try LedgerAgentAssistant.decode(data).suggestions ?? []
     }
 
+    /// A short name for a conversation, from its first exchange.
+    func agentSessionTitle(history: [LedgerAgentTurnRequest.HistoryEntry], choice: LedgerAgentModelChoice, apiKey: String,
+                           assistant: LedgerAgentAssistant = .native) async throws -> String {
+        let request = LedgerAgentAssistRequest(provider: choice.provider, model: choice.model, apiKey: apiKey,
+            custom: choice.isCustom ? choice.custom : nil, history: history)
+        let data = try await assistant.title(try JSONEncoder().encode(request))
+        guard let title = try LedgerAgentAssistant.decode(data).title, !title.isEmpty else {
+            throw LedgerAgentError.failed(String(localized: "模型没有给出标题"))
+        }
+        return title
+    }
+
     /// A short recap of a conversation, one point per line.
     func agentRecap(history: [LedgerAgentTurnRequest.HistoryEntry], choice: LedgerAgentModelChoice, apiKey: String,
                     assistant: LedgerAgentAssistant = .native) async throws -> String {

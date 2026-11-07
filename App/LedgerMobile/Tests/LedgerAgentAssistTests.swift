@@ -57,6 +57,87 @@ final class LedgerAgentAssistTests: XCTestCase {
         XCTAssertEqual(reopened.saved()?.messages[1].memory, true)
     }
 
+    @MainActor
+    func testSavedConversationUsesItsGeneratedTitleOrTheFirstQuestion() throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let older = try decoder.decode(LedgerAgentSavedConversation.self, from: Data("""
+        {"version":1,"id":"\(UUID().uuidString)","createdAt":"2026-11-01T00:00:00Z","updatedAt":"2026-11-01T00:00:00Z",
+         "messages":[{"role":"user","text":"这个月外卖花了多少？","toolCalls":[]},{"role":"assistant","text":"1,280 元","toolCalls":[]}],"unwrittenChange":false}
+        """.utf8))
+        XCTAssertEqual(older.title, "这个月外卖花了多少？", "an older save is named by its first question")
+
+        var named = older
+        named.generatedTitle = "本月外卖支出"
+        let round = try decoder.decode(LedgerAgentSavedConversation.self, from: encoder.encode(named))
+        XCTAssertEqual(round.generatedTitle, "本月外卖支出")
+        XCTAssertEqual(round.title, "本月外卖支出")
+
+        var blank = older
+        blank.generatedTitle = "   "
+        XCTAssertEqual(blank.title, "这个月外卖花了多少？", "a blank name falls back to the question")
+    }
+
+    @MainActor
+    func testTheFirstAnswerNamesTheConversationOnce() async throws {
+        let record = try XCTUnwrap(
+            LedgerAgentConversation(restoring: try decodedConversation(messages: [("user", "这个月外卖花了多少？"),
+                                                                                ("assistant", "本月餐饮支出合计 1,280.00 元。")]))
+                .saved())
+        let conversation = LedgerAgentConversation(restoring: record)
+        let calls = TitleCalls()
+        conversation.nameSession { _ in
+            await calls.record()
+            return "本月外卖支出"
+        }
+        for _ in 0..<100 where conversation.generatedTitle == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        let firstCount = await calls.count
+        XCTAssertEqual(conversation.generatedTitle, "本月外卖支出")
+        XCTAssertEqual(firstCount, 1)
+        XCTAssertEqual(conversation.saved()?.generatedTitle, "本月外卖支出")
+
+        conversation.nameSession { _ in
+            await calls.record()
+            return "另一个名字"
+        }
+        try? await Task.sleep(for: .milliseconds(80))
+        let afterSecond = await calls.count
+        XCTAssertEqual(afterSecond, 1, "a named conversation is not renamed")
+        XCTAssertEqual(conversation.generatedTitle, "本月外卖支出")
+    }
+
+    @MainActor
+    func testOnlyTheFirstAnswerNamesAConversation() async throws {
+        let longer = LedgerAgentConversation(restoring: try decodedConversation(messages: [
+            ("user", "这个月外卖花了多少？"), ("assistant", "1,280.00 元"),
+            ("user", "那上周呢？"), ("assistant", "320.00 元"),
+        ]))
+        let calls = TitleCalls()
+        longer.nameSession { _ in
+            await calls.record()
+            return "外卖"
+        }
+        try? await Task.sleep(for: .milliseconds(80))
+        let count = await calls.count
+        XCTAssertEqual(count, 0)
+        XCTAssertNil(longer.generatedTitle)
+    }
+
+    private func decodedConversation(messages: [(String, String)]) throws -> LedgerAgentSavedConversation {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let stored = messages.map { #"{"role":"\#($0.0)","text":"\#($0.1)","toolCalls":[]}"# }.joined(separator: ",")
+        let json = """
+        {"version":1,"id":"\(UUID().uuidString)","createdAt":"2026-11-01T00:00:00Z","updatedAt":"2026-11-01T00:00:00Z",
+         "messages":[\(stored)],"unwrittenChange":false}
+        """
+        return try decoder.decode(LedgerAgentSavedConversation.self, from: Data(json.utf8))
+    }
+
     func testStarterCacheIsFreshForTheDayUntilTheLedgerMoves() {
         let now = Date()
         let cache = LedgerAgentStarterCache(day: "2026-11-03", revisionID: "r1", memoryDigest: 7, suggestions: ["a"],
@@ -228,4 +309,10 @@ final class LedgerAgentAssistTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: url) }
         return url
     }
+}
+
+/// Counts the naming requests a conversation makes, from any thread.
+private actor TitleCalls {
+    private(set) var count = 0
+    func record() { count += 1 }
 }

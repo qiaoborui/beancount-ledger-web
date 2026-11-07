@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/MichaelKinsy/PiG/ai"
 )
@@ -75,6 +76,61 @@ func TestNextSuggestionFollowsTheConversation(t *testing.T) {
 	}
 	if !strings.Contains(seen, "餐饮 1820 元") || !strings.Contains(seen, "浅色") {
 		t.Fatalf("conversation did not reach the model:\n%s", seen)
+	}
+}
+
+func TestTitleNamesTheOpeningExchange(t *testing.T) {
+	var seen string
+	var tools []string
+	useFaux(t, ai.FauxFactoryStep(func(request ai.TranscriptContext, _ ai.StreamOptions, _ *ai.FauxProviderState, _ *ai.Model) (ai.AssistantMessage, error) {
+		seen, tools = transcriptText(t, request), offeredTools(request)
+		return ai.FauxResponse{Content: []ai.FauxContentBlock{ai.FauxText("**标题：本月外卖支出**。\n解释一下")}, StopReason: "stop"}.AssistantMessage(), nil
+	}))
+	response := assistFor(t, TitleJSON, map[string]any{"version": 1, "provider": "faux", "model": "faux-1", "apiKey": "test",
+		"history": []map[string]string{{"role": "user", "content": "帮我看下这个月的外卖"}, {"role": "assistant", "content": "本月餐饮支出合计 1,280.00 元。"}}})
+	if !response.OK || response.Title != "本月外卖支出" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+	for _, fact := range []string{"帮我看下这个月的外卖", "1,280.00"} {
+		if !strings.Contains(seen, fact) {
+			t.Fatalf("%q did not reach the model:\n%s", fact, seen)
+		}
+	}
+	if len(tools) != 0 {
+		t.Fatalf("assist calls must not offer tools: %v", tools)
+	}
+}
+
+func TestTitleNeedsAnAnswerAndAUselessReplyIsRejected(t *testing.T) {
+	useFaux(t, ai.FauxStaticStep(ai.FauxResponse{Content: []ai.FauxContentBlock{ai.FauxText("。")}, StopReason: "stop"}))
+	unanswered := assistFor(t, TitleJSON, map[string]any{"version": 1, "provider": "faux", "model": "faux-1", "apiKey": "test",
+		"history": []map[string]string{{"role": "user", "content": "这个月餐饮多少"}}})
+	if unanswered.OK || unanswered.Error == "" {
+		t.Fatalf("a question without an answer was named: %+v", unanswered)
+	}
+	useless := assistFor(t, TitleJSON, map[string]any{"version": 1, "provider": "faux", "model": "faux-1", "apiKey": "test",
+		"history": []map[string]string{{"role": "user", "content": "这个月餐饮多少"}, {"role": "assistant", "content": "1820 元"}}})
+	if useless.OK || useless.Error == "" {
+		t.Fatalf("an empty reply was accepted: %+v", useless)
+	}
+}
+
+func TestCleanTitleTakesOneLineAndDropsLabels(t *testing.T) {
+	cases := map[string]string{
+		"**会话标题：修复 iOS 流水**。\n说明": "修复 iOS 流水",
+		"Title: Q3 budget review": "Q3 budget review",
+		"`账单核对`":                  "账单核对",
+		"本月外卖支出。":                 "本月外卖支出",
+		"  \n\n":                  "",
+		"！":                       "",
+	}
+	for reply, want := range cases {
+		if got := cleanTitle(reply); got != want {
+			t.Fatalf("cleanTitle(%q) = %q, want %q", reply, got, want)
+		}
+	}
+	if got := cleanTitle(strings.Repeat("长", 80)); utf8.RuneCountInString(got) != maxTitleRunes+1 {
+		t.Fatalf("long title clipped to %d runes", utf8.RuneCountInString(got))
 	}
 }
 

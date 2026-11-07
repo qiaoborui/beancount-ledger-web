@@ -27,6 +27,7 @@ const (
 	maxSuggestions      = 6
 	maxSuggestionRunes  = 40
 	maxRecapRunes       = 600
+	maxTitleRunes       = 32
 	maxAssistMessage    = 2000
 	maxAssistTail       = 6
 	maxRecapBytes       = 24000
@@ -59,6 +60,7 @@ type assistResponseV1 struct {
 	OK          bool     `json:"ok"`
 	Suggestions []string `json:"suggestions,omitempty"`
 	Recap       string   `json:"recap,omitempty"`
+	Title       string   `json:"title,omitempty"`
 	Error       string   `json:"error,omitempty"`
 }
 
@@ -87,11 +89,28 @@ const recapPrompt = `你为记账 App 里和「账本助手」的一段对话写
 - 依次覆盖（没有的就省略）：问了或做了什么；关键结论，带上关键数字；对账本做了什么改动、是否已经写入；还没做完的或建议的下一步。
 - 只写对话里出现过的事实，不要编造。只输出要点本身。`
 
+// titlePrompt names one conversation for the history list. The shell asks for
+// it once, after the first answer, and keeps the first question as a fallback.
+const titlePrompt = `你为记账 App 里和「账本助手」的一段对话起名字，这个名字会显示在历史列表里。
+
+要求：
+- 用用户提问的语言，中文 4 到 16 个字（其他语言最多 40 个字符），概括这段对话在做什么。
+- 用具体的对象：分类、商户、账户、月份或要办的事。不要写「对话」「咨询」「理财问题」这类空话。
+- 不要引号、不要句号、不要「标题：」之类的前缀、不要编号。
+- 只输出标题本身。`
+
 // SuggestJSON returns starter suggestions, or with a history, the likely
 // next questions. The call blocks; the shell runs it off the main thread.
 func SuggestJSON(requestJSON string) string {
 	done := make(chan string, 1)
 	go func() { done <- runAssist(requestJSON, suggest) }()
+	return <-done
+}
+
+// TitleJSON returns a short name for the conversation in history.
+func TitleJSON(requestJSON string) string {
+	done := make(chan string, 1)
+	go func() { done <- runAssist(requestJSON, title) }()
 	return <-done
 }
 
@@ -107,6 +126,7 @@ type assistKind int
 const (
 	suggest assistKind = iota
 	recap
+	title
 )
 
 func runAssist(requestJSON string, kind assistKind) (responseJSON string) {
@@ -150,6 +170,11 @@ func assist(ctx context.Context, network *turnHTTP, requestJSON string, kind ass
 			return assistResponseV1{}, errors.New("nothing to recap")
 		}
 		prompt, message = recapPrompt, recapMessage(history)
+	case kind == title:
+		if len(history) < 2 {
+			return assistResponseV1{}, errors.New("a title needs the first exchange")
+		}
+		prompt, message = titlePrompt, titleMessage(history)
 	case len(history) > 0:
 		prompt, message = nextPrompt, nextMessage(history, memoryText(request.MemoryPath))
 	default:
@@ -165,6 +190,13 @@ func assist(ctx context.Context, network *turnHTTP, requestJSON string, kind ass
 	reply, err := complete(ctx, network, model, assumed, request.APIKey, prompt, message)
 	if err != nil {
 		return assistResponseV1{}, err
+	}
+	if kind == title {
+		text := cleanTitle(reply)
+		if text == "" {
+			return assistResponseV1{}, errors.New("模型没有给出标题")
+		}
+		return assistResponseV1{Title: text}, nil
 	}
 	if kind == recap {
 		text := cleanRecap(reply)
@@ -274,6 +306,61 @@ func starterMessage(facts, memory string, recent []string, count int) string {
 		}
 	}
 	return out.String()
+}
+
+// titleMessage is the opening exchange: what the user asked and what the
+// answer was about, which is all a name needs.
+func titleMessage(history []historyMessageV1) string {
+	question, answer := "", ""
+	for _, entry := range history {
+		switch {
+		case entry.Role == "user" && question == "":
+			question = truncateRunes(entry.Content, maxAssistMessage)
+		case entry.Role == "assistant" && answer == "":
+			answer = truncateRunes(entry.Content, maxAssistMessage)
+		}
+		if question != "" && answer != "" {
+			break
+		}
+	}
+	var out strings.Builder
+	out.WriteString("用户提问：\n" + question)
+	if answer != "" {
+		out.WriteString("\n\n助手回答：\n" + answer)
+	}
+	return out.String()
+}
+
+// cleanTitle reduces a reply to one short name: first line, no markdown or
+// label, no trailing punctuation, bounded.
+func cleanTitle(reply string) string {
+	line := ""
+	for _, candidate := range strings.Split(reply, "\n") {
+		if trimmed := strings.TrimSpace(candidate); trimmed != "" {
+			line = trimmed
+			break
+		}
+	}
+	// Peel one layer per pass so `**标题：修复流水**。` unwraps through the
+	// trailing punctuation, the bold markers, and the label.
+	for {
+		before := line
+		line = strings.Trim(strings.TrimSpace(line), "`*\"'“”「」『』《》")
+		line = strings.TrimRight(line, "。.!！?？,，、；;：:")
+		for _, prefix := range []string{"会话标题", "标题", "Title", "title"} {
+			if rest, found := strings.CutPrefix(line, prefix); found {
+				line = strings.TrimSpace(strings.TrimLeft(rest, "：:"))
+			}
+		}
+		line = strings.TrimSpace(line)
+		if line == before {
+			break
+		}
+	}
+	if utf8.RuneCountInString(line) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(truncateRunes(line, maxTitleRunes))
 }
 
 func nextMessage(history []historyMessageV1, memory string) string {
