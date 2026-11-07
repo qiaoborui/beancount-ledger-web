@@ -611,6 +611,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"POST /api/integrations/gmail/drain":       true,
 		"POST /api/integrations/telegram/webhook":  true,
 	}
+	covered["POST /api/ai/agent/session-title"] = true
 	covered["GET /api/ai/agent/sessions/:sessionID/timeline"] = true
 	covered["DELETE /api/ai/agent/sessions/:sessionID"] = true
 	covered["GET /api/internal/agent/tools"] = true

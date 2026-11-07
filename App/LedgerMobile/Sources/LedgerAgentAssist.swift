@@ -47,6 +47,7 @@ struct LedgerAgentAssistResponse: Decodable, Sendable {
     let ok: Bool
     var suggestions: [String]? = nil
     var recap: String? = nil
+    var title: String? = nil
     var error: String? = nil
 }
 
@@ -54,6 +55,8 @@ struct LedgerAgentAssistResponse: Decodable, Sendable {
 struct LedgerAgentAssistant: Sendable {
     var suggest: @Sendable (Data) async throws -> Data
     var recap: @Sendable (Data) async throws -> Data
+    /// Names one conversation from its first exchange.
+    var title: @Sendable (Data) async throws -> Data
 
     static let native = LedgerAgentAssistant(suggest: { request in
         #if canImport(LedgerCore)
@@ -67,6 +70,14 @@ struct LedgerAgentAssistant: Sendable {
         #if canImport(LedgerCore)
         return try await LedgerAgentRunner.withDeadline(100, onTimeout: {}) {
             Data(MobileagentRecapJSON(String(decoding: request, as: UTF8.self)).utf8)
+        }
+        #else
+        throw LocalLedgerError.runtimeUnavailable
+        #endif
+    }, title: { request in
+        #if canImport(LedgerCore)
+        return try await LedgerAgentRunner.withDeadline(100, onTimeout: {}) {
+            Data(MobileagentTitleJSON(String(decoding: request, as: UTF8.self)).utf8)
         }
         #else
         throw LocalLedgerError.runtimeUnavailable

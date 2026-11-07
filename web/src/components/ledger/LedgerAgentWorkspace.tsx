@@ -7,6 +7,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, Res
 import { apiEndpointLedgerScope, apiFetch, apiSensitiveDataLockedEvent } from "@/lib/apiEndpoints";
 import i18n from "@/i18n";
 import { readLedgerAgentStream, type AgentArtifact, type AgentFinal, type AgentToolEvent } from "@/lib/ledgerAgentStream";
+import { requestAgentSessionTitle } from "@/lib/agentSessionTitle";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MessageResponse } from "@/components/ai-elements/message";
 import type { ParsedTransaction } from "@/lib/schemas";
@@ -324,7 +325,7 @@ export function LedgerAgentWorkspace({
     setSessions((current) => current.map((session) => {
       if ((session.serverSessionId || `session-${session.id}`) !== serverSessionId) return session;
       if (!before) {
-        const title = timelineTitle(page.items) || session.title;
+        const title = session.title || timelineTitle(page.items);
         return { ...session, title, timelineState: "available", timeline: reconcileAgentTimeline(page.items, session.timeline) };
       }
       const known = new Set(session.timeline.map((item) => item.id));
@@ -354,7 +355,7 @@ export function LedgerAgentWorkspace({
         body: JSON.stringify({ sessionId, message: prompt, context }),
       }, { kind: "write" });
       const final = await consumeStream(response);
-      finishTurn(final);
+      finishTurn(final, prompt);
     } catch (error) {
       const message = error instanceof Error ? error.message : i18n.t("agentWorkspace.agentRequestFailed");
       const messageID = streamingMessageIDRef.current || nextID();
@@ -380,7 +381,23 @@ export function LedgerAgentWorkspace({
     });
   }
 
-  function finishTurn(final: AgentFinal) {
+  // A session keeps its first question as a fallback title. Replace it with a
+  // model summary once the first answer exists, and only while the session is
+  // still that single exchange so an edited or continued conversation is never
+  // renamed under the user.
+  async function nameSessionFromFirstTurn(sessionId: string, question: string, answer: string) {
+    const title = await requestAgentSessionTitle(question, answer);
+    if (!title) return;
+    setSessions((current) => current.map((session) => {
+      if (session.id !== sessionId) return session;
+      const userMessages = session.timeline.filter((item) => item.kind === "message" && item.role === "user").length;
+      if (userMessages !== 1) return session;
+      return { ...session, title };
+    }));
+  }
+
+  function finishTurn(final: AgentFinal, question: string) {
+    const firstTurn = activeSession.timeline.filter((item) => item.kind === "message" && item.role === "user").length <= 1;
     updateActiveSession((session) => ({ ...session, serverSessionId: final.sessionId, updatedAt: Date.now() }));
     setStatus(final.status === "cancelled" ? i18n.t("agentWorkspace.cancelled") : i18n.t("agentWorkspace.ready"));
     const message = final.message.trim();
@@ -388,6 +405,7 @@ export function LedgerAgentWorkspace({
       const messageID = streamingMessageIDRef.current || nextID();
       setStreamingText("");
       updateTimeline((current) => [...current, { kind: "message", id: messageID, role: "assistant", content: message }]);
+      if (firstTurn) void nameSessionFromFirstTurn(activeSession.id, question, message);
     }
     void loadTimelinePage(final.sessionId);
     if (final.refreshLedger) {
