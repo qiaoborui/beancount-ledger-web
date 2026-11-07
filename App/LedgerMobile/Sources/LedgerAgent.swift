@@ -35,6 +35,8 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         case "grep_files": String(localized: "搜索文件")
         case "draft_changes": String(localized: "查看草稿改动")
         case "ask_user": String(localized: "向你提问")
+        case "list_saved_conversations": String(localized: "查看历史对话")
+        case "read_saved_conversation": String(localized: "读取历史对话")
         default: name
         }
         if name == "get_ledger_summary", let start = argument("start"), let end = argument("end") {
