@@ -782,6 +782,9 @@ final class LedgerAgentConversation: ObservableObject {
     @Published private(set) var recap: LedgerAgentRecap?
     @Published private(set) var recapping = false
     @Published private(set) var recapError: String?
+    /// The name the model gave the conversation, saved with it; nil until the
+    /// first answer is named, or when the user turned assists off.
+    @Published private(set) var generatedTitle: String?
     /// Reopened from the history, so the screen recaps it on arrival.
     private(set) var restored = false
     /// Attached files no answered turn has told the model about yet; they
@@ -843,6 +846,7 @@ final class LedgerAgentConversation: ObservableObject {
         }
         attachments = saved.attachments ?? []
         recap = saved.recap
+        generatedTitle = saved.generatedTitle
         restored = true
         if saved.unwrittenChange {
             restoredNotice = String(localized: "上次的草稿改动没有写入，重新打开后已放弃。需要的话让助手重新改一次。")
@@ -867,7 +871,8 @@ final class LedgerAgentConversation: ObservableObject {
                                            memory: $0.rememberedMemory ? true : nil, ask: $0.ask, write: $0.write) },
             unwrittenChange: pending?.review != nil || draftUnreviewed,
             attachments: attachments.isEmpty ? nil : attachments,
-            recap: recap)
+            recap: recap,
+            generatedTitle: generatedTitle)
     }
 
     /// Every file, attached or staged, for the id of the next one.
@@ -1000,6 +1005,21 @@ final class LedgerAgentConversation: ObservableObject {
         }
     }
 
+    /// Names the conversation from its first exchange; the name is saved with
+    /// the conversation and shown in the history list. Only the first answer
+    /// names it, so a later question never renames a conversation the user
+    /// already recognises.
+    func nameSession(using write: @escaping Assist<String>) {
+        guard generatedTitle == nil, answerCount == 1, !isRunning else { return }
+        let epoch = epoch, history = visibleHistory
+        Task { [weak self] in
+            let name = try? await write(history)
+            guard let self, self.epoch == epoch, let name, !name.isEmpty, self.generatedTitle == nil else { return }
+            self.generatedTitle = name
+            self.onSettled?(self)
+        }
+    }
+
     /// Writes a recap of the conversation for its bottom; it is saved with
     /// the conversation.
     func summarize(using write: @escaping Assist<String>) {
@@ -1101,6 +1121,7 @@ final class LedgerAgentConversation: ObservableObject {
         recap = nil
         recapping = false
         recapError = nil
+        generatedTitle = nil
         epoch += 1
         if let editor {
             let draft = draft, reopening = reopening

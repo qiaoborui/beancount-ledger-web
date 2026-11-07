@@ -141,7 +141,10 @@ private struct LedgerAgentChatScreen: View {
             if conversation.restored { recapIfWanted() }
             if conversation.messages.isEmpty { refreshStarters() }
         }
-        .onChange(of: conversation.messages.count) { _, _ in predictNext() }
+        .onChange(of: conversation.messages.count) { _, _ in
+            predictNext()
+            nameSession()
+        }
         .onChange(of: session.privacyShielded) { _, shielded in
             if !shielded { resumeIfInterrupted() }
         }
@@ -502,6 +505,18 @@ private struct LedgerAgentChatScreen: View {
         let choice = settings.choice, usesMemory = settings.usesMemory
         conversation.predictNext { history in
             try await repository.agentNextSuggestions(history: history, choice: choice, apiKey: key, usesMemory: usesMemory)
+        }
+    }
+
+    /// Names the conversation once it has its first answer, when the user
+    /// allows the extra requests. An unnamed conversation keeps its first
+    /// question as its name.
+    private func nameSession() {
+        guard settings.assists, settings.hasKey, conversation.generatedTitle == nil,
+              let repository = session.localRepository, let key = try? settings.apiKey() else { return }
+        let choice = settings.choice
+        conversation.nameSession { history in
+            try await repository.agentSessionTitle(history: history, choice: choice, apiKey: key)
         }
     }
 
@@ -1519,10 +1534,10 @@ struct LedgerAgentSettingsView: View {
                 .accessibilityIdentifier("ledger-agent-memory")
                 Toggle("使用记忆", isOn: Binding(get: { settings.usesMemory }, set: { settings.setUsesMemory($0) }))
                     .accessibilityIdentifier("ledger-agent-uses-memory")
-                Toggle("智能建议与回顾", isOn: Binding(get: { settings.assists }, set: { settings.setAssists($0) }))
+                Toggle("智能建议、回顾与命名", isOn: Binding(get: { settings.assists }, set: { settings.setAssists($0) }))
                     .accessibilityIdentifier("ledger-agent-assists")
             } header: { Text("记忆与建议") } footer: {
-                Text("记忆是这本账的 memory.md：你的偏好、常用的账户和分类、常做的事。助手每次回答都会读，你说「记住」或纠正它时会自己更新。只存在本机，不随 Git 同步。智能建议会根据账本和记忆生成「试试」、在输入框里预测下一句、回来时总结对话，每次都是一个不带思考的小请求。")
+                Text("记忆是这本账的 memory.md：你的偏好、常用的账户和分类、常做的事。助手每次回答都会读，你说「记住」或纠正它时会自己更新。只存在本机，不随 Git 同步。智能建议会根据账本和记忆生成「试试」、在输入框里预测下一句、回来时总结对话，并在第一次回答后给这段对话起一个名字，每次都是一个不带思考的小请求。")
             }
             Section {
                 Toggle("后台保持运行", isOn: Binding(get: { settings.keepsAwake }, set: { settings.setKeepsAwake($0) }))

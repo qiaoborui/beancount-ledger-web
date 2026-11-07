@@ -221,6 +221,15 @@ describe("LedgerAgentWorkspace", () => {
     expect(source.indexOf("void readStoredAgent(ledgerScope)")).toBeLessThan(source.indexOf("if (!localHydrationReady) return;\n    void writeStoredAgent"));
   });
 
+  it("names a session from its first exchange and never renames it afterwards", () => {
+    expect(source).toContain('import { requestAgentSessionTitle } from "@/lib/agentSessionTitle";');
+    expect(source).toContain("if (firstTurn) void nameSessionFromFirstTurn(activeSession.id, question, message);");
+    expect(source).toContain("const userMessages = session.timeline.filter((item) => item.kind === \"message\" && item.role === \"user\").length;");
+    expect(source).toContain("if (userMessages !== 1) return session;");
+    // A server timeline refresh must not replace a generated title with the raw first question.
+    expect(source).toContain("const title = session.title || timelineTitle(page.items);");
+  });
+
   it("never persists the new-session placeholder as a title", () => {
     expect(storageSource).toContain("title: session.title || timelineTitle(session.timeline)");
     expect(storageSource).not.toContain("title: sessionLabel(session), archived");

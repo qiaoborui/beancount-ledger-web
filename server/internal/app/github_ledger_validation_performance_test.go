@@ -35,14 +35,16 @@ func (metrics *validationDownloadMetrics) wrap(next http.Handler) http.Handler {
 			metrics.maxActive = metrics.active
 		}
 		metrics.mu.Unlock()
-		defer func() {
-			metrics.mu.Lock()
-			metrics.active--
-			metrics.mu.Unlock()
-		}()
 		// Model latency on content downloads only. Keep the delay outside the
-		// fake's state mutex so the measurement observes actual HTTP overlap.
+		// fake's state mutex so the measurement observes actual HTTP overlap,
+		// and stop counting before the response is written: the client frees
+		// its slot for the next request as soon as the body arrives, which can
+		// be before this handler returns, and counting that tail made the
+		// overlap look one higher than the limiter allows on a slow runner.
 		time.Sleep(20 * time.Millisecond)
+		metrics.mu.Lock()
+		metrics.active--
+		metrics.mu.Unlock()
 		next.ServeHTTP(w, r)
 	})
 }

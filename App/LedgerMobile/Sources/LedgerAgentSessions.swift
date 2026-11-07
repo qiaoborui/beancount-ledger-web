@@ -29,9 +29,15 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
     var attachments: [LedgerAgentAttachment]? = nil
     /// The recap at the bottom of the conversation, if one was written.
     var recap: LedgerAgentRecap? = nil
+    /// The name the model gave the conversation; absent in older saves, which
+    /// are still named by their first question.
+    var generatedTitle: String? = nil
 
-    /// The first question names the conversation.
+    /// The model's name, or the first question.
     var title: String {
+        if let name = generatedTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return Self.oneLine(name)
+        }
         let question = messages.first { $0.role == LedgerAgentMessage.Role.user.rawValue }?.text ?? ""
         return Self.oneLine(question)
     }
