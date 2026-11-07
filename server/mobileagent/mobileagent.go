@@ -385,7 +385,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		return "", "", calls, files, nil, err
 	}
 	specs := app.LocalAgentToolSpecs()
-	tools := make([]agent.AgentTool, 0, len(specs)+12)
+	tools := make([]agent.AgentTool, 0, len(specs)+14)
 	allowed := make(map[string]bool, len(specs)+12)
 	for _, spec := range specs {
 		tools = append(tools, ledgerTool{spec: spec, session: session})
@@ -434,6 +434,13 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		}
 		systemPrompt += attachmentPrompt
 		message = withAttachmentNote(attached, message)
+	}
+	if history := openHistory(request.RuntimeRoot, request.ConversationID); history != nil {
+		for _, tool := range history.tools() {
+			tools = append(tools, tool)
+			allowed[tool.Name()] = true
+		}
+		systemPrompt += savedHistoryPrompt
 	}
 	if remembered != nil {
 		// Last, so the rules and tools before it stay one cacheable prefix.
