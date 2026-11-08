@@ -60,6 +60,7 @@ let package = Package(
                 "LedgerAgentView.swift",
                 "LedgerAgentMemoryView.swift",
                 "LedgerAgentVisualView.swift",
+                "LedgerAgentHistoryView.swift",
                 // App-target only: `LocalLedgerPerformanceRecording` drives the
                 // opt-in recording from `UserDefaults`/`Bundle` and the view is
                 // SwiftUI, so neither belongs to the portable test build. The
