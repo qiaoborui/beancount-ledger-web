@@ -557,7 +557,9 @@ private struct LedgerAgentChatScreen: View {
         let requested = newlineRequested
         newlineRequested = false
         let edit = LedgerAgentComposer.submission(old: old, new: new)
-        if edit.submit, !requested {
+        // Return that cannot send right now keeps its newline, so the next
+        // question can still be drafted over several lines.
+        if edit.submit, !requested, !conversation.isRunning, canSend(edit.text) {
             draft = edit.text
             submit()
         }
@@ -570,15 +572,20 @@ private struct LedgerAgentChatScreen: View {
             : String(localized: "还要怎么改…")
     }
 
-    private var canSend: Bool {
+    private var canSend: Bool { canSend(draft) }
+
+    private func canSend(_ text: String) -> Bool {
         guard !sessions.busyElsewhere, !attaching else { return false }
-        return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !conversation.staged.isEmpty || ghost != nil
+        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !conversation.staged.isEmpty
+            || ghost(for: text) != nil
     }
 
     /// The suggestion shown faintly in an empty composer: the likely next
     /// question after an answer, or the first starter in a new conversation.
-    private var ghost: String? {
-        guard settings.assists, draft.isEmpty, conversation.staged.isEmpty, !conversation.isRunning,
+    private var ghost: String? { ghost(for: draft) }
+
+    private func ghost(for text: String) -> String? {
+        guard settings.assists, text.isEmpty, conversation.staged.isEmpty, !conversation.isRunning,
               !sessions.busyElsewhere else { return nil }
         if conversation.messages.isEmpty { return starters.isDynamic ? starters.suggestions.first : nil }
         guard case .idle = conversation.phase else { return nil }
