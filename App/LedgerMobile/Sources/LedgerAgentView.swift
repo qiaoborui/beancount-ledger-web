@@ -68,10 +68,31 @@ private struct LedgerAgentChatScreen: View {
     @State private var dropTargeted = false
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
+    /// The question being edited in the composer, and what the composer held
+    /// before, given back when the edit is cancelled.
+    @State private var editing: UUID?
+    @State private var draftBeforeEdit = ""
+    /// A regenerate, edit or switch waiting for the user's word.
+    @State private var confirming: BranchConfirmation?
+    /// Counts copies, for the haptic.
+    @State private var copies = 0
 
     private struct BookkeepingPrefill: Identifiable {
         let id = UUID()
         let text: String
+    }
+
+    private enum BranchAction {
+        case regenerate(UUID)
+        case edit(UUID, String)
+        case switchVersion(UUID, Int)
+        case latestAnswer(UUID)
+    }
+
+    private struct BranchConfirmation: Identifiable {
+        let id = UUID()
+        let action: BranchAction
+        let warning: LedgerAgentBranchWarning
     }
 
     var body: some View {
@@ -117,6 +138,17 @@ private struct LedgerAgentChatScreen: View {
         .fullScreenCover(item: $bookkeeping) { prefill in
             NaturalLanguageBookkeepingView(onSaved: { bookkeeping = nil }, initialInput: prefill.text)
         }
+        .alert(confirming.map { confirmationTitle($0.warning) } ?? "", isPresented: confirmingPresented,
+               presenting: confirming) { confirmation in
+            Button("继续") { perform(confirmation.action, confirmed: true) }
+                .accessibilityIdentifier("ledger-agent-branch-continue")
+            Button("取消", role: .cancel) {}
+        } message: { confirmation in
+            Text(confirmationMessage(confirmation))
+        }
+        .sensoryFeedback(.success, trigger: copies)
+        // An edit belongs to its conversation.
+        .onChange(of: conversation.id) { _, _ in cancelEditing() }
         .onAppear {
             conversation.isOnScreen = true
             LedgerAgentBackgroundRun.shared.conversationSeen()
@@ -275,7 +307,7 @@ private struct LedgerAgentChatScreen: View {
                     if conversation.messages.isEmpty && !conversation.isRunning { emptyState }
                     ForEach(conversation.messages) { message in
                         switch message.role {
-                        case .user: LedgerAgentQuestion(text: message.text, attachments: message.attachments)
+                        case .user: question(message)
                         case .assistant: answer(message)
                         }
                     }
@@ -377,18 +409,222 @@ private struct LedgerAgentChatScreen: View {
     private func answer(_ message: LedgerAgentMessage) -> some View {
         let asksNow = message.id == conversation.messages.last?.id && !conversation.isRunning && !sessions.busyElsewhere
         let undoFailure = conversation.undoFailure?.message == message.id ? conversation.undoFailure?.text : nil
-        return LedgerAgentAnswer(
-            message: message,
-            asksNow: asksNow,
-            undoing: conversation.undoing == message.id,
-            canUndo: conversation.canUndo(message),
-            undoFailure: undoFailure,
-            toolsStartExpanded: message.id == conversation.streamedAnswer,
-            onMemory: { memoryPresented = true },
-            onRecord: { bookkeeping = .init(text: question(before: message)) },
-            onAnswer: { send($0, clearsComposer: false) },
-            onAsk: { ask($0) },
-            onUndo: { undo(message) })
+        return VStack(alignment: .leading, spacing: 6) {
+            LedgerAgentAnswer(
+                message: message,
+                asksNow: asksNow,
+                undoing: conversation.undoing == message.id,
+                canUndo: conversation.canUndo(message),
+                undoFailure: undoFailure,
+                toolsStartExpanded: message.id == conversation.streamedAnswer,
+                onMemory: { memoryPresented = true },
+                onRecord: { bookkeeping = .init(text: question(before: message)) },
+                onAnswer: { send($0, clearsComposer: false) },
+                onAsk: { ask($0) },
+                onUndo: { undo(message) })
+            .contentShape(Rectangle())
+            .contextMenu {
+                Button { copy(message.text) } label: { Label("复制", systemImage: "doc.on.doc") }
+                Button { copy(LedgerAgentReplyText.plainText(message.text)) } label: {
+                    Label("复制为纯文本", systemImage: "text.alignleft")
+                }
+                Button { perform(.regenerate(message.id)) } label: { Label("重新生成", systemImage: "arrow.clockwise") }
+                    .disabled(!canStartVersion)
+                if session.amountsVisible {
+                    ShareLink(item: message.text) { Label("分享", systemImage: "square.and.arrow.up") }
+                }
+            }
+            answerActions(message)
+        }
+    }
+
+    /// Copy, regenerate and share under a finished answer, and the switch
+    /// between its versions when it was regenerated.
+    private func answerActions(_ message: LedgerAgentMessage) -> some View {
+        let versions = conversation.versions(of: message.id)
+        return HStack(spacing: 0) {
+            if !message.text.isEmpty {
+                actionButton("复制", systemImage: "doc.on.doc", identifier: "ledger-agent-copy") { copy(message.text) }
+            }
+            actionButton("重新生成", systemImage: "arrow.clockwise", identifier: "ledger-agent-regenerate") {
+                perform(.regenerate(message.id))
+            }
+            .disabled(!canStartVersion)
+            // Shared text carries the amounts the privacy mask hides.
+            if session.amountsVisible, !message.text.isEmpty {
+                ShareLink(item: message.text) { actionIcon("square.and.arrow.up") }
+                    .accessibilityLabel("分享")
+                    .accessibilityIdentifier("ledger-agent-share")
+            }
+            Spacer(minLength: 8)
+            if versions.count > 1 {
+                LedgerAgentVersionSwitch(index: versions.index, count: versions.count, enabled: conversation.canBranch) {
+                    perform(.switchVersion(message.id, $0))
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, -12)
+        .accessibilityIdentifier("ledger-agent-answer-actions")
+    }
+
+    /// A question, with copy and edit on a long press, and the switch between
+    /// its versions when it was edited.
+    private func question(_ message: LedgerAgentMessage) -> some View {
+        let versions = conversation.versions(of: message.id)
+        let earlierAnswers = conversation.answersBeside(message.id)
+        return VStack(alignment: .trailing, spacing: 4) {
+            LedgerAgentQuestion(text: message.text, attachments: message.attachments,
+                                isEditing: editing == message.id)
+                .contextMenu {
+                    Button { copy(message.text) } label: { Label("复制", systemImage: "doc.on.doc") }
+                    Button { startEditing(message) } label: { Label("编辑后重新发送", systemImage: "pencil") }
+                        .disabled(!canStartVersion)
+                }
+            HStack(spacing: 4) {
+                // A regenerate that failed or stopped before replying leaves
+                // the question without an answer; the earlier ones are kept.
+                if earlierAnswers > 0, !conversation.isRunning {
+                    Button { perform(.latestAnswer(message.id)) } label: {
+                        Label("回到之前的回答", systemImage: "arrow.uturn.backward")
+                            .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                            .frame(minHeight: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!conversation.canBranch)
+                    .accessibilityIdentifier("ledger-agent-latest-answer")
+                }
+                if versions.count > 1 {
+                    LedgerAgentVersionSwitch(index: versions.index, count: versions.count, enabled: conversation.canBranch) {
+                        perform(.switchVersion(message.id, $0))
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private func actionButton(_ label: LocalizedStringKey, systemImage: String, identifier: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) { actionIcon(systemImage) }
+            .accessibilityLabel(label)
+            .accessibilityIdentifier(identifier)
+    }
+
+    private func actionIcon(_ systemImage: String) -> some View {
+        Image(systemName: systemImage).font(.system(size: 13, weight: .medium))
+            .foregroundStyle(BalancedPalette.meta)
+            .frame(width: 40, height: 36)
+            .contentShape(Rectangle())
+    }
+
+    private func copy(_ text: String) {
+        UIPasteboard.general.string = text
+        copies += 1
+    }
+
+    // MARK: Versions
+
+    /// Regenerating and editing start a turn, so they also wait for another
+    /// conversation's turn and for files being attached.
+    private var canStartVersion: Bool { conversation.canBranch && !sessions.busyElsewhere && !attaching }
+
+    private var confirmingPresented: Binding<Bool> {
+        Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
+    }
+
+    /// Regenerates, edits or switches; asks first when written answers or an
+    /// unreviewed draft would be replaced. Nothing is ever written here.
+    private func perform(_ action: BranchAction, confirmed: Bool = false) {
+        let result: LedgerAgentBranchResult
+        switch action {
+        case let .regenerate(id):
+            guard let reporting = turnReporting() else { return }
+            result = conversation.regenerate(id, confirmed: confirmed, reporting: reporting)
+        case let .edit(id, text):
+            guard let reporting = turnReporting() else { return }
+            result = conversation.editAndResend(id, newText: text, confirmed: confirmed, reporting: reporting)
+        case let .switchVersion(id, direction):
+            result = conversation.switchBranch(id, direction: direction, confirmed: confirmed)
+        case let .latestAnswer(id):
+            result = conversation.showLatestAnswer(of: id, confirmed: confirmed)
+        }
+        switch result {
+        case let .needsConfirmation(warning): confirming = BranchConfirmation(action: action, warning: warning)
+        case .started:
+            if case .edit = action { finishEditing() }
+        case .refused: break
+        }
+    }
+
+    private func confirmationTitle(_ warning: LedgerAgentBranchWarning) -> String {
+        warning.contains(.written) ? String(localized: "已写入的改动不会撤销") : String(localized: "丢弃未确认的草稿？")
+    }
+
+    private func confirmationMessage(_ confirmation: BranchConfirmation) -> String {
+        var lines: [String] = []
+        if confirmation.warning.contains(.written) {
+            let written = switch confirmation.action {
+            case .regenerate: String(localized: "这些回答已写入账本，重新生成不会撤销写入。可以先在对应回答上撤销。")
+            case .edit: String(localized: "这些回答已写入账本，编辑后重新发送不会撤销写入。可以先在对应回答上撤销。")
+            case .switchVersion, .latestAnswer:
+                String(localized: "这些回答已写入账本，切换版本不会撤销写入。可以先在对应回答上撤销。")
+            }
+            lines.append(written)
+        }
+        if confirmation.warning.contains(.unreviewedDraft) {
+            lines.append(String(localized: "停止的回答可能在草稿里留下了没有确认过的改动，继续会丢弃草稿，账本不变。"))
+        }
+        return lines.joined(separator: "\n\n")
+    }
+
+    /// Puts the question in the composer; sending sends it as another
+    /// version of that question.
+    private func startEditing(_ message: LedgerAgentMessage) {
+        guard canStartVersion else { return }
+        if editing == nil { draftBeforeEdit = draft }
+        editing = message.id
+        draft = message.text
+        composerFocused = true
+    }
+
+    /// Leaves the edit and gives the composer back what it held.
+    private func cancelEditing() {
+        guard editing != nil else { return }
+        editing = nil
+        draft = draftBeforeEdit
+        draftBeforeEdit = ""
+    }
+
+    private func finishEditing() {
+        editing = nil
+        draft = draftBeforeEdit
+        draftBeforeEdit = ""
+    }
+
+    /// The question being edited and its number, while it is on screen.
+    private var editedQuestion: (id: UUID, number: Int)? {
+        guard let editing, let number = conversation.questionNumber(editing) else { return nil }
+        return (editing, number)
+    }
+
+    private var editBanner: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "pencil").font(.system(size: 11, weight: .semibold))
+            Text("正在编辑第 \(editedQuestion?.number ?? 0) 个问题")
+            Text("·").accessibilityHidden(true)
+            Button("取消") { cancelEditing() }
+                .buttonStyle(.plain)
+                .foregroundStyle(BalancedPalette.ink)
+                .frame(minHeight: 28)
+                .contentShape(Rectangle())
+                .accessibilityLabel("取消编辑")
+                .accessibilityIdentifier("ledger-agent-edit-cancel")
+        }
+        .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+        .padding(.horizontal, 6)
+        .accessibilityIdentifier("ledger-agent-edit-banner")
     }
 
     private func follow(_ proxy: ScrollViewProxy, force: Bool = false) {
@@ -528,6 +764,7 @@ private struct LedgerAgentChatScreen: View {
                 LedgerAgentQuickSwitch(usage: conversation.usage) { settingsPresented = true }
                     .padding(.horizontal, 2)
             }
+            if editedQuestion != nil { editBanner }
             if !conversation.staged.isEmpty || attaching || attachError != nil { stagedFiles }
             HStack(alignment: .bottom, spacing: 4) {
                 attachMenu
@@ -594,6 +831,11 @@ private struct LedgerAgentChatScreen: View {
     /// Sends what the composer holds, or the suggestion shown in it.
     private func submit() {
         guard !conversation.isRunning, canSend else { return }
+        if let edited = editedQuestion {
+            perform(.edit(edited.id, draft))
+            return
+        }
+        editing = nil
         send(draft.isEmpty ? ghost ?? "" : draft)
     }
 
@@ -620,6 +862,9 @@ private struct LedgerAgentChatScreen: View {
 
     private func canSend(_ text: String) -> Bool {
         guard !sessions.busyElsewhere, !attaching else { return false }
+        if editedQuestion != nil {
+            return conversation.canBranch && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
         return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !conversation.staged.isEmpty
             || ghost(for: text) != nil
     }
@@ -630,7 +875,7 @@ private struct LedgerAgentChatScreen: View {
 
     private func ghost(for text: String) -> String? {
         guard settings.assists, text.isEmpty, conversation.staged.isEmpty, !conversation.isRunning,
-              !sessions.busyElsewhere else { return nil }
+              !sessions.busyElsewhere, editedQuestion == nil else { return nil }
         if conversation.messages.isEmpty { return starters.isDynamic ? starters.suggestions.first : nil }
         guard case .idle = conversation.phase else { return nil }
         return conversation.nextSuggestion
@@ -925,32 +1170,43 @@ private struct LedgerAgentChatScreen: View {
     private func send(_ text: String, clearsComposer: Bool = true) {
         var question = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if question.isEmpty, !conversation.staged.isEmpty { question = Self.reconcileQuestion }
-        guard !question.isEmpty, !conversation.isRunning, !sessions.busyElsewhere, !attaching else { return }
-        guard let repository = session.localRepository, !session.privacyShielded else { return }
+        guard !question.isEmpty, !conversation.isRunning, let reporting = turnReporting() else { return }
+        let started = conversation.send(question, reporting: reporting)
+        if started, clearsComposer { draft = "" }
+    }
+
+    /// How a turn of this conversation runs: the native loop over the local
+    /// ledger with the chosen model. Sending, regenerating and editing share
+    /// it. nil when no turn can start now.
+    private func turnReporting() -> LedgerAgentConversation.SendReporting? {
+        guard !sessions.busyElsewhere, !attaching else { return nil }
+        guard let repository = session.localRepository, !session.privacyShielded else { return nil }
         let key: String
         do { key = try settings.apiKey() } catch {
             settingsPresented = true
-            return
+            return nil
         }
         let choice = settings.choice, thinking = settings.effectiveThinking, usesMemory = settings.usesMemory
         let conversation = conversation, conversationID = conversation.id
-        let attachments = conversation.attachmentPayloads(in: repository.workspace.agentAttachmentLocation(id: conversationID))
+        let location = repository.workspace.agentAttachmentLocation(id: conversationID)
         conversation.editor = .live(repository)
         conversation.autoWrites = settings.autoWrites
         conversation.lifecycle = LedgerAgentBackgroundRun.shared
         LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
         LedgerAgentBackgroundRun.shared.keepsAwake = settings.keepsAwake
-        let started = conversation.send(question, reporting: { message, history, draftRoot, report in
+        return { message, history, draftRoot, report in
             // Read when the turn starts, not when it is asked: a turn stopped
-            // just before may still be bringing back the transcript to follow.
+            // just before may still be bringing back the transcript to follow,
+            // and a regenerate or edit cuts it first and sends the question's
+            // files again.
             let transcript = await conversation.transcript
+            let attachments = await conversation.attachmentPayloads(in: location)
             return try await repository.runAgentTurn(message: message, history: history, choice: choice,
                                               apiKey: key, sensitiveUnlocked: true, thinking: thinking,
                                               draft: draftRoot, transcript: transcript,
                                               conversationID: conversationID, attachments: attachments,
                                               usesMemory: usesMemory, onStep: report)
-        })
-        if started, clearsComposer { draft = "" }
+        }
     }
 
     /// Sends a visual's follow-up question, or leaves it in the composer
@@ -974,6 +1230,8 @@ private struct LedgerAgentChatScreen: View {
 private struct LedgerAgentQuestion: View {
     let text: String
     var attachments: [String] = []
+    /// The question is in the composer being edited.
+    var isEditing = false
     var body: some View {
         HStack {
             Spacer(minLength: 48)
@@ -991,7 +1249,45 @@ private struct LedgerAgentQuestion: View {
             .padding(.vertical, 10)
             .background(BalancedPalette.sunken)
             .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+            .overlay {
+                if isEditing {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous).stroke(BalancedPalette.ruleStrong, lineWidth: 1)
+                }
+            }
         }
+    }
+}
+
+/// '‹ 2/3 ›' between the versions of a question or an answer.
+private struct LedgerAgentVersionSwitch: View {
+    let index: Int
+    let count: Int
+    var enabled = true
+    let onStep: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            step(-1, systemImage: "chevron.left", label: "上一个版本")
+                .disabled(!enabled || index == 0)
+            Text(verbatim: "\(index + 1)/\(count)").balancedMono(size: 12).foregroundStyle(BalancedPalette.secondary)
+                .monospacedDigit()
+                .accessibilityHidden(true)
+            step(1, systemImage: "chevron.right", label: "下一个版本")
+                .disabled(!enabled || index >= count - 1)
+        }
+        .accessibilityIdentifier("ledger-agent-versions")
+    }
+
+    private func step(_ offset: Int, systemImage: String, label: LocalizedStringKey) -> some View {
+        Button { onStep(offset) } label: {
+            Image(systemName: systemImage).font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(BalancedPalette.meta)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityValue(Text(verbatim: "\(index + 1) / \(count)"))
     }
 }
 
@@ -1375,6 +1671,8 @@ private struct LedgerAgentChangeCard: View {
 struct LedgerAgentReplyBlock: View {
     let segment: LedgerAgentReplyText.Segment
     var onAsk: (String) -> Void = { _ in }
+    /// Counts copies of a code block, for the haptic.
+    @State private var copies = 0
 
     var body: some View {
         switch segment {
@@ -1433,13 +1731,31 @@ struct LedgerAgentReplyBlock: View {
         case .rule:
             BalancedPalette.rule.frame(height: 1).padding(.vertical, 4)
         case let .code(code):
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(code).balancedMono(size: 12.5).foregroundStyle(BalancedPalette.ink)
-                    .textSelection(.enabled)
-                    .fixedSize()
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Spacer()
+                    Button {
+                        UIPasteboard.general.string = code
+                        copies += 1
+                    } label: {
+                        Label("复制", systemImage: "doc.on.doc").balancedFont(size: 12)
+                            .foregroundStyle(BalancedPalette.meta)
+                            .frame(minHeight: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("复制代码")
+                    .accessibilityIdentifier("ledger-agent-code-copy")
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(code).balancedMono(size: 12.5).foregroundStyle(BalancedPalette.ink)
+                        .textSelection(.enabled)
+                        .fixedSize()
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .balancedBand()
+            .sensoryFeedback(.success, trigger: copies)
         case let .chart(chart):
             LedgerAgentChartView(chart: chart)
         case let .visual(visual):
