@@ -52,6 +52,9 @@ jobs:
       - name: Verify private IPA packaging guards
         run: python3 scripts/test_ios_private_ipa.py
 
+      - name: Test SideStore source publishing
+        run: python3 scripts/test_sidestore_publish.py
+
       # Static Compose validation runs once here instead of in both the backend
       # and agent jobs, which each repeated it.
       - name: Validate complete self-hosted Compose
