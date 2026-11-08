@@ -839,6 +839,10 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
     /// A short label beside the title, shown only when the row has room.
     let subtitle: String?
     let amountText: String
+    /// The compact pill's trailing text: a shortened amount or a short count.
+    /// Built from numbers when the notice is made, never by re-parsing
+    /// `amountText`, whose decimal separator depends on the region.
+    let compactText: String
     /// The category's symbol, as the transaction list draws it. The expanded
     /// disc shows a check instead; this symbol is for the compact pill.
     let iconName: String
@@ -849,6 +853,7 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
         title: String,
         subtitle: String? = nil,
         amountText: String,
+        compactText: String? = nil,
         iconName: String
     ) {
         self.id = id
@@ -856,7 +861,22 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
         self.title = title
         self.subtitle = subtitle
         self.amountText = amountText
+        self.compactText = compactText ?? amountText
         self.iconName = iconName
+    }
+
+    /// The symbol the compact pill's disc knocks out: the category for one
+    /// entry, the tray for an import. `nil` draws the check (several entries).
+    var compactSymbol: String? {
+        if case .entries = type { return nil }
+        return iconName
+    }
+
+    /// A count short enough for the compact pill ("128 笔", "128 txns"); the
+    /// card itself spells it out with the full "%lld 笔" plural.
+    static func compactCount(_ count: Int) -> String {
+        String(localized: "LedgerIsland.compactCount", defaultValue: "\(count) 笔",
+               comment: "Compact Dynamic Island pill beside the camera; keep the unit very short.")
     }
 
     /// What VoiceOver says when the notice appears; the island itself is a
@@ -897,6 +917,7 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
                 type: .transfer,
                 title: "\(fromLabel) → \(toLabel)",
                 amountText: MoneyText.format(minorUnits: magnitude, currency: currency),
+                compactText: LedgerIslandAmount.compact(minorUnits: magnitude, currency: currency),
                 iconName: "arrow.left.arrow.right"
             )
         }
@@ -904,11 +925,13 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
         let category = mainPosting?.account ?? ""
         let categoryLabel = category.isEmpty ? nil : label(category)
         let icon = LedgerCategoryIcon.name(account: category, label: categoryLabel ?? "")
+        let signed = isIncome ? magnitude : -magnitude
         return LedgerIslandNotice(
             type: isIncome ? .income : .expense,
             title: titleText,
             subtitle: categoryLabel == titleText ? nil : categoryLabel,
-            amountText: MoneyText.format(minorUnits: isIncome ? magnitude : -magnitude, currency: currency, showSign: isIncome),
+            amountText: MoneyText.format(minorUnits: signed, currency: currency, showSign: isIncome),
+            compactText: LedgerIslandAmount.compact(minorUnits: signed, currency: currency, showSign: isIncome),
             iconName: icon
         )
     }
@@ -931,6 +954,7 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
             title: String(localized: "记账完成"),
             subtitle: String(localized: "已写入账本"),
             amountText: String(localized: "\(count) 笔"),
+            compactText: compactCount(count),
             iconName: "checkmark"
         )
     }
@@ -944,6 +968,7 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
             title: name.map { String(localized: "\($0)账单") } ?? String(localized: "账单"),
             subtitle: String(localized: "已导入"),
             amountText: String(localized: "\(count) 笔"),
+            compactText: compactCount(count),
             iconName: "tray.and.arrow.down.fill"
         )
     }

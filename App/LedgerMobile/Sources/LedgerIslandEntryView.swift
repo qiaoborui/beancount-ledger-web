@@ -5,8 +5,8 @@ import UIKit
 /// 每一帧都是时间的纯函数（见 `LedgerIslandStage`），由 `TimelineView` 驱动，
 /// 不依赖 `withAnimation` 链，因此新通知可以在任意时刻打断并保留形状速度。
 /// 展开态是挂在摄像头下方的一行：色相圆盘（对勾 / 导入托盘）、标题、可选的
-/// 小标签和金额。摄像头那一条始终留空；圆盘与圆角同心。紧凑态左侧是小圆盘，
-/// 右侧是金额，都避开摄像头。
+/// 小标签和金额。摄像头那一条始终留空；圆盘与圆角同心。紧凑态左侧是小圆盘
+/// （单笔显示分类图标，多笔显示对勾，导入显示托盘），右侧是金额或笔数，都避开摄像头。
 /// 一条通知只用一个色相：支出 #CF7A52、收入 #4FBFAB（即 `BalancedPalette`
 /// 的深色值，岛永远是黑的），转账、批量记账和导入用白色。
 struct LedgerIslandStyle {
@@ -16,12 +16,7 @@ struct LedgerIslandStyle {
 
     init(_ notice: LedgerIslandNotice) {
         hue = Color(uiColor: UIColor(hex: notice.type.hueHex))
-        switch notice.type {
-        case .expense, .income, .transfer:
-            trailingText = LedgerIslandAmount.compact(notice.amountText)
-        case .entries, .batchImport:
-            trailingText = notice.amountText
-        }
+        trailingText = notice.compactText
     }
 }
 
@@ -66,8 +61,6 @@ final class LedgerIslandPresenter: ObservableObject {
     private var hapticTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
     private var finishTask: Task<Void, Never>?
-
-    var isActive: Bool { stage?.current != nil }
 
     /// True only while an effect still changes with time. Once every entry has
     /// settled the timeline can stop; a `TimelineView(.animation)` that stays
@@ -289,7 +282,8 @@ private struct LedgerIslandExpandedContent: View {
         let textWidth = row.titleWidth + (secondary == nil ? 0 : L.secondaryGap + (metrics.secondaryWidth ?? 0))
 
         ZStack {
-            LedgerIslandDisc(notice: notice, hue: style.hue, size: L.disc, glyphSize: 13, lineWidth: 2.4,
+            LedgerIslandDisc(symbol: notice.type.isImport ? notice.iconName : nil, hue: style.hue,
+                             size: L.disc, glyphSize: 13, lineWidth: 2.4,
                              tick: reduce ? 1 : LedgerIslandEasing.easeOut((entry.localTime(now) - entry.timeline.check) / 0.24))
                 .islandPlaced(entry.effect(.expanded, delay: 0, at: now, reduceMotion: reduce), at: point(L.discCenterX))
 
@@ -325,7 +319,8 @@ private struct LedgerIslandExpandedContent: View {
     }
 }
 
-/// The compact pill: a small disc on the leading end cap, the amount or count
+/// The compact pill: a small disc on the leading end cap (the category for one
+/// entry, the check for several, the tray for an import), the amount or count
 /// before the trailing one, the camera clear between them. Anchored on the
 /// camera like the row, so the collapsing shape never drags either across it.
 private struct LedgerIslandCompactContent: View {
@@ -347,7 +342,8 @@ private struct LedgerIslandCompactContent: View {
         let capCenter = Double(stage.pill.height) / 2
 
         ZStack {
-            LedgerIslandDisc(notice: entry.notice, hue: style.hue, size: C.glyph, glyphSize: 8.5, lineWidth: 1.8, tick: 1)
+            LedgerIslandDisc(symbol: entry.notice.compactSymbol, hue: style.hue, size: C.glyph, glyphSize: 8.5,
+                             lineWidth: 1.8, tick: 1)
                 .islandPlaced(entry.effect(.compact, delay: 0, at: now, reduceMotion: reduce),
                               at: CGPoint(x: left + capCenter, y: cy))
 
@@ -365,10 +361,10 @@ private struct LedgerIslandCompactContent: View {
     }
 }
 
-/// A solid disc in the notice's hue with the glyph knocked out in black: a
-/// drawn check for entries, the tray for imports.
+/// A solid disc in the notice's hue with the glyph knocked out in black: the
+/// given symbol, or a drawn check when there is none.
 private struct LedgerIslandDisc: View {
-    let notice: LedgerIslandNotice
+    let symbol: String?
     let hue: Color
     let size: Double
     let glyphSize: Double
@@ -379,8 +375,8 @@ private struct LedgerIslandDisc: View {
     var body: some View {
         ZStack {
             Circle().fill(hue)
-            if notice.type.isImport {
-                Image(systemName: "tray.and.arrow.down.fill")
+            if let symbol {
+                Image(systemName: symbol)
                     .font(.system(size: glyphSize, weight: .bold))
                     .foregroundStyle(Color.black)
             } else {
@@ -431,10 +427,11 @@ struct LedgerIslandOverlayContainer: View {
         guard ProcessInfo.processInfo.arguments.contains("--preview-island") else { return }
         let samples = [
             LedgerIslandNotice(type: .expense, title: "楼下便利店", subtitle: "餐饮",
-                               amountText: "-¥38.00", iconName: "fork.knife"),
+                               amountText: "-¥38.00", compactText: "-¥38", iconName: "fork.knife"),
             LedgerIslandNotice.fromImport(count: 128, provider: "alipay"),
             LedgerIslandNotice(type: .income, title: "Synthetic context action with a long name",
-                               subtitle: "工资", amountText: "+¥12,800.00", iconName: "banknote.fill"),
+                               subtitle: "工资", amountText: "+¥12,800.00", compactText: "+¥1.28万",
+                               iconName: "banknote.fill"),
         ]
         var index = 0
         while !Task.isCancelled {

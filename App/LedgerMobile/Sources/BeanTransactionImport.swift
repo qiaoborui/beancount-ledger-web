@@ -10,8 +10,6 @@ struct BeanTransactionImportView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var preview: PreparedBookkeepingChange?
-    /// How many transactions `preview` writes, for the saved notice.
-    @State private var previewCount = 1
 
     var body: some View {
         NavigationStack {
@@ -91,7 +89,7 @@ struct BeanTransactionImportView: View {
             }
         }
         .sheet(item: $preview) { prepared in
-            BookkeepingPreviewView(preview: prepared, islandNotice: .written(count: previewCount)) { _ in
+            BookkeepingPreviewView(preview: prepared, islandNotice: .written(count: prepared.entryCount ?? 1)) { _ in
                 onSaved()
                 dismiss()
             }
@@ -112,7 +110,6 @@ struct BeanTransactionImportView: View {
                 await repository.discardPrepared(result)
                 return
             }
-            previewCount = (try? BeanTransactionParser.transactionCount(text)) ?? 1
             preview = result
         } catch {
             self.error = error.localizedDescription

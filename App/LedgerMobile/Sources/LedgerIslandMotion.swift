@@ -463,26 +463,20 @@ struct LedgerIslandStage: Equatable, Sendable {
 
 enum LedgerIslandAmount {
     /// The compact island stays snug around the camera, so large amounts use
-    /// a shorter unit ("¥12,800.00" → "¥1.28万") and whole amounts drop ".00".
-    static func compact(_ text: String) -> String {
-        guard let first = text.firstIndex(where: \.isNumber),
-              let last = text.lastIndex(where: \.isNumber) else { return text }
-        let prefix = String(text[..<first])
-        let suffix = String(text[text.index(after: last)...])
-        let digits = text[first...last].filter { $0.isNumber || $0 == "." }
-        guard let value = Double(digits) else { return text }
-        let body: String
-        if value >= 10_000 {
-            let chineseUnits = LedgerLocale.usesChineseNumberUnits
-            var short = String(format: "%.2f", value / (chineseUnits ? 10_000 : 1_000))
-            while short.hasSuffix("0") { short.removeLast() }
-            if short.hasSuffix(".") { short.removeLast() }
-            body = short + (chineseUnits ? "万" : "k")
-        } else if value == value.rounded() {
-            body = text[first...last].replacingOccurrences(of: ".00", with: "")
-        } else {
-            body = String(text[first...last])
+    /// a shorter unit (12,800.00 → "¥1.28万") and whole amounts drop the cents.
+    /// It works on minor units: the display string's decimal separator follows
+    /// the region ("€150,00"), so parsing it back would scale the value.
+    static func compact(minorUnits: Int, currency: String, showSign: Bool = false) -> String {
+        let magnitude = MoneyText.magnitude(minorUnits)
+        guard magnitude >= 1_000_000 else {
+            return MoneyText.format(minorUnits: minorUnits, currency: currency, showSign: showSign,
+                                    maximumFractionDigits: magnitude % 100 == 0 ? 0 : nil)
         }
-        return prefix + body + suffix
+        let chineseUnits = LedgerLocale.usesChineseNumberUnits
+        var short = String(format: "%.2f", Double(magnitude) / 100 / (chineseUnits ? 10_000 : 1_000))
+        while short.hasSuffix("0") { short.removeLast() }
+        if short.hasSuffix(".") { short.removeLast() }
+        let sign = minorUnits < 0 ? "-" : showSign ? "+" : ""
+        return sign + MoneyText.currencySymbol(for: currency.isEmpty ? "CNY" : currency) + short + (chineseUnits ? "万" : "k")
     }
 }

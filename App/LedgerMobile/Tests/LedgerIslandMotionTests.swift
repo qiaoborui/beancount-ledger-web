@@ -219,9 +219,13 @@ struct LedgerIslandMotionTests {
             #expect(amount.minX >= camera.maxX + C.cameraGap - 0.001, "amount meets the camera on \(island.name)")
             #expect(C.trailingGap > 0)
         }
-        #expect(LedgerIslandAmount.compact("-¥38.00") == "-¥38")
-        #expect(LedgerIslandAmount.compact("+¥12,800.00") == "+¥1.28万")
-        #expect(LedgerIslandAmount.compact("¥3.50") == "¥3.50")
+        #expect(LedgerIslandAmount.compact(minorUnits: -3800, currency: "CNY") == "-¥38")
+        #expect(LedgerIslandAmount.compact(minorUnits: 1_280_000, currency: "CNY", showSign: true) == "+¥1.28万")
+        #expect(LedgerIslandAmount.compact(minorUnits: 350, currency: "CNY") == "¥3.50")
+        // Built from minor units: 150.00 stays 150 whatever the region's
+        // decimal separator, never 15,000 shortened to a unit.
+        let euros = LedgerIslandAmount.compact(minorUnits: -15_000, currency: "EUR")
+        #expect(euros.contains("150") && !euros.contains("万") && !euros.contains("k"))
     }
 
     @Test("Hardware cutout is located per panel and covered with a bleed")

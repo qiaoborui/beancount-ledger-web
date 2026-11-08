@@ -32,9 +32,12 @@ struct LedgerIslandNoticeTests {
         #expect(notice.amountText.hasPrefix("-"))
         #expect(notice.type.hueHex == 0xCF7A52)
         #expect(notice.announcement.contains("Blue Bottle Coffee"))
+        // The compact pill drops the cents and shows the category symbol.
+        #expect(notice.compactText == "-¥38")
+        #expect(notice.compactSymbol == "fork.knife")
     }
 
-    @Test("The icon comes from the category, as the transaction list draws it")
+    @Test("The compact pill's icon comes from the category, as the transaction list draws it")
     func iconFollowsCategory() {
         #expect(LedgerIslandNotice.from(entry: expense()).iconName == "fork.knife")
         #expect(LedgerIslandNotice.from(entry: expense(account: "Expenses:Transport:Taxi")).iconName == "car.fill")
@@ -62,6 +65,7 @@ struct LedgerIslandNoticeTests {
         #expect(notice.title == "九月工资")
         #expect(notice.amountText == MoneyText.format(minorUnits: 1_280_000, currency: "CNY", showSign: true))
         #expect(notice.amountText.hasPrefix("+"))
+        #expect(notice.compactText == "+¥1.28万")
         #expect(notice.iconName == "banknote.fill")
         #expect(notice.type.hueHex == 0x4FBFAB)
     }
@@ -99,6 +103,9 @@ struct LedgerIslandNoticeTests {
         let several = LedgerIslandNotice.from(entries: [expense(), expense(payee: "Bakery")])
         #expect(several.type == .entries(count: 2))
         #expect(several.amountText == "2 笔")
+        #expect(several.compactText == "2 笔")
+        // Several entries have no single category, so the pill keeps the check.
+        #expect(several.compactSymbol == nil)
         #expect(several.type.hueHex == 0xFFFFFF)
         #expect(!several.type.isImport)
         #expect(LedgerIslandNotice.written(count: 3).amountText == "3 笔")
@@ -112,6 +119,8 @@ struct LedgerIslandNoticeTests {
         #expect(wechat.title == "微信支付账单")
         #expect(wechat.subtitle == "已导入")
         #expect(wechat.amountText == "8 笔")
+        #expect(wechat.compactText == "8 笔")
+        #expect(wechat.compactSymbol == "tray.and.arrow.down.fill")
         #expect(wechat.type.hueHex == 0xFFFFFF)
         // Provider ids use the short label; display names pass through.
         #expect(LedgerIslandNotice.fromImport(count: 1, provider: "cmb").title == "招行信用卡账单")

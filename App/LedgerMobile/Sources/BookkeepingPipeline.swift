@@ -227,4 +227,7 @@ struct PreparedBookkeepingChange: Identifiable, Sendable {
     let draftRevision: UUID
     let files: LocalLedgerWorkspace.PreparedFiles
     let createdAt: Date
+    /// Transactions the change writes, when preparing already counted them
+    /// (a pasted .bean file), so callers need not parse the input again.
+    var entryCount: Int? = nil
 }
