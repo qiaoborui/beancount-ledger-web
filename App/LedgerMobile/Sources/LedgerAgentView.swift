@@ -216,7 +216,7 @@ private struct LedgerAgentChatScreen: View {
     private var headerTitleAction: TerminalTitleAction? {
         guard settings.isReady, !conversation.messages.isEmpty else { return nil }
         let id = conversation.id, name = headerTitle
-        return TerminalTitleAction(hint: String(localized: "重命名这段对话")) { renaming = .init(id: id, name: name) }
+        return TerminalTitleAction(hint: String(localized: "重命名这段对话")) { renaming = .init(id: id, shown: name) }
     }
 
     @State private var renaming: LedgerAgentRenameTarget?

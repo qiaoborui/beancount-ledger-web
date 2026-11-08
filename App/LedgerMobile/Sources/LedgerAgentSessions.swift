@@ -233,6 +233,16 @@ final class LedgerAgentSessions: ObservableObject {
         updateRecord(id) { $0.customTitle = name.isEmpty ? nil : name }
     }
 
+    /// Names a conversation from the rename field, which opens holding the
+    /// name `shown`. Saving that name untouched keeps an automatic name
+    /// automatic, so the model's name can still replace the first question.
+    func rename(_ id: UUID, to name: String, shown: String) {
+        let unchanged = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            == shown.trimmingCharacters(in: .whitespacesAndNewlines)
+        if unchanged, customTitle(of: id) == nil { return }
+        rename(id, to: name)
+    }
+
     func setPinned(_ id: UUID, _ pinned: Bool) {
         updateRecord(id) { record in
             if pinned != (record.pinnedAt != nil) { record.pinnedAt = pinned ? Date() : nil }

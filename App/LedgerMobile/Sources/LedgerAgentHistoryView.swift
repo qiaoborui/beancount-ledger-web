@@ -77,7 +77,7 @@ struct LedgerAgentHistoryView: View {
     }
 
     @ViewBuilder private func menu(_ item: LedgerAgentSavedConversation) -> some View {
-        Button { renaming = .init(id: item.id, name: item.title) } label: { Label("重命名", systemImage: "pencil") }
+        Button { renaming = .init(id: item.id, shown: item.title) } label: { Label("重命名", systemImage: "pencil") }
         Button { sessions.setPinned(item.id, item.pinnedAt == nil) } label: { pinLabel(item) }
         if sharesText {
             ShareLink(item: item.plainTextExport()) { Label("分享", systemImage: "square.and.arrow.up") }
@@ -127,10 +127,18 @@ struct LedgerAgentHistoryView: View {
     }
 }
 
-/// A conversation being renamed, with the name typed so far.
+/// A conversation being renamed, with the name it showed when the field
+/// opened and the name typed so far.
 struct LedgerAgentRenameTarget: Identifiable, Equatable {
     let id: UUID
+    let shown: String
     var name: String
+
+    init(id: UUID, shown: String) {
+        self.id = id
+        self.shown = shown
+        self.name = shown
+    }
 }
 
 extension View {
@@ -150,7 +158,7 @@ private struct LedgerAgentRenameAlert: ViewModifier {
                 .accessibilityIdentifier("ledger-agent-rename-field")
             Button("取消", role: .cancel) { target = nil }
             Button("保存") {
-                if let target { LedgerAgentSessions.shared.rename(target.id, to: target.name) }
+                if let target { LedgerAgentSessions.shared.rename(target.id, to: target.name, shown: target.shown) }
                 target = nil
             }
         } message: {

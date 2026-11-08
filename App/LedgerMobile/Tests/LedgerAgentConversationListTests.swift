@@ -119,6 +119,24 @@ final class LedgerAgentConversationListTests: XCTestCase {
     }
 
     @MainActor
+    func testSavingTheShownAutomaticNameKeepsItAutomatic() async throws {
+        let sessions = LedgerAgentSessions()
+        sessions.bind(ledger: UUID(), storage: MemoryStore().storage)
+        try await ask(sessions, "十月吃饭花了多少")
+        let conversation = sessions.current
+        sessions.rename(conversation.id, to: "十月吃饭花了多少 ", shown: sessions.title(of: conversation))
+        XCTAssertNil(sessions.customTitle(of: conversation.id))
+        conversation.nameSession { _ in "十月餐饮" }
+        try await waitFor { conversation.generatedTitle != nil }
+        XCTAssertEqual(sessions.title(of: conversation), "十月餐饮")
+
+        // An edited name, or a user name saved again, is kept.
+        sessions.rename(conversation.id, to: "十月餐饮复盘", shown: "十月餐饮")
+        sessions.rename(conversation.id, to: "十月餐饮复盘", shown: "十月餐饮复盘")
+        XCTAssertEqual(sessions.customTitle(of: conversation.id), "十月餐饮复盘")
+    }
+
+    @MainActor
     func testPinningPersistsAndPruningKeepsPinnedConversations() async throws {
         let store = MemoryStore()
         let base = Date(timeIntervalSince1970: 1_700_000_000)
