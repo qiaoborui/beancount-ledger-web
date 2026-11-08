@@ -4,9 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -423,5 +427,243 @@ func BenchmarkLocalModelAdoptClone100k(b *testing.B) {
 		if _, err := cloneLocalCanonicalModelForWorkspace(model); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// coldSnapshotFor builds the snapshot a freshly bound cache would build for the
+// promoted model at the generation, the reference a carried snapshot must equal.
+func coldSnapshotFor(t *testing.T, generation LocalRequest, promoted string) *LedgerSnapshot {
+	t.Helper()
+	cfg, err := localConfig(generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolveLocalModel(cfg, promoted, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamps := &localSourceStamps{}
+	version, err := ledgerVersionStamped(resolved, stamps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cold := bindLocalRegisteredModel(cfg, resolved.localCanonical, "cold", version.Version, stamps, version, false, 0)
+	snapshot, err := cold.cache.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+// sameSnapshotContent compares two snapshots apart from their build time and
+// process-local read-model identity, which are unique per build by design.
+func sameSnapshotContent(a, b *LedgerSnapshot) bool {
+	left, right := *a, *b
+	left.ParsedAt, right.ParsedAt = 0, 0
+	left.localReadModelID, right.localReadModelID = 0, 0
+	return reflect.DeepEqual(left, right)
+}
+
+func TestLocalModelPromoteCarriesWarmStageSnapshot(t *testing.T) {
+	for _, deferred := range []bool{true, false} {
+		t.Run(map[bool]string{true: "deferred-raw", false: "parsed-raw"}[deferred], func(t *testing.T) {
+			previous := localDeferRawParse
+			localDeferRawParse = deferred
+			t.Cleanup(func() { localDeferRawParse = previous })
+
+			generation := localTestRequest(t)
+			stage := stageClone(t, generation)
+			handle, version := registerStreamHandleFixture(t, stage, canonicalStreamForLedgerFixture(t))
+			if err := WarmLocalModel(handle); err != nil {
+				t.Fatal(err)
+			}
+			localModels.Lock()
+			warm := localModels.staged.cache.snapshot
+			localModels.Unlock()
+			if warm == nil {
+				t.Fatal("warming did not build the stage snapshot")
+			}
+			stageID := warm.localReadModelID
+
+			promoted, err := PromoteLocalModel(generation, handle, version)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { ReleaseLocalModel(promoted) })
+			// Publication removes the stage; nothing carried may still point at it.
+			if err := os.RemoveAll(filepath.Dir(filepath.Dir(stage.WorkspaceRoot))); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := localConfig(generation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := resolveLocalModel(cfg, promoted, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved.localRegisteredCache.mu.Lock()
+			carried := resolved.localRegisteredCache.snapshot
+			resolved.localRegisteredCache.mu.Unlock()
+			if carried != warm {
+				t.Fatal("promotion did not carry the warm stage snapshot")
+			}
+			if carried.localReadModelID == stageID {
+				t.Fatal("carried snapshot kept the stage read-model identity")
+			}
+			served, err := resolved.localRegisteredCache.Snapshot()
+			if err != nil || served != carried {
+				t.Fatalf("first read rebuilt instead of serving the carried snapshot: %v", err)
+			}
+
+			cold := coldSnapshotFor(t, generation, promoted)
+			if cold == carried {
+				t.Fatal("reference snapshot was not built cold")
+			}
+			if !sameSnapshotContent(carried, cold) {
+				t.Fatalf("carried snapshot differs from a cold build\ncarried: %+v\ncold:    %+v", *carried, *cold)
+			}
+			// Lazily materialized editor drafts resolve against the new root too.
+			if editable, coldEditable := snapshotEditable(carried), snapshotEditable(cold); !reflect.DeepEqual(
+				editable.Transactions, coldEditable.Transactions) ||
+				!reflect.DeepEqual(editable.SourceBeanEntries, coldEditable.SourceBeanEntries) {
+				t.Fatal("carried snapshot's editor drafts differ from a cold build")
+			}
+
+			// The version reported after promotion is the generation's own.
+			generationVersion, err := LocalModelSourceVersion(generation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if carried.Version != generationVersion || generationVersion != version {
+				t.Fatalf("carried version = %s, generation = %s, stage = %s", carried.Version, generationVersion, version)
+			}
+			request := generation
+			request.ModelHandle = promoted
+			request.Path = "/api/ledger/version"
+			var reported LedgerVersion
+			if err := json.Unmarshal(localTestDispatch(t, request), &reported); err != nil {
+				t.Fatal(err)
+			}
+			if reported != cold.LedgerVersion {
+				t.Fatalf("reported version after promote = %+v, cold = %+v", reported, cold.LedgerVersion)
+			}
+			request.Path = "/api/ledger/transactions/page"
+			request.Query = candidatePageQuery(nil)
+			raw := localTestDispatch(t, request)
+			if strings.Contains(string(raw), "/staging/") || strings.Contains(string(raw), generation.WorkspaceRoot) {
+				t.Fatalf("carried page leaked an absolute or stale source path: %s", raw)
+			}
+		})
+	}
+}
+
+func TestLocalModelPromoteWithoutWarmSnapshotBuildsOnFirstRead(t *testing.T) {
+	generation := localTestRequest(t)
+	stage := stageClone(t, generation)
+	handle, version := registerStreamHandleFixture(t, stage, canonicalStreamForLedgerFixture(t))
+	promoted, err := PromoteLocalModel(generation, handle, version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ReleaseLocalModel(promoted) })
+	cfg, err := localConfig(generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolveLocalModel(cfg, promoted, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Nothing builds in the background, so the cache mutex stays free for an
+	// adoption of the committed model until a read asks for the snapshot.
+	if !resolved.localRegisteredCache.mu.TryLock() {
+		t.Fatal("promotion left a build holding the committed cache")
+	}
+	pending := resolved.localRegisteredCache.snapshot
+	resolved.localRegisteredCache.mu.Unlock()
+	if pending != nil {
+		t.Fatal("promotion without a warm stage snapshot built one anyway")
+	}
+	snapshot, err := resolved.localRegisteredCache.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameSnapshotContent(snapshot, coldSnapshotFor(t, generation, promoted)) {
+		t.Fatal("first-read snapshot differs from a cold build")
+	}
+}
+
+func TestLocalModelWarmRequiresTheRetainedStage(t *testing.T) {
+	generation := localTestRequest(t)
+	stream := canonicalStreamForLedgerFixture(t)
+	committed, _ := registerStreamHandleFixture(t, generation, stream)
+	if err := WarmLocalModel(committed); err != ErrLocalModelUnavailable {
+		t.Fatalf("warming a committed handle = %v", err)
+	}
+	if err := WarmLocalModel(""); err == nil {
+		t.Fatal("empty handle warmed")
+	}
+	stage := stageClone(t, generation)
+	handle, _ := registerStreamHandleFixture(t, stage, stream)
+	ReleaseLocalModel(handle)
+	if err := WarmLocalModel(handle); err != ErrLocalModelUnavailable {
+		t.Fatalf("warming a released stage = %v", err)
+	}
+}
+
+func TestLocalSnapshotRebaseRefusesForeignPaths(t *testing.T) {
+	version := LedgerVersion{Version: "v"}
+	foreign := &LedgerSnapshot{LedgerVersion: version,
+		Transactions: []Transaction{{Source: TransactionSource{File: "/elsewhere/main.bean"}}}}
+	if rebaseLocalSnapshotRoot(foreign, "/ledger/staging/a/workspace", "/ledger/generations/b/workspace", version) != nil {
+		t.Fatal("snapshot with a path outside the stage root was carried")
+	}
+	stale := &LedgerSnapshot{LedgerVersion: LedgerVersion{Version: "old"}}
+	if rebaseLocalSnapshotRoot(stale, "/a", "/b", version) != nil {
+		t.Fatal("snapshot of another source version was carried")
+	}
+	if rebaseLocalSnapshotRoot(nil, "/a", "/b", version) != nil {
+		t.Fatal("missing snapshot was carried")
+	}
+}
+
+// The shell now dispatches reads of one committed handle in parallel instead
+// of one at a time on its actor. Concurrent first reads must join a single
+// snapshot build and every read must see the same model (run under -race).
+func TestLocalModelConcurrentReadsShareOneHandle(t *testing.T) {
+	generation := localTestRequest(t)
+	handle, _ := registerStreamHandleFixture(t, generation, canonicalStreamForLedgerFixture(t))
+	paths := []string{"/api/ledger/transactions/page", "/api/ledger/bootstrap/page", "/api/ledger/version",
+		"/api/ledger/overview/categories", "/api/ledger/transactions"}
+	var wg sync.WaitGroup
+	failures := make(chan string, 64)
+	for worker := range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			request := generation
+			request.ModelHandle = handle
+			request.Path = paths[worker%len(paths)]
+			switch request.Path {
+			case "/api/ledger/transactions/page":
+				request.Query = candidatePageQuery(nil)
+			case "/api/ledger/bootstrap/page":
+				request.Query = map[string]string{"start": "2026-05-01", "end": "2026-06-01", "today": "2026-05-31"}
+			case "/api/ledger/overview/categories":
+				request.Query = map[string]string{"start": "2026-05-01", "end": "2026-06-01"}
+			default:
+				request.Query = maps.Clone(generation.Query)
+			}
+			status, raw, err := DispatchLocalRequest(request)
+			if status != 200 || err != nil {
+				failures <- fmt.Sprintf("%s: status=%d err=%v raw=%s", request.Path, status, err, raw)
+			}
+		}()
+	}
+	wg.Wait()
+	close(failures)
+	for failure := range failures {
+		t.Error(failure)
 	}
 }

@@ -551,6 +551,10 @@ struct TransactionsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var filters = LedgerTransactionFilter()
+    /// What the search field shows. `filters.query` follows it after a pause, so
+    /// each keystroke does not re-filter the rows and restart the window read.
+    @State private var searchText = ""
+    static let searchDebounceNanoseconds: UInt64 = 250_000_000
     @State private var filterPresented = false
     @State private var storagePresented = false
     @State private var duplicateTarget: LedgerTransaction?
@@ -649,10 +653,6 @@ struct TransactionsView: View {
         // started yet, or a reset just cleared it), there is nothing to judge.
         return session.localTransactionWindow == nil && session.localTransactionWindowError == nil
             && session.phase == .ready && !session.privacyShielded
-    }
-
-    private var displayedCount: Int? {
-        session.isLocal ? session.localTransactionSummary?.matchedCount : filteredTransactions.count
     }
 
     private var transactions: [LedgerTransaction] {
@@ -897,7 +897,10 @@ struct TransactionsView: View {
     private var transactionList: some View {
         let labels = accountLabels
         let displayed = displayedTransactions
-        let filtered = filteredTransactions
+        // A remote list's displayed rows already are the filtered rows; a local
+        // list never shows the remote footer. Filtering again per body was waste.
+        let filtered = session.isLocal ? [] : displayed
+        let count: Int? = session.isLocal ? session.localTransactionSummary?.matchedCount : displayed.count
         let grouped = Dictionary(grouping: displayed, by: \.date)
             .map { (date: $0.key, transactions: $0.value) }
             .sorted { $0.date > $1.date }
@@ -911,11 +914,11 @@ struct TransactionsView: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 9) {
                         Image(systemName: "magnifyingglass").font(.system(size: 15))
-                        TextField("商户、备注或标签", text: $filters.query)
+                        TextField("商户、备注或标签", text: $searchText)
                             .balancedFont(size: 14.5).autocorrectionDisabled()
                             .accessibilityIdentifier("transaction-quick-search")
-                        if !filters.query.isEmpty {
-                            Button { filters.query = "" } label: { Image(systemName: "xmark.circle") }
+                        if !searchText.isEmpty {
+                            Button { searchText = ""; filters.query = "" } label: { Image(systemName: "xmark.circle") }
                                 .frame(width: 44, height: 44).accessibilityLabel("清除流水搜索")
                         }
                     }
@@ -924,7 +927,7 @@ struct TransactionsView: View {
                     .padding(.bottom, 14)
                     BalancedTransactionFilterBar(kindFilter: $filters.kind, counts: kindCounts)
                     HStack {
-                        Text((filters.account.flatMap { labels[$0] ?? $0 } ?? String(localized: "全部账户")) + " · " + (displayedCount.map { String(localized: "\($0) 笔") } ?? String(localized: "统计中")))
+                        Text((filters.account.flatMap { labels[$0] ?? $0 } ?? String(localized: "全部账户")) + " · " + (count.map { String(localized: "\($0) 笔") } ?? String(localized: "统计中")))
                             .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                         Spacer(minLength: 8)
                         Button("筛选", systemImage: "line.3.horizontal.decrease") { filterPresented = true }
@@ -1025,7 +1028,7 @@ struct TransactionsView: View {
                     if session.isLocal && session.localTransactionHasMore {
                         infiniteScrollFooter
                     } else {
-                        Text(balancedListFootnote)
+                        Text(balancedListFootnote(count: displayed.count))
                             .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                             .padding(.top, 12).padding(.bottom, 20)
                     }
@@ -1081,9 +1084,8 @@ struct TransactionsView: View {
 
     /// `.note` under the list — the filtered tab points at the settle block
     /// above it instead of repeating the "fully loaded" footnote.
-    private var balancedListFootnote: String {
+    private func balancedListFootnote(count: Int) -> String {
         guard filters.kind == .all else { return String(localized: "筛选只作用于当前区间，其余账目未被隐藏。") }
-        let count = displayedTransactions.count
         if session.isLocal, session.localTransactionReachedRowCap {
             return String(localized: "已加载 \(count) 笔，收窄时间范围可以看得更远。长按可多选，左滑显示改分类与对账。")
         }
@@ -1102,6 +1104,16 @@ struct TransactionsView: View {
         .refreshable { await session.refresh() }
         .task(id: windowRequestKey) {
             if windowRequestKey.readable { await loadWindow(reuseCurrent: true) }
+        }
+        .task(id: searchText) {
+            guard searchText != filters.query else { return }
+            try? await Task.sleep(nanoseconds: Self.searchDebounceNanoseconds)
+            guard !Task.isCancelled else { return }
+            filters.query = searchText
+        }
+        // Filters set elsewhere (a deep link, a cleared filter) win over the field.
+        .onChange(of: filters.query) { _, query in
+            if query != searchText { searchText = query }
         }
     }
 
@@ -5320,19 +5332,22 @@ struct TransactionEditorView: View {
         .buttonStyle(.plain)
     }
 
-    private static func parseDate(_ raw: String) -> Date? {
+    // Built once: the date pickers read these bindings on every render.
+    private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static func parseDate(_ raw: String) -> Date? {
+        let formatter = Self.dayFormatter
         return formatter.date(from: raw)
     }
 
     private static func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
+        let formatter = Self.dayFormatter
         return formatter.string(from: date)
     }
 

@@ -806,20 +806,23 @@ private struct GlobalSearchFilterSheet: View {
         }
     }
 
-    private static func parse(_ text: String?) -> Date? {
-        guard let text else { return nil }
+    // Built once: the date pickers read these bindings on every render.
+    private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static func parse(_ text: String?) -> Date? {
+        guard let text else { return nil }
+        let formatter = Self.dayFormatter
         return formatter.date(from: text)
     }
 
     private static func format(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
+        let formatter = Self.dayFormatter
         return formatter.string(from: date)
     }
 }
