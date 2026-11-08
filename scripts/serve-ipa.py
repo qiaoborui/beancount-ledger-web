@@ -297,7 +297,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return super().guess_type(path)
 
     def end_headers(self) -> None:
-        if str(self.path).lower().split("?")[0].endswith(".ipa"):
+        # A malformed request line fails before parse_request sets self.path, and
+        # send_error still goes through this override; without the default the
+        # error response raised AttributeError instead of answering the client.
+        if str(getattr(self, "path", "")).lower().split("?")[0].endswith(".ipa"):
             self.send_header("Content-Disposition", "attachment")
         self.send_header("Access-Control-Allow-Origin", "*")
         super().end_headers()

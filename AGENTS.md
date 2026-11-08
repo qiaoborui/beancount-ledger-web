@@ -91,6 +91,12 @@ Cutting a release is its own step, when a batch is ready:
    when the tag and `project.yml` disagree, and advances the build number by one
    on every package, so no two IPAs share a number.
 4. Commit the build-number bump the packaging script leaves behind.
+5. Publish to the SideStore source:
+   `python3 scripts/publish-sidestore-release.py --public <ipa> --notes <notes.md>`.
+   It uploads the IPA to a `v<version>` release of the public
+   `beancount-ledger-releases` repository and prepends the version to
+   `sidestore/source.json` there. Write the notes in Chinese for users, one
+   line per change with its PR number. Run it with `--dry-run` first.
 
 `project.yml` and the tags must never disagree: the build stops rather than ship
 a version nobody declared.

@@ -13,6 +13,12 @@ builds upload a short-lived private artifact for authorized repository users and
 retain a local copy on the owner's Mac. Public IPA release is gated until the
 combined-work licensing issue and dependency notice audit are resolved.
 
+As of 2026-11-08 the owner has chosen to publish IPAs through a public
+SideStore source (`scripts/publish-sidestore-release.py`, repository
+`qiaoborui/beancount-ledger-releases`) before this issue is resolved. That
+decision does not resolve it: the licensing issue and the notice audit
+described above still apply to every published IPA.
+
 * Beancount 3.2.3, copyright Martin Blais and contributors: GPL-2.0-only,
   explicitly declared in pyproject.toml and README.rst.
   Source: https://pypi.org/project/beancount/3.2.3/ . The unmodified source
