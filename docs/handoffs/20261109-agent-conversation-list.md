@@ -2,10 +2,10 @@
 
 - Status: completed-pending-review — local commits on
   `codex/agent-conversation-list`, not pushed, no PR.
-- Last updated: 2026-11-09 01:15 UTC+8.
+- Last updated: 2026-11-09 01:40 UTC+8.
 - Branch: `codex/agent-conversation-list`, based on `main` at `8f0abb3b`. The
-  code covered by this note ends at `8ba890fe`; this note and the
-  `FEATURE_PARITY.md` row land in the docs commit after it.
+  code covered by this note ends at `18aaf067` (review fixes); this note
+  update lands in the docs commit after it.
 - Track "conversation-list" of the 5-PR stack bringing the iOS 账本助手 to
   Claude Desktop parity. Swift only; no Go changes.
 - PR body must say: `需要发版：账本助手对话列表重命名/置顶`.
@@ -41,6 +41,14 @@ v1 records decode.
   The view's `nameSession()` sits outside the allowed edit regions and was
   left alone, so the model may still be asked for a name that is never shown.
   That only happens when the user renames during the first turn.
+- Rename alert (review fix): it still opens prefilled with the name on screen
+  so a small edit is easy. `LedgerAgentRenameTarget` keeps that `shown` name,
+  and saving goes through `LedgerAgentSessions.rename(_:to:shown:)`. When the
+  trimmed text equals `shown` and the record has no custom title yet, nothing
+  is stored, so the first question or the model's name stays automatic and a
+  later model name still replaces it. An edited name, or a custom name saved
+  again, is stored as before. Chosen over a placeholder-only field so users
+  can tweak the AI name without retyping it.
 - Rename and pin leave `updatedAt` alone, so the conversation doesn't move in
   the time sections.
 - Pruning (limit 200) skips pinned and live conversations. It removes the
@@ -70,7 +78,11 @@ v1 records decode.
   newline appended at the end as Return. A pasted block or a newline in the
   middle stays in the field. Return in an empty field returns `submit: true`,
   and the screen's existing `canSend` / ghost / attachment rules decide what
-  happens. Hardware keyboards: `.onKeyPress(.return)` sends. Shift-Return is
+  happens. Review fix: the newline is only removed and read as Return when the
+  composer can send (no turn running, `canSend` true for the text without
+  that newline). Otherwise it stays in the field, so a multi-line next
+  question can be drafted while a turn runs or an attachment is processed.
+  `canSend` and `ghost` now take the text as a parameter for this check. Hardware keyboards: `.onKeyPress(.return)` sends. Shift-Return is
   ignored by the handler, so the text system inserts the newline, and a flag
   stops that newline from being read as Return.
 - Scrolling: `isAtBottom` follows the 1-pt anchor's `onAppear`/`onDisappear`
@@ -113,48 +125,41 @@ v1 records decode.
 - `App/LedgerMobile/Sources/TerminalDesignSystem.swift`: optional title action.
 - `App/LedgerMobile/Package.swift`: composer added to `sources:`; history view
   added to the app-only excludes.
-- `App/LedgerMobile/Tests/LedgerAgentConversationListTests.swift` (new, 11
+- `App/LedgerMobile/Tests/LedgerAgentConversationListTests.swift` (new, 12
   tests).
 - `App/LedgerMobile/FEATURE_PARITY.md`: ledger assistant row.
 
 ## Validation
 
-All at `8ba890fe` unless noted. iOS Simulator: iPhone 17, Xcode at
+Review fixes, all at `18aaf067`. iOS Simulator: iPhone 17, Xcode at
 `/Applications/Xcode.app`.
 
-- `cd App/LedgerMobile && swift test --filter LedgerAgentConversationListTests`
-  passed: 11 tests, 0 failures. They cover title precedence, rename
-  round-trip through save/load, clearing a rename, `nameSession` not
-  overriding a custom title, pin ordering and sections, pruning keeping
-  pinned, search by title, v1 JSON without the new keys, the
-  `plainTextExport` format, composer submission (trailing newline, middle
-  newline, paste, empty), and unsent text across `startNew`/`open`/`delete`.
-- `cd App/LedgerMobile && swift test` passed: XCTest 910 executed, 25 skipped,
-  0 failures; Swift Testing 20 tests in 2 suites passed.
-- `xcodegen generate` and then
-  `xcodebuild build -project LedgerMobile.xcodeproj -scheme LedgerMobile -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO`:
-  BUILD SUCCEEDED. LedgerCore was rebuilt in the worktree with
-  `scripts/build-ledgercore-xcframework.sh`.
-- `xcodebuild test` with the same arguments, run before the last
-  motion-helper refactor (`withLedgerAnimation` / `.ledgerAnimation` in place
-  of manual Reduce Motion checks, plus scoping the jump-button animation to
-  its overlay). The temporary `@MainActor` test patch was applied for that
-  run only.
-  - Unit tests (`LedgerMobileTests`): 925 executed, 7 skipped, 3 failures.
-    All three are the known Keychain tests that fail unsigned:
-    `BookkeepingPipelineTests.testSemanticCredentialsStayLocalAndChangingEndpointRequiresFreshKey`,
+- `cd App/LedgerMobile && swift test --filter LedgerAgent`: 89 tests, 0
+  failures. This includes the new
+  `testSavingTheShownAutomaticNameKeepsItAutomatic` (unchanged save keeps the
+  name automatic and the model name then shows; an edited or re-saved custom
+  name is kept). `LedgerAgentConversationListTests` now has 12 tests.
+- `cd App/LedgerMobile && swift test`: XCTest 911 executed, 25 skipped, 0
+  failures; Swift Testing 20 tests in 2 suites passed.
+- `xcodegen generate`, then `xcodebuild test ... -only-testing:LedgerMobileTests`
+  with the temporary `@MainActor` patch (reverted, not committed). This also
+  compiles the app target, including `LedgerAgentView.swift`. 926 executed,
+  7 skipped, 4 failures (3 unexpected in XCTest's count):
+  - the three known Keychain tests that fail unsigned
+    (`BookkeepingPipelineTests.testSemanticCredentialsStayLocalAndChangingEndpointRequiresFreshKey`,
     `ImportClassificationTests.testConsentIsPerLedgerAndKeyIsStoredSeparatelyFromPreferences`,
-    `LocalGitBackgroundCredentialTests.testDeviceOnlyCredentialMigratesAccessibilityWithoutChangingToken`.
-  - UI tests: 33 failures, none involving the assistant. I re-ran exactly
-    those 33 with `-only-testing:` on a clean `origin/main` (`8f0abb3b`)
-    worktree, and the same 33 fail there too (identical list). They are not
-    caused by this branch, including the `TerminalPageChrome` change.
-- `xcodebuild test` was not re-run after that motion-helper refactor. The
-  build and the portable suite were re-run on the final tree.
+    `LocalGitBackgroundCredentialTests.testDeviceOnlyCredentialMigratesAccessibilityWithoutChangingToken`);
+  - `LocalLedgerAutomaticSyncSessionTests.testRangeChangeAtSameRevisionDoesNotRebuildWidgetSnapshot`.
+    This branch does not touch that code. Re-running that class on its own
+    twice passed both times (0 unexpected), so the failure is flaky.
+- UI tests were not re-run for the review fixes. Earlier run at `8ba890fe`:
+  33 UI test failures, none involving the assistant. The identical 33 also
+  fail on a clean `origin/main` (`8f0abb3b`).
 
 ## Not tested
 
-- The UI by hand: the rename alert, the context menu, swipe pin, the share
+- The UI by hand: the rename alert (including the unchanged-save path),
+  Return while a turn is running, the context menu, swipe pin, the share
   sheet, the jump button, hardware-keyboard Return/Shift-Return, and VoiceOver
   announcements. No UI test covers them.
 - Whether `.onKeyPress(.return)` reaches a vertical `TextField` on every iOS
