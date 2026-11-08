@@ -65,6 +65,13 @@ struct TerminalDateRangeButton: View {
     }
 }
 
+/// What tapping a page's title does, such as renaming the conversation it
+/// names.
+struct TerminalTitleAction {
+    let hint: String
+    let run: () -> Void
+}
+
 struct TerminalPageChrome: ViewModifier {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -77,14 +84,26 @@ struct TerminalPageChrome: ViewModifier {
     var showsSync = true
     /// Retained for call-site compatibility; Balanced is the only appearance now.
     var balanced = false
+    /// Makes the compact bar's title a button, announced with `hint`.
+    var titleAction: TerminalTitleAction? = nil
 
-    private var titleText: some View {
+    private var titleLabel: some View {
         Text(compactTitle ?? title)
             .accessibilityLabel(title)
             .balancedFont(size: 17, weight: .medium)
             .tracking(-0.085)
             .foregroundStyle(BalancedPalette.ink)
             .lineLimit(1)
+    }
+
+    @ViewBuilder private var titleText: some View {
+        if let titleAction {
+            Button(action: titleAction.run) { titleLabel.frame(minHeight: 44).contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .accessibilityHint(titleAction.hint)
+        } else {
+            titleLabel
+        }
     }
 
     private var showsSyncButton: Bool { showsSync && (!session.isLocal || session.hasLocalRemoteSync) }
@@ -311,8 +330,8 @@ private struct TerminalBackGestureBridge: UIViewControllerRepresentable {
 }
 
 extension View {
-    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, showsTimeRange: Bool = false, showsSync: Bool = true, actions: AnyView? = nil, balanced: Bool = false) -> some View {
-        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions, showsTimeRange: showsTimeRange, showsSync: showsSync, balanced: balanced))
+    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, showsTimeRange: Bool = false, showsSync: Bool = true, actions: AnyView? = nil, balanced: Bool = false, titleAction: TerminalTitleAction? = nil) -> some View {
+        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions, showsTimeRange: showsTimeRange, showsSync: showsSync, balanced: balanced, titleAction: titleAction))
     }
 }
 

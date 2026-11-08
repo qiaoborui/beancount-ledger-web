@@ -32,14 +32,49 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
     /// The name the model gave the conversation; absent in older saves, which
     /// are still named by their first question.
     var generatedTitle: String? = nil
+    /// The name the user gave the conversation; it wins over the model's.
+    /// Absent in older saves and until the user renames it.
+    var customTitle: String? = nil
+    /// When the user pinned the conversation to the top of the history;
+    /// pinned conversations are never pruned.
+    var pinnedAt: Date? = nil
 
-    /// The model's name, or the first question.
+    /// The user's name, the model's, or the first question.
     var title: String {
-        if let name = generatedTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-            return Self.oneLine(name)
+        Self.title(custom: customTitle, generated: generatedTitle,
+                   question: messages.first { $0.role == LedgerAgentMessage.Role.user.rawValue }?.text)
+    }
+
+    /// How a conversation is named, saved or still on screen.
+    static func title(custom: String?, generated: String?, question: String?) -> String {
+        for name in [custom, generated] {
+            if let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+                return oneLine(name)
+            }
         }
-        let question = messages.first { $0.role == LedgerAgentMessage.Role.user.rawValue }?.text ?? ""
-        return Self.oneLine(question)
+        return oneLine(question ?? "")
+    }
+
+    /// The conversation as plain text for sharing: its name, then each
+    /// question and answer with the names of the files sent along. The reads
+    /// behind an answer are left out.
+    func plainTextExport() -> String {
+        var blocks = [title]
+        for message in messages {
+            switch LedgerAgentMessage.Role(rawValue: message.role) {
+            case .user:
+                var block = String(localized: "问：") + message.text
+                if let files = message.attachments, !files.isEmpty {
+                    block += "\n" + String(localized: "附件：") + files.joined(separator: "、")
+                }
+                blocks.append(block)
+            case .assistant:
+                blocks.append(String(localized: "答：") + message.text)
+            case nil:
+                continue
+            }
+        }
+        return blocks.joined(separator: "\n\n")
     }
 
     /// The last reply, as one plain line.
@@ -53,7 +88,8 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
     func matches(_ query: String) -> Bool {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return true }
-        return messages.contains { $0.text.localizedCaseInsensitiveContains(query) }
+        return title.localizedCaseInsensitiveContains(query)
+            || messages.contains { $0.text.localizedCaseInsensitiveContains(query) }
     }
 
     private static func oneLine(_ text: String) -> String {
@@ -61,6 +97,53 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
             .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "#>-*| ").union(.whitespaces)) }
             .filter { !$0.isEmpty && !$0.allSatisfy { "-:| ".contains($0) } }
             .joined(separator: " ")
+    }
+}
+
+/// One section of the history list: the pinned conversations, newest pin
+/// first, then the rest by when they were last used, newest first.
+struct LedgerAgentHistoryGroup: Equatable, Identifiable, Sendable {
+    enum Kind: CaseIterable, Sendable {
+        case pinned, today, yesterday, week, month, earlier
+    }
+
+    let kind: Kind
+    let items: [LedgerAgentSavedConversation]
+    var id: Kind { kind }
+
+    var title: String {
+        switch kind {
+        case .pinned: String(localized: "置顶")
+        case .today: String(localized: "今天")
+        case .yesterday: String(localized: "昨天")
+        case .week: String(localized: "过去 7 天")
+        case .month: String(localized: "本月")
+        case .earlier: String(localized: "更早")
+        }
+    }
+
+    /// Empty sections are left out.
+    static func grouping(_ items: [LedgerAgentSavedConversation], now: Date = Date(),
+                         calendar: Calendar = .current) -> [Self] {
+        let today = calendar.startOfDay(for: now)
+        let weekAgo = calendar.date(byAdding: .day, value: -7, to: today) ?? today
+        var byKind: [Kind: [LedgerAgentSavedConversation]] = [:]
+        for item in items {
+            let kind: Kind
+            if item.pinnedAt != nil { kind = .pinned }
+            else if calendar.isDate(item.updatedAt, inSameDayAs: now) { kind = .today }
+            else if let yesterday = calendar.date(byAdding: .day, value: -1, to: today),
+                    calendar.isDate(item.updatedAt, inSameDayAs: yesterday) { kind = .yesterday }
+            else if item.updatedAt >= weekAgo { kind = .week }
+            else if calendar.isDate(item.updatedAt, equalTo: now, toGranularity: .month) { kind = .month }
+            else { kind = .earlier }
+            byKind[kind, default: []].append(item)
+        }
+        byKind[.pinned]?.sort { ($0.pinnedAt ?? .distantPast) > ($1.pinnedAt ?? .distantPast) }
+        for kind in Kind.allCases where kind != .pinned {
+            byKind[kind]?.sort { $0.updatedAt > $1.updatedAt }
+        }
+        return Kind.allCases.compactMap { kind in byKind[kind].map { Self(kind: kind, items: $0) } }
     }
 }
 
@@ -105,6 +188,9 @@ final class LedgerAgentSessions: ObservableObject {
     private var ledgerID: UUID?
     private var storage: Storage?
     private var loading: Task<Void, Never>?
+    /// What the composer held when the user left each conversation; kept
+    /// only while the app runs.
+    private var unsent: [UUID: String] = [:]
 
     init() {
         current = LedgerAgentConversation()
@@ -128,6 +214,47 @@ final class LedgerAgentSessions: ObservableObject {
     /// Another conversation is answering, so the one on screen cannot ask.
     var busyElsewhere: Bool { background?.isRunning == true }
 
+    /// What the header calls a live conversation, the way the history will.
+    func title(of conversation: LedgerAgentConversation) -> String {
+        LedgerAgentSavedConversation.title(
+            custom: saved.first { $0.id == conversation.id }?.customTitle, generated: conversation.generatedTitle,
+            question: conversation.messages.first { $0.role == .user }?.text)
+    }
+
+    /// The name the user gave a conversation, if any.
+    func customTitle(of id: UUID) -> String? {
+        saved.first { $0.id == id }?.customTitle
+    }
+
+    /// Names a conversation; an empty name gives it back the model's name or
+    /// its first question.
+    func rename(_ id: UUID, to name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        updateRecord(id) { $0.customTitle = name.isEmpty ? nil : name }
+    }
+
+    /// Names a conversation from the rename field, which opens holding the
+    /// name `shown`. Saving that name untouched keeps an automatic name
+    /// automatic, so the model's name can still replace the first question.
+    func rename(_ id: UUID, to name: String, shown: String) {
+        let unchanged = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            == shown.trimmingCharacters(in: .whitespacesAndNewlines)
+        if unchanged, customTitle(of: id) == nil { return }
+        rename(id, to: name)
+    }
+
+    func setPinned(_ id: UUID, _ pinned: Bool) {
+        updateRecord(id) { record in
+            if pinned != (record.pinnedAt != nil) { record.pinnedAt = pinned ? Date() : nil }
+        }
+    }
+
+    func unsentText(for id: UUID) -> String { unsent[id] ?? "" }
+
+    func setUnsentText(_ text: String, for id: UUID) {
+        unsent[id] = text.isEmpty ? nil : text
+    }
+
     /// Switches to the history of the ledger on screen; another ledger drops
     /// every live conversation.
     func bind(ledger id: UUID, storage: Storage) {
@@ -142,6 +269,7 @@ final class LedgerAgentSessions: ObservableObject {
         ledgerID = id
         self.storage = storage
         saved = []
+        unsent = [:]
         loading = Task { [weak self] in
             let records = await storage.load().compactMap { try? Self.decoder.decode(LedgerAgentSavedConversation.self, from: $0) }
             guard let self, self.ledgerID == id else { return }
@@ -192,6 +320,7 @@ final class LedgerAgentSessions: ObservableObject {
             background = nil
         }
         saved.removeAll { $0.id == id }
+        unsent[id] = nil
         if let storage { Task { await storage.remove(id) } }
     }
 
@@ -209,6 +338,7 @@ final class LedgerAgentSessions: ObservableObject {
         }
         let removed = saved.filter { !keep.contains($0.id) }.map(\.id)
         saved.removeAll { !keep.contains($0.id) }
+        unsent = unsent.filter { keep.contains($0.key) }
         guard let storage else { return }
         Task {
             if keep.isEmpty { await storage.removeAll() } else { for id in removed { await storage.remove(id) } }
@@ -236,7 +366,13 @@ final class LedgerAgentSessions: ObservableObject {
     }
 
     private func save(_ conversation: LedgerAgentConversation) {
-        guard let record = conversation.saved() else { return }
+        guard var record = conversation.saved() else { return }
+        // The name and pin are the user's, kept on the saved record rather
+        // than the conversation, so every save carries them over.
+        if let previous = saved.first(where: { $0.id == record.id }) {
+            record.customTitle = previous.customTitle
+            record.pinnedAt = previous.pinnedAt
+        }
         merge([record])
         guard let storage, let data = try? Self.encoder.encode(record) else { return }
         let removed = prune()
@@ -256,12 +392,36 @@ final class LedgerAgentSessions: ObservableObject {
         saved = byID.values.sorted { $0.updatedAt > $1.updatedAt }
     }
 
+    /// Changes what the user owns on a record, its name or its pin, without
+    /// moving it in the history. A conversation on screen that was not saved
+    /// yet is saved with the change.
+    private func updateRecord(_ id: UUID, _ change: (inout LedgerAgentSavedConversation) -> Void) {
+        var record: LedgerAgentSavedConversation
+        if let existing = saved.first(where: { $0.id == id }) {
+            record = existing
+        } else if let live = [current, background].compactMap({ $0 }).first(where: { $0.id == id }),
+                  let fresh = live.saved() {
+            record = fresh
+        } else {
+            return
+        }
+        let before = record
+        change(&record)
+        guard record != before else { return }
+        if let index = saved.firstIndex(where: { $0.id == id }) { saved[index] = record } else { merge([record]) }
+        guard let storage, let data = try? Self.encoder.encode(record) else { return }
+        Task { try? await storage.save(id, data) }
+    }
+
+    /// The oldest conversations beyond the limit, except pinned ones and the
+    /// ones still live.
     private func prune() -> [UUID] {
         guard saved.count > Self.limit else { return [] }
         let live = Set([current.id, background?.id].compactMap { $0 })
-        let removed = saved.dropFirst(Self.limit).map(\.id).filter { !live.contains($0) }
+        let removable = saved.filter { $0.pinnedAt == nil && !live.contains($0.id) }
+        let removed = Set(removable.suffix(saved.count - Self.limit).map(\.id))
         saved.removeAll { removed.contains($0.id) }
-        return removed
+        return Array(removed)
     }
 
     private static let encoder: JSONEncoder = {
