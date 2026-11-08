@@ -1,8 +1,8 @@
 # 20261109-agent-live-timeline
 
-- Status: completed-pending-review. Local commits on `codex/agent-live-timeline`,
-  not pushed, no PR.
-- Last updated: 2026-11-09 01:55 UTC+8.
+- Status: completed. Reviewed; review fixes committed. Local commits on
+  `codex/agent-live-timeline`, not pushed, no PR.
+- Last updated: 2026-11-09 02:40 UTC+8.
 - Branch: `codex/agent-live-timeline`, based on `codex/agent-conversation-list`
   at `9dbf9025`. This note covers the `feat(agent)` and `feat(ios)` commits
   listed under Changed files.
@@ -70,6 +70,22 @@ writes automatically.
   - A stopped turn skips the draft review (`editor.review`). The existing
     unreviewed-draft flag makes the next turn review it.
   - Stopped answers are not announced to VoiceOver as finished answers.
+- **Late stop results (review fix).**
+  - `Stopping` also records the note and the new files the stopped
+    question was sent with. A late transcript clears only those: a note set
+    after the stop (for example the written-to-ledger notice) and files
+    attached to the next question stay.
+  - If the next question gives up waiting (`stopSettleTimeout`, now an
+    instance property so tests can shorten it), the stop record is marked
+    stale. A stale result still replaces or inserts the stopped reply's text
+    and steps, but does not adopt its transcript or usage, so it cannot
+    replace a newer answer's transcript or meter.
+  - The next question's note is read after the wait, not when it is sent.
+- **Unfinished tools on stop (review fix).** A call still running when the
+  user stops is saved with `interrupted: true` (a new optional field on
+  `LedgerAgentToolCall`). Its row shows a dash and 已停止, VoiceOver says
+  已停止, and it does not count as a draft edit. The native-cancel fallback
+  uses the same marking.
 - **Repository cancel path (deviation from a plain rethrow).** When the task is
   cancelled, `runAgentTurn` now returns a decoded response whose
   `cancelled == true`, instead of always throwing `CancellationError`. Any
@@ -81,15 +97,35 @@ writes automatically.
   - A tap opens a popover with "上下文已用 X% · N / M tokens".
   - Each message saves its usage, and a restored conversation shows the last
     known usage.
+- **Streaming scroll follow (review fix).** Live growth scrolls only when the
+  reader is at the real bottom and not moving the page. On iOS 18+,
+  `onScrollGeometryChange` measures the distance to the bottom (24 pt slack)
+  and `onScrollPhaseChange` pauses following while tracking, interacting or
+  decelerating. On iOS 17 a simultaneous drag gesture pauses following until
+  the bottom anchor reappears, the jump button is tapped, or a new turn
+  starts. Discrete events (a new message, a change card, a recap) still use
+  the bottom-anchor rule from conversation-list.
 - **Compaction.** "正在压缩较早的对话…" shows while compacting live. A saved
   answer with `compacted` shows "已压缩较早的对话，以便继续". The events are only
   decoded here; `codex/agent-auto-compaction` emits them.
 - **Display details.**
   - Durations under 1 s show in 毫秒, longer ones as seconds with one decimal.
   - Live tool groups start expanded; saved ones start collapsed under the
-    summary line the answer already used.
+    summary line the answer already used. The answer that just replaced the
+    live turn (`streamedAnswer`, kept for the session, not saved) opens its
+    tool groups, so the page above the reply keeps its height when the turn
+    finishes. Row and thinking expansion the user set while live is not
+    carried over.
   - A streaming code fence that has not closed renders as prose until it
-    closes.
+    closes. Stopped answers render the same way, so a reply stopped inside a
+    chart fence looks as it did at the stop.
+  - The live timeline keeps every text step, the trailing one included, in
+    one `ForEach` keyed by step index, so the reply does not crossfade when a
+    tool or reasoning follows it.
+  - The live footer shows the same hints as `LedgerAgentRunning`: "可以离开这一
+    页…", and the slow hint after 45 s without any streamed event. Each live
+    event bumps `stepSince`.
+  - The meter's warning tint follows the displayed percent (≥ 80).
 - **Tool titles (deviation).** Most tool names in the spec already had titles.
   Only `edit_memory` (更新记忆) and `write_memory` (整理记忆) were added.
 - **Accessibility and motion.** All new motion goes through
@@ -130,8 +166,27 @@ Run with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
 
 - Base branch, before changes: `cd App/LedgerMobile && swift test --filter
   LedgerAgent`: 89 tests, 0 failures.
-- Final state: `cd App/LedgerMobile && swift test --filter LedgerAgent`: 103
-  tests, 0 failures. `--filter "LedgerAgentTimelineTests|LedgerAgentTests"`
+- Before review: `cd App/LedgerMobile && swift test --filter LedgerAgent`:
+  103 tests, 0 failures.
+- After review fixes: `swift test --filter LedgerAgent`: 105 tests, 0
+  failures; `--filter "LedgerAgentTimelineTests|LedgerAgentTests"`: 69 tests,
+  0 failures, 5 runs in a row. Two tests were added: a running tool marked
+  unfinished on stop, and a stop that returns after the next answer, keeping
+  the newer transcript and usage. The grouping test also covers the live item
+  list.
+- After review fixes, `xcodegen generate && xcodebuild test` (same command and
+  temporary `@MainActor` as below, reverted before committing; LedgerCore
+  xcframework from the earlier build, no Go changes since):
+  - `LedgerMobileTests`: 942 tests, 7 skipped, 3 failures, the same three
+    unsigned-Keychain tests listed below. Agent classes: 106 tests, 0
+    failures. No new warnings in the agent files.
+  - The run first failed to type-check the chat list until the answer row
+    moved into its own builder (`answer(_:)`); fixed before the run above.
+  - The scheme also runs `LedgerMobileUITests`. That run was stopped partway:
+    several non-agent UI tests (sidebar accounts, analysis, inbox and
+    bookkeeping screenshots) failed while the machine was heavily loaded. No
+    UI test covers the agent screen. These failures were not compared against
+    the base branch. `--filter "LedgerAgentTimelineTests|LedgerAgentTests"`
   passed 6 runs in a row while developing.
 - `bash scripts/build-ledgercore-xcframework.sh`: pass.
 - `cd App/LedgerMobile && xcodegen generate && xcodebuild test -project
