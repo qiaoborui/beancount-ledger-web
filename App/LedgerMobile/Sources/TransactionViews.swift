@@ -3583,6 +3583,8 @@ struct CookieKeypadView: View {
 struct CookieFastTransactionEditorBody: View {
     @EnvironmentObject private var session: LedgerSession
     @State private var preparedBookkeeping: PreparedBookkeepingChange?
+    /// The entry behind `preparedBookkeeping`, for the saved notice.
+    @State private var preparedEntry: LedgerTransactionEntry?
     @State private var naturalLanguagePresented = false
     @Environment(\.dismiss) private var dismiss
 
@@ -3863,7 +3865,7 @@ struct CookieFastTransactionEditorBody: View {
                 NaturalLanguageBookkeepingView { dismiss() }
             }
             .fullScreenCover(item: $preparedBookkeeping) { preview in
-                BookkeepingPreviewView(preview: preview) { _ in dismiss() }
+                BookkeepingPreviewView(preview: preview, islandNotice: .entries(preparedEntry.map { [$0] } ?? [])) { _ in dismiss() }
             }
             .onAppear {
                 guard !didSetup else { return }
@@ -4835,6 +4837,7 @@ struct CookieFastTransactionEditorBody: View {
         saving = true
         do {
             if transaction == nil, let repository = session.localRepository {
+                preparedEntry = entry
                 preparedBookkeeping = try await repository.prepareBookkeeping(.manual(entry))
                 saving = false
                 return
@@ -4885,6 +4888,8 @@ private enum TransactionEditorError: LocalizedError {
 struct TransactionEditorView: View {
     @EnvironmentObject private var session: LedgerSession
     @State private var preparedBookkeeping: PreparedBookkeepingChange?
+    /// The entry behind `preparedBookkeeping`, for the saved notice.
+    @State private var preparedEntry: LedgerTransactionEntry?
     @State private var naturalLanguagePresented = false
     @Environment(\.dismiss) private var dismiss
 
@@ -5073,7 +5078,7 @@ struct TransactionEditorView: View {
             NaturalLanguageBookkeepingView { dismiss() }
         }
         .fullScreenCover(item: $preparedBookkeeping) { preview in
-            BookkeepingPreviewView(preview: preview) { _ in dismiss() }
+            BookkeepingPreviewView(preview: preview, islandNotice: .entries(preparedEntry.map { [$0] } ?? [])) { _ in dismiss() }
         }
     }
 
@@ -5290,6 +5295,7 @@ struct TransactionEditorView: View {
             if transaction == nil {
                 if let repository = session.localRepository {
                     saving = true
+                    preparedEntry = entry
                     preparedBookkeeping = try await repository.prepareBookkeeping(.manual(entry))
                     saving = false
                 } else {

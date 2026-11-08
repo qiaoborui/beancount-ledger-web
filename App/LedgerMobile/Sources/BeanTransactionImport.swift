@@ -89,7 +89,7 @@ struct BeanTransactionImportView: View {
             }
         }
         .sheet(item: $preview) { prepared in
-            BookkeepingPreviewView(preview: prepared) { _ in
+            BookkeepingPreviewView(preview: prepared, islandNotice: .written(count: prepared.entryCount ?? 1)) { _ in
                 onSaved()
                 dismiss()
             }

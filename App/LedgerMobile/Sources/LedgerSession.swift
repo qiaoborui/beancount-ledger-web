@@ -216,10 +216,11 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var gmailOAuthResult: LedgerGmailOAuthResult?
     @Published private(set) var transactionMutationStates: [String: LedgerTransactionMutationPhase] = [:]
     @Published private(set) var widgetRefreshStatus: LedgerWidgetRefreshStatus
-    @Published var pendingIslandNotice: LedgerIslandNotice?
-
+    /// Hands the notice straight to the island overlay. It is not published
+    /// state: a published property here would re-render every view observing
+    /// the session just to show a two-second confirmation.
     func triggerIslandNotice(_ notice: LedgerIslandNotice) {
-        pendingIslandNotice = notice
+        LedgerIslandNotices.post(notice)
     }
 
     private let repositoryFactory: LedgerRepositoryFactory

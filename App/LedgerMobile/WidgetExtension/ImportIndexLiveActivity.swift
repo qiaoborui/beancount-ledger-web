@@ -15,7 +15,7 @@ struct ImportIndexLiveActivity: Widget {
                 ) {
                     statusBadge(phase)
                 } footer: {
-                    phaseTrack(phase).padding(.top, 2)
+                    progress(phase).padding(.top, 2)
                 }
             }
             .activityBackgroundTint(.clear)
@@ -26,38 +26,44 @@ struct ImportIndexLiveActivity: Widget {
         } dynamicIsland: { context in
             let phase = displayPhase(context)
             return DynamicIsland {
+                // The in-app island's row: hue disc, one-line title with a
+                // quiet detail, the state word in the hue, then one track.
                 DynamicIslandExpandedRegion(.leading) {
-                    LedgerGlassBadge(symbol: symbol(phase), color: phaseColor(phase), size: 24, symbolSize: 12)
+                    LedgerIslandDiscBadge(symbol: symbol(phase), color: phaseColor(phase))
+                        .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     Text(badgeText(phase))
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit())
                         .foregroundStyle(phaseColor(phase))
+                        .padding(.trailing, 4)
+                        .frame(maxHeight: .infinity)
                 }
-                DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 8) {
+                DynamicIslandExpandedRegion(.center) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(title(phase))
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(LedgerGlass.text)
                         Text(detail(context))
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(LedgerGlass.secondary)
-                        phaseTrack(phase)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(Color.white.opacity(0.55))
                     }
+                    .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    progress(phase)
+                        .padding(.horizontal, 4)
+                        .padding(.top, 6)
                 }
             } compactLeading: {
-                Image(systemName: symbol(phase))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(phaseColor(phase))
+                LedgerIslandDiscBadge(symbol: symbol(phase), color: phaseColor(phase), size: 18, symbolSize: 9)
             } compactTrailing: {
                 Text(compactText(phase))
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(LedgerGlass.text)
-            } minimal: {
-                Image(systemName: symbol(phase))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
                     .foregroundStyle(phaseColor(phase))
+            } minimal: {
+                LedgerIslandDiscBadge(symbol: symbol(phase), color: phaseColor(phase), size: 18, symbolSize: 9)
             }
             .widgetURL(URL(string: "ledger://imports"))
             .keylineTint(phaseColor(phase))
@@ -76,22 +82,15 @@ struct ImportIndexLiveActivity: Widget {
         return .indexing
     }
 
-    private func statusMark(_ phase: DisplayPhase) -> some View {
-        LedgerGlassBadge(symbol: symbol(phase), color: phaseColor(phase))
-    }
-
     private func statusBadge(_ phase: DisplayPhase) -> some View {
         LedgerGlassPill(text: badgeText(phase), color: phaseColor(phase))
     }
 
-    private func phaseTrack(_ phase: DisplayPhase) -> some View {
-        HStack(spacing: 4) {
-            Capsule()
-                .fill(phaseColor(phase))
-            Capsule()
-                .fill(phase == .indexed ? LedgerGlass.success : Color.white.opacity(0.18))
-        }
-        .frame(height: 4)
+    /// The import has two real stages, written to the ledger and indexed, so
+    /// the one track sits halfway until the index lands. It never creeps on a
+    /// timer: there is no measurable progress in between to show.
+    private func progress(_ phase: DisplayPhase) -> some View {
+        LedgerIslandProgressBar(fraction: phase == .indexed ? 1 : 0.5, color: phaseColor(phase))
     }
 
     private func symbol(_ phase: DisplayPhase) -> String {
@@ -129,11 +128,12 @@ struct ImportIndexLiveActivity: Widget {
         }
     }
 
+    /// Imports are white in the in-app island too; only a stalled confirmation
+    /// borrows the warm expense hue to ask for a look.
     private func phaseColor(_ phase: DisplayPhase) -> Color {
         switch phase {
-        case .indexing: LedgerGlass.gold
-        case .waiting: LedgerGlass.warning
-        case .indexed: LedgerGlass.success
+        case .indexing, .indexed: LedgerIslandHue.neutral
+        case .waiting: LedgerIslandHue.expense
         }
     }
 

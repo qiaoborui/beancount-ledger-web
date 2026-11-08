@@ -80,7 +80,7 @@ struct RootView: View {
             )
 
             // 灵动岛全屏入账浮层容器 (无论用户在哪个 Tab 页面记账/导入，均自顶部灵动岛优雅弹下)
-            LedgerIslandOverlayContainer(currentNotice: $session.pendingIslandNotice)
+            LedgerIslandOverlayContainer()
                 .zIndex(2)
         }
         // Balanced has no accent colour (docs/design/ios-balanced/README.md):

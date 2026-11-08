@@ -88,13 +88,16 @@ enum MoneyText {
     /// only a guard against pathological input.
     private static let capacity = 64
 
-    static func format(minorUnits: Int, currency: String, showSign: Bool = false, showsCurrency: Bool = true) -> String {
+    /// `maximumFractionDigits` drops the currency's minimum fraction digits
+    /// too, so `0` turns "¥38.00" into "¥38".
+    static func format(minorUnits: Int, currency: String, showSign: Bool = false, showsCurrency: Bool = true,
+                       maximumFractionDigits: Int? = nil) -> String {
         let currencyCode = currency.isEmpty ? "CNY" : currency
         let key = CurrencyFormatterKey(
             currencyCode: currencyCode,
             showsCurrency: showsCurrency,
             showSign: showSign,
-            maximumFractionDigits: nil
+            maximumFractionDigits: maximumFractionDigits
         )
         let formatter = currencyFormatter(for: key)
         let value = NSDecimalNumber(value: Double(minorUnits) / 100)

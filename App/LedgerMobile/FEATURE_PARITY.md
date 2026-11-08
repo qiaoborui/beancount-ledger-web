@@ -21,7 +21,8 @@ push — stay out of scope by design, not as pending work.
 | Ledger files | Browse `.bean` files under the ledger root, edit in a plain editor, validate the whole ledger, export a snapshot folder | Write with validation | `LocalLedgerFilesView`, `LocalLedgerFileEditor` |
 | Settings and privacy | Face ID/Touch ID/passcode, lock interval, app language, compact tab customization, device-local storage settings | Device/auth | `SettingsView.swift`, `LocalLedgerAuthentication.swift` |
 | Home Screen widgets | Weekly/monthly/yearly overview, expense calendar, 30-day trend, 12-week heatmap, configurable account balance, import recency, Lock Screen families | Read-only snapshot | `WidgetExtension/`, `LedgerWidgetSnapshot.swift` |
-| Live Activity | Import index progress | Read-only | `ImportIndexLiveActivity.swift` |
+| Live Activity | Import index progress in two stages (written, indexed), with the same disc and hue as the in-app notice | Read-only | `ImportIndexLiveActivity.swift` |
+| Save and import notice | In-app Dynamic Island card that grows from the camera after a save or a bill import: one entry shows payee, category and signed amount in the expense/income hue; several entries, a pasted `.bean` file or an import show a count. It then settles into a compact pill with the category symbol and a short amount, and retracts. VoiceOver announces it; Reduce Motion crossfades | Read-only feedback | `LedgerIslandEntryView.swift`, `LedgerIslandMotion.swift`, `BookkeepingPreviewView.swift` |
 | Assets, income statement, investments | Net worth history and trend, hierarchical income/expense statements, holdings with market value, cost, and return | Read | `AnalysisViews.swift` |
 | Currencies | Current, inverse, and CNY-cross rate cards with sparklines, missing-rate warnings, valuation currency per server origin | Read | `CurrencyAnalysisView.swift` |
 | BQL | Multi-statement editor, examples, table/bar/pie/line results, device-local history | Read plus runtime history | `BQLQueryView.swift` |
@@ -33,7 +34,7 @@ push — stay out of scope by design, not as pending work.
 | Backup and restore | iCloud Drive (or any folder) snapshots with hash verification, restore into the current ledger or as a new one, daily automatic backup | Local read/write | `LocalLedgerBackup*.swift` |
 | Git synchronization | HTTPS remote, branch, Keychain credentials, pull/validate/push, conflict review and resolution, automatic sync | Network | `GitLocalStorage.swift`, `LocalLedgerAutoSyncCoordinator.swift` |
 | iCloud Drive folder sync | Third storage provider beside device-only and Git: a picked folder holds immutable content-addressed snapshots plus one head file per device; peers merge three-way and reuse the conflict review; no push, so peers are picked up on save, foreground, periodic or background sync, or 立即同步 | Local read/write over iCloud Drive | `FolderLocalStorage.swift`, `LocalLedgerStorageView.swift` |
-| App Intents and URL routes | Open a page, search, `ledger://` deep links, Dynamic Island entry notice | Read | `LedgerAppIntents.swift`, `LedgerExternalRoute.swift` |
+| App Intents and URL routes | Open a page, search, `ledger://` deep links | Read | `LedgerAppIntents.swift`, `LedgerExternalRoute.swift` |
 
 ## Deliberately out of scope
 
