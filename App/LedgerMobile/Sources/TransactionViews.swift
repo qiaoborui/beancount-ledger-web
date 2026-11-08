@@ -636,21 +636,30 @@ struct TransactionsView: View {
         return filteredTransactions
     }
 
-    /// Keys of mutations whose write was validated. Remote rows already drop a
-    /// confirmed deletion through the session's projection; local rows come from
-    /// windows and bootstrap pages read before the write, so they are filtered
-    /// here until the next generation (which no longer has the row) lands.
-    private var confirmedMutationKeys: Set<String> {
-        Set(session.transactionMutationStates.compactMap { $0.value == .confirmed ? $0.key : nil })
-    }
-
+    /// Remote rows already drop a confirmed deletion through the session's
+    /// projection; local rows come from windows and bootstrap pages read before
+    /// the write, so they are filtered here until the next generation (which no
+    /// longer has the row) lands.
     private func hidingConfirmedDeletions(_ rows: [LedgerTransaction]) -> [LedgerTransaction] {
         guard session.transactionMutationStates.values.contains(.confirmed) else { return rows }
-        return rows.filter { row in
-            guard session.transactionMutationPhase(for: row) == .confirmed,
-                  case .unavailable = session.transactionResolution(for: row.source) else { return true }
-            return false
-        }
+        return rows.filter { !isHiddenConfirmedDeletion($0) }
+    }
+
+    private func isHiddenConfirmedDeletion(_ row: LedgerTransaction) -> Bool {
+        guard session.transactionMutationPhase(for: row) == .confirmed,
+              case .unavailable = session.transactionResolution(for: row.source) else { return false }
+        return true
+    }
+
+    /// Local rows a confirmed deletion is hiding. Only these drive the list's
+    /// delete animation: other confirmed writes (an edit, a 200-row tag add)
+    /// update their rows in place, and page appends never animate.
+    private var hiddenConfirmedDeletionIDs: Set<LedgerTransaction.ID> {
+        guard session.isLocal, session.transactionMutationStates.values.contains(.confirmed) else { return [] }
+        let rows = session.localTransactionAccumulatedRows.isEmpty
+            ? session.localBootstrapTransactions
+            : session.localTransactionAccumulatedRows
+        return Set(rows.lazy.filter(isHiddenConfirmedDeletion).map(\.id))
     }
 
     /// Same scope as `displayedTransactions` but ignores the active kind
@@ -942,7 +951,10 @@ struct TransactionsView: View {
         let summaryDays: [String: LocalTransactionScan.Day] = session.isLocal
             ? Dictionary(session.localTransactionSummary?.days.map { ($0.date, $0) } ?? [], uniquingKeysWith: { first, _ in first })
             : [:]
-        let confirmedKeys = confirmedMutationKeys
+        let hiddenDeletions = hiddenConfirmedDeletionIDs
+        // Same condition as the loading row below. Keyed on the placeholder, not on
+        // `isAwaitingRows`, which is also true while a page is appended.
+        let showsPlaceholder = displayed.isEmpty && isAwaitingRows
         return List {
             Section {
                 VStack(spacing: 0) {
@@ -1013,7 +1025,7 @@ struct TransactionsView: View {
                     }
                 }
             }
-            if displayed.isEmpty && isAwaitingRows {
+            if showsPlaceholder {
                 Section {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small).tint(BalancedPalette.meta)
@@ -1082,11 +1094,11 @@ struct TransactionsView: View {
         }
         // Rows landing cross-fade over the loading placeholder. Clearing the list
         // (a range or filter reset) stays instant, so a 1,000-row window is never
-        // animated out.
-        .animation(reduceMotion || isAwaitingRows ? nil : LedgerMotion.segment, value: isAwaitingRows)
+        // animated out, and appending a page to rows already shown is not animated.
+        .animation(reduceMotion || showsPlaceholder ? nil : LedgerMotion.segment, value: showsPlaceholder)
         // A confirmed deletion leaves through the List's own delete animation.
         // Retiring the last receipt (when the next generation lands) is instant.
-        .animation(reduceMotion || confirmedKeys.isEmpty ? nil : LedgerMotion.value, value: confirmedKeys)
+        .animation(reduceMotion || hiddenDeletions.isEmpty ? nil : LedgerMotion.value, value: hiddenDeletions)
     }
 
     /// Tail of the scrolling list. Appearing on screen appends the next bounded
