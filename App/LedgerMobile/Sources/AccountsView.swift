@@ -124,7 +124,7 @@ struct AccountsView: View {
                             : allSections.filter { filter.matches(section: $0) }.reduce(0) { $0 + $1.rows.count }
                         Button {
                             LedgerFeedback.selection()
-                            withAnimation(.easeOut(duration: 0.18)) { selectedFilter = filter }
+                            withLedgerAnimation(LedgerMotion.segment) { selectedFilter = filter }
                         } label: {
                             VStack(spacing: 7) {
                                 HStack(spacing: 4) {
@@ -227,7 +227,7 @@ struct AccountsView: View {
                 let selected = trendRange == range
                 Button {
                     LedgerFeedback.selection()
-                    withAnimation(.easeOut(duration: 0.18)) { trendRange = range }
+                    withLedgerAnimation(LedgerMotion.segment) { trendRange = range }
                 } label: {
                     Text(range.title)
                         .balancedFont(size: 13, weight: .medium)

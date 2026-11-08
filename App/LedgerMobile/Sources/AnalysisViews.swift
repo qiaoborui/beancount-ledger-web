@@ -710,7 +710,7 @@ private struct AssetAllocationDonutCard: View {
                     ForEach(allocations) { slice in
                         Button {
                             LedgerFeedback.selection()
-                            withAnimation(.easeInOut(duration: 0.15)) {
+                            withLedgerAnimation(LedgerMotion.selection) {
                                 if selectedID == slice.id {
                                     selectedID = nil
                                 } else {
@@ -2038,7 +2038,7 @@ struct CookieCategoryDonutCard: View {
                         let isSelected = selectedTab == tab
                         Button {
                             LedgerFeedback.selection()
-                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                            withLedgerAnimation(LedgerMotion.toggle) {
                                 selectedTab = tab
                                 selectedSliceID = nil
                             }
@@ -2116,7 +2116,7 @@ struct CookieCategoryDonutCard: View {
                     ForEach(slices) { slice in
                         Button {
                             LedgerFeedback.selection()
-                            withAnimation(.easeInOut(duration: 0.15)) {
+                            withLedgerAnimation(LedgerMotion.selection) {
                                 if selectedSliceID == slice.id {
                                     selectedSliceID = nil
                                 } else {

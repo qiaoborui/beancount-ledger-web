@@ -310,7 +310,7 @@ struct ReconciliationView: View {
                 let title = filter == .all ? filter.title : "\(filter.title) \(count(for: filter))"
                 Button {
                     LedgerFeedback.selection()
-                    withAnimation(.easeOut(duration: 0.18)) { selectedStatus = filter }
+                    withLedgerAnimation(LedgerMotion.segment) { selectedStatus = filter }
                 } label: {
                     BalancedMark(title: title, selected: selectedStatus == filter, size: 14)
                 }
@@ -376,9 +376,9 @@ struct ReconciliationView: View {
     private func handleReconcileSuccess(_ message: String) {
         guard !session.isLocal || localReadable else { return }
         successFeedback += 1
-        withAnimation { successMessage = message }
+        withLedgerAnimation(LedgerMotion.value) { successMessage = message }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-            withAnimation { successMessage = nil }
+            withLedgerAnimation(LedgerMotion.value) { successMessage = nil }
         }
     }
 

@@ -3728,7 +3728,7 @@ struct CookieFastTransactionEditorBody: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .animation(.easeInOut(duration: 0.2), value: focusedField != nil)
+            .ledgerAnimation(LedgerMotion.disclose, value: focusedField != nil)
             .background(BalancedPalette.page)
             .contentShape(Rectangle())
             .onTapGesture {
@@ -3812,7 +3812,7 @@ struct CookieFastTransactionEditorBody: View {
 
                     Button {
                         LedgerFeedback.light()
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                        withLedgerAnimation(LedgerMotion.toggle) {
                             isSplitMode = false
                         }
                     } label: {
@@ -3831,7 +3831,7 @@ struct CookieFastTransactionEditorBody: View {
                     ForEach(CookieEntryKind.allCases) { entryKind in
                         Button {
                             LedgerFeedback.selection()
-                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                            withLedgerAnimation(LedgerMotion.toggle) {
                                 kind = entryKind
                                 if entryKind == .income && !CookieCategoryItem.incomeCategories.contains(where: { $0.id == selectedCategoryID }) {
                                     selectedCategoryID = CookieCategoryItem.incomeCategories.first?.id ?? "salary"
@@ -4312,7 +4312,7 @@ struct CookieFastTransactionEditorBody: View {
                 Button {
                     LedgerFeedback.selection()
                     focusedField = nil
-                    withAnimation(.easeInOut(duration: 0.2)) { toggleSplitMode() }
+                    withLedgerAnimation(LedgerMotion.disclose) { toggleSplitMode() }
                 } label: {
                     linkLabel(String(localized: "拆分成多条分录"))
                         .frame(minHeight: 44)
@@ -4976,7 +4976,7 @@ struct TransactionEditorView: View {
                         if !newPostings.isEmpty {
                             postings = newPostings
                         }
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withLedgerAnimation(LedgerMotion.disclose) {
                             mode = .advanced
                         }
                     }
@@ -5129,7 +5129,7 @@ struct TransactionEditorView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("极速") {
                         LedgerFeedback.light()
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withLedgerAnimation(LedgerMotion.disclose) {
                             mode = .fast
                         }
                     }
@@ -5305,7 +5305,7 @@ struct TransactionEditorView: View {
         let isSelected = Calendar.current.isDate(date, inSameDayAs: targetDate)
         return Button {
             LedgerFeedback.selection()
-            withAnimation(.spring(response: 0.22, dampingFraction: 0.7)) {
+            withLedgerAnimation(LedgerMotion.segment) {
                 date = targetDate
             }
         } label: {

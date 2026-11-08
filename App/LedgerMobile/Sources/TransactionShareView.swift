@@ -691,12 +691,12 @@ struct TransactionShareSheet: View {
     }
 
     private func showNotice(_ msg: String) {
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+        withLedgerAnimation(LedgerMotion.toggle) {
             actionNotice = msg
         }
         Task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+            withLedgerAnimation(LedgerMotion.toggle) {
                 actionNotice = nil
             }
         }
