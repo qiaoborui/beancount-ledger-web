@@ -362,6 +362,9 @@ private struct LedgerAgentChatScreen: View {
             .scrollDismissesKeyboard(.interactively)
             .modifier(LedgerAgentScrollTracking(nearBottom: $nearBottom, touching: $touchingPage))
             .onChange(of: conversation.messages.count) { _, _ in
+                // Another version on screen: nothing was asked or answered,
+                // and the user stays by the switch they tapped.
+                guard !conversation.replacedByVersionChange else { return }
                 let last = conversation.messages.last?.role
                 // The question the user just sent is always shown.
                 follow(proxy, force: last == .user)
@@ -422,29 +425,32 @@ private struct LedgerAgentChatScreen: View {
                 onAnswer: { send($0, clearsComposer: false) },
                 onAsk: { ask($0) },
                 onUndo: { undo(message) })
-            .contentShape(Rectangle())
-            .contextMenu {
-                Button { copy(message.text) } label: { Label("复制", systemImage: "doc.on.doc") }
-                Button { copy(LedgerAgentReplyText.plainText(message.text)) } label: {
-                    Label("复制为纯文本", systemImage: "text.alignleft")
-                }
-                Button { perform(.regenerate(message.id)) } label: { Label("重新生成", systemImage: "arrow.clockwise") }
-                    .disabled(!canStartVersion)
-                if session.amountsVisible {
-                    ShareLink(item: message.text) { Label("分享", systemImage: "square.and.arrow.up") }
-                }
-            }
+            // No context menu over the answer: a long press there selects
+            // its text, tool sources and errors, as everywhere else.
             answerActions(message)
         }
     }
 
     /// Copy, regenerate and share under a finished answer, and the switch
-    /// between its versions when it was regenerated.
+    /// between its versions when it was regenerated. A long press on copy
+    /// offers the reply without its Markdown.
     private func answerActions(_ message: LedgerAgentMessage) -> some View {
         let versions = conversation.versions(of: message.id)
         return HStack(spacing: 0) {
             if !message.text.isEmpty {
-                actionButton("复制", systemImage: "doc.on.doc", identifier: "ledger-agent-copy") { copy(message.text) }
+                Menu {
+                    Button { copy(LedgerAgentReplyText.plainText(message.text)) } label: {
+                        Label("复制为纯文本", systemImage: "text.alignleft")
+                    }
+                } label: {
+                    actionIcon("doc.on.doc")
+                } primaryAction: {
+                    copy(message.text)
+                }
+                .menuIndicator(.hidden)
+                .accessibilityLabel("复制")
+                .accessibilityAction(named: "复制为纯文本") { copy(LedgerAgentReplyText.plainText(message.text)) }
+                .accessibilityIdentifier("ledger-agent-copy")
             }
             actionButton("重新生成", systemImage: "arrow.clockwise", identifier: "ledger-agent-regenerate") {
                 perform(.regenerate(message.id))
@@ -468,20 +474,27 @@ private struct LedgerAgentChatScreen: View {
         .accessibilityIdentifier("ledger-agent-answer-actions")
     }
 
-    /// A question, with copy and edit on a long press, and the switch between
-    /// its versions when it was edited.
+    /// A question, with edit beside it, and the switch between its versions
+    /// when it was edited. Its text stays selectable on a long press.
     private func question(_ message: LedgerAgentMessage) -> some View {
         let versions = conversation.versions(of: message.id)
         let earlierAnswers = conversation.answersBeside(message.id)
         return VStack(alignment: .trailing, spacing: 4) {
             LedgerAgentQuestion(text: message.text, attachments: message.attachments,
                                 isEditing: editing == message.id)
-                .contextMenu {
-                    Button { copy(message.text) } label: { Label("复制", systemImage: "doc.on.doc") }
-                    Button { startEditing(message) } label: { Label("编辑后重新发送", systemImage: "pencil") }
-                        .disabled(!canStartVersion)
-                }
             HStack(spacing: 4) {
+                if editing != message.id, !conversation.isRunning {
+                    Button { startEditing(message) } label: {
+                        Image(systemName: "pencil").font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(BalancedPalette.meta)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canStartVersion)
+                    .accessibilityLabel("编辑后重新发送")
+                    .accessibilityIdentifier("ledger-agent-edit-question")
+                }
                 // A regenerate that failed or stopped before replying leaves
                 // the question without an answer; the earlier ones are kept.
                 if earlierAnswers > 0, !conversation.isRunning {
@@ -1200,7 +1213,7 @@ private struct LedgerAgentChatScreen: View {
             // and a regenerate or edit cuts it first and sends the question's
             // files again.
             let transcript = await conversation.transcript
-            let attachments = await conversation.attachmentPayloads(in: location)
+            let attachments = await conversation.turnAttachmentPayloads(in: location)
             return try await repository.runAgentTurn(message: message, history: history, choice: choice,
                                               apiKey: key, sensitiveUnlocked: true, thinking: thinking,
                                               draft: draftRoot, transcript: transcript,
