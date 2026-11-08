@@ -6,6 +6,8 @@ import SwiftUI
 /// is drawn after this by `LedgerAgentAnswer`.
 struct LedgerAgentStepTimeline: View {
     let steps: [LedgerAgentStepRecord]
+    /// The answer just replaced the live turn, whose tool groups were open.
+    var toolsStartExpanded = false
     var onAsk: (String) -> Void = { _ in }
 
     var body: some View {
@@ -14,7 +16,8 @@ struct LedgerAgentStepTimeline: View {
             case let .thinking(index):
                 LedgerAgentThinkingBlock(step: steps[index])
             case let .tools(indices):
-                LedgerAgentToolTimeline(rows: indices.compactMap { index in steps[index].call.map { .init(id: index, call: $0) } })
+                LedgerAgentToolTimeline(rows: indices.compactMap { index in steps[index].call.map { .init(id: index, call: $0) } },
+                                        startsExpanded: toolsStartExpanded)
             case let .text(index):
                 LedgerAgentStreamingReply(text: steps[index].text, streaming: false, onAsk: onAsk)
             }
@@ -27,9 +30,16 @@ struct LedgerAgentStepTimeline: View {
 struct LedgerAgentLiveTimeline: View {
     let turn: LedgerAgentLiveTurn
     let since: Date
+    /// When the stream last sent anything.
+    let quietSince: Date
+
+    /// A stream quiet this long gets the hint to stop and send again.
+    static let slowAfter: TimeInterval = 45
 
     var body: some View {
-        let items = LedgerAgentTimelineItem.items(turn.steps, answerTrails: true)
+        // Every text step stays in the one list by its index, so the reply
+        // keeps its view when a tool or reasoning follows it.
+        let items = LedgerAgentTimelineItem.items(turn.steps, includesAnswer: true)
         VStack(alignment: .leading, spacing: 14) {
             ForEach(items) { item in
                 Group {
@@ -41,13 +51,10 @@ struct LedgerAgentLiveTimeline: View {
                             turn.steps[index].call.map { .init(id: index, call: $0, isRunning: turn.running.contains(index)) }
                         }, startsExpanded: true)
                     case let .text(index):
-                        LedgerAgentStreamingReply(text: turn.steps[index].text, streaming: false)
+                        LedgerAgentStreamingReply(text: turn.steps[index].text, streaming: index == turn.steps.indices.last)
                     }
                 }
                 .transition(.opacity.combined(with: .offset(y: 6)))
-            }
-            if let answer = LedgerAgentTimelineItem.answerIndex(turn.steps, answerTrails: true) {
-                LedgerAgentStreamingReply(text: turn.steps[answer].text, streaming: true)
             }
             if turn.compacting {
                 Text("正在压缩较早的对话…").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
@@ -59,17 +66,26 @@ struct LedgerAgentLiveTimeline: View {
         .accessibilityIdentifier("ledger-agent-live")
     }
 
-    /// How long the turn has run, under whatever it is doing.
+    /// How long the turn has run, under whatever it is doing, with the same
+    /// hints as before the stream began: the page can be left, and a stream
+    /// gone quiet can be stopped and sent again.
     private var footer: some View {
-        HStack(spacing: 8) {
-            ProgressView().controlSize(.mini).tint(BalancedPalette.meta)
-            TimelineView(.periodic(from: since, by: 1)) { context in
-                Text("\(max(Int(context.date.timeIntervalSince(since).rounded(.down)), 0)) 秒")
-                    .balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+        TimelineView(.periodic(from: since, by: 1)) { context in
+            let hint = context.date.timeIntervalSince(quietSince) >= Self.slowAfter
+                ? String(localized: "模型这一步比较慢。网络不好时可以点停止，再发一次。")
+                : String(localized: "可以离开这一页或切到后台，答完会通知你")
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.mini).tint(BalancedPalette.meta)
+                    Text("\(max(Int(context.date.timeIntervalSince(since).rounded(.down)), 0)) 秒")
+                        .balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                }
+                Text(hint).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("正在回答")
+            .accessibilityValue(hint)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("正在回答")
         .accessibilityIdentifier("ledger-agent-running")
     }
 }
@@ -190,7 +206,9 @@ struct LedgerAgentToolTimeline: View {
                     Text(call.title).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    if let duration = Self.duration(call) {
+                    if call.interrupted == true {
+                        Text("已停止").balancedMono(size: 11).foregroundStyle(BalancedPalette.meta)
+                    } else if let duration = Self.duration(call) {
                         Text(duration).balancedMono(size: 11).foregroundStyle(BalancedPalette.meta)
                     } else if call.isError {
                         Text("失败").balancedMono(size: 11).foregroundStyle(BalancedPalette.expense)
@@ -213,6 +231,8 @@ struct LedgerAgentToolTimeline: View {
     @ViewBuilder private func status(_ row: Row) -> some View {
         if row.isRunning {
             ProgressView().controlSize(.mini).tint(BalancedPalette.meta)
+        } else if row.call.interrupted == true {
+            Image(systemName: "minus").font(.system(size: 10, weight: .semibold)).foregroundStyle(BalancedPalette.meta)
         } else if row.call.isError {
             Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(BalancedPalette.expense)
         } else {
@@ -263,7 +283,9 @@ struct LedgerAgentToolTimeline: View {
     }
 
     private static func accessibilityLabel(_ row: Row) -> String {
-        let state = row.isRunning ? String(localized: "进行中") : row.call.isError ? String(localized: "失败") : String(localized: "完成")
+        let state = row.isRunning ? String(localized: "进行中")
+            : row.call.interrupted == true ? String(localized: "已停止")
+            : row.call.isError ? String(localized: "失败") : String(localized: "完成")
         return [row.call.title, state, duration(row.call)].compactMap { $0 }.joined(separator: "，")
     }
 
@@ -294,12 +316,13 @@ struct LedgerAgentContextMeter: View {
     @State private var detailPresented = false
 
     /// From here on the meter warns that the conversation is nearly full.
-    static let warningFraction = 0.8
+    static let warningPercent = 80
 
     var body: some View {
         if let fraction = usage.fraction {
-            let tint = fraction >= Self.warningFraction ? BalancedPalette.expense : BalancedPalette.meta
             let percent = Int((fraction * 100).rounded())
+            // From the percent shown, so "80%" is never drawn in the calm tint.
+            let tint = percent >= Self.warningPercent ? BalancedPalette.expense : BalancedPalette.meta
             Button { detailPresented = true } label: {
                 HStack(spacing: 4) {
                     ZStack {

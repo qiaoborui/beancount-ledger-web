@@ -255,6 +255,17 @@ private struct LedgerAgentChatScreen: View {
     /// arrives follows it down only then, so reading back during a turn is
     /// not pulled away; the jump button shows otherwise.
     @State private var isAtBottom = false
+    /// How far the page is from its true bottom is within a few points; nil
+    /// before iOS 18, where only the anchor above says so.
+    @State private var nearBottom: Bool?
+    /// The reader's finger (or a fling) is moving the page.
+    @State private var touchingPage = false
+
+    /// A streaming reply scrolls the page only for a reader at its very
+    /// bottom who is not moving it. The anchor alone stays "on screen" behind
+    /// the composer until the reader is well up the page, which is too loose
+    /// for a reply that grows a dozen times a second.
+    private var followsStream: Bool { (nearBottom ?? isAtBottom) && !touchingPage }
 
     private var chat: some View {
         ScrollViewReader { proxy in
@@ -265,19 +276,7 @@ private struct LedgerAgentChatScreen: View {
                     ForEach(conversation.messages) { message in
                         switch message.role {
                         case .user: LedgerAgentQuestion(text: message.text, attachments: message.attachments)
-                        case .assistant:
-                            LedgerAgentAnswer(
-                                message: message,
-                                asksNow: message.id == conversation.messages.last?.id && !conversation.isRunning
-                                    && !sessions.busyElsewhere,
-                                undoing: conversation.undoing == message.id,
-                                canUndo: conversation.canUndo(message),
-                                undoFailure: conversation.undoFailure?.message == message.id ? conversation.undoFailure?.text : nil,
-                                onMemory: { memoryPresented = true },
-                                onRecord: { bookkeeping = .init(text: question(before: message)) },
-                                onAnswer: { send($0, clearsComposer: false) },
-                                onAsk: { ask($0) },
-                                onUndo: { undo(message) })
+                        case .assistant: answer(message)
                         }
                     }
                     if let notice = conversation.restoredNotice {
@@ -308,7 +307,7 @@ private struct LedgerAgentChatScreen: View {
                         // that (preparing, or a core that does not stream) the
                         // step line with its elapsed and slow hints.
                         if let live = conversation.live, !live.isEmpty || live.compacting {
-                            LedgerAgentLiveTimeline(turn: live, since: since)
+                            LedgerAgentLiveTimeline(turn: live, since: since, quietSince: conversation.stepSince ?? since)
                         } else {
                             LedgerAgentRunning(step: conversation.step, steps: conversation.stepCount,
                                                since: since, stepSince: conversation.stepSince ?? since)
@@ -316,7 +315,12 @@ private struct LedgerAgentChatScreen: View {
                     case let .failed(error, question): failure(error, question: question)
                     }
                     Color.clear.frame(height: 1).id(Self.bottomID)
-                        .onAppear { isAtBottom = true }
+                        .onAppear {
+                            isAtBottom = true
+                            // Before iOS 18 a drag pauses following until the
+                            // reader is back at the bottom.
+                            if nearBottom == nil { touchingPage = false }
+                        }
                         .onDisappear { isAtBottom = false }
                 }
                 .padding(.horizontal, 20)
@@ -324,6 +328,7 @@ private struct LedgerAgentChatScreen: View {
                 .padding(.bottom, 8)
             }
             .scrollDismissesKeyboard(.interactively)
+            .modifier(LedgerAgentScrollTracking(nearBottom: $nearBottom, touching: $touchingPage))
             .onChange(of: conversation.messages.count) { _, _ in
                 let last = conversation.messages.last?.role
                 // The question the user just sent is always shown.
@@ -332,12 +337,20 @@ private struct LedgerAgentChatScreen: View {
             }
             // The reply growing while it streams follows only a reader who
             // is at the bottom, without an animation per redraw.
-            .onChange(of: conversation.live) { _, _ in follow(proxy, animated: false) }
+            .onChange(of: conversation.live) { _, _ in
+                if followsStream { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            }
             .onChange(of: conversation.pending) { _, _ in follow(proxy) }
             .onChange(of: conversation.recap) { _, _ in follow(proxy) }
             .onChange(of: conversation.phase) { _, phase in
                 if case let .failed(_, question) = phase, draft.isEmpty { draft = question }
-                if case .running = phase { follow(proxy, force: true) } else { follow(proxy) }
+                if case .running = phase {
+                    // A question just sent follows its reply again.
+                    if nearBottom == nil { touchingPage = false }
+                    follow(proxy, force: true)
+                } else {
+                    follow(proxy)
+                }
             }
             .overlay(alignment: .bottomTrailing) {
                 ZStack {
@@ -361,9 +374,26 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
-    private func follow(_ proxy: ScrollViewProxy, force: Bool = false, animated: Bool = true) {
+    private func answer(_ message: LedgerAgentMessage) -> some View {
+        let asksNow = message.id == conversation.messages.last?.id && !conversation.isRunning && !sessions.busyElsewhere
+        let undoFailure = conversation.undoFailure?.message == message.id ? conversation.undoFailure?.text : nil
+        return LedgerAgentAnswer(
+            message: message,
+            asksNow: asksNow,
+            undoing: conversation.undoing == message.id,
+            canUndo: conversation.canUndo(message),
+            undoFailure: undoFailure,
+            toolsStartExpanded: message.id == conversation.streamedAnswer,
+            onMemory: { memoryPresented = true },
+            onRecord: { bookkeeping = .init(text: question(before: message)) },
+            onAnswer: { send($0, clearsComposer: false) },
+            onAsk: { ask($0) },
+            onUndo: { undo(message) })
+    }
+
+    private func follow(_ proxy: ScrollViewProxy, force: Bool = false) {
         guard force || isAtBottom else { return }
-        if animated { scrollToBottom(proxy) } else { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+        scrollToBottom(proxy)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
@@ -371,7 +401,10 @@ private struct LedgerAgentChatScreen: View {
     }
 
     private func jumpToBottom(_ proxy: ScrollViewProxy) -> some View {
-        Button { scrollToBottom(proxy) } label: {
+        Button {
+            touchingPage = false
+            scrollToBottom(proxy)
+        } label: {
             Image(systemName: "arrow.down").font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(BalancedPalette.ink)
                 .frame(width: 40, height: 40)
@@ -1004,6 +1037,8 @@ private struct LedgerAgentAnswer: View {
     var undoing = false
     var canUndo = false
     var undoFailure: String? = nil
+    /// The answer just replaced the live turn: its tool groups open, as they were.
+    var toolsStartExpanded = false
     var onMemory: () -> Void = {}
     let onRecord: () -> Void
     var onAnswer: (String) -> Void = { _ in }
@@ -1022,11 +1057,14 @@ private struct LedgerAgentAnswer: View {
             }
             // Replies from older builds have only their tool calls.
             if !message.steps.isEmpty {
-                LedgerAgentStepTimeline(steps: message.steps, onAsk: onAsk)
+                LedgerAgentStepTimeline(steps: message.steps, toolsStartExpanded: toolsStartExpanded, onAsk: onAsk)
             } else if !message.toolCalls.isEmpty {
                 tools
             }
-            ForEach(Array(LedgerAgentReplyText.segments(message.text).enumerated()), id: \.offset) { _, segment in
+            // A stopped reply reads as it did when stopped: a fence cut off
+            // mid-chart stays prose rather than a block of broken JSON.
+            ForEach(Array(LedgerAgentReplyText.segments(message.text, streaming: message.stopped).enumerated()),
+                    id: \.offset) { _, segment in
                 LedgerAgentReplyBlock(segment: segment, onAsk: onAsk)
             }
             if message.stopped {
@@ -1459,7 +1497,7 @@ private struct LedgerAgentRunning: View {
     let stepSince: Date
 
     /// A step quiet this long gets the hint.
-    private static let slowAfter: TimeInterval = 45
+    private static let slowAfter = LedgerAgentLiveTimeline.slowAfter
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -1490,6 +1528,35 @@ private struct LedgerAgentRunning: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("ledger-agent-running")
+    }
+}
+
+/// Tells the chat how close the page is to its real bottom and whether the
+/// reader is moving it, so a streaming reply does not pull the page back
+/// under a finger. iOS 18 measures both; before it, a drag pauses following
+/// until the reader is back at the bottom or taps the jump button.
+private struct LedgerAgentScrollTracking: ViewModifier {
+    @Binding var nearBottom: Bool?
+    @Binding var touching: Bool
+
+    /// Within this many points of the bottom still counts as at it.
+    private static let slack: CGFloat = 24
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    let bottom = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
+                    return bottom - geometry.contentOffset.y <= Self.slack
+                } action: { _, near in
+                    nearBottom = near
+                }
+                .onScrollPhaseChange { _, phase in
+                    touching = phase == .tracking || phase == .interacting || phase == .decelerating
+                }
+        } else {
+            content.simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in touching = true })
+        }
     }
 }
 
