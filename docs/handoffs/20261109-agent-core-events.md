@@ -1,10 +1,11 @@
 # 20261109-agent-core-events
 
-- Status: completed-pending-review. Local commits on `codex/agent-core-events`,
-  not pushed, no PR.
-- Last updated: 2026-11-09 00:40 UTC+8.
+- Status: completed. Review findings are fixed. Local commits on
+  `codex/agent-core-events`, not pushed, no PR.
+- Last updated: 2026-11-09 00:50 UTC+8.
 - Branch: `codex/agent-core-events`, based on `main` at `8f0abb3b`. Code covered
-  by this note is the three `feat(agent)` commits listed under Changed files.
+  by this note is the three `feat(agent)` and two `fix(agent)` commits listed
+  under Changed files.
 - Track "core-events" of the five-PR stack that brings the on-device ledger
   assistant (账本助手) to desktop-assistant parity. Go only; no Swift file is
   touched, and the current Swift build keeps working unchanged.
@@ -85,13 +86,40 @@ Ledger writes are not touched (still draft, change card, 写入账本, validatio
     system-only transcript. PiG adds a system message in front of a History
     replay, and the turn-start index accounts for that.
 - **Truncate.**
+  - The request names the cut by exactly one of `keepUserTurns` (first N
+    stay) and `dropUserTurns` (last N go). Both count the transcript's own
+    user turns. These are not always the visible questions: a long transcript
+    loses its oldest turns, and a question that failed, or was stopped before
+    anything came back, is never recorded. The shell should send
+    `dropUserTurns` = the number of recorded questions from the target to the
+    last one, because trimming the front does not move that count (review
+    fix).
+  - A cut past the recorded turns (`keepUserTurns` > total or
+    `dropUserTurns` > total) returns `ok: false` with `userTurns` and an
+    error, instead of the transcript unchanged. `keepUserTurns` == total and
+    `dropUserTurns` 0 return it unchanged. This deviates from the spec's
+    "keepUserTurns >= total returns unchanged" (review fix).
   - `userTurns` in the response is the number of real user turns in the
-    *input* transcript.
+    *input* transcript, also in the out-of-range error.
   - A real user turn is a user message whose trimmed text is not one of the
     two nudge constants. The shell's `（系统提示：` note prefix stays part of
     its question.
-  - Negative `keepUserTurns`, a wrong version, unknown fields and malformed
-    JSON or transcripts return `ok: false` with an error.
+  - A negative count, both or neither field, a wrong version, unknown fields
+    and malformed JSON or transcripts return `ok: false` with an error.
+- **Context tokens after a stop (review fix).** A model message that ends with
+  all-zero usage (stopped or failed before the provider reported usage) still
+  adds to the totals but does not overwrite `contextTokens`, which keeps what
+  the last measured message held. An aborted message that did report usage
+  still updates it, since its input is the context actually sent.
+- **Refused calls' arguments (review fix).** The turn record remembers the
+  arguments from PiG's `ToolExecutionStartEvent`, which is emitted for every
+  call before the hooks run. A call that never reached the before-tool hook
+  (an unknown tool) now has its arguments in its step, its `tool_start` and its
+  `toolCalls` entry. Calls the hook saw keep the hook's arguments in
+  `toolCalls`.
+- **Feed timer (review fix).** `deliver` reads the clock once per pass for both
+  the flush check and the wait, and clamps the wait at zero. A delta that
+  came due between two readings could otherwise wait with no timer.
 - **Cancelled responses stay compatible.** The Swift shell's cancelled branch
   ignores `reply` / `transcript` today (`ok` is false), so the new cancelled
   fields change nothing until the Swift bucket reads them.
@@ -115,19 +143,24 @@ Commits on `codex/agent-core-events`:
     `partialText`.
   - `server/mobileagent/mobileagent.go`: cancel path.
   - New `server/mobileagent/stop_test.go`.
+- `fix(agent): let truncate count turns from the end and fail out of range`.
+  Changes `truncate.go` and `truncate_test.go`.
+- `fix(agent): keep a stopped turn's context size and refused calls'
+  arguments`. Changes `events.go`, `observer.go`, `mobileagent.go` and
+  `events_test.go`.
 
 ## Validation
 
 All run on the final branch state unless noted.
 
 - `cd server && go test ./mobileagent/... ./mobilecore/...`: pass.
-- `cd server && go test ./...`: pass (1191 tests, 38 packages).
+- `cd server && go test ./...`: pass (1194 tests, 38 packages).
 - `cd server && go build ./...`: pass.
 - `cd server && go vet ./mobileagent/`: clean.
-- `cd server && go test -race ./mobileagent/ -count=2`: pass. The new tests
-  also passed `-race -count=8`.
-- Each intermediate commit was checked out in a throwaway worktree:
-  `go vet ./mobileagent/ && go test ./mobileagent/` passes on both.
+- `cd server && go test -race ./mobileagent/ -count=3`: pass, after the
+  review fixes. Before them, the new tests also passed `-race -count=8`.
+- Each intermediate `feat` commit was checked out in a throwaway worktree, and
+  `go vet ./mobileagent/ && go test ./mobileagent/` passed on both.
 - `bash scripts/build-ledgercore-xcframework.sh`: pass. The generated header
   exports `MobileagentTruncateTranscriptJSON`.
 - `cd App/LedgerMobile && xcodegen generate && xcodebuild build -project
@@ -148,10 +181,16 @@ All run on the final branch state unless noted.
     transcript; a unit test for `sanitizeAfterAbort`.
   - `truncate_test.go`: nudges are not counted (including a real nudge read
     back from a returned transcript), tool calls and results are never
-    split, out-of-range values are handled, bad input fails.
+    split, out-of-range cuts fail with `userTurns`, `dropUserTurns` cuts at
+    the right question in a front-trimmed transcript, and bad input fails
+    (including both or neither field).
+  - Review fixes in `events_test.go`: `TestRefusedCallKeepsItsArguments` and
+    `TestStoppedMessageKeepsTheContextTokens`.
 
 ## Not tested
 
+- The feed timer race has no deterministic test, because the window is
+  nanoseconds wide. The existing feed tests pass on the new code.
 - No Swift unit or UI tests (`swift test`, `xcodebuild test`) were run, because
   no Swift changed. Only the app build above was run.
 - The mid-tool stop test cancels on the first `tool_start` from the async
@@ -176,6 +215,8 @@ All run on the final branch state unless noted.
      `errorText`).
    - On a cancelled response, show `reply` as a stopped message and store a
      non-empty `transcript`.
-   - Call `MobileagentTruncateTranscriptJSON` for regenerate and edit.
+   - Call `MobileagentTruncateTranscriptJSON` for regenerate and edit, with
+     `dropUserTurns` counted over the questions recorded in the transcript.
+     On `ok: false`, do not resend with the stale context.
 3. `codex/agent-auto-compaction` emits `compaction_start` / `compaction_end`
    and sets `compacted` / `compactedTurns`.
