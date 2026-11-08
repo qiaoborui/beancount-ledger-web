@@ -135,7 +135,7 @@ struct CurrencyAnalysisView: View {
                 }
                 .onAppear { proxy.scrollTo(selected, anchor: .leading) }
                 .onChange(of: selected) { _, currency in
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+                    withAnimation(reduceMotion ? nil : LedgerMotion.segment) {
                         proxy.scrollTo(currency, anchor: .leading)
                     }
                 }
@@ -409,12 +409,21 @@ private enum CurrencyRateText {
         return "1 \(currency) = \(number(rate.rate)) \(valuationCurrency)"
     }
 
-    static func number(_ value: Double) -> String {
+    // Built once per precision; rendering a rate list made a formatter per row.
+    private static let wholeFormatter = formatter(minimumFractionDigits: 2, maximumFractionDigits: 4)
+    private static let fractionFormatter = formatter(minimumFractionDigits: 4, maximumFractionDigits: 6)
+
+    private static func formatter(minimumFractionDigits: Int, maximumFractionDigits: Int) -> NumberFormatter {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = value >= 1 ? 2 : 4
-        formatter.maximumFractionDigits = value >= 1 ? 4 : 6
+        formatter.minimumFractionDigits = minimumFractionDigits
+        formatter.maximumFractionDigits = maximumFractionDigits
+        return formatter
+    }
+
+    static func number(_ value: Double) -> String {
+        let formatter = value >= 1 ? wholeFormatter : fractionFormatter
         return formatter.string(from: NSNumber(value: value)) ?? String(value)
     }
 

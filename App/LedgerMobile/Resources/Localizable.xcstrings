@@ -583,6 +583,16 @@
         }
       }
     },
+    "%@账单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ bill"
+          }
+        }
+      }
+    },
     "%@，%@" : {
       "localizations" : {
         "en" : {
@@ -1625,6 +1635,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ledger Web needs the widget snapshot endpoint deployed"
+          }
+        }
+      }
+    },
+    "LedgerIsland.compactCount" : {
+      "comment" : "Compact Dynamic Island pill beside the camera; keep the unit very short.",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld txn"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld txns"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 笔"
           }
         }
       }
@@ -7563,6 +7602,16 @@
         }
       }
     },
+    "已写入账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Added to ledger"
+          }
+        }
+      }
+    },
     "已分类为：%@" : {
       "localizations" : {
         "en" : {
@@ -7735,6 +7784,16 @@
         }
       }
     },
+    "已导入" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Imported"
+          }
+        }
+      }
+    },
     "已就绪" : {
       "localizations" : {
         "en" : {
@@ -7891,6 +7950,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Smart matching done · %lld filled in"
+          }
+        }
+      }
+    },
+    "已记账" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved"
           }
         }
       }
@@ -16529,6 +16598,16 @@
         }
       }
     },
+    "记账完成" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entries saved"
+          }
+        }
+      }
+    },
     "记账日期" : {
       "localizations" : {
         "en" : {
@@ -17265,6 +17344,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Very solid finances"
+          }
+        }
+      }
+    },
+    "账单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bill"
           }
         }
       }

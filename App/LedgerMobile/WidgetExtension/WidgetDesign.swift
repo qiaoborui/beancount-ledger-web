@@ -572,6 +572,51 @@ struct LedgerGlassBadge: View {
     }
 }
 
+/// The in-app island's language for Live Activities: a solid hue disc with a
+/// dark glyph, not a glass ring. Hues match `LedgerIslandNoticeType.hueHex`
+/// in the app (the extension does not compile LedgerModels).
+enum LedgerIslandHue {
+    static let expense = Color(red: 0xCF / 255, green: 0x7A / 255, blue: 0x52 / 255)
+    static let income = Color(red: 0x4F / 255, green: 0xBF / 255, blue: 0xAB / 255)
+    static let neutral = Color.white
+}
+
+struct LedgerIslandDiscBadge: View {
+    let symbol: String
+    let color: Color
+    var size: CGFloat = 28
+    var symbolSize: CGFloat = 13
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: symbolSize, weight: .bold))
+            .foregroundStyle(Color.black)
+            .frame(width: size, height: size)
+            .background(Circle().fill(color))
+            .accessibilityHidden(true)
+    }
+}
+
+/// One clean track: a white hairline groove and a hue fill. No segments, no
+/// glow; the fraction is whatever stage the caller can actually vouch for.
+struct LedgerIslandProgressBar: View {
+    let fraction: Double
+    let color: Color
+    var height: CGFloat = 4
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.16))
+                Capsule().fill(color)
+                    .frame(width: max(height, proxy.size.width * min(max(fraction, 0), 1)))
+            }
+        }
+        .frame(height: height)
+        .accessibilityHidden(true)
+    }
+}
+
 struct LedgerGlassPill: View {
     let text: String
     let color: Color

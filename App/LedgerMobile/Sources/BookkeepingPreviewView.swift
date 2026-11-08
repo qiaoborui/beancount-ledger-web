@@ -7,6 +7,10 @@ struct BookkeepingPreviewView: View {
     /// Imports pass how many transactions the change writes, so the totals
     /// lead and the diff follows.
     var entryCount: Int? = nil
+    /// What the Dynamic Island confirms once the change is written. The caller
+    /// knows what it prepared; the commit result only knows a count, and only
+    /// for imports.
+    var islandNotice: IslandNotice = .written(count: 1)
     let onSaved: (LedgerImportCommitResult?) -> Void
     @State private var saving = false
     @State private var error: String?
@@ -176,11 +180,7 @@ struct BookkeepingPreviewView: View {
                 throw BookkeepingError.expiredPreview
             }
             let result = try await repository.commitPrepared(preview)
-            if let count = result?.count, count > 0 {
-                session.triggerIslandNotice(LedgerIslandNotice.fromImport(count: count, provider: String(localized: "快速记账")))
-            } else {
-                session.triggerIslandNotice(LedgerIslandNotice.fromImport(count: 1, provider: String(localized: "快速记账")))
-            }
+            session.triggerIslandNotice(notice(written: result.flatMap { $0.count > 0 ? $0.count : nil }))
             onSaved(result)
             dismiss()
             // Let the full-screen bookkeeping flow close immediately after the
@@ -191,6 +191,32 @@ struct BookkeepingPreviewView: View {
             self.error = error.localizedDescription
         }
         saving = false
+    }
+}
+
+extension BookkeepingPreviewView {
+    enum IslandNotice {
+        /// Entries the caller prepared: one entry shows its payee, category
+        /// and amount; several show how many were written.
+        case entries([LedgerTransactionEntry])
+        /// A bill import; `provider` is the import provider id.
+        case billImport(provider: String?)
+        /// A change whose entries the caller never parsed (a .bean file).
+        case written(count: Int)
+    }
+
+    private func notice(written: Int?) -> LedgerIslandNotice {
+        switch islandNotice {
+        case .entries(let entries) where !entries.isEmpty:
+            return .from(entries: entries,
+                         accountLabels: TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? []))
+        case .entries:
+            return .written(count: written ?? entryCount ?? 1)
+        case .billImport(let provider):
+            return .fromImport(count: written ?? entryCount ?? 0, provider: provider)
+        case .written(let count):
+            return .written(count: written ?? count)
+        }
     }
 }
 

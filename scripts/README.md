@@ -134,3 +134,39 @@ LOCAL_LEDGER_SCALE_RESULT=/tmp/blw-scale-bench/100k/go-stages.json \
 subsystem `app.beancount.ledger.local-performance`、category `ledger` 过滤。
 `phys_footprint` 来自 `task_info(TASK_VM_INFO)`；`os_proc_available_memory`
 是 iOS 专属 API，macOS 便携包只记录 footprint。
+
+## 发布到 SideStore 源
+
+`publish-sidestore-release.py` 把 `build-ios-ipa.sh` 打好的 IPA 发布到公开的
+SideStore 源。源在单独的公开仓库
+[`qiaoborui/beancount-ledger-releases`](https://github.com/qiaoborui/beancount-ledger-releases)：
+`sidestore/source.json` 列出所有版本，每个版本的 IPA 是该仓库 `v<版本号>` Release 的附件。
+手机上添加一次源地址，以后在 SideStore 里直接升级：
+
+```
+https://raw.githubusercontent.com/qiaoborui/beancount-ledger-releases/main/sidestore/source.json
+```
+
+发版顺序见 `AGENTS.md` 的 iOS App Version 一节；打包并提交构建号之后：
+
+```bash
+python3 scripts/publish-sidestore-release.py --public \
+  dist/0.5.0-55/LedgerMobile-0.5.0-55-SideStore.ipa --notes /tmp/notes.md --dry-run
+python3 scripts/publish-sidestore-release.py --public \
+  dist/0.5.0-55/LedgerMobile-0.5.0-55-SideStore.ipa --notes /tmp/notes.md
+```
+
+- 必须加 `--public`：发布后 IPA 任何人都能下载，而
+  `App/LedgerMobile/Runtime/THIRD_PARTY.md` 记录了尚未解决的再分发许可问题。
+- 下面这些情况会拒绝发布：IPA 的版本号没有已推送的 `v<版本号>` 标签，或者不是最新标签；
+  版本号已经在源里；构建号不高于源里已有的构建号（不高的话 SideStore 不会把它当成更新）；
+  IPA 旁边的 `build-info.txt` 没有记录干净的工作区，或者其中的 `Source` 提交不是该标签指向的提交，
+  或者该提交不在 origin/main 上（本地和远端标签指向不同提交也会拒绝）。
+- 每个版本会记录 `size` 和 `sha256`；IPA 旁边的 `.sha256` 也会一起上传。
+- Release 建好了、但源没推上去时，用同样的命令再跑一次即可：已有 Release 里有同名、已上传、
+  sha256 一致的附件，脚本会复用它，只更新源；字节不同的同名包会被拒绝。
+- SideStore 遇到没有任何版本的 App 会拒绝整个源，所以第一次发版前源里没有 App；
+  第一次发布时脚本从 releases 仓库的 `sidestore/app.json` 把 App 加进去。
+- `--repo` 或环境变量 `LEDGER_RELEASES_REPO` 可以换成别的仓库。
+- 需要已登录的 `gh`，以及对 releases 仓库的推送权限。
+- 测试：`python3 scripts/test_sidestore_publish.py`（只用标准库，CI 的 Plan checks 会跑）。

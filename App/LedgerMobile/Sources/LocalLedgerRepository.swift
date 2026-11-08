@@ -875,7 +875,7 @@ actor LocalLedgerRepository: LedgerRepository {
     }
 
     func prepareBeanTransactions(_ text: String) async throws -> PreparedBookkeepingChange {
-        _ = try BeanTransactionParser.transactionCount(text)
+        let count = try BeanTransactionParser.transactionCount(text)
         guard let revision = try await workspace.currentRevision() else { throw LocalLedgerError.previewRequired }
         let evidence = BookkeepingDraft.Evidence.make(.beancount, original: text)
         let validator = validator, entrypoint = descriptor.entrypoint
@@ -898,7 +898,7 @@ actor LocalLedgerRepository: LedgerRepository {
             try Data(next.utf8).write(to: main)
         }, validator: { root in try await validator(root, entrypoint) })
         let preview = PreparedBookkeepingChange(id: UUID(), ledgerID: descriptor.id, draftRevision: UUID(),
-            files: files, createdAt: Date())
+            files: files, createdAt: Date(), entryCount: count)
         if preparedOperations.count >= 4 { preparedOperations.removeAll() }
         preparedOperations[preview.id] = .init(preview: preview, importID: nil, result: nil)
         return preview
