@@ -84,16 +84,59 @@ func TestTruncateKeepsWholeUserTurns(t *testing.T) {
 
 func TestTruncateHandlesTheEnds(t *testing.T) {
 	transcript := threeTurns(t)
-	for _, keep := range []int{3, 4, 100} {
-		response := truncateFor(t, map[string]any{"version": 1, "transcript": transcript, "keepUserTurns": keep})
+	for _, request := range []map[string]any{{"keepUserTurns": 3}, {"dropUserTurns": 0}} {
+		request["version"], request["transcript"] = 1, transcript
+		response := truncateFor(t, request)
 		if !response.OK || response.Transcript != transcript || response.UserTurns != 3 {
-			t.Fatalf("keep %d changed the transcript: %+v", keep, response)
+			t.Fatalf("%v changed the transcript: %+v", request, response)
 		}
 	}
-	response := truncateFor(t, map[string]any{"version": 1, "transcript": transcript, "keepUserTurns": 0})
+	for _, request := range []map[string]any{{"keepUserTurns": 0}, {"dropUserTurns": 3}} {
+		request["version"], request["transcript"] = 1, transcript
+		response := truncateFor(t, request)
+		messages, err := decodeTranscript(response.Transcript)
+		if !response.OK || err != nil || len(messages) != 1 || messages[0].System == nil {
+			t.Fatalf("%v = %+v (%v)", request, response, err)
+		}
+	}
+	// A cut past the recorded questions means the shell's count and the
+	// transcript disagree; it fails instead of keeping the turn.
+	for _, request := range []map[string]any{{"keepUserTurns": 4}, {"keepUserTurns": 100}, {"dropUserTurns": 4}} {
+		request["version"], request["transcript"] = 1, transcript
+		response := truncateFor(t, request)
+		if response.OK || response.Error == "" || response.Transcript != "" || response.UserTurns != 3 {
+			t.Fatalf("%v = %+v", request, response)
+		}
+	}
+}
+
+// Dropping counts from the end, so a transcript that lost its oldest turns
+// still cuts at the question the shell meant.
+func TestTruncateDropsFromTheEnd(t *testing.T) {
+	full, err := decodeTranscript(threeTurns(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := 0
+	for index, message := range full {
+		if message.User != nil && strings.HasSuffix(userText(message.User.Content), "第二问") {
+			second = index
+		}
+	}
+	trimmed, err := encodeTranscript(append(full[:1:1], full[second:]...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := truncateFor(t, map[string]any{"version": 1, "transcript": trimmed, "dropUserTurns": 1})
+	if !response.OK || response.UserTurns != 2 {
+		t.Fatalf("drop 1 = %+v", response)
+	}
 	messages, err := decodeTranscript(response.Transcript)
-	if !response.OK || err != nil || len(messages) != 1 || messages[0].System == nil {
-		t.Fatalf("keep 0 = %+v (%v)", response, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := messages[len(messages)-1].Assistant; last == nil || assistantText(last.Content) != "第二答" {
+		t.Fatalf("drop 1 ends with %+v", messages[len(messages)-1])
 	}
 }
 
@@ -102,6 +145,9 @@ func TestTruncateRejectsBadInput(t *testing.T) {
 		"not JSON":       `{"version":1,`,
 		"version":        `{"version":2,"transcript":"[]","keepUserTurns":1}`,
 		"negative":       `{"version":1,"transcript":"[]","keepUserTurns":-1}`,
+		"negative drop":  `{"version":1,"transcript":"[]","dropUserTurns":-1}`,
+		"both":           `{"version":1,"transcript":"[]","keepUserTurns":0,"dropUserTurns":0}`,
+		"neither":        `{"version":1,"transcript":"[]"}`,
 		"transcript":     `{"version":1,"transcript":"[{","keepUserTurns":1}`,
 		"foreign":        `{"version":1,"transcript":"[{\"role\":\"robot\"}]","keepUserTurns":1}`,
 		"unknown fields": `{"version":1,"transcript":"[]","keep":1}`,
