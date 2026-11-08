@@ -255,6 +255,17 @@ private struct LedgerAgentChatScreen: View {
     /// arrives follows it down only then, so reading back during a turn is
     /// not pulled away; the jump button shows otherwise.
     @State private var isAtBottom = false
+    /// How far the page is from its true bottom is within a few points; nil
+    /// before iOS 18, where only the anchor above says so.
+    @State private var nearBottom: Bool?
+    /// The reader's finger (or a fling) is moving the page.
+    @State private var touchingPage = false
+
+    /// A streaming reply scrolls the page only for a reader at its very
+    /// bottom who is not moving it. The anchor alone stays "on screen" behind
+    /// the composer until the reader is well up the page, which is too loose
+    /// for a reply that grows a dozen times a second.
+    private var followsStream: Bool { (nearBottom ?? isAtBottom) && !touchingPage }
 
     private var chat: some View {
         ScrollViewReader { proxy in
@@ -265,19 +276,7 @@ private struct LedgerAgentChatScreen: View {
                     ForEach(conversation.messages) { message in
                         switch message.role {
                         case .user: LedgerAgentQuestion(text: message.text, attachments: message.attachments)
-                        case .assistant:
-                            LedgerAgentAnswer(
-                                message: message,
-                                asksNow: message.id == conversation.messages.last?.id && !conversation.isRunning
-                                    && !sessions.busyElsewhere,
-                                undoing: conversation.undoing == message.id,
-                                canUndo: conversation.canUndo(message),
-                                undoFailure: conversation.undoFailure?.message == message.id ? conversation.undoFailure?.text : nil,
-                                onMemory: { memoryPresented = true },
-                                onRecord: { bookkeeping = .init(text: question(before: message)) },
-                                onAnswer: { send($0, clearsComposer: false) },
-                                onAsk: { ask($0) },
-                                onUndo: { undo(message) })
+                        case .assistant: answer(message)
                         }
                     }
                     if let notice = conversation.restoredNotice {
@@ -303,12 +302,25 @@ private struct LedgerAgentChatScreen: View {
                     }
                     switch conversation.phase {
                     case .idle: EmptyView()
-                    case let .running(since): LedgerAgentRunning(step: conversation.step, steps: conversation.stepCount,
-                                                                 since: since, stepSince: conversation.stepSince ?? since)
+                    case let .running(since):
+                        // The streamed turn once its first event is in; before
+                        // that (preparing, or a core that does not stream) the
+                        // step line with its elapsed and slow hints.
+                        if let live = conversation.live, !live.isEmpty || live.compacting {
+                            LedgerAgentLiveTimeline(turn: live, since: since, quietSince: conversation.stepSince ?? since)
+                        } else {
+                            LedgerAgentRunning(step: conversation.step, steps: conversation.stepCount,
+                                               since: since, stepSince: conversation.stepSince ?? since)
+                        }
                     case let .failed(error, question): failure(error, question: question)
                     }
                     Color.clear.frame(height: 1).id(Self.bottomID)
-                        .onAppear { isAtBottom = true }
+                        .onAppear {
+                            isAtBottom = true
+                            // Before iOS 18 a drag pauses following until the
+                            // reader is back at the bottom.
+                            if nearBottom == nil { touchingPage = false }
+                        }
                         .onDisappear { isAtBottom = false }
                 }
                 .padding(.horizontal, 20)
@@ -316,17 +328,29 @@ private struct LedgerAgentChatScreen: View {
                 .padding(.bottom, 8)
             }
             .scrollDismissesKeyboard(.interactively)
+            .modifier(LedgerAgentScrollTracking(nearBottom: $nearBottom, touching: $touchingPage))
             .onChange(of: conversation.messages.count) { _, _ in
                 let last = conversation.messages.last?.role
                 // The question the user just sent is always shown.
                 follow(proxy, force: last == .user)
-                if last == .assistant { announceAnswer() }
+                if last == .assistant, conversation.messages.last?.stopped == false { announceAnswer() }
+            }
+            // The reply growing while it streams follows only a reader who
+            // is at the bottom, without an animation per redraw.
+            .onChange(of: conversation.live) { _, _ in
+                if followsStream { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
             .onChange(of: conversation.pending) { _, _ in follow(proxy) }
             .onChange(of: conversation.recap) { _, _ in follow(proxy) }
             .onChange(of: conversation.phase) { _, phase in
                 if case let .failed(_, question) = phase, draft.isEmpty { draft = question }
-                if case .running = phase { follow(proxy, force: true) } else { follow(proxy) }
+                if case .running = phase {
+                    // A question just sent follows its reply again.
+                    if nearBottom == nil { touchingPage = false }
+                    follow(proxy, force: true)
+                } else {
+                    follow(proxy)
+                }
             }
             .overlay(alignment: .bottomTrailing) {
                 ZStack {
@@ -350,6 +374,23 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
+    private func answer(_ message: LedgerAgentMessage) -> some View {
+        let asksNow = message.id == conversation.messages.last?.id && !conversation.isRunning && !sessions.busyElsewhere
+        let undoFailure = conversation.undoFailure?.message == message.id ? conversation.undoFailure?.text : nil
+        return LedgerAgentAnswer(
+            message: message,
+            asksNow: asksNow,
+            undoing: conversation.undoing == message.id,
+            canUndo: conversation.canUndo(message),
+            undoFailure: undoFailure,
+            toolsStartExpanded: message.id == conversation.streamedAnswer,
+            onMemory: { memoryPresented = true },
+            onRecord: { bookkeeping = .init(text: question(before: message)) },
+            onAnswer: { send($0, clearsComposer: false) },
+            onAsk: { ask($0) },
+            onUndo: { undo(message) })
+    }
+
     private func follow(_ proxy: ScrollViewProxy, force: Bool = false) {
         guard force || isAtBottom else { return }
         scrollToBottom(proxy)
@@ -360,7 +401,10 @@ private struct LedgerAgentChatScreen: View {
     }
 
     private func jumpToBottom(_ proxy: ScrollViewProxy) -> some View {
-        Button { scrollToBottom(proxy) } label: {
+        Button {
+            touchingPage = false
+            scrollToBottom(proxy)
+        } label: {
             Image(systemName: "arrow.down").font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(BalancedPalette.ink)
                 .frame(width: 40, height: 40)
@@ -481,7 +525,7 @@ private struct LedgerAgentChatScreen: View {
                     .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                     .padding(.horizontal, 6)
             } else {
-                LedgerAgentQuickSwitch { settingsPresented = true }
+                LedgerAgentQuickSwitch(usage: conversation.usage) { settingsPresented = true }
                     .padding(.horizontal, 2)
             }
             if !conversation.staged.isEmpty || attaching || attachError != nil { stagedFiles }
@@ -889,7 +933,7 @@ private struct LedgerAgentChatScreen: View {
             return
         }
         let choice = settings.choice, thinking = settings.effectiveThinking, usesMemory = settings.usesMemory
-        let transcript = conversation.transcript, conversationID = conversation.id
+        let conversation = conversation, conversationID = conversation.id
         let attachments = conversation.attachmentPayloads(in: repository.workspace.agentAttachmentLocation(id: conversationID))
         conversation.editor = .live(repository)
         conversation.autoWrites = settings.autoWrites
@@ -897,7 +941,10 @@ private struct LedgerAgentChatScreen: View {
         LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
         LedgerAgentBackgroundRun.shared.keepsAwake = settings.keepsAwake
         let started = conversation.send(question, reporting: { message, history, draftRoot, report in
-            try await repository.runAgentTurn(message: message, history: history, choice: choice,
+            // Read when the turn starts, not when it is asked: a turn stopped
+            // just before may still be bringing back the transcript to follow.
+            let transcript = await conversation.transcript
+            return try await repository.runAgentTurn(message: message, history: history, choice: choice,
                                               apiKey: key, sensitiveUnlocked: true, thinking: thinking,
                                               draft: draftRoot, transcript: transcript,
                                               conversationID: conversationID, attachments: attachments,
@@ -990,6 +1037,8 @@ private struct LedgerAgentAnswer: View {
     var undoing = false
     var canUndo = false
     var undoFailure: String? = nil
+    /// The answer just replaced the live turn: its tool groups open, as they were.
+    var toolsStartExpanded = false
     var onMemory: () -> Void = {}
     let onRecord: () -> Void
     var onAnswer: (String) -> Void = { _ in }
@@ -1001,9 +1050,26 @@ private struct LedgerAgentAnswer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if !message.toolCalls.isEmpty { tools }
-            ForEach(Array(LedgerAgentReplyText.segments(message.text).enumerated()), id: \.offset) { _, segment in
+            if message.compacted {
+                Text("已压缩较早的对话，以便继续").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("ledger-agent-compacted")
+            }
+            // Replies from older builds have only their tool calls.
+            if !message.steps.isEmpty {
+                LedgerAgentStepTimeline(steps: message.steps, toolsStartExpanded: toolsStartExpanded, onAsk: onAsk)
+            } else if !message.toolCalls.isEmpty {
+                tools
+            }
+            // A stopped reply reads as it did when stopped: a fence cut off
+            // mid-chart stays prose rather than a block of broken JSON.
+            ForEach(Array(LedgerAgentReplyText.segments(message.text, streaming: message.stopped).enumerated()),
+                    id: \.offset) { _, segment in
                 LedgerAgentReplyBlock(segment: segment, onAsk: onAsk)
+            }
+            if message.stopped {
+                Text("已停止").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .accessibilityIdentifier("ledger-agent-stopped")
             }
             if let ask = message.ask, asksNow { choices(ask) }
             if LedgerAgentReplyText.beancountDraft(in: message.text) != nil {
@@ -1147,24 +1213,15 @@ private struct LedgerAgentAnswer: View {
         }
     }
 
-    private var toolsSummary: String {
-        let edits = message.toolCalls.filter {
-            ["edit_file", "write_file", "move_file", "copy_file", "delete_file", "save_attachment"].contains($0.name) && !$0.isError
-        }.count
-        if edits == 0, message.toolCalls.contains(where: { $0.name == "reconcile_attachment" }) {
-            return String(localized: "读取附件和账本 \(message.toolCalls.count) 次")
-        }
-        return edits == 0
-            ? String(localized: "读取了账本 \(message.toolCalls.count) 次")
-            : String(localized: "调用了 \(message.toolCalls.count) 次工具，改了草稿 \(edits) 处")
-    }
+    private var toolsSummary: String { LedgerAgentToolTimeline.summary(message.toolCalls) }
 
     private var footer: String? {
         guard let duration = message.duration else { return nil }
         let seconds = duration.formatted(.number.precision(.fractionLength(1)))
-        return message.toolCalls.isEmpty
+        let tools = message.steps.isEmpty ? message.toolCalls.count : message.steps.filter { $0.kind == .tool }.count
+        return tools == 0
             ? String(localized: "\(seconds) 秒")
-            : String(localized: "\(message.toolCalls.count) 次工具调用 · \(seconds) 秒")
+            : String(localized: "\(tools) 次工具调用 · \(seconds) 秒")
     }
 
 }
@@ -1315,7 +1372,7 @@ private struct LedgerAgentChangeCard: View {
 }
 
 /// One Markdown block of a reply.
-private struct LedgerAgentReplyBlock: View {
+struct LedgerAgentReplyBlock: View {
     let segment: LedgerAgentReplyText.Segment
     var onAsk: (String) -> Void = { _ in }
 
@@ -1440,7 +1497,7 @@ private struct LedgerAgentRunning: View {
     let stepSince: Date
 
     /// A step quiet this long gets the hint.
-    private static let slowAfter: TimeInterval = 45
+    private static let slowAfter = LedgerAgentLiveTimeline.slowAfter
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -1471,6 +1528,35 @@ private struct LedgerAgentRunning: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("ledger-agent-running")
+    }
+}
+
+/// Tells the chat how close the page is to its real bottom and whether the
+/// reader is moving it, so a streaming reply does not pull the page back
+/// under a finger. iOS 18 measures both; before it, a drag pauses following
+/// until the reader is back at the bottom or taps the jump button.
+private struct LedgerAgentScrollTracking: ViewModifier {
+    @Binding var nearBottom: Bool?
+    @Binding var touching: Bool
+
+    /// Within this many points of the bottom still counts as at it.
+    private static let slack: CGFloat = 24
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    let bottom = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
+                    return bottom - geometry.contentOffset.y <= Self.slack
+                } action: { _, near in
+                    nearBottom = near
+                }
+                .onScrollPhaseChange { _, phase in
+                    touching = phase == .tracking || phase == .interacting || phase == .decelerating
+                }
+        } else {
+            content.simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in touching = true })
+        }
     }
 }
 
@@ -1817,6 +1903,8 @@ private struct LedgerAgentModelPicker: View {
 /// model and effort it was sent with.
 private struct LedgerAgentQuickSwitch: View {
     @ObservedObject private var settings = LedgerAgentSettings.shared
+    /// The conversation's latest usage; the meter shows once it is known.
+    var usage: LedgerAgentUsage? = nil
     var manage: () -> Void
 
     var body: some View {
@@ -1828,6 +1916,7 @@ private struct LedgerAgentQuickSwitch: View {
                 .accessibilityLabel(String(localized: "思考强度：\(settings.effectiveThinking.title)"))
                 .accessibilityIdentifier("ledger-agent-quick-thinking")
             Spacer(minLength: 0)
+            if let usage, usage.fraction != nil { LedgerAgentContextMeter(usage: usage) }
         }
     }
 
