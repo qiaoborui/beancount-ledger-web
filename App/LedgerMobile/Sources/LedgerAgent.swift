@@ -1139,8 +1139,15 @@ final class LedgerAgentConversation: ObservableObject {
     /// The version on screen: the active path of `thread`, which follows
     /// every change made here.
     @Published private(set) var messages: [LedgerAgentMessage] = [] {
-        didSet { thread.adopt(messages) }
+        didSet {
+            thread.adopt(messages)
+            replacedByVersionChange = showingVersion
+        }
     }
+    /// The last change to `messages` showed another version rather than a
+    /// question or an answer, so the screen neither announces nor jumps.
+    private(set) var replacedByVersionChange = false
+    private var showingVersion = false
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var pending: LedgerAgentPendingEdit?
     /// The last change written from this conversation, until the next turn.
@@ -1263,6 +1270,10 @@ final class LedgerAgentConversation: ObservableObject {
     @Published private(set) var switching = false
     /// The transcripts of versions not on screen, by their last message.
     private var branchTranscripts: [UUID: String] = [:]
+    /// The questions each of those transcripts does not hold. A question is
+    /// shared by every answer under it, so its `outsideTranscript` follows
+    /// the version on screen and is put back from here on a switch.
+    private var branchOutside: [UUID: Set<UUID>] = [:]
     private var unsavedBranchTranscripts: Set<UUID> = []
     /// Reads a version's transcript an earlier run saved; set by the sessions.
     var loadBranchTranscript: (@Sendable (UUID) async -> String?)?
@@ -1348,6 +1359,13 @@ final class LedgerAgentConversation: ObservableObject {
     /// announced ones marked new.
     func attachmentPayloads(in directory: URL) -> [LedgerAgentAttachment.Payload] {
         allAttachments.map { $0.payload(in: directory, isNew: unannounced.contains($0.id) || staged.contains($0)) }
+    }
+
+    /// What a turn that is starting sends: the files that went with a
+    /// question, with the not yet announced ones marked new. A file staged
+    /// while the turn waited for its draft is for the next question.
+    func turnAttachmentPayloads(in directory: URL) -> [LedgerAgentAttachment.Payload] {
+        attachments.map { $0.payload(in: directory, isNew: unannounced.contains($0.id)) }
     }
 
     private struct Outcome: Sendable {
@@ -1509,9 +1527,12 @@ final class LedgerAgentConversation: ObservableObject {
         let warning = warning(replacing: messages[(questionIndex + 1)...])
         if !warning.isEmpty, !confirmed { return .needsConfirmation(warning) }
         cut(dropping: recordedQuestions(in: messages[questionIndex...]), warning: warning) { [weak self] in
-            guard let self else { return }
+            guard let self else { return nil }
             self.thread.rewind(to: question.id)
             self.messages = self.thread.activePath
+            return question
+        } then: { [weak self] question in
+            guard let self else { return }
             self.reannounce(question)
             self.begin(question.text, using: send)
         }
@@ -1536,8 +1557,11 @@ final class LedgerAgentConversation: ObservableObject {
         let warning = warning(replacing: messages[index...])
         if !warning.isEmpty, !confirmed { return .needsConfirmation(warning) }
         cut(dropping: recordedQuestions(in: messages[index...]), warning: warning) { [weak self] in
-            guard let self, let edited = self.thread.fork(atUser: questionID, newText: text) else { return }
+            guard let self, let edited = self.thread.fork(atUser: questionID, newText: text) else { return nil }
             self.messages = self.thread.activePath
+            return edited
+        } then: { [weak self] edited in
+            guard let self else { return }
             self.reannounce(edited)
             self.takeStaged(into: self.messages.count - 1)
             self.begin(text, using: send)
@@ -1566,12 +1590,15 @@ final class LedgerAgentConversation: ObservableObject {
     }
 
     /// The other versions' transcripts not saved yet, by their last message.
+    /// A version still on screen, such as the one a cut is leaving while it
+    /// runs, stays queued for a later save.
     func takeUnsavedBranchTranscripts() -> [UUID: String] {
         let leaves = thread.inactiveLeaves
-        defer { unsavedBranchTranscripts = [] }
-        return unsavedBranchTranscripts.reduce(into: [:]) { result, leaf in
+        let taken: [UUID: String] = unsavedBranchTranscripts.reduce(into: [:]) { result, leaf in
             if leaves.contains(leaf), let transcript = branchTranscripts[leaf] { result[leaf] = transcript }
         }
+        unsavedBranchTranscripts.subtract(taken.keys)
+        return taken
     }
 
     private func show(_ target: UUID, from messageID: UUID?, confirmed: Bool) -> LedgerAgentBranchResult {
@@ -1580,7 +1607,8 @@ final class LedgerAgentConversation: ObservableObject {
         if !warning.isEmpty, !confirmed { return .needsConfirmation(warning) }
         leaveVersion()
         let leaf = thread.newestLeaf(under: target)
-        let known = branchTranscripts[leaf], load = loadBranchTranscript, epoch = epoch
+        let known = branchTranscripts[leaf], outside = branchOutside[leaf]
+        let load = loadBranchTranscript, epoch = epoch
         switching = true
         Task { [weak self] in
             var arriving = known
@@ -1588,7 +1616,11 @@ final class LedgerAgentConversation: ObservableObject {
             guard let self, self.epoch == epoch else { return }
             self.switching = false
             self.thread.switchTo(sibling: target)
-            self.messages = self.thread.activePath
+            var path = self.thread.activePath
+            Self.markOutside(&path, known: outside)
+            self.showingVersion = true
+            self.messages = path
+            self.showingVersion = false
             self.transcript = arriving
             self.enterVersion(warning, switched: true)
             // The failure belonged to the version left behind.
@@ -1602,8 +1634,12 @@ final class LedgerAgentConversation: ObservableObject {
     /// Cuts the transcript back by its last `drop` questions, then `apply`s
     /// the new version. Without a transcript, or when it cannot be cut, the
     /// next turn replays the visible history instead of a stale context.
+    /// The thread is rewound before the cut transcript is taken, so a save
+    /// on the way (a discarded draft, a recap landing) never pairs the cut
+    /// transcript with the version being left.
     private func cut(dropping drop: Int, warning: LedgerAgentBranchWarning,
-                     then apply: @escaping @MainActor () -> Void) {
+                     rewind: @escaping @MainActor () -> LedgerAgentMessage?,
+                     then start: @escaping @MainActor (LedgerAgentMessage) -> Void) {
         leaveVersion()
         let source = transcript, truncate = truncate, epoch = epoch
         switching = true
@@ -1612,21 +1648,43 @@ final class LedgerAgentConversation: ObservableObject {
             if let source, drop > 0 { cut = try? await truncate(source, drop) }
             guard let self, self.epoch == epoch else { return }
             self.switching = false
+            guard let question = rewind() else { return }
+            // The cut transcript does not hold the question about to be asked.
+            if let last = self.messages.indices.last { self.messages[last].outsideTranscript = true }
             self.transcript = cut
             self.enterVersion(warning, switched: false)
-            apply()
+            start(question)
         }
     }
 
     /// Keeps the transcript of the version being left, under its last
-    /// message. A stop still settling belonged to it: its partial reply
-    /// stays as shown, and its late transcript is not adopted.
+    /// message, with the questions it does not hold. A stop still settling
+    /// belonged to it: its partial reply stays as shown, and its late
+    /// transcript is not adopted.
     private func leaveVersion() {
         stopping = nil
         branchedSinceRestore = true
         if let leaf = thread.activeLeaf, thread.children(of: leaf).isEmpty, let transcript {
             branchTranscripts[leaf] = transcript
+            branchOutside[leaf] = Set(messages.filter { $0.role == .user && $0.outsideTranscript }.map(\.id))
             unsavedBranchTranscripts.insert(leaf)
+        }
+    }
+
+    /// Puts back which questions of a version's path its transcript does
+    /// not hold. `known` is what was noted when the version was left in this
+    /// run. Without it (a transcript an earlier run saved), a question
+    /// answered without a stop is held, one the version ends on is not, and
+    /// one a stop answered keeps the flag it was saved with.
+    nonisolated static func markOutside(_ path: inout [LedgerAgentMessage], known: Set<UUID>?) {
+        for index in path.indices where path[index].role == .user {
+            if let known {
+                path[index].outsideTranscript = known.contains(path[index].id)
+            } else if index == path.count - 1 {
+                path[index].outsideTranscript = true
+            } else if path[index + 1].role == .assistant, !path[index + 1].stopped {
+                path[index].outsideTranscript = false
+            }
         }
     }
 
@@ -1922,6 +1980,7 @@ final class LedgerAgentConversation: ObservableObject {
         messages = []
         switching = false
         branchTranscripts = [:]
+        branchOutside = [:]
         unsavedBranchTranscripts = []
         branchedSinceRestore = false
         phase = .idle

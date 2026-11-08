@@ -94,6 +94,27 @@ final class LedgerAgentBranchesTests: XCTestCase {
         XCTAssertEqual(saved.activeLeaf, first.messages.last?.id)
     }
 
+    /// An older save that ends on a failed question: its transcript never
+    /// took that question in, so a cut does not count it.
+    @MainActor
+    func testAnOlderSavesTrailingQuestionIsOutsideItsTranscript() throws {
+        let json = """
+        {"version":1,"id":"6F9F1C2A-1111-4C3B-9D7E-2B8A1C0D4E5F","createdAt":"2026-11-01T08:00:00Z",
+         "updatedAt":"2026-11-01T08:01:00Z","unwrittenChange":false,
+         "messages":[{"role":"user","text":"十月餐饮","toolCalls":[]},{"role":"assistant","text":"812 元","toolCalls":[]},
+                     {"role":"user","text":"九月呢","toolCalls":[]}]}
+        """
+        let record = try Self.decoder.decode(LedgerAgentSavedConversation.self, from: Data(json.utf8))
+        let restored = LedgerAgentConversation(restoring: record)
+        XCTAssertEqual(restored.messages.map(\.outsideTranscript), [false, false, true])
+
+        // A version 2 save says so itself.
+        let saved = try XCTUnwrap(LedgerAgentConversation(restoring: record).saved())
+        var noted = saved
+        noted.messages = saved.messages.map { LedgerAgentSavedConversation.Message(id: $0.id, role: $0.role, text: $0.text) }
+        XCTAssertEqual(LedgerAgentConversation(restoring: noted).messages.map(\.outsideTranscript), [false, false, false])
+    }
+
     @MainActor
     func testVersion2RoundTripKeepsBranchesAndTheActiveLeaf() async throws {
         let conversation = LedgerAgentConversation()
@@ -292,6 +313,113 @@ final class LedgerAgentBranchesTests: XCTestCase {
         try await waitUntilSettled(conversation)
         XCTAssertEqual(conversation.messages.map(\.text), ["十月餐饮", "813 元"])
         XCTAssertEqual(conversation.phase, .idle)
+    }
+
+    /// A question is shared by every answer under it. A failed regenerate
+    /// leaves it outside the cut transcript, but going back to the old
+    /// answer brings back a transcript that holds it, so the next cut drops it.
+    @MainActor
+    func testGoingBackAfterAFailedRegenerateCutsTheQuestionAgain() async throws {
+        let conversation = LedgerAgentConversation()
+        let drops = Recorder<Int>()
+        conversation.truncate = { transcript, drop in
+            drops.append(drop)
+            return transcript + "-cut"
+        }
+        try await ask(conversation, "十月餐饮", reply: "812 元", transcript: "t1")
+        let question = conversation.messages[0]
+        conversation.regenerate(conversation.messages[1].id, reporting: { _, _, _, _ in
+            .init(ok: false, error: "503 overloaded")
+        })
+        try await waitUntilSettled(conversation)
+        XCTAssertEqual(conversation.messages.last?.outsideTranscript, true)
+        XCTAssertEqual(conversation.showLatestAnswer(of: question.id), .started)
+        try await waitUntilSettled(conversation)
+        XCTAssertEqual(conversation.transcript, "t1")
+        XCTAssertEqual(conversation.messages.first?.outsideTranscript, false)
+
+        conversation.regenerate(conversation.messages[1].id, reporting: Self.reply("813 元", transcript: "t2"))
+        try await waitUntilSettled(conversation)
+        XCTAssertEqual(drops.values, [1, 1])
+    }
+
+    /// Without what was noted on leaving (a transcript an earlier run saved),
+    /// answered questions count as held and a trailing one does not; one a
+    /// stop answered keeps its flag.
+    func testMarkOutsideFallsBackToTheShapeOfThePath() {
+        func message(_ role: LedgerAgentMessage.Role, outside: Bool = false, stopped: Bool = false) -> LedgerAgentMessage {
+            LedgerAgentMessage(role: role, text: "", stopped: stopped, outsideTranscript: outside)
+        }
+        let original = [message(.user, outside: true), message(.assistant), message(.user, outside: true),
+                        message(.assistant, stopped: true), message(.user)]
+        var path = original
+        LedgerAgentConversation.markOutside(&path, known: nil)
+        XCTAssertEqual(path.map(\.outsideTranscript), [false, false, true, false, true])
+
+        path = original
+        LedgerAgentConversation.markOutside(&path, known: [original[4].id])
+        XCTAssertEqual(path.map(\.outsideTranscript), [false, false, false, false, true])
+    }
+
+    /// A save during a cut (here the discarded draft's) neither pairs the cut
+    /// transcript with the version being left nor loses that version's
+    /// transcript, which a later save writes.
+    @MainActor
+    func testASaveDuringACutKeepsTheLeftVersionsTranscript() async throws {
+        let ledger = FakeLedger()
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.truncate = { transcript, _ in
+            try await Task.sleep(nanoseconds: 20_000_000)
+            return transcript + "-cut"
+        }
+        try await ask(conversation, "十月餐饮", reply: "812 元", transcript: "t1")
+        conversation.send("把午饭都改一下", reporting: { _, _, _, report in
+            report(.live(.textDelta("正在改")))
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 2_000_000) }
+            throw CancellationError()
+        })
+        for _ in 0..<200 where conversation.live?.text != "正在改" { try await Task.sleep(nanoseconds: 2_000_000) }
+        conversation.stop()
+        for _ in 0..<200 where conversation.saved()?.unwrittenChange != true { try await Task.sleep(nanoseconds: 2_000_000) }
+        let left = try XCTUnwrap(conversation.messages.last?.id)
+        let leftTranscript = conversation.transcript
+
+        var taken: [UUID: String] = [:]
+        var saves: [(texts: [String], transcript: String?)] = []
+        conversation.onSettled = { settled in
+            taken.merge(settled.takeUnsavedBranchTranscripts()) { $1 }
+            saves.append((settled.messages.map(\.text), settled.transcript))
+        }
+        conversation.regenerate(conversation.messages[1].id, confirmed: true,
+                                reporting: Self.reply("813 元", transcript: "t3"))
+        XCTAssertTrue(conversation.takeUnsavedBranchTranscripts().isEmpty, "still on screen while the cut runs")
+        try await waitUntilSettled(conversation)
+
+        XCTAssertNotNil(leftTranscript)
+        XCTAssertEqual(taken[left], leftTranscript)
+        let cutSaves = saves.filter { $0.transcript?.hasSuffix("-cut") == true }
+        XCTAssertFalse(cutSaves.isEmpty)
+        XCTAssertTrue(cutSaves.allSatisfy { $0.texts == ["十月餐饮"] }, "\(cutSaves)")
+    }
+
+    /// Showing another version is not an answer arriving: the screen
+    /// neither announces nor jumps for it.
+    @MainActor
+    func testAVersionChangeIsToldApartFromAnAnswer() async throws {
+        let conversation = LedgerAgentConversation()
+        conversation.truncate = { transcript, _ in transcript + "-cut" }
+        try await ask(conversation, "十月餐饮", reply: "812 元", transcript: "t1")
+        XCTAssertFalse(conversation.replacedByVersionChange)
+        conversation.regenerate(conversation.messages[1].id, reporting: Self.reply("813 元", transcript: "t2"))
+        try await waitUntilSettled(conversation)
+        XCTAssertFalse(conversation.replacedByVersionChange)
+        XCTAssertEqual(conversation.switchBranch(conversation.messages[1].id, direction: -1), .started)
+        try await waitUntilSettled(conversation)
+        XCTAssertEqual(conversation.messages.last?.text, "812 元")
+        XCTAssertTrue(conversation.replacedByVersionChange)
+        try await ask(conversation, "九月呢", reply: "600 元", transcript: "t3")
+        XCTAssertFalse(conversation.replacedByVersionChange)
     }
 
     // MARK: Guards

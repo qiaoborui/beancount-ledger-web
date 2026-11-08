@@ -66,6 +66,23 @@ final class LedgerAgentAttachmentsTests: XCTestCase {
         XCTAssertTrue(attachment.detail.contains("2 页"))
     }
 
+    /// A turn sends the files that went with a question. One staged while
+    /// the turn waited for its draft is for the next question.
+    @MainActor
+    func testATurnLeavesOutFilesStagedAfterItWasAsked() {
+        let conversation = LedgerAgentConversation()
+        conversation.stage(LedgerAgentAttachment(id: "a1", name: "招行.csv", kind: .table, bytes: 10, fileName: "a1-招行.csv"))
+        conversation.send("对账") { _, _, _ in
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            return .init(ok: true, reply: "")
+        }
+        conversation.stage(LedgerAgentAttachment(id: "a2", name: "小票.jpg", kind: .image, bytes: 10, fileName: "a2-小票.jpg"))
+        let directory = URL(fileURLWithPath: "/runtime/agent-attachments/c")
+        XCTAssertEqual(conversation.turnAttachmentPayloads(in: directory).map(\.id), ["a1"])
+        XCTAssertEqual(conversation.turnAttachmentPayloads(in: directory).map(\.new), [true])
+        conversation.stop()
+    }
+
     /// Staged files go with the next question and stay new until a turn
     /// answers, so a failed turn's retry announces them again.
     @MainActor

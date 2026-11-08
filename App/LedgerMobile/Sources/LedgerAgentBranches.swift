@@ -238,8 +238,14 @@ extension LedgerAgentSavedConversation {
     /// before version 2, get ids derived from their place; a version 1 save
     /// is one branch.
     func thread() -> LedgerAgentThread {
-        let path = messages.enumerated().compactMap { index, stored in
+        var path = messages.enumerated().compactMap { index, stored in
             LedgerAgentMessage(saved: stored, fallbackID: LedgerAgentMessageID.derived(conversation: id, index: index))
+        }
+        // An older save did not note which questions its transcript lacks. A
+        // question it ends on failed or was cut off, so the transcript never
+        // took it in.
+        if messages.last?.id == nil, let last = path.indices.last, path[last].role == .user {
+            path[last].outsideTranscript = true
         }
         let branches = (branches ?? []).enumerated().compactMap { index, branch -> LedgerAgentThread.Branch? in
             let fallback = LedgerAgentMessageID.derived(conversation: id, index: messages.count + index)
