@@ -1482,6 +1482,9 @@ private struct LedgerAgentIntro: View {
         Ability(title: String(localized: "搜索流水"), detail: String(localized: "按商户、账户、标签、日期找交易")),
         Ability(title: String(localized: "BQL 查询"), detail: String(localized: "分组、排序、自定义统计")),
         Ability(title: String(localized: "账户"), detail: String(localized: "账户名称、别名和币种")),
+        Ability(title: String(localized: "改账（草稿确认后写入）"), detail: String(localized: "改分类、补记漏记、删重复，先改草稿，你确认后才写入")),
+        Ability(title: String(localized: "附件对账"), detail: String(localized: "上传 CSV、Excel、PDF 或截图，和账本逐笔核对")),
+        Ability(title: String(localized: "记忆"), detail: String(localized: "记住你的偏好和常用账户，只存在本机")),
     ]
 
     var body: some View {
@@ -1501,7 +1504,7 @@ private struct LedgerAgentIntro: View {
                     .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                     .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
                 }
-                Text("这一版只读：不会新增、修改或删除交易。需要你自己的模型 API Key，费用记在你的模型账户上。")
+                Text("改账时先改一份草稿，改动以卡片给你过目，点「写入账本」并通过校验后才会写入。需要你自己的模型 API Key，费用记在你的模型账户上。")
                     .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta).lineSpacing(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .balancedBand()
@@ -1659,12 +1662,19 @@ struct LedgerAgentSettingsView: View {
             Section("发给模型的内容") {
                 Text("你的问题、本次对话，以及助手调用工具后得到的结果（例如汇总金额、匹配到的流水）。不会发送整本账本文件，也不会发送 Git 凭据或本机路径。")
             }
-            Section("可用工具 · 只读") {
+            Section {
                 tool(String(localized: "汇总与搜索流水"), "get_ledger_summary · search_transactions")
                 tool(String(localized: "BQL 查询"), "run_bql · validate_bql · get_bql_capabilities")
                 tool(String(localized: "账户"), "get_accounts")
                 tool(String(localized: "向你提问（选项卡）"), "ask_user")
+                tool(String(localized: "改账（只改草稿）"),
+                     "list_files · grep_files · read_file · edit_file · write_file · copy_file · move_file · delete_file · draft_changes · bean_check")
                 if settings.usesMemory { tool(String(localized: "记忆"), "edit_memory · write_memory") }
+                tool(String(localized: "附件"),
+                     "list_attachments · read_attachment · reconcile_attachment · view_attachment_image · save_attachment")
+                tool(String(localized: "历史对话"), "list_saved_conversations · read_saved_conversation")
+            } header: { Text("可用工具") } footer: {
+                Text("查询工具只读账本。改账工具只改一份私有草稿，改动卡片上点「写入账本」并通过校验后才写入；打开「改完自动写入」时校验通过即写入。附件工具在对话附了文件时才有，看图需要模型支持图片。")
             }
         }
         .font(.subheadline)
