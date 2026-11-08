@@ -425,6 +425,7 @@ private struct AccountsNetWorthChart: View {
         .chartXAxis { dateAxis }
         .chartYAxis { amountAxis }
         .chartLegend(.hidden)
+        .ledgerChartReveal()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("净资产趋势"))
         .accessibilityValue(Text(accessibilityValue))
@@ -1170,6 +1171,7 @@ private struct AccountBalanceTrendPanel: View {
             }
             .chartYAxis(.hidden)
             .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
+            .ledgerChartReveal()
             .privacySensitive()
             .accessibilityLabel("账户余额趋势图，可点按或拖动查看数据")
             .accessibilityValue(axis.usesTimeScale ? "真实时间轴" : "有序分类轴")

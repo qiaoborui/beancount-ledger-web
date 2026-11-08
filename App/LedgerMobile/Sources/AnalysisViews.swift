@@ -1296,6 +1296,7 @@ private struct CashflowTrendChart: View {
                 .chartXAxis { xAxisMarks(axis) }
                 .chartYAxis(.hidden)
                 .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
+                .ledgerChartReveal()
                 .accessibilityLabel("现金流趋势图，可点按或拖动查看数据")
                 .accessibilityValue(axis.usesTimeScale ? "真实时间轴" : "有序分类轴")
                 .accessibilityIdentifier("cashflow-trend-chart")
@@ -1445,6 +1446,7 @@ private struct NetWorthTrendChart: View {
                 }
                 .chartYAxis(.hidden)
                 .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
+                .ledgerChartReveal()
                 .accessibilityLabel("净资产走势图，可点按或拖动查看数据")
                 .accessibilityValue(axis.usesTimeScale ? "真实时间轴" : "有序分类轴")
                 .accessibilityIdentifier("net-worth-trend-chart")
