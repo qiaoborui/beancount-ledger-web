@@ -185,6 +185,11 @@ type turnResponseV1 struct {
 	Steps []stepV1 `json:"steps,omitempty"`
 	// Usage is the turn's tokens; absent when no model message ended.
 	Usage *usageV1 `json:"usage,omitempty"`
+	// StopReason is "aborted" for a turn the user stopped. A stopped turn
+	// still returns what it wrote so far as Reply and a Transcript the next
+	// question can follow; the transcript is absent when the model had said
+	// nothing yet, and the shell keeps the previous one.
+	StopReason string `json:"stopReason,omitempty"`
 	// Compacted and CompactedTurns are reserved for a turn that summarized
 	// older turns of its transcript; nothing sets them yet.
 	Compacted      bool `json:"compacted,omitempty"`
@@ -263,8 +268,9 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 	// A failed or cancelled turn may still have edited the scratch copy or
 	// the memory.
 	if errors.Is(ctx.Err(), context.Canceled) {
-		return encode(turnResponseV1{Version: 1, Cancelled: true, ToolCalls: out.calls, Steps: out.steps, Usage: out.usage,
-			Edited: out.edited, MemoryUpdated: out.remembered, Error: "cancelled"})
+		return encode(turnResponseV1{Version: 1, Cancelled: true, StopReason: string(ai.StopReasonAborted), Reply: out.reply,
+			ToolCalls: out.calls, Steps: out.steps, Usage: out.usage, Edited: out.edited, MemoryUpdated: out.remembered,
+			Transcript: out.transcript, Error: "cancelled"})
 	}
 	if err != nil {
 		return encode(turnResponseV1{Version: 1, ToolCalls: out.calls, Steps: out.steps, Usage: out.usage, Edited: out.edited,
@@ -580,6 +586,16 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	if nudge != "" {
 		produced, err = runner.Send(ctx, nudge)
 		collect(produced)
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		messages := runner.Messages()
+		// PiG puts the system message in front of a history without one.
+		start := len(history)
+		if len(messages) > 0 && messages[0].System != nil && (len(history) == 0 || history[0].System == nil) {
+			start++
+		}
+		out.reply, out.transcript = stoppedTurn(messages, start)
+		return files, context.Canceled
 	}
 	if err != nil {
 		return files, err
