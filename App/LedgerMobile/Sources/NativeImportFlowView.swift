@@ -3,6 +3,7 @@ import SwiftUI
 struct NativeImportFlowView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var classificationSettings = ImportClassificationSettings.shared
 
     let file: LedgerImportSelectedFile
@@ -55,8 +56,19 @@ struct NativeImportFlowView: View {
     @State private var classificationRunID = UUID()
     @State private var classificationEvidence: [String: [ImportClassificationRequest.Example]] = [:]
     @State private var warningsExpanded = false
+    @State private var completionRevealTrigger = false
 
     private enum ImportExitAction { case close, preparation }
+
+    /// Which page of the flow is on screen. Derived from the existing state so
+    /// it cannot drift from it; only used to animate between pages.
+    private enum ImportStage: Hashable { case preparation, parsing, review, completion }
+
+    private var stage: ImportStage {
+        if commitResult != nil { return .completion }
+        if preview != nil { return .review }
+        return showsParsing ? .parsing : .preparation
+    }
 
     init(
         file: LedgerImportSelectedFile,
@@ -149,14 +161,19 @@ struct NativeImportFlowView: View {
             Group {
                 if let commitResult {
                     completionView(commitResult)
+                        .transition(LedgerMotion.stageTransition)
                 } else if let preview {
                     previewView(preview)
+                        .transition(LedgerMotion.stageTransition)
                 } else if showsParsing {
                     parsingView
+                        .transition(LedgerMotion.stageTransition)
                 } else {
                     preparationView
+                        .transition(LedgerMotion.stageTransition)
                 }
             }
+            .ledgerAnimation(LedgerMotion.stage, value: stage)
             .background(BalancedPalette.page)
             .alert(exitConfirmationTitle, isPresented: Binding(
                 get: { pendingExit != nil },
@@ -1182,6 +1199,18 @@ struct NativeImportFlowView: View {
         .ledgerGlassDock()
     }
 
+    /// Plays the completion reveal once, after the write sheet has started to
+    /// leave so the reveal is not spent behind it. Keyframe animators hold their
+    /// final value, so a later re-appearance keeps the page drawn.
+    private func revealCompletionIfReady() {
+        guard !completionStartsDrawn, !completionRevealTrigger, commitResult != nil, preparedBookkeeping == nil else { return }
+        completionRevealTrigger = true
+    }
+
+    /// UI-test fixtures (see `LedgerMotion.allowsAmbientMotion`) assert the
+    /// heading the moment the page exists, so they get the drawn page directly.
+    private var completionStartsDrawn: Bool { reduceMotion || !LedgerMotion.allowsAmbientMotion }
+
     /// The written batch as a closed account: the double rule, the totals the
     /// person just confirmed, then where to go next.
     private func completionView(_ result: LedgerImportCommitResult) -> some View {
@@ -1191,20 +1220,45 @@ struct NativeImportFlowView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
-                    VStack(spacing: 2) {
+                    // The double rule closes the account: its two strokes draw in
+                    // from the leading edge, the second a beat after the first,
+                    // then the heading settles. One pass, on arrival only. No
+                    // success haptic here: the island already gives one.
+                    VStack(alignment: .leading, spacing: 2) {
                         BalancedPalette.ink.frame(width: 40, height: 1)
+                            .keyframeAnimator(initialValue: completionStartsDrawn ? 1.0 : 0, trigger: completionRevealTrigger) { rule, draw in
+                                rule.scaleEffect(x: draw, anchor: .leading)
+                            } keyframes: { _ in
+                                CubicKeyframe(1, duration: 0.28)
+                            }
                         BalancedPalette.ink.frame(width: 40, height: 1)
+                            .keyframeAnimator(initialValue: completionStartsDrawn ? 1.0 : 0, trigger: completionRevealTrigger) { rule, draw in
+                                rule.scaleEffect(x: draw, anchor: .leading)
+                            } keyframes: { _ in
+                                LinearKeyframe(0, duration: 0.08)
+                                CubicKeyframe(1, duration: 0.28)
+                            }
                     }
                     .padding(.bottom, 12)
                     .accessibilityHidden(true)
-                    Text(result.count == 0 ? "账单已归档" : "已写入 \(result.count) 条交易")
-                        .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 22, relativeTo: .title2))
-                        .foregroundStyle(BalancedPalette.ink)
-                    Text(completionDetail(result))
-                        .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(result.count == 0 ? "账单已归档" : "已写入 \(result.count) 条交易")
+                            .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 22, relativeTo: .title2))
+                            .foregroundStyle(BalancedPalette.ink)
+                        Text(completionDetail(result))
+                            .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .keyframeAnimator(initialValue: completionStartsDrawn ? 1.0 : 0, trigger: completionRevealTrigger) { heading, settle in
+                        heading.opacity(settle).offset(y: (1 - settle) * 6)
+                    } keyframes: { _ in
+                        LinearKeyframe(0, duration: 0.2)
+                        CubicKeyframe(1, duration: 0.3)
+                    }
                 }
                 .padding(EdgeInsets(top: 18, leading: 20, bottom: 20, trailing: 20))
+                .onAppear(perform: revealCompletionIfReady)
+                .onChange(of: preparedBookkeeping == nil) { _, _ in revealCompletionIfReady() }
 
                 if result.count > 0 {
                     VStack(alignment: .leading, spacing: 0) {
