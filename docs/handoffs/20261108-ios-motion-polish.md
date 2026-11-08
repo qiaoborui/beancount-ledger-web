@@ -1,9 +1,9 @@
 # 20261108-ios-motion-polish
 
 - Status: completed — local commits on `codex/ios-motion-polish`, not pushed, no PR.
-- Last updated: 2026-11-08 18:25 UTC+8.
+- Last updated: 2026-11-08 19:05 UTC+8.
 - Branch: `codex/ios-motion-polish`, based on `main` at `f58874e8`; code covered
-  by this note ends at `63327c06`.
+  by this note ends at `24602a1e` (review fixes included).
 
 ## Goal
 
@@ -36,14 +36,22 @@ bean-check / canonical validation and rollback are untouched.
   with its phase, and a confirmed deletion hides its local row with an
   animation (view-side filter on `transactionResolution(for:) == .unavailable`;
   no `LedgerSession` change). Before, the row stayed until the next generation.
+  The list animation is keyed on the placeholder showing, not on
+  `isAwaitingRows`, so infinite-scroll appends are never animated; the
+  deletion animation is keyed on the hidden deletion row IDs only, so edits
+  and bulk tag adds do not animate the list.
 - The filter settle block (合计) and day summaries roll their totals. The settle
   block keeps `Text` plus the shared modifier rather than `BalancedAmount`,
   because `minimumScaleFactor` mismeasures inside List rows.
 - Behaviour change: day summaries now mask to `••••••` when amounts are hidden.
   They were never masked before.
 - Charts (accounts net worth, account balance trend, cash flow trend, analysis
-  net worth) reveal from the leading edge once per view lifetime; range changes
-  do not replay it.
+  net worth) reveal from the leading edge on first appearance. The analysis
+  pages and account detail rebuild their charts on every reload (cached vs
+  loaded branch, loading row), so they hold a `LedgerChartRevealMemory` in
+  the environment and the reveal plays once per screen; range changes, saves
+  and returning from a pushed row do not replay it. The accounts net worth
+  chart stays mounted and keeps the per-view-lifetime default.
 - `LedgerIsland*`, `LedgerAgent*`, `LedgerLaunch*` and `LedgerSession.swift`
   are untouched. Versions are unchanged.
 
@@ -66,8 +74,10 @@ bean-check / canonical validation and rollback are untouched.
 
 ## Validation
 
+- Re-run after review fixes, at `24602a1e`:
 - `cd App/LedgerMobile && swift test` — pass: XCTest 889 executed, 22 skipped, 0 failures;
-  Swift Testing 21 tests in 2 suites passed.
+  Swift Testing 21 tests in 2 suites passed. (One earlier run under heavy
+  concurrent load reported 1 expected failure, 0 unexpected; the rerun was clean.)
 - `xcodebuild build -project LedgerMobile.xcodeproj -scheme LedgerMobile
   -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO`
   — succeeds, no new warnings in changed files.
@@ -79,7 +89,11 @@ bean-check / canonical validation and rollback are untouched.
 - Simulator (iPhone 17, `--safe-preview`): transactions list and fast entry
   sheet (`--open-create-transaction`) render correctly at rest.
 - Not tested: the animations themselves frame by frame, haptics on a device,
-  the import completion reveal, confirmed-deletion hide, and the UI test suite.
+  the import completion reveal, confirmed-deletion hide, page appends staying
+  unanimated, the chart reveal not replaying on reload, and the UI test suite.
+  No unit test pins the day-summary masking or the confirmed-deletion filter:
+  `TransactionViews.swift` is outside the Swift package and `LedgerMobileTests`
+  does not build (see above).
 
 ## Remaining / next
 
@@ -91,3 +105,7 @@ bean-check / canonical validation and rollback are untouched.
 4. Follow-up: the island notice content belongs to the island work, not here.
 5. Separate fix: make `testInterruptionNotificationNamesTheCause` main-actor
    isolated so `LedgerMobileTests` builds again.
+6. Follow-up: once tests build, move the confirmed-deletion predicate into a
+   testable helper (confirmed delete hidden; confirmed edit, pending delete and
+   failed delete kept) and assert the day summary masks when amounts are hidden.
+7. Call out the day-summary masking (a privacy fix) in the PR body.
