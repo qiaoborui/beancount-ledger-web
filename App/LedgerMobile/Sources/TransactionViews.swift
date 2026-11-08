@@ -3427,6 +3427,9 @@ struct CookieKeypadView: View {
         .background(BalancedPalette.sunken.ignoresSafeArea(edges: .bottom))
     }
 
+    // Each key gives exactly one haptic: the selection tick in its action, which
+    // fires only for a completed tap. The press style's own haptic is off here,
+    // and so is not tied to Reduce Motion either.
     private func keypadButton(_ label: String, action: @escaping () -> Void) -> some View {
         Button {
             LedgerFeedback.selection()
@@ -3439,7 +3442,7 @@ struct CookieKeypadView: View {
                 .frame(maxWidth: .infinity, minHeight: 52)
                 .background(BalancedPalette.sunken)
         }
-        .buttonStyle(PressScaleButtonStyle())
+        .buttonStyle(PressScaleButtonStyle(enablesHaptic: false))
         .accessibilityIdentifier("keypad-\(label)")
     }
 
@@ -3456,7 +3459,7 @@ struct CookieKeypadView: View {
                 .frame(maxWidth: .infinity, minHeight: 52)
                 .background(BalancedPalette.sunken)
         }
-        .buttonStyle(PressScaleButtonStyle())
+        .buttonStyle(PressScaleButtonStyle(enablesHaptic: false))
         .accessibilityIdentifier("keypad-op-\(op)")
     }
 
@@ -3477,7 +3480,7 @@ struct CookieKeypadView: View {
                 calculator.clear()
             }
         )
-        .buttonStyle(PressScaleButtonStyle())
+        .buttonStyle(PressScaleButtonStyle(enablesHaptic: false))
         .accessibilityIdentifier("keypad-delete")
     }
 
@@ -3498,7 +3501,8 @@ struct CookieKeypadView: View {
 
         }
         .disabled(saving)
-        .buttonStyle(PressScaleButtonStyle())
+        // `onCommit` gives this key its one haptic: a tick for "=", a tap for save.
+        .buttonStyle(PressScaleButtonStyle(enablesHaptic: false))
         .accessibilityIdentifier("fast-entry-save-button")
     }
 }
@@ -3721,6 +3725,7 @@ struct CookieFastTransactionEditorBody: View {
                                 updateActivePostingAmount()
                                 LedgerFeedback.selection()
                             } else {
+                                LedgerFeedback.light()
                                 Task { await save() }
                             }
                         }
@@ -3882,6 +3887,8 @@ struct CookieFastTransactionEditorBody: View {
                     .foregroundStyle(BalancedPalette.meta)
                 // U+2212 for the displayed minus; the calculator's own expression
                 // stays ASCII so parsing is unaffected.
+                // Digits roll as they are typed, and "=" rolls the expression
+                // into its result, like every other amount in the app.
                 Text(calculator.displayText.replacingOccurrences(of: "-", with: "−"))
                     .balancedFont(size: 40, weight: .medium, relativeTo: .largeTitle)
                     .monospacedDigit()
@@ -3889,14 +3896,18 @@ struct CookieFastTransactionEditorBody: View {
                     .foregroundStyle(amountColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
+                    .contentTransition(.numericText())
                 Spacer(minLength: 8)
                 if !isSplitMode, calculator.isCalculationPending, let res = calculator.evaluatedResult {
                     Text(verbatim: "= \(res)")
                         .balancedFont(size: 15)
                         .monospacedDigit()
                         .foregroundStyle(BalancedPalette.meta)
+                        .contentTransition(.numericText())
+                        .transition(.opacity.combined(with: .offset(x: 6)))
                 }
             }
+            .ledgerAnimation(LedgerMotion.entry, value: calculator.displayText)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("金额 \(calculator.displayText) \(selectedCurrency)")
         }
