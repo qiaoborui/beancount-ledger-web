@@ -115,6 +115,11 @@ func dispatchModelOperation(request dispatchRequestV1) string {
 		var handle string
 		handle, err = app.AdoptLocalModel(input, request.ModelHandle, request.SourceVersion)
 		result = map[string]string{"handle": handle}
+	case "model-warm":
+		// The handle names the retained stage registration; warming never
+		// consumes it.
+		err = app.WarmLocalModel(request.ModelHandle)
+		result = map[string]bool{"warmed": err == nil}
 	case "model-release":
 		app.ReleaseLocalModel(request.ModelHandle)
 		result = map[string]bool{"released": true}

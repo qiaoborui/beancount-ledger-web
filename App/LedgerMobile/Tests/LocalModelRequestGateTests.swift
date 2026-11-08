@@ -97,6 +97,53 @@ final class LocalModelRequestGateTests: XCTestCase {
         XCTAssertEqual(sequence.first, "write", "a queued writer must not be overtaken by a later reader")
     }
 
+    func testWriterLaneIsExclusiveAndFirstComeFirstServed() async {
+        let lane = LocalModelWriterLane()
+        let order = Recorder()
+        await lane.acquire()
+        var writers: [Task<Void, Never>] = []
+        for index in 0..<3 {
+            writers.append(Task {
+                await lane.acquire()
+                await order.append("writer-\(index)")
+                await lane.release()
+            })
+            // Queue them in a known order.
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let whileHeld = await order.values
+        XCTAssertTrue(whileHeld.isEmpty, "no writer may enter while another holds the lane")
+        await lane.release()
+        for writer in writers { await writer.value }
+        let sequence = await order.values
+        XCTAssertEqual(sequence, ["writer-0", "writer-1", "writer-2"])
+    }
+
+    /// The lane is what lets a publication export without blocking reads: a
+    /// writer holding only the lane must leave the gate open to readers, while
+    /// a second writer still waits.
+    func testReadersIgnoreTheWriterLane() async {
+        let gate = LocalModelRequestGate()
+        let lane = LocalModelWriterLane()
+        let order = Recorder()
+        await lane.acquire()
+        let secondWriter = Task {
+            await lane.acquire()
+            await order.append("write")
+            await lane.release()
+        }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        await gate.acquireRead()
+        await order.append("read")
+        await gate.releaseRead()
+        let whileHeld = await order.values
+        XCTAssertEqual(whileHeld, ["read"], "a reader must not wait for the writer lane")
+        await lane.release()
+        await secondWriter.value
+        let sequence = await order.values
+        XCTAssertEqual(sequence, ["read", "write"])
+    }
+
     private actor Recorder {
         private(set) var values: [String] = []
         func append(_ value: String) { values.append(value) }

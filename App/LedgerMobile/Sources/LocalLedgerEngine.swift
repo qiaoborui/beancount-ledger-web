@@ -312,6 +312,12 @@ struct LocalStageRetention: Sendable, Equatable {
 
 actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     static let shared = EmbeddedLocalLedgerEngine()
+
+    /// Writes the canonical stream for `workspace` to `output`. The default is
+    /// the embedded Python exporter; tests wrap it to observe or pause it.
+    typealias CanonicalExporter = @Sendable (_ workspace: URL, _ entrypoint: String, _ output: URL) async throws
+        -> EmbeddedBeancountValidator.StreamDescriptor
+
     // Committed generation directories are immutable. Keep a handle for each of
     // the few most recently used ledgers (the core holds a bounded LRU of the
     // same size and may evict earlier); mutable stages always load their
@@ -319,6 +325,19 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     private var canonicalHandles = LocalCanonicalHandleCache()
     // Stage registrations retained by a publish validation, awaiting promotion.
     private var retainedStages = LocalStageRetention()
+    private let gate: LocalModelRequestGate
+    private let lane: LocalModelWriterLane
+    private let exportCanonical: CanonicalExporter
+
+    init(gate: LocalModelRequestGate = .shared, lane: LocalModelWriterLane = .shared,
+         exporter: @escaping CanonicalExporter = { workspace, entrypoint, output in
+             try await EmbeddedBeancountValidator.shared.exportCanonical(
+                 workspace: workspace, entryFile: entrypoint, to: output)
+         }) {
+        self.gate = gate
+        self.lane = lane
+        exportCanonical = exporter
+    }
 
     /// Resolving a committed read also marks that ledger most recently used, so
     /// the memory-pressure eviction keeps the ledger the user is viewing rather
@@ -357,35 +376,43 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         // pages and analysis reads share the gate instead of queueing. Anything
         // that may register, export or release a handle falls through to the
         // exclusive path below.
-        await LocalModelRequestGate.shared.acquireRead()
+        await gate.acquireRead()
         do {
-            if let live = try concurrentResponse(request) {
-                await LocalModelRequestGate.shared.releaseRead()
+            if let live = try await concurrentResponse(request) {
+                await gate.releaseRead()
                 return live
             }
         } catch {
-            await LocalModelRequestGate.shared.releaseRead()
+            await gate.releaseRead()
             throw error
         }
-        await LocalModelRequestGate.shared.releaseRead()
+        await gate.releaseRead()
 
-        await LocalModelRequestGate.shared.acquireWrite()
+        // Registration and staging requests write the scratch directory and the
+        // stage slot (lane) and change the committed handle table (gate).
+        await lane.acquire()
+        await gate.acquireWrite()
         do {
             try Task.checkCancellation()
             let result = try await serializedResponse(request)
-            await LocalModelRequestGate.shared.releaseWrite()
+            await gate.releaseWrite()
+            await lane.release()
             return result
         } catch {
-            await LocalModelRequestGate.shared.releaseWrite()
+            await gate.releaseWrite()
+            await lane.release()
             throw error
         }
     }
 
     /// Serve a request from the live committed handle. Caller must hold the read
-    /// lock: there is no suspension point between the handle check and
-    /// `nativeResponse`, so the handle cannot be released underneath it.
+    /// lock. The dispatch suspends this actor, so other readers run alongside;
+    /// the handle stays valid because only the exclusive gate releases committed
+    /// handles, apart from a reader that just saw the same handle reported
+    /// unavailable (it then is for every reader). The core also keeps a
+    /// resolved model alive for the request that resolved it.
     /// Returns nil when this request needs the exclusive path.
-    private func concurrentResponse(_ original: LocalLedgerEngineRequest) throws -> LocalLedgerResponse? {
+    private func concurrentResponse(_ original: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse? {
         #if canImport(LedgerCore)
         let request = normalized(original)
         guard !request.staging, let cached = cachedHandle(request) else { return nil }
@@ -394,7 +421,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         small.modelHandle = cached.handle
         let pageInterval = LocalLedgerPerformance.begin(.goPage)
         defer { LocalLedgerPerformance.end(pageInterval) }
-        let result = try nativeResponse(small)
+        let result = try await Self.nativeResponse(small)
         guard !result.modelUnavailable else {
             // The generation moved or the core evicted the model. Drop the stale
             // handle and redo this request through the exclusive path, which
@@ -421,13 +448,14 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         return request
     }
 
+    /// Caller holds the lane and the exclusive gate.
     private func serializedResponse(_ original: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse {
         #if canImport(LedgerCore)
         let request = normalized(original)
         let handle: String
         if !request.staging, let cached = cachedHandle(request) {
             handle = cached.handle
-        } else if request.staging, let adopted = adoptStageModel(request) {
+        } else if request.staging, let adopted = await adoptStageModel(request) {
             // The staged tree is a byte-identical clone of the committed parent
             // generation, so one shallow copy of that model serves this request
             // instead of importing the whole canonical stream again. The adopted
@@ -444,7 +472,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         small.modelHandle = handle
         let pageInterval = LocalLedgerPerformance.begin(.goPage)
         defer { LocalLedgerPerformance.end(pageInterval) }
-        let result = try nativeResponse(small)
+        let result = try await Self.nativeResponse(small)
         // Fail stale reads safely; do not retry financial writes automatically.
         if result.modelUnavailable {
             forget(handle)
@@ -463,7 +491,8 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         #if canImport(LedgerCore)
         let request = normalized(original)
         guard !request.staging else { return nil }
-        await LocalModelRequestGate.shared.acquireWrite()
+        await lane.acquire()
+        await gate.acquireWrite()
         do {
             try Task.checkCancellation()
             if let stale, cachedHandle(request)?.handle == stale {
@@ -478,10 +507,12 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
                 remember(registered.handle, version: registered.version, request: request)
                 handle = registered.handle
             }
-            await LocalModelRequestGate.shared.releaseWrite()
+            await gate.releaseWrite()
+            await lane.release()
             return handle
         } catch {
-            await LocalModelRequestGate.shared.releaseWrite()
+            await gate.releaseWrite()
+            await lane.release()
             throw error
         }
         #else
@@ -496,22 +527,43 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     /// `retainForPromotion` is only for a tree that is about to be published;
     /// the retained model is then promoted into the generation after commit so
     /// the first read reuses it instead of importing the stream again.
+    ///
+    /// Validation holds the writer lane throughout but never blocks committed
+    /// reads for the export. Nothing it does before the retention bookkeeping is
+    /// visible to a committed read:
+    /// - `model-source` hashes the staged tree. The Go source memo it shares
+    ///   with reads is mutex-guarded and keyed by full stat identity.
+    /// - The Python export runs on `EmbeddedBeancountValidator`, whose
+    ///   interpreter only validation and registration use; committed reads
+    ///   never enter Python. Its loader-cache environment variables are read by
+    ///   Python only, and the Go runtime keeps its own copy of the environment
+    ///   from process start. Output goes to a fresh scratch file that only lane
+    ///   holders create, list or delete.
+    /// - The stream cache and the stage registration belong to lane holders
+    ///   too: committed reads resolve committed handles only, never the stage
+    ///   slot, and never read the stream cache.
+    /// - Warming builds the stage's own LedgerSnapshot under its own cache
+    ///   mutex. Reads of committed models use different caches.
+    /// Only the retention bookkeeping, which can release native handles, takes
+    /// the gate exclusively, for a few microseconds. Publication still waits
+    /// for this whole function, so a tree that fails validation is never
+    /// published, and the generation a read sees changes only when the
+    /// workspace swaps its revision pointer after validation succeeds.
     func validateCanonical(workspaceRoot: String, runtimeRoot: String, entrypoint: String,
                            retainForPromotion: Bool = false) async throws {
-        // Export writes the shared scratch directory and can replace the cached
-        // stream, so it takes the gate exclusively.
-        await LocalModelRequestGate.shared.acquireWrite()
+        await lane.acquire()
         do {
             try Task.checkCancellation()
             try await serializedValidateCanonical(workspaceRoot: workspaceRoot, runtimeRoot: runtimeRoot,
                 entrypoint: entrypoint, retainForPromotion: retainForPromotion)
-            await LocalModelRequestGate.shared.releaseWrite()
+            await lane.release()
         } catch {
-            await LocalModelRequestGate.shared.releaseWrite()
+            await lane.release()
             throw error
         }
     }
 
+    /// Caller holds the lane, not the gate.
     private func serializedValidateCanonical(workspaceRoot: String, runtimeRoot: String, entrypoint: String,
                                              retainForPromotion: Bool) async throws {
         #if canImport(LedgerCore)
@@ -521,7 +573,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
             entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
         command.operation = "model-source"
         struct Version: Decodable { let sourceVersion: String }
-        let version = try nativeResponse(command).decode(Version.self)
+        let version = try await Self.nativeResponse(command).decode(Version.self)
         let runtime = URL(fileURLWithPath: runtimeRoot)
         let cache = LocalCanonicalStreamCache(runtimeRoot: runtime)
         if !cache.contains(version.sourceVersion) {
@@ -532,8 +584,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
             }
             let output = directory.appendingPathComponent(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + ".records")
             defer { try? FileManager.default.removeItem(at: output) }
-            let descriptor = try await EmbeddedBeancountValidator.shared.exportCanonical(
-                workspace: URL(fileURLWithPath: workspaceRoot), entryFile: entrypoint, to: output)
+            let descriptor = try await exportCanonical(URL(fileURLWithPath: workspaceRoot), entrypoint, output)
             cache.store(output, sourceVersion: version.sourceVersion, descriptor: descriptor)
         }
         if retainForPromotion {
@@ -549,7 +600,27 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     }
 
     #if canImport(LedgerCore)
-    private func nativeResponse(_ request: LocalLedgerEngineRequest) throws -> LocalLedgerResponse {
+    /// A bridge call blocks its thread for as long as Go works, which for a cold
+    /// snapshot build or a stream registration is seconds. Running it on the
+    /// actor serialized readers the gate admits together and parked a Swift
+    /// cooperative-pool thread. This queue takes the blocking call instead, and
+    /// the actor suspends meanwhile. The Go side is safe for concurrent reads:
+    /// the model registry, each LedgerCache (whose mutex also makes concurrent
+    /// first reads join one snapshot build), the source memo and the page cache
+    /// are mutex-guarded, built snapshots are immutable, and the Agent already
+    /// reads committed models concurrently with the engine.
+    private static let nativeQueue = DispatchQueue(label: "LedgerMobile.native-dispatch",
+        qos: .userInitiated, attributes: .concurrent)
+
+    private static func nativeResponse(_ request: LocalLedgerEngineRequest) async throws -> LocalLedgerResponse {
+        try await withCheckedThrowingContinuation { continuation in
+            nativeQueue.async { continuation.resume(with: Result { try nativeResponseNow(request) }) }
+        }
+    }
+
+    /// Blocking form, kept for control operations that return immediately
+    /// (`model-release`, memory limits).
+    private static func nativeResponseNow(_ request: LocalLedgerEngineRequest) throws -> LocalLedgerResponse {
         let encoded = try JSONEncoder().encode(request)
         return LocalLedgerResponse(envelope: Data(MobilecoreDispatchJSON(String(decoding: encoded, as: UTF8.self)).utf8))
     }
@@ -565,9 +636,11 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     /// (most recently used) ledger stays registered so the visible view keeps
     /// serving without a canonical re-register. The native side trims its LRU in
     /// one atomic operation instead of a per-handle release loop, so it cannot be
-    /// observed half-evicted; staged models are intentionally left alone.
+    /// observed half-evicted; staged models are intentionally left alone. It
+    /// touches no writer-owned state, so it skips the lane and does not wait
+    /// behind a publication's export.
     func releaseIdleModelsForMemoryPressure() async {
-        await LocalModelRequestGate.shared.acquireWrite()
+        await gate.acquireWrite()
         let plan = canonicalHandles.releaseIdleModels()
         #if canImport(LedgerCore)
         _ = try? Self.nativeControlResponse(
@@ -575,7 +648,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         #else
         _ = plan
         #endif
-        await LocalModelRequestGate.shared.releaseWrite()
+        await gate.releaseWrite()
     }
 
     /// Apply the native Go soft heap limit (GOMEMLIMIT) from the shell's
@@ -608,14 +681,15 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     #endif
 
     /// `model-release` needs the native core; without it there is no handle to
-    /// release either.
+    /// release either. Releasing only drops a registry entry, so it stays a
+    /// synchronous call and never suspends a bookkeeping loop.
     private func releaseHandle(_ handle: String, request: LocalLedgerEngineRequest) {
         #if canImport(LedgerCore)
         var command = request
         command.operation = "model-release"
         command.modelHandle = handle
         command.body = nil; command.importFile = nil; command.canonical = nil
-        _ = try? nativeResponse(command)
+        _ = try? Self.nativeResponseNow(command)
         #endif
     }
 
@@ -628,7 +702,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         command.operation = "model-source"
         command.body = nil; command.importFile = nil; command.canonical = nil; command.modelHandle = nil
         struct Version: Decodable { let sourceVersion: String }
-        let version = try nativeResponse(command).decode(Version.self).sourceVersion
+        let version = try await Self.nativeResponse(command).decode(Version.self).sourceVersion
         return (try await registerCanonicalModel(command, version: version), version)
     }
 
@@ -638,6 +712,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     /// that is kept in the build-scoped cache so the next registration of the
     /// same source skips NDJSON parsing. A snapshot Go refuses is dropped and the
     /// stream path runs as before, so the snapshot can only ever save time.
+    /// Caller holds the lane.
     private func registerCanonicalModel(_ request: LocalLedgerEngineRequest, version: String) async throws -> String {
         struct Registration: Decodable { let handle: String }
         var command = request
@@ -649,7 +724,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
             defer { try? FileManager.default.removeItem(at: snapshot.url) }
             try Task.checkCancellation()
             command.streamFile = snapshot.name
-            if let handle = try? nativeResponse(command).decode(Registration.self).handle {
+            if let handle = try? await Self.nativeResponse(command).decode(Registration.self).handle {
                 return handle
             }
             cache.remove(version, format: .snapshot)
@@ -663,7 +738,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         }
         try Task.checkCancellation()
         command.streamFile = scratch.name
-        let handle = try nativeResponse(command).decode(Registration.self).handle
+        let handle = try await Self.nativeResponse(command).decode(Registration.self).handle
         cache.storeSnapshot(written, sourceVersion: version)
         return handle
     }
@@ -691,9 +766,9 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
 
     /// The owned `canonical-stream` scratch directory, emptied of earlier
     /// scratch files. All exporter/ingestion work is serialized by the
-    /// process-wide gate. Only exact owned scratch names (`<32 hex>.records` and
-    /// the `<32 hex>.snap1` Go writes beside them) are removed; imports/receipts
-    /// stay untouched.
+    /// process-wide writer lane, so no other writer's file is in flight here.
+    /// Only exact owned scratch names (`<32 hex>.records` and the `<32 hex>.snap1`
+    /// Go writes beside them) are removed; imports/receipts stay untouched.
     private func canonicalScratchDirectory(runtimeRoot: String) throws -> URL {
         let runtime = URL(fileURLWithPath: runtimeRoot)
         let directory = runtime.appendingPathComponent("canonical-stream")
@@ -730,8 +805,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         // instead of re-running the Python loader over the whole ledger.
         let cache = LocalCanonicalStreamCache(runtimeRoot: runtime)
         if !cache.restore(version, to: output) {
-            let descriptor = try await EmbeddedBeancountValidator.shared.exportCanonical(
-                workspace: URL(fileURLWithPath: workspaceRoot), entryFile: entrypoint, to: output)
+            let descriptor = try await exportCanonical(URL(fileURLWithPath: workspaceRoot), entrypoint, output)
             cache.store(output, sourceVersion: version, descriptor: descriptor)
         }
         return CanonicalStreamScratch(name: name, url: output)
@@ -740,7 +814,7 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     /// Adopts the committed parent generation's model as this staging request's
     /// one-shot model when both trees provably hold the same bytes. Any missing
     /// precondition returns nil and the caller registers from scratch.
-    private func adoptStageModel(_ request: LocalLedgerEngineRequest) -> String? {
+    private func adoptStageModel(_ request: LocalLedgerEngineRequest) async -> String? {
         guard let committed = LocalModelHandleMatching.adoptionSource(in: canonicalHandles.handles,
             entrypoint: request.entrypoint, stagingRoot: request.workspaceRoot) else { return nil }
         var command = request
@@ -750,13 +824,15 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
         command.staging = true
         command.canonical = nil; command.body = nil; command.importFile = nil
         struct Adoption: Decodable { let handle: String }
-        guard let adopted = try? nativeResponse(command).decode(Adoption.self) else { return nil }
+        guard let adopted = try? await Self.nativeResponse(command).decode(Adoption.self) else { return nil }
         return adopted.handle
     }
 
     /// Registers the publish candidate's final staged content and keeps it until
     /// publication promotes it. Only stage trees qualify: a generation tree is
     /// already committed, and a preview that is never confirmed discards it.
+    /// Caller holds the lane; see `validateCanonical` for why the registration
+    /// and the warm-up need not exclude committed reads.
     private func retainStageModel(workspaceRoot: String, runtimeRoot: String, entrypoint: String,
                                   version: String) async throws {
         let container = URL(fileURLWithPath: workspaceRoot)
@@ -774,14 +850,31 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
             entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
         command.staging = true
         let registerInterval = LocalLedgerPerformance.begin(.goModelRegister)
-        defer { LocalLedgerPerformance.end(registerInterval) }
-        let handle = try await registerCanonicalModel(command, version: version)
+        let handle: String
+        do {
+            handle = try await registerCanonicalModel(command, version: version)
+            LocalLedgerPerformance.end(registerInterval)
+        } catch {
+            LocalLedgerPerformance.end(registerInterval)
+            throw error
+        }
+        // Build the stage's derived snapshot now, while reads keep running, so
+        // promotion hands the generation a warm cache and the first read after
+        // the save does not rebuild it. Best effort: without it the core starts
+        // the same build when it promotes.
+        var warm = command
+        warm.operation = "model-warm"
+        warm.modelHandle = handle
+        _ = try? await Self.nativeResponse(warm)
         command.operation = "model-register"
         command.sourceVersion = version
         let entry = LocalStageRetention.Entry(handle: handle, workspace: workspaceRoot, sourceVersion: version)
+        // Releasing a displaced stage changes the native handle table.
+        await gate.acquireWrite()
         for released in retainedStages.retain(entry, for: key) {
             releaseHandle(released, request: command)
         }
+        await gate.releaseWrite()
     }
     #endif
 
@@ -790,7 +883,8 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
     /// register through the full path; callers never observe an error.
     func promoteRetainedStageModel(ledgerRoot: URL, runtimeRoot: URL, entrypoint: String, generationRoot: URL) async {
         #if canImport(LedgerCore)
-        await LocalModelRequestGate.shared.acquireWrite()
+        await lane.acquire()
+        await gate.acquireWrite()
         let key = Self.retentionKey(ledgerRoot: ledgerRoot.path, entrypoint: entrypoint)
         if let retained = retainedStages.take(key) {
             var command = LocalLedgerEngineRequest(workspaceRoot: generationRoot.path, runtimeRoot: runtimeRoot.path,
@@ -799,19 +893,21 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
             command.modelHandle = retained.handle
             command.sourceVersion = retained.sourceVersion
             struct Registration: Decodable { let handle: String }
-            if let promoted = try? nativeResponse(command).decode(Registration.self) {
+            if let promoted = try? await Self.nativeResponse(command).decode(Registration.self) {
                 remember(promoted.handle, version: retained.sourceVersion, request: command)
             } else {
                 releaseHandle(retained.handle, request: command)
             }
         }
-        await LocalModelRequestGate.shared.releaseWrite()
+        await gate.releaseWrite()
+        await lane.release()
         #endif
     }
 
     func discardRetainedStageModel(ledgerRoot: URL, entrypoint: String) async {
         #if canImport(LedgerCore)
-        await LocalModelRequestGate.shared.acquireWrite()
+        await lane.acquire()
+        await gate.acquireWrite()
         let key = Self.retentionKey(ledgerRoot: ledgerRoot.path, entrypoint: entrypoint)
         if let retained = retainedStages.take(key) {
             let command = LocalLedgerEngineRequest(workspaceRoot: ledgerRoot.path,
@@ -819,8 +915,14 @@ actor EmbeddedLocalLedgerEngine: LocalLedgerEngine {
                 entrypoint: entrypoint, method: "GET", path: "/api/ledger/version")
             releaseHandle(retained.handle, request: command)
         }
-        await LocalModelRequestGate.shared.releaseWrite()
+        await gate.releaseWrite()
+        await lane.release()
         #endif
+    }
+
+    /// Test seam: whether a stage is retained for `ledgerRoot`/`entrypoint`.
+    func hasRetainedStage(ledgerRoot: URL, entrypoint: String) -> Bool {
+        retainedStages.entry(for: Self.retentionKey(ledgerRoot: ledgerRoot.path, entrypoint: entrypoint)) != nil
     }
 
 }

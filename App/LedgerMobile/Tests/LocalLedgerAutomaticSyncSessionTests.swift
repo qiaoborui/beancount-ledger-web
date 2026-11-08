@@ -9,6 +9,15 @@ final class LocalLedgerAutomaticSyncSessionTests: XCTestCase {
     private static let disabledPrefix = "ledger.mobile.auto-sync-disabled."
     private static let pausedPrefix = "ledger.mobile.auto-sync-paused."
 
+    override func setUp() async throws {
+        try await super.setUp()
+        // The local widget debounce has its own test. Elsewhere it only stretches
+        // how long publication assertions wait on a loaded simulator.
+        let previous = LedgerSession.localWidgetPublishDebounceNanoseconds
+        LedgerSession.localWidgetPublishDebounceNanoseconds = 50_000_000
+        addTeardownBlock { @MainActor in LedgerSession.localWidgetPublishDebounceNanoseconds = previous }
+    }
+
     private actor Gate {
         let entered: XCTestExpectation
         private var continuation: CheckedContinuation<Void, Never>?
@@ -332,6 +341,123 @@ final class LocalLedgerAutomaticSyncSessionTests: XCTestCase {
         XCTAssertNotEqual(after?.id, before?.id)
         XCTAssertEqual(fixture.store.publishedRevision(), after?.id)
         XCTAssertEqual(fixture.store.load()?.expense.amount, 77)
+    }
+
+    func testAutomaticSyncRefreshDecisionFollowsWorkspaceRevision() {
+        let presented = UUID(), other = UUID()
+        XCTAssertFalse(LedgerSession.automaticSyncRequiresRefresh(currentRevisionID: presented, presentedRevisionID: presented),
+            "a push moves baseCommit but not the revision the save already presented")
+        XCTAssertTrue(LedgerSession.automaticSyncRequiresRefresh(currentRevisionID: other, presentedRevisionID: presented),
+            "a pull or merge commits a revision nobody presented")
+        XCTAssertTrue(LedgerSession.automaticSyncRequiresRefresh(currentRevisionID: other, presentedRevisionID: nil))
+        XCTAssertFalse(LedgerSession.automaticSyncRequiresRefresh(currentRevisionID: nil, presentedRevisionID: presented))
+    }
+
+    /// A save refreshes onto its own revision; the push that follows must not
+    /// reload the ledger again. A pull that commits a new revision still does.
+    func testAutomaticPushAfterSaveSkipsRefreshButPullRefreshes() async throws {
+        let fixture = try await fixture()
+        fixture.authenticator.accepts = true
+        let firstFetch = expectation(description: "foreground eligibility starts initial fetch")
+        await fixture.git.observeNextFetch(firstFetch)
+        let session = fixture.session()
+        defer { session.chooseLedger() }
+        await session.start()
+        XCTAssertEqual(session.phase, .ready, session.errorMessage ?? "")
+        await fulfillment(of: [firstFetch], timeout: 3)
+        try await waitForSyncToSettle(session, git: fixture.git)
+
+        let pushed = expectation(description: "save pushes")
+        await fixture.git.observeNextPush(pushed)
+        let repository = try XCTUnwrap(session.localRepository)
+        let draft = try await repository.readFile(path: "main.bean")
+        try await repository.saveFile(draft, text: "; synthetic expense 73\n")
+        await session.refresh() // What an in-app save does before its push.
+        let saved = try await repository.workspace.currentRevision()
+        XCTAssertEqual(session.localTransactionPresentationRevision, saved?.id)
+        // No list rows exist here, so any same-revision refresh bumps this.
+        let reloadID = session.localTransactionReloadID
+        await fulfillment(of: [pushed], timeout: 5)
+        try await waitForSyncToSettle(session, git: fixture.git)
+        XCTAssertEqual(session.localSyncStatus?.phase, .synced)
+        XCTAssertEqual(session.localTransactionReloadID, reloadID, "the push must not refresh the presented ledger")
+        let afterPush = try await repository.workspace.currentRevision()
+        XCTAssertEqual(afterPush?.id, saved?.id)
+
+        await fixture.git.setRemote("; synthetic expense 88\n")
+        let fetched = expectation(description: "pull fetch")
+        await fixture.git.observeNextFetch(fetched)
+        // The save notification queues an automatic pass after its debounce.
+        NotificationCenter.default.post(name: LocalLedgerRepository.didSaveNotification, object: fixture.descriptor.id)
+        await fulfillment(of: [fetched], timeout: 5)
+        try await waitForSyncToSettle(session, git: fixture.git)
+        let pulled = try await repository.workspace.currentRevision()
+        XCTAssertNotEqual(pulled?.id, saved?.id)
+        let deadline = Date().addingTimeInterval(3)
+        while session.localTransactionPresentationRevision != pulled?.id, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(session.localTransactionPresentationRevision, pulled?.id, "a pulled revision is presented")
+    }
+
+    /// Reloads arrive in bursts (save, refresh, sync). Only the last needs the
+    /// widget's reports, and leaving the foreground must not lose it.
+    func testLocalWidgetPublishCoalescesBurstsAndFlushesOnBackground() async throws {
+        let previous = LedgerSession.localWidgetPublishDebounceNanoseconds
+        defer { LedgerSession.localWidgetPublishDebounceNanoseconds = previous }
+        LedgerSession.localWidgetPublishDebounceNanoseconds = 400_000_000
+        let fixture = try await fixture()
+        fixture.authenticator.accepts = true
+        let session = fixture.session(enabled: false)
+        defer { session.chooseLedger() }
+        func reportCount() async -> Int { await fixture.engine.requests.filter { $0.path == "/api/ledger/home-report" }.count }
+        await session.start()
+        XCTAssertEqual(session.phase, .ready, session.errorMessage ?? "")
+        var deadline = Date().addingTimeInterval(5)
+        while fixture.store.load() == nil, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertNotNil(fixture.store.load())
+
+        await fixture.engine.resetRequests()
+        // A new day changes the publish key, so none of these can short-circuit.
+        fixture.clock.now = ISO8601DateFormatter().date(from: "2026-09-16T04:00:00Z")!
+        for _ in 0..<3 { await session.refresh() }
+        XCTAssertTrue(session.hasPendingWidgetPublish)
+        deadline = Date().addingTimeInterval(5)
+        while await reportCount() < 4, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try await Task.sleep(for: .milliseconds(600))
+        let coalesced = await reportCount()
+        XCTAssertEqual(coalesced, 4, "three reloads publish the widget once")
+
+        LedgerSession.localWidgetPublishDebounceNanoseconds = 60_000_000_000
+        await fixture.engine.resetRequests()
+        fixture.clock.now = ISO8601DateFormatter().date(from: "2026-09-17T04:00:00Z")!
+        await session.refresh()
+        XCTAssertTrue(session.hasPendingWidgetPublish)
+        let beforeFlush = await reportCount()
+        XCTAssertEqual(beforeFlush, 0, "still waiting out the debounce")
+        await session.updateActivity(isActive: false, isBackground: true)
+        XCTAssertFalse(session.hasPendingWidgetPublish)
+        deadline = Date().addingTimeInterval(5)
+        while await reportCount() < 4, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        let flushed = await reportCount()
+        XCTAssertEqual(flushed, 4, "backgrounding publishes the pending snapshot immediately")
+        deadline = Date().addingTimeInterval(5)
+        while fixture.store.load()?.insights?.updatedAt.hasPrefix("2026-09-17") != true, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(fixture.store.load()?.insights?.updatedAt.prefix(10), "2026-09-17")
+
+        // A reload that finishes after the transition (a save backgrounded at
+        // once) would otherwise sleep out its debounce in a suspended app.
+        await fixture.engine.resetRequests()
+        fixture.clock.now = ISO8601DateFormatter().date(from: "2026-09-18T04:00:00Z")!
+        await session.refresh()
+        XCTAssertFalse(session.hasPendingWidgetPublish, "a reload while backgrounded publishes at once")
+        deadline = Date().addingTimeInterval(5)
+        while fixture.store.load()?.insights?.updatedAt.hasPrefix("2026-09-18") != true, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(fixture.store.load()?.insights?.updatedAt.prefix(10), "2026-09-18")
     }
 
     func testForegroundSaveNotificationAutomaticallyPushesValidatedLocalChange() async throws {

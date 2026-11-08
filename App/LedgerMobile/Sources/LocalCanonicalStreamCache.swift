@@ -16,8 +16,9 @@ import Foundation
 /// Both are pinned by size and SHA-256 and live under the build fingerprint,
 /// because each is a product of this build's exporter and Go core.
 ///
-/// Callers serialize access through `LocalModelRequestGate`, which also guards
+/// Callers serialize access through `LocalModelWriterLane`, which also guards
 /// the sibling `canonical-stream` scratch directory the entries are linked into.
+/// Committed reads never touch either, so they do not wait for that lane.
 struct LocalCanonicalStreamCache {
     enum Format: String, CaseIterable {
         case records

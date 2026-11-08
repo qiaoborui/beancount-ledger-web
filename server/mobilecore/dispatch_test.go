@@ -90,7 +90,7 @@ func TestDispatchModelPromotionOperationsAreRouted(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "main.bean"), []byte("option \"operating_currency\" \"CNY\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, operation := range []string{"model-promote", "model-adopt"} {
+	for _, operation := range []string{"model-promote", "model-adopt", "model-warm"} {
 		request, err := json.Marshal(map[string]any{"version": 1, "operation": operation,
 			"workspaceRoot": root, "modelHandle": "unknown", "sourceVersion": "version"})
 		if err != nil {

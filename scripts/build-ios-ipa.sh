@@ -57,6 +57,13 @@ if [[ "$marketing_version" != "$stored_version" ]]; then
   echo "Newest release tag v$release_version disagrees with project.yml MARKETING_VERSION $stored_version. Refresh project.yml from the tag before packaging." >&2
   exit 1
 fi
+# Recorded in build-info.txt before the build-number bump below dirties
+# project.yml; publish-sidestore-release.py refuses anything but "clean".
+if [[ -z "$(git -C "$repo_root" status --porcelain --untracked-files=no)" ]]; then
+  worktree_state=clean
+else
+  worktree_state=dirty
+fi
 current_build="$(sed -n 's/^ *CURRENT_PROJECT_VERSION: *"\{0,1\}\([0-9][0-9]*\)"\{0,1\} *$/\1/p' project.yml | head -n 1)"
 build_number="$(( ${current_build:-0} + 1 ))"
 
@@ -191,6 +198,7 @@ shasum -a 256 "$ipa_name" > "$ipa_name.sha256"
   xcodebuild -version
   echo "iPhoneOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
   echo "Source: $(git -C "$repo_root" rev-parse HEAD)"
+  echo "Worktree: $worktree_state"
   echo "App: $version ($build)"
   echo 'Signing: ad-hoc; install and re-sign with SideStore / iLoader / AltStore'
   echo 'Distribution: private local use only; public redistribution remains gated'
