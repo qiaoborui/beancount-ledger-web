@@ -60,13 +60,9 @@ struct AccountsView: View {
         ).filter { !$0.rows.isEmpty }
     }
 
-    private var sections: [AccountBalanceSection] {
-        allSections.filter { section in
-            selectedFilter.matches(section: section)
-        }
-    }
-
-    private var totals: BalanceSheetTotals {
+    /// Every derived value reads the same sections. Computing them through
+    /// separate properties rebuilt the account sections several times per body.
+    private func totals(in allSections: [AccountBalanceSection]) -> BalanceSheetTotals {
         guard let ledger = session.ledger else {
             return BalanceSheetTotals(assets: 0, liabilities: 0, netWorth: 0)
         }
@@ -92,12 +88,15 @@ struct AccountsView: View {
 
     var body: some View {
         let history = trendHistory
+        let allSections = self.allSections
+        let sections = allSections.filter { selectedFilter.matches(section: $0) }
+        let totals = self.totals(in: allSections)
         List {
             if let error = session.errorMessage {
                 Section { StatusBanner(message: error, onDismiss: session.dismissError) }
             }
             Section {
-                netWorthHeader
+                netWorthHeader(totals)
                     .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 12, trailing: 12))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -149,7 +148,7 @@ struct AccountsView: View {
             // rounded surface, so every account keeps its native swipe actions.
             Section {
                 ForEach(sections) { section in
-                    groupCard(section)
+                    groupCard(section, assets: totals.assets)
                 }
             }
             if sections.isEmpty {
@@ -186,7 +185,7 @@ struct AccountsView: View {
 
     // MARK: Net worth
 
-    private var netWorthHeader: some View {
+    private func netWorthHeader(_ totals: BalanceSheetTotals) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(session.accountPeriodBalancesAvailable && (session.ledger?.periodAccountBalancesAvailable ?? false) ? "期末净资产" : "当前净资产")
@@ -203,7 +202,7 @@ struct AccountsView: View {
             }
             BalancedKeyTotalText.value(minorUnits: totals.netWorth, currency: valuationCurrency, color: BalancedPalette.ink, amountsVisible: session.amountsVisible)
                 .accessibilityLabel(session.amountsVisible ? MoneyText.format(minorUnits: totals.netWorth, currency: valuationCurrency) : String(localized: "金额已隐藏"))
-            Text(balanceSheetSubtotalText)
+            Text(balanceSheetSubtotalText(totals))
                 .balancedFont(size: 15)
                 .monospacedDigit()
                 .foregroundStyle(BalancedPalette.meta)
@@ -213,7 +212,7 @@ struct AccountsView: View {
     }
 
     /// "资产 ¥x · 负债 ¥y" under the net-worth figure.
-    private var balanceSheetSubtotalText: String {
+    private func balanceSheetSubtotalText(_ totals: BalanceSheetTotals) -> String {
         let assetsLabel = String(localized: "资产"), liabilitiesLabel = String(localized: "负债")
         guard session.amountsVisible else { return "\(assetsLabel) •••••• · \(liabilitiesLabel) ••••••" }
         let assets = MoneyText.format(minorUnits: totals.assets, currency: valuationCurrency)
@@ -253,15 +252,15 @@ struct AccountsView: View {
             .reduce(0) { $0 + ($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation) }
     }
 
-    private func assetShareText(_ total: Int) -> String? {
-        guard session.amountsVisible, total > 0, totals.assets > 0 else { return nil }
-        return String(localized: "占资产") + " " + String(format: "%.1f%%", Double(total) / Double(totals.assets) * 100)
+    private func assetShareText(_ total: Int, assets: Int) -> String? {
+        guard session.amountsVisible, total > 0, assets > 0 else { return nil }
+        return String(localized: "占资产") + " " + String(format: "%.1f%%", Double(total) / Double(assets) * 100)
     }
 
     /// A group card: the header row, then one List row per account.
     @ViewBuilder
-    private func groupCard(_ section: AccountBalanceSection) -> some View {
-        groupHeader(section)
+    private func groupCard(_ section: AccountBalanceSection, assets: Int) -> some View {
+        groupHeader(section, assets: assets)
             .listRowInsets(EdgeInsets(top: Self.cardGap, leading: Self.cardMargin + Self.cardPadding,
                                       bottom: 0, trailing: Self.cardMargin + Self.cardPadding))
             .listRowBackground(cardBackground(top: true, bottom: false, topGap: Self.cardGap))
@@ -298,9 +297,9 @@ struct AccountsView: View {
         }
     }
 
-    private func groupHeader(_ section: AccountBalanceSection) -> some View {
+    private func groupHeader(_ section: AccountBalanceSection, assets: Int) -> some View {
         let total = groupTotal(section)
-        let share = assetShareText(total)
+        let share = assetShareText(total, assets: assets)
         return HStack(alignment: .center, spacing: 12) {
             Text(section.title)
                 .balancedFont(size: 17, weight: .medium)

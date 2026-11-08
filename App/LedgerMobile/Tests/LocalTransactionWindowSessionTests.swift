@@ -720,7 +720,15 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         await session.refresh()
         let refreshed = try await repository.workspace.currentRevision()
         XCTAssertEqual(revision?.id, refreshed?.id)
-        XCTAssertGreaterThan(session.localTransactionReloadID, before)
+        // The list kept its rows, so the refresh re-read the window itself
+        // instead of signalling the page to restart it a second time.
+        XCTAssertEqual(session.localTransactionReloadID, before)
+        XCTAssertNotNil(session.localTransactionWindow)
+        // With no rows on screen there is nothing to re-read, so the page is told.
+        session.resetLocalTransactionWindow()
+        let beforeEmpty = session.localTransactionReloadID
+        await session.refresh()
+        XCTAssertGreaterThan(session.localTransactionReloadID, beforeEmpty)
         XCTAssertNil(session.localTransactionWindow)
         await session.loadLocalTransactionWindow()
         XCTAssertNotNil(session.localTransactionWindow)
@@ -731,6 +739,74 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertGreaterThan(session.localTransactionReloadID, beforeFailure)
         await session.loadLocalTransactionWindow()
         XCTAssertNotNil(session.localTransactionWindow)
+    }
+
+    /// A refresh onto a newer revision re-reads the same list. The rows stay on
+    /// screen until the first window of that revision replaces them in one
+    /// assignment, instead of blanking to a spinner between two full lists. A
+    /// second caller for the same list joins the read instead of restarting it.
+    func testRefreshAtNewRevisionKeepsRowsUntilFirstWindowReplacesThem() async throws {
+        let (session, engine, repository) = try await fixture()
+        defer { session.chooseLedger() }
+        await session.loadLocalTransactionWindow()
+        let shown = session.localTransactionAccumulatedRows.map(\.id)
+        XCTAssertEqual(shown.count, 3)
+        let reloadID = session.localTransactionReloadID
+        try await advance(repository)
+        await engine.setRowCount(4)
+        let pagesBefore = await engine.pageRequests.count
+        let entered = expectation(description: "new revision window awaiting")
+        let gate = Gate(entered)
+        await engine.pause(gate: gate)
+        let refreshing = Task { await session.refresh() }
+        await fulfillment(of: [entered], timeout: 3)
+        XCTAssertEqual(session.localTransactionAccumulatedRows.map(\.id), shown, "rows stay while the new revision is read")
+        XCTAssertNil(session.localTransactionWindow, "kept rows are stale: no continuation appends onto them")
+        XCTAssertFalse(session.localTransactionHasMore)
+        let joining = Task { await session.ensureLocalTransactionWindow() }
+        await Task.yield()
+        await gate.release()
+        await refreshing.value
+        await joining.value
+        XCTAssertEqual(session.localTransactionAccumulatedRows.count, 4)
+        XCTAssertNotNil(session.localTransactionWindow)
+        XCTAssertNil(session.localTransactionWindowError)
+        XCTAssertEqual(session.localTransactionReloadID, reloadID, "a new revision needs no extra reload signal")
+        let pagesAfter = await engine.pageRequests.count
+        XCTAssertEqual(pagesAfter - pagesBefore, 1, "the joining caller must not restart the first window")
+    }
+
+    /// Rows for another filter are wrong as soon as the filter changes, and a
+    /// re-read that fails must not keep showing the old rows beside its error.
+    func testFilterChangeAndFailedRereadClearRows() async throws {
+        for failedReread in [false, true] {
+            let (session, engine, repository) = try await fixture()
+            await session.loadLocalTransactionWindow()
+            XCTAssertFalse(session.localTransactionAccumulatedRows.isEmpty)
+            let entered = expectation(description: "window awaiting")
+            let gate = Gate(entered)
+            await engine.pause(gate: gate, fail: failedReread)
+            let loading: Task<Void, Never>
+            if failedReread {
+                try await advance(repository)
+                loading = Task { await session.refresh() }
+                await fulfillment(of: [entered], timeout: 3)
+                XCTAssertFalse(session.localTransactionAccumulatedRows.isEmpty)
+            } else {
+                loading = Task { await session.loadLocalTransactionWindow(filter: .init(query: "Needle")) }
+                await fulfillment(of: [entered], timeout: 3)
+                XCTAssertTrue(session.localTransactionAccumulatedRows.isEmpty, "a new filter clears at once")
+            }
+            await gate.release()
+            await loading.value
+            if failedReread {
+                XCTAssertTrue(session.localTransactionAccumulatedRows.isEmpty)
+                XCTAssertNotNil(session.localTransactionWindowError)
+            } else {
+                XCTAssertEqual(session.localTransactionAccumulatedRows.map(\.source.line), [2])
+            }
+            session.chooseLedger()
+        }
     }
 
     func testReturningToForegroundSignalsWindowReload() async throws {
