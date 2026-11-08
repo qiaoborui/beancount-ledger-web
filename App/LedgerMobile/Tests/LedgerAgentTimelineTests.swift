@@ -131,6 +131,12 @@ final class LedgerAgentTimelineTests: XCTestCase {
         XCTAssertNil(LedgerAgentTimelineItem.answerIndex(running, answerTrails: true))
         // A finished stopped reply draws its text last wherever it fell.
         XCTAssertEqual(LedgerAgentTimelineItem.items(running), [.thinking(index: 0), .tools(indices: [2, 3])])
+        // The live list keeps the trailing reply in place, under the same id
+        // it will have once a tool follows it.
+        let streaming = Array(steps.prefix(2))
+        XCTAssertEqual(LedgerAgentTimelineItem.items(streaming, includesAnswer: true), [.thinking(index: 0), .text(index: 1)])
+        XCTAssertEqual(LedgerAgentTimelineItem.items(running, includesAnswer: true),
+                       [.thinking(index: 0), .text(index: 1), .tools(indices: [2, 3])])
     }
 
     // MARK: Response
@@ -327,6 +333,57 @@ final class LedgerAgentTimelineTests: XCTestCase {
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(conversation.messages.map(\.text), ["十月餐饮", "我查一下。", "再查"])
         XCTAssertEqual(conversation.transcript, "stopped-transcript")
+    }
+
+    @MainActor
+    func testStopMarksARunningToolUnfinished() async throws {
+        let conversation = LedgerAgentConversation()
+        conversation.send("把这笔改成餐饮", reporting: { _, _, _, report in
+            report(.live(.textDelta("我改一下。")))
+            report(.live(.toolStart(.init(name: "edit_file", isError: false, callId: "c1"))))
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 2_000_000) }
+            return .init(ok: false, cancelled: true, stopReason: "aborted")
+        })
+        for _ in 0..<200 where conversation.live?.running.isEmpty != false { try await Task.sleep(nanoseconds: 2_000_000) }
+        conversation.stop()
+        let call = try XCTUnwrap(conversation.messages.last?.steps.last?.call)
+        XCTAssertEqual(call.interrupted, true)
+        XCTAssertFalse(call.editsDraft)
+        try await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(conversation.messages.last?.steps.last?.call?.interrupted, true)
+    }
+
+    @MainActor
+    func testAStopThatReturnsAfterTheNextAnswerKeepsTheNewerTranscript() async throws {
+        let conversation = LedgerAgentConversation()
+        conversation.stopSettleTimeout = 0.05
+        let gate = Gate()
+        conversation.send("十月餐饮", reporting: { _, _, _, report in
+            report(.live(.textDelta("十月餐饮共")))
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 2_000_000) }
+            // A slow tool that does not notice the stop.
+            await gate.wait()
+            return .init(ok: false, reply: "十月餐饮共 812", cancelled: true, transcript: "stopped-transcript",
+                         usage: .init(contextTokens: 300, contextWindow: 1000), stopReason: "aborted")
+        })
+        for _ in 0..<200 where conversation.live?.text != "十月餐饮共" { try await Task.sleep(nanoseconds: 2_000_000) }
+        conversation.stop()
+
+        // The next question gives up waiting and answers on its own.
+        conversation.send("那九月呢", reporting: { _, _, _, _ in
+            .init(ok: true, reply: "九月 600 元。", transcript: "next-transcript",
+                  usage: .init(contextTokens: 500, contextWindow: 1000))
+        })
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.transcript, "next-transcript")
+
+        // The stopped turn returns late: its reply still lands in place,
+        // but the newer transcript and meter stay.
+        await gate.open()
+        for _ in 0..<200 where conversation.messages[1].text != "十月餐饮共 812" { try await Task.sleep(nanoseconds: 2_000_000) }
+        XCTAssertEqual(conversation.messages.map(\.text), ["十月餐饮", "十月餐饮共 812", "那九月呢", "九月 600 元。"])
+        XCTAssertEqual(conversation.transcript, "next-transcript")
+        XCTAssertEqual(conversation.usage?.contextTokens, 500)
     }
 
     // MARK: Saving

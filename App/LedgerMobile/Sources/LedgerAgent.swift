@@ -17,6 +17,8 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
     var preview: String? = nil
     /// What went wrong, for a call that failed.
     var errorText: String? = nil
+    /// The user stopped the turn while the call ran, so it never finished.
+    var interrupted: Bool? = nil
 
     /// The row title, in the words of the design: what was read, then the range
     /// or search term when the arguments carry one.
@@ -83,6 +85,7 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
     /// The tool counts as an edit of the draft in the timeline's summary.
     var editsDraft: Bool {
         ["edit_file", "write_file", "move_file", "copy_file", "delete_file", "save_attachment"].contains(name) && !isError
+            && interrupted != true
     }
 
     private func arrayArgument(_ key: String) -> [String]? {
@@ -234,6 +237,14 @@ struct LedgerAgentLiveTurn: Equatable, Sendable {
 
     var isEmpty: Bool { steps.isEmpty }
 
+    /// The steps as a stopped turn keeps them: a call still running is
+    /// marked unfinished rather than drawn as done.
+    var stoppedSteps: [LedgerAgentStepRecord] {
+        var steps = steps
+        for index in running where steps.indices.contains(index) { steps[index].call?.interrupted = true }
+        return steps
+    }
+
     mutating func apply(_ event: LedgerAgentLiveEvent) {
         switch event {
         case let .thinkingDelta(text):
@@ -310,9 +321,11 @@ enum LedgerAgentTimelineItem: Equatable, Identifiable, Sendable {
 
     /// `answerTrails` leaves the last text step out only when nothing came
     /// after it, as while a turn is still running; otherwise the last text
-    /// step is the answer wherever it fell.
-    static func items(_ steps: [LedgerAgentStepRecord], answerTrails: Bool = false) -> [LedgerAgentTimelineItem] {
-        let answer = answerIndex(steps, answerTrails: answerTrails)
+    /// step is the answer wherever it fell. `includesAnswer` leaves nothing
+    /// out, for the live turn, whose reply keeps its place as tools follow it.
+    static func items(_ steps: [LedgerAgentStepRecord], answerTrails: Bool = false,
+                      includesAnswer: Bool = false) -> [LedgerAgentTimelineItem] {
+        let answer = includesAnswer ? nil : answerIndex(steps, answerTrails: answerTrails)
         var items: [LedgerAgentTimelineItem] = []
         for (index, step) in steps.enumerated() where index != answer {
             switch step.kind {
@@ -1175,10 +1188,22 @@ final class LedgerAgentConversation: ObservableObject {
         let question: UUID?
         /// The partial reply shown at once when the user stopped.
         let message: UUID?
+        /// The note and the new files the stopped question was sent with;
+        /// its transcript tells the model about these, and no others.
+        let note: String?
+        let unannounced: Set<String>
+        /// A newer question stopped waiting for it and went on with the
+        /// older transcript, so its late transcript is no longer the one to
+        /// follow.
+        var stale = false
     }
     private var stopping: Stopping?
     /// How long a new question waits for a stopped turn to return.
-    static let stopSettleTimeout: TimeInterval = 3
+    var stopSettleTimeout: TimeInterval = 3
+    /// The answer that just finished streaming. Its tool groups open as they
+    /// were while live, so the page above the reply keeps its height when
+    /// the answer replaces the live turn.
+    private(set) var streamedAnswer: UUID?
 
     var isRunning: Bool { if case .running = phase { true } else { false } }
     var isWriting: Bool { pending?.status == .writing }
@@ -1300,8 +1325,7 @@ final class LedgerAgentConversation: ObservableObject {
         stepSince = started
         stepCount = 0
         let editor = editor, existing = draft, reopening = reopening, unreviewed = draftUnreviewed
-        let hadChange = pending != nil
-        let message = note.map { $0 + "\n\n" + question } ?? question
+        let hadChange = pending != nil, settleTimeout = stopSettleTimeout
         let report: LedgerAgentSteps.Handler = { [weak self] step in
             Task { @MainActor in self?.advance(step, started: started) }
         }
@@ -1310,10 +1334,16 @@ final class LedgerAgentConversation: ObservableObject {
         task = Task { [weak self] in
             // A turn stopped a moment ago may still bring back its partial
             // reply and the transcript this question should follow.
-            let deadline = Date().addingTimeInterval(Self.stopSettleTimeout)
+            let deadline = Date().addingTimeInterval(settleTimeout)
             while self?.stopping != nil, Date() < deadline, !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 20_000_000)
             }
+            // Gave up waiting: this question follows the older transcript,
+            // and what it builds must not be replaced when the stopped turn
+            // returns late.
+            if let self, let stopped = self.stopping, stopped.started != started { self.stopping?.stale = true }
+            // Read after the wait, which may have settled the note.
+            let message = (self?.note).map { $0 + "\n\n" + question } ?? question
             let outcome: Result<Outcome, Error>
             do {
                 // A copy that cannot be made leaves the turn read-only.
@@ -1430,18 +1460,20 @@ final class LedgerAgentConversation: ObservableObject {
         let turn = liveDraft
         if let turn, Self.hasText(turn.text) {
             let message = LedgerAgentMessage(role: .assistant, text: turn.text, duration: Date().timeIntervalSince(started),
-                                             steps: turn.steps, stopped: true, usage: turn.usage)
+                                             steps: turn.stoppedSteps, stopped: true, usage: turn.usage)
             messages.append(message)
             partial = message.id
+            streamedAnswer = message.id
         }
-        stopping = Stopping(started: started, question: question, message: partial)
+        stopping = Stopping(started: started, question: question, message: partial, note: note, unannounced: unannounced)
         phase = .idle
         endRunning(.stopped)
     }
 
     /// Takes what a stopped turn's native loop returned: its partial reply
     /// replaces the one shown at the stop, or is added when none was, and its
-    /// transcript, which ends on that reply, is what the next question sends.
+    /// transcript, which ends on that reply, is what the next question sends,
+    /// unless a newer question already went on without it.
     private func settleStop(_ response: LedgerAgentTurnResponse, _ stopped: Stopping) {
         stopping = nil
         guard response.cancelled == true else { return }
@@ -1456,12 +1488,21 @@ final class LedgerAgentConversation: ObservableObject {
             messages.insert(.init(role: .assistant, text: reply, toolCalls: response.toolCalls, steps: response.steps,
                                   stopped: true, usage: response.usage), at: at)
         }
-        adoptStopped(response)
+        if !stopped.stale {
+            if let usage = response.usage, usage.fraction != nil { self.usage = usage }
+            // Only what the stopped question carried is now told; a note or
+            // a file that came after it is still for the next question.
+            if let next = response.transcript, !next.isEmpty {
+                transcript = next
+                if note == stopped.note { note = nil }
+                unannounced.subtract(stopped.unannounced)
+            }
+        }
         onSettled?(self)
     }
 
-    /// The transcript of a stopped turn already holds its question, its
-    /// files and any note sent with it.
+    /// The transcript of a turn the native loop stopped already holds its
+    /// question, its files and any note sent with it.
     private func adoptStopped(_ response: LedgerAgentTurnResponse) {
         if let usage = response.usage, usage.fraction != nil { self.usage = usage }
         guard let next = response.transcript, !next.isEmpty else { return }
@@ -1519,6 +1560,8 @@ final class LedgerAgentConversation: ObservableObject {
         turn.apply(event)
         liveDraft = turn
         if case let .usage(usage) = event, usage.fraction != nil { self.usage = usage }
+        // The stream is not quiet; the live footer's slow hint counts from here.
+        stepSince = Date()
         switch event {
         case .textDelta, .thinkingDelta:
             let wait = Self.liveInterval - Date().timeIntervalSince(livePublishedAt ?? .distantPast)
@@ -1568,6 +1611,7 @@ final class LedgerAgentConversation: ObservableObject {
         step = nil
         clearLive()
         stopping = nil
+        streamedAnswer = nil
         usage = nil
         restoredNotice = nil
         draftUnreviewed = false
@@ -1740,11 +1784,13 @@ final class LedgerAgentConversation: ObservableObject {
             let reply = Self.hasText(turn.response.reply) ? turn.response.reply ?? ""
                 : String(localized: "改动已经准备好，请在下方查看并确认。")
             let steps = turn.response.steps.isEmpty ? liveDraft?.steps ?? [] : turn.response.steps
-            messages.append(.init(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
-                                  duration: Date().timeIntervalSince(started),
-                                  rememberedMemory: turn.response.memoryUpdated, ask: turn.response.ask,
-                                  steps: steps, usage: turn.response.usage,
-                                  compacted: turn.response.compacted || liveDraft?.compacted == true))
+            let answer = LedgerAgentMessage(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
+                                            duration: Date().timeIntervalSince(started),
+                                            rememberedMemory: turn.response.memoryUpdated, ask: turn.response.ask,
+                                            steps: steps, usage: turn.response.usage,
+                                            compacted: turn.response.compacted || liveDraft?.compacted == true)
+            if liveDraft != nil { streamedAnswer = answer.id }
+            messages.append(answer)
             if let usage = turn.response.usage, usage.fraction != nil { self.usage = usage }
             phase = .idle
             resumes = 0
@@ -1758,10 +1804,12 @@ final class LedgerAgentConversation: ObservableObject {
             // what it wrote, and the question with it, in the conversation.
             let reply = (turn.response.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if !reply.isEmpty {
-                messages.append(.init(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
-                                      duration: Date().timeIntervalSince(started),
-                                      steps: turn.response.steps.isEmpty ? liveDraft?.steps ?? [] : turn.response.steps,
-                                      stopped: true, usage: turn.response.usage))
+                let answer = LedgerAgentMessage(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
+                                                duration: Date().timeIntervalSince(started),
+                                                steps: turn.response.steps.isEmpty ? liveDraft?.stoppedSteps ?? [] : turn.response.steps,
+                                                stopped: true, usage: turn.response.usage)
+                if liveDraft != nil { streamedAnswer = answer.id }
+                messages.append(answer)
             }
             adoptStopped(turn.response)
             phase = .idle
