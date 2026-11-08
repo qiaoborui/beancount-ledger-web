@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 var ErrLocalModelUnavailable = errors.New("local model unavailable; reload required")
@@ -330,7 +331,20 @@ func PromoteLocalModel(input LocalRequest, handle, expectedVersion string) (stri
 	if !stamps.unusable && !stamps.matches() {
 		return "", errors.New("generation source changed during promotion")
 	}
-	if err := rebindLocalCanonicalModelRoot(stage.model, stage.root, cfg.LedgerRoot); err != nil {
+	// The stage cache mutex excludes a snapshot build still reading the model
+	// (WarmLocalModel). The shell waits for its warm-up before promoting, so
+	// this does not block in practice; it only keeps the in-place rewrite below
+	// from racing a straggler.
+	stage.cache.mu.Lock()
+	built := stage.cache.snapshot
+	stage.cache.snapshot = nil
+	err = rebindLocalCanonicalModelRoot(stage.model, stage.root, cfg.LedgerRoot)
+	var carried *LedgerSnapshot
+	if err == nil {
+		carried = rebaseLocalSnapshotRoot(built, stage.root, cfg.LedgerRoot, version)
+	}
+	stage.cache.mu.Unlock()
+	if err != nil {
 		return "", err
 	}
 	promotedHandle, err := newLocalModelHandle()
@@ -339,9 +353,120 @@ func PromoteLocalModel(input LocalRequest, handle, expectedVersion string) (stri
 	}
 	promoted := bindLocalRegisteredModel(cfg, stage.model, promotedHandle, expectedVersion, stamps, version,
 		false, stage.estimate)
+	if carried != nil {
+		// The registration is not published yet, so nothing else can hold its
+		// cache. These are the values a cold Snapshot would leave behind.
+		promoted.cache.snapshot = carried
+		promoted.cache.version, promoted.cache.versionReadAt = version, time.Now()
+	}
 	localModels.staged = nil
 	insertCommittedLocalModel(promoted)
+	if carried == nil {
+		// No warm stage snapshot to carry: start the build now rather than on
+		// the first read. A read arriving meanwhile waits on the cache mutex for
+		// this same build instead of starting its own.
+		go func() { _, _ = promoted.cache.Snapshot() }()
+	}
 	return promotedHandle, nil
+}
+
+// WarmLocalModel builds the derived LedgerSnapshot of the retained stage
+// registration `handle` before it is promoted. Publication validation calls it
+// right after registering the stage and without holding the shell's exclusive
+// gate, so the build overlaps the commit and committed reads keep running;
+// PromoteLocalModel then carries the snapshot into the generation instead of
+// leaving the first read after a save to rebuild it. The stage is not consumed.
+func WarmLocalModel(handle string) error {
+	if handle == "" {
+		return errors.New("invalid model warm")
+	}
+	localModels.Lock()
+	stage := localModels.staged
+	localModels.Unlock()
+	if stage == nil || stage.handle != handle || !stage.staging {
+		return ErrLocalModelUnavailable
+	}
+	_, err := stage.cache.Snapshot()
+	return err
+}
+
+// rebaseLocalSnapshotRoot moves a snapshot built for a retained stage onto the
+// generation it was published as, or returns nil when it cannot.
+//
+// Stage and generation hold byte-identical sources (promotion proved the same
+// content hash and the snapshot was built for that version), so everything
+// derived from entry content carries over unchanged: balances, prices,
+// accounts, commodities and both sort orders, which compare only dates and
+// lines. Only absolute source locators name the root: transaction sources, the
+// raw source entries and deferred transaction blocks, and parse errors. The
+// semantic entries are the model's own array, which rebindLocalCanonicalModelRoot
+// has already rewritten. The version is the one promotion just computed for
+// the generation, exactly what a cold build would read, and the snapshot gets a
+// fresh read-model identity so no cursor issued before the publish matches it.
+//
+// Caller holds the stage cache mutex and gives the snapshot up: it is rewritten
+// in place. A path outside the old root returns nil, and the caller then lets
+// the generation build its snapshot cold, so an unexpected shape costs time but
+// never a stale locator.
+func rebaseLocalSnapshotRoot(snapshot *LedgerSnapshot, oldRoot, newRoot string, version LedgerVersion) *LedgerSnapshot {
+	if snapshot == nil || snapshot.Version != version.Version {
+		return nil
+	}
+	oldPrefix := oldRoot + string(filepath.Separator)
+	newPrefix := newRoot + string(filepath.Separator)
+	move := func(file *string) bool {
+		switch {
+		case *file == "":
+		case strings.HasPrefix(*file, oldPrefix):
+			*file = newPrefix + strings.TrimPrefix(*file, oldPrefix)
+		default:
+			return false
+		}
+		return true
+	}
+	for index := range snapshot.BeanEntries {
+		// Rebinding the model already moved its (shared) entries.
+		if file := snapshot.BeanEntries[index].File; file != "" && strings.HasPrefix(file, newPrefix) {
+			continue
+		}
+		if !move(&snapshot.BeanEntries[index].File) {
+			return nil
+		}
+	}
+	for index := range snapshot.SourceBeanEntries {
+		if !move(&snapshot.SourceBeanEntries[index].File) {
+			return nil
+		}
+	}
+	for index := range snapshot.BeanErrors {
+		if !move(&snapshot.BeanErrors[index].File) {
+			return nil
+		}
+	}
+	for index := range snapshot.Transactions {
+		if !move(&snapshot.Transactions[index].Source.File) {
+			return nil
+		}
+	}
+	if source := snapshot.localSource; source != nil {
+		for index := range source.controls {
+			if !move(&source.controls[index].File) {
+				return nil
+			}
+		}
+		for index := range source.deferred {
+			if !move(&source.deferred[index].File) {
+				return nil
+			}
+		}
+		// The locator index and the editable view are keyed by the old paths and
+		// built lazily, so start them over instead of rewriting them.
+		snapshot.localSource = &localSourceDrafts{controls: source.controls,
+			controlIndices: source.controlIndices, deferred: source.deferred}
+	}
+	snapshot.LedgerVersion = version
+	snapshot.localReadModelID = localSnapshotSequence.Add(1)
+	return snapshot
 }
 
 // AdoptLocalModel creates the one-shot stage registration for a staging request
