@@ -45,6 +45,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         private var gatedPath = ""
         private var failAfterGate = false
         private(set) var pageRequests: [LocalLedgerEngineRequest] = []
+        private(set) var overviewRequests = 0
         private(set) var bootstrapPaths: [String] = []
         func pause(_ path: String = "/api/ledger/transactions/page", gate: Gate, fail: Bool = false) {
             self.gate = gate
@@ -54,6 +55,7 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
             if request.path == "/api/ledger/version" { return Data("{}".utf8) }
             if request.path == "/api/ledger/overview/categories" {
+                overviewRequests += 1
                 return try OverviewCategoriesFixture.data(start: request.query["start"]!, end: request.query["end"]!)
             }
             if request.path == "/api/ledger/transactions/page" { pageRequests.append(request) }
@@ -720,11 +722,11 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         await session.refresh()
         let refreshed = try await repository.workspace.currentRevision()
         XCTAssertEqual(revision?.id, refreshed?.id)
-        // The list kept its rows, so the refresh re-read the window itself
-        // instead of signalling the page to restart it a second time.
-        XCTAssertEqual(session.localTransactionReloadID, before)
-        XCTAssertNotNil(session.localTransactionWindow)
-        // With no rows on screen there is nothing to re-read, so the page is told.
+        // The list owns the re-read: the refresh keeps the rows, marks them stale
+        // and signals the page once.
+        XCTAssertGreaterThan(session.localTransactionReloadID, before)
+        XCTAssertNil(session.localTransactionWindow)
+        XCTAssertFalse(session.localTransactionAccumulatedRows.isEmpty)
         session.resetLocalTransactionWindow()
         let beforeEmpty = session.localTransactionReloadID
         await session.refresh()
@@ -741,10 +743,11 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertNotNil(session.localTransactionWindow)
     }
 
-    /// A refresh onto a newer revision re-reads the same list. The rows stay on
-    /// screen until the first window of that revision replaces them in one
-    /// assignment, instead of blanking to a spinner between two full lists. A
-    /// second caller for the same list joins the read instead of restarting it.
+    /// A refresh onto a newer revision keeps the rows on screen, marked stale,
+    /// and leaves the re-read to the list: the overview and the refresh's caller
+    /// must not wait on a list that may not be visible. The list's first window
+    /// then replaces the rows in one assignment, and a second caller for the same
+    /// list joins the read instead of restarting it.
     func testRefreshAtNewRevisionKeepsRowsUntilFirstWindowReplacesThem() async throws {
         let (session, engine, repository) = try await fixture()
         defer { session.chooseLedger() }
@@ -755,23 +758,31 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         try await advance(repository)
         await engine.setRowCount(4)
         let pagesBefore = await engine.pageRequests.count
+        let overviewBefore = await engine.overviewRequests
+        await session.refresh()
+        let pagesAfterRefresh = await engine.pageRequests.count
+        let overviewAfterRefresh = await engine.overviewRequests
+        XCTAssertEqual(pagesAfterRefresh, pagesBefore, "the refresh must not read the list window itself")
+        XCTAssertGreaterThan(overviewAfterRefresh, overviewBefore, "the overview refreshes without waiting on the list")
+        XCTAssertEqual(session.localTransactionAccumulatedRows.map(\.id), shown, "rows stay while the new revision is unread")
+        XCTAssertNil(session.localTransactionWindow, "kept rows are stale: no continuation appends onto them")
+        XCTAssertFalse(session.localTransactionHasMore)
+        XCTAssertEqual(session.localTransactionReloadID, reloadID, "the new revision already changes the list's key")
+
         let entered = expectation(description: "new revision window awaiting")
         let gate = Gate(entered)
         await engine.pause(gate: gate)
-        let refreshing = Task { await session.refresh() }
+        let listing = Task { await session.ensureLocalTransactionWindow() }
         await fulfillment(of: [entered], timeout: 3)
         XCTAssertEqual(session.localTransactionAccumulatedRows.map(\.id), shown, "rows stay while the new revision is read")
-        XCTAssertNil(session.localTransactionWindow, "kept rows are stale: no continuation appends onto them")
-        XCTAssertFalse(session.localTransactionHasMore)
         let joining = Task { await session.ensureLocalTransactionWindow() }
         await Task.yield()
         await gate.release()
-        await refreshing.value
+        await listing.value
         await joining.value
         XCTAssertEqual(session.localTransactionAccumulatedRows.count, 4)
         XCTAssertNotNil(session.localTransactionWindow)
         XCTAssertNil(session.localTransactionWindowError)
-        XCTAssertEqual(session.localTransactionReloadID, reloadID, "a new revision needs no extra reload signal")
         let pagesAfter = await engine.pageRequests.count
         XCTAssertEqual(pagesAfter - pagesBefore, 1, "the joining caller must not restart the first window")
     }
@@ -789,7 +800,8 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
             let loading: Task<Void, Never>
             if failedReread {
                 try await advance(repository)
-                loading = Task { await session.refresh() }
+                await session.refresh()
+                loading = Task { await session.loadLocalTransactionWindow() }
                 await fulfillment(of: [entered], timeout: 3)
                 XCTAssertFalse(session.localTransactionAccumulatedRows.isEmpty)
             } else {
@@ -1688,6 +1700,9 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
             await fulfillment(of: [cleared], timeout: 3)
             observation.cancel()
             assertCleared(session)
+            // Nothing re-reads another surface's revision until a refresh, so
+            // old-revision rows must not stay on screen as interactive targets.
+            XCTAssertTrue(session.localTransactionAccumulatedRows.isEmpty)
             await gate?.release()
             await loading?.value
             assertCleared(session)
@@ -1706,6 +1721,9 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         let mutation = Task { try await session.deleteTransaction(source: original.source, reason: "Synthetic test") }
         await fulfillment(of: [entered], timeout: 3)
         assertCleared(session)
+        // The list renders raw window rows, so the row being deleted must not
+        // stay on screen unprojected while the write runs.
+        XCTAssertTrue(session.localTransactionAccumulatedRows.isEmpty)
         await session.loadLocalTransactionWindow()
         assertCleared(session)
         await gate.release()

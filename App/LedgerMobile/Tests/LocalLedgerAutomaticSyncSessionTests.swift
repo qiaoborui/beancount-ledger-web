@@ -446,6 +446,18 @@ final class LocalLedgerAutomaticSyncSessionTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertEqual(fixture.store.load()?.insights?.updatedAt.prefix(10), "2026-09-17")
+
+        // A reload that finishes after the transition (a save backgrounded at
+        // once) would otherwise sleep out its debounce in a suspended app.
+        await fixture.engine.resetRequests()
+        fixture.clock.now = ISO8601DateFormatter().date(from: "2026-09-18T04:00:00Z")!
+        await session.refresh()
+        XCTAssertFalse(session.hasPendingWidgetPublish, "a reload while backgrounded publishes at once")
+        deadline = Date().addingTimeInterval(5)
+        while fixture.store.load()?.insights?.updatedAt.hasPrefix("2026-09-18") != true, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(fixture.store.load()?.insights?.updatedAt.prefix(10), "2026-09-18")
     }
 
     func testForegroundSaveNotificationAutomaticallyPushesValidatedLocalChange() async throws {

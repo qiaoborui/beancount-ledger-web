@@ -627,7 +627,10 @@ final class LedgerSession: ObservableObject {
                           self.localPresentation == presentation, self.location == .local(id),
                           self.phase == .ready,
                           revision?.id != self.localPresentation?.revisionID else { return }
-                    self.cancelLocalTransactionReaders()
+                    // Another surface committed a revision this session has not
+                    // presented, and nothing here re-reads it until the next
+                    // refresh. Rows from the old revision would stay interactive.
+                    self.resetLocalTransactionWindow()
                     self.invalidateOverviewCategories()
                     self.localOverviewCategoriesError = String(localized: "账本已更新，请刷新概览汇总")
                 }
@@ -1596,11 +1599,14 @@ final class LedgerSession: ObservableObject {
         guard epoch == sessionEpoch else { throw CancellationError() }
         let accountLabels = TransactionCategoryPresentation.accountLabels(ledger?.accounts ?? [])
         triggerIslandNotice(LedgerIslandNotice.from(entry: entry, accountLabels: accountLabels))
-        // The refresh owns the reload signal. Bumping here as well restarted the
-        // list's window read a second time after every save.
+        // The refresh owns the reload signal: a new revision changes the list's
+        // request key, a same-revision refresh bumps it. Bumping here as well
+        // restarted the list's window read a second time after every save.
         let reloadID = localTransactionReloadID
+        let presentedRevision = localPresentation?.revisionID
         await refresh()
-        if epoch == sessionEpoch, localTransactionReloadID == reloadID, localTransactionWindow == nil {
+        if epoch == sessionEpoch, localTransactionReloadID == reloadID,
+           localPresentation?.revisionID == presentedRevision {
             localTransactionReloadID &+= 1
         }
     }
@@ -2450,7 +2456,7 @@ final class LedgerSession: ObservableObject {
             pendingStates[key] = .pending
         }
         if isLocal {
-            cancelLocalTransactionReaders()
+            resetLocalTransactionWindow()
             invalidateOverviewCategories()
         }
         if pendingStates != transactionMutationStates { transactionMutationStates = pendingStates }
@@ -2637,8 +2643,11 @@ final class LedgerSession: ObservableObject {
         if transactionMutations[key]?.phase.blocksFurtherWrites == true {
             throw LedgerTransactionMutationError.alreadyInProgress
         }
+        // A mutation clears the rows rather than keeping them like a refresh:
+        // the list renders raw window rows, so a kept row would show the
+        // pre-edit content, or a deleted row, until the re-read replaced it.
         if publishing, isLocal {
-            cancelLocalTransactionReaders()
+            resetLocalTransactionWindow()
             invalidateOverviewCategories()
         }
         transactionMutations[key] = mutation
@@ -3852,13 +3861,6 @@ final class LedgerSession: ObservableObject {
         }
         phase = .ready
         Task { await restoreImportIndexTrackingIfNeeded() }
-        if local != nil, !localTransactionAccumulatedRows.isEmpty {
-            // The list kept its rows across this reload. Re-read its first window
-            // before any other follow-up, so the screen the user is looking at
-            // settles first; the list's own request joins this read.
-            await loadLocalTransactionWindow(filter: transactionWindowFilter, limits: transactionWindowLimits)
-            guard generation == requestGeneration else { return }
-        }
         if local != nil, deferLocalDerivedRefreshes {
             let epoch = sessionEpoch, expectedLocation = location
             Task(priority: .utility) { @MainActor [weak self] in
@@ -4029,22 +4031,33 @@ final class LedgerSession: ObservableObject {
     }
 
     /// Replace any waiting local publish with this one and restart the wait.
-    /// A publish already running is left alone; its generation check retires it
-    /// if this newer request superseded it.
+    /// A publish already running is left alone; it ends well inside this
+    /// request's debounce, so the newer snapshot is written last.
+    ///
+    /// The wait is checked against the ledger and revision, not the request
+    /// generation: a pull-to-refresh or range change in the window that then
+    /// fails must not drop the last good snapshot with nothing to replace it.
     private func scheduleLocalWidgetPublish(_ request: WidgetPublishRequest) {
         pendingWidgetPublish = request
         pendingWidgetPublishTask?.cancel()
+        pendingWidgetPublishTask = nil
+        // A reload finishing after the app left the foreground would sleep in a
+        // suspended process; the transition's own flush already ran.
+        guard applicationActive, !applicationBackground else {
+            flushPendingWidgetPublish()
+            return
+        }
         let delay = Self.localWidgetPublishDebounceNanoseconds
         pendingWidgetPublishTask = Task(priority: .utility) { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: delay)
             guard !Task.isCancelled, let self, let request = self.pendingWidgetPublish else { return }
             self.pendingWidgetPublish = nil
             self.pendingWidgetPublishTask = nil
-            guard request.generation == self.requestGeneration, self.contextURL == request.contextURL,
-                  self.phase == .ready else { return }
+            guard self.contextURL == request.contextURL, self.phase == .ready,
+                  request.localRevisionID == self.localPresentation?.revisionID else { return }
             await self.publishWidgetSnapshot(ledger: request.ledger, contextURL: request.contextURL,
                 valuationCurrency: request.valuationCurrency, generation: request.generation,
-                localRevisionID: request.localRevisionID)
+                localRevisionID: request.localRevisionID, pinnedToGeneration: false)
         }
     }
 
@@ -4363,7 +4376,7 @@ final class LedgerSession: ObservableObject {
     /// Revoke every reader but keep the rows on screen, marked stale by the nil
     /// window (no continuation, so nothing appends onto them). The next first
     /// window replaces them in one assignment. Use when the same list is about to
-    /// be re-read at a newer revision: a refresh, a save, or a mutation.
+    /// be re-read at a newer revision: a refresh or an appended transaction.
     ///
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
@@ -5269,7 +5282,7 @@ final class LedgerSession: ObservableObject {
         // Invalidate and publish once for the whole batch. Doing it per row made a
         // 200-row tag operation rebuild the window and overview 200 times.
         if isLocal {
-            cancelLocalTransactionReaders()
+            resetLocalTransactionWindow()
             invalidateOverviewCategories()
         }
         if pendingStates != transactionMutationStates { transactionMutationStates = pendingStates }
