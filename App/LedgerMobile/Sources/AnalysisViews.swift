@@ -50,6 +50,8 @@ struct LedgerAnalysisView: View {
     @State private var errorMessage: String?
     @State private var reloadToken = 0
     @State private var loadedKey: AnalysisRequestKey?
+    // Above the cached/loaded branches, which rebuild the report on every reload.
+    @State private var chartReveals = LedgerChartRevealMemory()
 
     private var requestKey: AnalysisRequestKey {
         AnalysisRequestKey(
@@ -92,6 +94,7 @@ struct LedgerAnalysisView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+            .environment(\.ledgerChartRevealMemory, chartReveals)
         }
         .background(BalancedPalette.page)
         .terminalPageChrome(kind.title, isRoot: isRoot, showsTimeRange: true, balanced: true)
@@ -1296,7 +1299,7 @@ private struct CashflowTrendChart: View {
                 .chartXAxis { xAxisMarks(axis) }
                 .chartYAxis(.hidden)
                 .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
-                .ledgerChartReveal()
+                .ledgerChartReveal("cashflow")
                 .accessibilityLabel("现金流趋势图，可点按或拖动查看数据")
                 .accessibilityValue(axis.usesTimeScale ? "真实时间轴" : "有序分类轴")
                 .accessibilityIdentifier("cashflow-trend-chart")
@@ -1446,7 +1449,7 @@ private struct NetWorthTrendChart: View {
                 }
                 .chartYAxis(.hidden)
                 .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
-                .ledgerChartReveal()
+                .ledgerChartReveal("net-worth")
                 .accessibilityLabel("净资产走势图，可点按或拖动查看数据")
                 .accessibilityValue(axis.usesTimeScale ? "真实时间轴" : "有序分类轴")
                 .accessibilityIdentifier("net-worth-trend-chart")

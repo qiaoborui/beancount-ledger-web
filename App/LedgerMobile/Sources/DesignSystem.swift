@@ -149,22 +149,58 @@ private struct LedgerRollingAmountModifier: ViewModifier {
     }
 }
 
-/// Draws a chart's plot area in from the leading edge, once per view lifetime.
-/// Range changes keep their own morph: the state survives new data. Only the
-/// plot is masked, never the axis labels, which mask with the amounts.
+/// Which charts on one screen already drew in. Screens that rebuild their
+/// charts on every reload (the analysis pages swap cached and loaded content,
+/// the account trend swaps in a loading row) keep one of these above the
+/// rebuild, so the reveal plays once per screen rather than once per rebuild.
+@MainActor
+final class LedgerChartRevealMemory {
+    private var revealed: Set<String> = []
+
+    func hasRevealed(_ id: String) -> Bool { revealed.contains(id) }
+    func markRevealed(_ id: String) { revealed.insert(id) }
+}
+
+private struct LedgerChartRevealMemoryKey: EnvironmentKey {
+    static let defaultValue: LedgerChartRevealMemory? = nil
+}
+
+extension EnvironmentValues {
+    var ledgerChartRevealMemory: LedgerChartRevealMemory? {
+        get { self[LedgerChartRevealMemoryKey.self] }
+        set { self[LedgerChartRevealMemoryKey.self] = newValue }
+    }
+}
+
+/// Draws a chart's plot area in from the leading edge on first appearance.
+/// Without a memory in the environment that is once per view lifetime; with
+/// one, once per `id` for the screen holding it. Range changes on a chart that
+/// stays mounted keep their own morph. Only the plot is masked, never the axis
+/// labels, which mask with the amounts.
 private struct LedgerChartRevealModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.ledgerChartRevealMemory) private var memory
     @State private var revealed = false
+    let id: String
 
     func body(content: Content) -> some View {
+        // A rebuilt chart whose reveal already played starts fully drawn. The
+        // chart that plays it marks the memory in the same update that starts
+        // the animation, so its own mask still animates from zero.
+        let drawn = revealed || reduceMotion || memory?.hasRevealed(id) == true
         content
             .chartPlotStyle { plot in
                 plot.mask(alignment: .leading) {
-                    Rectangle().scaleEffect(x: revealed || reduceMotion ? 1 : 0, anchor: .leading)
+                    Rectangle().scaleEffect(x: drawn ? 1 : 0, anchor: .leading)
                 }
             }
             .onAppear {
                 guard !revealed else { return }
+                if memory?.hasRevealed(id) == true {
+                    revealed = true
+                    return
+                }
+                memory?.markRevealed(id)
                 withAnimation(reduceMotion ? nil : LedgerMotion.reveal) { revealed = true }
             }
     }
@@ -180,8 +216,9 @@ extension View {
         modifier(LedgerRollingAmountModifier(minorUnits: minorUnits))
     }
 
-    func ledgerChartReveal() -> some View {
-        modifier(LedgerChartRevealModifier())
+    /// `id` names the chart within its screen's `LedgerChartRevealMemory`.
+    func ledgerChartReveal(_ id: String) -> some View {
+        modifier(LedgerChartRevealModifier(id: id))
     }
 }
 
