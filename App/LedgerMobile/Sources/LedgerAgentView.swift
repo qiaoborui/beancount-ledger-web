@@ -303,8 +303,16 @@ private struct LedgerAgentChatScreen: View {
                     }
                     switch conversation.phase {
                     case .idle: EmptyView()
-                    case let .running(since): LedgerAgentRunning(step: conversation.step, steps: conversation.stepCount,
-                                                                 since: since, stepSince: conversation.stepSince ?? since)
+                    case let .running(since):
+                        // The streamed turn once its first event is in; before
+                        // that (preparing, or a core that does not stream) the
+                        // step line with its elapsed and slow hints.
+                        if let live = conversation.live, !live.isEmpty || live.compacting {
+                            LedgerAgentLiveTimeline(turn: live, since: since)
+                        } else {
+                            LedgerAgentRunning(step: conversation.step, steps: conversation.stepCount,
+                                               since: since, stepSince: conversation.stepSince ?? since)
+                        }
                     case let .failed(error, question): failure(error, question: question)
                     }
                     Color.clear.frame(height: 1).id(Self.bottomID)
@@ -320,8 +328,11 @@ private struct LedgerAgentChatScreen: View {
                 let last = conversation.messages.last?.role
                 // The question the user just sent is always shown.
                 follow(proxy, force: last == .user)
-                if last == .assistant { announceAnswer() }
+                if last == .assistant, conversation.messages.last?.stopped == false { announceAnswer() }
             }
+            // The reply growing while it streams follows only a reader who
+            // is at the bottom, without an animation per redraw.
+            .onChange(of: conversation.live) { _, _ in follow(proxy, animated: false) }
             .onChange(of: conversation.pending) { _, _ in follow(proxy) }
             .onChange(of: conversation.recap) { _, _ in follow(proxy) }
             .onChange(of: conversation.phase) { _, phase in
@@ -350,9 +361,9 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
-    private func follow(_ proxy: ScrollViewProxy, force: Bool = false) {
+    private func follow(_ proxy: ScrollViewProxy, force: Bool = false, animated: Bool = true) {
         guard force || isAtBottom else { return }
-        scrollToBottom(proxy)
+        if animated { scrollToBottom(proxy) } else { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
@@ -481,7 +492,7 @@ private struct LedgerAgentChatScreen: View {
                     .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                     .padding(.horizontal, 6)
             } else {
-                LedgerAgentQuickSwitch { settingsPresented = true }
+                LedgerAgentQuickSwitch(usage: conversation.usage) { settingsPresented = true }
                     .padding(.horizontal, 2)
             }
             if !conversation.staged.isEmpty || attaching || attachError != nil { stagedFiles }
@@ -889,7 +900,7 @@ private struct LedgerAgentChatScreen: View {
             return
         }
         let choice = settings.choice, thinking = settings.effectiveThinking, usesMemory = settings.usesMemory
-        let transcript = conversation.transcript, conversationID = conversation.id
+        let conversation = conversation, conversationID = conversation.id
         let attachments = conversation.attachmentPayloads(in: repository.workspace.agentAttachmentLocation(id: conversationID))
         conversation.editor = .live(repository)
         conversation.autoWrites = settings.autoWrites
@@ -897,7 +908,10 @@ private struct LedgerAgentChatScreen: View {
         LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
         LedgerAgentBackgroundRun.shared.keepsAwake = settings.keepsAwake
         let started = conversation.send(question, reporting: { message, history, draftRoot, report in
-            try await repository.runAgentTurn(message: message, history: history, choice: choice,
+            // Read when the turn starts, not when it is asked: a turn stopped
+            // just before may still be bringing back the transcript to follow.
+            let transcript = await conversation.transcript
+            return try await repository.runAgentTurn(message: message, history: history, choice: choice,
                                               apiKey: key, sensitiveUnlocked: true, thinking: thinking,
                                               draft: draftRoot, transcript: transcript,
                                               conversationID: conversationID, attachments: attachments,
@@ -1001,9 +1015,23 @@ private struct LedgerAgentAnswer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if !message.toolCalls.isEmpty { tools }
+            if message.compacted {
+                Text("已压缩较早的对话，以便继续").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("ledger-agent-compacted")
+            }
+            // Replies from older builds have only their tool calls.
+            if !message.steps.isEmpty {
+                LedgerAgentStepTimeline(steps: message.steps, onAsk: onAsk)
+            } else if !message.toolCalls.isEmpty {
+                tools
+            }
             ForEach(Array(LedgerAgentReplyText.segments(message.text).enumerated()), id: \.offset) { _, segment in
                 LedgerAgentReplyBlock(segment: segment, onAsk: onAsk)
+            }
+            if message.stopped {
+                Text("已停止").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .accessibilityIdentifier("ledger-agent-stopped")
             }
             if let ask = message.ask, asksNow { choices(ask) }
             if LedgerAgentReplyText.beancountDraft(in: message.text) != nil {
@@ -1147,24 +1175,15 @@ private struct LedgerAgentAnswer: View {
         }
     }
 
-    private var toolsSummary: String {
-        let edits = message.toolCalls.filter {
-            ["edit_file", "write_file", "move_file", "copy_file", "delete_file", "save_attachment"].contains($0.name) && !$0.isError
-        }.count
-        if edits == 0, message.toolCalls.contains(where: { $0.name == "reconcile_attachment" }) {
-            return String(localized: "读取附件和账本 \(message.toolCalls.count) 次")
-        }
-        return edits == 0
-            ? String(localized: "读取了账本 \(message.toolCalls.count) 次")
-            : String(localized: "调用了 \(message.toolCalls.count) 次工具，改了草稿 \(edits) 处")
-    }
+    private var toolsSummary: String { LedgerAgentToolTimeline.summary(message.toolCalls) }
 
     private var footer: String? {
         guard let duration = message.duration else { return nil }
         let seconds = duration.formatted(.number.precision(.fractionLength(1)))
-        return message.toolCalls.isEmpty
+        let tools = message.steps.isEmpty ? message.toolCalls.count : message.steps.filter { $0.kind == .tool }.count
+        return tools == 0
             ? String(localized: "\(seconds) 秒")
-            : String(localized: "\(message.toolCalls.count) 次工具调用 · \(seconds) 秒")
+            : String(localized: "\(tools) 次工具调用 · \(seconds) 秒")
     }
 
 }
@@ -1315,7 +1334,7 @@ private struct LedgerAgentChangeCard: View {
 }
 
 /// One Markdown block of a reply.
-private struct LedgerAgentReplyBlock: View {
+struct LedgerAgentReplyBlock: View {
     let segment: LedgerAgentReplyText.Segment
     var onAsk: (String) -> Void = { _ in }
 
@@ -1817,6 +1836,8 @@ private struct LedgerAgentModelPicker: View {
 /// model and effort it was sent with.
 private struct LedgerAgentQuickSwitch: View {
     @ObservedObject private var settings = LedgerAgentSettings.shared
+    /// The conversation's latest usage; the meter shows once it is known.
+    var usage: LedgerAgentUsage? = nil
     var manage: () -> Void
 
     var body: some View {
@@ -1828,6 +1849,7 @@ private struct LedgerAgentQuickSwitch: View {
                 .accessibilityLabel(String(localized: "思考强度：\(settings.effectiveThinking.title)"))
                 .accessibilityIdentifier("ledger-agent-quick-thinking")
             Spacer(minLength: 0)
+            if let usage, usage.fraction != nil { LedgerAgentContextMeter(usage: usage) }
         }
     }
 
