@@ -7,7 +7,16 @@ import LedgerCore
 struct LedgerAgentToolCall: Codable, Equatable, Sendable {
     let name: String
     var arguments: BQLCell? = nil
-    let isError: Bool
+    var isError: Bool
+    /// The provider's id for the call, which pairs its start with its end.
+    /// The fields from here on are absent in older saves and cores.
+    var callId: String? = nil
+    /// How long the tool ran; nil when it did not run.
+    var durationMs: Int? = nil
+    /// The start of the tool's result.
+    var preview: String? = nil
+    /// What went wrong, for a call that failed.
+    var errorText: String? = nil
 
     /// The row title, in the words of the design: what was read, then the range
     /// or search term when the arguments carry one.
@@ -37,6 +46,8 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         case "ask_user": String(localized: "向你提问")
         case "list_saved_conversations": String(localized: "查看历史对话")
         case "read_saved_conversation": String(localized: "读取历史对话")
+        case "edit_memory": String(localized: "更新记忆")
+        case "write_memory": String(localized: "整理记忆")
         default: name
         }
         if name == "get_ledger_summary", let start = argument("start"), let end = argument("end") {
@@ -60,6 +71,20 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         return argument("query")
     }
 
+    /// The arguments as compact JSON, for an expanded timeline row of a tool
+    /// without BQL; nil when there are none.
+    var argumentsText: String? {
+        guard source == nil, let arguments, arguments != .null, arguments != .object([:]) else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return (try? encoder.encode(arguments)).map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    /// The tool counts as an edit of the draft in the timeline's summary.
+    var editsDraft: Bool {
+        ["edit_file", "write_file", "move_file", "copy_file", "delete_file", "save_attachment"].contains(name) && !isError
+    }
+
     private func arrayArgument(_ key: String) -> [String]? {
         guard case let .object(values)? = arguments, case let .array(items)? = values[key] else { return nil }
         let strings = items.compactMap { item -> String? in if case let .string(value) = item { value } else { nil } }
@@ -75,6 +100,242 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
     /// `2026-10-01` → `10-01`; anything else is shown as given.
     private static func shortDate(_ value: String) -> String {
         value.count == 10 && value.dropFirst(4).first == "-" ? String(value.dropFirst(5)) : value
+    }
+}
+
+/// One piece of a turn, in the order it happened: a reasoning block, a run of
+/// reply text, or a tool call. Saved with the answer, so a reopened
+/// conversation draws the same timeline.
+struct LedgerAgentStepRecord: Codable, Equatable, Sendable {
+    enum Kind: String, Codable, Sendable { case thinking, text, tool }
+    let kind: Kind
+    /// The reasoning or the reply; empty for a tool and for redacted reasoning.
+    var text = ""
+    /// How long the reasoning took; a tool's own time is on its call.
+    var durationMs: Int? = nil
+    /// The provider sent the reasoning encrypted, so there is nothing to show.
+    var redacted = false
+    var call: LedgerAgentToolCall? = nil
+
+    init(kind: Kind, text: String = "", durationMs: Int? = nil, redacted: Bool = false, call: LedgerAgentToolCall? = nil) {
+        self.kind = kind
+        self.text = text
+        self.durationMs = durationMs
+        self.redacted = redacted
+        self.call = call
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, text, durationMs, redacted, call
+        // The native response lists a tool step's call fields flat.
+        case callId, name, arguments, isError, preview, errorText
+    }
+
+    /// Reads both the saved shape, with the call nested, and the native
+    /// response's, with the call's fields beside `kind`.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+        redacted = try container.decodeIfPresent(Bool.self, forKey: .redacted) ?? false
+        let duration = try container.decodeIfPresent(Int.self, forKey: .durationMs)
+        if let nested = try container.decodeIfPresent(LedgerAgentToolCall.self, forKey: .call) {
+            call = nested
+            durationMs = duration
+        } else if kind == .tool {
+            let name = try container.decode(String.self, forKey: .name)
+            call = LedgerAgentToolCall(
+                name: name, arguments: try? container.decodeIfPresent(BQLCell.self, forKey: .arguments),
+                isError: try container.decodeIfPresent(Bool.self, forKey: .isError) ?? false,
+                callId: try container.decodeIfPresent(String.self, forKey: .callId), durationMs: duration,
+                preview: try container.decodeIfPresent(String.self, forKey: .preview),
+                errorText: try container.decodeIfPresent(String.self, forKey: .errorText))
+        } else {
+            durationMs = duration
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        if !text.isEmpty { try container.encode(text, forKey: .text) }
+        try container.encodeIfPresent(durationMs, forKey: .durationMs)
+        if redacted { try container.encode(true, forKey: .redacted) }
+        try container.encodeIfPresent(call, forKey: .call)
+    }
+}
+
+/// The tokens of a turn: input, output and cache counts summed over its model
+/// messages, and how full the context was at the last one.
+struct LedgerAgentUsage: Codable, Equatable, Sendable {
+    var input = 0
+    var output = 0
+    var cacheRead = 0
+    var cacheWrite = 0
+    var contextTokens = 0
+    var contextWindow = 0
+
+    init(input: Int = 0, output: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, contextTokens: Int = 0,
+         contextWindow: Int = 0) {
+        self.input = input; self.output = output; self.cacheRead = cacheRead; self.cacheWrite = cacheWrite
+        self.contextTokens = contextTokens; self.contextWindow = contextWindow
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        input = try container.decodeIfPresent(Int.self, forKey: .input) ?? 0
+        output = try container.decodeIfPresent(Int.self, forKey: .output) ?? 0
+        cacheRead = try container.decodeIfPresent(Int.self, forKey: .cacheRead) ?? 0
+        cacheWrite = try container.decodeIfPresent(Int.self, forKey: .cacheWrite) ?? 0
+        contextTokens = try container.decodeIfPresent(Int.self, forKey: .contextTokens) ?? 0
+        contextWindow = try container.decodeIfPresent(Int.self, forKey: .contextWindow) ?? 0
+    }
+
+    /// How much of the model's context the conversation fills, from 0 to 1;
+    /// nil while either side is unknown.
+    var fraction: Double? {
+        guard contextWindow > 0, contextTokens > 0 else { return nil }
+        return min(Double(contextTokens) / Double(contextWindow), 1)
+    }
+}
+
+/// One streamed event of a running turn, beyond the model and tool steps the
+/// Live Activity counts.
+enum LedgerAgentLiveEvent: Equatable, Sendable {
+    case textDelta(String)
+    case thinkingDelta(String)
+    case thinkingEnd(durationMs: Int?, redacted: Bool)
+    case toolStart(LedgerAgentToolCall)
+    case toolEnd(LedgerAgentToolCall)
+    case usage(LedgerAgentUsage)
+    case compactionStart
+    case compactionEnd(summarizedTurns: Int?)
+}
+
+/// The running turn as it streams in: reasoning, reply text and tool calls in
+/// the order they happened. Built by `apply`, one event at a time.
+struct LedgerAgentLiveTurn: Equatable, Sendable {
+    private(set) var steps: [LedgerAgentStepRecord] = []
+    /// The tool calls started but not ended, by index into `steps`.
+    private(set) var running: Set<Int> = []
+    private(set) var usage: LedgerAgentUsage?
+    /// Older turns are being summarized so the conversation fits.
+    private(set) var compacting = false
+    private(set) var compacted = false
+    /// The reasoning block still streaming, by index into `steps`.
+    private var openThinking: Int?
+
+    /// The reply so far: the text of the latest model message that wrote
+    /// any, which is what a stop keeps.
+    var text: String { steps.last { $0.kind == .text }?.text ?? "" }
+
+    /// Whether the reasoning block at `index` is still streaming.
+    func isThinking(_ index: Int) -> Bool { openThinking == index }
+
+    var isEmpty: Bool { steps.isEmpty }
+
+    mutating func apply(_ event: LedgerAgentLiveEvent) {
+        switch event {
+        case let .thinkingDelta(text):
+            if let open = openThinking {
+                steps[open].text += text
+            } else {
+                steps.append(.init(kind: .thinking, text: text))
+                openThinking = steps.count - 1
+            }
+        case let .thinkingEnd(durationMs, redacted):
+            if let open = openThinking {
+                steps[open].durationMs = durationMs
+                steps[open].redacted = redacted
+            } else {
+                // Redacted reasoning streams nothing before its end.
+                steps.append(.init(kind: .thinking, durationMs: durationMs, redacted: redacted))
+            }
+            openThinking = nil
+        case let .textDelta(text):
+            openThinking = nil
+            if steps.last?.kind == .text {
+                steps[steps.count - 1].text += text
+            } else {
+                steps.append(.init(kind: .text, text: text))
+            }
+        case let .toolStart(call):
+            openThinking = nil
+            guard index(of: call) == nil else { return }
+            steps.append(.init(kind: .tool, call: call))
+            running.insert(steps.count - 1)
+        case let .toolEnd(call):
+            openThinking = nil
+            guard let index = index(of: call), var known = steps[index].call else {
+                steps.append(.init(kind: .tool, call: call))
+                return
+            }
+            known.isError = call.isError
+            known.durationMs = call.durationMs
+            known.preview = call.preview
+            known.errorText = call.errorText
+            if known.arguments == nil { known.arguments = call.arguments }
+            steps[index].call = known
+            running.remove(index)
+        case let .usage(usage):
+            self.usage = usage
+        case .compactionStart:
+            compacting = true
+        case .compactionEnd:
+            compacting = false
+            compacted = true
+        }
+    }
+
+    private func index(of call: LedgerAgentToolCall) -> Int? {
+        guard let id = call.callId, !id.isEmpty else { return nil }
+        return steps.lastIndex { $0.call?.callId == id }
+    }
+}
+
+/// A turn's steps as the timeline draws them: each reasoning block, each run
+/// of adjacent tool calls as one group, and the text between them, in order.
+/// The answer is drawn last by the reply itself, so its text step is left out.
+enum LedgerAgentTimelineItem: Equatable, Identifiable, Sendable {
+    case thinking(index: Int)
+    case tools(indices: [Int])
+    case text(index: Int)
+
+    var id: Int {
+        switch self {
+        case let .thinking(index), let .text(index): index
+        case let .tools(indices): indices.first ?? -1
+        }
+    }
+
+    /// `answerTrails` leaves the last text step out only when nothing came
+    /// after it, as while a turn is still running; otherwise the last text
+    /// step is the answer wherever it fell.
+    static func items(_ steps: [LedgerAgentStepRecord], answerTrails: Bool = false) -> [LedgerAgentTimelineItem] {
+        let answer = answerIndex(steps, answerTrails: answerTrails)
+        var items: [LedgerAgentTimelineItem] = []
+        for (index, step) in steps.enumerated() where index != answer {
+            switch step.kind {
+            case .thinking: items.append(.thinking(index: index))
+            case .text:
+                guard !step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                items.append(.text(index: index))
+            case .tool:
+                if case var .tools(indices)? = items.last {
+                    indices.append(index)
+                    items[items.count - 1] = .tools(indices: indices)
+                } else {
+                    items.append(.tools(indices: [index]))
+                }
+            }
+        }
+        return items
+    }
+
+    /// The step that is the answer, drawn after the items.
+    static func answerIndex(_ steps: [LedgerAgentStepRecord], answerTrails: Bool = false) -> Int? {
+        let lastText = steps.lastIndex { $0.kind == .text }
+        return answerTrails ? (lastText == steps.indices.last ? lastText : nil) : lastText
     }
 }
 
@@ -109,7 +370,7 @@ struct LedgerAgentMessage: Identifiable, Equatable, Sendable {
     enum Role: String, Sendable { case user, assistant }
     let id = UUID()
     let role: Role
-    let text: String
+    var text: String
     var toolCalls: [LedgerAgentToolCall] = []
     var duration: TimeInterval? = nil
     /// Names of the files sent with a question.
@@ -120,6 +381,14 @@ struct LedgerAgentMessage: Identifiable, Equatable, Sendable {
     var ask: LedgerAgentAsk? = nil
     /// The change written to the ledger after this reply.
     var write: LedgerAgentWriteRecord? = nil
+    /// The reasoning, text and tool calls behind the reply, in order; empty
+    /// for replies from older builds, which show `toolCalls` alone.
+    var steps: [LedgerAgentStepRecord] = []
+    /// The user stopped the turn; the text is what it had written by then.
+    var stopped = false
+    var usage: LedgerAgentUsage? = nil
+    /// The turn summarized older turns before it answered.
+    var compacted = false
 }
 
 /// The provider and model a turn uses. The key travels separately.
@@ -335,6 +604,9 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     var attachments: [LedgerAgentAttachment.Payload]? = nil
     /// The ledger's memory.md; nil turns memory off for the turn.
     var memoryPath: String? = nil
+    /// Asks for the reply, the reasoning and each tool's start and end as
+    /// they happen, beside the model and tool steps.
+    var streamEvents: Bool? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {
@@ -354,16 +626,30 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
     /// Choices the model asked the user to pick from; the reply repeats the
     /// question.
     var ask: LedgerAgentAsk? = nil
+    /// The reasoning, text and tool calls of the turn, in order; empty from
+    /// older cores.
+    var steps: [LedgerAgentStepRecord] = []
+    /// The turn's tokens; nil when no model message ended.
+    var usage: LedgerAgentUsage? = nil
+    /// "aborted" for a turn the user stopped. A stopped turn still returns
+    /// what it wrote so far as `reply`, and a transcript the next question can
+    /// follow unless the model had said nothing yet.
+    var stopReason: String? = nil
+    /// The turn summarized older turns of its transcript to fit.
+    var compacted = false
 
     private enum CodingKeys: String, CodingKey {
         case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited, transcript, memoryUpdated, ask
+        case steps, usage, stopReason, compacted
     }
     init(ok: Bool, reply: String? = nil, toolCalls: [LedgerAgentToolCall] = [], error: String? = nil,
          cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false, transcript: String? = nil,
-         memoryUpdated: Bool = false, ask: LedgerAgentAsk? = nil) {
+         memoryUpdated: Bool = false, ask: LedgerAgentAsk? = nil, steps: [LedgerAgentStepRecord] = [],
+         usage: LedgerAgentUsage? = nil, stopReason: String? = nil, compacted: Bool = false) {
         self.ok = ok; self.reply = reply; self.toolCalls = toolCalls; self.error = error
         self.cancelled = cancelled; self.modelUnavailable = modelUnavailable; self.edited = edited
         self.transcript = transcript; self.memoryUpdated = memoryUpdated; self.ask = ask
+        self.steps = steps; self.usage = usage; self.stopReason = stopReason; self.compacted = compacted
     }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -378,6 +664,17 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
         memoryUpdated = try container.decodeIfPresent(Bool.self, forKey: .memoryUpdated) ?? false
         // A malformed card is dropped; the reply still carries the question.
         ask = try? container.decodeIfPresent(LedgerAgentAsk.self, forKey: .ask)
+        // A step of a kind this build does not know is left out, not the reply.
+        steps = (try? container.decodeIfPresent([Lossy<LedgerAgentStepRecord>].self, forKey: .steps))?
+            .compactMap(\.value) ?? []
+        usage = try? container.decodeIfPresent(LedgerAgentUsage.self, forKey: .usage)
+        stopReason = try container.decodeIfPresent(String.self, forKey: .stopReason)
+        compacted = try container.decodeIfPresent(Bool.self, forKey: .compacted) ?? false
+    }
+
+    private struct Lossy<Value: Decodable>: Decodable {
+        let value: Value?
+        init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
     }
 }
 
@@ -515,10 +812,17 @@ struct LedgerAgentStep: Equatable, Sendable {
     /// first event: copying the draft, loading the ledger, starting the loop.
     /// On a conversation's first question that can take a while on a large
     /// ledger, and without it the screen showed nothing changing.
-    enum Kind: String, Decodable, Sendable { case model, tool, preparing }
+    ///
+    /// `live` carries a streamed event (reply or reasoning text, a tool's
+    /// start or end, usage) on the same path. It is not a step: the
+    /// conversation draws it, and the Live Activity never counts it.
+    enum Kind: String, Sendable { case model, tool, preparing, live }
     let kind: Kind
     var call: LedgerAgentToolCall? = nil
     var detail: String? = nil
+    var live: LedgerAgentLiveEvent? = nil
+
+    static func live(_ event: LedgerAgentLiveEvent) -> LedgerAgentStep { .init(kind: .live, live: event) }
 
     static func preparing(_ detail: String) -> LedgerAgentStep { .init(kind: .preparing, detail: detail) }
     static var copyingDraft: LedgerAgentStep { .preparing(String(localized: "正在准备账本草稿")) }
@@ -529,7 +833,7 @@ struct LedgerAgentStep: Equatable, Sendable {
         switch kind {
         case .preparing: return detail ?? String(localized: "正在准备")
         case .tool: return call?.title ?? String(localized: "正在思考")
-        case .model: return String(localized: "正在思考")
+        case .model, .live: return String(localized: "正在思考")
         }
     }
 
@@ -538,17 +842,48 @@ struct LedgerAgentStep: Equatable, Sendable {
     static func decode(_ json: String) -> LedgerAgentStep? {
         struct Event: Decodable {
             let version: Int
-            let kind: Kind
+            let kind: String
             var name: String?
             var arguments: BQLCell?
+            var callId: String?
+            var text: String?
+            var durationMs: Int?
+            var redacted: Bool?
+            var isError: Bool?
+            var preview: String?
+            var errorText: String?
+            var usage: LedgerAgentUsage?
+            var summarizedTurns: Int?
         }
         guard let event = try? JSONDecoder().decode(Event.self, from: Data(json.utf8)), event.version == 1 else { return nil }
+        let name = event.name.flatMap { $0.isEmpty ? nil : $0 }
         switch event.kind {
-        case .model: return .init(kind: .model)
-        case .preparing: return nil
-        case .tool:
-            guard let name = event.name, !name.isEmpty else { return nil }
+        case "model": return .init(kind: .model)
+        case "tool":
+            guard let name else { return nil }
             return .init(kind: .tool, call: .init(name: name, arguments: event.arguments, isError: false))
+        case "text_delta":
+            guard let text = event.text, !text.isEmpty else { return nil }
+            return .live(.textDelta(text))
+        case "thinking_delta":
+            guard let text = event.text, !text.isEmpty else { return nil }
+            return .live(.thinkingDelta(text))
+        case "thinking_end":
+            return .live(.thinkingEnd(durationMs: event.durationMs, redacted: event.redacted ?? false))
+        case "tool_start":
+            guard let name else { return nil }
+            return .live(.toolStart(.init(name: name, arguments: event.arguments, isError: false, callId: event.callId)))
+        case "tool_end":
+            guard let name else { return nil }
+            return .live(.toolEnd(.init(name: name, arguments: event.arguments, isError: event.isError ?? false,
+                                        callId: event.callId, durationMs: event.durationMs,
+                                        preview: event.preview, errorText: event.errorText)))
+        case "usage":
+            guard let usage = event.usage else { return nil }
+            return .live(.usage(usage))
+        case "compaction_start": return .live(.compactionStart)
+        case "compaction_end": return .live(.compactionEnd(summarizedTurns: event.summarizedTurns))
+        default: return nil
         }
     }
 }
@@ -760,6 +1095,12 @@ final class LedgerAgentConversation: ObservableObject {
     }
     /// What the running turn is doing now; nil before its first event.
     @Published private(set) var step: LedgerAgentStep?
+    /// The running turn as it streams in; nil before its first streamed
+    /// event, and from cores that do not stream. Text arrives at most every
+    /// `liveInterval`, so a fast model does not redraw the page per token.
+    @Published private(set) var live: LedgerAgentLiveTurn?
+    /// How full the model's context was at the latest turn, for the meter.
+    @Published private(set) var usage: LedgerAgentUsage?
     /// Everything the model saw and said so far, tool results included, as
     /// the last answered turn returned it. The next turn sends it back so
     /// follow-ups build on earlier reads; nil until a turn is answered (and
@@ -820,6 +1161,24 @@ final class LedgerAgentConversation: ObservableObject {
     static let maximumResumes = 2
     private var reopening: Task<LedgerAgentDraft?, Never>?
     var editor: LedgerAgentEditor?
+    /// Every streamed event so far; `live` is this as last published.
+    private var liveDraft: LedgerAgentLiveTurn?
+    private var livePublishedAt: Date?
+    private var liveFlush: Task<Void, Never>?
+    static let liveInterval: TimeInterval = 0.08
+
+    /// A turn the user stopped whose native loop has not returned yet. It
+    /// still brings back the authoritative partial reply and a transcript
+    /// that includes it, and the next question waits briefly for them.
+    private struct Stopping {
+        let started: Date
+        let question: UUID?
+        /// The partial reply shown at once when the user stopped.
+        let message: UUID?
+    }
+    private var stopping: Stopping?
+    /// How long a new question waits for a stopped turn to return.
+    static let stopSettleTimeout: TimeInterval = 3
 
     var isRunning: Bool { if case .running = phase { true } else { false } }
     var isWriting: Bool { pending?.status == .writing }
@@ -843,9 +1202,12 @@ final class LedgerAgentConversation: ObservableObject {
             LedgerAgentMessage.Role(rawValue: stored.role).map {
                 LedgerAgentMessage(role: $0, text: stored.text, toolCalls: stored.toolCalls, duration: stored.duration,
                                    attachments: stored.attachments ?? [], rememberedMemory: stored.memory ?? false,
-                                   ask: stored.ask, write: stored.write)
+                                   ask: stored.ask, write: stored.write, steps: stored.steps ?? [],
+                                   stopped: stored.stopped ?? false, usage: stored.usage,
+                                   compacted: stored.compacted ?? false)
             }
         }
+        usage = messages.last { $0.usage != nil }?.usage
         attachments = saved.attachments ?? []
         recap = saved.recap
         generatedTitle = saved.generatedTitle
@@ -870,7 +1232,9 @@ final class LedgerAgentConversation: ObservableObject {
             id: id, createdAt: createdAt, updatedAt: date,
             messages: messages.map { .init(role: $0.role.rawValue, text: $0.text, toolCalls: $0.toolCalls, duration: $0.duration,
                                            attachments: $0.attachments.isEmpty ? nil : $0.attachments,
-                                           memory: $0.rememberedMemory ? true : nil, ask: $0.ask, write: $0.write) },
+                                           memory: $0.rememberedMemory ? true : nil, ask: $0.ask, write: $0.write,
+                                           steps: $0.steps.isEmpty ? nil : $0.steps, stopped: $0.stopped ? true : nil,
+                                           usage: $0.usage, compacted: $0.compacted ? true : nil) },
             unwrittenChange: pending?.review != nil || draftUnreviewed,
             attachments: attachments.isEmpty ? nil : attachments,
             recap: recap,
@@ -932,6 +1296,7 @@ final class LedgerAgentConversation: ObservableObject {
         let started = Date()
         phase = .running(since: started)
         step = nil
+        clearLive()
         stepSince = started
         stepCount = 0
         let editor = editor, existing = draft, reopening = reopening, unreviewed = draftUnreviewed
@@ -943,6 +1308,12 @@ final class LedgerAgentConversation: ObservableObject {
         resumable = false
         lifecycle?.turnStarted(question: question, conversation: self)
         task = Task { [weak self] in
+            // A turn stopped a moment ago may still bring back its partial
+            // reply and the transcript this question should follow.
+            let deadline = Date().addingTimeInterval(Self.stopSettleTimeout)
+            while self?.stopping != nil, Date() < deadline, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
             let outcome: Result<Outcome, Error>
             do {
                 // A copy that cannot be made leaves the turn read-only.
@@ -967,7 +1338,8 @@ final class LedgerAgentConversation: ObservableObject {
                 }
                 let response = try await send(message, history, draft?.root, report)
                 var review: Result<LedgerAgentReview?, Error>?
-                if response.edited || unreviewed || redraw, let editor, let draft {
+                // A stopped turn leaves its draft for the next turn to review.
+                if response.cancelled != true, response.edited || unreviewed || redraw, let editor, let draft {
                     do { review = .success(try await editor.review(draft)) } catch { review = .failure(error) }
                 }
                 outcome = .success(.init(response: response, draft: draft, review: review))
@@ -1049,10 +1421,53 @@ final class LedgerAgentConversation: ObservableObject {
         task = nil
         resumable = false
         resumes = 0
-        guard isRunning else { return }
-        // A stopped question stays visible; it is not resent as history.
+        guard case let .running(started) = phase else { return }
+        // A stopped question stays visible. What the reply had said so far
+        // stays too, marked stopped, so the page does not flash empty; the
+        // native loop's own partial replaces it when it returns.
+        let question = messages.last { $0.role == .user }?.id
+        var partial: UUID?
+        let turn = liveDraft
+        if let turn, Self.hasText(turn.text) {
+            let message = LedgerAgentMessage(role: .assistant, text: turn.text, duration: Date().timeIntervalSince(started),
+                                             steps: turn.steps, stopped: true, usage: turn.usage)
+            messages.append(message)
+            partial = message.id
+        }
+        stopping = Stopping(started: started, question: question, message: partial)
         phase = .idle
         endRunning(.stopped)
+    }
+
+    /// Takes what a stopped turn's native loop returned: its partial reply
+    /// replaces the one shown at the stop, or is added when none was, and its
+    /// transcript, which ends on that reply, is what the next question sends.
+    private func settleStop(_ response: LedgerAgentTurnResponse, _ stopped: Stopping) {
+        stopping = nil
+        guard response.cancelled == true else { return }
+        let reply = (response.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if let id = stopped.message, let index = messages.firstIndex(where: { $0.id == id }) {
+            if !reply.isEmpty { messages[index].text = reply }
+            if !response.steps.isEmpty { messages[index].steps = response.steps }
+            if let usage = response.usage { messages[index].usage = usage }
+        } else if !reply.isEmpty {
+            // Right after its question, even if another question followed.
+            let at = stopped.question.flatMap { id in messages.firstIndex { $0.id == id } }.map { $0 + 1 } ?? messages.count
+            messages.insert(.init(role: .assistant, text: reply, toolCalls: response.toolCalls, steps: response.steps,
+                                  stopped: true, usage: response.usage), at: at)
+        }
+        adoptStopped(response)
+        onSettled?(self)
+    }
+
+    /// The transcript of a stopped turn already holds its question, its
+    /// files and any note sent with it.
+    private func adoptStopped(_ response: LedgerAgentTurnResponse) {
+        if let usage = response.usage, usage.fraction != nil { self.usage = usage }
+        guard let next = response.transcript, !next.isEmpty else { return }
+        transcript = next
+        note = nil
+        unannounced = []
     }
 
     /// Ends the running turn because the app is losing its background time.
@@ -1086,15 +1501,58 @@ final class LedgerAgentConversation: ObservableObject {
 
     private func advance(_ step: LedgerAgentStep, started: Date) {
         guard case let .running(since) = phase, since == started else { return }
+        if step.kind == .live {
+            if let event = step.live { receive(event) }
+            return
+        }
         stepSince = Date()
         self.step = step
         if step.kind != .preparing { stepCount += 1 }
         lifecycle?.turnStepped(step, count: stepCount)
     }
 
+    /// Folds a streamed event into the running turn. Text and reasoning
+    /// deltas are published at most every `liveInterval`; anything else at
+    /// once, with whatever text it follows.
+    private func receive(_ event: LedgerAgentLiveEvent) {
+        var turn = liveDraft ?? LedgerAgentLiveTurn()
+        turn.apply(event)
+        liveDraft = turn
+        if case let .usage(usage) = event, usage.fraction != nil { self.usage = usage }
+        switch event {
+        case .textDelta, .thinkingDelta:
+            let wait = Self.liveInterval - Date().timeIntervalSince(livePublishedAt ?? .distantPast)
+            guard wait > 0 else { return publishLive() }
+            guard liveFlush == nil else { return }
+            liveFlush = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                self?.publishLive()
+            }
+        default:
+            publishLive()
+        }
+    }
+
+    private func publishLive() {
+        liveFlush?.cancel()
+        liveFlush = nil
+        livePublishedAt = Date()
+        live = liveDraft
+    }
+
+    private func clearLive() {
+        liveFlush?.cancel()
+        liveFlush = nil
+        livePublishedAt = nil
+        liveDraft = nil
+        live = nil
+    }
+
     private func endRunning(_ ending: LedgerAgentTurnEnding) {
         if ending == .stopped || ending == .interrupted, draft != nil { draftUnreviewed = true }
         step = nil
+        clearLive()
         stepSince = nil
         restoredNotice = nil
         lifecycle?.turnEnded(ending)
@@ -1108,6 +1566,9 @@ final class LedgerAgentConversation: ObservableObject {
         resumable = false
         resumes = 0
         step = nil
+        clearLive()
+        stopping = nil
+        usage = nil
         restoredNotice = nil
         draftUnreviewed = false
         messages = []
@@ -1250,6 +1711,9 @@ final class LedgerAgentConversation: ObservableObject {
                     Task { await editor.close(opened) }
                 }
             }
+            if let stopped = stopping, stopped.started == started {
+                if case let .success(turn) = outcome { settleStop(turn.response, stopped) } else { stopping = nil }
+            }
             return
         }
         task = nil
@@ -1275,9 +1739,13 @@ final class LedgerAgentConversation: ObservableObject {
             if let next = turn.response.transcript, !next.isEmpty { transcript = next }
             let reply = Self.hasText(turn.response.reply) ? turn.response.reply ?? ""
                 : String(localized: "改动已经准备好，请在下方查看并确认。")
+            let steps = turn.response.steps.isEmpty ? liveDraft?.steps ?? [] : turn.response.steps
             messages.append(.init(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
                                   duration: Date().timeIntervalSince(started),
-                                  rememberedMemory: turn.response.memoryUpdated, ask: turn.response.ask))
+                                  rememberedMemory: turn.response.memoryUpdated, ask: turn.response.ask,
+                                  steps: steps, usage: turn.response.usage,
+                                  compacted: turn.response.compacted || liveDraft?.compacted == true))
+            if let usage = turn.response.usage, usage.fraction != nil { self.usage = usage }
             phase = .idle
             resumes = 0
             if let review = pending?.review {
@@ -1286,6 +1754,16 @@ final class LedgerAgentConversation: ObservableObject {
                 endRunning(.answered(reply))
             }
         case let .success(turn) where turn.response.cancelled == true:
+            // Stopped by the native loop rather than the stop button: keep
+            // what it wrote, and the question with it, in the conversation.
+            let reply = (turn.response.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !reply.isEmpty {
+                messages.append(.init(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
+                                      duration: Date().timeIntervalSince(started),
+                                      steps: turn.response.steps.isEmpty ? liveDraft?.steps ?? [] : turn.response.steps,
+                                      stopped: true, usage: turn.response.usage))
+            }
+            adoptStopped(turn.response)
             phase = .idle
             endRunning(.stopped)
         case _ where lifecycle?.turnWasSuspended == true && Self.diedWithConnection(outcome):
@@ -1552,7 +2030,10 @@ enum LedgerAgentReplyText {
         var depth: Int
     }
 
-    static func segments(_ text: String) -> [Segment] {
+    /// `streaming` reads a reply still being written: a fence that has not
+    /// closed yet shows its lines as prose until it does, so half a chart or
+    /// visual never draws as a broken block.
+    static func segments(_ text: String, streaming: Bool = false) -> [Segment] {
         var segments: [Segment] = []
         var lines: [Substring] = []
         var inCode = false
@@ -1582,7 +2063,8 @@ enum LedgerAgentReplyText {
                 lines.append(line)
             }
         }
-        // An unclosed fence still shows as code.
+        // An unclosed fence still shows as code, once the reply is complete.
+        if inCode, streaming { inCode = false }
         flush()
         return segments
     }

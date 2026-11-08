@@ -15,6 +15,15 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
         var ask: LedgerAgentAsk? = nil
         /// The change written to the ledger after a reply.
         var write: LedgerAgentWriteRecord? = nil
+        /// The reasoning, text and tool calls behind a reply, in order; absent
+        /// in older saves. `text` stays the reply alone, which is all the
+        /// native history tools read back.
+        var steps: [LedgerAgentStepRecord]? = nil
+        /// The user stopped the reply part way; absent when not.
+        var stopped: Bool? = nil
+        var usage: LedgerAgentUsage? = nil
+        /// The turn summarized older turns first; absent when not.
+        var compacted: Bool? = nil
     }
 
     var version = 1
