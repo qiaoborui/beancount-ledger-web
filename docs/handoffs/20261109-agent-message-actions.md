@@ -2,10 +2,10 @@
 
 - Status: completed-pending-review. Local commits on
   `codex/agent-message-actions`, not pushed, no PR.
-- Last updated: 2026-11-09 02:45 UTC+8.
+- Last updated: 2026-11-09 03:00 UTC+8 (review fixes).
 - Branch: `codex/agent-message-actions`, based on `codex/agent-live-timeline`
-  at `a64115b6`. This note covers the `feat(agent)` and `feat(ios)` commits
-  listed under Changed files.
+  at `a64115b6`. This note covers the `feat(agent)`, `feat(ios)` and review
+  `fix(agent)` / `fix(ios)` commits listed under Changed files.
 - Track "message-actions" of the stack that brings the on-device ledger
   assistant (账本助手) to desktop-assistant parity. Swift only. No Go file is
   touched; the truncation bridge `MobileagentTruncateTranscriptJSON` comes from
@@ -17,8 +17,7 @@
 
 Desktop-assistant message actions:
 
-1. Copy, regenerate and share under finished answers. Context menus on answers
-   and questions.
+1. Copy, regenerate and share under finished answers. Edit beside questions.
 2. Edit a question and resend it.
 3. Keep every version as a branch with a `‹ N/M ›` switch.
 4. Persist versions and per-version transcripts.
@@ -90,15 +89,44 @@ Nothing writes automatically.
 - **Attachments on regenerate.** The turn builder (`turnReporting()`, shared
   by send, regenerate and edit) now reads the attachment payloads when the turn
   starts, not when it is asked. The cut runs first and re-marks the question's
-  files as new, so they are sent again.
+  files as new, so they are sent again. It reads `turnAttachmentPayloads`,
+  which leaves out files still staged, so a file dragged in while the turn
+  copies its draft waits for the next question.
+- **Review fixes.**
+  - A question is shared by every answer under it, so its `outsideTranscript`
+    has to follow the version on screen. Leaving a version notes which
+    questions its transcript lacks (`branchOutside`, in memory), and a switch
+    puts those flags back. A transcript an earlier run saved has no note, so
+    `markOutside` falls back to the path's shape: an answered question is
+    held, a trailing one is not, and one a stop answered keeps its saved
+    flag. Not persisted, by choice. The stop-answered case after a relaunch
+    is the only one left approximate, and there a failed cut falls back to
+    history replay.
+  - A cut rewinds the thread before it takes the cut transcript, and marks
+    the question about to be asked as outside it. A save during the cut (a
+    discarded draft, a recap or title landing) therefore never pairs the cut
+    transcript with the old messages.
+  - `takeUnsavedBranchTranscripts` removes only the leaves it returns. A leaf
+    still on screen stays queued for a later save.
+  - Saves before v2 that end on an unanswered question mark it outside the
+    transcript when loaded.
+  - The context menus are gone, because they replaced text selection (and
+    Copy / Look Up / Translate) on answers, tool sources and errors,
+    thinking text and questions. 复制为纯文本 is now a long press on the
+    copy button (a `Menu` with a primary action), and VoiceOver offers it as
+    a named action. Questions get a small 编辑后重新发送 pencil button under
+    the bubble, hidden while a turn runs or while that question is being
+    edited.
+  - Showing another version sets `replacedByVersionChange`. The view's
+    message-count handler skips both the 回答好了 announcement and the forced
+    scroll to the bottom.
 - **UI.**
   - The action row uses icon buttons with VoiceOver labels. Share is a
     `ShareLink`, hidden while amounts are masked.
   - The `‹ N/M ›` switch has buttons labelled 上一个版本 / 下一个版本, each
     with the value "N / M".
   - The question being edited gets a thin outline.
-  - Copy, in the row, the context menus and code blocks, plays
-    `.sensoryFeedback(.success)`.
+  - Copy, in the row and in code blocks, plays `.sensoryFeedback(.success)`.
 
 ## Changed files
 
@@ -112,44 +140,46 @@ Nothing writes automatically.
 - `feat(ios)` commit:
   - `App/LedgerMobile/Sources/LedgerAgentView.swift`
   - `App/LedgerMobile/FEATURE_PARITY.md`
+- `fix(agent)` review commit: `LedgerAgent.swift`, `LedgerAgentBranches.swift`,
+  `Tests/LedgerAgentBranchesTests.swift` (5 new tests),
+  `Tests/LedgerAgentAttachmentsTests.swift` (1 new test).
+- `fix(ios)` review commit: `LedgerAgentView.swift`, `FEATURE_PARITY.md`.
 
 All committed locally; nothing pushed.
 
 ## Validation
 
-All run on the branch HEAD before this note.
+Run on the review-fix tree, which is the branch HEAD minus this note.
 
-- `cd App/LedgerMobile && swift test --filter LedgerAgent`: 120 tests, 0
-  failures (baseline 105 plus 15 new).
-- `cd App/LedgerMobile && xcodegen generate`, then `xcodebuild build -project
+- `cd App/LedgerMobile && swift test --filter LedgerAgent`: 126 tests, 0
+  failures. That is 120 from before plus 6 new review tests.
+- `cd App/LedgerMobile && xcodegen generate`, then `xcodebuild test -project
   LedgerMobile.xcodeproj -scheme LedgerMobile -destination 'id=<booted iPhone
-  17 Pro>' CODE_SIGNING_ALLOWED=NO`: BUILD SUCCEEDED.
-- `xcodebuild test ... -only-testing:LedgerMobileTests`: 957 tests, 7 skipped,
-  3 failures.
+  17 Pro>' CODE_SIGNING_ALLOWED=NO -only-testing:LedgerMobileTests`. The app
+  built, and 963 tests ran: 7 skipped, 3 failures.
   - The failures are the known unsigned-Keychain ones:
     - `BookkeepingPipelineTests.testSemanticCredentialsStayLocal...`
     - `ImportClassificationTests.testConsentIsPerLedger...`
     - `LocalGitBackgroundCredentialTests.testDeviceOnlyCredentialMigrates...`
   - The run needed the usual temporary `@MainActor` on
-    `LedgerAgentTests.testInterruptionNotificationNamesTheCause`, reverted
-    before committing.
+    `LedgerAgentTests.testInterruptionNotificationNamesTheCause`. It was
+    reverted before committing.
 - Go: not run. No Go change.
 
 ## Not tested
 
 - Nothing was run in the simulator: no API key or model was configured. The
-  action row, context menus, edit banner, version switch, confirmation alert
-  and code-block copy are compile-checked only.
-- A long press on answer and question text, which uses `textSelection`, may
-  compete with the context menu. Check on a device.
+  action row (including the copy button's long-press menu), the question
+  edit button, edit banner, version switch, confirmation alert and
+  code-block copy are compile-checked only.
 - The real `MobileagentTruncateTranscriptJSON` call on a device. Tests use a
   fake truncator. The bridge request shape follows the Go handler.
 - VoiceOver and Reduce Motion behaviour, by hand.
 
 ## Next
 
-1. Review the two commits; check the long-press and context-menu feel on a
-   device.
+1. Review the commits. On a device, check the copy button's long press, the
+   question pencil, and that answer and question text can be selected.
 2. Run one regenerate and one edit against a real model, then switch versions
    and continue, to confirm the cut transcript is accepted.
 3. Open the PR in stack order after `codex/agent-live-timeline`, with the
