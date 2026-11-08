@@ -96,7 +96,7 @@ struct RootView: View {
         // Remote startup cross-fades its connecting surface into the shell. The
         // local path is excluded here because it presents one authenticated frame;
         // its cover lifts on the scope above instead.
-        .animation(session.isLocal || reduceMotion ? nil : .easeOut(duration: 0.18), value: session.phase)
+        .animation(session.isLocal || reduceMotion ? nil : LedgerMotion.segment, value: session.phase)
         .onChange(of: session.phase) { _, phase in
             // Unmounting the shell used to take its sheets, alerts and pickers with
             // it. A retained shell must drop them itself, or they would stay above

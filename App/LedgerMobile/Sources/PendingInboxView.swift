@@ -346,7 +346,7 @@ struct PendingInboxView: View {
                 let count = session.isLocal ? (localWindow?.result.counts[tab.filter] ?? 0) : countFor(tab)
                 Button {
                     LedgerFeedback.selection()
-                    withAnimation(.easeOut(duration: 0.18)) { selectedTab = tab }
+                    withLedgerAnimation(LedgerMotion.segment) { selectedTab = tab }
                 } label: {
                     BalancedMark(title: "\(tab.title) \(count)", selected: selectedTab == tab, size: 14)
                 }

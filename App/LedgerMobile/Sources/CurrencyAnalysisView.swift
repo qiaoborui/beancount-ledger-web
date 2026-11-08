@@ -135,7 +135,7 @@ struct CurrencyAnalysisView: View {
                 }
                 .onAppear { proxy.scrollTo(selected, anchor: .leading) }
                 .onChange(of: selected) { _, currency in
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+                    withAnimation(reduceMotion ? nil : LedgerMotion.segment) {
                         proxy.scrollTo(currency, anchor: .leading)
                     }
                 }

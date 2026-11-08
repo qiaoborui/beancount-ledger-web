@@ -123,7 +123,7 @@ struct AccountsView: View {
                             : allSections.filter { filter.matches(section: $0) }.reduce(0) { $0 + $1.rows.count }
                         Button {
                             LedgerFeedback.selection()
-                            withAnimation(.easeOut(duration: 0.18)) { selectedFilter = filter }
+                            withLedgerAnimation(LedgerMotion.segment) { selectedFilter = filter }
                         } label: {
                             VStack(spacing: 7) {
                                 HStack(spacing: 4) {
@@ -226,7 +226,7 @@ struct AccountsView: View {
                 let selected = trendRange == range
                 Button {
                     LedgerFeedback.selection()
-                    withAnimation(.easeOut(duration: 0.18)) { trendRange = range }
+                    withLedgerAnimation(LedgerMotion.segment) { trendRange = range }
                 } label: {
                     Text(range.title)
                         .balancedFont(size: 13, weight: .medium)
@@ -424,6 +424,7 @@ private struct AccountsNetWorthChart: View {
         .chartXAxis { dateAxis }
         .chartYAxis { amountAxis }
         .chartLegend(.hidden)
+        .ledgerChartReveal("net-worth")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("净资产趋势"))
         .accessibilityValue(Text(accessibilityValue))
@@ -555,6 +556,9 @@ struct AccountDetailView: View {
     @State private var active = false
     @State private var completedRequest: AccountDetailRequestKey?
     @State private var completedTrendRequest: AccountDetailRequestKey?
+    // The local trend panel is swapped for a loading row on every range change,
+    // save and return from a pushed row; the reveal still plays only once here.
+    @State private var chartReveals = LedgerChartRevealMemory()
     private var displayedRange: LedgerDateRange {
         guard session.isLocal, let completedRequest else { return session.selectedRange }
         return .init(start: completedRequest.start, end: completedRequest.end, preset: .custom)
@@ -623,6 +627,7 @@ struct AccountDetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .environment(\.ledgerChartRevealMemory, chartReveals)
         .background(LedgerPalette.canvas)
         .terminalPageChrome(detail?.label ?? String(localized: "账户详情"), compactTitle: String(localized: "账户详情"), isRoot: false, showsTimeRange: true, actions: AnyView(
             Button { showingReconcileSheet = true } label: {
@@ -1169,6 +1174,7 @@ private struct AccountBalanceTrendPanel: View {
             }
             .chartYAxis(.hidden)
             .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
+            .ledgerChartReveal("balance-trend")
             .privacySensitive()
             .accessibilityLabel("账户余额趋势图，可点按或拖动查看数据")
             .accessibilityValue(axis.usesTimeScale ? "真实时间轴" : "有序分类轴")

@@ -126,7 +126,7 @@ struct OnboardingWizardView: View {
                     summaryStepView.tag(Step.summary)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.easeInOut(duration: 0.25), value: currentStep)
+                .ledgerAnimation(LedgerMotion.stage, value: currentStep)
 
                 // 底部导航栏
                 bottomBar
