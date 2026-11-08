@@ -360,13 +360,10 @@ func PromoteLocalModel(input LocalRequest, handle, expectedVersion string) (stri
 		promoted.cache.version, promoted.cache.versionReadAt = version, time.Now()
 	}
 	localModels.staged = nil
+	// Without a warm stage snapshot the first read builds it, as before. A
+	// background build here would hold the cache mutex that AdoptLocalModel
+	// needs to clone the committed model, stalling the next edit behind it.
 	insertCommittedLocalModel(promoted)
-	if carried == nil {
-		// No warm stage snapshot to carry: start the build now rather than on
-		// the first read. A read arriving meanwhile waits on the cache mutex for
-		// this same build instead of starting its own.
-		go func() { _, _ = promoted.cache.Snapshot() }()
-	}
 	return promotedHandle, nil
 }
 

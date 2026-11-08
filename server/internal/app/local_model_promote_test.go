@@ -558,7 +558,7 @@ func TestLocalModelPromoteCarriesWarmStageSnapshot(t *testing.T) {
 	}
 }
 
-func TestLocalModelPromoteWithoutWarmSnapshotBuildsInBackground(t *testing.T) {
+func TestLocalModelPromoteWithoutWarmSnapshotBuildsOnFirstRead(t *testing.T) {
 	generation := localTestRequest(t)
 	stage := stageClone(t, generation)
 	handle, version := registerStreamHandleFixture(t, stage, canonicalStreamForLedgerFixture(t))
@@ -575,13 +575,22 @@ func TestLocalModelPromoteWithoutWarmSnapshotBuildsInBackground(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The promotion already started this build; a read joins it.
+	// Nothing builds in the background, so the cache mutex stays free for an
+	// adoption of the committed model until a read asks for the snapshot.
+	if !resolved.localRegisteredCache.mu.TryLock() {
+		t.Fatal("promotion left a build holding the committed cache")
+	}
+	pending := resolved.localRegisteredCache.snapshot
+	resolved.localRegisteredCache.mu.Unlock()
+	if pending != nil {
+		t.Fatal("promotion without a warm stage snapshot built one anyway")
+	}
 	snapshot, err := resolved.localRegisteredCache.Snapshot()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !sameSnapshotContent(snapshot, coldSnapshotFor(t, generation, promoted)) {
-		t.Fatal("background-built snapshot differs from a cold build")
+		t.Fatal("first-read snapshot differs from a cold build")
 	}
 }
 
