@@ -50,6 +50,8 @@ struct LedgerAnalysisView: View {
     @State private var errorMessage: String?
     @State private var reloadToken = 0
     @State private var loadedKey: AnalysisRequestKey?
+    // Above the cached/loaded branches, which rebuild the report on every reload.
+    @State private var chartReveals = LedgerChartRevealMemory()
 
     private var requestKey: AnalysisRequestKey {
         AnalysisRequestKey(
@@ -92,6 +94,7 @@ struct LedgerAnalysisView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+            .environment(\.ledgerChartRevealMemory, chartReveals)
         }
         .background(BalancedPalette.page)
         .terminalPageChrome(kind.title, isRoot: isRoot, showsTimeRange: true, balanced: true)
@@ -710,7 +713,7 @@ private struct AssetAllocationDonutCard: View {
                     ForEach(allocations) { slice in
                         Button {
                             LedgerFeedback.selection()
-                            withAnimation(.easeInOut(duration: 0.15)) {
+                            withLedgerAnimation(LedgerMotion.selection) {
                                 if selectedID == slice.id {
                                     selectedID = nil
                                 } else {
@@ -1296,6 +1299,7 @@ private struct CashflowTrendChart: View {
                 .chartXAxis { xAxisMarks(axis) }
                 .chartYAxis(.hidden)
                 .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
+                .ledgerChartReveal("cashflow")
                 .accessibilityLabel("现金流趋势图，可点按或拖动查看数据")
                 .accessibilityValue(axis.usesTimeScale ? "真实时间轴" : "有序分类轴")
                 .accessibilityIdentifier("cashflow-trend-chart")
@@ -1445,6 +1449,7 @@ private struct NetWorthTrendChart: View {
                 }
                 .chartYAxis(.hidden)
                 .chartOverlay { proxy in selectionOverlay(proxy: proxy) }
+                .ledgerChartReveal("net-worth")
                 .accessibilityLabel("净资产走势图，可点按或拖动查看数据")
                 .accessibilityValue(axis.usesTimeScale ? "真实时间轴" : "有序分类轴")
                 .accessibilityIdentifier("net-worth-trend-chart")
@@ -2038,7 +2043,7 @@ struct CookieCategoryDonutCard: View {
                         let isSelected = selectedTab == tab
                         Button {
                             LedgerFeedback.selection()
-                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                            withLedgerAnimation(LedgerMotion.toggle) {
                                 selectedTab = tab
                                 selectedSliceID = nil
                             }
@@ -2116,7 +2121,7 @@ struct CookieCategoryDonutCard: View {
                     ForEach(slices) { slice in
                         Button {
                             LedgerFeedback.selection()
-                            withAnimation(.easeInOut(duration: 0.15)) {
+                            withLedgerAnimation(LedgerMotion.selection) {
                                 if selectedSliceID == slice.id {
                                     selectedSliceID = nil
                                 } else {

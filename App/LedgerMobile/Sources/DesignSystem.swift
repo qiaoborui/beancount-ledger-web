@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 import UIKit
 
@@ -76,6 +77,148 @@ enum LedgerMotion {
         static let breathDuration: TimeInterval = 1.9
         static let exitDuration: TimeInterval = 0.32
         static let exitScale: CGFloat = 1.06
+    }
+
+    // One vocabulary of curves so the same kind of change moves the same way on
+    // every screen. Apply them through `withLedgerAnimation` / `ledgerAnimation`,
+    // which drop the animation under Reduce Motion.
+
+    /// A figure or row changing in place: rolling digits, totals, list rows.
+    static let value = Animation.snappy(duration: 0.32)
+    /// Keypad typing. Shorter than `value` so fast input never queues rolls.
+    static let entry = Animation.snappy(duration: 0.2)
+    /// Flipping a choice that reshapes the form (entry kind, split mode).
+    static let toggle = Animation.spring(response: 0.25, dampingFraction: 0.8)
+    /// Moving the selection along one segmented row: tabs, ranges, sort orders.
+    static let segment = Animation.easeOut(duration: 0.18)
+    /// Highlighting one item of a chart or grid without changing the layout.
+    static let selection = Animation.easeInOut(duration: 0.15)
+    /// Inline expand/collapse and swapping one editor mode for another.
+    static let disclose = Animation.easeInOut(duration: 0.2)
+    /// Button press-down scale.
+    static let press = Animation.spring(response: 0.22, dampingFraction: 0.65)
+    /// Amounts showing or hiding behind the privacy mask.
+    static let privacy = Animation.easeOut(duration: 0.16)
+    /// Moving between the stages of one flow (import: parse → review → done).
+    static let stage = Animation.snappy(duration: 0.3)
+    /// A chart's plot drawing in on first appearance.
+    static let reveal = Animation.smooth(duration: 0.55)
+
+    /// Stage content rises into place and leaves by fading, so the outgoing
+    /// stage never slides against the incoming one.
+    static var stageTransition: AnyTransition {
+        .asymmetric(insertion: .opacity.combined(with: .offset(y: 8)), removal: .opacity)
+    }
+
+    /// `nil` under Reduce Motion, so the change lands in one frame.
+    @MainActor
+    static func resolved(_ animation: Animation,
+                         reduceMotion: Bool = UIAccessibility.isReduceMotionEnabled) -> Animation? {
+        reduceMotion ? nil : animation
+    }
+}
+
+/// `withAnimation` for action closures, which cannot read the environment.
+@MainActor
+func withLedgerAnimation<Result>(_ animation: Animation, _ body: () throws -> Result) rethrows -> Result {
+    try withAnimation(LedgerMotion.resolved(animation), body)
+}
+
+private struct LedgerAnimationModifier<Value: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let animation: Animation
+    let value: Value
+
+    func body(content: Content) -> some View {
+        content.animation(reduceMotion ? nil : animation, value: value)
+    }
+}
+
+/// Rolling digits for a figure that can change in place, plus the privacy
+/// fade. Reduce Motion swaps the roll for an instant cross-fade.
+private struct LedgerRollingAmountModifier: ViewModifier {
+    @EnvironmentObject private var session: LedgerSession
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let minorUnits: Int
+
+    func body(content: Content) -> some View {
+        content
+            .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(minorUnits)))
+            .animation(reduceMotion ? nil : LedgerMotion.privacy, value: session.amountsVisible)
+            .animation(reduceMotion ? nil : LedgerMotion.value, value: minorUnits)
+    }
+}
+
+/// Which charts on one screen already drew in. Screens that rebuild their
+/// charts on every reload (the analysis pages swap cached and loaded content,
+/// the account trend swaps in a loading row) keep one of these above the
+/// rebuild, so the reveal plays once per screen rather than once per rebuild.
+@MainActor
+final class LedgerChartRevealMemory {
+    private var revealed: Set<String> = []
+
+    func hasRevealed(_ id: String) -> Bool { revealed.contains(id) }
+    func markRevealed(_ id: String) { revealed.insert(id) }
+}
+
+private struct LedgerChartRevealMemoryKey: EnvironmentKey {
+    static let defaultValue: LedgerChartRevealMemory? = nil
+}
+
+extension EnvironmentValues {
+    var ledgerChartRevealMemory: LedgerChartRevealMemory? {
+        get { self[LedgerChartRevealMemoryKey.self] }
+        set { self[LedgerChartRevealMemoryKey.self] = newValue }
+    }
+}
+
+/// Draws a chart's plot area in from the leading edge on first appearance.
+/// Without a memory in the environment that is once per view lifetime; with
+/// one, once per `id` for the screen holding it. Range changes on a chart that
+/// stays mounted keep their own morph. Only the plot is masked, never the axis
+/// labels, which mask with the amounts.
+private struct LedgerChartRevealModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.ledgerChartRevealMemory) private var memory
+    @State private var revealed = false
+    let id: String
+
+    func body(content: Content) -> some View {
+        // A rebuilt chart whose reveal already played starts fully drawn. The
+        // chart that plays it marks the memory in the same update that starts
+        // the animation, so its own mask still animates from zero.
+        let drawn = revealed || reduceMotion || memory?.hasRevealed(id) == true
+        content
+            .chartPlotStyle { plot in
+                plot.mask(alignment: .leading) {
+                    Rectangle().scaleEffect(x: drawn ? 1 : 0, anchor: .leading)
+                }
+            }
+            .onAppear {
+                guard !revealed else { return }
+                if memory?.hasRevealed(id) == true {
+                    revealed = true
+                    return
+                }
+                memory?.markRevealed(id)
+                withAnimation(reduceMotion ? nil : LedgerMotion.reveal) { revealed = true }
+            }
+    }
+}
+
+extension View {
+    /// `.animation(_:value:)` that stands down under Reduce Motion.
+    func ledgerAnimation<Value: Equatable>(_ animation: Animation, value: Value) -> some View {
+        modifier(LedgerAnimationModifier(animation: animation, value: value))
+    }
+
+    func ledgerRollingAmount(_ minorUnits: Int) -> some View {
+        modifier(LedgerRollingAmountModifier(minorUnits: minorUnits))
+    }
+
+    /// `id` names the chart within its screen's `LedgerChartRevealMemory`.
+    func ledgerChartReveal(_ id: String) -> some View {
+        modifier(LedgerChartRevealModifier(id: id))
     }
 }
 
@@ -368,7 +511,6 @@ struct SectionHeading: View {
 
 struct AmountLabel: View {
     @EnvironmentObject private var session: LedgerSession
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let minorUnits: Int
     let currency: String
@@ -384,9 +526,7 @@ struct AmountLabel: View {
         amountText
             .font(font).monospacedDigit()
             .foregroundStyle(color)
-            .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(minorUnits)))
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: session.amountsVisible)
-            .animation(reduceMotion ? nil : .snappy(duration: 0.32), value: minorUnits)
+            .ledgerRollingAmount(minorUnits)
             .accessibilityLabel(
                 session.amountsVisible
                     ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showSign: showSign)
@@ -541,7 +681,7 @@ struct PressScaleButtonStyle: ButtonStyle {
             .scaleEffect(reduceMotion ? 1 : configuration.isPressed ? pressedScale : 1)
             .opacity(configuration.isPressed ? 0.88 : 1)
             .animation(
-                reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.65),
+                reduceMotion ? nil : LedgerMotion.press,
                 value: configuration.isPressed
             )
             .onChange(of: configuration.isPressed) { _, isPressed in
@@ -579,7 +719,7 @@ struct TactilePillButtonStyle: ButtonStyle {
             }
             .scaleEffect(reduceMotion ? 1 : configuration.isPressed ? 0.96 : 1)
             .animation(
-                reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.68),
+                reduceMotion ? nil : LedgerMotion.press,
                 value: configuration.isPressed
             )
             .onChange(of: configuration.isPressed) { _, isPressed in

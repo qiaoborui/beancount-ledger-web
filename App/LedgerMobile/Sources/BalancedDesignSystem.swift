@@ -125,7 +125,6 @@ extension View {
 /// in the direction colour, never a minus sign duplicating what colour says.
 struct BalancedAmount: View {
     @EnvironmentObject private var session: LedgerSession
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let minorUnits: Int
     let currency: String
     var size: CGFloat = 15
@@ -147,8 +146,7 @@ struct BalancedAmount: View {
         .foregroundStyle(color)
         .lineLimit(1)
         .minimumScaleFactor(0.45)
-        .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(minorUnits)))
-        .animation(reduceMotion ? nil : .snappy(duration: 0.32), value: minorUnits)
+        .ledgerRollingAmount(minorUnits)
         .accessibilityLabel(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency) : String(localized: "金额已隐藏"))
     }
 

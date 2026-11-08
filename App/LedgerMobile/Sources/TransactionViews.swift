@@ -438,6 +438,7 @@ private struct BalancedTransactionFilterSettle: View {
                         Text(session.amountsVisible ? sign + MoneyText.format(minorUnits: abs(row.minorUnits), currency: currency, showsCurrency: false) : "••••••")
                             .font(.custom(BalancedWeight.text.sansPostscriptName, size: 15, relativeTo: .body))
                             .monospacedDigit().foregroundStyle(BalancedPalette.ink).lineLimit(1).fixedSize()
+                            .ledgerRollingAmount(row.minorUnits)
                     }.padding(.vertical, 6)
                 }
             }
@@ -445,9 +446,12 @@ private struct BalancedTransactionFilterSettle: View {
                 Text("合计").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                 Spacer(minLength: 8)
                 // `.settle-total dd`: 30/500/-0.025em, same as OverviewView's settle total.
+                // Rolls like AmountLabel; BalancedAmount itself is not used because its
+                // `.minimumScaleFactor` mismeasures inside List rows (see above).
                 Text(session.amountsVisible ? sign + MoneyText.format(minorUnits: abs(total), currency: currency, showsCurrency: false) : "••••••")
                     .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 30, relativeTo: .title))
                     .tracking(-0.75).monospacedDigit().foregroundStyle(totalColor).lineLimit(1).fixedSize()
+                    .ledgerRollingAmount(total)
             }
             .padding(.top, 14)
             .overlay(alignment: .top) { BalancedPalette.ink.frame(height: 1) }
@@ -464,15 +468,16 @@ private struct BalancedTransactionFilterSettle: View {
 private struct BalancedTransactionDayHeader: View {
     let date: String
     let weekday: String
-    let summary: String
+    let summary: BalancedDaySummary
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             (Text(date).font(.custom(BalancedWeight.semibold.sansPostscriptName, size: 12.5, relativeTo: .caption)).foregroundColor(BalancedPalette.secondary)
              + Text(" " + weekday).font(.custom(BalancedWeight.regular.sansPostscriptName, size: 12.5, relativeTo: .caption)).foregroundColor(BalancedPalette.meta))
                 .monospacedDigit()
-            if !summary.isEmpty {
-                Text(summary).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.secondary)
+            if !summary.text.isEmpty {
+                Text(summary.text).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.secondary)
+                    .ledgerRollingAmount(summary.minorUnits)
             }
             BalancedPalette.rule.frame(height: 1)
         }
@@ -481,6 +486,14 @@ private struct BalancedTransactionDayHeader: View {
         .padding(.bottom, 6)
         .textCase(nil)
     }
+}
+
+/// A day's kind summary and the figure it rolls on when the full-range scan
+/// lands or a save changes the day. `minorUnits` is 0 for the transfer note.
+private struct BalancedDaySummary {
+    static let empty = BalancedDaySummary(text: "", minorUnits: 0)
+    let text: String
+    let minorUnits: Int
 }
 
 private struct BalancedLedgerTransactionRow: View {
@@ -550,7 +563,12 @@ struct TransactionsView: View {
 
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var filters = LedgerTransactionFilter()
+    /// What the search field shows. `filters.query` follows it after a pause, so
+    /// each keystroke does not re-filter the rows and restart the window read.
+    @State private var searchText = ""
+    static let searchDebounceNanoseconds: UInt64 = 250_000_000
     @State private var filterPresented = false
     @State private var storagePresented = false
     @State private var duplicateTarget: LedgerTransaction?
@@ -614,12 +632,38 @@ struct TransactionsView: View {
 
     private var displayedTransactions: [LedgerTransaction] {
         if session.isLocal {
-            return (session.localTransactionAccumulatedRows.isEmpty
+            return hidingConfirmedDeletions((session.localTransactionAccumulatedRows.isEmpty
                 ? session.localBootstrapTransactions
                 : session.localTransactionAccumulatedRows)
-                .filter(filters.matches)
+                .filter(filters.matches))
         }
         return filteredTransactions
+    }
+
+    /// Remote rows already drop a confirmed deletion through the session's
+    /// projection; local rows come from windows and bootstrap pages read before
+    /// the write, so they are filtered here until the next generation (which no
+    /// longer has the row) lands.
+    private func hidingConfirmedDeletions(_ rows: [LedgerTransaction]) -> [LedgerTransaction] {
+        guard session.transactionMutationStates.values.contains(.confirmed) else { return rows }
+        return rows.filter { !isHiddenConfirmedDeletion($0) }
+    }
+
+    private func isHiddenConfirmedDeletion(_ row: LedgerTransaction) -> Bool {
+        guard session.transactionMutationPhase(for: row) == .confirmed,
+              case .unavailable = session.transactionResolution(for: row.source) else { return false }
+        return true
+    }
+
+    /// Local rows a confirmed deletion is hiding. Only these drive the list's
+    /// delete animation: other confirmed writes (an edit, a 200-row tag add)
+    /// update their rows in place, and page appends never animate.
+    private var hiddenConfirmedDeletionIDs: Set<LedgerTransaction.ID> {
+        guard session.isLocal, session.transactionMutationStates.values.contains(.confirmed) else { return [] }
+        let rows = session.localTransactionAccumulatedRows.isEmpty
+            ? session.localBootstrapTransactions
+            : session.localTransactionAccumulatedRows
+        return Set(rows.lazy.filter(isHiddenConfirmedDeletion).map(\.id))
     }
 
     /// Same scope as `displayedTransactions` but ignores the active kind
@@ -649,10 +693,6 @@ struct TransactionsView: View {
         // started yet, or a reset just cleared it), there is nothing to judge.
         return session.localTransactionWindow == nil && session.localTransactionWindowError == nil
             && session.phase == .ready && !session.privacyShielded
-    }
-
-    private var displayedCount: Int? {
-        session.isLocal ? session.localTransactionSummary?.matchedCount : filteredTransactions.count
     }
 
     private var transactions: [LedgerTransaction] {
@@ -719,8 +759,8 @@ struct TransactionsView: View {
     ///
     /// Local lists load lazily, so a day can be split across windows; prefer the
     /// full-range day totals from the summary scan when they exist.
-    private func balancedDaySummary(_ transactions: [LedgerTransaction], day: LocalTransactionScan.Day? = nil) -> String {
-        guard filters.kind == .all else { return "" }
+    private func balancedDaySummary(_ transactions: [LedgerTransaction], day: LocalTransactionScan.Day? = nil) -> BalancedDaySummary {
+        guard filters.kind == .all else { return .empty }
         var income = day?.incomeTotal ?? 0
         var expense = day?.expenseTotal ?? 0
         var transfers = day?.hasTransfer ?? false
@@ -732,9 +772,14 @@ struct TransactionsView: View {
             case .transfer: transfers = true
             }
         }
-        if income > 0 { return String(localized: "收入 \(MoneyText.format(minorUnits: income, currency: session.ledger?.summary.currency ?? "CNY", showsCurrency: false))") }
-        if expense > 0 { return String(localized: "支出 \(MoneyText.format(minorUnits: expense, currency: session.ledger?.summary.currency ?? "CNY", showsCurrency: false))") }
-        return transfers ? String(localized: "转账，不计收支") : ""
+        // Masked with the row amounts, so hiding amounts hides the day totals too.
+        let currency = session.ledger?.summary.currency ?? "CNY"
+        func figure(_ minorUnits: Int) -> String {
+            session.amountsVisible ? MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: false) : "••••••"
+        }
+        if income > 0 { return .init(text: String(localized: "收入 \(figure(income))"), minorUnits: income) }
+        if expense > 0 { return .init(text: String(localized: "支出 \(figure(expense))"), minorUnits: expense) }
+        return transfers ? .init(text: String(localized: "转账，不计收支"), minorUnits: 0) : .empty
     }
 
     /// `.settle` filter-result block (b04) — only once a kind filter narrows
@@ -897,7 +942,10 @@ struct TransactionsView: View {
     private var transactionList: some View {
         let labels = accountLabels
         let displayed = displayedTransactions
-        let filtered = filteredTransactions
+        // A remote list's displayed rows already are the filtered rows; a local
+        // list never shows the remote footer. Filtering again per body was waste.
+        let filtered = session.isLocal ? [] : displayed
+        let count: Int? = session.isLocal ? session.localTransactionSummary?.matchedCount : displayed.count
         let grouped = Dictionary(grouping: displayed, by: \.date)
             .map { (date: $0.key, transactions: $0.value) }
             .sorted { $0.date > $1.date }
@@ -906,16 +954,20 @@ struct TransactionsView: View {
         let summaryDays: [String: LocalTransactionScan.Day] = session.isLocal
             ? Dictionary(session.localTransactionSummary?.days.map { ($0.date, $0) } ?? [], uniquingKeysWith: { first, _ in first })
             : [:]
+        let hiddenDeletions = hiddenConfirmedDeletionIDs
+        // Same condition as the loading row below. Keyed on the placeholder, not on
+        // `isAwaitingRows`, which is also true while a page is appended.
+        let showsPlaceholder = displayed.isEmpty && isAwaitingRows
         return List {
             Section {
                 VStack(spacing: 0) {
                     HStack(spacing: 9) {
                         Image(systemName: "magnifyingglass").font(.system(size: 15))
-                        TextField("商户、备注或标签", text: $filters.query)
+                        TextField("商户、备注或标签", text: $searchText)
                             .balancedFont(size: 14.5).autocorrectionDisabled()
                             .accessibilityIdentifier("transaction-quick-search")
-                        if !filters.query.isEmpty {
-                            Button { filters.query = "" } label: { Image(systemName: "xmark.circle") }
+                        if !searchText.isEmpty {
+                            Button { searchText = ""; filters.query = "" } label: { Image(systemName: "xmark.circle") }
                                 .frame(width: 44, height: 44).accessibilityLabel("清除流水搜索")
                         }
                     }
@@ -924,7 +976,7 @@ struct TransactionsView: View {
                     .padding(.bottom, 14)
                     BalancedTransactionFilterBar(kindFilter: $filters.kind, counts: kindCounts)
                     HStack {
-                        Text((filters.account.flatMap { labels[$0] ?? $0 } ?? String(localized: "全部账户")) + " · " + (displayedCount.map { String(localized: "\($0) 笔") } ?? String(localized: "统计中")))
+                        Text((filters.account.flatMap { labels[$0] ?? $0 } ?? String(localized: "全部账户")) + " · " + (count.map { String(localized: "\($0) 笔") } ?? String(localized: "统计中")))
                             .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                         Spacer(minLength: 8)
                         Button("筛选", systemImage: "line.3.horizontal.decrease") { filterPresented = true }
@@ -976,7 +1028,7 @@ struct TransactionsView: View {
                     }
                 }
             }
-            if displayed.isEmpty && isAwaitingRows {
+            if showsPlaceholder {
                 Section {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small).tint(BalancedPalette.meta)
@@ -987,6 +1039,7 @@ struct TransactionsView: View {
                     .frame(maxWidth: .infinity, minHeight: 120)
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("transaction-list-loading")
+                    .transition(.opacity)
                 }
                 .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 .listRowBackground(Color.clear)
@@ -1025,7 +1078,7 @@ struct TransactionsView: View {
                     if session.isLocal && session.localTransactionHasMore {
                         infiniteScrollFooter
                     } else {
-                        Text(balancedListFootnote)
+                        Text(balancedListFootnote(count: displayed.count))
                             .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                             .padding(.top, 12).padding(.bottom, 20)
                     }
@@ -1042,6 +1095,13 @@ struct TransactionsView: View {
                 .listRowBackground(Color.clear)
             }
         }
+        // Rows landing cross-fade over the loading placeholder. Clearing the list
+        // (a range or filter reset) stays instant, so a 1,000-row window is never
+        // animated out, and appending a page to rows already shown is not animated.
+        .animation(reduceMotion || showsPlaceholder ? nil : LedgerMotion.segment, value: showsPlaceholder)
+        // A confirmed deletion leaves through the List's own delete animation.
+        // Retiring the last receipt (when the next generation lands) is instant.
+        .animation(reduceMotion || hiddenDeletions.isEmpty ? nil : LedgerMotion.value, value: hiddenDeletions)
     }
 
     /// Tail of the scrolling list. Appearing on screen appends the next bounded
@@ -1081,9 +1141,8 @@ struct TransactionsView: View {
 
     /// `.note` under the list — the filtered tab points at the settle block
     /// above it instead of repeating the "fully loaded" footnote.
-    private var balancedListFootnote: String {
+    private func balancedListFootnote(count: Int) -> String {
         guard filters.kind == .all else { return String(localized: "筛选只作用于当前区间，其余账目未被隐藏。") }
-        let count = displayedTransactions.count
         if session.isLocal, session.localTransactionReachedRowCap {
             return String(localized: "已加载 \(count) 笔，收窄时间范围可以看得更远。长按可多选，左滑显示改分类与对账。")
         }
@@ -1102,6 +1161,16 @@ struct TransactionsView: View {
         .refreshable { await session.refresh() }
         .task(id: windowRequestKey) {
             if windowRequestKey.readable { await loadWindow(reuseCurrent: true) }
+        }
+        .task(id: searchText) {
+            guard searchText != filters.query else { return }
+            try? await Task.sleep(nanoseconds: Self.searchDebounceNanoseconds)
+            guard !Task.isCancelled else { return }
+            filters.query = searchText
+        }
+        // Filters set elsewhere (a deep link, a cleared filter) win over the field.
+        .onChange(of: filters.query) { _, query in
+            if query != searchText { searchText = query }
         }
     }
 
@@ -1360,13 +1429,16 @@ struct TransactionsView: View {
             NavigationLink {
                 TransactionDetailView(transaction: transaction)
             } label: {
+                let phase = session.transactionMutationPhase(for: transaction)
                 VStack(alignment: .leading, spacing: 0) {
                     BalancedLedgerTransactionRow(transaction: transaction, accountLabels: accountLabels,
                         accountCurrency: session.ledger?.valuationCurrency ?? "CNY")
-                    if let phase = session.transactionMutationPhase(for: transaction) {
+                    if let phase {
                         TransactionMutationBadge(phase: phase)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
+                .ledgerAnimation(LedgerMotion.value, value: phase)
             }
             .buttonStyle(.plain)
             .navigationLinkIndicatorVisibility(.hidden)
@@ -2166,6 +2238,7 @@ private struct TransactionMutationBadge: View {
         Label(presentation.title, systemImage: presentation.image)
             .font(.system(.caption2, design: .default, weight: .semibold))
             .foregroundStyle(presentation.color)
+            .contentTransition(.opacity)
             .accessibilityIdentifier("transaction-mutation-state")
     }
 }
@@ -3427,6 +3500,9 @@ struct CookieKeypadView: View {
         .background(BalancedPalette.sunken.ignoresSafeArea(edges: .bottom))
     }
 
+    // Each key gives exactly one haptic: the selection tick in its action, which
+    // fires only for a completed tap. The press style's own haptic is off here,
+    // and so is not tied to Reduce Motion either.
     private func keypadButton(_ label: String, action: @escaping () -> Void) -> some View {
         Button {
             LedgerFeedback.selection()
@@ -3439,7 +3515,7 @@ struct CookieKeypadView: View {
                 .frame(maxWidth: .infinity, minHeight: 52)
                 .background(BalancedPalette.sunken)
         }
-        .buttonStyle(PressScaleButtonStyle())
+        .buttonStyle(PressScaleButtonStyle(enablesHaptic: false))
         .accessibilityIdentifier("keypad-\(label)")
     }
 
@@ -3456,7 +3532,7 @@ struct CookieKeypadView: View {
                 .frame(maxWidth: .infinity, minHeight: 52)
                 .background(BalancedPalette.sunken)
         }
-        .buttonStyle(PressScaleButtonStyle())
+        .buttonStyle(PressScaleButtonStyle(enablesHaptic: false))
         .accessibilityIdentifier("keypad-op-\(op)")
     }
 
@@ -3477,7 +3553,7 @@ struct CookieKeypadView: View {
                 calculator.clear()
             }
         )
-        .buttonStyle(PressScaleButtonStyle())
+        .buttonStyle(PressScaleButtonStyle(enablesHaptic: false))
         .accessibilityIdentifier("keypad-delete")
     }
 
@@ -3498,7 +3574,8 @@ struct CookieKeypadView: View {
 
         }
         .disabled(saving)
-        .buttonStyle(PressScaleButtonStyle())
+        // `onCommit` gives this key its one haptic: a tick for "=", a tap for save.
+        .buttonStyle(PressScaleButtonStyle(enablesHaptic: false))
         .accessibilityIdentifier("fast-entry-save-button")
     }
 }
@@ -3723,6 +3800,7 @@ struct CookieFastTransactionEditorBody: View {
                                 updateActivePostingAmount()
                                 LedgerFeedback.selection()
                             } else {
+                                LedgerFeedback.light()
                                 Task { await save() }
                             }
                         }
@@ -3730,7 +3808,7 @@ struct CookieFastTransactionEditorBody: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .animation(.easeInOut(duration: 0.2), value: focusedField != nil)
+            .ledgerAnimation(LedgerMotion.disclose, value: focusedField != nil)
             .background(BalancedPalette.page)
             .contentShape(Rectangle())
             .onTapGesture {
@@ -3814,7 +3892,7 @@ struct CookieFastTransactionEditorBody: View {
 
                     Button {
                         LedgerFeedback.light()
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                        withLedgerAnimation(LedgerMotion.toggle) {
                             isSplitMode = false
                         }
                     } label: {
@@ -3833,7 +3911,7 @@ struct CookieFastTransactionEditorBody: View {
                     ForEach(CookieEntryKind.allCases) { entryKind in
                         Button {
                             LedgerFeedback.selection()
-                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                            withLedgerAnimation(LedgerMotion.toggle) {
                                 kind = entryKind
                                 if entryKind == .income && !CookieCategoryItem.incomeCategories.contains(where: { $0.id == selectedCategoryID }) {
                                     selectedCategoryID = CookieCategoryItem.incomeCategories.first?.id ?? "salary"
@@ -3884,6 +3962,8 @@ struct CookieFastTransactionEditorBody: View {
                     .foregroundStyle(BalancedPalette.meta)
                 // U+2212 for the displayed minus; the calculator's own expression
                 // stays ASCII so parsing is unaffected.
+                // Digits roll as they are typed, and "=" rolls the expression
+                // into its result, like every other amount in the app.
                 Text(calculator.displayText.replacingOccurrences(of: "-", with: "−"))
                     .balancedFont(size: 40, weight: .medium, relativeTo: .largeTitle)
                     .monospacedDigit()
@@ -3891,14 +3971,18 @@ struct CookieFastTransactionEditorBody: View {
                     .foregroundStyle(amountColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
+                    .contentTransition(.numericText())
                 Spacer(minLength: 8)
                 if !isSplitMode, calculator.isCalculationPending, let res = calculator.evaluatedResult {
                     Text(verbatim: "= \(res)")
                         .balancedFont(size: 15)
                         .monospacedDigit()
                         .foregroundStyle(BalancedPalette.meta)
+                        .contentTransition(.numericText())
+                        .transition(.opacity.combined(with: .offset(x: 6)))
                 }
             }
+            .ledgerAnimation(LedgerMotion.entry, value: calculator.displayText)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("金额 \(calculator.displayText) \(selectedCurrency)")
         }
@@ -4314,7 +4398,7 @@ struct CookieFastTransactionEditorBody: View {
                 Button {
                     LedgerFeedback.selection()
                     focusedField = nil
-                    withAnimation(.easeInOut(duration: 0.2)) { toggleSplitMode() }
+                    withLedgerAnimation(LedgerMotion.disclose) { toggleSplitMode() }
                 } label: {
                     linkLabel(String(localized: "拆分成多条分录"))
                         .frame(minHeight: 44)
@@ -4981,7 +5065,7 @@ struct TransactionEditorView: View {
                         if !newPostings.isEmpty {
                             postings = newPostings
                         }
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withLedgerAnimation(LedgerMotion.disclose) {
                             mode = .advanced
                         }
                     }
@@ -5134,7 +5218,7 @@ struct TransactionEditorView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("极速") {
                         LedgerFeedback.light()
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withLedgerAnimation(LedgerMotion.disclose) {
                             mode = .fast
                         }
                     }
@@ -5311,7 +5395,7 @@ struct TransactionEditorView: View {
         let isSelected = Calendar.current.isDate(date, inSameDayAs: targetDate)
         return Button {
             LedgerFeedback.selection()
-            withAnimation(.spring(response: 0.22, dampingFraction: 0.7)) {
+            withLedgerAnimation(LedgerMotion.segment) {
                 date = targetDate
             }
         } label: {
@@ -5326,19 +5410,22 @@ struct TransactionEditorView: View {
         .buttonStyle(.plain)
     }
 
-    private static func parseDate(_ raw: String) -> Date? {
+    // Built once: the date pickers read these bindings on every render.
+    private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static func parseDate(_ raw: String) -> Date? {
+        let formatter = Self.dayFormatter
         return formatter.date(from: raw)
     }
 
     private static func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
+        let formatter = Self.dayFormatter
         return formatter.string(from: date)
     }
 

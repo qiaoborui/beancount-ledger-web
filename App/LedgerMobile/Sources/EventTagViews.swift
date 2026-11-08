@@ -103,7 +103,7 @@ struct EventTagListView: View {
                 ForEach(SortOrder.allCases) { order in
                     Button {
                         LedgerFeedback.selection()
-                        withAnimation(.easeOut(duration: 0.18)) { sortOrder = order }
+                        withLedgerAnimation(LedgerMotion.segment) { sortOrder = order }
                     } label: {
                         BalancedMark(title: order.title, selected: sortOrder == order, size: 13)
                     }

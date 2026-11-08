@@ -124,6 +124,20 @@ final class LedgerSession: ObservableObject {
         let today: String
     }
     private var lastWidgetPublish: WidgetPublishKey?
+    private struct WidgetPublishRequest {
+        let ledger: LedgerBootstrap
+        let contextURL: URL
+        let valuationCurrency: String
+        let generation: Int
+        let localRevisionID: UUID?
+    }
+    /// The newest local publish still waiting out its debounce, if any.
+    private var pendingWidgetPublish: WidgetPublishRequest?
+    private var pendingWidgetPublishTask: Task<Void, Never>?
+    /// Trailing debounce for local widget publication. A save, its refresh and
+    /// any follow-up refresh each reload the ledger; only the last one needs the
+    /// five reports. Internal so tests can shorten it.
+    static var localWidgetPublishDebounceNanoseconds: UInt64 = 2_500_000_000
     private var analysisPrefetchTask: Task<Void, Never>?
     private var analysisInFlight: [AnalysisCacheKey: Task<LedgerAnalysisResource, Error>] = [:]
     @Published private(set) var localOverviewCategoriesError: String?
@@ -254,7 +268,17 @@ final class LedgerSession: ObservableObject {
         let today: String
     }
     private var localPresentation: LocalPresentation? {
-        didSet { if localPresentation != oldValue { resetLocalTransactionWindow() } }
+        didSet {
+            guard localPresentation != oldValue else { return }
+            // A newer revision of the same ledger re-reads the same list, so the
+            // rows stay until its first window replaces them. Another ledger, or
+            // none, owns different rows.
+            if let localPresentation, localPresentation.ledgerID == oldValue?.ledgerID {
+                cancelLocalTransactionReaders()
+            } else {
+                resetLocalTransactionWindow()
+            }
+        }
     }
 
     var localTransactionPresentationRevision: UUID? { localPresentation?.revisionID }
@@ -300,6 +324,9 @@ final class LedgerSession: ObservableObject {
     private var transactionSummaryTask: Task<Void, Never>?
     private var transactionWindowFilter = LedgerTransactionFilter()
     private var transactionWindowLimits = LocalTransactionWindow.Limits()
+    /// Window generation of a first-window read still in flight, so a second
+    /// caller for the same list joins it instead of revoking and restarting it.
+    private var firstWindowGeneration: Int?
     private var transactionWindowAnchors = LocalTransactionWindow.Anchors()
     @Published private(set) var localTransactionWindowIndex = 0
     private var transactionWindowReader: LocalTransactionWindow?
@@ -601,6 +628,9 @@ final class LedgerSession: ObservableObject {
                           self.localPresentation == presentation, self.location == .local(id),
                           self.phase == .ready,
                           revision?.id != self.localPresentation?.revisionID else { return }
+                    // Another surface committed a revision this session has not
+                    // presented, and nothing here re-reads it until the next
+                    // refresh. Rows from the old revision would stay interactive.
                     self.resetLocalTransactionWindow()
                     self.invalidateOverviewCategories()
                     self.localOverviewCategoriesError = String(localized: "账本已更新，请刷新概览汇总")
@@ -1499,11 +1529,14 @@ final class LedgerSession: ObservableObject {
                 }
             }
             // Only reload the presented ledger when the exchange actually moved
-            // it. The periodic path runs this every few minutes; refreshing an
-            // unchanged ledger rebuilt the whole bootstrap and every projection.
-            let movedCommit = status.baseCommit != previous.baseCommit
-            let changed = status.phase == .pending || movedCommit
-            if changed, !background, epoch == sessionEpoch, phase == .ready, applicationActive {
+            // it. A push after a local save advances `baseCommit` but leaves the
+            // workspace revision alone, and the save already refreshed onto that
+            // revision; only a pull or merge commits a new one. `baseCommit`
+            // stays a sync-status detail.
+            let presented = location == .local(active.id)
+            if presented, !background, epoch == sessionEpoch, phase == .ready, applicationActive,
+               Self.automaticSyncRequiresRefresh(currentRevisionID: currentRevisionID,
+                   presentedRevisionID: localPresentation?.revisionID) {
                 await refresh()
             }
             guard !Task.isCancelled, epoch == sessionEpoch else { return .retryableFailure }
@@ -1529,6 +1562,13 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    /// The presentation is keyed by workspace revision, so a sync needs a reload
+    /// exactly when the workspace now sits on a revision nobody has presented.
+    nonisolated static func automaticSyncRequiresRefresh(currentRevisionID: UUID?, presentedRevisionID: UUID?) -> Bool {
+        guard let currentRevisionID else { return false }
+        return currentRevisionID != presentedRevisionID
+    }
+
     static func automaticSyncRequiresAttention(_ error: Error) -> Bool {
         if let error = error as? LocalStorageError {
             switch error {
@@ -1548,13 +1588,28 @@ final class LedgerSession: ObservableObject {
             throw LedgerRepositoryError.capabilityUnavailable("local writes")
         }
         let epoch = sessionEpoch
-        resetLocalTransactionWindow()
-        defer { if epoch == sessionEpoch { localTransactionReloadID &+= 1 } }
-        try await localRepository.addTransaction(entry: entry)
+        cancelLocalTransactionReaders()
+        do {
+            try await localRepository.addTransaction(entry: entry)
+        } catch {
+            // Nothing was appended, so no refresh follows; the list still needs
+            // a signal to re-read the window the line above revoked.
+            if epoch == sessionEpoch { localTransactionReloadID &+= 1 }
+            throw error
+        }
         guard epoch == sessionEpoch else { throw CancellationError() }
         let accountLabels = TransactionCategoryPresentation.accountLabels(ledger?.accounts ?? [])
         triggerIslandNotice(LedgerIslandNotice.from(entry: entry, accountLabels: accountLabels))
+        // The refresh owns the reload signal: a new revision changes the list's
+        // request key, a same-revision refresh bumps it. Bumping here as well
+        // restarted the list's window read a second time after every save.
+        let reloadID = localTransactionReloadID
+        let presentedRevision = localPresentation?.revisionID
         await refresh()
+        if epoch == sessionEpoch, localTransactionReloadID == reloadID,
+           localPresentation?.revisionID == presentedRevision {
+            localTransactionReloadID &+= 1
+        }
     }
 
     func addAccount(
@@ -1946,8 +2001,17 @@ final class LedgerSession: ObservableObject {
 
     private func refreshWithResult() async -> Bool {
         guard phase == .ready, let contextURL, !isRangeLoading, !isValuationCurrencyLoading else { return false }
-        let generation = invalidateRequests(preservingOverviewCategories: true)
-        defer { if generation == requestGeneration { localTransactionReloadID &+= 1 } }
+        let generation = invalidateRequests(preservingOverviewCategories: true, keepingTransactionRows: true)
+        let presentedRevision = localPresentation?.revisionID
+        // A newer revision already changes the list's request key. Signal only a
+        // same-revision refresh, so one refresh restarts the window read once.
+        defer {
+            if generation == requestGeneration,
+               localPresentation == nil || localPresentation?.revisionID == presentedRevision,
+               !(isLocal && localTransactionWindow != nil) {
+                localTransactionReloadID &+= 1
+            }
+        }
         do {
             try await loadLedger(from: contextURL, generation: generation)
             guard generation == requestGeneration else { return false }
@@ -2580,6 +2644,9 @@ final class LedgerSession: ObservableObject {
         if transactionMutations[key]?.phase.blocksFurtherWrites == true {
             throw LedgerTransactionMutationError.alreadyInProgress
         }
+        // A mutation clears the rows rather than keeping them like a refresh:
+        // the list renders raw window rows, so a kept row would show the
+        // pre-edit content, or a deleted row, until the re-read replaced it.
         if publishing, isLocal {
             resetLocalTransactionWindow()
             invalidateOverviewCategories()
@@ -3256,6 +3323,7 @@ final class LedgerSession: ObservableObject {
         applicationActive = isActive
         applicationBackground = isBackground
         if !isActive || isBackground {
+            flushPendingWidgetPublish()
             resetLocalTransactionWindow()
         } else if !wasActive {
             // Leaving the foreground dropped the list window, but the transactions
@@ -3804,10 +3872,10 @@ final class LedgerSession: ObservableObject {
                 await self.refreshLocalOverviewCategories()
                 guard generation == self.requestGeneration, epoch == self.sessionEpoch,
                       expectedLocation == self.location, self.phase == .ready else { return }
-                await self.publishWidgetSnapshot(ledger: payload, contextURL: contextURL,
-                    valuationCurrency: payload.valuationCurrency, generation: generation,
-                    localRevisionID: presentationRevision)
                 self.prefetchAnalysis()
+                self.scheduleLocalWidgetPublish(.init(ledger: payload, contextURL: contextURL,
+                    valuationCurrency: payload.valuationCurrency, generation: generation,
+                    localRevisionID: presentationRevision))
             }
         } else {
             if local != nil { await refreshLocalOverviewCategories() }
@@ -3817,17 +3885,11 @@ final class LedgerSession: ObservableObject {
                 // path: the snapshot is derived from the same generation that is
                 // already displayed. Awaiting it here made every cold launch and
                 // every unlock wait on five reports plus a Keychain read before
-                // `loadLedger` returned.
-                let epoch = sessionEpoch, expectedLocation = location
-                Task(priority: .utility) { @MainActor [weak self] in
-                    await Task.yield()
-                    guard let self, generation == self.requestGeneration,
-                          epoch == self.sessionEpoch, expectedLocation == self.location,
-                          self.phase == .ready else { return }
-                    await self.publishWidgetSnapshot(ledger: payload, contextURL: contextURL,
-                        valuationCurrency: payload.valuationCurrency, generation: generation,
-                        localRevisionID: presentationRevision)
-                }
+                // `loadLedger` returned. It is debounced so a burst of reloads
+                // (save, refresh, sync) builds it once, after everything else.
+                scheduleLocalWidgetPublish(.init(ledger: payload, contextURL: contextURL,
+                    valuationCurrency: payload.valuationCurrency, generation: generation,
+                    localRevisionID: presentationRevision))
             } else {
                 await publishWidgetSnapshot(
                     ledger: payload,
@@ -3969,12 +4031,76 @@ final class LedgerSession: ObservableObject {
         Task { await importIndexActivity.end(immediately: true) }
     }
 
+    /// Replace any waiting local publish with this one and restart the wait.
+    /// A publish already running is left alone; it ends well inside this
+    /// request's debounce, so the newer snapshot is written last.
+    ///
+    /// The wait is checked against the ledger and revision, not the request
+    /// generation: a pull-to-refresh or range change in the window that then
+    /// fails must not drop the last good snapshot with nothing to replace it.
+    private func scheduleLocalWidgetPublish(_ request: WidgetPublishRequest) {
+        pendingWidgetPublish = request
+        pendingWidgetPublishTask?.cancel()
+        pendingWidgetPublishTask = nil
+        // A reload finishing after the app left the foreground would sleep in a
+        // suspended process; the transition's own flush already ran.
+        guard applicationActive, !applicationBackground else {
+            flushPendingWidgetPublish()
+            return
+        }
+        let delay = Self.localWidgetPublishDebounceNanoseconds
+        pendingWidgetPublishTask = Task(priority: .utility) { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled, let self, let request = self.pendingWidgetPublish else { return }
+            self.pendingWidgetPublish = nil
+            self.pendingWidgetPublishTask = nil
+            guard self.contextURL == request.contextURL, self.phase == .ready,
+                  request.localRevisionID == self.localPresentation?.revisionID else { return }
+            await self.publishWidgetSnapshot(ledger: request.ledger, contextURL: request.contextURL,
+                valuationCurrency: request.valuationCurrency, generation: request.generation,
+                localRevisionID: request.localRevisionID, pinnedToGeneration: false)
+        }
+    }
+
+    /// Publish a waiting local snapshot now instead of after its debounce. The
+    /// app is leaving the foreground or locking, and either can retire the
+    /// generation the request was pinned to, so the flushed publish is checked
+    /// against its ledger only. Its data is what the screen already showed.
+    func flushPendingWidgetPublish() {
+        guard let request = pendingWidgetPublish else { return }
+        pendingWidgetPublish = nil
+        pendingWidgetPublishTask?.cancel()
+        pendingWidgetPublishTask = nil
+        Task { @MainActor [weak self] in
+            #if canImport(UIKit)
+            var backgroundTaskID = UIBackgroundTaskIdentifier.invalid
+            backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "ledger.flush-widget") {
+                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                backgroundTaskID = .invalid
+            }
+            #endif
+            await self?.publishWidgetSnapshot(ledger: request.ledger, contextURL: request.contextURL,
+                valuationCurrency: request.valuationCurrency, generation: request.generation,
+                localRevisionID: request.localRevisionID, pinnedToGeneration: false)
+            #if canImport(UIKit)
+            if backgroundTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                backgroundTaskID = .invalid
+            }
+            #endif
+        }
+    }
+
+    /// True while a local widget publish is waiting out its debounce.
+    var hasPendingWidgetPublish: Bool { pendingWidgetPublish != nil }
+
     private func publishWidgetSnapshot(
         ledger: LedgerBootstrap,
         contextURL: URL,
         valuationCurrency: String,
         generation: Int,
-        localRevisionID: UUID? = nil
+        localRevisionID: UUID? = nil,
+        pinnedToGeneration: Bool = true
     ) async {
         let widgetRefreshAttemptAt = ledgerNow()
         let month = LedgerDateRange.current(.month, now: widgetRefreshAttemptAt)
@@ -4008,12 +4134,22 @@ final class LedgerSession: ObservableObject {
         )
         async let importDocumentsRequest: [LedgerImportDocument]? = try? await repository.importDocuments()
         let (report, importDocuments, week, year, history) = await (reportRequest, importDocumentsRequest, weekRequest, yearRequest, historyRequest)
-        guard generation == requestGeneration, self.contextURL == contextURL else {
+        // A flushed publish outlives a lock that lands while it runs, but never
+        // a logout or a switch to another ledger.
+        func stillCurrent() -> Bool {
+            guard self.contextURL == contextURL else { return false }
+            if pinnedToGeneration { return generation == requestGeneration && phase == .ready }
+            switch phase {
+            case .ready, .locked: return true
+            default: return false
+            }
+        }
+        guard self.contextURL == contextURL, !pinnedToGeneration || generation == requestGeneration else {
             return
         }
         await ensureWidgetCredential(for: contextURL, valuationCurrency: valuationCurrency)
         // Credential registration can suspend while the user ends or locks this session.
-        guard generation == requestGeneration, self.contextURL == contextURL, phase == .ready else {
+        guard stillCurrent() else {
             return
         }
         guard let report else {
@@ -4230,9 +4366,22 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    /// Revoke every reader and drop the rows on screen. Use when the rows no
+    /// longer describe what the user asked for: another filter, range or ledger,
+    /// a privacy shield, or the app leaving the foreground.
+    func resetLocalTransactionWindow() {
+        cancelLocalTransactionReaders()
+        clearLocalTransactionRows()
+    }
+
+    /// Revoke every reader but keep the rows on screen, marked stale by the nil
+    /// window (no continuation, so nothing appends onto them). The next first
+    /// window replaces them in one assignment. Use when the same list is about to
+    /// be re-read at a newer revision: a refresh or an appended transaction.
+    ///
     /// Revocation is synchronous on the session actor. Reader cleanup may run
     /// later; generation checks, not actor-task ordering, prevent late publication.
-    func resetLocalTransactionWindow() {
+    func cancelLocalTransactionReaders() {
         pendingWindowID = nil
         pendingWindowTask?.cancel(); pendingWindowTask = nil
         pendingReadSequence = nil
@@ -4279,12 +4428,15 @@ final class LedgerSession: ObservableObject {
         transactionWindowReader = nil
         transactionWindowContext = nil
         localTransactionWindow = nil
-        localTransactionAccumulatedRows = []
-        localTransactionAccumulatedIDs = []
-        localTransactionReachedRowCap = false
         isLocalTransactionWindowLoading = false
         localTransactionWindowError = nil
         if let reader { Task { await reader.invalidate() } }
+    }
+
+    private func clearLocalTransactionRows() {
+        if !localTransactionAccumulatedRows.isEmpty { localTransactionAccumulatedRows = [] }
+        localTransactionAccumulatedIDs = []
+        localTransactionReachedRowCap = false
     }
 
     private func localReadContext() throws -> LocalReadContext {
@@ -4324,6 +4476,14 @@ final class LedgerSession: ObservableObject {
            (try? validateLocalRead(context)) != nil {
             return
         }
+        // Every invalidation advances the window generation, so a first read
+        // started at this generation is still a valid read of this list. Wait for
+        // it without cancelling it: another caller owns it.
+        if let task = transactionWindowTask, firstWindowGeneration == transactionWindowGeneration,
+           transactionWindowFilter == filter, transactionWindowLimits == limits {
+            await task.value
+            if localTransactionWindow != nil || localTransactionWindowError != nil || Task.isCancelled { return }
+        }
         await loadLocalTransactionWindow(filter: filter, limits: limits)
     }
 
@@ -4331,11 +4491,19 @@ final class LedgerSession: ObservableObject {
     func loadLocalTransactionWindow(filter: LedgerTransactionFilter = .init(),
                                     limits: LocalTransactionWindow.Limits = .init()) async {
         guard !Task.isCancelled else { return }
-        resetLocalTransactionWindow()
+        // Re-reading the same list keeps its rows until the first window lands;
+        // a different filter or page size means the rows on screen are wrong now.
+        if filter == transactionWindowFilter, limits == transactionWindowLimits {
+            cancelLocalTransactionReaders()
+        } else {
+            resetLocalTransactionWindow()
+        }
         transactionWindowFilter = filter
         transactionWindowLimits = limits
         guard let context = try? localReadContext(), let repository = localRepository else { return }
+        firstWindowGeneration = context.generation
         await runLocalTransactionWindow(context: context, repository: repository, filter: filter, limits: limits)
+        if firstWindowGeneration == context.generation { firstWindowGeneration = nil }
     }
 
     /// Append the next bounded window to the rows already on screen. This is the
@@ -4495,7 +4663,9 @@ final class LedgerSession: ObservableObject {
             } catch {
                 guard context.generation == transactionWindowGeneration else { return }
                 let cancelled = error is CancellationError || Task.isCancelled
-                resetLocalTransactionWindow()
+                // A cancelled re-read leaves the previous rows; a failed one must
+                // not keep showing them beside the error.
+                if cancelled { cancelLocalTransactionReaders() } else { resetLocalTransactionWindow() }
                 if !cancelled { localTransactionWindowError = error.localizedDescription }
             }
         }
@@ -5203,12 +5373,13 @@ final class LedgerSession: ObservableObject {
     }
 
     @discardableResult
-    private func invalidateRequests(preservingOverviewCategories: Bool = false) -> Int {
+    private func invalidateRequests(preservingOverviewCategories: Bool = false,
+                                    keepingTransactionRows: Bool = false) -> Int {
         analysisCache.removeAll()
         analysisInFlight.removeAll()
         accountDetailCache.removeAll()
         accountTrendCache.removeAll()
-        resetLocalTransactionWindow()
+        if keepingTransactionRows { cancelLocalTransactionReaders() } else { resetLocalTransactionWindow() }
         if preservingOverviewCategories {
             // A refresh replaces the current snapshot only after a successful read.
             // Supersede pending category reads without blanking the same-context UI.
@@ -5226,6 +5397,11 @@ final class LedgerSession: ObservableObject {
     private func invalidateSession() -> Int {
         analysisDisplayCache.removeAll()
         lastWidgetPublish = nil
+        // A lock flushes first; anything still waiting belongs to a session
+        // that is ending.
+        pendingWidgetPublishTask?.cancel()
+        pendingWidgetPublishTask = nil
+        pendingWidgetPublish = nil
         analysisPrefetchTask?.cancel()
         analysisPrefetchTask = nil
         localResumeTask?.cancel()
@@ -5320,6 +5496,7 @@ final class LedgerSession: ObservableObject {
         guard self.contextURL == contextURL else { return }
         guard localPrivacyProtectionEnabled else { return }
         if case .locked = phase { return }
+        flushPendingWidgetPublish()
         _ = invalidateSession()
         stopImportIndexTracking()
         setLocallyLocked(true, for: contextURL)
