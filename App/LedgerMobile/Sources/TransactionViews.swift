@@ -438,6 +438,7 @@ private struct BalancedTransactionFilterSettle: View {
                         Text(session.amountsVisible ? sign + MoneyText.format(minorUnits: abs(row.minorUnits), currency: currency, showsCurrency: false) : "••••••")
                             .font(.custom(BalancedWeight.text.sansPostscriptName, size: 15, relativeTo: .body))
                             .monospacedDigit().foregroundStyle(BalancedPalette.ink).lineLimit(1).fixedSize()
+                            .ledgerRollingAmount(row.minorUnits)
                     }.padding(.vertical, 6)
                 }
             }
@@ -445,9 +446,12 @@ private struct BalancedTransactionFilterSettle: View {
                 Text("合计").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                 Spacer(minLength: 8)
                 // `.settle-total dd`: 30/500/-0.025em, same as OverviewView's settle total.
+                // Rolls like AmountLabel; BalancedAmount itself is not used because its
+                // `.minimumScaleFactor` mismeasures inside List rows (see above).
                 Text(session.amountsVisible ? sign + MoneyText.format(minorUnits: abs(total), currency: currency, showsCurrency: false) : "••••••")
                     .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 30, relativeTo: .title))
                     .tracking(-0.75).monospacedDigit().foregroundStyle(totalColor).lineLimit(1).fixedSize()
+                    .ledgerRollingAmount(total)
             }
             .padding(.top, 14)
             .overlay(alignment: .top) { BalancedPalette.ink.frame(height: 1) }
@@ -464,15 +468,16 @@ private struct BalancedTransactionFilterSettle: View {
 private struct BalancedTransactionDayHeader: View {
     let date: String
     let weekday: String
-    let summary: String
+    let summary: BalancedDaySummary
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             (Text(date).font(.custom(BalancedWeight.semibold.sansPostscriptName, size: 12.5, relativeTo: .caption)).foregroundColor(BalancedPalette.secondary)
              + Text(" " + weekday).font(.custom(BalancedWeight.regular.sansPostscriptName, size: 12.5, relativeTo: .caption)).foregroundColor(BalancedPalette.meta))
                 .monospacedDigit()
-            if !summary.isEmpty {
-                Text(summary).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.secondary)
+            if !summary.text.isEmpty {
+                Text(summary.text).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.secondary)
+                    .ledgerRollingAmount(summary.minorUnits)
             }
             BalancedPalette.rule.frame(height: 1)
         }
@@ -481,6 +486,14 @@ private struct BalancedTransactionDayHeader: View {
         .padding(.bottom, 6)
         .textCase(nil)
     }
+}
+
+/// A day's kind summary and the figure it rolls on when the full-range scan
+/// lands or a save changes the day. `minorUnits` is 0 for the transfer note.
+private struct BalancedDaySummary {
+    static let empty = BalancedDaySummary(text: "", minorUnits: 0)
+    let text: String
+    let minorUnits: Int
 }
 
 private struct BalancedLedgerTransactionRow: View {
@@ -550,6 +563,7 @@ struct TransactionsView: View {
 
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var filters = LedgerTransactionFilter()
     @State private var filterPresented = false
     @State private var storagePresented = false
@@ -614,12 +628,29 @@ struct TransactionsView: View {
 
     private var displayedTransactions: [LedgerTransaction] {
         if session.isLocal {
-            return (session.localTransactionAccumulatedRows.isEmpty
+            return hidingConfirmedDeletions((session.localTransactionAccumulatedRows.isEmpty
                 ? session.localBootstrapTransactions
                 : session.localTransactionAccumulatedRows)
-                .filter(filters.matches)
+                .filter(filters.matches))
         }
         return filteredTransactions
+    }
+
+    /// Keys of mutations whose write was validated. Remote rows already drop a
+    /// confirmed deletion through the session's projection; local rows come from
+    /// windows and bootstrap pages read before the write, so they are filtered
+    /// here until the next generation (which no longer has the row) lands.
+    private var confirmedMutationKeys: Set<String> {
+        Set(session.transactionMutationStates.compactMap { $0.value == .confirmed ? $0.key : nil })
+    }
+
+    private func hidingConfirmedDeletions(_ rows: [LedgerTransaction]) -> [LedgerTransaction] {
+        guard session.transactionMutationStates.values.contains(.confirmed) else { return rows }
+        return rows.filter { row in
+            guard session.transactionMutationPhase(for: row) == .confirmed,
+                  case .unavailable = session.transactionResolution(for: row.source) else { return true }
+            return false
+        }
     }
 
     /// Same scope as `displayedTransactions` but ignores the active kind
@@ -719,8 +750,8 @@ struct TransactionsView: View {
     ///
     /// Local lists load lazily, so a day can be split across windows; prefer the
     /// full-range day totals from the summary scan when they exist.
-    private func balancedDaySummary(_ transactions: [LedgerTransaction], day: LocalTransactionScan.Day? = nil) -> String {
-        guard filters.kind == .all else { return "" }
+    private func balancedDaySummary(_ transactions: [LedgerTransaction], day: LocalTransactionScan.Day? = nil) -> BalancedDaySummary {
+        guard filters.kind == .all else { return .empty }
         var income = day?.incomeTotal ?? 0
         var expense = day?.expenseTotal ?? 0
         var transfers = day?.hasTransfer ?? false
@@ -732,9 +763,14 @@ struct TransactionsView: View {
             case .transfer: transfers = true
             }
         }
-        if income > 0 { return String(localized: "收入 \(MoneyText.format(minorUnits: income, currency: session.ledger?.summary.currency ?? "CNY", showsCurrency: false))") }
-        if expense > 0 { return String(localized: "支出 \(MoneyText.format(minorUnits: expense, currency: session.ledger?.summary.currency ?? "CNY", showsCurrency: false))") }
-        return transfers ? String(localized: "转账，不计收支") : ""
+        // Masked with the row amounts, so hiding amounts hides the day totals too.
+        let currency = session.ledger?.summary.currency ?? "CNY"
+        func figure(_ minorUnits: Int) -> String {
+            session.amountsVisible ? MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: false) : "••••••"
+        }
+        if income > 0 { return .init(text: String(localized: "收入 \(figure(income))"), minorUnits: income) }
+        if expense > 0 { return .init(text: String(localized: "支出 \(figure(expense))"), minorUnits: expense) }
+        return transfers ? .init(text: String(localized: "转账，不计收支"), minorUnits: 0) : .empty
     }
 
     /// `.settle` filter-result block (b04) — only once a kind filter narrows
@@ -906,6 +942,7 @@ struct TransactionsView: View {
         let summaryDays: [String: LocalTransactionScan.Day] = session.isLocal
             ? Dictionary(session.localTransactionSummary?.days.map { ($0.date, $0) } ?? [], uniquingKeysWith: { first, _ in first })
             : [:]
+        let confirmedKeys = confirmedMutationKeys
         return List {
             Section {
                 VStack(spacing: 0) {
@@ -987,6 +1024,7 @@ struct TransactionsView: View {
                     .frame(maxWidth: .infinity, minHeight: 120)
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("transaction-list-loading")
+                    .transition(.opacity)
                 }
                 .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 .listRowBackground(Color.clear)
@@ -1042,6 +1080,13 @@ struct TransactionsView: View {
                 .listRowBackground(Color.clear)
             }
         }
+        // Rows landing cross-fade over the loading placeholder. Clearing the list
+        // (a range or filter reset) stays instant, so a 1,000-row window is never
+        // animated out.
+        .animation(reduceMotion || isAwaitingRows ? nil : LedgerMotion.segment, value: isAwaitingRows)
+        // A confirmed deletion leaves through the List's own delete animation.
+        // Retiring the last receipt (when the next generation lands) is instant.
+        .animation(reduceMotion || confirmedKeys.isEmpty ? nil : LedgerMotion.value, value: confirmedKeys)
     }
 
     /// Tail of the scrolling list. Appearing on screen appends the next bounded
@@ -1360,13 +1405,16 @@ struct TransactionsView: View {
             NavigationLink {
                 TransactionDetailView(transaction: transaction)
             } label: {
+                let phase = session.transactionMutationPhase(for: transaction)
                 VStack(alignment: .leading, spacing: 0) {
                     BalancedLedgerTransactionRow(transaction: transaction, accountLabels: accountLabels,
                         accountCurrency: session.ledger?.valuationCurrency ?? "CNY")
-                    if let phase = session.transactionMutationPhase(for: transaction) {
+                    if let phase {
                         TransactionMutationBadge(phase: phase)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
+                .ledgerAnimation(LedgerMotion.value, value: phase)
             }
             .buttonStyle(.plain)
             .navigationLinkIndicatorVisibility(.hidden)
@@ -2166,6 +2214,7 @@ private struct TransactionMutationBadge: View {
         Label(presentation.title, systemImage: presentation.image)
             .font(.system(.caption2, design: .default, weight: .semibold))
             .foregroundStyle(presentation.color)
+            .contentTransition(.opacity)
             .accessibilityIdentifier("transaction-mutation-state")
     }
 }
