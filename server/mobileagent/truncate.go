@@ -99,13 +99,9 @@ func truncateTranscript(requestJSON string) (truncateResponseV1, error) {
 	if keep == turns {
 		return response, nil
 	}
-	cut := head
+	cut := compactionEnd(messages, head)
 	if keep > 0 {
 		cut = starts[keep]
-	} else if head < len(messages) && isCompactionSummary(messages[head]) {
-		cut = head + 1
-	} else if head < len(messages) && isCompactionSummary(messages[head]) {
-		cut = head + 1
 	}
 	if response.Transcript, err = encodeTranscript(messages[:cut]); err != nil {
 		return truncateResponseV1{}, err

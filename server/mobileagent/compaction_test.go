@@ -140,6 +140,18 @@ func requestTexts(request ai.TranscriptContext) []string {
 	return out
 }
 
+// cutOf is compactionCut with the messages' own sizes.
+func cutOf(t *testing.T, messages []agent.AgentMessage) (head, cut, turns int, ok bool) {
+	t.Helper()
+	sizes, _, encodes := messageSizes(messages)
+	if !encodes {
+		t.Fatal("messages do not encode")
+	}
+	return compactionCut(messages, sizes)
+}
+
+var compactionModel = &ai.Model{ID: "faux-1", ProviderMeta: ai.ProviderMetadata{API: "faux", ProviderID: "faux"}}
+
 func eventIndex(events []turnEventV1, kind string) int {
 	return slices.IndexFunc(events, func(event turnEventV1) bool { return event.Kind == kind })
 }
@@ -178,7 +190,7 @@ func TestCompactionSummarizesOlderTurns(t *testing.T) {
 	if len(texts) < 2 || !strings.HasPrefix(texts[0], "user:"+compactionMarker) || !strings.Contains(texts[0], "1820 元") {
 		t.Fatalf("turn request does not start with the summary: %v", texts)
 	}
-	want := []string{"user:问题5", "assistant:回答5", "user:问题6", "assistant:我查一下。", "tool:call_6", "assistant:回答6",
+	want := []string{"assistant:" + compactionAck, "user:问题5", "assistant:回答5", "user:问题6", "assistant:我查一下。", "tool:call_6", "assistant:回答6",
 		"user:问题7", "assistant:回答7", "user:问题8", "assistant:回答8", "user:新问题"}
 	if !reflect.DeepEqual(texts[1:], want) {
 		t.Fatalf("turn request = %v", texts)
@@ -198,8 +210,8 @@ func TestCompactionSummarizesOlderTurns(t *testing.T) {
 		t.Fatalf("compacted transcript does not decode: %v", err)
 	}
 	assertEveryCallAnswered(t, messages)
-	if messages[0].System == nil || !isCompactionSummary(messages[1]) {
-		t.Fatalf("transcript starts with %+v, %+v", messages[0], messages[1])
+	if messages[0].System == nil || !isCompactionSummary(messages[1]) || !isCompactionAck(messages[2]) || isUserTurn(messages[2]) {
+		t.Fatalf("transcript starts with %+v, %+v, %+v", messages[0], messages[1], messages[2])
 	}
 	questions := 0
 	for _, message := range messages {
@@ -311,7 +323,7 @@ func TestCompactionNeedsSixQuestions(t *testing.T) {
 	messages = slices.Insert(messages, 4, agent.AgentMessage{User: &agent.UserMessage{Role: "user", Content: ai.UserText(nudgeEmptyReply)}},
 		agent.AgentMessage{Assistant: &agent.AssistantMessage{Role: "assistant", StopReason: ai.StopReasonStop,
 			Content: []ai.AssistantContentBlock{ai.TextContent{Text: "补一句"}}}})
-	if _, _, turns, ok := compactionCut(messages); ok || turns != 0 {
+	if _, _, turns, ok := cutOf(t, messages); ok || turns != 0 {
 		t.Fatalf("a summary or a nudge counted as a question: %d", turns)
 	}
 	response = compactionTurn(t, "turn-five-summary", encoded(t, messages))
@@ -334,7 +346,7 @@ func TestCompactionCutKeepsToolCallsWithTheirResults(t *testing.T) {
 		agent.AgentMessage{Assistant: &agent.AssistantMessage{Role: "assistant", StopReason: ai.StopReasonStop}},
 		agent.AgentMessage{User: &agent.UserMessage{Role: "user", Content: ai.UserText(nudgeEmptyReply)}})
 
-	head, cut, turns, ok := compactionCut(messages)
+	head, cut, turns, ok := cutOf(t, messages)
 	if !ok || head != 1 || turns != 4 || userText(messages[cut].User.Content) != "问题5" {
 		t.Fatalf("cut = head %d, cut %d, %d turns, %v", head, cut, turns, ok)
 	}
@@ -349,11 +361,16 @@ func TestCompactionCutKeepsToolCallsWithTheirResults(t *testing.T) {
 		t.Fatalf("summary source holds a nudge or a kept turn:\n%s", source)
 	}
 
-	compacted := compactedMessages(messages, head, cut, "- 摘要")
+	compacted := compactedMessages(messages, head, cut, "- 摘要", compactionModel)
 	if compacted[0].System == nil || compacted[1].System == nil || len(compacted[1].System.ToolsAdded) != 1 || !isCompactionSummary(compacted[2]) {
 		t.Fatalf("compacted transcript opens with %+v", compacted[:3])
 	}
-	if !reflect.DeepEqual(compacted[3:], messages[cut:]) {
+	// The summary is answered, so the first kept question does not follow
+	// another user message.
+	if ack := compacted[3].Assistant; ack == nil || !isCompactionAck(compacted[3]) || ack.ModelID != "faux-1" || ack.Provider != "faux" || ack.API != "faux" {
+		t.Fatalf("summary is not answered: %+v", compacted[3])
+	}
+	if !reflect.DeepEqual(compacted[4:], messages[cut:]) {
 		t.Fatal("the kept turns changed")
 	}
 	assertEveryCallAnswered(t, compacted)
@@ -373,7 +390,7 @@ func TestCompactionCutKeepsToolCallsWithTheirResults(t *testing.T) {
 
 	// An earlier summary goes into the next one.
 	again := summarySource(compacted[2:])
-	if !strings.Contains(again, "更早对话的摘要：\n- 摘要") || strings.Contains(again, compactionMarker) {
+	if !strings.Contains(again, "更早对话的摘要：\n- 摘要") || strings.Contains(again, compactionMarker) || strings.Contains(again, compactionAck) {
 		t.Fatalf("earlier summary in source:\n%s", again)
 	}
 }
@@ -497,5 +514,73 @@ func TestTruncateDoesNotCountTheSummary(t *testing.T) {
 	}
 	if over := truncateFor(t, map[string]any{"version": 1, "transcript": transcript, "dropUserTurns": 3}); over.OK || over.UserTurns != 2 {
 		t.Fatalf("drop 3 = %+v", over)
+	}
+}
+
+func TestCompactionComesBeforeTheTrimWithALargeWindow(t *testing.T) {
+	// Ten questions with tool results of 36 KB: past the byte budget while
+	// the provider reports half of the 200000-token window.
+	provider := useCompactionFaux(t, summaryText)
+	messages := conversation(10, usageAt(0.5), 36_000, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+	if _, total, _ := messageSizes(messages); total <= transcriptBudget {
+		t.Fatalf("transcript is %d bytes, within the budget", total)
+	}
+	response := compactionTurn(t, "turn-large-window", encoded(t, messages))
+	if !response.OK || !response.Compacted || response.CompactedTurns != 6 || provider.summaries() != 1 {
+		t.Fatalf("over the budget: %+v, %d summaries", response, provider.summaries())
+	}
+	texts := requestTexts(provider.main[0])
+	if !strings.HasPrefix(texts[0], "user:"+compactionMarker) || texts[1] != "assistant:"+compactionAck || texts[2] != "user:问题7" {
+		t.Fatalf("turn request = %v", texts[:3])
+	}
+	// The summary's tokens count in the turn's usage: with one turn
+	// request, the sum is past what that request held.
+	if usage := response.Usage; usage == nil || usage.Input+usage.Output+usage.CacheRead+usage.CacheWrite <= usage.ContextTokens {
+		t.Fatalf("usage = %+v", response.Usage)
+	}
+}
+
+func TestCompactionKeepsTheSummaryWhenKeptTurnsAreLarge(t *testing.T) {
+	// The last four questions each carry 100 KB: together past what the trim
+	// keeps, so fewer stay whole and the summary covers the rest.
+	provider := useCompactionFaux(t, summaryText)
+	response := compactionTurn(t, "turn-large-tail", encoded(t, conversation(8, usageAt(0.8), 100_000, 5, 6, 7, 8)))
+	if !response.OK || !response.Compacted || response.CompactedTurns != 7 || provider.summaries() != 1 {
+		t.Fatalf("large kept turns: %+v, %d summaries", response, provider.summaries())
+	}
+	if !strings.Contains(transcriptText(t, provider.summary[0]), "问题7") {
+		t.Fatal("the summary does not cover the turns that no longer fit")
+	}
+	texts := requestTexts(provider.main[0])
+	if !strings.HasPrefix(texts[0], "user:"+compactionMarker) || texts[1] != "assistant:"+compactionAck || texts[2] != "user:问题8" {
+		t.Fatalf("turn request = %v", texts)
+	}
+	messages, err := decodeTranscript(response.Transcript)
+	if err != nil || !isCompactionSummary(messages[1]) {
+		t.Fatalf("returned transcript lost the summary: %v", err)
+	}
+
+	// The trim, when it still has to cut, keeps the summary and its answer
+	// and drops the turns after them.
+	big := conversation(3, nil, 150_000, 1, 2, 3)
+	compacted := compactedMessages(big, 1, 1, "- 摘要", compactionModel)
+	trimmed := trimTranscript(compacted, transcriptBudget)
+	if len(trimmed) < 4 || !isCompactionSummary(trimmed[1]) || !isCompactionAck(trimmed[2]) || userText(trimmed[3].User.Content) != "问题3" {
+		t.Fatalf("trim kept %d messages, opening %s", len(trimmed), encoded(t, trimmed[:min(len(trimmed), 3)]))
+	}
+}
+
+func TestTruncateKeepsTheSummaryAndItsAnswer(t *testing.T) {
+	messages := conversation(7, nil, 0)
+	head, cut, _, _ := cutOf(t, messages)
+	transcript := encoded(t, compactedMessages(messages, head, cut, "- 摘要", compactionModel))
+	dropped := truncateFor(t, map[string]any{"version": 1, "transcript": transcript, "dropUserTurns": 4})
+	got, err := decodeTranscript(dropped.Transcript)
+	if !dropped.OK || dropped.UserTurns != 4 || err != nil || len(got) != 3 || !isCompactionSummary(got[1]) || !isCompactionAck(got[2]) {
+		t.Fatalf("drop 4 = %+v", dropped)
+	}
+	kept := truncateFor(t, map[string]any{"version": 1, "transcript": transcript, "keepUserTurns": 1})
+	if got, err = decodeTranscript(kept.Transcript); !kept.OK || err != nil || len(got) != 5 || userText(got[3].User.Content) != "问题4" {
+		t.Fatalf("keep 1 = %+v", kept)
 	}
 }

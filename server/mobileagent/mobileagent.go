@@ -502,9 +502,11 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		return files, err
 	}
 	key := request.APIKey
+	var summaryUsage ai.Usage
 	if replayed {
 		// A stop during the summary leaves the previous transcript as it was.
-		summarizer := compactor{network: network, model: model, assumed: assumed, key: key, feed: feed}
+		summarizer := compactor{network: network, model: model, assumed: assumed, key: key, feed: feed,
+			spend: func(usage ai.Usage) { summaryUsage = usage }}
 		if history, out.compactedTurns, err = summarizer.compact(ctx, history); err != nil {
 			return files, err
 		}
@@ -519,6 +521,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	var toolsSpent atomic.Bool
 	var bonusCalls atomic.Int32
 	record := newTurnRecord(feed, model.Capabilities.ContextWindow)
+	record.addUsage(summaryUsage)
 	defer func() { out.steps, out.usage = record.result() }()
 	runner, err := agent.NewAgent(agent.AgentOptions{
 		InitialState:  &agent.AgentInitialState{Messages: history},
