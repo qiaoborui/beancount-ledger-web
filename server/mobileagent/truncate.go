@@ -42,9 +42,11 @@ type truncateResponseV1 struct {
 // questions, for the shell to regenerate an answer or ask an edited
 // question: it keeps the system message and everything up to the next
 // question, so a tool call never loses its result. The prompts the loop adds
-// on its own are part of the turn they follow, not questions. A cut past the
-// questions the transcript holds fails rather than keep a turn the shell
-// meant to drop.
+// on its own are part of the turn they follow, not questions, and so is the
+// summary a compaction put in place of older turns: it stays with the first
+// question after it, and also when every question is cut, since it stands
+// for questions the shell can no longer cut. A cut past the questions the
+// transcript holds fails rather than keep a turn the shell meant to drop.
 func TruncateTranscriptJSON(requestJSON string) string {
 	response, err := truncateTranscript(requestJSON)
 	if err != nil {
@@ -100,6 +102,10 @@ func truncateTranscript(requestJSON string) (truncateResponseV1, error) {
 	cut := head
 	if keep > 0 {
 		cut = starts[keep]
+	} else if head < len(messages) && isCompactionSummary(messages[head]) {
+		cut = head + 1
+	} else if head < len(messages) && isCompactionSummary(messages[head]) {
+		cut = head + 1
 	}
 	if response.Transcript, err = encodeTranscript(messages[:cut]); err != nil {
 		return truncateResponseV1{}, err
@@ -108,13 +114,15 @@ func truncateTranscript(requestJSON string) (truncateResponseV1, error) {
 }
 
 // isUserTurn reports a question of the user's, as opposed to a prompt the
-// loop added. A system note the shell puts before a question is part of it.
+// loop added or the summary of a compaction (see compactionMarker). A system
+// note the shell puts before a question is part of it. Truncation and
+// compaction count questions with it.
 func isUserTurn(message agent.AgentMessage) bool {
 	if message.User == nil {
 		return false
 	}
 	text := strings.TrimSpace(userText(message.User.Content))
-	return text != nudgeEmptyReply && text != nudgeToolBudget
+	return text != nudgeEmptyReply && text != nudgeToolBudget && !strings.HasPrefix(text, compactionMarker)
 }
 
 func userText(content ai.UserContent) string {

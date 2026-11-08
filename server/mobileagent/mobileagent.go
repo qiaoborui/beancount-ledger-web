@@ -190,8 +190,10 @@ type turnResponseV1 struct {
 	// question can follow; the transcript is absent when the model had said
 	// nothing yet, and the shell keeps the previous one.
 	StopReason string `json:"stopReason,omitempty"`
-	// Compacted and CompactedTurns are reserved for a turn that summarized
-	// older turns of its transcript; nothing sets them yet.
+	// Compacted reports that the turn replaced the older turns of its
+	// transcript with a summary before it asked the model, so Transcript
+	// starts with the summary; CompactedTurns is how many questions it
+	// replaced. Set only with a Transcript, also on a stopped turn.
 	Compacted      bool `json:"compacted,omitempty"`
 	CompactedTurns int  `json:"compactedTurns,omitempty"`
 }
@@ -205,6 +207,17 @@ type turnOutcome struct {
 	usage              *usageV1
 	edited, remembered bool
 	ask                *askV1
+	// compactedTurns is how many questions the turn's summary replaced.
+	compactedTurns int
+}
+
+// compaction is what the response reports of the turn's summary: only a
+// transcript that starts with it counts.
+func (out turnOutcome) compaction() (bool, int) {
+	if out.transcript == "" || out.compactedTurns == 0 {
+		return false, 0
+	}
+	return true, out.compactedTurns
 }
 
 // streamFn is replaced by tests with a deterministic provider.
@@ -265,19 +278,21 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 	network := newTurnHTTP()
 	defer network.close()
 	out, err := runTurn(ctx, cancel, network, requestJSON)
+	compacted, compactedTurns := out.compaction()
 	// A failed or cancelled turn may still have edited the scratch copy or
 	// the memory.
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return encode(turnResponseV1{Version: 1, Cancelled: true, StopReason: string(ai.StopReasonAborted), Reply: out.reply,
 			ToolCalls: out.calls, Steps: out.steps, Usage: out.usage, Edited: out.edited, MemoryUpdated: out.remembered,
-			Transcript: out.transcript, Error: "cancelled"})
+			Transcript: out.transcript, Compacted: compacted, CompactedTurns: compactedTurns, Error: "cancelled"})
 	}
 	if err != nil {
 		return encode(turnResponseV1{Version: 1, ToolCalls: out.calls, Steps: out.steps, Usage: out.usage, Edited: out.edited,
 			MemoryUpdated: out.remembered, Error: turnErrorText(ctx, network, err), ModelUnavailable: errors.Is(err, app.ErrLocalModelUnavailable)})
 	}
 	return encode(turnResponseV1{Version: 1, OK: true, Reply: out.reply, ToolCalls: out.calls, Steps: out.steps, Usage: out.usage,
-		Edited: out.edited, MemoryUpdated: out.remembered, Transcript: out.transcript, Ask: out.ask})
+		Edited: out.edited, MemoryUpdated: out.remembered, Transcript: out.transcript, Ask: out.ask,
+		Compacted: compacted, CompactedTurns: compactedTurns})
 }
 
 // turnErrorText says why a turn failed in words the user can act on; the
@@ -482,11 +497,21 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		// Last, so the rules and tools before it stay one cacheable prefix.
 		systemPrompt += remembered.prompt()
 	}
-	history, err := priorMessages(request, systemPrompt)
+	history, replayed, err := priorMessages(request, systemPrompt)
 	if err != nil {
 		return files, err
 	}
 	key := request.APIKey
+	if replayed {
+		// A stop during the summary leaves the previous transcript as it was.
+		summarizer := compactor{network: network, model: model, assumed: assumed, key: key, feed: feed}
+		if history, out.compactedTurns, err = summarizer.compact(ctx, history); err != nil {
+			return files, err
+		}
+		// The byte trim stays the last bound, and the fallback when the
+		// summary failed. Within the budget it returns history unchanged.
+		history = trimTranscript(history, transcriptBudget)
+	}
 	var argumentsMu sync.Mutex
 	arguments := map[string]json.RawMessage{}
 	// toolsSpent is set when the turn ran out of model calls: tools are then
@@ -709,17 +734,19 @@ func editableScratch(request turnRequestV1) (*scratch, error) {
 }
 
 // priorMessages is what the turn starts from: the transcript the previous
-// turn returned, trimmed when it outgrew its budget, or for a conversation
-// without one, its visible history.
-func priorMessages(request turnRequestV1, systemPrompt string) ([]agent.AgentMessage, error) {
+// turn returned, or for a conversation without one, its visible history.
+// replayed reports a transcript, which the turn then compacts or trims when
+// it outgrew its budget.
+func priorMessages(request turnRequestV1, systemPrompt string) (messages []agent.AgentMessage, replayed bool, err error) {
 	if strings.TrimSpace(request.Transcript) != "" {
 		if messages, err := decodeTranscript(request.Transcript); err == nil {
-			return withSystemPrompt(trimTranscript(messages, transcriptBudget), systemPrompt), nil
+			return withSystemPrompt(messages, systemPrompt), true, nil
 		}
 		// An unreadable transcript (another build's format) costs the
 		// conversation its tool results, not the turn.
 	}
-	return historyMessages(request.History)
+	messages, err = historyMessages(request.History)
+	return messages, false, err
 }
 
 // historyMessages replays the visible conversation. Providers reject empty
