@@ -274,7 +274,8 @@ struct NativeImportFlowView: View {
                 .ledgerPrivacyProtectedSheet()
         }
         .sheet(item: $preparedBookkeeping) { prepared in
-            BookkeepingPreviewView(preview: prepared, entryCount: committedEntries.count) { result in
+            BookkeepingPreviewView(preview: prepared, entryCount: committedEntries.count,
+                                   islandNotice: .billImport(provider: preview?.provider)) { result in
                 guard let result else { return }
                 commitResult = result
                 discardDraft()

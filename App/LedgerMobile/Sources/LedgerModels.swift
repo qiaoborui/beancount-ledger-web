@@ -809,17 +809,39 @@ enum LedgerIslandNoticeType: Equatable, Sendable {
     case expense
     case income
     case transfer
+    /// Several entries written by one confirmation (natural language, .bean).
+    case entries(count: Int)
     case batchImport(count: Int)
+
+    var isImport: Bool {
+        if case .batchImport = self { return true }
+        return false
+    }
+
+    /// The notice's single accent, drawn on the always-black island. Expense
+    /// and income are the dark-mode values of `BalancedPalette.expense` and
+    /// `.income`; the light values are too dark to read on black, so the island
+    /// uses the dark ones in both appearances. Everything else stays white.
+    var hueHex: UInt {
+        switch self {
+        case .expense: return 0xCF7A52
+        case .income: return 0x4FBFAB
+        case .transfer, .entries, .batchImport: return 0xFFFFFF
+        }
+    }
 }
 
 struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
     let id: UUID
     let type: LedgerIslandNoticeType
+    /// One line: the payee, the transfer's accounts, or the bill's name.
     let title: String
+    /// A short label beside the title, shown only when the row has room.
     let subtitle: String?
     let amountText: String
+    /// The category's symbol, as the transaction list draws it. The expanded
+    /// disc shows a check instead; this symbol is for the compact pill.
     let iconName: String
-    let iconColorHex: UInt
 
     init(
         id: UUID = UUID(),
@@ -827,8 +849,7 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
         title: String,
         subtitle: String? = nil,
         amountText: String,
-        iconName: String,
-        iconColorHex: UInt
+        iconName: String
     ) {
         self.id = id
         self.type = type
@@ -836,16 +857,22 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
         self.subtitle = subtitle
         self.amountText = amountText
         self.iconName = iconName
-        self.iconColorHex = iconColorHex
+    }
+
+    /// What VoiceOver says when the notice appears; the island itself is a
+    /// passthrough window that never takes focus.
+    var announcement: String {
+        let status = type.isImport ? String(localized: "已导入") : String(localized: "已记账")
+        return [status, title, subtitle, amountText].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "，")
     }
 
     static func from(entry: LedgerTransactionEntry, accountLabels: [String: String] = [:]) -> LedgerIslandNotice {
         let isIncome = entry.postings.contains { $0.account.hasPrefix("Income:") }
         let isTransfer = entry.postings.allSatisfy { $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:") }
 
-        let primaryCategory = entry.postings.first(where: {
-            !$0.account.hasPrefix("Assets:") && !$0.account.hasPrefix("Liabilities:")
-        })?.account ?? (entry.postings.first?.account ?? "")
+        func label(_ account: String) -> String {
+            accountLabels[account] ?? (account.components(separatedBy: ":").last ?? account)
+        }
 
         let titleText: String = {
             if !entry.payee.isEmpty { return entry.payee }
@@ -858,68 +885,122 @@ struct LedgerIslandNotice: Equatable, Identifiable, Sendable {
             if isTransfer { return true }
             return $0.account.hasPrefix("Expenses:")
         }) ?? entry.postings.first
-
-        let rawAmount = mainPosting?.amount.trimmingCharacters(in: .whitespacesAndNewlines) ?? "0"
-        let currency = mainPosting?.currency.isEmpty == false ? (mainPosting?.currency ?? "CNY") : "CNY"
-        let cleanAmount = rawAmount.replacingOccurrences(of: "-", with: "")
-
-        let formattedAmount: String = {
-            if let decimal = Decimal(string: cleanAmount) {
-                let formatter = NumberFormatter()
-                formatter.numberStyle = .currency
-                formatter.currencySymbol = currency == "CNY" ? "¥" : currency == "USD" ? "$" : "\(currency) "
-                formatter.maximumFractionDigits = 2
-                formatter.minimumFractionDigits = 2
-                return formatter.string(from: decimal as NSDecimalNumber) ?? "\(currency) \(cleanAmount)"
-            }
-            return "\(currency) \(cleanAmount)"
-        }()
+        let currency = mainPosting.map { $0.currency.isEmpty ? entry.currency : $0.currency } ?? entry.currency
+        let magnitude = abs(mainPosting.flatMap { minorUnits($0.amount) } ?? 0)
 
         if isTransfer {
             let fromAccount = entry.postings.first(where: { $0.amount.hasPrefix("-") })?.account
             let toAccount = entry.postings.first(where: { !$0.amount.hasPrefix("-") })?.account
-            let fromLabel = fromAccount.map { accountLabels[$0] ?? ($0.components(separatedBy: ":").last ?? $0) } ?? String(localized: "转出")
-            let toLabel = toAccount.map { accountLabels[$0] ?? ($0.components(separatedBy: ":").last ?? $0) } ?? String(localized: "转入")
-
+            let fromLabel = fromAccount.map(label) ?? String(localized: "转出")
+            let toLabel = toAccount.map(label) ?? String(localized: "转入")
             return LedgerIslandNotice(
                 type: .transfer,
-                title: "\(fromLabel) ➔ \(toLabel)",
-                subtitle: String(localized: "资金划转"),
-                amountText: formattedAmount,
-                iconName: "arrow.left.arrow.right",
-                iconColorHex: 0x0055D4
-            )
-        } else if isIncome {
-            return LedgerIslandNotice(
-                type: .income,
-                title: titleText,
-                subtitle: String(localized: "收入入账"),
-                amountText: "+\(formattedAmount)",
-                iconName: "banknote.fill",
-                iconColorHex: 0x107C41
-            )
-        } else {
-            return LedgerIslandNotice(
-                type: .expense,
-                title: titleText,
-                subtitle: String(localized: "支出已记录"),
-                amountText: "-\(formattedAmount)",
-                iconName: "fork.knife",
-                iconColorHex: 0xF59E0B
+                title: "\(fromLabel) → \(toLabel)",
+                amountText: MoneyText.format(minorUnits: magnitude, currency: currency),
+                iconName: "arrow.left.arrow.right"
             )
         }
+
+        let category = mainPosting?.account ?? ""
+        let categoryLabel = category.isEmpty ? nil : label(category)
+        let icon = LedgerCategoryIcon.name(account: category, label: categoryLabel ?? "")
+        return LedgerIslandNotice(
+            type: isIncome ? .income : .expense,
+            title: titleText,
+            subtitle: categoryLabel == titleText ? nil : categoryLabel,
+            amountText: MoneyText.format(minorUnits: isIncome ? magnitude : -magnitude, currency: currency, showSign: isIncome),
+            iconName: icon
+        )
     }
 
+    /// One confirmation that wrote `entries`: a single entry gets its own
+    /// notice, several get a count instead of a total that could mix
+    /// currencies and directions.
+    static func from(entries: [LedgerTransactionEntry], accountLabels: [String: String] = [:]) -> LedgerIslandNotice {
+        if entries.count == 1, let entry = entries.first {
+            return from(entry: entry, accountLabels: accountLabels)
+        }
+        return written(count: entries.count)
+    }
+
+    /// Several entries whose contents the caller does not have (a pasted
+    /// .bean file is validated as text, not parsed into entries).
+    static func written(count: Int) -> LedgerIslandNotice {
+        LedgerIslandNotice(
+            type: .entries(count: count),
+            title: String(localized: "记账完成"),
+            subtitle: String(localized: "已写入账本"),
+            amountText: String(localized: "\(count) 笔"),
+            iconName: "checkmark"
+        )
+    }
+
+    /// `provider` is an import provider id ("alipay") or a display name; an id
+    /// is shown by its short label ("支付宝账单").
     static func fromImport(count: Int, provider: String? = nil) -> LedgerIslandNotice {
-        let providerName = provider?.isEmpty == false ? provider! : String(localized: "账单文件")
+        let name = LedgerImportProvider.provider(provider)?.compactLabel ?? provider.flatMap { $0.isEmpty ? nil : $0 }
         return LedgerIslandNotice(
             type: .batchImport(count: count),
-            title: String(localized: "\(providerName)导入"),
-            subtitle: String(localized: "已归档至账本"),
-            amountText: String(localized: "\(count) 笔已归档"),
-            iconName: "tray.and.arrow.down.fill",
-            iconColorHex: 0x16A34A
+            title: name.map { String(localized: "\($0)账单") } ?? String(localized: "账单"),
+            subtitle: String(localized: "已导入"),
+            amountText: String(localized: "\(count) 笔"),
+            iconName: "tray.and.arrow.down.fill"
         )
+    }
+
+    /// Posting amounts are Beancount decimals ("-38.00"), never localized.
+    private static func minorUnits(_ raw: String) -> Int? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
+        var scaled = value * 100, rounded = Decimal()
+        NSDecimalRound(&rounded, &scaled, 0, .plain)
+        return NSDecimalNumber(decimal: rounded).intValue
+    }
+}
+
+/// Where saved-entry notices go. The overlay installs `handler` when it
+/// appears; until then (and in the portable package, which has no island)
+/// notices are dropped, because a confirmation shown late is worse than none.
+@MainActor
+enum LedgerIslandNotices {
+    static var handler: (@MainActor (LedgerIslandNotice) -> Void)?
+
+    static func post(_ notice: LedgerIslandNotice) { handler?(notice) }
+}
+
+/// The SF Symbol a category account is drawn with. Shared by the transaction
+/// list's category chips (`TransactionVisualCategory.resolve(account:label:)`)
+/// and the island, so a saved entry shows the icon the list will show.
+enum LedgerCategoryIcon {
+    static func name(account: String, label: String = "") -> String {
+        let displayLabel = label.isEmpty ? (account.components(separatedBy: ":").last ?? account) : label
+        let lower = account.lowercased()
+
+        if lower.hasPrefix("expenses:food") || lower.hasPrefix("expenses:dining") || lower.hasPrefix("expenses:groceries") || lower.hasPrefix("expenses:meal") { return "fork.knife" }
+        if lower.hasPrefix("expenses:transport") || lower.hasPrefix("expenses:travel") || lower.hasPrefix("expenses:taxi") { return "car.fill" }
+        if lower.hasPrefix("expenses:book") || lower.hasPrefix("expenses:education") || lower.hasPrefix("expenses:study") { return "book.fill" }
+        if lower.hasPrefix("expenses:digital") || lower.hasPrefix("expenses:communication") || lower.hasPrefix("expenses:telecom") { return "antenna.radiowaves.left.and.right" }
+        if lower.hasPrefix("expenses:shopping") || lower.hasPrefix("expenses:clothing") || lower.hasPrefix("expenses:daily") { return "bag.fill" }
+        if lower.hasPrefix("expenses:entertainment") || lower.hasPrefix("expenses:game") || lower.hasPrefix("expenses:movie") { return "popcorn.fill" }
+        if lower.hasPrefix("expenses:housing") || lower.hasPrefix("expenses:rent") || lower.hasPrefix("expenses:utilities") { return "house.fill" }
+        if lower.hasPrefix("expenses:health") || lower.hasPrefix("expenses:medical") { return "heart.fill" }
+        if lower.hasPrefix("income:salary") || lower.hasPrefix("income:wage") || lower.hasPrefix("income:bonus") { return "banknote.fill" }
+        if lower.contains("fund") || lower.contains("invest") || lower.contains("stock") { return "chart.line.uptrend.xyaxis" }
+
+        // Keyword matching on displayLabel & account
+        let text = "\(displayLabel) \(account)".lowercased()
+        func any(_ words: [String]) -> Bool { words.contains { text.contains($0) } }
+        if any(["餐饮", "美食", "早餐", "午餐", "晚餐", "外卖", "美团", "咖啡", "超市", "买菜"]) { return "fork.knife" }
+        if any(["交通", "出行", "打车", "滴滴", "地铁", "公交", "加油", "停车"]) { return "car.fill" }
+        if any(["购物", "数码", "淘宝", "京东", "拼多多", "服饰", "衣服", "日用"]) { return "bag.fill" }
+        if any(["娱乐", "游戏", "电影", "音乐", "会员"]) { return "popcorn.fill" }
+        if any(["房租", "房贷", "水电", "燃气", "物业", "家居"]) { return "house.fill" }
+        if any(["医疗", "健康", "医院", "药品"]) { return "heart.fill" }
+        if any(["话费", "流量", "宽带", "云服务"]) { return "antenna.radiowaves.left.and.right" }
+        if any(["学习", "图书", "书籍", "课程", "培训"]) { return "book.fill" }
+        if any(["工资", "薪水", "奖金", "收入"]) { return "banknote.fill" }
+
+        return account.hasPrefix("Income:") ? "arrow.down.left" : "cart.fill"
     }
 }
 

@@ -15,6 +15,8 @@ struct NaturalLanguageBookkeepingView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var preview: PreparedBookkeepingChange?
+    /// The records behind `preview`, for the saved notice.
+    @State private var previewRecords: [LedgerTransactionEntry] = []
     @State private var operation: Task<Void, Never>?
     @State private var runID = UUID()
     @FocusState private var inputFocused: Bool
@@ -127,7 +129,7 @@ struct NaturalLanguageBookkeepingView: View {
                 }
             }
             .fullScreenCover(item: $preview) { prepared in
-                BookkeepingPreviewView(preview: prepared) { _ in
+                BookkeepingPreviewView(preview: prepared, islandNotice: .entries(previewRecords)) { _ in
                     onSaved?()
                 }
             }
@@ -1105,6 +1107,7 @@ struct NaturalLanguageBookkeepingView: View {
                     await repository.discardPrepared(result)
                     return
                 }
+                previewRecords = preparedDraft.records
                 preview = result
             } catch is CancellationError {
             } catch {
