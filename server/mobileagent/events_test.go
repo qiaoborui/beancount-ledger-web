@@ -323,3 +323,58 @@ func TestUsageReportsTheModelsContextWindow(t *testing.T) {
 		t.Fatalf("context window = %d, model has %d", response.Usage.ContextWindow, builtin.Capabilities.ContextWindow)
 	}
 }
+
+// A call refused before it runs still reports the arguments the model gave,
+// in its step and its tool_start, as its toolCalls entry does.
+func TestRefusedCallKeepsItsArguments(t *testing.T) {
+	observer := &streamObserver{}
+	observe(t, observer)
+	useFaux(t,
+		ai.FauxStaticStep(ai.FauxResponse{StopReason: string(ai.StopReasonToolUse), Content: []ai.FauxContentBlock{
+			ai.FauxToolCall("delete_ledger", map[string]any{"path": "main.bean"}, &ai.FauxToolCallOptions{ID: "call_refused"}),
+		}}),
+		ai.FauxStaticStep(ai.FauxResponse{Content: []ai.FauxContentBlock{ai.FauxText("这个工具不能用。")}}),
+	)
+	response := streamedTurn(t, "turn-refused", nil)
+	if !response.OK {
+		t.Fatalf("turn failed: %+v", response)
+	}
+	const want = `{"path":"main.bean"}`
+	var step *stepV1
+	for index := range response.Steps {
+		if response.Steps[index].CallID == "call_refused" {
+			step = &response.Steps[index]
+		}
+	}
+	if step == nil || !step.IsError || string(step.Arguments) != want {
+		t.Fatalf("refused step = %+v", step)
+	}
+	if len(response.ToolCalls) != 1 || string(response.ToolCalls[0].Arguments) != want {
+		t.Fatalf("tool calls = %+v", response.ToolCalls)
+	}
+	started := false
+	for _, event := range observer.recorded() {
+		if event.Kind == "tool_start" && event.CallID == "call_refused" {
+			started = string(event.Arguments) == want
+		}
+	}
+	if !started {
+		t.Fatalf("tool_start lost the arguments: %v", observer.recorded())
+	}
+}
+
+// A message stopped before the provider reported usage carries zeros; the
+// context stays what the last measured message held.
+func TestStoppedMessageKeepsTheContextTokens(t *testing.T) {
+	record := newTurnRecord(nil, 200000)
+	end := func(reason ai.StopReason, usage ai.Usage) {
+		_ = record.observe(context.Background(), agent.MessageEndEvent{Message: agent.AgentMessage{Assistant: &agent.AssistantMessage{
+			Role: "assistant", StopReason: reason, Usage: &usage}}})
+	}
+	end(ai.StopReasonToolUse, ai.Usage{Input: 1600, Output: 20, CacheRead: 12})
+	end(ai.StopReasonAborted, ai.Usage{})
+	_, usage := record.result()
+	if usage == nil || usage.ContextTokens != 1632 || usage.Input != 1600 || usage.ContextWindow != 200000 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}

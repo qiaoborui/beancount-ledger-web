@@ -115,14 +115,18 @@ func (f *eventFeed) deliver(o Observer, turnID string) {
 	timer.Stop()
 	for {
 		f.mu.Lock()
-		if f.delta != nil && (f.closed || time.Since(f.deltaSince) >= deltaFlushInterval) {
+		// One reading of the clock decides both whether the delta is due and
+		// how long to wait for it, so a delta that comes due between two
+		// readings is never left without a timer.
+		now := time.Now()
+		if f.delta != nil && (f.closed || now.Sub(f.deltaSince) >= deltaFlushInterval) {
 			f.readyDelta(f.closed)
 		}
 		batch := f.ready
 		f.ready = nil
 		wait := time.Duration(-1)
 		if f.delta != nil {
-			wait = deltaFlushInterval - time.Since(f.deltaSince)
+			wait = max(deltaFlushInterval-now.Sub(f.deltaSince), 0)
 		}
 		finished := f.closed && f.delta == nil
 		f.mu.Unlock()

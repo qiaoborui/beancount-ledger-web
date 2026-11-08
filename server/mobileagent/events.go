@@ -62,15 +62,18 @@ type turnRecord struct {
 	// started and how long each took, by content index.
 	thinkingStart map[int]time.Time
 	thinkingTook  map[int]int64
-	// tools maps a call id to its step.
+	// tools maps a call id to its step, and args holds the arguments of
+	// each call PiG started, for one refused before the before-tool hook
+	// recorded it.
 	tools     map[string]int
+	args      map[string]json.RawMessage
 	durations map[string]int64
 }
 
 func newTurnRecord(feed *eventFeed, contextWindow int) *turnRecord {
 	return &turnRecord{feed: feed, usage: usageV1{ContextWindow: contextWindow},
 		thinkingStart: map[int]time.Time{}, thinkingTook: map[int]int64{},
-		tools: map[string]int{}, durations: map[string]int64{}}
+		tools: map[string]int{}, args: map[string]json.RawMessage{}, durations: map[string]int64{}}
 }
 
 // observe is the agent subscription.
@@ -89,6 +92,8 @@ func (r *turnRecord) observe(_ context.Context, event agent.AgentEvent) error {
 		if assistant := event.Message.Assistant; assistant != nil {
 			r.endMessage(assistant)
 		}
+	case agent.ToolExecutionStartEvent:
+		r.args[event.ToolCallID] = append(json.RawMessage(nil), event.Args...)
 	case agent.ToolExecutionEndEvent:
 		r.endTool(event)
 	}
@@ -141,7 +146,12 @@ func (r *turnRecord) endMessage(assistant *agent.AssistantMessage) {
 		r.usage.Output += usage.Output
 		r.usage.CacheRead += usage.CacheRead
 		r.usage.CacheWrite += usage.CacheWrite
-		r.usage.ContextTokens = usage.Input + usage.CacheRead + usage.CacheWrite + usage.Output
+		// A message stopped or failed before the provider reported usage
+		// carries all zeros; the context is still what the last measured
+		// message held.
+		if held := usage.Input + usage.CacheRead + usage.CacheWrite + usage.Output; held > 0 {
+			r.usage.ContextTokens = held
+		}
 	}
 	r.measured = true
 	usage := r.usage
@@ -168,7 +178,7 @@ func (r *turnRecord) startToolLocked(callID, name string, arguments json.RawMess
 }
 
 func (r *turnRecord) endTool(event agent.ToolExecutionEndEvent) {
-	r.startToolLocked(event.ToolCallID, event.ToolName, nil)
+	r.startToolLocked(event.ToolCallID, event.ToolName, r.args[event.ToolCallID])
 	step := &r.steps[r.tools[event.ToolCallID]]
 	text := toolResultText(event.Result.Content)
 	step.IsError = event.IsError
@@ -184,11 +194,13 @@ func (r *turnRecord) endTool(event agent.ToolExecutionEndEvent) {
 		DurationMs: step.DurationMs, Preview: step.Preview, ErrorText: step.ErrorText})
 }
 
-// toolDuration is how long the call ran, zero when it did not.
-func (r *turnRecord) toolDuration(callID string) int64 {
+// toolRun is the arguments PiG started the call with, which a call that
+// never reached the before-tool hook has nowhere else, and how long it ran,
+// zero when it did not.
+func (r *turnRecord) toolRun(callID string) (json.RawMessage, int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.durations[callID]
+	return r.args[callID], r.durations[callID]
 }
 
 // result is the steps and usage so far; usage is nil before any model

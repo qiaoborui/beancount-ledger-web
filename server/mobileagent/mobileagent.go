@@ -561,8 +561,12 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 				continue
 			}
 			seenResults = results
-			call := toolCallV1{Name: result.ToolName, Arguments: arguments[result.ToolCallID], IsError: result.IsError,
-				CallID: result.ToolCallID, DurationMs: record.toolDuration(result.ToolCallID)}
+			args, took := record.toolRun(result.ToolCallID)
+			if recorded, ok := arguments[result.ToolCallID]; ok {
+				args = recorded
+			}
+			call := toolCallV1{Name: result.ToolName, Arguments: args, IsError: result.IsError,
+				CallID: result.ToolCallID, DurationMs: took}
 			text := toolResultText(result.Content)
 			call.Preview = firstRunes(text, previewRunes)
 			if result.IsError {
