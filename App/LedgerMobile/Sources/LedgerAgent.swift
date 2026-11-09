@@ -1257,10 +1257,6 @@ final class LedgerAgentConversation: ObservableObject {
     private var stopping: Stopping?
     /// How long a new question waits for a stopped turn to return.
     var stopSettleTimeout: TimeInterval = 3
-    /// The answer that just finished streaming. Its tool groups open as they
-    /// were while live, so the page above the reply keeps its height when
-    /// the answer replaces the live turn.
-    private(set) var streamedAnswer: UUID?
 
     /// Every version of the conversation: regenerated answers and edited
     /// questions branch off where they were asked.
@@ -1816,7 +1812,6 @@ final class LedgerAgentConversation: ObservableObject {
                                              steps: turn.stoppedSteps, stopped: true, usage: turn.usage)
             messages.append(message)
             partial = message.id
-            streamedAnswer = message.id
         }
         stopping = Stopping(started: started, question: question, message: partial, note: note, unannounced: unannounced)
         phase = .idle
@@ -1972,7 +1967,6 @@ final class LedgerAgentConversation: ObservableObject {
         step = nil
         clearLive()
         stopping = nil
-        streamedAnswer = nil
         usage = nil
         restoredNotice = nil
         draftUnreviewed = false
@@ -2162,7 +2156,6 @@ final class LedgerAgentConversation: ObservableObject {
                                             rememberedMemory: turn.response.memoryUpdated, ask: turn.response.ask,
                                             steps: steps, usage: turn.response.usage,
                                             compacted: turn.response.compacted || liveDraft?.compacted == true)
-            if liveDraft != nil { streamedAnswer = answer.id }
             messages.append(answer)
             if let usage = turn.response.usage, usage.fraction != nil { self.usage = usage }
             phase = .idle
@@ -2181,7 +2174,6 @@ final class LedgerAgentConversation: ObservableObject {
                                                 duration: Date().timeIntervalSince(started),
                                                 steps: turn.response.steps.isEmpty ? liveDraft?.stoppedSteps ?? [] : turn.response.steps,
                                                 stopped: true, usage: turn.response.usage)
-                if liveDraft != nil { streamedAnswer = answer.id }
                 messages.append(answer)
             }
             adoptStopped(turn.response, question: questionID)
