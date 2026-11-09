@@ -79,7 +79,10 @@ type turnRequestV1 struct {
 	// MemoryPath is the ledger's memory.md, which the system prompt carries
 	// and the memory tools rewrite; empty turns memory off.
 	MemoryPath string `json:"memoryPath,omitempty"`
-	Message    string `json:"message"`
+	// StreamEvents asks the observer for the streaming event kinds besides
+	// "model" and "tool"; see turnEventV1.
+	StreamEvents bool   `json:"streamEvents,omitempty"`
+	Message      string `json:"message"`
 }
 
 type customEndpointV1 struct {
@@ -149,6 +152,11 @@ type toolCallV1 struct {
 	// or date range each read used.
 	Arguments json.RawMessage `json:"arguments,omitempty"`
 	IsError   bool            `json:"isError"`
+	CallID    string          `json:"callId,omitempty"`
+	// DurationMs is how long the tool ran; absent when it did not.
+	DurationMs int64  `json:"durationMs,omitempty"`
+	Preview    string `json:"preview,omitempty"`
+	ErrorText  string `json:"errorText,omitempty"`
 }
 
 type turnResponseV1 struct {
@@ -173,6 +181,43 @@ type turnResponseV1 struct {
 	// Ask is a question the model put to the user with ask_user, to show as
 	// a card of choices; the reply then repeats its question.
 	Ask *askV1 `json:"ask,omitempty"`
+	// Steps are the reasoning, text and tool calls of this turn, in order.
+	Steps []stepV1 `json:"steps,omitempty"`
+	// Usage is the turn's tokens; absent when no model message ended.
+	Usage *usageV1 `json:"usage,omitempty"`
+	// StopReason is "aborted" for a turn the user stopped. A stopped turn
+	// still returns what it wrote so far as Reply and a Transcript the next
+	// question can follow; the transcript is absent when the model had said
+	// nothing yet, and the shell keeps the previous one.
+	StopReason string `json:"stopReason,omitempty"`
+	// Compacted reports that the turn replaced the older turns of its
+	// transcript with a summary before it asked the model, so Transcript
+	// starts with the summary; CompactedTurns is how many questions it
+	// replaced. Set only with a Transcript, also on a stopped turn.
+	Compacted      bool `json:"compacted,omitempty"`
+	CompactedTurns int  `json:"compactedTurns,omitempty"`
+}
+
+// turnOutcome is what a turn hands back, also when it failed or was stopped
+// part way.
+type turnOutcome struct {
+	reply, transcript  string
+	calls              []toolCallV1
+	steps              []stepV1
+	usage              *usageV1
+	edited, remembered bool
+	ask                *askV1
+	// compactedTurns is how many questions the turn's summary replaced.
+	compactedTurns int
+}
+
+// compaction is what the response reports of the turn's summary: only a
+// transcript that starts with it counts.
+func (out turnOutcome) compaction() (bool, int) {
+	if out.transcript == "" || out.compactedTurns == 0 {
+		return false, 0
+	}
+	return true, out.compactedTurns
 }
 
 // streamFn is replaced by tests with a deterministic provider.
@@ -232,17 +277,22 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 	defer cancel()
 	network := newTurnHTTP()
 	defer network.close()
-	reply, transcript, calls, edited, remembered, ask, err := runTurn(ctx, cancel, network, requestJSON)
+	out, err := runTurn(ctx, cancel, network, requestJSON)
+	compacted, compactedTurns := out.compaction()
 	// A failed or cancelled turn may still have edited the scratch copy or
 	// the memory.
 	if errors.Is(ctx.Err(), context.Canceled) {
-		return encode(turnResponseV1{Version: 1, Cancelled: true, ToolCalls: calls, Edited: edited, MemoryUpdated: remembered, Error: "cancelled"})
+		return encode(turnResponseV1{Version: 1, Cancelled: true, StopReason: string(ai.StopReasonAborted), Reply: out.reply,
+			ToolCalls: out.calls, Steps: out.steps, Usage: out.usage, Edited: out.edited, MemoryUpdated: out.remembered,
+			Transcript: out.transcript, Compacted: compacted, CompactedTurns: compactedTurns, Error: "cancelled"})
 	}
 	if err != nil {
-		return encode(turnResponseV1{Version: 1, ToolCalls: calls, Edited: edited, MemoryUpdated: remembered, Error: turnErrorText(ctx, network, err),
-			ModelUnavailable: errors.Is(err, app.ErrLocalModelUnavailable)})
+		return encode(turnResponseV1{Version: 1, ToolCalls: out.calls, Steps: out.steps, Usage: out.usage, Edited: out.edited,
+			MemoryUpdated: out.remembered, Error: turnErrorText(ctx, network, err), ModelUnavailable: errors.Is(err, app.ErrLocalModelUnavailable)})
 	}
-	return encode(turnResponseV1{Version: 1, OK: true, Reply: reply, ToolCalls: calls, Edited: edited, MemoryUpdated: remembered, Transcript: transcript, Ask: ask})
+	return encode(turnResponseV1{Version: 1, OK: true, Reply: out.reply, ToolCalls: out.calls, Steps: out.steps, Usage: out.usage,
+		Edited: out.edited, MemoryUpdated: out.remembered, Transcript: out.transcript, Ask: out.ask,
+		Compacted: compacted, CompactedTurns: compactedTurns})
 }
 
 // turnErrorText says why a turn failed in words the user can act on; the
@@ -331,58 +381,59 @@ func ToolCatalogJSON() string {
 	return encode(map[string]any{"version": 1, "tools": tools})
 }
 
-func runTurn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (reply, transcript string, calls []toolCallV1, edited, remembered bool, ask *askV1, err error) {
+func runTurn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string) (turnOutcome, error) {
+	out := turnOutcome{calls: []toolCallV1{}}
 	var memory *memoryFile
-	reply, transcript, calls, scratch, ask, err := runTurnIn(ctx, cancel, network, requestJSON, &memory)
+	scratch, err := runTurnIn(ctx, cancel, network, requestJSON, &memory, &out)
 	if scratch != nil {
-		edited = scratch.wasEdited()
+		out.edited = scratch.wasEdited()
 		scratch.close()
 	}
-	return reply, transcript, calls, edited, memory != nil && memory.wasUpdated(), ask, err
+	out.remembered = memory != nil && memory.wasUpdated()
+	return out, err
 }
 
-// runTurnIn runs the turn; memory receives the turn's memory file as soon as
-// it is open, so a failed turn still reports a memory it changed.
-func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string, memory **memoryFile) (string, string, []toolCallV1, *scratch, *askV1, error) {
-	calls := []toolCallV1{}
+// runTurnIn runs the turn into out; memory receives the turn's memory file as
+// soon as it is open, so a failed turn still reports a memory it changed.
+func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP, requestJSON string, memory **memoryFile, out *turnOutcome) (*scratch, error) {
 	var files *scratch
 	decoder := json.NewDecoder(strings.NewReader(requestJSON))
 	decoder.DisallowUnknownFields()
 	var request turnRequestV1
 	if err := decoder.Decode(&request); err != nil {
-		return "", "", calls, files, nil, fmt.Errorf("invalid Agent request: %w", err)
+		return files, fmt.Errorf("invalid Agent request: %w", err)
 	}
 	if request.Version != 1 {
-		return "", "", calls, files, nil, errors.New("supported Agent request version is 1")
+		return files, errors.New("supported Agent request version is 1")
 	}
 	captureCrashes(request.RuntimeRoot)
 	if request.TurnID != "" {
 		if _, loaded := runningTurns.LoadOrStore(request.TurnID, cancel); loaded {
-			return "", "", calls, files, nil, errors.New("turnId is already running")
+			return files, errors.New("turnId is already running")
 		}
 		defer runningTurns.Delete(request.TurnID)
 		if _, cancelled := earlyCancels.LoadAndDelete(request.TurnID); cancelled {
 			cancel()
-			return "", "", calls, files, nil, context.Canceled
+			return files, context.Canceled
 		}
 	}
-	feed := openEventFeed(request.TurnID)
+	feed := openEventFeed(request.TurnID, request.StreamEvents)
 	defer feed.close()
 	message := strings.TrimSpace(request.Message)
 	if message == "" || len(message) > maxMessageBytes {
-		return "", "", calls, files, nil, errors.New("message is required and must be at most 12000 bytes")
+		return files, errors.New("message is required and must be at most 12000 bytes")
 	}
 	model, assumed, err := requestModel(request.Provider, request.Model, request.Custom)
 	if err != nil {
-		return "", "", calls, files, nil, err
+		return files, err
 	}
 	thinking, err := thinkingLevel(model, request.Thinking, assumed)
 	if err != nil {
-		return "", "", calls, files, nil, err
+		return files, err
 	}
 	session, err := app.OpenLocalAgentSession(request.LocalRequest, request.SensitiveUnlocked)
 	if err != nil {
-		return "", "", calls, files, nil, err
+		return files, err
 	}
 	specs := app.LocalAgentToolSpecs()
 	tools := make([]agent.AgentTool, 0, len(specs)+14)
@@ -398,7 +449,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	turns := maxTurns
 	if request.ScratchRoot != "" {
 		if files, err = editableScratch(request); err != nil {
-			return "", "", calls, nil, nil, err
+			return nil, err
 		}
 		for _, tool := range files.tools() {
 			tools = append(tools, tool)
@@ -408,13 +459,13 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	}
 	attached, err := openAttachments(request.Attachments, request.RuntimeRoot, supportsImages(model) && !assumed)
 	if err != nil {
-		return "", "", calls, files, nil, err
+		return files, err
 	}
 	systemPrompt := app.LocalAgentSystemPrompt(files != nil)
 	var remembered *memoryFile
 	if request.MemoryPath != "" {
 		if remembered, err = openMemory(request.MemoryPath); err != nil {
-			return "", "", calls, files, nil, err
+			return files, err
 		}
 		*memory = remembered
 		for _, tool := range remembered.tools() {
@@ -446,17 +497,32 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		// Last, so the rules and tools before it stay one cacheable prefix.
 		systemPrompt += remembered.prompt()
 	}
-	history, err := priorMessages(request, systemPrompt)
+	history, replayed, err := priorMessages(request, systemPrompt)
 	if err != nil {
-		return "", "", calls, files, nil, err
+		return files, err
 	}
 	key := request.APIKey
+	var summaryUsage ai.Usage
+	if replayed {
+		// A stop during the summary leaves the previous transcript as it was.
+		summarizer := compactor{network: network, model: model, assumed: assumed, key: key, feed: feed,
+			spend: func(usage ai.Usage) { summaryUsage = usage }}
+		if history, out.compactedTurns, err = summarizer.compact(ctx, history); err != nil {
+			return files, err
+		}
+		// The byte trim stays the last bound, and the fallback when the
+		// summary failed. Within the budget it returns history unchanged.
+		history = trimTranscript(history, transcriptBudget)
+	}
 	var argumentsMu sync.Mutex
 	arguments := map[string]json.RawMessage{}
 	// toolsSpent is set when the turn ran out of model calls: tools are then
 	// refused and the model answers from what it has.
 	var toolsSpent atomic.Bool
 	var bonusCalls atomic.Int32
+	record := newTurnRecord(feed, model.Capabilities.ContextWindow)
+	record.addUsage(summaryUsage)
+	defer func() { out.steps, out.usage = record.result() }()
 	runner, err := agent.NewAgent(agent.AgentOptions{
 		InitialState:  &agent.AgentInitialState{Messages: history},
 		Model:         model,
@@ -488,15 +554,18 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 				return agent.ToolCallHookResult{Block: true, Reason: "这一轮的工具调用次数已用完，请直接回答"}
 			}
 			feed.send(turnEventV1{Kind: "tool", Name: name, Arguments: append(json.RawMessage(nil), args...)})
+			record.startTool(id, name, args)
 			return agent.ToolCallHookResult{}
 		}},
 	})
 	if err != nil {
-		return "", "", calls, files, nil, err
+		return files, err
 	}
 	if request.ConversationID != "" {
 		runner.SetSessionID(request.ConversationID)
 	}
+	unsubscribe := runner.Subscribe(record.observe)
+	defer unsubscribe()
 	// A run returns the whole transcript, which starts with the one the turn
 	// was given; this turn's calls are the results after those.
 	priorResults := 0
@@ -520,7 +589,18 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 				continue
 			}
 			seenResults = results
-			calls = append(calls, toolCallV1{Name: result.ToolName, Arguments: arguments[result.ToolCallID], IsError: result.IsError})
+			args, took := record.toolRun(result.ToolCallID)
+			if recorded, ok := arguments[result.ToolCallID]; ok {
+				args = recorded
+			}
+			call := toolCallV1{Name: result.ToolName, Arguments: args, IsError: result.IsError,
+				CallID: result.ToolCallID, DurationMs: took}
+			text := toolResultText(result.Content)
+			call.Preview = firstRunes(text, previewRunes)
+			if result.IsError {
+				call.ErrorText = firstRunes(strings.TrimSpace(text), errorRunes)
+			}
+			out.calls = append(out.calls, call)
 		}
 	}
 	produced, err := runner.Send(ctx, message)
@@ -539,8 +619,18 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		produced, err = runner.Send(ctx, nudge)
 		collect(produced)
 	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		messages := runner.Messages()
+		// PiG puts the system message in front of a history without one.
+		start := len(history)
+		if len(messages) > 0 && messages[0].System != nil && (len(history) == 0 || history[0].System == nil) {
+			start++
+		}
+		out.reply, out.transcript = stoppedTurn(messages, start)
+		return files, context.Canceled
+	}
 	if err != nil {
-		return "", "", calls, files, nil, err
+		return files, err
 	}
 	ask := asking.question()
 	messages := runner.Messages()
@@ -550,16 +640,16 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		reply = ask.Question
 		messages = closeAsk(messages, ask)
 	} else if reply, err = finalReply(produced); err != nil {
-		return "", "", calls, files, nil, err
+		return files, err
 	}
+	out.reply, out.ask = reply, ask
 	// The whole transcript goes back to the shell, which sends it with the
 	// next question unchanged: the provider then sees the same prefix every
 	// turn and serves it from its prompt cache.
-	transcript, err := encodeTranscript(messages)
-	if err != nil {
-		return reply, "", calls, files, ask, nil
+	if transcript, err := encodeTranscript(messages); err == nil {
+		out.transcript = transcript
 	}
-	return reply, transcript, calls, files, ask, nil
+	return files, nil
 }
 
 // lastAssistant is the final model message of a run, if any.
@@ -647,17 +737,19 @@ func editableScratch(request turnRequestV1) (*scratch, error) {
 }
 
 // priorMessages is what the turn starts from: the transcript the previous
-// turn returned, trimmed when it outgrew its budget, or for a conversation
-// without one, its visible history.
-func priorMessages(request turnRequestV1, systemPrompt string) ([]agent.AgentMessage, error) {
+// turn returned, or for a conversation without one, its visible history.
+// replayed reports a transcript, which the turn then compacts or trims when
+// it outgrew its budget.
+func priorMessages(request turnRequestV1, systemPrompt string) (messages []agent.AgentMessage, replayed bool, err error) {
 	if strings.TrimSpace(request.Transcript) != "" {
 		if messages, err := decodeTranscript(request.Transcript); err == nil {
-			return withSystemPrompt(trimTranscript(messages, transcriptBudget), systemPrompt), nil
+			return withSystemPrompt(messages, systemPrompt), true, nil
 		}
 		// An unreadable transcript (another build's format) costs the
 		// conversation its tool results, not the turn.
 	}
-	return historyMessages(request.History)
+	messages, err = historyMessages(request.History)
+	return messages, false, err
 }
 
 // historyMessages replays the visible conversation. Providers reject empty

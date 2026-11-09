@@ -1212,7 +1212,7 @@ actor LocalLedgerRepository: LedgerRepository {
                     scratchRoot: draft?.path, transcript: transcript,
                     conversationId: conversationID?.uuidString,
                     attachments: attachments.isEmpty ? nil : attachments,
-                    memoryPath: memoryPath)
+                    memoryPath: memoryPath, streamEvents: onStep != nil ? true : nil)
                 let encoded = try JSONEncoder().encode(request)
                 if let onStep {
                     onStep(.startingLoop)
@@ -1222,8 +1222,18 @@ actor LocalLedgerRepository: LedgerRepository {
                 let data = try await withTaskCancellationHandler {
                     try await runner.run(encoded)
                 } onCancel: { runner.cancel(turnID) }
-                try Task.checkCancellation()
-                let response = try JSONDecoder().decode(LedgerAgentTurnResponse.self, from: data)
+                // A stopped turn still returns what it wrote so far and a
+                // transcript ending on it; anything else after a stop is
+                // dropped as before.
+                let response: LedgerAgentTurnResponse
+                do { response = try JSONDecoder().decode(LedgerAgentTurnResponse.self, from: data) } catch {
+                    try Task.checkCancellation()
+                    throw error
+                }
+                if Task.isCancelled {
+                    guard response.cancelled == true else { throw CancellationError() }
+                    return response
+                }
                 guard response.modelUnavailable == true, attempt == 0 else { return response }
                 handle = try await engine.committedModelHandle(for: model, replacing: handle)
             }
