@@ -37,8 +37,9 @@ type stepV1 struct {
 }
 
 // usageV1 is the tokens of a turn. Input, output and the cache counts add
-// up every model message of the turn; ContextTokens is what the last one
-// held in all, against the model's ContextWindow.
+// up every model message of the turn, the summary of a compaction included;
+// ContextTokens is what the last one of the conversation held in all,
+// against the model's ContextWindow.
 type usageV1 struct {
 	Input         int `json:"input"`
 	Output        int `json:"output"`
@@ -156,6 +157,18 @@ func (r *turnRecord) endMessage(assistant *agent.AssistantMessage) {
 	r.measured = true
 	usage := r.usage
 	r.feed.send(turnEventV1{Kind: "usage", Usage: &usage})
+}
+
+// addUsage counts the tokens of a request outside the conversation, the
+// summary of a compaction, in the turn's usage. They show with the first
+// model message's usage; the context it held is not the conversation's.
+func (r *turnRecord) addUsage(usage ai.Usage) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.usage.Input += usage.Input
+	r.usage.Output += usage.Output
+	r.usage.CacheRead += usage.CacheRead
+	r.usage.CacheWrite += usage.CacheWrite
 }
 
 // startTool records a call as it begins. An admitted call starts from the

@@ -52,8 +52,11 @@ type turnEventV1 struct {
 	//   - "tool_end" closes it: CallID, Name, IsError, DurationMs (absent when
 	//     the tool did not run), Preview, ErrorText.
 	//   - "usage" follows each model message: Usage holds the turn so far.
-	//   - "compaction_start" and "compaction_end" are reserved for summarizing
-	//     older turns (SummarizedTurns); nothing sends them yet.
+	//   - "compaction_start" and "compaction_end" bracket the summary of older
+	//     turns a long transcript gets before the turn's first "model".
+	//     SummarizedTurns on "compaction_end" is how many questions the
+	//     summary replaced; it is absent when the summary failed and the turn
+	//     went on with the transcript trimmed instead, or was stopped.
 	Kind       string          `json:"kind"`
 	Name       string          `json:"name,omitempty"`
 	Arguments  json.RawMessage `json:"arguments,omitempty"`

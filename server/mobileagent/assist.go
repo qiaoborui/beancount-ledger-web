@@ -221,9 +221,16 @@ func assist(ctx context.Context, network *turnHTTP, requestJSON string, kind ass
 
 // complete makes one request without tools and returns the text.
 func complete(ctx context.Context, network *turnHTTP, model *ai.Model, assumed bool, key, prompt, message string) (string, error) {
+	reply, _, err := completeUsage(ctx, network, model, assumed, key, prompt, message)
+	return reply, err
+}
+
+// completeUsage is complete that also returns the tokens the reply cost,
+// when the provider reported them, a failed reply's included.
+func completeUsage(ctx context.Context, network *turnHTTP, model *ai.Model, assumed bool, key, prompt, message string) (string, *ai.Usage, error) {
 	thinking, err := thinkingLevel(model, string(ai.ThinkingOff), assumed)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	runner, err := agent.NewAgent(agent.AgentOptions{
 		Model:         model,
@@ -240,13 +247,18 @@ func complete(ctx context.Context, network *turnHTTP, model *ai.Model, assumed b
 		GetAPIKey: func(string) (string, error) { return key, nil },
 	})
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	produced, err := runner.Send(ctx, message)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return finalReply(produced)
+	var usage *ai.Usage
+	if assistant := lastAssistant(produced); assistant != nil {
+		usage = assistant.Usage
+	}
+	reply, err := finalReply(produced)
+	return reply, usage, err
 }
 
 // ledgerFacts reads the facts starters are drawn from, as compact JSON.

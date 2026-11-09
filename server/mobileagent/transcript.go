@@ -61,30 +61,42 @@ func withSystemPrompt(messages []agent.AgentMessage, prompt string) []agent.Agen
 	return out
 }
 
+// messageSizes is the encoded size of each message and of all of them, as
+// the byte budget counts it; ok is false when a message does not encode.
+func messageSizes(messages []agent.AgentMessage) (sizes []int, total int, ok bool) {
+	sizes = make([]int, len(messages))
+	for index, message := range messages {
+		raw, err := json.Marshal(message)
+		if err != nil {
+			return nil, 0, false
+		}
+		sizes[index] = len(raw)
+		total += len(raw)
+	}
+	return sizes, total, true
+}
+
 // trimTranscript drops whole turns from the front, each starting at a user
 // message, until the rest fits. It never returns a transcript that starts
 // with a model message or a tool result.
 func trimTranscript(messages []agent.AgentMessage, budget int) []agent.AgentMessage {
-	sizes := make([]int, len(messages))
-	total := 0
-	for index, message := range messages {
-		raw, err := json.Marshal(message)
-		if err != nil {
-			return nil
-		}
-		sizes[index] = len(raw)
-		total += len(raw)
+	sizes, total, ok := messageSizes(messages)
+	if !ok {
+		return nil
 	}
 	if total <= budget {
 		return messages
 	}
 	target := int(float64(budget) * transcriptKeep)
 	// The system message that opens the transcript carries the tool
-	// declarations and stays; everything after it goes turn by turn.
+	// declarations and stays, and so does the summary of a compaction after
+	// it, which stands for turns already gone; everything after them goes
+	// turn by turn.
 	head := 0
 	for head < len(messages) && messages[head].System != nil {
 		head++
 	}
+	head = compactionEnd(messages, head)
 	start := head
 	for start < len(messages) && total > target {
 		total -= sizes[start]
