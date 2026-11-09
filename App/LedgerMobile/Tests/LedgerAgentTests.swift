@@ -764,6 +764,7 @@ final class LedgerAgentTests: XCTestCase {
     }
 
     #if os(iOS)
+    @MainActor
     func testInterruptionNotificationNamesTheCause() {
         let summary = LedgerAgentBackgroundRun.summary(.interrupted, concealed: true, cause: "后台保活被来电或其他 App 的声音打断")
         XCTAssertEqual(summary.phase, .interrupted)
