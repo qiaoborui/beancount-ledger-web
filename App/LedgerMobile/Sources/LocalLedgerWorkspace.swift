@@ -576,6 +576,7 @@ actor LocalLedgerWorkspace {
         guard let directory = try? importRuntimeDirectory("runtime/agent-history") else { return }
         removeIfPresent(directory.appendingPathComponent(id.uuidString + ".json"))
         removeIfPresent(directory.appendingPathComponent(id.uuidString + ".transcript"))
+        removeAgentBranchTranscripts(id: id, keeping: [])
     }
 
     /// runtime/agent-attachments/<id>: the files attached to one Agent
@@ -632,6 +633,39 @@ actor LocalLedgerWorkspace {
         let file = directory.appendingPathComponent(id.uuidString + ".transcript")
         guard (try? itemKindIfPresent(at: file)) == .regularFile else { return nil }
         return try? Data(contentsOf: file)
+    }
+
+    /// The transcript of one version of a conversation that is not on
+    /// screen, as runtime/agent-history/<id>.<leaf>.transcript, where <leaf>
+    /// is the version's last message. The history listing reads only .json.
+    func saveAgentBranchTranscript(id: UUID, leaf: UUID, data: Data) throws {
+        let directory = try importRuntimeDirectory("runtime/agent-history")
+        try createProtectedDirectory(directory)
+        let file = directory.appendingPathComponent(id.uuidString + "." + leaf.uuidString + ".transcript")
+        if let kind = try itemKindIfPresent(at: file), kind != .regularFile { throw WorkspaceError.unsupportedItem(file.lastPathComponent) }
+        try data.write(to: file, options: .atomic)
+        try protect(file)
+    }
+
+    func agentBranchTranscript(id: UUID, leaf: UUID) -> Data? {
+        guard let directory = try? importRuntimeDirectory("runtime/agent-history") else { return nil }
+        let file = directory.appendingPathComponent(id.uuidString + "." + leaf.uuidString + ".transcript")
+        guard (try? itemKindIfPresent(at: file)) == .regularFile else { return nil }
+        return try? Data(contentsOf: file)
+    }
+
+    /// Drops a conversation's version transcripts other than those of
+    /// `leaves`: versions that grew past their old last message, or whose
+    /// transcript became the one on screen.
+    func removeAgentBranchTranscripts(id: UUID, keeping leaves: Set<UUID>) {
+        guard let directory = try? importRuntimeDirectory("runtime/agent-history"),
+              let names = try? fileManager.contentsOfDirectory(atPath: directory.path) else { return }
+        let prefix = id.uuidString + ".", suffix = ".transcript"
+        for name in names where name.hasPrefix(prefix) && name.hasSuffix(suffix) {
+            let middle = name.dropFirst(prefix.count).dropLast(suffix.count)
+            guard let leaf = UUID(uuidString: String(middle)), !leaves.contains(leaf) else { continue }
+            removeIfPresent(directory.appendingPathComponent(name))
+        }
     }
 
     func removeAgentConversations() {

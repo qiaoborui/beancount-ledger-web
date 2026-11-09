@@ -7,7 +7,18 @@ import LedgerCore
 struct LedgerAgentToolCall: Codable, Equatable, Sendable {
     let name: String
     var arguments: BQLCell? = nil
-    let isError: Bool
+    var isError: Bool
+    /// The provider's id for the call, which pairs its start with its end.
+    /// The fields from here on are absent in older saves and cores.
+    var callId: String? = nil
+    /// How long the tool ran; nil when it did not run.
+    var durationMs: Int? = nil
+    /// The start of the tool's result.
+    var preview: String? = nil
+    /// What went wrong, for a call that failed.
+    var errorText: String? = nil
+    /// The user stopped the turn while the call ran, so it never finished.
+    var interrupted: Bool? = nil
 
     /// The row title, in the words of the design: what was read, then the range
     /// or search term when the arguments carry one.
@@ -37,6 +48,8 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         case "ask_user": String(localized: "向你提问")
         case "list_saved_conversations": String(localized: "查看历史对话")
         case "read_saved_conversation": String(localized: "读取历史对话")
+        case "edit_memory": String(localized: "更新记忆")
+        case "write_memory": String(localized: "整理记忆")
         default: name
         }
         if name == "get_ledger_summary", let start = argument("start"), let end = argument("end") {
@@ -60,6 +73,21 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         return argument("query")
     }
 
+    /// The arguments as compact JSON, for an expanded timeline row of a tool
+    /// without BQL; nil when there are none.
+    var argumentsText: String? {
+        guard source == nil, let arguments, arguments != .null, arguments != .object([:]) else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return (try? encoder.encode(arguments)).map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    /// The tool counts as an edit of the draft in the timeline's summary.
+    var editsDraft: Bool {
+        ["edit_file", "write_file", "move_file", "copy_file", "delete_file", "save_attachment"].contains(name) && !isError
+            && interrupted != true
+    }
+
     private func arrayArgument(_ key: String) -> [String]? {
         guard case let .object(values)? = arguments, case let .array(items)? = values[key] else { return nil }
         let strings = items.compactMap { item -> String? in if case let .string(value) = item { value } else { nil } }
@@ -75,6 +103,252 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
     /// `2026-10-01` → `10-01`; anything else is shown as given.
     private static func shortDate(_ value: String) -> String {
         value.count == 10 && value.dropFirst(4).first == "-" ? String(value.dropFirst(5)) : value
+    }
+}
+
+/// One piece of a turn, in the order it happened: a reasoning block, a run of
+/// reply text, or a tool call. Saved with the answer, so a reopened
+/// conversation draws the same timeline.
+struct LedgerAgentStepRecord: Codable, Equatable, Sendable {
+    enum Kind: String, Codable, Sendable { case thinking, text, tool }
+    let kind: Kind
+    /// The reasoning or the reply; empty for a tool and for redacted reasoning.
+    var text = ""
+    /// How long the reasoning took; a tool's own time is on its call.
+    var durationMs: Int? = nil
+    /// The provider sent the reasoning encrypted, so there is nothing to show.
+    var redacted = false
+    var call: LedgerAgentToolCall? = nil
+
+    init(kind: Kind, text: String = "", durationMs: Int? = nil, redacted: Bool = false, call: LedgerAgentToolCall? = nil) {
+        self.kind = kind
+        self.text = text
+        self.durationMs = durationMs
+        self.redacted = redacted
+        self.call = call
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, text, durationMs, redacted, call
+        // The native response lists a tool step's call fields flat.
+        case callId, name, arguments, isError, preview, errorText
+    }
+
+    /// Reads both the saved shape, with the call nested, and the native
+    /// response's, with the call's fields beside `kind`.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+        redacted = try container.decodeIfPresent(Bool.self, forKey: .redacted) ?? false
+        let duration = try container.decodeIfPresent(Int.self, forKey: .durationMs)
+        if let nested = try container.decodeIfPresent(LedgerAgentToolCall.self, forKey: .call) {
+            call = nested
+            durationMs = duration
+        } else if kind == .tool {
+            let name = try container.decode(String.self, forKey: .name)
+            call = LedgerAgentToolCall(
+                name: name, arguments: try? container.decodeIfPresent(BQLCell.self, forKey: .arguments),
+                isError: try container.decodeIfPresent(Bool.self, forKey: .isError) ?? false,
+                callId: try container.decodeIfPresent(String.self, forKey: .callId), durationMs: duration,
+                preview: try container.decodeIfPresent(String.self, forKey: .preview),
+                errorText: try container.decodeIfPresent(String.self, forKey: .errorText))
+        } else {
+            durationMs = duration
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        if !text.isEmpty { try container.encode(text, forKey: .text) }
+        try container.encodeIfPresent(durationMs, forKey: .durationMs)
+        if redacted { try container.encode(true, forKey: .redacted) }
+        try container.encodeIfPresent(call, forKey: .call)
+    }
+}
+
+/// The tokens of a turn: input, output and cache counts summed over its model
+/// messages, and how full the context was at the last one.
+struct LedgerAgentUsage: Codable, Equatable, Sendable {
+    var input = 0
+    var output = 0
+    var cacheRead = 0
+    var cacheWrite = 0
+    var contextTokens = 0
+    var contextWindow = 0
+
+    init(input: Int = 0, output: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, contextTokens: Int = 0,
+         contextWindow: Int = 0) {
+        self.input = input; self.output = output; self.cacheRead = cacheRead; self.cacheWrite = cacheWrite
+        self.contextTokens = contextTokens; self.contextWindow = contextWindow
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        input = try container.decodeIfPresent(Int.self, forKey: .input) ?? 0
+        output = try container.decodeIfPresent(Int.self, forKey: .output) ?? 0
+        cacheRead = try container.decodeIfPresent(Int.self, forKey: .cacheRead) ?? 0
+        cacheWrite = try container.decodeIfPresent(Int.self, forKey: .cacheWrite) ?? 0
+        contextTokens = try container.decodeIfPresent(Int.self, forKey: .contextTokens) ?? 0
+        contextWindow = try container.decodeIfPresent(Int.self, forKey: .contextWindow) ?? 0
+    }
+
+    /// How much of the model's context the conversation fills, from 0 to 1;
+    /// nil while either side is unknown.
+    var fraction: Double? {
+        guard contextWindow > 0, contextTokens > 0 else { return nil }
+        return min(Double(contextTokens) / Double(contextWindow), 1)
+    }
+}
+
+/// One streamed event of a running turn, beyond the model and tool steps the
+/// Live Activity counts.
+enum LedgerAgentLiveEvent: Equatable, Sendable {
+    case textDelta(String)
+    case thinkingDelta(String)
+    case thinkingEnd(durationMs: Int?, redacted: Bool)
+    case toolStart(LedgerAgentToolCall)
+    case toolEnd(LedgerAgentToolCall)
+    case usage(LedgerAgentUsage)
+    case compactionStart
+    case compactionEnd(summarizedTurns: Int?)
+}
+
+/// The running turn as it streams in: reasoning, reply text and tool calls in
+/// the order they happened. Built by `apply`, one event at a time.
+struct LedgerAgentLiveTurn: Equatable, Sendable {
+    private(set) var steps: [LedgerAgentStepRecord] = []
+    /// The tool calls started but not ended, by index into `steps`.
+    private(set) var running: Set<Int> = []
+    private(set) var usage: LedgerAgentUsage?
+    /// Older turns are being summarized so the conversation fits.
+    private(set) var compacting = false
+    private(set) var compacted = false
+    /// The reasoning block still streaming, by index into `steps`.
+    private var openThinking: Int?
+
+    /// The reply so far: the text of the latest model message that wrote
+    /// any, which is what a stop keeps.
+    var text: String { steps.last { $0.kind == .text }?.text ?? "" }
+
+    /// Whether the reasoning block at `index` is still streaming.
+    func isThinking(_ index: Int) -> Bool { openThinking == index }
+
+    var isEmpty: Bool { steps.isEmpty }
+
+    /// The steps as a stopped turn keeps them: a call still running is
+    /// marked unfinished rather than drawn as done.
+    var stoppedSteps: [LedgerAgentStepRecord] {
+        var steps = steps
+        for index in running where steps.indices.contains(index) { steps[index].call?.interrupted = true }
+        return steps
+    }
+
+    mutating func apply(_ event: LedgerAgentLiveEvent) {
+        switch event {
+        case let .thinkingDelta(text):
+            if let open = openThinking {
+                steps[open].text += text
+            } else {
+                steps.append(.init(kind: .thinking, text: text))
+                openThinking = steps.count - 1
+            }
+        case let .thinkingEnd(durationMs, redacted):
+            if let open = openThinking {
+                steps[open].durationMs = durationMs
+                steps[open].redacted = redacted
+            } else {
+                // Redacted reasoning streams nothing before its end.
+                steps.append(.init(kind: .thinking, durationMs: durationMs, redacted: redacted))
+            }
+            openThinking = nil
+        case let .textDelta(text):
+            openThinking = nil
+            if steps.last?.kind == .text {
+                steps[steps.count - 1].text += text
+            } else {
+                steps.append(.init(kind: .text, text: text))
+            }
+        case let .toolStart(call):
+            openThinking = nil
+            guard index(of: call) == nil else { return }
+            steps.append(.init(kind: .tool, call: call))
+            running.insert(steps.count - 1)
+        case let .toolEnd(call):
+            openThinking = nil
+            guard let index = index(of: call), var known = steps[index].call else {
+                steps.append(.init(kind: .tool, call: call))
+                return
+            }
+            known.isError = call.isError
+            known.durationMs = call.durationMs
+            known.preview = call.preview
+            known.errorText = call.errorText
+            if known.arguments == nil { known.arguments = call.arguments }
+            steps[index].call = known
+            running.remove(index)
+        case let .usage(usage):
+            self.usage = usage
+        case .compactionStart:
+            compacting = true
+        case .compactionEnd:
+            compacting = false
+            compacted = true
+        }
+    }
+
+    private func index(of call: LedgerAgentToolCall) -> Int? {
+        guard let id = call.callId, !id.isEmpty else { return nil }
+        return steps.lastIndex { $0.call?.callId == id }
+    }
+}
+
+/// A turn's steps as the timeline draws them: each reasoning block, each run
+/// of adjacent tool calls as one group, and the text between them, in order.
+/// The answer is drawn last by the reply itself, so its text step is left out.
+enum LedgerAgentTimelineItem: Equatable, Identifiable, Sendable {
+    case thinking(index: Int)
+    case tools(indices: [Int])
+    case text(index: Int)
+
+    var id: Int {
+        switch self {
+        case let .thinking(index), let .text(index): index
+        case let .tools(indices): indices.first ?? -1
+        }
+    }
+
+    /// `answerTrails` leaves the last text step out only when nothing came
+    /// after it, as while a turn is still running; otherwise the last text
+    /// step is the answer wherever it fell. `includesAnswer` leaves nothing
+    /// out, for the live turn, whose reply keeps its place as tools follow it.
+    static func items(_ steps: [LedgerAgentStepRecord], answerTrails: Bool = false,
+                      includesAnswer: Bool = false) -> [LedgerAgentTimelineItem] {
+        let answer = includesAnswer ? nil : answerIndex(steps, answerTrails: answerTrails)
+        var items: [LedgerAgentTimelineItem] = []
+        for (index, step) in steps.enumerated() where index != answer {
+            switch step.kind {
+            case .thinking: items.append(.thinking(index: index))
+            case .text:
+                guard !step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                items.append(.text(index: index))
+            case .tool:
+                if case var .tools(indices)? = items.last {
+                    indices.append(index)
+                    items[items.count - 1] = .tools(indices: indices)
+                } else {
+                    items.append(.tools(indices: [index]))
+                }
+            }
+        }
+        return items
+    }
+
+    /// The step that is the answer, drawn after the items.
+    static func answerIndex(_ steps: [LedgerAgentStepRecord], answerTrails: Bool = false) -> Int? {
+        let lastText = steps.lastIndex { $0.kind == .text }
+        return answerTrails ? (lastText == steps.indices.last ? lastText : nil) : lastText
     }
 }
 
@@ -107,9 +381,11 @@ struct LedgerAgentWriteRecord: Codable, Equatable, Sendable {
 /// One visible message. Tool reads hang off the assistant reply they led to.
 struct LedgerAgentMessage: Identifiable, Equatable, Sendable {
     enum Role: String, Sendable { case user, assistant }
-    let id = UUID()
+    /// Saved with the message, so a version of the conversation can name it
+    /// across reopening.
+    var id = UUID()
     let role: Role
-    let text: String
+    var text: String
     var toolCalls: [LedgerAgentToolCall] = []
     var duration: TimeInterval? = nil
     /// Names of the files sent with a question.
@@ -120,6 +396,19 @@ struct LedgerAgentMessage: Identifiable, Equatable, Sendable {
     var ask: LedgerAgentAsk? = nil
     /// The change written to the ledger after this reply.
     var write: LedgerAgentWriteRecord? = nil
+    /// The reasoning, text and tool calls behind the reply, in order; empty
+    /// for replies from older builds, which show `toolCalls` alone.
+    var steps: [LedgerAgentStepRecord] = []
+    /// The user stopped the turn; the text is what it had written by then.
+    var stopped = false
+    var usage: LedgerAgentUsage? = nil
+    /// The turn summarized older turns before it answered.
+    var compacted = false
+    /// The conversation's transcript does not hold this question: it is
+    /// still running, it failed, or it was stopped and no transcript came
+    /// back for it. Cutting the transcript back for a regenerate or an edit
+    /// counts only the questions it holds.
+    var outsideTranscript = false
 }
 
 /// The provider and model a turn uses. The key travels separately.
@@ -335,6 +624,9 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     var attachments: [LedgerAgentAttachment.Payload]? = nil
     /// The ledger's memory.md; nil turns memory off for the turn.
     var memoryPath: String? = nil
+    /// Asks for the reply, the reasoning and each tool's start and end as
+    /// they happen, beside the model and tool steps.
+    var streamEvents: Bool? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {
@@ -354,16 +646,30 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
     /// Choices the model asked the user to pick from; the reply repeats the
     /// question.
     var ask: LedgerAgentAsk? = nil
+    /// The reasoning, text and tool calls of the turn, in order; empty from
+    /// older cores.
+    var steps: [LedgerAgentStepRecord] = []
+    /// The turn's tokens; nil when no model message ended.
+    var usage: LedgerAgentUsage? = nil
+    /// "aborted" for a turn the user stopped. A stopped turn still returns
+    /// what it wrote so far as `reply`, and a transcript the next question can
+    /// follow unless the model had said nothing yet.
+    var stopReason: String? = nil
+    /// The turn summarized older turns of its transcript to fit.
+    var compacted = false
 
     private enum CodingKeys: String, CodingKey {
         case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited, transcript, memoryUpdated, ask
+        case steps, usage, stopReason, compacted
     }
     init(ok: Bool, reply: String? = nil, toolCalls: [LedgerAgentToolCall] = [], error: String? = nil,
          cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false, transcript: String? = nil,
-         memoryUpdated: Bool = false, ask: LedgerAgentAsk? = nil) {
+         memoryUpdated: Bool = false, ask: LedgerAgentAsk? = nil, steps: [LedgerAgentStepRecord] = [],
+         usage: LedgerAgentUsage? = nil, stopReason: String? = nil, compacted: Bool = false) {
         self.ok = ok; self.reply = reply; self.toolCalls = toolCalls; self.error = error
         self.cancelled = cancelled; self.modelUnavailable = modelUnavailable; self.edited = edited
         self.transcript = transcript; self.memoryUpdated = memoryUpdated; self.ask = ask
+        self.steps = steps; self.usage = usage; self.stopReason = stopReason; self.compacted = compacted
     }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -378,6 +684,17 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
         memoryUpdated = try container.decodeIfPresent(Bool.self, forKey: .memoryUpdated) ?? false
         // A malformed card is dropped; the reply still carries the question.
         ask = try? container.decodeIfPresent(LedgerAgentAsk.self, forKey: .ask)
+        // A step of a kind this build does not know is left out, not the reply.
+        steps = (try? container.decodeIfPresent([Lossy<LedgerAgentStepRecord>].self, forKey: .steps))?
+            .compactMap(\.value) ?? []
+        usage = try? container.decodeIfPresent(LedgerAgentUsage.self, forKey: .usage)
+        stopReason = try container.decodeIfPresent(String.self, forKey: .stopReason)
+        compacted = try container.decodeIfPresent(Bool.self, forKey: .compacted) ?? false
+    }
+
+    private struct Lossy<Value: Decodable>: Decodable {
+        let value: Value?
+        init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
     }
 }
 
@@ -447,6 +764,13 @@ enum LedgerAgentError: LocalizedError, Equatable {
 struct LedgerAgentRunner: Sendable {
     var run: @Sendable (Data) async throws -> Data
     var cancel: @Sendable (String) -> Void
+    /// Cuts a transcript back for a regenerate or an edit: the transcript,
+    /// and how many of the last questions it holds to drop, with everything
+    /// after the first of them. Counting from the end, not the front, keeps
+    /// the cut right when the transcript lost its oldest turns. Throws when
+    /// the transcript holds fewer questions, so a stale context is never
+    /// resent.
+    var truncate: @Sendable (String, Int) async throws -> String = { _, _ in throw LocalLedgerError.runtimeUnavailable }
 
     /// The native loop stops a turn after ten minutes on its own. If it has
     /// still not returned this long after that, the screen stops waiting.
@@ -468,9 +792,39 @@ struct LedgerAgentRunner: Sendable {
         #if canImport(LedgerCore)
         MobileagentCancelTurn(turnID)
         #endif
+    }, truncate: { transcript, dropUserTurns in
+        #if canImport(LedgerCore)
+        let request = try JSONEncoder().encode(TruncateRequest(transcript: transcript, dropUserTurns: dropUserTurns))
+        let data = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: Data(MobileagentTruncateTranscriptJSON(String(decoding: request, as: UTF8.self)).utf8))
+            }
+        }
+        let response = try JSONDecoder().decode(TruncateResponse.self, from: data)
+        guard response.ok, let cut = response.transcript else {
+            throw LedgerAgentError.failed(response.error ?? String(localized: "没能截短对话记录"))
+        }
+        return cut
+        #else
+        throw LocalLedgerError.runtimeUnavailable
+        #endif
     })
 
     private struct TurnID: Decodable { let turnId: String }
+
+    /// The wire request of `TruncateTranscriptJSON`; the native decoder
+    /// rejects unknown fields.
+    private struct TruncateRequest: Encodable {
+        let version = 1
+        let transcript: String
+        let dropUserTurns: Int
+    }
+
+    private struct TruncateResponse: Decodable {
+        let ok: Bool
+        var transcript: String?
+        var error: String?
+    }
 
     /// Runs a blocking call on a global queue and returns its result, or
     /// throws once `seconds` pass first. The call keeps its thread until it
@@ -515,10 +869,17 @@ struct LedgerAgentStep: Equatable, Sendable {
     /// first event: copying the draft, loading the ledger, starting the loop.
     /// On a conversation's first question that can take a while on a large
     /// ledger, and without it the screen showed nothing changing.
-    enum Kind: String, Decodable, Sendable { case model, tool, preparing }
+    ///
+    /// `live` carries a streamed event (reply or reasoning text, a tool's
+    /// start or end, usage) on the same path. It is not a step: the
+    /// conversation draws it, and the Live Activity never counts it.
+    enum Kind: String, Sendable { case model, tool, preparing, live }
     let kind: Kind
     var call: LedgerAgentToolCall? = nil
     var detail: String? = nil
+    var live: LedgerAgentLiveEvent? = nil
+
+    static func live(_ event: LedgerAgentLiveEvent) -> LedgerAgentStep { .init(kind: .live, live: event) }
 
     static func preparing(_ detail: String) -> LedgerAgentStep { .init(kind: .preparing, detail: detail) }
     static var copyingDraft: LedgerAgentStep { .preparing(String(localized: "正在准备账本草稿")) }
@@ -529,7 +890,7 @@ struct LedgerAgentStep: Equatable, Sendable {
         switch kind {
         case .preparing: return detail ?? String(localized: "正在准备")
         case .tool: return call?.title ?? String(localized: "正在思考")
-        case .model: return String(localized: "正在思考")
+        case .model, .live: return String(localized: "正在思考")
         }
     }
 
@@ -538,17 +899,48 @@ struct LedgerAgentStep: Equatable, Sendable {
     static func decode(_ json: String) -> LedgerAgentStep? {
         struct Event: Decodable {
             let version: Int
-            let kind: Kind
+            let kind: String
             var name: String?
             var arguments: BQLCell?
+            var callId: String?
+            var text: String?
+            var durationMs: Int?
+            var redacted: Bool?
+            var isError: Bool?
+            var preview: String?
+            var errorText: String?
+            var usage: LedgerAgentUsage?
+            var summarizedTurns: Int?
         }
         guard let event = try? JSONDecoder().decode(Event.self, from: Data(json.utf8)), event.version == 1 else { return nil }
+        let name = event.name.flatMap { $0.isEmpty ? nil : $0 }
         switch event.kind {
-        case .model: return .init(kind: .model)
-        case .preparing: return nil
-        case .tool:
-            guard let name = event.name, !name.isEmpty else { return nil }
+        case "model": return .init(kind: .model)
+        case "tool":
+            guard let name else { return nil }
             return .init(kind: .tool, call: .init(name: name, arguments: event.arguments, isError: false))
+        case "text_delta":
+            guard let text = event.text, !text.isEmpty else { return nil }
+            return .live(.textDelta(text))
+        case "thinking_delta":
+            guard let text = event.text, !text.isEmpty else { return nil }
+            return .live(.thinkingDelta(text))
+        case "thinking_end":
+            return .live(.thinkingEnd(durationMs: event.durationMs, redacted: event.redacted ?? false))
+        case "tool_start":
+            guard let name else { return nil }
+            return .live(.toolStart(.init(name: name, arguments: event.arguments, isError: false, callId: event.callId)))
+        case "tool_end":
+            guard let name else { return nil }
+            return .live(.toolEnd(.init(name: name, arguments: event.arguments, isError: event.isError ?? false,
+                                        callId: event.callId, durationMs: event.durationMs,
+                                        preview: event.preview, errorText: event.errorText)))
+        case "usage":
+            guard let usage = event.usage else { return nil }
+            return .live(.usage(usage))
+        case "compaction_start": return .live(.compactionStart)
+        case "compaction_end": return .live(.compactionEnd(summarizedTurns: event.summarizedTurns))
+        default: return nil
         }
     }
 }
@@ -744,7 +1136,18 @@ final class LedgerAgentConversation: ObservableObject {
         case failed(LedgerAgentError, question: String)
     }
 
-    @Published private(set) var messages: [LedgerAgentMessage] = []
+    /// The version on screen: the active path of `thread`, which follows
+    /// every change made here.
+    @Published private(set) var messages: [LedgerAgentMessage] = [] {
+        didSet {
+            thread.adopt(messages)
+            replacedByVersionChange = showingVersion
+        }
+    }
+    /// The last change to `messages` showed another version rather than a
+    /// question or an answer, so the screen neither announces nor jumps.
+    private(set) var replacedByVersionChange = false
+    private var showingVersion = false
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var pending: LedgerAgentPendingEdit?
     /// The last change written from this conversation, until the next turn.
@@ -760,12 +1163,20 @@ final class LedgerAgentConversation: ObservableObject {
     }
     /// What the running turn is doing now; nil before its first event.
     @Published private(set) var step: LedgerAgentStep?
+    /// The running turn as it streams in; nil before its first streamed
+    /// event, and from cores that do not stream. Text arrives at most every
+    /// `liveInterval`, so a fast model does not redraw the page per token.
+    @Published private(set) var live: LedgerAgentLiveTurn?
+    /// How full the model's context was at the latest turn, for the meter.
+    @Published private(set) var usage: LedgerAgentUsage?
     /// Everything the model saw and said so far, tool results included, as
     /// the last answered turn returned it. The next turn sends it back so
     /// follow-ups build on earlier reads; nil until a turn is answered (and
     /// for a conversation saved by an older build, which replays its visible
     /// history instead). A failed or stopped turn leaves it as it was.
-    private(set) var transcript: String?
+    private(set) var transcript: String? {
+        didSet { if transcript != nil { clearsStoredTranscript = false } }
+    }
     /// When the running turn last reported a step, or started.
     private(set) var stepSince: Date?
     private(set) var stepCount = 0
@@ -820,6 +1231,60 @@ final class LedgerAgentConversation: ObservableObject {
     static let maximumResumes = 2
     private var reopening: Task<LedgerAgentDraft?, Never>?
     var editor: LedgerAgentEditor?
+    /// Every streamed event so far; `live` is this as last published.
+    private var liveDraft: LedgerAgentLiveTurn?
+    private var livePublishedAt: Date?
+    private var liveFlush: Task<Void, Never>?
+    static let liveInterval: TimeInterval = 0.08
+
+    /// A turn the user stopped whose native loop has not returned yet. It
+    /// still brings back the authoritative partial reply and a transcript
+    /// that includes it, and the next question waits briefly for them.
+    private struct Stopping {
+        let started: Date
+        let question: UUID?
+        /// The partial reply shown at once when the user stopped.
+        let message: UUID?
+        /// The note and the new files the stopped question was sent with;
+        /// its transcript tells the model about these, and no others.
+        let note: String?
+        let unannounced: Set<String>
+        /// A newer question stopped waiting for it and went on with the
+        /// older transcript, so its late transcript is no longer the one to
+        /// follow.
+        var stale = false
+    }
+    private var stopping: Stopping?
+    /// How long a new question waits for a stopped turn to return.
+    var stopSettleTimeout: TimeInterval = 3
+    /// The answer that just finished streaming. Its tool groups open as they
+    /// were while live, so the page above the reply keeps its height when
+    /// the answer replaces the live turn.
+    private(set) var streamedAnswer: UUID?
+
+    /// Every version of the conversation: regenerated answers and edited
+    /// questions branch off where they were asked.
+    private(set) var thread = LedgerAgentThread()
+    /// A regenerate, an edit or a switch is cutting the transcript back or
+    /// loading another version's; nothing else starts until it lands.
+    @Published private(set) var switching = false
+    /// The transcripts of versions not on screen, by their last message.
+    private var branchTranscripts: [UUID: String] = [:]
+    /// The questions each of those transcripts does not hold. A question is
+    /// shared by every answer under it, so its `outsideTranscript` follows
+    /// the version on screen and is put back from here on a switch.
+    private var branchOutside: [UUID: Set<UUID>] = [:]
+    private var unsavedBranchTranscripts: Set<UUID> = []
+    /// Reads a version's transcript an earlier run saved; set by the sessions.
+    var loadBranchTranscript: (@Sendable (UUID) async -> String?)?
+    /// Cuts the transcript back for a regenerate or an edit. Tests substitute it.
+    var truncate: @Sendable (String, Int) async throws -> String = LedgerAgentRunner.native.truncate
+    /// A version change left no transcript, so the one saved for the version
+    /// that was on screen no longer applies and is cleared on the next save.
+    private(set) var clearsStoredTranscript = false
+    /// A version change since reopening: the transcript saved with the
+    /// record belongs to a version no longer on screen.
+    private var branchedSinceRestore = false
 
     var isRunning: Bool { if case .running = phase { true } else { false } }
     var isWriting: Bool { pending?.status == .writing }
@@ -839,13 +1304,9 @@ final class LedgerAgentConversation: ObservableObject {
     /// wrote is dropped, and both the screen and the model are told so.
     convenience init(restoring saved: LedgerAgentSavedConversation) {
         self.init(id: saved.id, createdAt: saved.createdAt)
-        messages = saved.messages.compactMap { stored in
-            LedgerAgentMessage.Role(rawValue: stored.role).map {
-                LedgerAgentMessage(role: $0, text: stored.text, toolCalls: stored.toolCalls, duration: stored.duration,
-                                   attachments: stored.attachments ?? [], rememberedMemory: stored.memory ?? false,
-                                   ask: stored.ask, write: stored.write)
-            }
-        }
+        thread = saved.thread()
+        messages = thread.activePath
+        usage = messages.last { $0.usage != nil }?.usage
         attachments = saved.attachments ?? []
         recap = saved.recap
         generatedTitle = saved.generatedTitle
@@ -859,22 +1320,25 @@ final class LedgerAgentConversation: ObservableObject {
     /// Takes the transcript saved with a reopened conversation, unless a turn
     /// has already answered without it.
     func adoptTranscript(_ saved: String) {
-        guard transcript == nil, !saved.isEmpty else { return }
+        guard transcript == nil, !saved.isEmpty, !branchedSinceRestore else { return }
         transcript = saved
     }
 
     /// What to save, or nil while nothing has been asked.
     func saved(at date: Date = Date()) -> LedgerAgentSavedConversation? {
         guard !messages.isEmpty else { return nil }
+        let branches = thread.branches.map {
+            LedgerAgentSavedConversation.Branch(parent: $0.parentID, index: $0.index, message: .init($0.message))
+        }
         return LedgerAgentSavedConversation(
-            id: id, createdAt: createdAt, updatedAt: date,
-            messages: messages.map { .init(role: $0.role.rawValue, text: $0.text, toolCalls: $0.toolCalls, duration: $0.duration,
-                                           attachments: $0.attachments.isEmpty ? nil : $0.attachments,
-                                           memory: $0.rememberedMemory ? true : nil, ask: $0.ask, write: $0.write) },
+            version: 2, id: id, createdAt: createdAt, updatedAt: date,
+            messages: messages.map(LedgerAgentSavedConversation.Message.init),
             unwrittenChange: pending?.review != nil || draftUnreviewed,
             attachments: attachments.isEmpty ? nil : attachments,
             recap: recap,
-            generatedTitle: generatedTitle)
+            generatedTitle: generatedTitle,
+            branches: branches.isEmpty ? nil : branches,
+            activeLeaf: thread.activeLeaf)
     }
 
     /// Every file, attached or staged, for the id of the next one.
@@ -897,6 +1361,13 @@ final class LedgerAgentConversation: ObservableObject {
         allAttachments.map { $0.payload(in: directory, isNew: unannounced.contains($0.id) || staged.contains($0)) }
     }
 
+    /// What a turn that is starting sends: the files that went with a
+    /// question, with the not yet announced ones marked new. A file staged
+    /// while the turn waited for its draft is for the next question.
+    func turnAttachmentPayloads(in directory: URL) -> [LedgerAgentAttachment.Payload] {
+        attachments.map { $0.payload(in: directory, isNew: unannounced.contains($0.id)) }
+    }
+
     private struct Outcome: Sendable {
         let response: LedgerAgentTurnResponse
         let draft: LedgerAgentDraft?
@@ -916,33 +1387,76 @@ final class LedgerAgentConversation: ObservableObject {
     @discardableResult
     func send(_ raw: String, reporting send: @escaping SendReporting) -> Bool {
         let question = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty, !isRunning, !isWriting else { return false }
-        let history = LedgerAgentHistory.entries(from: messages)
+        guard !question.isEmpty, !isRunning, !isWriting, !switching else { return false }
         var sentFiles: [String] = []
-        if case let .failed(_, previous) = phase, messages.last?.role == .user, messages.last?.text == previous {
-            sentFiles = messages.removeLast().attachments
+        if case let .failed(_, previous) = phase, let last = messages.last, last.role == .user, last.text == previous {
+            if question == previous {
+                // Asked again as it was: the question keeps its place, and the
+                // answers a failed regenerate left under it stay its versions.
+                takeStaged(into: messages.count - 1)
+                begin(question, using: send)
+                return true
+            }
+            if !thread.children(of: last.id).isEmpty, thread.fork(atUser: last.id, newText: question) != nil {
+                // Other words for a question that has answers: a version beside it.
+                messages = thread.activePath
+                takeStaged(into: messages.count - 1)
+                begin(question, using: send)
+                return true
+            }
+            messages.removeLast()
+            thread.remove(last.id)
+            sentFiles = last.attachments
         }
-        sentFiles += staged.map(\.name)
+        messages.append(.init(role: .user, text: question, attachments: sentFiles))
+        takeStaged(into: messages.count - 1)
+        begin(question, using: send)
+        return true
+    }
+
+    /// The staged files go with the question at `index`.
+    private func takeStaged(into index: Int) {
+        guard !staged.isEmpty else { return }
+        messages[index].attachments += staged.map(\.name)
         unannounced.formUnion(staged.map(\.id))
         attachments += staged
         staged = []
-        messages.append(.init(role: .user, text: question, attachments: sentFiles))
+    }
+
+    /// Runs a turn for the question the conversation ends on.
+    private func begin(_ question: String, using send: @escaping SendReporting) {
+        let history = LedgerAgentHistory.entries(from: messages)
+        // Not in the transcript until a turn that holds it answers.
+        let questionID = messages.last?.id
+        if let last = messages.indices.last { messages[last].outsideTranscript = true }
         written = nil
         nextSuggestion = nil
         let started = Date()
         phase = .running(since: started)
         step = nil
+        clearLive()
         stepSince = started
         stepCount = 0
         let editor = editor, existing = draft, reopening = reopening, unreviewed = draftUnreviewed
-        let hadChange = pending != nil
-        let message = note.map { $0 + "\n\n" + question } ?? question
+        let hadChange = pending != nil, settleTimeout = stopSettleTimeout
         let report: LedgerAgentSteps.Handler = { [weak self] step in
             Task { @MainActor in self?.advance(step, started: started) }
         }
         resumable = false
         lifecycle?.turnStarted(question: question, conversation: self)
         task = Task { [weak self] in
+            // A turn stopped a moment ago may still bring back its partial
+            // reply and the transcript this question should follow.
+            let deadline = Date().addingTimeInterval(settleTimeout)
+            while self?.stopping != nil, Date() < deadline, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
+            // Gave up waiting: this question follows the older transcript,
+            // and what it builds must not be replaced when the stopped turn
+            // returns late.
+            if let self, let stopped = self.stopping, stopped.started != started { self.stopping?.stale = true }
+            // Read after the wait, which may have settled the note.
+            let message = (self?.note).map { $0 + "\n\n" + question } ?? question
             let outcome: Result<Outcome, Error>
             do {
                 // A copy that cannot be made leaves the turn read-only.
@@ -967,14 +1481,255 @@ final class LedgerAgentConversation: ObservableObject {
                 }
                 let response = try await send(message, history, draft?.root, report)
                 var review: Result<LedgerAgentReview?, Error>?
-                if response.edited || unreviewed || redraw, let editor, let draft {
+                // A stopped turn leaves its draft for the next turn to review.
+                if response.cancelled != true, response.edited || unreviewed || redraw, let editor, let draft {
                     do { review = .success(try await editor.review(draft)) } catch { review = .failure(error) }
                 }
                 outcome = .success(.init(response: response, draft: draft, review: review))
             } catch { outcome = .failure(error) }
-            self?.finish(outcome, question: question, started: started)
+            self?.finish(outcome, question: question, questionID: questionID, started: started)
         }
-        return true
+    }
+
+    // MARK: Versions
+
+    /// Regenerating, editing and switching versions wait while a turn runs,
+    /// a version loads, or a change is on the card or being written: the user
+    /// writes or discards it first, so a change never follows the user onto
+    /// another version.
+    var canBranch: Bool { !isRunning && !isWriting && !switching && pending == nil && undoing == nil }
+
+    /// Where `id` stands among the versions at its place, from 0.
+    func versions(of id: UUID) -> (index: Int, count: Int) { thread.siblings(of: id) }
+
+    /// How many answers sit under the question `id` when it ends the
+    /// conversation without one: a regenerate that failed or stopped before
+    /// replying. 0 otherwise.
+    func answersBeside(_ questionID: UUID) -> Int {
+        guard messages.last?.id == questionID, messages.last?.role == .user else { return 0 }
+        return thread.children(of: questionID).count
+    }
+
+    /// The question's number on screen, from 1.
+    func questionNumber(_ id: UUID) -> Int? { thread.userTurnIndex(of: id).map { $0 + 1 } }
+
+    /// Asks the question behind `answerID` again for another answer. The
+    /// transcript is cut back to before the question, so the model answers
+    /// as if for the first time; the old answer, and what followed it, stay
+    /// a version to switch back to. The question's files are sent again.
+    @discardableResult
+    func regenerate(_ answerID: UUID, confirmed: Bool = false,
+                    reporting send: @escaping SendReporting) -> LedgerAgentBranchResult {
+        guard canBranch, let index = messages.firstIndex(where: { $0.id == answerID }),
+              messages[index].role == .assistant,
+              let questionIndex = messages[..<index].lastIndex(where: { $0.role == .user }) else { return .refused }
+        let question = messages[questionIndex]
+        let warning = warning(replacing: messages[(questionIndex + 1)...])
+        if !warning.isEmpty, !confirmed { return .needsConfirmation(warning) }
+        cut(dropping: recordedQuestions(in: messages[questionIndex...]), warning: warning) { [weak self] in
+            guard let self else { return nil }
+            self.thread.rewind(to: question.id)
+            self.messages = self.thread.activePath
+            return question
+        } then: { [weak self] question in
+            guard let self else { return }
+            self.reannounce(question)
+            self.begin(question.text, using: send)
+        }
+        return .started
+    }
+
+    /// Sends `newText` in place of the question `questionID`, as a version
+    /// beside it. The transcript is cut back to before the question; the
+    /// old question and everything after it stay a version to switch back
+    /// to. Staged files go with the edited question, as from the composer.
+    @discardableResult
+    func editAndResend(_ questionID: UUID, newText: String, confirmed: Bool = false,
+                       reporting send: @escaping SendReporting) -> LedgerAgentBranchResult {
+        let text = newText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canBranch, !text.isEmpty, let index = messages.firstIndex(where: { $0.id == questionID }),
+              messages[index].role == .user else { return .refused }
+        // A failed question nothing hangs under is simply asked again in
+        // other words, as the composer does after a failure.
+        if index == messages.count - 1, case .failed = phase, thread.children(of: questionID).isEmpty {
+            return self.send(text, reporting: send) ? .started : .refused
+        }
+        let warning = warning(replacing: messages[index...])
+        if !warning.isEmpty, !confirmed { return .needsConfirmation(warning) }
+        cut(dropping: recordedQuestions(in: messages[index...]), warning: warning) { [weak self] in
+            guard let self, let edited = self.thread.fork(atUser: questionID, newText: text) else { return nil }
+            self.messages = self.thread.activePath
+            return edited
+        } then: { [weak self] edited in
+            guard let self else { return }
+            self.reannounce(edited)
+            self.takeStaged(into: self.messages.count - 1)
+            self.begin(text, using: send)
+        }
+        return .started
+    }
+
+    /// Shows the version `direction` places before (-1) or after (+1) the
+    /// message `messageID`, with that version's transcript, so the next
+    /// question continues from it.
+    @discardableResult
+    func switchBranch(_ messageID: UUID, direction: Int, confirmed: Bool = false) -> LedgerAgentBranchResult {
+        guard canBranch, messages.contains(where: { $0.id == messageID }),
+              let target = thread.sibling(of: messageID, offset: direction) else { return .refused }
+        return show(target, from: messageID, confirmed: confirmed)
+    }
+
+    /// Back to the latest answer under the question `questionID`, which ends
+    /// the conversation after a regenerate that failed or stopped early.
+    @discardableResult
+    func showLatestAnswer(of questionID: UUID, confirmed: Bool = false) -> LedgerAgentBranchResult {
+        guard canBranch, answersBeside(questionID) > 0, let answer = thread.children(of: questionID).last else {
+            return .refused
+        }
+        return show(answer, from: nil, confirmed: confirmed)
+    }
+
+    /// The other versions' transcripts not saved yet, by their last message.
+    /// A version still on screen, such as the one a cut is leaving while it
+    /// runs, stays queued for a later save.
+    func takeUnsavedBranchTranscripts() -> [UUID: String] {
+        let leaves = thread.inactiveLeaves
+        let taken: [UUID: String] = unsavedBranchTranscripts.reduce(into: [:]) { result, leaf in
+            if leaves.contains(leaf), let transcript = branchTranscripts[leaf] { result[leaf] = transcript }
+        }
+        unsavedBranchTranscripts.subtract(taken.keys)
+        return taken
+    }
+
+    private func show(_ target: UUID, from messageID: UUID?, confirmed: Bool) -> LedgerAgentBranchResult {
+        let start = messageID.flatMap { id in messages.firstIndex { $0.id == id } } ?? messages.count
+        let warning = warning(replacing: messages[start...])
+        if !warning.isEmpty, !confirmed { return .needsConfirmation(warning) }
+        leaveVersion()
+        let leaf = thread.newestLeaf(under: target)
+        let known = branchTranscripts[leaf], outside = branchOutside[leaf]
+        let load = loadBranchTranscript, epoch = epoch
+        switching = true
+        Task { [weak self] in
+            var arriving = known
+            if arriving == nil, let load { arriving = await load(leaf) }
+            guard let self, self.epoch == epoch else { return }
+            self.switching = false
+            self.thread.switchTo(sibling: target)
+            var path = self.thread.activePath
+            Self.markOutside(&path, known: outside)
+            self.showingVersion = true
+            self.messages = path
+            self.showingVersion = false
+            self.transcript = arriving
+            self.enterVersion(warning, switched: true)
+            // The failure belonged to the version left behind.
+            if case .failed = self.phase { self.phase = .idle }
+            self.resumable = false
+            self.onSettled?(self)
+        }
+        return .started
+    }
+
+    /// Cuts the transcript back by its last `drop` questions, then `apply`s
+    /// the new version. Without a transcript, or when it cannot be cut, the
+    /// next turn replays the visible history instead of a stale context.
+    /// The thread is rewound before the cut transcript is taken, so a save
+    /// on the way (a discarded draft, a recap landing) never pairs the cut
+    /// transcript with the version being left.
+    private func cut(dropping drop: Int, warning: LedgerAgentBranchWarning,
+                     rewind: @escaping @MainActor () -> LedgerAgentMessage?,
+                     then start: @escaping @MainActor (LedgerAgentMessage) -> Void) {
+        leaveVersion()
+        let source = transcript, truncate = truncate, epoch = epoch
+        switching = true
+        Task { [weak self] in
+            var cut = source
+            if let source, drop > 0 { cut = try? await truncate(source, drop) }
+            guard let self, self.epoch == epoch else { return }
+            self.switching = false
+            guard let question = rewind() else { return }
+            // The cut transcript does not hold the question about to be asked.
+            if let last = self.messages.indices.last { self.messages[last].outsideTranscript = true }
+            self.transcript = cut
+            self.enterVersion(warning, switched: false)
+            start(question)
+        }
+    }
+
+    /// Keeps the transcript of the version being left, under its last
+    /// message, with the questions it does not hold. A stop still settling
+    /// belonged to it: its partial reply stays as shown, and its late
+    /// transcript is not adopted.
+    private func leaveVersion() {
+        stopping = nil
+        branchedSinceRestore = true
+        if let leaf = thread.activeLeaf, thread.children(of: leaf).isEmpty, let transcript {
+            branchTranscripts[leaf] = transcript
+            branchOutside[leaf] = Set(messages.filter { $0.role == .user && $0.outsideTranscript }.map(\.id))
+            unsavedBranchTranscripts.insert(leaf)
+        }
+    }
+
+    /// Puts back which questions of a version's path its transcript does
+    /// not hold. `known` is what was noted when the version was left in this
+    /// run. Without it (a transcript an earlier run saved), a question
+    /// answered without a stop is held, one the version ends on is not, and
+    /// one a stop answered keeps the flag it was saved with.
+    nonisolated static func markOutside(_ path: inout [LedgerAgentMessage], known: Set<UUID>?) {
+        for index in path.indices where path[index].role == .user {
+            if let known {
+                path[index].outsideTranscript = known.contains(path[index].id)
+            } else if index == path.count - 1 {
+                path[index].outsideTranscript = true
+            } else if path[index + 1].role == .assistant, !path[index + 1].stopped {
+                path[index].outsideTranscript = false
+            }
+        }
+    }
+
+    /// What the model and the screen are told once another version shows.
+    private func enterVersion(_ warning: LedgerAgentBranchWarning, switched: Bool) {
+        // The draft may hold edits from the turns left behind: start it
+        // again from the ledger through the usual discard, so the next turn
+        // copies the ledger as it is.
+        if warning.contains(.unreviewedDraft) { discard() }
+        var notes: [String] = []
+        if warning.contains(.written) {
+            notes.append(String(localized: "（系统提示：用户换掉了之前的一些回答。那些回答写入账本的改动没有撤销，仍在账本里，以账本当前内容为准。）"))
+        }
+        if switched {
+            notes.append(String(localized: "（系统提示：用户切换到了这段对话的另一个版本。这个版本里提议过但没有写入的改动不在草稿里，草稿和账本以当前内容为准。）"))
+        }
+        for added in notes { note = note.map { $0 + "\n" + added } ?? added }
+        if transcript == nil { clearsStoredTranscript = true }
+        written = nil
+        nextSuggestion = nil
+        restoredNotice = nil
+        // A recap of another version would describe what is no longer shown.
+        recap = nil
+        recapError = nil
+        usage = messages.last { $0.usage != nil }?.usage
+    }
+
+    /// Changes that would be replaced: written answers among them, and edits
+    /// a stopped turn may have left in the draft.
+    private func warning(replacing replaced: ArraySlice<LedgerAgentMessage>) -> LedgerAgentBranchWarning {
+        var warning: LedgerAgentBranchWarning = []
+        if replaced.contains(where: { $0.write != nil && $0.write?.undoneAt == nil }) { warning.insert(.written) }
+        if draftUnreviewed, draft != nil { warning.insert(.unreviewedDraft) }
+        return warning
+    }
+
+    /// The questions from the start of `slice` on that the transcript holds.
+    private func recordedQuestions(in slice: ArraySlice<LedgerAgentMessage>) -> Int {
+        slice.filter { $0.role == .user && !$0.outsideTranscript }.count
+    }
+
+    /// The cut transcript no longer holds the question's files, so they are
+    /// new again.
+    private func reannounce(_ question: LedgerAgentMessage) {
+        unannounced.formUnion(attachments.filter { question.attachments.contains($0.name) }.map(\.id))
     }
 
     // MARK: Suggestions and recap
@@ -1049,10 +1804,72 @@ final class LedgerAgentConversation: ObservableObject {
         task = nil
         resumable = false
         resumes = 0
-        guard isRunning else { return }
-        // A stopped question stays visible; it is not resent as history.
+        guard case let .running(started) = phase else { return }
+        // A stopped question stays visible. What the reply had said so far
+        // stays too, marked stopped, so the page does not flash empty; the
+        // native loop's own partial replaces it when it returns.
+        let question = messages.last { $0.role == .user }?.id
+        var partial: UUID?
+        let turn = liveDraft
+        if let turn, Self.hasText(turn.text) {
+            let message = LedgerAgentMessage(role: .assistant, text: turn.text, duration: Date().timeIntervalSince(started),
+                                             steps: turn.stoppedSteps, stopped: true, usage: turn.usage)
+            messages.append(message)
+            partial = message.id
+            streamedAnswer = message.id
+        }
+        stopping = Stopping(started: started, question: question, message: partial, note: note, unannounced: unannounced)
         phase = .idle
         endRunning(.stopped)
+    }
+
+    /// Takes what a stopped turn's native loop returned: its partial reply
+    /// replaces the one shown at the stop, or is added when none was, and its
+    /// transcript, which ends on that reply, is what the next question sends,
+    /// unless a newer question already went on without it.
+    private func settleStop(_ response: LedgerAgentTurnResponse, _ stopped: Stopping) {
+        stopping = nil
+        guard response.cancelled == true else { return }
+        let reply = (response.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if let id = stopped.message, let index = messages.firstIndex(where: { $0.id == id }) {
+            if !reply.isEmpty { messages[index].text = reply }
+            if !response.steps.isEmpty { messages[index].steps = response.steps }
+            if let usage = response.usage { messages[index].usage = usage }
+        } else if !reply.isEmpty {
+            // Right after its question, even if another question followed.
+            let at = stopped.question.flatMap { id in messages.firstIndex { $0.id == id } }.map { $0 + 1 } ?? messages.count
+            messages.insert(.init(role: .assistant, text: reply, toolCalls: response.toolCalls, steps: response.steps,
+                                  stopped: true, usage: response.usage), at: at)
+        }
+        if !stopped.stale {
+            if let usage = response.usage, usage.fraction != nil { self.usage = usage }
+            // Only what the stopped question carried is now told; a note or
+            // a file that came after it is still for the next question.
+            if let next = response.transcript, !next.isEmpty {
+                transcript = next
+                if note == stopped.note { note = nil }
+                unannounced.subtract(stopped.unannounced)
+                markRecorded(stopped.question)
+            }
+        }
+        onSettled?(self)
+    }
+
+    /// The transcript of a turn the native loop stopped already holds its
+    /// question, its files and any note sent with it.
+    private func adoptStopped(_ response: LedgerAgentTurnResponse, question: UUID?) {
+        if let usage = response.usage, usage.fraction != nil { self.usage = usage }
+        guard let next = response.transcript, !next.isEmpty else { return }
+        transcript = next
+        note = nil
+        unannounced = []
+        markRecorded(question)
+    }
+
+    /// The transcript now holds the question `id`.
+    private func markRecorded(_ id: UUID?) {
+        guard let id, let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].outsideTranscript = false
     }
 
     /// Ends the running turn because the app is losing its background time.
@@ -1086,15 +1903,60 @@ final class LedgerAgentConversation: ObservableObject {
 
     private func advance(_ step: LedgerAgentStep, started: Date) {
         guard case let .running(since) = phase, since == started else { return }
+        if step.kind == .live {
+            if let event = step.live { receive(event) }
+            return
+        }
         stepSince = Date()
         self.step = step
         if step.kind != .preparing { stepCount += 1 }
         lifecycle?.turnStepped(step, count: stepCount)
     }
 
+    /// Folds a streamed event into the running turn. Text and reasoning
+    /// deltas are published at most every `liveInterval`; anything else at
+    /// once, with whatever text it follows.
+    private func receive(_ event: LedgerAgentLiveEvent) {
+        var turn = liveDraft ?? LedgerAgentLiveTurn()
+        turn.apply(event)
+        liveDraft = turn
+        if case let .usage(usage) = event, usage.fraction != nil { self.usage = usage }
+        // The stream is not quiet; the live footer's slow hint counts from here.
+        stepSince = Date()
+        switch event {
+        case .textDelta, .thinkingDelta:
+            let wait = Self.liveInterval - Date().timeIntervalSince(livePublishedAt ?? .distantPast)
+            guard wait > 0 else { return publishLive() }
+            guard liveFlush == nil else { return }
+            liveFlush = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                self?.publishLive()
+            }
+        default:
+            publishLive()
+        }
+    }
+
+    private func publishLive() {
+        liveFlush?.cancel()
+        liveFlush = nil
+        livePublishedAt = Date()
+        live = liveDraft
+    }
+
+    private func clearLive() {
+        liveFlush?.cancel()
+        liveFlush = nil
+        livePublishedAt = nil
+        liveDraft = nil
+        live = nil
+    }
+
     private func endRunning(_ ending: LedgerAgentTurnEnding) {
         if ending == .stopped || ending == .interrupted, draft != nil { draftUnreviewed = true }
         step = nil
+        clearLive()
         stepSince = nil
         restoredNotice = nil
         lifecycle?.turnEnded(ending)
@@ -1108,14 +1970,25 @@ final class LedgerAgentConversation: ObservableObject {
         resumable = false
         resumes = 0
         step = nil
+        clearLive()
+        stopping = nil
+        streamedAnswer = nil
+        usage = nil
         restoredNotice = nil
         draftUnreviewed = false
+        thread = LedgerAgentThread()
         messages = []
+        switching = false
+        branchTranscripts = [:]
+        branchOutside = [:]
+        unsavedBranchTranscripts = []
+        branchedSinceRestore = false
         phase = .idle
         pending = nil
         written = nil
         note = nil
         transcript = nil
+        clearsStoredTranscript = false
         attachments = []
         staged = []
         unannounced = []
@@ -1172,6 +2045,8 @@ final class LedgerAgentConversation: ObservableObject {
         guard let editor, let draft, !isRunning, !isWriting else { return }
         let review = pending?.review
         pending = nil
+        // The fresh copy has nothing a stopped turn left unreviewed.
+        draftUnreviewed = false
         note = String(localized: "（系统提示：用户放弃了上一轮的草稿改动，草稿已恢复为当前账本。）")
         self.draft = nil
         // The next turn waits for the fresh copy instead of making its own.
@@ -1182,7 +2057,7 @@ final class LedgerAgentConversation: ObservableObject {
     /// Whether the change written after `message` can be undone now.
     func canUndo(_ message: LedgerAgentMessage) -> Bool {
         guard let write = message.write, write.undoneAt == nil else { return false }
-        return undoing == nil && !isRunning && !isWriting
+        return undoing == nil && !isRunning && !isWriting && !switching
     }
 
     /// Reverses the change written after `message` as a new commit on the
@@ -1239,7 +2114,7 @@ final class LedgerAgentConversation: ObservableObject {
         }
     }
 
-    private func finish(_ outcome: Result<Outcome, Error>, question: String, started: Date) {
+    private func finish(_ outcome: Result<Outcome, Error>, question: String, questionID: UUID?, started: Date) {
         guard case let .running(since) = phase, since == started else {
             // A stopped or reset turn may still have opened a copy.
             if case let .success(turn) = outcome, let opened = turn.draft {
@@ -1249,6 +2124,9 @@ final class LedgerAgentConversation: ObservableObject {
                 } else if let editor {
                     Task { await editor.close(opened) }
                 }
+            }
+            if let stopped = stopping, stopped.started == started {
+                if case let .success(turn) = outcome { settleStop(turn.response, stopped) } else { stopping = nil }
             }
             return
         }
@@ -1272,12 +2150,21 @@ final class LedgerAgentConversation: ObservableObject {
         case let .success(turn) where turn.response.ok && (Self.hasText(turn.response.reply) || pending?.review != nil):
             note = nil
             unannounced = []
-            if let next = turn.response.transcript, !next.isEmpty { transcript = next }
+            if let next = turn.response.transcript, !next.isEmpty {
+                transcript = next
+                markRecorded(questionID)
+            }
             let reply = Self.hasText(turn.response.reply) ? turn.response.reply ?? ""
                 : String(localized: "改动已经准备好，请在下方查看并确认。")
-            messages.append(.init(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
-                                  duration: Date().timeIntervalSince(started),
-                                  rememberedMemory: turn.response.memoryUpdated, ask: turn.response.ask))
+            let steps = turn.response.steps.isEmpty ? liveDraft?.steps ?? [] : turn.response.steps
+            let answer = LedgerAgentMessage(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
+                                            duration: Date().timeIntervalSince(started),
+                                            rememberedMemory: turn.response.memoryUpdated, ask: turn.response.ask,
+                                            steps: steps, usage: turn.response.usage,
+                                            compacted: turn.response.compacted || liveDraft?.compacted == true)
+            if liveDraft != nil { streamedAnswer = answer.id }
+            messages.append(answer)
+            if let usage = turn.response.usage, usage.fraction != nil { self.usage = usage }
             phase = .idle
             resumes = 0
             if let review = pending?.review {
@@ -1286,6 +2173,18 @@ final class LedgerAgentConversation: ObservableObject {
                 endRunning(.answered(reply))
             }
         case let .success(turn) where turn.response.cancelled == true:
+            // Stopped by the native loop rather than the stop button: keep
+            // what it wrote, and the question with it, in the conversation.
+            let reply = (turn.response.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !reply.isEmpty {
+                let answer = LedgerAgentMessage(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
+                                                duration: Date().timeIntervalSince(started),
+                                                steps: turn.response.steps.isEmpty ? liveDraft?.stoppedSteps ?? [] : turn.response.steps,
+                                                stopped: true, usage: turn.response.usage)
+                if liveDraft != nil { streamedAnswer = answer.id }
+                messages.append(answer)
+            }
+            adoptStopped(turn.response, question: questionID)
             phase = .idle
             endRunning(.stopped)
         case _ where lifecycle?.turnWasSuspended == true && Self.diedWithConnection(outcome):
@@ -1552,7 +2451,10 @@ enum LedgerAgentReplyText {
         var depth: Int
     }
 
-    static func segments(_ text: String) -> [Segment] {
+    /// `streaming` reads a reply still being written: a fence that has not
+    /// closed yet shows its lines as prose until it does, so half a chart or
+    /// visual never draws as a broken block.
+    static func segments(_ text: String, streaming: Bool = false) -> [Segment] {
         var segments: [Segment] = []
         var lines: [Substring] = []
         var inCode = false
@@ -1582,7 +2484,8 @@ enum LedgerAgentReplyText {
                 lines.append(line)
             }
         }
-        // An unclosed fence still shows as code.
+        // An unclosed fence still shows as code, once the reply is complete.
+        if inCode, streaming { inCode = false }
         flush()
         return segments
     }
@@ -1734,6 +2637,35 @@ enum LedgerAgentReplyText {
             return parts.count == 2 ? encode(parts[0]) + "=" + encode(parts[1]) : encode(parts[0])
         }
         return String(head) + "?" + pairs.joined(separator: "&")
+    }
+
+    /// The reply without its Markdown, for 复制为纯文本. Headings, list items
+    /// and quotes keep their words, emphasis and link syntax go, a table
+    /// becomes tab-separated rows, code keeps its lines, and a chart or
+    /// visual leaves its title.
+    static func plainText(_ text: String) -> String {
+        segments(text).compactMap { segment -> String? in
+            switch segment {
+            case let .prose(text), let .quote(text), let .heading(_, text): plainInline(text)
+            case let .list(_, items):
+                items.map { String(repeating: "  ", count: min($0.depth, 4)) + $0.marker + " " + plainInline($0.text) }
+                    .joined(separator: "\n")
+            case let .table(header, rows):
+                ([header] + rows).map { $0.map(plainInline).joined(separator: "\t") }.joined(separator: "\n")
+            case .rule: nil
+            case let .code(code): code
+            case let .chart(chart): chart.title
+            case let .visual(visual): visual.title
+            }
+        }
+        .filter { !$0.isEmpty }
+        .joined(separator: "\n\n")
+    }
+
+    private static func plainInline(_ text: String) -> String {
+        let text = encodingLedgerLinks(text)
+        let parsed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
+        return parsed.map { String($0.characters) } ?? text
     }
 
     /// The first fenced block that opens with a dated transaction header.
