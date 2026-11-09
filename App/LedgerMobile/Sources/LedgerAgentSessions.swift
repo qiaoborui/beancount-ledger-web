@@ -3,6 +3,9 @@ import Foundation
 /// One conversation as it is saved in the ledger's runtime directory.
 struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable {
     struct Message: Codable, Equatable, Sendable {
+        /// Absent in saves before version 2; those messages get ids derived
+        /// from the conversation and their place when loaded.
+        var id: UUID? = nil
         let role: String
         let text: String
         var toolCalls: [LedgerAgentToolCall] = []
@@ -24,8 +27,22 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
         var usage: LedgerAgentUsage? = nil
         /// The turn summarized older turns first; absent when not.
         var compacted: Bool? = nil
+        /// The conversation's transcript never took this turn in (a stop that
+        /// did not settle); absent when it did.
+        var outsideTranscript: Bool? = nil
     }
 
+    /// A message off the active path: another answer to a question, another
+    /// version of a question, or what followed one. `index` is its place
+    /// among its parent's children, so versions keep their order.
+    struct Branch: Codable, Equatable, Sendable {
+        var parent: UUID?
+        var index: Int
+        var message: Message
+    }
+
+    /// 2 adds message ids, `branches` and `activeLeaf`. `messages` is still
+    /// the conversation on screen, which is all a version 1 reader needs.
     var version = 1
     let id: UUID
     let createdAt: Date
@@ -47,6 +64,10 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
     /// When the user pinned the conversation to the top of the history;
     /// pinned conversations are never pruned.
     var pinnedAt: Date? = nil
+    /// The other versions of the conversation; absent when there are none.
+    var branches: [Branch]? = nil
+    /// The last message of the version on screen, which `messages` ends on.
+    var activeLeaf: UUID? = nil
 
     /// The user's name, the model's, or the first question.
     var title: String {
@@ -181,6 +202,12 @@ final class LedgerAgentSessions: ObservableObject {
         /// history list stays small; `remove` drops it too.
         var saveTranscript: @Sendable (UUID, Data) async throws -> Void = { _, _ in }
         var loadTranscript: @Sendable (UUID) async -> Data? = { _ in nil }
+        /// The transcript of a version not on screen, by the conversation and
+        /// the version's last message; `remove` drops these too.
+        var saveBranchTranscript: @Sendable (UUID, UUID, Data) async throws -> Void = { _, _, _ in }
+        var loadBranchTranscript: @Sendable (UUID, UUID) async -> Data? = { _, _ in nil }
+        /// Drops a conversation's version transcripts except these.
+        var pruneBranchTranscripts: @Sendable (UUID, Set<UUID>) async -> Void = { _, _ in }
         /// Drops attachment files of conversations other than these.
         var sweepAttachments: @Sendable (Set<UUID>) async -> Void = { _ in }
     }
@@ -372,6 +399,10 @@ final class LedgerAgentSessions: ObservableObject {
 
     private func wire(_ conversation: LedgerAgentConversation) {
         conversation.onSettled = { [weak self] in self?.save($0) }
+        conversation.loadBranchTranscript = { [weak self, id = conversation.id] leaf in
+            guard let storage = await self?.storage else { return nil }
+            return await storage.loadBranchTranscript(id, leaf).map { String(decoding: $0, as: UTF8.self) }
+        }
     }
 
     private func save(_ conversation: LedgerAgentConversation) {
@@ -385,10 +416,19 @@ final class LedgerAgentSessions: ObservableObject {
         merge([record])
         guard let storage, let data = try? Self.encoder.encode(record) else { return }
         let removed = prune()
+        // A version change that left no transcript empties the saved one,
+        // which belongs to the version no longer on screen.
         let transcript = conversation.transcript.map { Data($0.utf8) }
+            ?? (conversation.clearsStoredTranscript ? Data() : nil)
+        let branchTranscripts = conversation.takeUnsavedBranchTranscripts()
+        let leaves = conversation.thread.inactiveLeaves
         Task {
             try? await storage.save(record.id, data)
             if let transcript { try? await storage.saveTranscript(record.id, transcript) }
+            for (leaf, text) in branchTranscripts {
+                try? await storage.saveBranchTranscript(record.id, leaf, Data(text.utf8))
+            }
+            if !leaves.isEmpty || !branchTranscripts.isEmpty { await storage.pruneBranchTranscripts(record.id, leaves) }
             for id in removed { await storage.remove(id) }
         }
     }
@@ -456,6 +496,9 @@ extension LedgerAgentSessions.Storage {
             removeAll: { await workspace.removeAgentConversations() },
             saveTranscript: { try await workspace.saveAgentTranscript(id: $0, data: $1) },
             loadTranscript: { await workspace.agentTranscript(id: $0) },
+            saveBranchTranscript: { try await workspace.saveAgentBranchTranscript(id: $0, leaf: $1, data: $2) },
+            loadBranchTranscript: { await workspace.agentBranchTranscript(id: $0, leaf: $1) },
+            pruneBranchTranscripts: { await workspace.removeAgentBranchTranscripts(id: $0, keeping: $1) },
             sweepAttachments: { await workspace.removeAgentAttachments(keeping: $0) })
     }
 }
