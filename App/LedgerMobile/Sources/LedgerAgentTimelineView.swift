@@ -1,13 +1,29 @@
 #if os(iOS)
 import SwiftUI
 
+/// Stops the chat following a running turn. Opening a tool group, a row or
+/// a reasoning block calls it, so what opened stays under the reader's
+/// finger instead of being pushed up by the page tracking the reply.
+struct LedgerAgentFollowPause: Sendable {
+    let pause: @MainActor @Sendable () -> Void
+}
+
+private struct LedgerAgentFollowPauseKey: EnvironmentKey {
+    static let defaultValue: LedgerAgentFollowPause? = nil
+}
+
+extension EnvironmentValues {
+    var ledgerAgentFollowPause: LedgerAgentFollowPause? {
+        get { self[LedgerAgentFollowPauseKey.self] }
+        set { self[LedgerAgentFollowPauseKey.self] = newValue }
+    }
+}
+
 /// The steps behind an answer: reasoning blocks, groups of tool calls and the
 /// text written between them, in the order they happened. The answer itself
 /// is drawn after this by `LedgerAgentAnswer`.
 struct LedgerAgentStepTimeline: View {
     let steps: [LedgerAgentStepRecord]
-    /// The answer just replaced the live turn, whose tool groups were open.
-    var toolsStartExpanded = false
     var onAsk: (String) -> Void = { _ in }
 
     var body: some View {
@@ -16,8 +32,7 @@ struct LedgerAgentStepTimeline: View {
             case let .thinking(index):
                 LedgerAgentThinkingBlock(step: steps[index])
             case let .tools(indices):
-                LedgerAgentToolTimeline(rows: indices.compactMap { index in steps[index].call.map { .init(id: index, call: $0) } },
-                                        startsExpanded: toolsStartExpanded)
+                LedgerAgentToolTimeline(rows: indices.compactMap { index in steps[index].call.map { .init(id: index, call: $0) } })
             case let .text(index):
                 LedgerAgentStreamingReply(text: steps[index].text, streaming: false, onAsk: onAsk)
             }
@@ -49,7 +64,7 @@ struct LedgerAgentLiveTimeline: View {
                     case let .tools(indices):
                         LedgerAgentToolTimeline(rows: indices.compactMap { index in
                             turn.steps[index].call.map { .init(id: index, call: $0, isRunning: turn.running.contains(index)) }
-                        }, startsExpanded: true)
+                        })
                     case let .text(index):
                         LedgerAgentStreamingReply(text: turn.steps[index].text, streaming: index == turn.steps.indices.last)
                     }
@@ -96,10 +111,12 @@ struct LedgerAgentThinkingBlock: View {
     let step: LedgerAgentStepRecord
     var isLive = false
     @State private var expanded = false
+    @Environment(\.ledgerAgentFollowPause) private var followPause
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
+                followPause?.pause()
                 withLedgerAnimation(LedgerMotion.disclose) { expanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
@@ -142,9 +159,13 @@ struct LedgerAgentThinkingBlock: View {
     }
 }
 
-/// A run of tool calls under one summary line. Each row says whether the
-/// call is running, done or failed, and how long it took; a row expands to
-/// what it was asked and the start of what came back.
+/// A run of tool calls under one summary line, collapsed until tapped so a
+/// long run of reads does not push the reply down the page; while collapsed,
+/// the call still running shows under it. Live and saved groups both start
+/// collapsed, so a group opened during the turn closes again when the saved
+/// answer replaces the live turn. Each row says whether the call is
+/// running, done or failed, and how long it took; a row expands to what it
+/// was asked and the start of what came back.
 struct LedgerAgentToolTimeline: View {
     struct Row: Identifiable {
         let id: Int
@@ -153,17 +174,14 @@ struct LedgerAgentToolTimeline: View {
     }
 
     let rows: [Row]
-    @State private var expanded: Bool
+    @State private var expanded = false
     @State private var open: Set<Int> = []
-
-    init(rows: [Row], startsExpanded: Bool = false) {
-        self.rows = rows
-        _expanded = State(initialValue: startsExpanded)
-    }
+    @Environment(\.ledgerAgentFollowPause) private var followPause
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
+                followPause?.pause()
                 withLedgerAnimation(LedgerMotion.disclose) { expanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
@@ -187,6 +205,15 @@ struct LedgerAgentToolTimeline: View {
                 .padding(.leading, 12)
                 .overlay(alignment: .leading) { BalancedPalette.ruleStrong.frame(width: 1) }
                 .ledgerAnimation(LedgerMotion.disclose, value: rows.count)
+            } else if let current = rows.last(where: \.isRunning) {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.mini).tint(BalancedPalette.meta)
+                    Text(current.call.title).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        .lineLimit(1)
+                }
+                .padding(.leading, 12)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(Self.accessibilityLabel(current))
             }
         }
     }
@@ -197,6 +224,7 @@ struct LedgerAgentToolTimeline: View {
         let isOpen = details && open.contains(row.id)
         return VStack(alignment: .leading, spacing: 6) {
             Button {
+                followPause?.pause()
                 withLedgerAnimation(LedgerMotion.disclose) {
                     if open.contains(row.id) { open.remove(row.id) } else { open.insert(row.id) }
                 }

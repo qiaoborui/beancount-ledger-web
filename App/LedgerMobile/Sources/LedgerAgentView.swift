@@ -283,21 +283,26 @@ private struct LedgerAgentChatScreen: View {
 
     // MARK: Conversation
 
-    /// The 1-pt anchor under the last message is on screen. Content that
-    /// arrives follows it down only then, so reading back during a turn is
-    /// not pulled away; the jump button shows otherwise.
+    /// The 1-pt anchor under the last message is on screen; the jump button
+    /// shows otherwise, except while the page is following a running turn.
     @State private var isAtBottom = false
-    /// How far the page is from its true bottom is within a few points; nil
-    /// before iOS 18, where only the anchor above says so.
-    @State private var nearBottom: Bool?
-    /// The reader's finger (or a fling) is moving the page.
-    @State private var touchingPage = false
+    /// New content scrolls the page down to it. The reader scrolling up or
+    /// opening a tool group or reasoning block turns this off; the page
+    /// coming to rest at the bottom, the jump button or sending a question
+    /// turns it back on. Content growing past the bottom never turns it off,
+    /// so a burst of streamed text or a new tool row cannot leave the page
+    /// stranded above the reply. A screen opens following only when it opens
+    /// at the bottom, so a reopened conversation read from the top is not
+    /// pulled down when its recap arrives.
+    @State private var following = false
+    /// The reader's finger, or a fling or scroll they started, is moving the
+    /// page.
+    @State private var readerScrolling = false
 
-    /// A streaming reply scrolls the page only for a reader at its very
-    /// bottom who is not moving it. The anchor alone stays "on screen" behind
-    /// the composer until the reader is well up the page, which is too loose
-    /// for a reply that grows a dozen times a second.
-    private var followsStream: Bool { (nearBottom ?? isAtBottom) && !touchingPage }
+    private var showsJumpButton: Bool {
+        // Not while the page is on its way down to a growing reply.
+        !isAtBottom && !conversation.messages.isEmpty && !(following && conversation.isRunning)
+    }
 
     private var chat: some View {
         ScrollViewReader { proxy in
@@ -349,9 +354,10 @@ private struct LedgerAgentChatScreen: View {
                     Color.clear.frame(height: 1).id(Self.bottomID)
                         .onAppear {
                             isAtBottom = true
-                            // Before iOS 18 a drag pauses following until the
-                            // reader is back at the bottom.
-                            if nearBottom == nil { touchingPage = false }
+                            // Reached without the reader moving the page (it
+                            // opened here, or content shrank onto it); a
+                            // scroll they are making decides when it ends.
+                            if !readerScrolling { following = true }
                         }
                         .onDisappear { isAtBottom = false }
                 }
@@ -360,7 +366,11 @@ private struct LedgerAgentChatScreen: View {
                 .padding(.bottom, 8)
             }
             .scrollDismissesKeyboard(.interactively)
-            .modifier(LedgerAgentScrollTracking(nearBottom: $nearBottom, touching: $touchingPage))
+            .modifier(LedgerAgentScrollTracking(following: $following, scrolling: $readerScrolling, isAtBottom: isAtBottom) {
+                // Rows, text and charts take their height after the update
+                // that added them; follow that too while a turn runs.
+                if conversation.isRunning { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            })
             .onChange(of: conversation.messages.count) { _, _ in
                 // Another version on screen: nothing was asked or answered,
                 // and the user stays by the switch they tapped.
@@ -370,10 +380,19 @@ private struct LedgerAgentChatScreen: View {
                 follow(proxy, force: last == .user)
                 if last == .assistant, conversation.messages.last?.stopped == false { announceAnswer() }
             }
-            // The reply growing while it streams follows only a reader who
-            // is at the bottom, without an animation per redraw.
+            // The reply growing while it streams is followed without an
+            // animation per redraw.
             .onChange(of: conversation.live) { _, _ in
-                if followsStream { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+                if following { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            }
+            // Opening a tool group or reasoning block is reading back: the
+            // rows it shows stay where they were tapped.
+            .environment(\.ledgerAgentFollowPause, LedgerAgentFollowPause { following = false })
+            .onAppear {
+                // A conversation still answering opens on its reply.
+                guard conversation.isRunning else { return }
+                following = true
+                DispatchQueue.main.async { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
             .onChange(of: conversation.pending) { _, _ in follow(proxy) }
             .onChange(of: conversation.recap) { _, _ in follow(proxy) }
@@ -381,7 +400,7 @@ private struct LedgerAgentChatScreen: View {
                 if case let .failed(_, question) = phase, draft.isEmpty { draft = question }
                 if case .running = phase {
                     // A question just sent follows its reply again.
-                    if nearBottom == nil { touchingPage = false }
+                    following = true
                     follow(proxy, force: true)
                 } else {
                     follow(proxy)
@@ -389,13 +408,13 @@ private struct LedgerAgentChatScreen: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 ZStack {
-                    if !isAtBottom, !conversation.messages.isEmpty {
+                    if showsJumpButton {
                         jumpToBottom(proxy).transition(.opacity)
                     }
                 }
                 .padding(.trailing, 16)
                 .padding(.bottom, 10)
-                .ledgerAnimation(LedgerMotion.disclose, value: isAtBottom)
+                .ledgerAnimation(LedgerMotion.disclose, value: showsJumpButton)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
             // Bills and screenshots can also be dragged in from Photos, Files
@@ -419,7 +438,6 @@ private struct LedgerAgentChatScreen: View {
                 undoing: conversation.undoing == message.id,
                 canUndo: conversation.canUndo(message),
                 undoFailure: undoFailure,
-                toolsStartExpanded: message.id == conversation.streamedAnswer,
                 onMemory: { memoryPresented = true },
                 onRecord: { bookkeeping = .init(text: question(before: message)) },
                 onAnswer: { send($0, clearsComposer: false) },
@@ -641,7 +659,7 @@ private struct LedgerAgentChatScreen: View {
     }
 
     private func follow(_ proxy: ScrollViewProxy, force: Bool = false) {
-        guard force || isAtBottom else { return }
+        guard force || following else { return }
         scrollToBottom(proxy)
     }
 
@@ -651,7 +669,8 @@ private struct LedgerAgentChatScreen: View {
 
     private func jumpToBottom(_ proxy: ScrollViewProxy) -> some View {
         Button {
-            touchingPage = false
+            following = true
+            readerScrolling = false
             scrollToBottom(proxy)
         } label: {
             Image(systemName: "arrow.down").font(.system(size: 15, weight: .semibold))
@@ -1346,8 +1365,6 @@ private struct LedgerAgentAnswer: View {
     var undoing = false
     var canUndo = false
     var undoFailure: String? = nil
-    /// The answer just replaced the live turn: its tool groups open, as they were.
-    var toolsStartExpanded = false
     var onMemory: () -> Void = {}
     let onRecord: () -> Void
     var onAnswer: (String) -> Void = { _ in }
@@ -1366,7 +1383,7 @@ private struct LedgerAgentAnswer: View {
             }
             // Replies from older builds have only their tool calls.
             if !message.steps.isEmpty {
-                LedgerAgentStepTimeline(steps: message.steps, toolsStartExpanded: toolsStartExpanded, onAsk: onAsk)
+                LedgerAgentStepTimeline(steps: message.steps, onAsk: onAsk)
             } else if !message.toolCalls.isEmpty {
                 tools
             }
@@ -1860,31 +1877,95 @@ private struct LedgerAgentRunning: View {
     }
 }
 
-/// Tells the chat how close the page is to its real bottom and whether the
-/// reader is moving it, so a streaming reply does not pull the page back
-/// under a finger. iOS 18 measures both; before it, a drag pauses following
-/// until the reader is back at the bottom or taps the jump button.
+/// Turns following off when the reader scrolls up and back on when they
+/// leave the page at the bottom. iOS 18 sees the scroll phases and the
+/// real distance to the bottom, and reports content growing while
+/// following; before it, a drag up pauses following until a drag down ends
+/// at the bottom anchor or the anchor comes back on screen.
 private struct LedgerAgentScrollTracking: ViewModifier {
-    @Binding var nearBottom: Bool?
-    @Binding var touching: Bool
+    @Binding var following: Bool
+    /// The reader is moving the page.
+    @Binding var scrolling: Bool
+    /// The bottom anchor is on screen (the only measure before iOS 18).
+    let isAtBottom: Bool
+    /// The content grew while following.
+    let onGrow: () -> Void
 
     /// Within this many points of the bottom still counts as at it.
     private static let slack: CGFloat = 24
 
+    private struct Position: Equatable {
+        var offset: CGFloat
+        var toBottom: CGFloat
+    }
+
+    /// How far the page is from its bottom, measured on every move; nil
+    /// until it first moves, when only the anchor says.
+    @State private var toBottom: CGFloat?
+    /// Any scroll is under way: the reader's, or one the system animates
+    /// (a tap on the status bar).
+    @State private var inMotion = false
+    /// The reader has moved the page since it last came to rest.
+    @State private var moved = false
+    @GestureState private var dragging = false
+
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
             content
-                .onScrollGeometryChange(for: Bool.self) { geometry in
+                .onScrollGeometryChange(for: Position.self) { geometry in
                     let bottom = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
-                    return bottom - geometry.contentOffset.y <= Self.slack
-                } action: { _, near in
-                    nearBottom = near
+                    return Position(offset: geometry.contentOffset.y, toBottom: bottom - geometry.contentOffset.y)
+                } action: { old, new in
+                    toBottom = new.toBottom
+                    // Moving up and away from the bottom by any means other
+                    // than a drag (the status bar, VoiceOver, a pointer) is
+                    // reading back too. The app's own scrolls only go down,
+                    // and layout settling at rest is not a scroll.
+                    if inMotion, new.offset < old.offset - 1, new.toBottom > Self.slack { following = false }
+                }
+                .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { old, new in
+                    if new > old, following { onGrow() }
                 }
                 .onScrollPhaseChange { _, phase in
-                    touching = phase == .tracking || phase == .interacting || phase == .decelerating
+                    inMotion = phase != .idle
+                    switch phase {
+                    // A finger resting on the page (.tracking), or a tap on a
+                    // control in it, is not reading back.
+                    case .interacting:
+                        moved = true
+                        scrolling = true
+                        following = false
+                    case .decelerating:
+                        moved = true
+                        scrolling = true
+                    case .idle:
+                        scrolling = false
+                        // Where the reader left the page decides; a scroll the
+                        // app animated (.animating) does not count.
+                        if moved {
+                            moved = false
+                            following = toBottom.map { $0 <= Self.slack } ?? isAtBottom
+                        }
+                    default:
+                        break
+                    }
                 }
         } else {
-            content.simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in touching = true })
+            content
+                .simultaneousGesture(DragGesture(minimumDistance: 8)
+                    .updating($dragging) { _, state, _ in state = true }
+                    .onChanged { value in
+                        // A finger moving down the screen scrolls back up.
+                        if value.translation.height > 0 { following = false }
+                    }
+                    .onEnded { value in
+                        // The anchor also counts as shown behind the composer
+                        // or keyboard, so only a drag toward the bottom that
+                        // ends by it resumes.
+                        if isAtBottom, value.translation.height <= 0 { following = true }
+                    })
+                // A cancelled drag never ends, but its state still resets.
+                .onChange(of: dragging) { _, now in scrolling = now }
         }
     }
 }
