@@ -117,48 +117,87 @@ struct AccountBalanceWidget: Widget {
     }
 }
 
+/// A locked device keeps this layout and masks the figures and the account
+/// name; the widget URL drops the account then, too.
 struct AccountBalanceWidgetView: View {
     @Environment(\.widgetFamily) private var family
     @Environment(\.redactionReasons) private var redactionReasons
+    @Environment(\.widgetRenderingMode) private var renderingMode
     let entry: AccountBalanceEntry
     var familyOverride: WidgetFamily?
 
     var body: some View {
         Group {
-            if !redactionReasons.isEmpty {
-                LedgerWidgetPrivacyView(title: String(localized: "账户余额"))
-            } else if let account = entry.account, let snapshot = entry.snapshot {
-                content(account, updated: snapshot.updatedAt)
+            if let account = entry.account, let snapshot = entry.snapshot {
+                content(account, snapshot: snapshot)
+            } else if entry.snapshot == nil {
+                LedgerWidgetUnavailableView(title: String(localized: "账户余额"))
             } else {
                 LedgerWidgetUnavailableView(
-                    title: entry.snapshot == nil ? String(localized: "等待账户数据") : String(localized: "选择一个账户"),
-                    detail: entry.snapshot == nil ? String(localized: "打开 Ledger 并刷新一次") : String(localized: "长按小组件并选择编辑小组件"),
-                    symbol: "building.columns")
+                    title: String(localized: "账户余额"),
+                    reason: .message(String(localized: "选择一个账户"), detail: String(localized: "长按小组件并选择编辑小组件")))
             }
         }
         .widgetURL(entry.account.flatMap { LedgerWidgetNavigation.account($0, isRedacted: !redactionReasons.isEmpty) } ?? URL(string: "ledger://accounts"))
-        .containerBackground(for: .widget) { LedgerWidgetColors.panel }
+        .containerBackground(for: .widget) { LedgerWidgetColors.sunken }
     }
 
-    private func content(_ account: LedgerWidgetAccountSnapshot, updated: Date) -> some View {
+    private func content(_ account: LedgerWidgetAccountSnapshot, snapshot: LedgerWidgetSnapshot) -> some View {
+        let tone = LedgerWidgetTone(renderingMode)
         let medium = (familyOverride ?? family) == .systemMedium
-        let style = LedgerWidgetVisualHelper.account(for: account)
         let amount = account.isLiability ? MoneyText.magnitude(account.balance) : account.balance
-        return VStack(alignment: .leading, spacing: 6) {
-            Text(account.label).font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(LedgerWidgetColors.ink).lineLimit(2)
+        // Optional: net worth from rows already in the snapshot, single currency only.
+        let netWorth = medium ? LedgerWidgetNetWorth.single(snapshot.accounts) : nil
+        return VStack(alignment: .leading, spacing: 0) {
+            LedgerWidgetHeader(title: account.label, detail: AccountBalanceGroup.label(for: account))
+                .privacySensitive()
             Spacer(minLength: 0)
-            Text("\(account.isLiability ? String(localized: "待还余额") : String(localized: "资产余额")) · \(account.currency)")
-                .font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
-            LedgerWidgetAmount(amount: amount, currency: account.currency, size: medium ? 29 : 23)
-            if let valuation = account.valuation, account.currency != account.valuationCurrency {
-                Text("估值 \(MoneyText.format(minorUnits: account.isLiability ? MoneyText.magnitude(valuation) : valuation, currency: account.valuationCurrency))")
-                    .font(.system(size: 10, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.6)
-                    .foregroundStyle(LedgerWidgetColors.secondary)
+            HStack(alignment: .bottom, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Text(verbatim: account.currency)
+                        if account.isLiability {
+                            Text("负债")
+                                .padding(.horizontal, 3)
+                                .overlay(RoundedRectangle(cornerRadius: 2).stroke(tone.ruleStrong, lineWidth: 0.5))
+                        }
+                    }.font(LedgerWidgetFont.text(10)).foregroundStyle(tone.meta)
+                    LedgerWidgetAmount(amount: amount, currency: account.currency, size: 27)
+                    if let valuation = account.valuation, account.currency != account.valuationCurrency {
+                        Text(verbatim: "≈ " + MoneyText.format(minorUnits: account.isLiability ? MoneyText.magnitude(valuation) : valuation, currency: account.valuationCurrency))
+                            .font(LedgerWidgetFont.text(15)).monospacedDigit().foregroundStyle(tone.secondary)
+                            .lineLimit(1).minimumScaleFactor(0.6).privacySensitive()
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                if let netWorth {
+                    Rectangle().fill(tone.rule).frame(width: 1).frame(maxHeight: 44)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("净值").font(LedgerWidgetFont.text(10)).foregroundStyle(tone.meta)
+                        LedgerWidgetAmount(amount: netWorth.net, currency: netWorth.currency, size: 15)
+                    }.frame(maxWidth: 110, alignment: .leading)
+                }
             }
             Spacer(minLength: 0)
-            LedgerWidgetFooter(label: style.groupLabel, date: updated, now: entry.date)
-        }.privacySensitive()
+            LedgerWidgetFooter(date: snapshot.updatedAt, now: entry.date)
+        }
+    }
+}
+
+/// The account's group, as the header detail.
+enum AccountBalanceGroup {
+    static func label(for account: LedgerWidgetAccountSnapshot) -> String {
+        let name = "\(account.account) \(account.label) \(account.group)".lowercased()
+        if account.isLiability || name.contains("credit") || name.contains("信用卡") {
+            return String(localized: "信用卡")
+        }
+        if name.contains("cash") || name.contains("现金") { return String(localized: "现金资产") }
+        if name.contains("invest") || name.contains("fund") || name.contains("stock") || name.contains("理财") || name.contains("基金") || name.contains("证券") {
+            return String(localized: "投资理财")
+        }
+        if name.contains("loan") || name.contains("mortgage") || name.contains("借款") || name.contains("房贷") {
+            return String(localized: "负债借贷")
+        }
+        return String(localized: "日常银行")
     }
 }
 

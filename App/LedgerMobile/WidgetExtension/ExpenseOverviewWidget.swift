@@ -53,101 +53,104 @@ struct ExpenseOverviewWidget: Widget {
             ExpenseOverviewWidgetView(entry: entry)
         }
         .configurationDisplayName("消费概览")
-        .description("按周、月或年查看消费、同比与主要分类。")
+        .description("按周、月或年查看支出、同比与主要分类。")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
 
+/// A locked device keeps this layout and masks only the figures.
 struct ExpenseOverviewWidgetView: View {
     @Environment(\.widgetFamily) private var family
     @Environment(\.redactionReasons) private var redactionReasons
+    @Environment(\.widgetRenderingMode) private var renderingMode
     let entry: ExpenseOverviewEntry
     var familyOverride: WidgetFamily?
 
     var body: some View {
         Group {
-            if !redactionReasons.isEmpty {
-                LedgerWidgetPrivacyView(title: String(localized: "支出概览"))
-            } else if let snapshot = entry.snapshot,
-                      let expense = entry.period.currentExpense(in: snapshot, now: entry.date) {
+            if let snapshot = entry.snapshot,
+               let expense = entry.period.currentExpense(in: snapshot, now: entry.date) {
                 let updated = entry.period == .month ? snapshot.updatedAt : snapshot.insights?.date ?? snapshot.updatedAt
                 content(expense, updated: updated)
             } else {
-                LedgerWidgetUnavailableView(title: String(localized: "等待消费数据"), detail: String(localized: "打开 Ledger 并刷新一次"))
+                LedgerWidgetUnavailableView(title: String(localized: "支出"))
             }
         }
         .widgetURL(URL(string: "ledger://overview"))
-        .containerBackground(for: .widget) { LedgerWidgetColors.panel }
+        .containerBackground(for: .widget) { LedgerWidgetColors.sunken }
     }
+
+    private var tone: LedgerWidgetTone { LedgerWidgetTone(renderingMode) }
 
     private func content(_ expense: LedgerWidgetExpenseSnapshot, updated: Date) -> some View {
         let medium = (familyOverride ?? family) == .systemMedium
-        return VStack(alignment: .leading, spacing: 8) {
-            LedgerWidgetHeader(title: String(localized: "支出"), detail: periodDetail(expense))
+        return VStack(alignment: .leading, spacing: 0) {
+            LedgerWidgetHeader(title: String(localized: "支出"), detail: entry.period.shortTitle)
             if medium {
                 HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        LedgerWidgetAmount(amount: expense.amount, currency: expense.currency)
-                        comparison(expense.yearOverYearPercentage)
-                        Spacer(minLength: 0)
-                        Text(expense.transactionCount == 0 ? "暂无支出" : "\(expense.transactionCount) 笔 · 分类占比 →")
-                            .font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                    Rectangle().fill(LedgerWidgetColors.line).frame(width: 1)
+                    summary(expense, showsCount: true).frame(maxWidth: .infinity, alignment: .leading)
+                    Rectangle().fill(tone.rule).frame(width: 1)
                     categories(expense).frame(maxWidth: .infinity, alignment: .leading)
-                }.frame(maxHeight: .infinity)
+                }.padding(.top, 10).frame(maxHeight: .infinity, alignment: .top)
             } else {
-                LedgerWidgetAmount(amount: expense.amount, currency: expense.currency)
-                comparison(expense.yearOverYearPercentage)
+                summary(expense, showsCount: false).padding(.top, 10)
                 Spacer(minLength: 0)
-                HStack(spacing: 8) {
-                    Rectangle().fill(LedgerWidgetColors.accent).frame(width: 16, height: 2)
-                    Text(expense.transactionCount == 0 ? "暂无支出" : "\(expense.transactionCount) 笔支出")
-                        .font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
-                }
             }
-            LedgerWidgetFooter(label: expense.currency, date: updated, now: entry.date)
-        }.privacySensitive()
-    }
-
-    private func comparison(_ percentage: Double?) -> some View {
-        Text(percentage.map { String(localized: "\($0 < 0 ? "↓" : "↑") \(LedgerWidgetText.percentage(abs($0))) · 同比") } ?? String(localized: "暂无同期数据"))
-            .font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
-            .lineLimit(1).minimumScaleFactor(0.8)
-    }
-
-    private func periodDetail(_ expense: LedgerWidgetExpenseSnapshot) -> String {
-        switch entry.period {
-        case .month: expense.periodTitle
-        case .year: String(localized: "\(String(expense.start.prefix(4)))年")
-        case .week: String(localized: "\(LedgerWidgetHeat.shortDate(expense.start)) 起")
+            LedgerWidgetFooter(date: updated, now: entry.date)
         }
     }
 
+    private func summary(_ expense: LedgerWidgetExpenseSnapshot, showsCount: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            LedgerWidgetAmount(amount: expense.amount, currency: expense.currency, size: 27)
+            // `previous` is the same range a year earlier, so this is 同比 for
+            // every period; a missing or zero baseline hides the line.
+            if let percentage = expense.yearOverYearPercentage {
+                Text("同比 \(LedgerWidgetText.signedPercentage(percentage))")
+                    .font(LedgerWidgetFont.text(10)).monospacedDigit().foregroundStyle(tone.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.8).privacySensitive()
+            }
+            if showsCount {
+                Spacer(minLength: 0)
+                Text(countLine(expense))
+                    .font(LedgerWidgetFont.text(10)).monospacedDigit().foregroundStyle(tone.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.8).privacySensitive()
+            }
+        }
+    }
+
+    private func countLine(_ expense: LedgerWidgetExpenseSnapshot) -> String {
+        guard expense.transactionCount > 0 else { return String(localized: "暂无支出") }
+        let daily = expense.amount / max(expense.elapsedDays(now: entry.date), 1)
+        return String(localized: "\(expense.transactionCount) 笔 · 日均 \(MoneyText.formatWidget(minorUnits: daily, currency: expense.currency))")
+    }
+
+    /// The builder already keeps the top three; render what the snapshot holds.
     private func categories(_ expense: LedgerWidgetExpenseSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 9) {
             if expense.categories.isEmpty {
-                Text("暂无分类数据").font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
+                Text("暂无分类数据").font(LedgerWidgetFont.text(10)).foregroundStyle(tone.meta)
             } else {
-                ForEach(Array(expense.categories.prefix(3).enumerated()), id: \.element.id) { index, category in
-                    let fraction = expense.amount > 0 ? min(max(Double(category.amount) / Double(expense.amount), 0), 1) : 0
-                    HStack(alignment: .top, spacing: 6) {
-                        Text(String(format: "%02d", index + 1))
-                            .font(.system(size: 10, design: .monospaced)).foregroundStyle(LedgerWidgetColors.accent)
-                        VStack(spacing: 4) {
-                            HStack(spacing: 3) {
-                                Text(category.label).lineLimit(1)
-                                Spacer(minLength: 0)
-                                Text(LedgerWidgetText.percentage(fraction)).monospacedDigit()
-                            }.font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.ink)
-                            GeometryReader { bounds in
-                                Rectangle().fill(LedgerWidgetColors.line)
-                                    .overlay(alignment: .leading) {
-                                        Rectangle().fill(LedgerWidgetColors.accent).frame(width: bounds.size.width * fraction)
-                                    }
-                            }.frame(height: 2)
-                        }
-                    }
+                ForEach(expense.categories) { category in
+                    // Bars are shapes, which `privacySensitive` leaves visible.
+                    let fraction = expense.amount > 0 && redactionReasons.isEmpty
+                        ? min(max(Double(category.amount) / Double(expense.amount), 0), 1) : 0
+                    VStack(spacing: 4) {
+                        HStack(spacing: 4) {
+                            Text(category.label).foregroundStyle(tone.secondary).lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text(MoneyText.formatWidget(minorUnits: category.amount, currency: expense.currency))
+                                .monospacedDigit().foregroundStyle(tone.ink).lineLimit(1)
+                        }.font(LedgerWidgetFont.text(10))
+                        GeometryReader { bounds in
+                            Rectangle().fill(tone.rule)
+                                .overlay(alignment: .leading) {
+                                    Rectangle().fill(tone.isFullColor ? LedgerWidgetColors.expense : tone.ink)
+                                        .frame(width: bounds.size.width * fraction)
+                                        .widgetAccentable()
+                                }
+                        }.frame(height: 2)
+                    }.privacySensitive()
                 }
             }
         }

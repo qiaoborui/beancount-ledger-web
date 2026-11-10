@@ -1,3 +1,4 @@
+import CoreText
 import SwiftUI
 import UIKit
 import WidgetKit
@@ -5,6 +6,19 @@ import XCTest
 
 @MainActor
 final class LedgerWidgetVisualTests: XCTestCase {
+    /// The extension registers Plex through UIAppFonts; a test bundle has no
+    /// such key, so the render tests register the same files themselves.
+    nonisolated private static let fontsRegistered: Void = {
+        let urls = ["IBMPlexSans-Regular", "IBMPlexSans-Text", "IBMPlexSans-Medium", "IBMPlexSans-SemiBold"]
+            .compactMap { Bundle(for: LedgerWidgetVisualTests.self).url(forResource: $0, withExtension: "ttf") }
+        CTFontManagerRegisterFontURLs(urls as CFArray, .process, true, nil)
+    }()
+
+    override func setUp() {
+        super.setUp()
+        Self.fontsRegistered
+    }
+
     override func tearDown() {
         WidgetMockURLProtocol.requestHandler = nil
         super.tearDown()
@@ -449,18 +463,149 @@ final class LedgerWidgetVisualTests: XCTestCase {
         }
     }
 
+    /// Every family in full colour (light and dark), on a tinted Home Screen
+    /// (accented; vibrant for the Lock Screen), and locked in both. Tinted
+    /// renders must draw only primary/secondary, never the expense hue.
+    func testRenderEveryWidgetAcrossRenderingModesAndRedaction() throws {
+        let snapshot = LedgerWidgetSnapshot.placeholder
+        let now = snapshot.updatedAt
+        let small = CGSize(width: 158, height: 158), medium = CGSize(width: 338, height: 158), large = CGSize(width: 338, height: 354)
+        let history = ExpenseCalendarEntry(date: now, snapshot: snapshot)
+        let account = AccountBalanceEntry(date: now, snapshot: snapshot, selectedAccountID: snapshot.accounts.first?.id)
+        let liability = AccountBalanceEntry(date: now, snapshot: snapshot, selectedAccountID: snapshot.accounts.last?.id)
+        let overview = ExpenseOverviewEntry(date: now, snapshot: snapshot)
+        let quick = QuickActionsEntry(date: now)
+        let home: [(String, CGSize, AnyView)] = [
+            ("overview-small", small, AnyView(ExpenseOverviewWidgetView(entry: overview, familyOverride: .systemSmall))),
+            ("overview-medium", medium, AnyView(ExpenseOverviewWidgetView(entry: overview, familyOverride: .systemMedium))),
+            ("account-small", small, AnyView(AccountBalanceWidgetView(entry: account, familyOverride: .systemSmall))),
+            ("account-medium", medium, AnyView(AccountBalanceWidgetView(entry: account, familyOverride: .systemMedium))),
+            ("account-liability-small", small, AnyView(AccountBalanceWidgetView(entry: liability, familyOverride: .systemSmall))),
+            ("calendar-medium", medium, AnyView(ExpenseCalendarWidgetView(entry: history, familyOverride: .systemMedium))),
+            ("calendar-large", large, AnyView(ExpenseCalendarWidgetView(entry: history, familyOverride: .systemLarge))),
+            ("trend-medium", medium, AnyView(ExpenseTrendWidgetView(entry: history))),
+            ("heatmap-medium", medium, AnyView(ExpenseHeatmapWidgetView(entry: history))),
+            ("import-medium", medium, AnyView(ImportStatusWidgetView(entry: .init(date: now, snapshot: snapshot), familyOverride: .systemMedium))),
+            ("import-large", large, AnyView(ImportStatusWidgetView(entry: .init(date: now, snapshot: snapshot), familyOverride: .systemLarge))),
+            ("quickrecord-small", small, AnyView(QuickRecordWidgetView(entry: history, familyOverride: .systemSmall))),
+            ("quickrecord-medium", medium, AnyView(QuickRecordWidgetView(entry: history, familyOverride: .systemMedium))),
+        ]
+        // 快捷入口 disables content margins and pads itself.
+        let quickActions: [(String, CGSize, AnyView)] = [
+            ("quickactions-small", small, AnyView(QuickActionsWidgetView(entry: quick, familyOverride: .systemSmall))),
+            ("quickactions-medium", medium, AnyView(QuickActionsWidgetView(entry: quick, familyOverride: .systemMedium))),
+        ]
+        let lock: [(String, CGSize, AnyView)] = [
+            ("lock-circular", CGSize(width: 64, height: 64), AnyView(ExpenseLockScreenWidgetView(entry: overview, familyOverride: .accessoryCircular))),
+            ("lock-rectangular", CGSize(width: 160, height: 72), AnyView(ExpenseLockScreenWidgetView(entry: overview, familyOverride: .accessoryRectangular))),
+            ("lock-inline", CGSize(width: 220, height: 26), AnyView(ExpenseLockScreenWidgetView(entry: overview, familyOverride: .accessoryInline))),
+            ("quickactions-circular", CGSize(width: 64, height: 64), AnyView(QuickActionsWidgetView(entry: quick, familyOverride: .accessoryCircular))),
+        ]
+        let variants: [(String, ColorScheme, WidgetRenderingMode, Bool)] = [
+            ("full-light", .light, .fullColor, false), ("full-dark", .dark, .fullColor, false),
+            ("tinted", .dark, .accented, false),
+            ("full-light-redacted", .light, .fullColor, true), ("tinted-redacted", .dark, .accented, true),
+        ]
+        for (suffix, scheme, mode, redacted) in variants {
+            func check(_ image: UIImage, _ name: String) {
+                if mode != .fullColor { XCTAssertEqual(Self.expensePixelCount(image), 0, "\(name)-\(suffix)") }
+            }
+            for (name, size, view) in home {
+                check(try render(view, size: size, name: "\(name)-\(suffix)", colorScheme: scheme, mode: mode, redacted: redacted), name)
+            }
+            for (name, size, view) in quickActions {
+                check(try render(view, size: size, name: "\(name)-\(suffix)", padding: 0, colorScheme: scheme, mode: mode, redacted: redacted), name)
+            }
+            // Accessory families always render vibrant.
+            let accessoryMode: WidgetRenderingMode = mode == .fullColor ? .fullColor : .vibrant
+            for (name, size, view) in lock where mode != .fullColor || !redacted {
+                check(try render(view, size: size, name: "\(name)-\(suffix)", padding: 0, colorScheme: .dark, mode: accessoryMode, redacted: redacted), name)
+            }
+        }
+    }
+
+    /// `privacySensitive` masks text but leaves shapes, so heat cells, the
+    /// trend line and share bars would still show relative spending when locked.
+    func testRedactedWidgetsDrawNoHeatLineOrShareBars() throws {
+        let snapshot = LedgerWidgetSnapshot.placeholder
+        let history = ExpenseCalendarEntry(date: snapshot.updatedAt, snapshot: snapshot)
+        let overview = ExpenseOverviewEntry(date: snapshot.updatedAt, snapshot: snapshot)
+        let medium = CGSize(width: 338, height: 158)
+        let views: [(String, AnyView)] = [
+            ("heatmap", AnyView(ExpenseHeatmapWidgetView(entry: history))),
+            ("trend", AnyView(ExpenseTrendWidgetView(entry: history))),
+            ("overview", AnyView(ExpenseOverviewWidgetView(entry: overview, familyOverride: .systemMedium))),
+        ]
+        for (name, view) in views {
+            let open = try render(view, size: medium, name: "privacy-\(name)-open")
+            let locked = try render(view, size: medium, name: "privacy-\(name)-locked", redacted: true)
+            XCTAssertGreaterThan(Self.expensePixelCount(open), 0, name)
+            XCTAssertEqual(Self.expensePixelCount(locked), 0, name)
+        }
+    }
+
+    /// After a month rolls over the snapshot still holds last month until
+    /// the app refreshes; the calendar must not draw it as this month.
+    func testCalendarHidesStalePeriod() throws {
+        let snapshot = LedgerWidgetSnapshot.placeholder
+        let expense = snapshot.expense
+        let inside = try XCTUnwrap(LedgerWidgetDates.date(expense.start))
+        let after = try XCTUnwrap(LedgerWidgetDates.date(expense.end)).addingTimeInterval(36 * 60 * 60)
+        XCTAssertEqual(ExpenseCalendarWidgetView.expense(in: snapshot, now: inside.addingTimeInterval(12 * 60 * 60)), expense)
+        XCTAssertNil(ExpenseCalendarWidgetView.expense(in: snapshot, now: after))
+        XCTAssertNil(QuickRecordWidgetView.today(in: snapshot, now: after))
+        try render(ExpenseCalendarWidgetView(entry: .init(date: after, snapshot: snapshot), familyOverride: .systemMedium),
+                   size: CGSize(width: 338, height: 158), name: "calendar-stale-medium")
+        try render(QuickRecordWidgetView(entry: .init(date: after, snapshot: snapshot), familyOverride: .systemSmall),
+                   size: CGSize(width: 158, height: 158), name: "quickrecord-stale-small")
+    }
+
+    func testQuickRecordTodayReadsTheDailySeries() throws {
+        let base = LedgerWidgetSnapshot.placeholder
+        let expense = LedgerWidgetExpenseSnapshot(periodTitle: "2026年8月", start: "2026-08-01", end: "2026-09-01",
+            currency: "CNY", amount: 9_000, transactionCount: 2, yearOverYearPercentage: nil, categories: [],
+            dailySeries: [.init(date: "2026-08-03", amount: 4_000), .init(date: "2026-08-03", amount: 500)])
+        let snapshot = LedgerWidgetSnapshot(updatedAt: base.updatedAt, expense: expense, accounts: [])
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        func noon(_ day: Int) -> Date { calendar.date(from: DateComponents(year: 2026, month: 8, day: day, hour: 12))! }
+        XCTAssertEqual(QuickRecordWidgetView.today(in: snapshot, now: noon(3))?.today, 4_500)
+        // Inside the period but absent from the series: nothing spent.
+        XCTAssertEqual(QuickRecordWidgetView.today(in: snapshot, now: noon(4))?.today, 0)
+        XCTAssertNil(QuickRecordWidgetView.today(in: nil, now: noon(3)))
+    }
+
+    func testCalendarTimelineAddsMidnightEntryOnlyWhenRefreshCrossesIt() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let late = calendar.date(from: DateComponents(year: 2026, month: 8, day: 3, hour: 23, minute: 30))!
+        let entries = ExpenseCalendarProvider.entries(snapshot: nil, now: late, refreshInterval: 3_600, calendar: calendar)
+        XCTAssertEqual(entries.map(\.date), [late, calendar.date(from: DateComponents(year: 2026, month: 8, day: 4))!])
+        let morning = calendar.date(from: DateComponents(year: 2026, month: 8, day: 3, hour: 9))!
+        XCTAssertEqual(ExpenseCalendarProvider.entries(snapshot: nil, now: morning, refreshInterval: 3_600, calendar: calendar).count, 1)
+    }
+
+    /// Renders off-screen and, only when WIDGET_SHOTS_DIR is set (pass
+    /// TEST_RUNNER_WIDGET_SHOTS_DIR to xcodebuild), writes a PNG there; CI
+    /// writes nothing. Tinted modes draw on a dark wallpaper stand-in, since
+    /// the system, not the widget, supplies that background.
+    @discardableResult
     private func render<V: View>(
         _ view: V,
         size: CGSize,
         name: String,
         padding: CGFloat = 16,
-        colorScheme: ColorScheme = .light
-    ) throws {
+        colorScheme: ColorScheme = .light,
+        mode: WidgetRenderingMode = .fullColor,
+        redacted: Bool = false
+    ) throws -> UIImage {
         let content = view
+            .redacted(reason: redacted ? .privacy : [])
             .padding(padding)
             .frame(width: size.width, height: size.height)
-            .background(LedgerWidgetColors.panel)
+            .background(mode == .fullColor ? LedgerWidgetColors.sunken : Color(red: 0.16, green: 0.2, blue: 0.27))
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .environment(\.widgetRenderingMode, mode)
             .environment(\.colorScheme, colorScheme)
         let renderer = ImageRenderer(content: content)
         renderer.proposedSize = ProposedViewSize(size)
@@ -468,15 +613,26 @@ final class LedgerWidgetVisualTests: XCTestCase {
         let image = try XCTUnwrap(renderer.uiImage)
         XCTAssertEqual(image.size, size)
 
-        let directory = URL(fileURLWithPath: "/tmp/ledger-widget-renders", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent("\(name).png")
-        try XCTUnwrap(image.pngData()).write(to: url, options: .atomic)
+        if let path = ProcessInfo.processInfo.environment["WIDGET_SHOTS_DIR"], !path.isEmpty {
+            let directory = URL(fileURLWithPath: path, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try XCTUnwrap(image.pngData()).write(to: directory.appendingPathComponent("\(name).png"), options: .atomic)
+        }
+        return image
+    }
 
-        let attachment = XCTAttachment(image: image)
-        attachment.name = name
-        attachment.lifetime = XCTAttachment.Lifetime.keepAlways
-        add(attachment)
+    /// Pixels in the light `expense` hue (96401F and its tints over sunken),
+    /// above the bottom 28pt: the heatmap's 少…多 legend there is a fixed scale.
+    private static func expensePixelCount(_ image: UIImage) -> Int {
+        guard let cgImage = image.cgImage else { return 0 }
+        let width = cgImage.width, height = cgImage.height
+        var data = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &data, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 0 }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let rows = max(0, height - Int(28 * image.scale))
+        return stride(from: 0, to: rows * width * 4, by: 4).filter { Int(data[$0]) - Int(data[$0 + 2]) > 40 }.count
     }
 
     private static let widgetSnapshotJSON = #"""

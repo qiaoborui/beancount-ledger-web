@@ -18,6 +18,56 @@ final class LedgerWidgetSnapshotTests: XCTestCase {
         XCTAssertTrue(LedgerWidgetDates.series(expense, start: expense.start, end: "2028-03-03").isEmpty)
     }
 
+    func testLocalDayReadsTheWallClockNotUTC() throws {
+        var shanghai = Calendar(identifier: .gregorian)
+        shanghai.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        // 2026-08-31 18:30 UTC is already 1 September in Shanghai.
+        let instant = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-31T18:30:00Z"))
+        XCTAssertEqual(LedgerWidgetDates.localDay(instant, calendar: shanghai), "2026-09-01")
+        XCTAssertEqual(LedgerWidgetDates.day(instant), "2026-08-31")
+    }
+
+    func testElapsedDaysAndAmountOnDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        func noon(_ month: Int, _ day: Int) -> Date {
+            calendar.date(from: DateComponents(year: 2028, month: month, day: day, hour: 12))!
+        }
+        let expense = LedgerWidgetExpenseSnapshot(periodTitle: "2028年2月", start: "2028-02-01", end: "2028-03-01",
+            currency: "CNY", amount: 3_500, transactionCount: 3, yearOverYearPercentage: nil, categories: [],
+            dailySeries: [.init(date: "2028-02-29", amount: 1_000), .init(date: "2028-02-29", amount: 2_000),
+                          .init(date: "2028-02-03", amount: 500)])
+        XCTAssertEqual(expense.elapsedDays(now: noon(1, 31), calendar: calendar), 0)
+        XCTAssertEqual(expense.elapsedDays(now: noon(2, 1), calendar: calendar), 1)
+        XCTAssertEqual(expense.elapsedDays(now: noon(2, 29), calendar: calendar), 29)
+        XCTAssertEqual(expense.elapsedDays(now: noon(3, 15), calendar: calendar), 29)
+
+        XCTAssertEqual(expense.amount(onDay: "2028-02-29"), 3_000)
+        // Inside the period but absent from the series: nothing was spent.
+        XCTAssertEqual(expense.amount(onDay: "2028-02-04"), 0)
+        XCTAssertNil(expense.amount(onDay: "2028-03-01"))
+        XCTAssertNil(expense.amount(onDay: "2028-01-31"))
+        XCTAssertNil(expense.amount(onDay: "2028-02-30"))
+    }
+
+    func testNetWorthSumsPerCurrencyAndKeepsDuplicateAccountIDsApart() {
+        func row(_ account: String, _ currency: String, _ balance: Int) -> LedgerWidgetAccountSnapshot {
+            .init(account: account, label: account, group: "", currency: currency, balance: balance,
+                  valuationCurrency: "CNY", valuation: nil)
+        }
+        // One account per currency shares an id; both rows must count.
+        let rows = [row("Assets:Bank", "CNY", 10_000), row("Assets:Bank", "USD", 2_000),
+                    row("Assets:Cash", "CNY", 500), row("Liabilities:Card", "CNY", -3_000)]
+        XCTAssertEqual(LedgerWidgetNetWorth.summarize(rows), [
+            .init(currency: "CNY", assets: 10_500, liabilities: -3_000),
+            .init(currency: "USD", assets: 2_000, liabilities: 0),
+        ])
+        XCTAssertEqual(LedgerWidgetNetWorth.summarize(rows).first?.net, 7_500)
+        XCTAssertNil(LedgerWidgetNetWorth.single(rows))
+        XCTAssertEqual(LedgerWidgetNetWorth.single(rows.filter { $0.currency == "CNY" })?.net, 7_500)
+        XCTAssertNil(LedgerWidgetNetWorth.single([]))
+    }
+
     func testWidgetInsightsRoundTripAndOldSnapshotCompatibility() throws {
         var snapshot = Self.snapshot(updatedAt: Date(), amount: 842)
         XCTAssertNil(LedgerWidgetPeriod.week.expense(in: snapshot))
