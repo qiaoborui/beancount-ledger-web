@@ -116,7 +116,7 @@ struct AccountsView: View {
             }
 
             Section {
-                HStack(spacing: 22) {
+                let filterBar = HStack(spacing: 22) {
                     ForEach(AccountFilterCategory.allCases) { filter in
                         let count = filter == .all
                             ? allSections.reduce(0) { $0 + $1.rows.count }
@@ -127,7 +127,7 @@ struct AccountsView: View {
                         } label: {
                             VStack(spacing: 7) {
                                 HStack(spacing: 4) {
-                                    Text(filter.title).balancedFont(size: 13, weight: selectedFilter == filter ? .medium : .regular).lineLimit(1)
+                                    Text(filter.title).balancedFont(size: 13, weight: selectedFilter == filter ? .medium : .regular).lineLimit(1).fixedSize()
                                     Text("\(count)").balancedFont(size: 11).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                                 }
                                 .foregroundStyle(selectedFilter == filter ? BalancedPalette.ink : BalancedPalette.meta)
@@ -138,7 +138,12 @@ struct AccountsView: View {
                         .accessibilityAddTraits(selectedFilter == filter ? .isSelected : [])
                     }
                 }
-                .padding(.horizontal, 20)
+                // At accessibility text sizes the five filters no longer fit the width;
+                // scroll them instead of truncating every label to "…".
+                ViewThatFits(in: .horizontal) {
+                    filterBar.padding(.horizontal, 20)
+                    ScrollView(.horizontal, showsIndicators: false) { filterBar.padding(.horizontal, 20) }
+                }
                 .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 0, trailing: 0))
             }
             .listRowBackground(Color.clear).listRowSeparator(.hidden)

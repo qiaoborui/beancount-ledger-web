@@ -71,9 +71,14 @@ struct OverviewView: View {
                 .balancedFont(size: 15).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                 .padding(.top, 4)
             GeometryReader { proxy in
-                HStack(spacing: 3) {
-                    Capsule().fill(BalancedPalette.ink).frame(width: max(0, (proxy.size.width - 3) * barRatio))
-                    Capsule().fill(BalancedPalette.expense).frame(maxWidth: .infinity)
+                if income == 0 && ledger.summary.expense <= 0 {
+                    // Nothing earned or spent: an all-expense bar would claim spending.
+                    Capsule().fill(BalancedPalette.rule)
+                } else {
+                    HStack(spacing: 3) {
+                        Capsule().fill(BalancedPalette.ink).frame(width: max(0, (proxy.size.width - 3) * barRatio))
+                        Capsule().fill(BalancedPalette.expense).frame(maxWidth: .infinity)
+                    }
                 }
             }.frame(height: 6).padding(.top, 16).padding(.bottom, 12).accessibilityHidden(true)
             HStack {
@@ -197,7 +202,8 @@ struct OverviewView: View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
             label().frame(maxWidth: .infinity, alignment: .leading)
             amount().lineLimit(1).padding(.leading, 8)
-            share().lineLimit(1).frame(width: 54, alignment: .trailing).padding(.leading, 28)
+            // Grows past 54pt at large text sizes instead of truncating "68.4%" to "68…".
+            share().lineLimit(1).fixedSize().frame(minWidth: 54, alignment: .trailing).padding(.leading, 28)
         }.padding(.horizontal, 20)
     }
 

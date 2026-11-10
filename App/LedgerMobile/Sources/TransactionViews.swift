@@ -1050,6 +1050,10 @@ struct TransactionsView: View {
                     systemImage: "list.bullet.rectangle",
                     description: Text("调整时间范围或搜索条件。")
                 )
+                // Sit on the page paper like the loading row above, without the
+                // plain list's white row fill and inset separator.
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             if displayed.isEmpty && !isAwaitingRows && session.isLocal && session.localTransactionHasMore {
                 // The current window matched nothing but the reader still has rows to
