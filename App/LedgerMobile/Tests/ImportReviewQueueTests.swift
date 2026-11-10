@@ -56,11 +56,32 @@ final class ImportReviewQueueTests: XCTestCase {
         XCTAssertThrowsError(try ImportBulkEdit.applyingTags("bad tag!", mode: .add, to: entries, ids: ["a"]))
     }
 
-    private func entry(_ id: String, category: String, funding: String = "Assets:Alipay", tags: [String]? = nil) -> LedgerImportEntry {
+    func testTotalsStayPerCurrency() {
+        let entries = [entry("a", category: "Expenses:Food"), entry("b", category: "Expenses:Food"),
+                       entry("c", category: "Expenses:Food", currency: "USD", amount: 3)]
+        let totals = ImportReviewTotals.byCurrency(entries)
+        XCTAssertEqual(totals.map(\.currency), ["CNY", "USD"])
+        XCTAssertEqual(totals.map(\.minorUnits), [2_500, 300])
+        XCTAssertTrue(ImportReviewTotals.byCurrency([]).isEmpty)
+    }
+
+    func testClassificationProgressIgnoresUncheckedEntries() {
+        let ids = ["a", "b", "c", "d"]
+        let finished = ImportClassificationProgress.counts(entryIDs: ids, included: ["a", "b", "c"],
+            completed: ["a"], manuallyReviewed: ["c"])
+        XCTAssertEqual(finished.total, 3)
+        XCTAssertEqual(finished.done, 2)
+        let done = ImportClassificationProgress.counts(entryIDs: ids, included: ["a", "b"],
+            completed: ["a", "b"], manuallyReviewed: [])
+        XCTAssertEqual(done.done, done.total)
+    }
+
+    private func entry(_ id: String, category: String, funding: String = "Assets:Alipay", tags: [String]? = nil,
+                       currency: String = "CNY", amount: Double = 12.5) -> LedgerImportEntry {
         LedgerImportEntry(
             id: id, date: "2026-08-01", flag: "*", payee: id, narration: "", source: "alipay",
             orderID: nil, merchantID: nil, payTime: nil, method: nil, transactionType: nil, status: nil, type: nil,
-            categoryAccount: category, fundingAccount: funding, amount: 12.5, currency: "CNY", tags: tags,
+            categoryAccount: category, fundingAccount: funding, amount: amount, currency: currency, tags: tags,
             metadata: [:], postings: []
         )
     }

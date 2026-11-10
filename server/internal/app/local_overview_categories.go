@@ -24,6 +24,7 @@ type localOverviewCategories struct {
 	Start                   string                       `json:"start"`
 	End                     string                       `json:"end"`
 	SensitiveUnlocked       bool                         `json:"sensitiveUnlocked"`
+	Currency                string                       `json:"currency"`
 	PositiveTotalMinorUnits int                          `json:"positiveTotalMinorUnits"`
 	TransactionCount        int                          `json:"transactionCount"`
 	HighestExpense          *localOverviewHighestExpense `json:"highestExpense"`
@@ -51,7 +52,11 @@ type localOverviewCategoryGroup struct {
 // Native GET /api/ledger/overview/categories. The caller supplies a fresh,
 // committed snapshot and rejects staging/importFile before calling this helper.
 // Like pages, ranges are inclusive start/exclusive end and revision includes the
-// model identity. No currency conversion: Swift sums signed posting minor units.
+// model identity. Category totals are valued in the optional valuationCurrency
+// (resolved like the bootstrap summary, CNY by default) through the snapshot
+// price index, posting by posting as MonthSummaryWithPriceIndex does, so they
+// share a currency with the summary's expense. Eligibility and highestExpense
+// keep raw posting minor units, matching Swift TransactionPresentation.
 func localOverviewCategoriesResponse(cfg Config, snapshot *LedgerSnapshot, query map[string]string) (int, json.RawMessage, error) {
 	start, end := query["start"], query["end"]
 	if start == "" {
@@ -70,13 +75,15 @@ func localOverviewCategoriesResponse(cfg Config, snapshot *LedgerSnapshot, query
 	}
 	// This aggregate is date-only, not a page. Never silently ignore a filter.
 	for key := range query {
-		if key != "start" && key != "end" {
+		if key != "start" && key != "end" && key != "valuationCurrency" {
 			return http.StatusBadRequest, nil, errors.New("unsupported overview categories query parameter")
 		}
 	}
 	if snapshot == nil {
 		return http.StatusInternalServerError, nil, errors.New("missing overview categories snapshot")
 	}
+	currency := ValidValuationCurrency(query["valuationCurrency"], snapshot.Commodities)
+	priceIndex := snapshotPriceIndex(snapshot)
 	capacity := func() (int, json.RawMessage, error) {
 		return http.StatusRequestEntityTooLarge, nil, errLocalOverviewCategoryCapacity
 	}
@@ -91,7 +98,7 @@ func localOverviewCategoriesResponse(cfg Config, snapshot *LedgerSnapshot, query
 			continue
 		}
 		transactionCount++
-		eligible, total := false, 0
+		eligible, total, valued := false, 0, 0
 		for _, posting := range txn.Postings {
 			if posting.Amount == 0 || !strings.HasPrefix(posting.Account, "Expenses:") {
 				continue
@@ -99,6 +106,11 @@ func localOverviewCategoriesResponse(cfg Config, snapshot *LedgerSnapshot, query
 			eligible = true
 			var ok bool
 			total, ok = localOverviewAdd(total, posting.Amount)
+			if !ok {
+				return capacity()
+			}
+			// A posting without a usable price is valued at 0, as in the summary.
+			valued, ok = localOverviewAdd(valued, postingValuationWithPriceIndex(posting, priceIndex, "", currency))
 			if !ok {
 				return capacity()
 			}
@@ -177,17 +189,17 @@ func localOverviewCategoriesResponse(cfg Config, snapshot *LedgerSnapshot, query
 			groups[key] = group
 		}
 		var ok bool
-		group.total, ok = localOverviewAdd(group.total, total)
+		group.total, ok = localOverviewAdd(group.total, valued)
 		if !ok {
 			return capacity()
 		}
-		if total > 0 {
+		if valued > 0 {
 			group.count++
 		}
 	}
 	result := localOverviewCategories{
 		Revision: fmt.Sprintf("%s:%d", snapshot.Version, snapshot.localReadModelID),
-		Start:    start, End: end, SensitiveUnlocked: true,
+		Start:    start, End: end, SensitiveUnlocked: true, Currency: currency,
 		Categories: make([]localOverviewCategory, 0, 4), TransactionCount: transactionCount,
 	}
 	if highestIndex >= 0 {

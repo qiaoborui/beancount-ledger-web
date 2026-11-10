@@ -196,7 +196,8 @@ actor LocalLedgerRepository: LedgerRepository {
         let restored = try await workspace.withCurrentSnapshot { revision, _ -> CachedStartupPresentation? in
             guard let page = pageCache.loadPage(revisionID: revision.id, query: query) else { return nil }
             try Self.validateBootstrapPage(page, start: start, end: end, limit: limit)
-            var categories = categoriesCache.loadOverview(revisionID: revision.id, query: ["start": start, "end": end])
+            var categories = categoriesCache.loadOverview(revisionID: revision.id,
+                query: Self.overviewQuery(start: start, end: end, valuationCurrency: valuationCurrency))
             if let cached = categories {
                 do { try Self.validateOverviewCategories(cached, start: start, end: end) }
                 catch { categories = nil } // Rebuild a damaged secondary projection after first paint.
@@ -595,11 +596,12 @@ actor LocalLedgerRepository: LedgerRepository {
 
     /// The native model revision is opaque; the workspace UUID is the bootstrap
     /// pairing boundary. Check it inside the pinned snapshot, not in a prior read.
-    func overviewCategories(start: String, end: String,
-                            expectedRevisionID: UUID) async throws -> LedgerOverviewCategories {
+    func overviewCategories(start: String, end: String, expectedRevisionID: UUID,
+                            valuationCurrency: String? = nil) async throws -> LedgerOverviewCategories {
         let cache = overviewCache
+        let query = Self.overviewQuery(start: start, end: end, valuationCurrency: valuationCurrency)
         let (_, response) = try await readSnapshot("/api/ledger/overview/categories",
-            query: ["start": start, "end": end], expectedRevisionID: expectedRevisionID)
+            query: query, expectedRevisionID: expectedRevisionID)
         let result = try response.decode(LedgerOverviewCategories.self)
         try Self.validateOverviewCategories(result, start: start, end: end)
         // A pinned caller may legitimately finish after a writer publishes. Keep
@@ -607,17 +609,27 @@ actor LocalLedgerRepository: LedgerRepository {
         let current = try? await workspace.currentRevision()
         if !Task.isCancelled, current?.id == expectedRevisionID,
            let data = try? response.resultData() {
-            cache.save(data, revisionID: expectedRevisionID, query: ["start": start, "end": end])
+            cache.save(data, revisionID: expectedRevisionID, query: query)
         }
         return result
     }
 
-    func cachedOverviewCategories(start: String, end: String,
-                                  expectedRevisionID: UUID) async throws -> LedgerOverviewCategories? {
+    /// Category totals are valued in the bootstrap's valuation currency, so the
+    /// currency is part of the request and of the cache key. Keys without it
+    /// belong to engines that summed raw minor units and are never read again.
+    static func overviewQuery(start: String, end: String, valuationCurrency: String?) -> [String: String] {
+        var query = ["start": start, "end": end]
+        if let valuationCurrency, !valuationCurrency.isEmpty { query["valuationCurrency"] = valuationCurrency }
+        return query
+    }
+
+    func cachedOverviewCategories(start: String, end: String, expectedRevisionID: UUID,
+                                  valuationCurrency: String? = nil) async throws -> LedgerOverviewCategories? {
         let cache = overviewCache
+        let query = Self.overviewQuery(start: start, end: end, valuationCurrency: valuationCurrency)
         let result = try await workspace.withCurrentSnapshot { revision, _ in
             revision.id == expectedRevisionID
-                ? cache.loadOverview(revisionID: revision.id, query: ["start": start, "end": end]) : nil
+                ? cache.loadOverview(revisionID: revision.id, query: query) : nil
         }
         try Task.checkCancellation()
         guard let result else { return nil }
@@ -809,6 +821,13 @@ actor LocalLedgerRepository: LedgerRepository {
     func reconcile(request: LedgerReconcileRequest) async throws -> LedgerReconciliationResult {
         try await mutate("/api/ledger/reconciliation", method: "POST", body: json(request))
     }
+    /// Read-only preview of the balance `reconcile` diffs against; like the
+    /// reconciliation snapshot it does not advance the revision that authorizes writes.
+    func reconciliationBalance(account: String, date: String) async throws -> LedgerReconciliationBalance {
+        let (_, response) = try await readSnapshot("/api/ledger/reconciliation/balance",
+            query: ["account": account, "date": date])
+        return try response.decode(LedgerReconciliationBalance.self)
+    }
     func updateTransaction(source: TransactionSource, entry: LedgerTransactionEntry) async throws {
         let _: BQLCell = try await mutate("/api/ledger/transactions", method: "PUT",
             body: json(LedgerTransactionUpdateRequest(source: source, entry: entry)))
@@ -985,6 +1004,34 @@ actor LocalLedgerRepository: LedgerRepository {
     }
     func addAccount(input: LedgerAccountInput) async throws {
         let _: BQLCell = try await mutate("/api/ledger/accounts", method: "POST", body: json(input))
+    }
+    /// Opens `accounts` and appends `entry` as one revision. Separate commits
+    /// left the account behind when the opening balance failed validation, so
+    /// saving again wrote a duplicate `open`.
+    func addAccounts(_ accounts: [LedgerAccountInput], openingEntry entry: LedgerTransactionEntry?) async throws {
+        var bodies = try accounts.map { ("/api/ledger/accounts", try json($0)) }
+        if let entry { bodies.append(("/api/ledger/append", try json(entry))) }
+        guard let revisionID = presentedRevisionID else { throw LocalLedgerError.previewRequired }
+        let operations = bodies
+        let engine = engine, validator = writeValidator, entrypoint = descriptor.entrypoint
+        let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
+        let revision: LocalLedgerWorkspace.Revision
+        do {
+            revision = try await workspace.commit(expectedRevisionID: revisionID, changes: [], mutateStage: { root in
+                for (path, body) in operations {
+                    let data = try await engine.response(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+                        entrypoint: entrypoint, method: "POST", path: path, body: body, staging: true))
+                    _ = try data.decode(BQLCell.self)
+                }
+            }, validator: { root in try await validator(root, entrypoint) })
+        } catch {
+            await discardRetainedStageModel()
+            throw error
+        }
+        await promotePublishedGeneration(revision)
+        presentedRevisionID = revision.id
+        await storage.didCommit(revision)
+        NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
     }
     func indexInfo(targetGitSHA: String?) async throws -> LedgerIndexInfo {
         try await read("/api/ledger/index-info")

@@ -368,7 +368,7 @@ export const enUS: DeepStringify<TranslationResource> = {
     netWorth: "Net worth",
     debtRatio: "Debt ratio",
     assetAccountsCount: "{{count}} asset accounts with balances",
-    liabilitiesAbsolute: "Sum of liabilities by absolute value",
+    liabilitiesAbsolute: "Sum of liability balances; overpayments reduce debt",
     assetsMinusLiabilities: "Total assets minus total liabilities",
     noAssets: "No assets",
     liabilitiesToAssets: "Liabilities as a share of total assets",

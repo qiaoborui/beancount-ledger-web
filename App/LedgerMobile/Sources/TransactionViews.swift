@@ -1050,6 +1050,10 @@ struct TransactionsView: View {
                     systemImage: "list.bullet.rectangle",
                     description: Text("调整时间范围或搜索条件。")
                 )
+                // Sit on the page paper like the loading row above, without the
+                // plain list's white row fill and inset separator.
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             if displayed.isEmpty && !isAwaitingRows && session.isLocal && session.localTransactionHasMore {
                 // The current window matched nothing but the reader still has rows to
@@ -1144,9 +1148,9 @@ struct TransactionsView: View {
     private func balancedListFootnote(count: Int) -> String {
         guard filters.kind == .all else { return String(localized: "筛选只作用于当前区间，其余账目未被隐藏。") }
         if session.isLocal, session.localTransactionReachedRowCap {
-            return String(localized: "已加载 \(count) 笔，收窄时间范围可以看得更远。长按可多选，左滑显示改分类与对账。")
+            return String(localized: "已加载 \(count) 笔，收窄时间范围可以看得更远。长按查看更多操作，左滑可多选或删除，右滑可分享。")
         }
-        return String(localized: "已全部加载 \(count) 笔。长按可多选，左滑显示改分类与对账。")
+        return String(localized: "已全部加载 \(count) 笔。长按查看更多操作，左滑可多选或删除，右滑可分享。")
     }
 
     private var navigationContent: some View {
@@ -1213,13 +1217,8 @@ struct TransactionsView: View {
                     commodities: session.ledger?.commodities ?? [],
                     prefillPayee: transaction.payee,
                     prefillNarration: transaction.narration,
-                    prefillPostings: transaction.postings.map {
-                        EditableTransactionPosting(
-                            account: $0.account,
-                            amount: TransactionEditorView.decimalText($0.amount),
-                            currency: $0.currency ?? "CNY"
-                        )
-                    },
+                    prefillTags: TransactionEditorView.duplicateTags(of: transaction),
+                    prefillPostings: TransactionEditorView.duplicatePostings(of: transaction),
                     onSave: { entry in
                         try await session.addLocalTransaction(entry)
                         actionMessage = String(localized: "已复制并记录新流水")
@@ -2939,13 +2938,8 @@ struct TransactionDetailView: View {
                 commodities: session.ledger?.commodities ?? [],
                 prefillPayee: transaction.payee,
                 prefillNarration: transaction.narration,
-                prefillPostings: transaction.postings.map {
-                    EditableTransactionPosting(
-                        account: $0.account,
-                        amount: TransactionEditorView.decimalText($0.amount),
-                        currency: $0.currency ?? "CNY"
-                    )
-                },
+                prefillTags: TransactionEditorView.duplicateTags(of: transaction),
+                prefillPostings: TransactionEditorView.duplicatePostings(of: transaction),
                 onSave: { entry in
                     try await session.addLocalTransaction(entry)
                 }
@@ -3339,6 +3333,17 @@ struct CookieKeypadCalculator {
         evaluate(expression)
     }
 
+    /// The unsigned amount the keypad stands for, as posting text. A pending
+    /// expression is evaluated first: stripping its operators would turn
+    /// `50-20` into `5020`. Plain input is kept as typed (`12.50`).
+    var committedMagnitudeText: String {
+        guard pendingOperation != nil else {
+            return displayText.replacingOccurrences(of: "-", with: "")
+        }
+        guard let result = evaluatedResult else { return "0" }
+        return ExactBookkeepingAmount.text(abs(result))
+    }
+
     var isCalculationPending: Bool {
         guard pendingOperation != nil else { return false }
         let parts = expression.components(separatedBy: CharacterSet(charactersIn: "+-"))
@@ -3554,6 +3559,10 @@ struct CookieKeypadView: View {
             }
         )
         .buttonStyle(PressScaleButtonStyle(enablesHaptic: false))
+        // The glyph alone gives VoiceOver nothing useful, and long-press-to-clear
+        // needs an action it can reach.
+        .accessibilityLabel(String(localized: "删除"))
+        .accessibilityAction(named: Text("清空")) { calculator.clear() }
         .accessibilityIdentifier("keypad-delete")
     }
 
@@ -3574,6 +3583,7 @@ struct CookieKeypadView: View {
 
         }
         .disabled(saving)
+        .accessibilityLabel(saving ? String(localized: "正在保存") : actionTitle)
         // `onCommit` gives this key its one haptic: a tick for "=", a tap for save.
         .buttonStyle(PressScaleButtonStyle(enablesHaptic: false))
         .accessibilityIdentifier("fast-entry-save-button")
@@ -3615,6 +3625,9 @@ struct CookieFastTransactionEditorBody: View {
     @State private var date: Date = Date()
     @State private var payee: String = ""
     @State private var narration: String = ""
+    // The narration save() filled in from the category when no payee was
+    // given. Left untouched, it follows a category change on edit.
+    @State private var autoNarration: String?
     @State private var tagsText: String = ""
     @State private var selectedCurrency: String = "CNY"
 
@@ -3701,25 +3714,37 @@ struct CookieFastTransactionEditorBody: View {
         if isSplitMode {
             return splitPostings
         }
-        let amt = calculator.displayText.replacingOccurrences(of: "-", with: "")
+        let amt = calculator.committedMagnitudeText
         let amtStr = (amt.isEmpty || amt == "0") ? "0.00" : amt
         let negAmtStr = "-\(amtStr)"
+        let simple: [EditableTransactionPosting]
         switch kind {
         case .expense:
-            return [
+            simple = [
                 EditableTransactionPosting(account: resolveExpenseAccount(), amount: amtStr, currency: selectedCurrency),
                 EditableTransactionPosting(account: assetAccount, amount: negAmtStr, currency: selectedCurrency)
             ]
         case .income:
-            return [
+            simple = [
                 EditableTransactionPosting(account: resolveIncomeAccount(), amount: negAmtStr, currency: selectedCurrency),
                 EditableTransactionPosting(account: assetAccount, amount: amtStr, currency: selectedCurrency)
             ]
         case .transfer:
-            return [
+            simple = [
                 EditableTransactionPosting(account: transferTargetAccount, amount: amtStr, currency: selectedCurrency),
                 EditableTransactionPosting(account: transferSourceAccount, amount: negAmtStr, currency: selectedCurrency)
             ]
+        }
+        // The advanced form saves these as they are, so carry the original
+        // posting flags over rather than dropping them on the way.
+        let original = transaction?.editableEntry?.postings ?? []
+        let matches = TransactionEditorView.matchedPostingIndices(
+            newAccounts: simple.map(\.account), originalAccounts: original.map(\.account))
+        return zip(simple, matches).map { posting, match -> EditableTransactionPosting in
+            guard let match, let flag = original[match].flag else { return posting }
+            return EditableTransactionPosting(
+                id: posting.id, account: posting.account, amount: posting.amount,
+                currency: posting.currency, flag: flag)
         }
     }
 
@@ -4133,8 +4158,9 @@ struct CookieFastTransactionEditorBody: View {
 
     private func updateActivePostingAmount() {
         guard isSplitMode, splitPostings.indices.contains(activePostingIndex) else { return }
-        let amtStr = calculator.displayText
-        let clean = amtStr.replacingOccurrences(of: "-", with: "")
+        // Runs on every keystroke, so a pending `100-30` is stored as 70: the
+        // balance, 配平 and a switch to another posting all read this value.
+        let clean = calculator.committedMagnitudeText
         let isNegative = splitPostings[activePostingIndex].amount.hasPrefix("-")
         splitPostings[activePostingIndex].amount = (isNegative ? "-" : "") + clean
     }
@@ -4589,6 +4615,11 @@ struct CookieFastTransactionEditorBody: View {
             payee = initialPayee
             narration = initialNarration
         }
+        let generatedNarrations = (CookieCategoryItem.expenseCategories + CookieCategoryItem.incomeCategories).map(\.name)
+            + [String(localized: "记账"), String(localized: "拆分账单"), String(localized: "转账"), String(localized: "支出"), String(localized: "收入")]
+        if payee.isEmpty, generatedNarrations.contains(narration) {
+            autoNarration = narration
+        }
         tagsText = initialTags
 
         if initialPostings.count > 2 {
@@ -4739,6 +4770,9 @@ struct CookieFastTransactionEditorBody: View {
 
         let cleanPayee = payee.trimmingCharacters(in: .whitespacesAndNewlines)
         var cleanNarration = narration.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleanPayee.isEmpty, let autoNarration, cleanNarration == autoNarration {
+            cleanNarration = ""
+        }
 
         // If neither payee nor narration was entered, provide a default narration based on category/type
         if cleanPayee.isEmpty && cleanNarration.isEmpty {
@@ -4774,6 +4808,7 @@ struct CookieFastTransactionEditorBody: View {
             postings = splitPostings.map { p in
                 LedgerTransactionEntryPosting(
                     account: p.account,
+                    flag: p.flag,
                     amount: p.amount,
                     currency: p.currency.isEmpty ? selectedCurrency : p.currency
                 )
@@ -4817,15 +4852,39 @@ struct CookieFastTransactionEditorBody: View {
             }
         }
 
+        // An edit keeps what this editor does not show: metadata such as the
+        // import keys orderId and statementHash, ^links, and posting flags.
+        // Dropping them would let the next import of the same bill add the
+        // transaction again.
+        let baseline = transaction?.editableEntry
+        let originalPostings = baseline?.postings ?? []
+        let matches = TransactionEditorView.matchedPostingIndices(
+            newAccounts: postings.map(\.account), originalAccounts: originalPostings.map(\.account))
+        let entryPostings = zip(postings, matches).map { posting, match -> LedgerTransactionEntryPosting in
+            guard posting.flag == nil, let match, let flag = originalPostings[match].flag else { return posting }
+            return LedgerTransactionEntryPosting(
+                account: posting.account,
+                flag: flag,
+                amount: posting.amount,
+                currency: posting.currency,
+                costKind: posting.costKind,
+                costAmount: posting.costAmount,
+                costCurrency: posting.costCurrency,
+                costSpec: posting.costSpec,
+                priceKind: posting.priceKind,
+                priceAmount: posting.priceAmount,
+                priceCurrency: posting.priceCurrency
+            )
+        }
         let entry = LedgerTransactionEntry(
             date: Self.formatDate(date),
-            flag: transaction?.editableEntry?.flag,
+            flag: baseline?.flag,
             payee: cleanPayee,
             narration: cleanNarration,
-            metadata: [:],
+            metadata: transaction.map { baseline?.metadata ?? $0.metadata ?? [:] } ?? [:],
             tags: parsedTags,
-            links: [],
-            postings: postings
+            links: baseline?.links ?? [],
+            postings: entryPostings
         )
 
         if !isSplitMode && kind == .transfer {
@@ -4906,8 +4965,9 @@ struct TransactionEditorView: View {
     /// A new entry with nothing prefilled. The advanced form still needs
     /// placeholder postings, but the fast editor picks its own defaults
     /// (common category, last-used funding account) instead of whichever
-    /// Expenses/Assets account happens to sort first.
-    private var fastEditorStartsBlank = false
+    /// Expenses/Assets account happens to sort first. Cleared once postings
+    /// carry the user's work, so 极速 never throws that work away.
+    @State private var fastEditorStartsBlank = false
 
     @State private var mode: EditorMode
     @State private var date: Date
@@ -4939,35 +4999,25 @@ struct TransactionEditorView: View {
         self.onSave = onSave
         self.requiresAdvancedEditor = requiresAdvancedEditor
 
-        let hasComplexCostOrPrice = baseline?.postings.contains(where: { $0.costKind != nil || $0.priceKind != nil }) ?? false
-        _mode = State(initialValue: requiresAdvancedEditor ? .advanced : (initialMode ?? (hasComplexCostOrPrice ? .advanced : .fast)))
+        let initialPostings = baseline?.postings.map(Self.editablePosting) ?? transaction.postings.map {
+            EditableTransactionPosting(
+                account: $0.account,
+                amount: Self.decimalText($0.amount),
+                currency: $0.currency ?? "CNY"
+            )
+        }
+        // The fast editor rebuilds every posting from one keypad amount, so an
+        // entry it cannot reproduce (a refund, cost/price, mixed currencies)
+        // opens in the advanced form instead of being rewritten on save.
+        let fastFits = Self.fastEditorRepresents(initialPostings)
+        _mode = State(initialValue: (requiresAdvancedEditor || !fastFits) ? .advanced : (initialMode ?? .fast))
 
         _date = State(initialValue: Self.parseDate(baseline?.date ?? transaction.date) ?? Date())
         _payee = State(initialValue: baseline?.payee ?? transaction.payee)
         _narration = State(initialValue: baseline?.narration ?? transaction.narration)
         _tagsText = State(initialValue: (baseline?.tags ?? transaction.tags ?? []).joined(separator: " "))
         _metadataText = State(initialValue: Self.metadataText(baseline?.metadata ?? transaction.metadata ?? [:]))
-        _postings = State(initialValue: baseline?.postings.map {
-            EditableTransactionPosting(
-                account: $0.account,
-                amount: $0.amount,
-                currency: $0.currency,
-                flag: $0.flag,
-                costKind: $0.costKind,
-                costAmount: $0.costAmount,
-                costCurrency: $0.costCurrency,
-                costSpec: $0.costSpec,
-                priceKind: $0.priceKind,
-                priceAmount: $0.priceAmount,
-                priceCurrency: $0.priceCurrency
-            )
-        } ?? transaction.postings.map {
-            EditableTransactionPosting(
-                account: $0.account,
-                amount: Self.decimalText($0.amount),
-                currency: $0.currency ?? "CNY"
-            )
-        })
+        _postings = State(initialValue: initialPostings)
     }
 
     init(
@@ -4976,6 +5026,7 @@ struct TransactionEditorView: View {
         initialMode: EditorMode? = nil,
         prefillPayee: String = "",
         prefillNarration: String = "",
+        prefillTags: [String] = [],
         prefillPostings: [EditableTransactionPosting]? = nil,
         onSave: @escaping (LedgerTransactionEntry) async throws -> Void
     ) {
@@ -4983,16 +5034,19 @@ struct TransactionEditorView: View {
         self.accounts = accounts
         self.commodities = commodities
         self.onSave = onSave
-        _mode = State(initialValue: initialMode ?? .fast)
+        // 再记一笔 of a refund or an investment entry must not become a plain
+        // expense or transfer, so it starts in the advanced form.
+        let fastFits = Self.fastEditorRepresents(prefillPostings ?? [])
+        _mode = State(initialValue: fastFits ? (initialMode ?? .fast) : .advanced)
         _date = State(initialValue: Date())
         _payee = State(initialValue: prefillPayee)
         _narration = State(initialValue: prefillNarration)
-        _tagsText = State(initialValue: "")
+        _tagsText = State(initialValue: prefillTags.joined(separator: " "))
         _metadataText = State(initialValue: "{}")
         if let prefillPostings, !prefillPostings.isEmpty {
             _postings = State(initialValue: prefillPostings)
         } else {
-            fastEditorStartsBlank = prefillPayee.isEmpty && prefillNarration.isEmpty
+            _fastEditorStartsBlank = State(initialValue: prefillPayee.isEmpty && prefillNarration.isEmpty)
             _postings = State(initialValue: [
                 EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Expenses:") })?.account ?? "Expenses:Other", amount: "", currency: Self.defaultCurrency(valuation: nil, commodities: commodities)),
                 EditableTransactionPosting(account: accounts.first(where: { $0.active && $0.account.hasPrefix("Assets:") })?.account ?? "Assets:Cash", amount: "", currency: "")
@@ -5064,6 +5118,8 @@ struct TransactionEditorView: View {
                         narration = newNarration
                         if !newPostings.isEmpty {
                             postings = newPostings
+                            // These now hold the fast editor's amount and accounts.
+                            fastEditorStartsBlank = false
                         }
                         withLedgerAnimation(LedgerMotion.disclose) {
                             mode = .advanced
@@ -5218,12 +5274,16 @@ struct TransactionEditorView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("极速") {
                         LedgerFeedback.light()
+                        // Postings edited here are the user's work, not placeholders.
+                        if let initial = initialDraft?.postings, postings != initial {
+                            fastEditorStartsBlank = false
+                        }
                         withLedgerAnimation(LedgerMotion.disclose) {
                             mode = .fast
                         }
                     }
                     .font(.system(size: 15, weight: .medium))
-                    .disabled(saving || requiresAdvancedEditor)
+                    .disabled(saving || requiresAdvancedEditor || !Self.fastEditorRepresents(postings))
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -5285,6 +5345,119 @@ struct TransactionEditorView: View {
 
     static func decimalText(_ minorUnits: Int) -> String {
         String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), Double(minorUnits) / 100)
+    }
+
+    static func editablePosting(_ posting: LedgerTransactionEntryPosting) -> EditableTransactionPosting {
+        EditableTransactionPosting(
+            account: posting.account,
+            amount: posting.amount,
+            currency: posting.currency,
+            flag: posting.flag,
+            costKind: posting.costKind,
+            costAmount: posting.costAmount,
+            costCurrency: posting.costCurrency,
+            costSpec: posting.costSpec,
+            priceKind: posting.priceKind,
+            priceAmount: posting.priceAmount,
+            priceCurrency: posting.priceCurrency
+        )
+    }
+
+    /// 再记一笔 copies the exact amounts and cost/price of the source entry, and
+    /// falls back to its two-decimal projection only when there is no entry.
+    /// Posting flags mark the original's review state and are not copied.
+    static func duplicatePostings(of transaction: LedgerTransaction) -> [EditableTransactionPosting] {
+        if let entry = transaction.editableEntry, !entry.postings.isEmpty {
+            return entry.postings.map {
+                EditableTransactionPosting(
+                    account: $0.account,
+                    amount: $0.amount,
+                    currency: $0.currency,
+                    costKind: $0.costKind,
+                    costAmount: $0.costAmount,
+                    costCurrency: $0.costCurrency,
+                    costSpec: $0.costSpec,
+                    priceKind: $0.priceKind,
+                    priceAmount: $0.priceAmount,
+                    priceCurrency: $0.priceCurrency
+                )
+            }
+        }
+        return transaction.postings.map {
+            EditableTransactionPosting(
+                account: $0.account,
+                amount: decimalText($0.amount),
+                currency: $0.currency ?? "CNY"
+            )
+        }
+    }
+
+    static func duplicateTags(of transaction: LedgerTransaction) -> [String] {
+        transaction.editableEntry?.tags ?? transaction.tags ?? []
+    }
+
+    /// Whether the fast editor can load these postings and save them back
+    /// unchanged. It keeps one unsigned keypad amount with two decimals in one
+    /// currency, writes Expenses as positive and Income as negative, and has no
+    /// cost or price fields.
+    static func fastEditorRepresents(_ postings: [EditableTransactionPosting]) -> Bool {
+        if postings.contains(where: { $0.costKind != nil || $0.costSpec != nil || $0.priceKind != nil }) {
+            return false
+        }
+        let currencies = Set(postings.map { $0.currency.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        if currencies.count > 1 { return false }
+        for posting in postings {
+            let amount = posting.amount.trimmingCharacters(in: .whitespaces)
+            if amount.isEmpty {
+                // Split mode writes the keypad into an elided posting as 0.
+                if postings.count > 2 { return false }
+                continue
+            }
+            guard ExactBookkeepingAmount.parse(amount) != nil else { return false }
+            if let dot = amount.firstIndex(of: ".") {
+                let fraction = amount[amount.index(after: dot)...].reversed().drop(while: { $0 == "0" })
+                if fraction.count > 2 { return false }
+            }
+        }
+        guard postings.count == 2 else { return true }
+
+        // An elided amount balances the other posting.
+        func signedAmount(_ index: Int) -> Decimal {
+            if let own = ExactBookkeepingAmount.parse(postings[index].amount.trimmingCharacters(in: .whitespaces)) {
+                return own
+            }
+            let other = ExactBookkeepingAmount.parse(postings[1 - index].amount.trimmingCharacters(in: .whitespaces)) ?? 0
+            return -other
+        }
+        // Same precedence as the fast editor's setup: an Expenses posting
+        // makes it an expense, otherwise an Income posting makes it income.
+        if let expense = postings.firstIndex(where: { $0.account.hasPrefix("Expenses:") }) {
+            return signedAmount(expense) >= 0
+        }
+        if let income = postings.firstIndex(where: { $0.account.hasPrefix("Income:") }) {
+            return signedAmount(income) <= 0
+        }
+        return true
+    }
+
+    /// For each new posting, the index of the original posting it continues:
+    /// the same account first, then the one original left over when exactly
+    /// one new posting is unmatched (a changed category or funding account).
+    static func matchedPostingIndices(newAccounts: [String], originalAccounts: [String]) -> [Int?] {
+        var used = Set<Int>()
+        var matches: [Int?] = newAccounts.map { account -> Int? in
+            guard let index = originalAccounts.indices.first(where: { !used.contains($0) && originalAccounts[$0] == account }) else {
+                return nil
+            }
+            used.insert(index)
+            return index
+        }
+        let unmatched = matches.indices.filter { matches[$0] == nil }
+        let unused = originalAccounts.indices.filter { !used.contains($0) }
+        if unmatched.count == 1, unused.count == 1 {
+            matches[unmatched[0]] = unused[0]
+        }
+        return matches
     }
 
     private func save() async {

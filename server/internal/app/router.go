@@ -498,6 +498,33 @@ func (s *Server) deleteTransaction(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// reconciliationBalance returns the balance a reconciliation write on `date`
+// diffs against, so the client's 差异 and preview match what will be written.
+func (s *Server) reconciliationBalance(c *gin.Context) {
+	if !requireSensitive(c) {
+		return
+	}
+	account, date := c.Query("account"), c.Query("date")
+	if err := validateAccount("account", account); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := validateDate("date", date); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	snapshot, ok := s.snapshotLite(c, true)
+	if !ok {
+		return
+	}
+	balance, _, err := ReconciliationBalanceAsOf(snapshot, account, date)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, balance)
+}
+
 func (s *Server) reconcile(c *gin.Context) {
 	if !requireSensitive(c) {
 		return

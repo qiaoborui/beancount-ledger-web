@@ -64,8 +64,7 @@ func SegmentLines(lines []BeanLine) SourceSegments {
 		blockEnd := i + 1
 		for blockEnd < len(lines) {
 			next := lines[blockEnd]
-			nextTrimmed := strings.TrimSpace(next.Text)
-			if nextTrimmed == "" || strings.HasPrefix(nextTrimmed, ";") || isIndentedBeanLine(next.Text) {
+			if IsBlockContinuationLine(next.Text) {
 				blockEnd++
 				continue
 			}

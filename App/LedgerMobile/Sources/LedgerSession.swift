@@ -1627,18 +1627,29 @@ final class LedgerSession: ObservableObject {
         let input = LedgerAccountInput(date: date, account: account, alias: alias, currency: currency)
         let epoch = sessionEpoch
         if let localRepository {
-            try await localRepository.addAccount(input: input)
-            guard epoch == sessionEpoch else { throw CancellationError() }
-
-            if let openingBalance = openingBalance?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !openingBalance.isEmpty,
-               let balanceDecimal = Decimal(string: openingBalance),
-               balanceDecimal != 0 {
+            var balanceDecimal: Decimal?
+            if let raw = openingBalance?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+                guard let parsed = Self.parseOpeningBalance(raw) else {
+                    throw LocalLedgerError.invalidConfiguration(String(localized: "期初余额格式无法识别，请输入数字，例如 1000.50"))
+                }
+                balanceDecimal = parsed
+            }
+            var accounts = [input]
+            var entry: LedgerTransactionEntry?
+            if let balanceDecimal, balanceDecimal != 0 {
+                let equity = "Equity:Opening-Balances"
+                // Only onboarding-created ledgers open the equity account; an
+                // imported ledger needs it opened alongside the new account, at
+                // inception so later backdated opening balances still validate.
+                let equityIsOpen = ledger?.accounts.contains(where: { $0.account == equity }) ?? false
+                if !equityIsOpen {
+                    accounts.insert(LedgerAccountInput(date: "1970-01-01", account: equity, alias: "", currency: ""), at: 0)
+                }
                 let isLiability = account.hasPrefix("Liabilities:")
                 let isPositive = balanceDecimal > 0
                 let accountAmount = isLiability ? (isPositive ? "-\(balanceDecimal)" : "\(abs(balanceDecimal))") : "\(balanceDecimal)"
                 let equityAmount = isLiability ? "\(balanceDecimal)" : (isPositive ? "-\(balanceDecimal)" : "\(abs(balanceDecimal))")
-                let entry = LedgerTransactionEntry(
+                entry = LedgerTransactionEntry(
                     date: date,
                     flag: "*",
                     payee: "",
@@ -1647,18 +1658,34 @@ final class LedgerSession: ObservableObject {
                     links: [],
                     postings: [
                         LedgerTransactionEntryPosting(account: account, amount: accountAmount, currency: currency),
-                        LedgerTransactionEntryPosting(account: "Equity:Opening-Balances", amount: equityAmount, currency: currency)
+                        LedgerTransactionEntryPosting(account: equity, amount: equityAmount, currency: currency)
                     ]
                 )
-                try await localRepository.addTransaction(entry: entry)
-                guard epoch == sessionEpoch else { throw CancellationError() }
             }
+            // One revision: a rejected opening balance leaves no `open` behind,
+            // so saving again cannot write a duplicate.
+            try await localRepository.addAccounts(accounts, openingEntry: entry)
+            guard epoch == sessionEpoch else { throw CancellationError() }
         } else {
             _ = try await performSensitiveRequest { repository in
                 try await repository.addAccount(input: input)
             }
         }
         await refresh()
+    }
+
+    /// Reads an opening balance typed on a `.decimalPad`, which shows the
+    /// locale's decimal separator ("12,50" in de_DE). Anything that is not a
+    /// plain number returns nil instead of a truncated prefix.
+    nonisolated static func parseOpeningBalance(_ raw: String, locale: Locale = .current) -> Decimal? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let separator = locale.decimalSeparator, separator != "." {
+            text = text.replacingOccurrences(of: separator, with: ".")
+        }
+        guard text.range(of: #"^-?([0-9]+(\.[0-9]*)?|\.[0-9]+)$"#, options: .regularExpression) != nil else {
+            return nil
+        }
+        return Decimal(string: text, locale: Locale(identifier: "en_US_POSIX"))
     }
 
     func reconcileAccount(
@@ -1681,6 +1708,14 @@ final class LedgerSession: ObservableObject {
         }
         await refresh()
         return result
+    }
+
+    /// The balance a reconciliation write on `date` diffs against, computed by
+    /// the same server/core code as the write so the form's 差异 matches it.
+    func reconciliationBalance(account: String, date: String) async throws -> LedgerReconciliationBalance {
+        try await performSensitiveRequest(validatesRequestGeneration: false) { repository in
+            try await repository.reconciliationBalance(account: account, date: date)
+        }
     }
 
     func localReconciliationRows(start: String, end: String) async throws -> [LedgerReconciliationRow] {
@@ -3839,7 +3874,8 @@ final class LedgerSession: ObservableObject {
             if !matches {
                 invalidateOverviewCategories()
                 let cached = try? await local.cachedOverviewCategories(start: targetRange.start,
-                    end: targetRange.queryEndExclusive, expectedRevisionID: revisionID)
+                    end: targetRange.queryEndExclusive, expectedRevisionID: revisionID,
+                    valuationCurrency: targetCurrency)
                 guard generation == requestGeneration else { return }
                 let current = try await local.workspace.currentRevision()
                 guard generation == requestGeneration, current?.id == revisionID else {
@@ -5357,7 +5393,8 @@ final class LedgerSession: ObservableObject {
         defer { if isCurrent() { isLocalOverviewCategoriesLoading = false } }
         do {
             let result = try await repository.overviewCategories(start: range.start,
-                end: range.queryEndExclusive, expectedRevisionID: revisionID)
+                end: range.queryEndExclusive, expectedRevisionID: revisionID,
+                valuationCurrency: ledger?.valuationCurrency)
             // A writer may have published while the pinned engine read was suspended.
             let current = try await repository.workspace.currentRevision()
             guard isCurrent(), !Task.isCancelled else { return }

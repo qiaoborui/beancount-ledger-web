@@ -33,7 +33,13 @@ struct LocalPendingScan {
         let revision: String
         let counts: [LedgerPendingFilter: Int]
         let totalMinorUnits: Int
+        /// The same amounts split by each row's presentation currency, so the
+        /// inbox never adds USD to CNY under one symbol.
+        let minorUnitsByCurrency: [String: Int]
         let expenseAccounts: [String]
+        /// Income accounts, offered when the placeholder being classified is an
+        /// income account (`Income:Unknown`).
+        let incomeAccounts: [String]
         let transactions: [LedgerTransaction]
         let nextOffset: Int?
         var totalCount: Int { counts[.all] ?? 0 }
@@ -47,6 +53,7 @@ struct LocalPendingScan {
     private let limits: Limits
     private var counts: [LedgerPendingFilter: Int] = [:]
     private var total = 0
+    private var currencyTotals: [String: Int] = [:]
     private var accounts: Set<String> = []
     private var cursors: Set<String> = []
     private var cursor: String?
@@ -68,7 +75,7 @@ struct LocalPendingScan {
         self.revision = revision; self.filter = filter; self.offset = offset; self.limits = limits
         stateBytes = try LocalTransactionScan.add(512, LocalTransactionScan.stringBytes(revision))
         guard stateBytes <= limits.stateBytes else { throw ScanError.capacity }
-        for account in declaredAccounts where account.hasPrefix("Expenses:") { try addAccount(account) }
+        for account in declaredAccounts where Self.isCategory(account) { try addAccount(account) }
     }
 
     mutating func consume(_ page: LedgerTransactionPage, requestedCursor: String?) throws -> Result? {
@@ -89,13 +96,16 @@ struct LocalPendingScan {
                 guard previousDate.map({ $0 >= row.date }) ?? true else { throw ScanError.order }
                 if let previousDate { stateBytes -= try LocalTransactionScan.stringBytes(previousDate) }
                 try charge(LocalTransactionScan.stringBytes(row.date)); previousDate = row.date
-                for posting in row.postings where posting.account.hasPrefix("Expenses:") { try addAccount(posting.account) }
+                for posting in row.postings where Self.isCategory(posting.account) { try addAccount(posting.account) }
                 let reasons = row.pendingReasons
                 guard !reasons.isEmpty else { continue }
                 // Evaluate precisely the branches reached by the legacy amount
                 // presentation before constructing it; avoid all integer traps.
                 _ = try LocalTransactionScan.checkedExpense(row)
-                total = try LocalTransactionScan.add(total, TransactionPresentation(transaction: row).minorUnits)
+                let presentation = TransactionPresentation(transaction: row)
+                total = try LocalTransactionScan.add(total, presentation.minorUnits)
+                if currencyTotals[presentation.currency] == nil { try charge(LocalTransactionScan.stringBytes(presentation.currency)) }
+                currencyTotals[presentation.currency] = try LocalTransactionScan.add(currencyTotals[presentation.currency] ?? 0, presentation.minorUnits)
                 for tab in LedgerPendingFilter.allCases where tab.includes(reasons) {
                     counts[tab] = try LocalTransactionScan.add(counts[tab] ?? 0, 1)
                 }
@@ -110,16 +120,21 @@ struct LocalPendingScan {
             guard cursor == nil else { return nil }
             guard offset == 0 || offset < matched else { throw ScanError.offset }
             let consumed = try LocalTransactionScan.add(offset, rows.count)
-            let result = Result(revision: revision, counts: counts, totalMinorUnits: total,
-                expenseAccounts: accounts.sorted(), transactions: rows, nextOffset: consumed < matched ? consumed : nil)
+            let sorted = accounts.sorted()
+            let result = Result(revision: revision, counts: counts, totalMinorUnits: total, minorUnitsByCurrency: currencyTotals,
+                expenseAccounts: sorted.filter { $0.hasPrefix("Expenses:") }, incomeAccounts: sorted.filter { $0.hasPrefix("Income:") },
+                transactions: rows, nextOffset: consumed < matched ? consumed : nil)
             complete = true
-            rows.removeAll(); accounts.removeAll(); cursors.removeAll()
+            rows.removeAll(); accounts.removeAll(); cursors.removeAll(); currencyTotals.removeAll()
             return result
         } catch {
-            failed = true; rows.removeAll(); accounts.removeAll(); cursors.removeAll()
+            failed = true; rows.removeAll(); accounts.removeAll(); cursors.removeAll(); currencyTotals.removeAll()
             rowBytes = 0; stateBytes = 0
             throw error
         }
+    }
+    private static func isCategory(_ account: String) -> Bool {
+        account.hasPrefix("Expenses:") || account.hasPrefix("Income:")
     }
     private mutating func addAccount(_ account: String) throws {
         guard !accounts.contains(account) else { return }
@@ -130,5 +145,58 @@ struct LocalPendingScan {
         let total = try LocalTransactionScan.add(stateBytes, bytes)
         guard total <= limits.stateBytes else { throw ScanError.capacity }
         stateBytes = total
+    }
+}
+
+/// The category rewrite behind the pending inbox's 补分类 sheet. The account it
+/// replaces comes from the classifier's own `.uncategorized` reason, so every
+/// placeholder the inbox lists (`Expenses:Other`, `Equity:UFO`, …) is the one
+/// that changes, and a rewrite that would change nothing is refused.
+enum PendingCategoryEdit {
+    enum EditError: LocalizedError, Equatable {
+        case noCategoryPosting, unchanged
+        var errorDescription: String? {
+            switch self {
+            case .noCategoryPosting: String(localized: "这笔交易没有可替换的分类账户。")
+            case .unchanged: String(localized: "新分类与当前分类相同，未作修改。")
+            }
+        }
+    }
+
+    /// The placeholder posting the classifier flagged, if any.
+    static func placeholderAccount(of transaction: LedgerTransaction) -> String? {
+        for reason in transaction.pendingReasons {
+            if case .uncategorized(let account) = reason { return account }
+        }
+        return nil
+    }
+
+    /// The account a category change rewrites: the placeholder when there is
+    /// one, otherwise the first expense or income posting.
+    static func targetAccount(of transaction: LedgerTransaction) -> String? {
+        placeholderAccount(of: transaction)
+            ?? transaction.postings.first(where: { $0.account.hasPrefix("Expenses:") || $0.account.hasPrefix("Income:") })?.account
+    }
+
+    /// Income placeholders are reclassified among income accounts.
+    static func isIncome(_ transaction: LedgerTransaction) -> Bool {
+        targetAccount(of: transaction)?.hasPrefix("Income:") == true
+    }
+
+    /// Whether the classifier would list `account` as uncategorized. Such
+    /// accounts are not real choices in the picker.
+    static func isPlaceholder(_ account: String) -> Bool {
+        let probe = LedgerTransaction(date: "", payee: "probe", narration: "probe",
+            postings: [LedgerPosting(account: account, amount: 0, currency: nil)], source: .init(file: "", line: 0))
+        return placeholderAccount(of: probe) != nil
+    }
+
+    static func entry(for transaction: LedgerTransaction, to newAccount: String) throws -> LedgerTransactionEntry {
+        guard let oldAccount = targetAccount(of: transaction), !oldAccount.isEmpty else { throw EditError.noCategoryPosting }
+        guard oldAccount != newAccount, !newAccount.isEmpty else { throw EditError.unchanged }
+        let entry = transaction.entryReplacingAccount(from: oldAccount, to: newAccount)
+        guard entry.postings.contains(where: { $0.account == newAccount }),
+              !entry.postings.contains(where: { $0.account == oldAccount }) else { throw EditError.unchanged }
+        return entry
     }
 }

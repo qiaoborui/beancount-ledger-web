@@ -303,6 +303,9 @@ func localRequestCache(cfg Config, staging bool) (*LedgerCache, error) {
 // can never be reached through a path supplied by the mobile client.
 func localHandler(s *Server, method, path string) (gin.HandlerFunc, bool) {
 	if method == http.MethodGet {
+		if path == "/api/ledger/reconciliation/balance" {
+			return s.reconciliationBalance, false
+		}
 		return map[string]gin.HandlerFunc{
 			"/api/ledger/bootstrap":         s.ledgerBootstrap,
 			"/api/ledger/summary":           s.summary,

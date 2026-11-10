@@ -665,8 +665,11 @@ struct TerminalAssetsReport: View {
     private var debt: Int { index.debt }
     private var missing: Bool { index.missing }
     private var currency: String { data.valuationCurrency }
+    /// The series actually drawn: 月末 falls back to the daily history when the
+    /// ledger has no month-end points, and the caption follows this, not the tab.
+    private var showsMonthEnd: Bool { monthEnd && !data.monthEndNetWorth.isEmpty }
     private var points: [LedgerNetWorthPoint] {
-        monthEnd && !data.monthEndNetWorth.isEmpty ? data.monthEndNetWorth : data.netWorthHistory
+        showsMonthEnd ? data.monthEndNetWorth : data.netWorthHistory
     }
     private var accountNames: [String] { index.accountNames }
     private var labels: [String: String] { TransactionCategoryPresentation.accountLabels(data.accounts) }
@@ -721,11 +724,14 @@ struct TerminalAssetsReport: View {
             // colour with no opposed partner on the same settle is the one
             // thing batch 1's own rules call a bug, so this intentionally
             // departs from the stray `v-out` in the b07 HTML.
-            settleRow(String(localized: "负债"), amount(debt, prefix: debt != 0 ? "−" : ""))
+            // `debt` is signed: overpaid cards can leave it below zero, which
+            // adds to net worth and so reads `+`. `amount` drops the sign, so
+            // a negative net worth carries its own `−` too.
+            settleRow(String(localized: "负债"), amount(debt, prefix: debt > 0 ? "−" : debt < 0 ? "+" : ""))
             HStack(alignment: .firstTextBaseline, spacing: 16) {
                 Text("净值").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                 Spacer(minLength: 0)
-                amount(assets - debt, size: 30, weight: .medium, currencySymbol: true).lineLimit(1).fixedSize()
+                amount(assets - debt, prefix: assets - debt < 0 ? "−" : "", size: 30, weight: .medium, currencySymbol: true).lineLimit(1).fixedSize()
             }
             .padding(.top, 14)
             .overlay(alignment: .top) { BalancedPalette.ink.frame(height: 1) }
@@ -785,7 +791,7 @@ struct TerminalAssetsReport: View {
         case "wealth": String(localized: "储蓄与投资")
         case "cash": String(localized: "现金与支付")
         case "receivable": String(localized: "应收")
-        case "credit", "liability": String(localized: "信用")
+        case "credit", "liability": String(localized: "负债")
         default: String(localized: "其他资产")
         }
     }
@@ -795,11 +801,10 @@ struct TerminalAssetsReport: View {
         struct Acc { var amount = 0; var change = 0; var changeAvailable = true }
         var byGroup: [String: Acc] = [:]
         for balance in balances where balance.valuationMissing != true {
-            let isLiability = balance.account.hasPrefix("Liabilities:")
-            let rawGroup = groupLookup[balance.account] ?? (isLiability ? "liability" : "asset")
-            let group = rawGroup == "credit" ? "liability" : rawGroup
+            let group = TerminalAssetsIndex.compositionGroup(account: balance.account, metadataGroup: groupLookup[balance.account])
             var acc = byGroup[group] ?? Acc()
-            acc.amount += isLiability ? -abs(balance.valuation) : balance.valuation
+            // Signed, so an overpaid card offsets the rest of the debt.
+            acc.amount += balance.valuation
             if balance.periodAvailable == true, balance.periodValuationMissing != true, let delta = balance.periodValuationChange {
                 acc.change += delta
             } else {
@@ -819,7 +824,9 @@ struct TerminalAssetsReport: View {
 
     private var compositionBand: some View {
         let assetGroups = groupRows.filter { !$0.isLiability }.sorted { $0.amount > $1.amount }
-        let total = max(1, assetGroups.reduce(0) { $0 + $1.amount })
+        // Shares are of the positive groups; a group below zero (an overdrawn
+        // account) gets no bar segment and no percentage, only its amount.
+        let total = max(1, assetGroups.reduce(0) { $0 + max(0, $1.amount) })
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -835,7 +842,7 @@ struct TerminalAssetsReport: View {
                 HStack(spacing: gap) {
                     ForEach(Array(assetGroups.enumerated()), id: \.element.id) { index, group in
                         Self.groupColors[index % Self.groupColors.count]
-                            .frame(width: usable * CGFloat(Double(group.amount) / Double(total)))
+                            .frame(width: usable * CGFloat(Double(max(0, group.amount)) / Double(total)))
                     }
                 }
             }.frame(height: 10).padding(.bottom, 12).accessibilityHidden(true)
@@ -846,8 +853,8 @@ struct TerminalAssetsReport: View {
                         Text(group.label).balancedFont(size: 13).foregroundStyle(BalancedPalette.secondary)
                         Spacer(minLength: 8)
                         if session.amountsVisible {
-                            (amount(group.amount, size: 13, weight: .medium)
-                             + Text(" " + String(format: "%.1f%%", Double(group.amount) / Double(total) * 100))
+                            (amount(group.amount, prefix: group.amount < 0 ? "−" : "", size: 13, weight: .medium)
+                             + Text(group.amount > 0 ? " " + String(format: "%.1f%%", Double(group.amount) / Double(total) * 100) : "")
                                 .font(.custom(BalancedWeight.regular.sansPostscriptName, size: 13)).foregroundColor(BalancedPalette.meta))
                                 .lineLimit(1).fixedSize()
                         } else {
@@ -872,7 +879,13 @@ struct TerminalAssetsReport: View {
                     trendChoice(String(localized: "月末"), value: true)
                     trendChoice(String(localized: "每日"), value: false)
                 }
-                Text(session.amountsVisible ? "月度期末 · \(currency)" : "月度期末").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                Group {
+                    if showsMonthEnd {
+                        Text(session.amountsVisible ? "月度期末 · \(currency)" : "月度期末")
+                    } else {
+                        Text(session.amountsVisible ? "每日 · \(currency)" : "每日")
+                    }
+                }.balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             }.padding(EdgeInsets(top: 26, leading: 20, bottom: 10, trailing: 20))
             if points.isEmpty {
                 Text("所选范围暂无净值趋势").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
@@ -911,20 +924,26 @@ struct TerminalAssetsReport: View {
                 }
                 .frame(height: 156).padding(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))
                 .accessibilityIdentifier("balanced-assets-chart")
-                Text(session.amountsVisible ? "期末值与上月月末比较，不含区间内波动。" : "走势保留形状，刻度和末值一并隐藏，避免从坐标反推金额。")
+                Text(!session.amountsVisible ? "走势保留形状，刻度和末值一并隐藏，避免从坐标反推金额。"
+                    : showsMonthEnd ? "期末值与上月月末比较，不含区间内波动。" : "每个记账日的净值，含区间内波动。")
                     .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                     .padding(EdgeInsets(top: 0, leading: 20, bottom: 16, trailing: 20))
             }
         }.overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
     }
 
+    /// Highlights the series on screen. 月末 is disabled when the ledger has no
+    /// month-end points, rather than staying lit over daily data.
     private func trendChoice(_ title: String, value: Bool) -> some View {
-        Button { monthEnd = value } label: {
-            Text(title).balancedFont(size: 12.5, weight: monthEnd == value ? .semibold : .regular)
-                .foregroundStyle(monthEnd == value ? BalancedPalette.ink : BalancedPalette.meta)
+        let selected = showsMonthEnd == value
+        let unavailable = value && data.monthEndNetWorth.isEmpty
+        return Button { monthEnd = value } label: {
+            Text(title).balancedFont(size: 12.5, weight: selected ? .semibold : .regular)
+                .foregroundStyle(selected ? BalancedPalette.ink : BalancedPalette.meta)
+                .opacity(unavailable ? 0.45 : 1)
                 .padding(.bottom, 3)
-                .overlay(alignment: .bottom) { if monthEnd == value { BalancedPalette.ink.frame(height: 2) } }
-        }.buttonStyle(.plain).accessibilityAddTraits(monthEnd == value ? .isSelected : [])
+                .overlay(alignment: .bottom) { if selected { BalancedPalette.ink.frame(height: 2) } }
+        }.buttonStyle(.plain).disabled(unavailable).accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     // MARK: Group change table (`.tbl`)
@@ -953,9 +972,12 @@ struct TerminalAssetsReport: View {
             }
             if let netWorthWindowChange = data.netWorthWindows?.monthChange, session.amountsVisible {
                 let net = assets - debt
+                // Both sides are balance changes, so this only says the group
+                // rows add up; income and expense are not consulted and the
+                // copy must not claim they were.
                 let consistent = abs(netWorthWindowChange - (groupRows.reduce(0) { $0 + ($1.change ?? 0) })) < 100
                 Text(consistent
-                    ? "净值变动 \(amountPlain(netWorthWindowChange)) 与本期净结余一致，说明没有未记录的资产进出。"
+                    ? "净值变动 \(amountPlain(netWorthWindowChange)) 与各账户组变动合计一致。"
                     : "净值变动 \(amountPlain(netWorthWindowChange))，\(amountPlain(net)) 为当前估值。")
                     .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                     .padding(EdgeInsets(top: 12, leading: 20, bottom: 20, trailing: 20))

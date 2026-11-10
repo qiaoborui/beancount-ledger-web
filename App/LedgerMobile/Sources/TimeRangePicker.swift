@@ -194,7 +194,7 @@ private struct LedgerTimeRangeSheet: View {
 
                     Spacer()
 
-                    Text(verbatim: String(localized: "\(selectedYear)年"))
+                    Text(verbatim: String(localized: "\(selectedYear, format: .number.grouping(.never))年"))
                         .font(.system(.subheadline, design: .monospaced, weight: .bold))
                         .foregroundStyle(LedgerPalette.ink)
 
@@ -242,6 +242,9 @@ private struct LedgerTimeRangeSheet: View {
                 .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
             }
             .padding(.vertical, 4)
+            // The grid draws its own hairline; the system separator would add a second,
+            // inset one under the middle column.
+            .listRowSeparator(.hidden)
         } header: {
             Text("月份快捷直选")
         }
@@ -267,7 +270,7 @@ private struct LedgerTimeRangeSheet: View {
 
                     Spacer()
 
-                    Text(verbatim: String(localized: "\(selectedYear)年"))
+                    Text(verbatim: String(localized: "\(selectedYear, format: .number.grouping(.never))年"))
                         .font(.system(.subheadline, design: .monospaced, weight: .bold))
                         .foregroundStyle(LedgerPalette.ink)
 
@@ -335,7 +338,7 @@ private struct LedgerTimeRangeSheet: View {
                         LedgerFeedback.selection()
                         session.setDraftRange(LedgerDateRange.year(year: y))
                     } label: {
-                        Text(verbatim: String(localized: "\(y)年"))
+                        Text(verbatim: String(localized: "\(y, format: .number.grouping(.never))年"))
                             .balancedFont(size: 14, weight: isSelected ? .medium : .regular)
                             .monospacedDigit()
                             .foregroundStyle(isSelected ? BalancedPalette.ink : BalancedPalette.secondary)
@@ -351,6 +354,7 @@ private struct LedgerTimeRangeSheet: View {
             }
             .padding(.vertical, 4)
             .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+            .listRowSeparator(.hidden)
         } header: {
             Text("年份快捷直选")
         }

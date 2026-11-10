@@ -132,7 +132,7 @@ struct GlobalSearchView: View {
                         searchHintRow(label: String(localized: "商户与摘要"), value: String(localized: "任意文字"))
                         searchHintRow(label: String(localized: "账户"), value: "Assets:Bank:CMB", valueMono: true)
                         searchHintRow(label: String(localized: "标签"), value: String(localized: "#装修"))
-                        searchHintRow(label: String(localized: "金额"), value: String(localized: "38.5 以上"))
+                        searchHintRow(label: String(localized: "金额"), value: "38.5", valueMono: true)
                         searchHintRow(label: String(localized: "日期"), value: "2026-03")
                     } header: { searchSectionHeader(String(localized: "可以搜什么")) }
                     .listRowBackground(Color.clear)

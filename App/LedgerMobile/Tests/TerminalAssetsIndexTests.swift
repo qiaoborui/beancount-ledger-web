@@ -37,7 +37,10 @@ final class TerminalAssetsIndexTests: XCTestCase {
         let referenceValuations = Dictionary(grouping: referenceBalances.filter { $0.valuationMissing != true },
             by: \.account).mapValues { $0.reduce(0) { $0 + $1.valuation } }
         let referenceAssets = referenceValuations.filter { $0.key.hasPrefix("Assets:") }.values.reduce(0, +)
-        let referenceDebt = referenceValuations.filter { $0.key.hasPrefix("Liabilities:") }.values.reduce(0) { $0 + abs($1) }
+        // Debt is signed: the positive Loan balance is owed to the user and
+        // offsets the card, it is not more debt.
+        let referenceDebt = -referenceValuations.filter { $0.key.hasPrefix("Liabilities:") }.values.reduce(0, +)
+        XCTAssertEqual(referenceDebt, 25_000_00)
 
         XCTAssertEqual(index.balances.map(\.account), referenceBalances.map(\.account))
         XCTAssertEqual(index.valuations, referenceValuations)

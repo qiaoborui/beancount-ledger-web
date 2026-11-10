@@ -83,6 +83,45 @@ final class LocalPendingScanTests: XCTestCase {
         var clean = try LocalPendingScan(revision: "r")
         XCTAssertEqual(try clean.consume(page([row(1, amount: .min)]), requestedCursor: nil)?.totalMinorUnits, 0)
     }
+    func testTotalsSplitByCurrencyAndIncomeAccountsAreOfferedSeparately() throws {
+        let usd = LedgerTransaction(date: "2026-09-24", payee: "Synthetic", narration: "",
+            postings: [.init(account: "Expenses:Unknown", amount: 1_000, currency: "USD")],
+            pendingReviewFlag: false, source: .init(file: "fixture.bean", line: 1))
+        let income = LedgerTransaction(date: "2026-09-24", payee: "Synthetic", narration: "",
+            postings: [.init(account: "Income:Unknown", amount: -300, currency: "CNY"), .init(account: "Assets:Bank", amount: 300, currency: "CNY")],
+            pendingReviewFlag: false, source: .init(file: "fixture.bean", line: 2))
+        var scan = try LocalPendingScan(revision: "r", declaredAccounts: ["Income:Salary", "Expenses:Food", "Assets:Cash"])
+        let result = try XCTUnwrap(scan.consume(page([usd, income, row(3, flag: true, amount: 5_000)]), requestedCursor: nil))
+        XCTAssertEqual(result.minorUnitsByCurrency, ["USD": 1_000, "CNY": 5_300])
+        XCTAssertEqual(result.expenseAccounts, ["Expenses:Food", "Expenses:Unknown"])
+        XCTAssertEqual(result.incomeAccounts, ["Income:Salary", "Income:Unknown"])
+    }
+    func testCategoryEditReplacesTheFlaggedPlaceholderAndRefusesNoOps() throws {
+        func tx(_ account: String, _ other: String = "Assets:Alipay") -> LedgerTransaction {
+            .init(date: "2026-09-24", payee: "Synthetic", narration: "",
+                postings: [.init(account: account, amount: 1_250, currency: "CNY"), .init(account: other, amount: -1_250, currency: "CNY")],
+                source: .init(file: "fixture.bean", line: 1))
+        }
+        for placeholder in ["Expenses:Other", "Expenses:未分类", "Expenses:待整理", "Expenses:Pending", "Equity:UFO", "Expenses:Unknown"] {
+            let entry = try PendingCategoryEdit.entry(for: tx(placeholder), to: "Expenses:Food:Dining")
+            XCTAssertEqual(entry.postings.map(\.account), ["Expenses:Food:Dining", "Assets:Alipay"], placeholder)
+            XCTAssertTrue(PendingCategoryEdit.isPlaceholder(placeholder), placeholder)
+        }
+        XCTAssertFalse(PendingCategoryEdit.isPlaceholder("Expenses:Food:Dining"))
+        XCTAssertThrowsError(try PendingCategoryEdit.entry(for: tx("Expenses:Unknown"), to: "Expenses:Unknown")) {
+            XCTAssertEqual($0 as? PendingCategoryEdit.EditError, .unchanged)
+        }
+        XCTAssertThrowsError(try PendingCategoryEdit.entry(for: tx("Assets:Cash"), to: "Expenses:Food")) {
+            XCTAssertEqual($0 as? PendingCategoryEdit.EditError, .noCategoryPosting)
+        }
+        // A real category with no placeholder is the one the sheet shows and replaces.
+        XCTAssertEqual(PendingCategoryEdit.targetAccount(of: tx("Expenses:Food")), "Expenses:Food")
+        XCTAssertNil(PendingCategoryEdit.placeholderAccount(of: tx("Expenses:Food")))
+        XCTAssertTrue(PendingCategoryEdit.isIncome(tx("Income:Unknown")))
+        XCTAssertFalse(PendingCategoryEdit.isIncome(tx("Expenses:Other")))
+        // The placeholder wins over an earlier real expense posting.
+        XCTAssertEqual(PendingCategoryEdit.targetAccount(of: tx("Expenses:Food", "Expenses:Other")), "Expenses:Other")
+    }
     func testHundredThousandPendingRowsRetainOnlyOneHundredAndCompleteTotals() throws {
         var scan = try LocalPendingScan(revision: "r")
         var result: LocalPendingScan.Result?

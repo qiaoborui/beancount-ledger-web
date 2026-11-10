@@ -4,11 +4,20 @@ struct MoreView: View {
     @EnvironmentObject private var session: LedgerSession
     @Binding var overflowDestination: LedgerDestination?
 
+    /// `localLedgerName` keeps the last opened local ledger, so a remote
+    /// session names its server instead (as the login screen does).
+    private var settingsDetail: String {
+        if session.isLocal {
+            return String(localized: "\(session.localLedgerName) · 本地")
+        }
+        return String(localized: "\(session.serverURL?.host ?? "Ledger") · 远程")
+    }
+
     var body: some View {
         List {
             Section {
                 NavigationLink { SettingsView(isRoot: false) } label: {
-                    MoreNavigationRow(index: "00", icon: "gearshape", title: String(localized: "设置"), detail: String(localized: "\(session.localLedgerName) · 本地"))
+                    MoreNavigationRow(index: "00", icon: "gearshape", title: String(localized: "设置"), detail: settingsDetail)
                 }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).listRowSeparator(.hidden).navigationLinkIndicatorVisibility(.hidden).accessibilityIdentifier("more-settings")
             } header: { TerminalSectionLabel(text: String(localized: "系统")) }
 

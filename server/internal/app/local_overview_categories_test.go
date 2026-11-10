@@ -494,8 +494,10 @@ func TestLocalOverviewCategoriesRawMinorUnitsAndUnpreparedSnapshot(t *testing.T)
 	snapshot.AccountMap = nil
 	snapshot.transactionsAsc, snapshot.transactionsDesc = nil, nil
 	got := readOverview(t, cfg, snapshot, nil)
-	if got.Categories[0].Label != "later" || got.PositiveTotalMinorUnits != 30 || got.Categories[0].PositiveTransactionCount != 1 {
-		t.Fatal("raw minor units / Swift last account wins", got)
+	// No USD price: the USD posting is valued at 0, as the summary does, rather
+	// than being added to CNY as if 20 USD cents were 20 CNY cents.
+	if got.Categories[0].Label != "later" || got.PositiveTotalMinorUnits != 10 || got.Categories[0].PositiveTransactionCount != 1 || got.Currency != "CNY" {
+		t.Fatal("valued minor units / Swift last account wins", got)
 	}
 	status, raw, err := localOverviewCategoriesResponse(cfg, nil, nil)
 	if status != 500 || raw != nil || err == nil {
@@ -789,5 +791,50 @@ func TestLocalOverviewCategoriesStats100kIncomeOnlyAllocation(t *testing.T) {
 	})
 	if allocs > 100 {
 		t.Fatalf("per-candidate allocation regression: %.0f allocations", allocs)
+	}
+}
+
+// Category totals share the summary's valuation: a JPY hotel is valued through
+// the price index instead of being shown as the same number of yuan, and the
+// positive total equals the converted summary expense for the same range.
+func TestLocalOverviewCategoriesValueForeignPostings(t *testing.T) {
+	cfg, snapshot := overviewFixture(
+		Transaction{Payee: "hotel", Postings: []Posting{
+			{Account: "Expenses:Travel", Amount: 10_000, Currency: "JPY"}, {Account: "Liabilities:Card", Amount: -10_000, Currency: "JPY"}}},
+		Transaction{Payee: "lunch", Postings: []Posting{overviewPosting("Expenses:Food", 1_000), overviewPosting("Assets:Cash", -1_000)}},
+	)
+	snapshot.Commodities = []string{"CNY", "JPY", "USD"}
+	snapshot.Prices = []Price{
+		{Date: "2026-08-01", Currency: "JPY", Amount: 5, QuoteCurrency: "CNY"},
+		{Date: "2026-08-01", Currency: "USD", Amount: 700, QuoteCurrency: "CNY"},
+	}
+	snapshot.PriceIndex = NewPriceIndex(snapshot.Prices)
+	totals := func(got localOverviewCategories) map[string]int {
+		out := map[string]int{}
+		for _, category := range got.Categories {
+			out[category.Label] = category.TotalMinorUnits
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		currency string
+		want     map[string]int
+	}{
+		{"", map[string]int{"Travel": 500, "Food": 1_000}},
+		{"USD", map[string]int{"Travel": 71, "Food": 142}}, // JPY bridges through CNY
+	} {
+		query := map[string]string{"start": "2026-09-01", "end": "2026-10-01"}
+		if tc.currency != "" {
+			query["valuationCurrency"] = tc.currency
+		}
+		got := readOverview(t, cfg, snapshot, query)
+		summary := MonthSummaryWithPriceIndex(query["start"], query["end"], snapshot.Transactions, snapshot.PriceIndex, tc.currency)
+		if !reflect.DeepEqual(totals(got), tc.want) || got.Currency != summary.Currency || got.PositiveTotalMinorUnits != summary.Expense {
+			t.Fatalf("currency %q: totals=%v currency=%s total=%d summary=%+v", tc.currency, totals(got), got.Currency, got.PositiveTotalMinorUnits, summary)
+		}
+	}
+	// An unknown valuation currency resolves like the bootstrap summary does.
+	if got := readOverview(t, cfg, snapshot, map[string]string{"valuationCurrency": "EUR"}); got.Currency != "CNY" {
+		t.Fatalf("unknown valuation currency: %s", got.Currency)
 	}
 }

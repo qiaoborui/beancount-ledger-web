@@ -75,6 +75,25 @@ describe("NetWorthPage information architecture", () => {
     expect(html).not.toContain("财富/投资收入");
   });
 
+  it("counts an overpaid card as reducing debt, not adding to it", () => {
+    const overpaid = accountBalances.map((row) => row.account === "Liabilities:Card" ? { ...row, amount: 50000, valuation: 50000 } : row);
+    const html = renderToString(
+      <NetWorthPage
+        rows={[]}
+        monthEndRows={[]}
+        windows={windows}
+        accountBalances={overpaid}
+        accounts={accounts}
+        valuationCurrency="CNY"
+        visible
+        onToggleVisible={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("¥13,500.00");
+    expect(html).not.toContain("¥12,500.00");
+  });
+
   it("masks position values, ratios, and trend charts together", () => {
     const html = renderToString(
       <NetWorthPage

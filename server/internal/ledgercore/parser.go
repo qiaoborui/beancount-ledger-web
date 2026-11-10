@@ -191,8 +191,7 @@ func (p *beanLineParser) parse() BeanParseResult {
 		blockEnd := i + 1
 		for blockEnd < len(p.lines) {
 			next := p.lines[blockEnd]
-			nextTrimmed := strings.TrimSpace(next.Text)
-			if nextTrimmed == "" || strings.HasPrefix(nextTrimmed, ";") || isIndentedBeanLine(next.Text) {
+			if IsBlockContinuationLine(next.Text) {
 				blockEnd++
 				continue
 			}
@@ -1412,6 +1411,31 @@ func EvalNumberExpressionRat(tokens []Token) (*big.Rat, bool) {
 
 func IsIndentedBeanLine(text string) bool {
 	return isIndentedBeanLine(text)
+}
+
+// IsBlockContinuationLine reports whether a line after a dated directive's
+// header still belongs to that directive's block: blank lines, whole-line
+// comments and indented lines continue it, anything else ends it. Writers that
+// locate a block by its source hash must use this same rule.
+func IsBlockContinuationLine(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return trimmed == "" || strings.HasPrefix(trimmed, ";") || isIndentedBeanLine(text)
+}
+
+// TrailingTriviaStart returns the index in a block's raw lines where its
+// trailing blank and whole-line comment lines begin. Those lines follow the
+// entry's last posting or metadata line and are not part of the entry itself:
+// they are often a separator or a neighbour's commented-out (deleted) text.
+func TrailingTriviaStart(lines []string) int {
+	end := len(lines)
+	for end > 1 {
+		trimmed := strings.TrimSpace(lines[end-1])
+		if trimmed != "" && !strings.HasPrefix(trimmed, ";") {
+			break
+		}
+		end--
+	}
+	return end
 }
 
 func IsTransactionFlag(value string) bool {

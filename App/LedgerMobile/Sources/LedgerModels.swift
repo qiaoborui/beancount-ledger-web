@@ -637,6 +637,29 @@ struct LedgerReconciliationRow: Codable, Equatable, Identifiable, Sendable {
 
     var isAsserted: Bool { status == "asserted" }
     var hasSnapshotIssue: Bool { statusError == true }
+
+    /// One classification per row, shared by the summary band, the filter tabs
+    /// and the row tag. An account asserted in range whose later transactions
+    /// turned it yellow still needs reconciling, so it is pending, not 已核平.
+    func reconciliationState(status: LedgerAccountStatus?) -> LedgerReconciliationState {
+        if status?.hasIssue == true { return .error }
+        if status?.isReconciled == true { return .asserted }
+        if status?.needsReconciliation == true { return .pending }
+        return isAsserted ? .asserted : .pending
+    }
+
+    /// Book minus asserted amount for a failed assertion, against the balance
+    /// the assertion was checked with (before its day), not the all-time one.
+    func assertionDifference(status: LedgerAccountStatus?) -> Int? {
+        guard let status, status.hasIssue, let assertion = status.assertionAmount else { return nil }
+        return (status.computedBalance ?? ledgerBalance) - assertion
+    }
+}
+
+enum LedgerReconciliationState: Equatable, Sendable {
+    case error
+    case asserted
+    case pending
 }
 
 /// Complete bounded native account rows, not a page of transaction history.
@@ -669,6 +692,16 @@ struct LedgerReconciliationResult: Codable, Equatable, Sendable {
     let actual: Int
     let diff: Int
     let beanText: String?
+}
+
+/// The book balance a reconciliation write on `date` diffs against. A balance
+/// assertion holds at the start of its day, so it excludes transactions dated
+/// on or after `date`.
+struct LedgerReconciliationBalance: Codable, Equatable, Sendable {
+    let account: String
+    let date: String
+    let currency: String
+    let ledgerBalance: Int
 }
 
 struct LedgerSummary: Decodable, Equatable {
@@ -1219,7 +1252,8 @@ struct LedgerTransactionEntry: Codable, Equatable, Sendable {
         kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "transaction"
         date = try container.decode(String.self, forKey: .date)
         flag = try container.decodeIfPresent(String.self, forKey: .flag)
-        payee = try container.decode(String.self, forKey: .payee)
+        // A narration-only transaction has no payee key.
+        payee = try container.decodeIfPresent(String.self, forKey: .payee) ?? ""
         narration = try container.decodeIfPresent(String.self, forKey: .narration) ?? ""
         metadata = try container.decodeIfPresent([String: LedgerMetadataValue].self, forKey: .metadata) ?? [:]
         tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
@@ -1513,12 +1547,27 @@ struct LedgerAssetsAnalysis: Equatable, Sendable {
 /// evaluation. Recomputing the filter and grouping on each access cost several
 /// passes over every balance per render, and the per-account row lookup made it
 /// quadratic. This computes everything once per `data`.
+extension TerminalAssetsIndex {
+    /// The 资产构成 band/table group for one balance. Account type decides
+    /// first: every Liabilities:* balance is debt whatever its metadata group
+    /// (the server files payables under 应收), and an Assets account whose group
+    /// has no slot there (其他, or anything unexpected) counts as 其他资产
+    /// instead of being dropped.
+    static func compositionGroup(account: String, metadataGroup: String?) -> String {
+        if account.hasPrefix("Liabilities:") { return "liability" }
+        if let metadataGroup, ["wealth", "cash", "receivable"].contains(metadataGroup) { return metadataGroup }
+        return "asset"
+    }
+}
+
 struct TerminalAssetsIndex: Equatable {
     let balances: [AccountBalance]
     let valuations: [String: Int]
     let balancesByAccount: [String: [AccountBalance]]
     let accountNames: [String]
     let assets: Int
+    /// Signed debt, `-Σ` of the Liabilities valuations. An overpaid card (a
+    /// positive Liabilities balance) lowers it and can take it below zero.
     let debt: Int
     let missing: Bool
 
@@ -1577,7 +1626,7 @@ struct TerminalAssetsIndex: Equatable {
             if account.hasPrefix("Assets:") {
                 assetTotal += value
             } else if account.hasPrefix("Liabilities:") {
-                debtTotal += abs(value)
+                debtTotal -= value
             }
         }
         assets = assetTotal
@@ -2586,6 +2635,35 @@ struct BalanceSheetTotals: Equatable {
     let netWorth: Int
 }
 
+extension BalanceSheetTotals {
+    /// Liabilities keep their Beancount sign: a card balance is normally
+    /// negative, so debt is `-Σ` of the Liabilities valuations. An overpaid
+    /// card (a positive balance) reduces debt instead of adding to it, and
+    /// `netWorth` stays `assets - liabilities`.
+    init(assets: Int, liabilityBalance: Int) {
+        self.init(assets: assets, liabilities: -liabilityBalance, netWorth: assets + liabilityBalance)
+    }
+
+    /// Totals over account rows, classified by account prefix like
+    /// `LedgerBootstrap.balanceSheetTotals` rather than by display group, so a
+    /// `Liabilities:Payable` row in the 应收 group still counts as a liability
+    /// and an Assets row in the 其他 group is still an asset. Uses the period
+    /// closing valuation where the row has one.
+    init(closingRows rows: [AccountBalanceRow]) {
+        var assets = 0
+        var liabilityBalance = 0
+        for row in rows {
+            let value = row.periodBalancesAvailable ? row.closingValuation : row.valuation
+            if row.account.hasPrefix("Assets:") {
+                assets += value
+            } else if row.account.hasPrefix("Liabilities:") {
+                liabilityBalance += value
+            }
+        }
+        self.init(assets: assets, liabilityBalance: liabilityBalance)
+    }
+}
+
 struct AccountBalanceRow: Identifiable, Equatable {
     let account: String
     let label: String
@@ -2650,10 +2728,10 @@ extension LedgerBootstrap {
         let assets = valid
             .filter { $0.account.hasPrefix("Assets:") }
             .reduce(0) { $0 + $1.valuation }
-        let liabilities = valid
+        let liabilityBalance = valid
             .filter { $0.account.hasPrefix("Liabilities:") }
-            .reduce(0) { $0 + abs($1.valuation) }
-        return BalanceSheetTotals(assets: assets, liabilities: liabilities, netWorth: assets - liabilities)
+            .reduce(0) { $0 + $1.valuation }
+        return BalanceSheetTotals(assets: assets, liabilityBalance: liabilityBalance)
     }
 
     var accountSections: [AccountBalanceSection] {
@@ -2850,11 +2928,10 @@ enum PendingTransactionClassifier {
             }
         }
 
-        // 4. Missing or generic payee
+        // 4. Missing or generic payee. The payee is optional in quick entry,
+        // so a meaningful narration (`2026-11-10 * "餐饮"`) is enough.
         let trimmedPayee = transaction.payee.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedPayee.isEmpty {
-            reasons.append(.missingPayee)
-        } else if genericPayeePlaceholders.contains(trimmedPayee) {
+        if trimmedPayee.isEmpty || genericPayeePlaceholders.contains(trimmedPayee) {
             let trimmedNarration = transaction.narration.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmedNarration.isEmpty || genericPayeePlaceholders.contains(trimmedNarration) {
                 reasons.append(.missingPayee)
@@ -3327,6 +3404,9 @@ struct LedgerOverviewCategories: Codable, Sendable {
     let transactionCount: Int
     let highestExpense: HighestExpense?
     let categories: [Category]
+    /// Currency the category totals are valued in. nil from engines that summed
+    /// raw posting minor units across currencies.
+    let currency: String?
 
     struct HighestExpense: Codable, Equatable, Sendable {
         let title: String
@@ -3335,12 +3415,12 @@ struct LedgerOverviewCategories: Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case revision, start, end, sensitiveUnlocked, positiveTotalMinorUnits
-        case transactionCount, highestExpense, categories
+        case transactionCount, highestExpense, categories, currency
     }
 
     init(revision: String, start: String, end: String, sensitiveUnlocked: Bool,
          positiveTotalMinorUnits: Int, transactionCount: Int, highestExpense: HighestExpense?,
-         categories: [Category]) {
+         categories: [Category], currency: String? = nil) {
         self.revision = revision
         self.start = start
         self.end = end
@@ -3349,6 +3429,7 @@ struct LedgerOverviewCategories: Codable, Sendable {
         self.transactionCount = transactionCount
         self.highestExpense = highestExpense
         self.categories = categories
+        self.currency = currency
     }
 
     init(from decoder: Decoder) throws {
@@ -3363,6 +3444,7 @@ struct LedgerOverviewCategories: Codable, Sendable {
         // as a successful range with no expenses. Optional.decode requires the key.
         highestExpense = try values.decode(HighestExpense?.self, forKey: .highestExpense)
         categories = try values.decode([Category].self, forKey: .categories)
+        currency = try values.decodeIfPresent(String.self, forKey: .currency)
         guard transactionCount >= 0 else {
             throw DecodingError.dataCorruptedError(forKey: .transactionCount, in: values,
                 debugDescription: "Overview transaction count must be nonnegative")
@@ -3384,6 +3466,7 @@ struct LedgerOverviewCategories: Codable, Sendable {
         // Successful absence is an explicit JSON null, never an omitted key.
         try values.encode(highestExpense, forKey: .highestExpense)
         try values.encode(categories, forKey: .categories)
+        try values.encodeIfPresent(currency, forKey: .currency)
     }
 
     struct Category: Codable, Sendable {

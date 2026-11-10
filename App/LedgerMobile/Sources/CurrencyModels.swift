@@ -3,8 +3,19 @@ import Foundation
 struct LedgerPrice: Codable, Equatable, Sendable {
     let date: String
     let currency: String
+    /// Whole quote-currency cents, which the server's own valuation still uses.
     let amount: Int
     let quoteCurrency: String
+    /// Exact decimal from the price directive. `amount` rounds a sub-cent rate
+    /// such as `price JPY 0.0478 CNY` to 5, or `price IDR 0.00045 CNY` to 0.
+    /// Absent from older servers and from the Postgres read model.
+    var amountValue: String? = nil
+
+    /// Quote-currency units for one `currency`, from the exact decimal when known.
+    var rate: Double {
+        if let amountValue, let value = Double(amountValue), value.isFinite { return value }
+        return Double(amount) / 100
+    }
 }
 
 enum CurrencyRateSource: String, Equatable, Sendable {
@@ -260,12 +271,13 @@ enum CurrencyAnalysis {
         targetCurrency: String,
         index: PriceIndex
     ) -> CurrencyRateInfo? {
-        if let direct = index.latest(currency: currency, quoteCurrency: targetCurrency) {
-            return CurrencyRateInfo(rate: Double(direct.amount) / 100, date: direct.date, source: .direct)
+        // A zero rate is not a price: fall through to the inverse pair instead.
+        if let direct = index.latest(currency: currency, quoteCurrency: targetCurrency), direct.rate != 0 {
+            return CurrencyRateInfo(rate: direct.rate, date: direct.date, source: .direct)
         }
         guard let inverse = index.latest(currency: targetCurrency, quoteCurrency: currency),
-              inverse.amount != 0 else { return nil }
-        return CurrencyRateInfo(rate: 100 / Double(inverse.amount), date: inverse.date, source: .inverse)
+              inverse.rate != 0 else { return nil }
+        return CurrencyRateInfo(rate: 1 / inverse.rate, date: inverse.date, source: .inverse)
     }
 
     private static func pairRateAtDate(
@@ -278,15 +290,15 @@ enum CurrencyAnalysis {
             currency: currency,
             quoteCurrency: targetCurrency,
             date: date
-        ) {
-            return CurrencyRateInfo(rate: Double(direct.amount) / 100, date: direct.date, source: .direct)
+        ), direct.rate != 0 {
+            return CurrencyRateInfo(rate: direct.rate, date: direct.date, source: .direct)
         }
         guard let inverse = index.latestAtOrBefore(
             currency: targetCurrency,
             quoteCurrency: currency,
             date: date
-        ), inverse.amount != 0 else { return nil }
-        return CurrencyRateInfo(rate: 100 / Double(inverse.amount), date: inverse.date, source: .inverse)
+        ), inverse.rate != 0 else { return nil }
+        return CurrencyRateInfo(rate: 1 / inverse.rate, date: inverse.date, source: .inverse)
     }
 
     private struct PairKey: Hashable, Sendable {
@@ -341,5 +353,81 @@ enum CurrencyAnalysis {
         guard let lhs else { return rhs }
         guard let rhs else { return lhs }
         return max(lhs, rhs)
+    }
+}
+
+/// Port of the server's `PriceIndex.Valuation` (server/internal/app/ledger.go):
+/// the latest price per pair in whole cents, direct, then inverse, then a walk
+/// through the other pairs, with Go's truncating integer arithmetic. Client-side
+/// totals valued here add up to the server's converted summary instead of
+/// mixing currencies. Deliberately keeps the cent `amount`, not `rate`, so the
+/// two agree to the minor unit.
+struct LedgerPriceValuation: Sendable {
+    private struct Pair: Hashable, Sendable {
+        let base: String
+        let quote: String
+    }
+
+    private let latest: [Pair: Int]
+    private let pairs: [Pair]
+
+    init(prices: [LedgerPrice]) {
+        var latest: [Pair: (date: String, amount: Int)] = [:]
+        for price in prices {
+            let pair = Pair(base: Self.normalized(price.currency), quote: Self.normalized(price.quoteCurrency))
+            // Go keeps the last row of a date-sorted series; equal dates keep the later row.
+            if let existing = latest[pair], existing.date > price.date { continue }
+            latest[pair] = (price.date, price.amount)
+        }
+        self.latest = latest.mapValues { $0.amount }
+        // Go sorts "base\0quote" keys bytewise, which orders by base, then quote.
+        pairs = latest.keys.sorted { lhs, rhs in
+            lhs.base == rhs.base
+                ? lhs.quote.utf8.lexicographicallyPrecedes(rhs.quote.utf8)
+                : lhs.base.utf8.lexicographicallyPrecedes(rhs.base.utf8)
+        }
+    }
+
+    /// `minorUnits` of `currency` in `targetCurrency`, or nil without a price path.
+    func value(_ minorUnits: Int, currency: String?, in targetCurrency: String) -> Int? {
+        value(minorUnits, Self.normalized(currency), Self.normalized(targetCurrency), seen: [])
+    }
+
+    private func value(_ amount: Int, _ currency: String, _ target: String, seen: Set<String>) -> Int? {
+        if currency == target { return amount }
+        if let price = latest[Pair(base: currency, quote: target)] {
+            return Self.scale(amount, by: price, over: 100)
+        }
+        if let price = latest[Pair(base: target, quote: currency)], price != 0 {
+            return Self.scale(amount, by: 100, over: price)
+        }
+        guard !seen.contains(currency) else { return nil }
+        var seen = seen
+        seen.insert(currency)
+        for pair in pairs {
+            guard let price = latest[pair] else { continue }
+            if pair.base == currency,
+               let converted = value(Self.scale(amount, by: price, over: 100), pair.quote, target, seen: seen) {
+                return converted
+            }
+            if pair.quote == currency, price != 0,
+               let converted = value(Self.scale(amount, by: 100, over: price), pair.base, target, seen: seen) {
+                return converted
+            }
+        }
+        return nil
+    }
+
+    /// Go's `amount * a / b`: wrapping multiply, truncating divide, never a trap.
+    private static func scale(_ amount: Int, by multiplier: Int, over divisor: Int) -> Int {
+        let product = amount &* multiplier
+        let quotient = product.dividedReportingOverflow(by: divisor)
+        return quotient.overflow ? product : quotient.partialValue
+    }
+
+    /// Mirrors Go `normalizeValuationCurrency`: trimmed, uppercased, CNY when empty.
+    private static func normalized(_ currency: String?) -> String {
+        let value = (currency ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return value.isEmpty ? "CNY" : value
     }
 }

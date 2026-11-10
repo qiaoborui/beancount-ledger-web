@@ -111,3 +111,26 @@ func TestRequestSchemaValidation(t *testing.T) {
 		t.Fatal("bulk tag source without hash should fail validation")
 	}
 }
+
+func TestLedgerEntryAllowsNarrationOnlyTransaction(t *testing.T) {
+	entry := LedgerEntry{
+		Kind:      "transaction",
+		Date:      "2026-11-10",
+		Narration: "餐饮",
+		Postings:  []EntryPosting{{Account: "Expenses:Food", Amount: "38.50", Currency: "CNY"}, {Account: "Assets:Cash", Amount: "-38.50", Currency: "CNY"}},
+	}
+	if err := entry.Validate(); err != nil {
+		t.Fatalf("narration-only transaction should pass: %v", err)
+	}
+	if got := strings.SplitN(TransactionToBean(entry), "\n", 2)[0]; got != `2026-11-10 * "餐饮"` {
+		t.Fatalf("narration-only header = %q", got)
+	}
+	entry.Payee = "午饭小馆"
+	if got := strings.SplitN(TransactionToBean(entry), "\n", 2)[0]; got != `2026-11-10 * "午饭小馆" "餐饮"` {
+		t.Fatalf("payee header = %q", got)
+	}
+	entry.Payee, entry.Narration = " ", ""
+	if err := entry.Validate(); err == nil {
+		t.Fatal("a transaction with neither payee nor narration should fail")
+	}
+}

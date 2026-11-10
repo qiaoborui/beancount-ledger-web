@@ -563,6 +563,7 @@ func TestRegisteredAPIRoutesHaveIntegrationCoverage(t *testing.T) {
 		"GET /api/ledger/accounts/detail":          true,
 		"GET /api/ledger/account-status":           true,
 		"GET /api/ledger/reconciliation":           true,
+		"GET /api/ledger/reconciliation/balance":   true,
 		"POST /api/ledger/reconciliation":          true,
 		"POST /api/ledger/bql":                     true,
 		"GET /api/ledger/bql-history":              true,

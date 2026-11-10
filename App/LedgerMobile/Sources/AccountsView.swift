@@ -68,11 +68,10 @@ struct AccountsView: View {
         }
         let periodAvailable = session.accountPeriodBalancesAvailable && ledger.periodAccountBalancesAvailable
         if periodAvailable {
-            let assetSections = allSections.filter { $0.id == "cash" || $0.id == "asset" || $0.id == "wealth" || $0.id == "receivable" }
-            let liabilitySections = allSections.filter { $0.id == "credit" || $0.id == "liability" }
-            let assets = assetSections.flatMap(\.rows).reduce(0) { $0 + ($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation) }
-            let liabilities = liabilitySections.flatMap(\.rows).reduce(0) { $0 + abs($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation) }
-            return BalanceSheetTotals(assets: assets, liabilities: liabilities, netWorth: assets - liabilities)
+            // Classify by account prefix, not section id: a section is the
+            // account's display group, so payables sit under 应收 and an
+            // Assets account can sit under 其他.
+            return BalanceSheetTotals(closingRows: allSections.flatMap(\.rows))
         }
         return ledger.balanceSheetTotals
     }
@@ -116,7 +115,7 @@ struct AccountsView: View {
             }
 
             Section {
-                HStack(spacing: 22) {
+                let filterBar = HStack(spacing: 22) {
                     ForEach(AccountFilterCategory.allCases) { filter in
                         let count = filter == .all
                             ? allSections.reduce(0) { $0 + $1.rows.count }
@@ -127,7 +126,7 @@ struct AccountsView: View {
                         } label: {
                             VStack(spacing: 7) {
                                 HStack(spacing: 4) {
-                                    Text(filter.title).balancedFont(size: 13, weight: selectedFilter == filter ? .medium : .regular).lineLimit(1)
+                                    Text(filter.title).balancedFont(size: 13, weight: selectedFilter == filter ? .medium : .regular).lineLimit(1).fixedSize()
                                     Text("\(count)").balancedFont(size: 11).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                                 }
                                 .foregroundStyle(selectedFilter == filter ? BalancedPalette.ink : BalancedPalette.meta)
@@ -138,7 +137,12 @@ struct AccountsView: View {
                         .accessibilityAddTraits(selectedFilter == filter ? .isSelected : [])
                     }
                 }
-                .padding(.horizontal, 20)
+                // At accessibility text sizes the five filters no longer fit the width;
+                // scroll them instead of truncating every label to "…".
+                ViewThatFits(in: .horizontal) {
+                    filterBar.padding(.horizontal, 20)
+                    ScrollView(.horizontal, showsIndicators: false) { filterBar.padding(.horizontal, 20) }
+                }
                 .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 0, trailing: 0))
             }
             .listRowBackground(Color.clear).listRowSeparator(.hidden)

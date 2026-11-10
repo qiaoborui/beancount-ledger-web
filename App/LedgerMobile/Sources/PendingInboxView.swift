@@ -113,19 +113,38 @@ struct PendingInboxView: View {
         }
     }
 
-    private var availableExpenseAccounts: [String] {
-        if session.isLocal { return localWindow?.result.expenseAccounts ?? [] }
-        let accounts = session.ledger?.accounts.map(\.account).filter { $0.hasPrefix("Expenses:") } ?? []
-        let transactionAccounts = allTransactions.flatMap { $0.postings.map(\.account) }.filter { $0.hasPrefix("Expenses:") }
-        return Array(Set(accounts + transactionAccounts)).sorted()
+    /// Accounts the picker offers for `tx`: income accounts when the category
+    /// being replaced is an income account, expense accounts otherwise.
+    /// Placeholders such as `Expenses:Unknown` are left out: picking one would
+    /// keep the row uncategorized.
+    private func availableCategoryAccounts(for tx: LedgerTransaction) -> [String] {
+        let income = PendingCategoryEdit.isIncome(tx)
+        let candidates: [String]
+        if session.isLocal {
+            candidates = (income ? localWindow?.result.incomeAccounts : localWindow?.result.expenseAccounts) ?? []
+        } else {
+            let prefix = income ? "Income:" : "Expenses:"
+            let accounts = session.ledger?.accounts.map(\.account).filter { $0.hasPrefix(prefix) } ?? []
+            let transactionAccounts = allTransactions.flatMap { $0.postings.map(\.account) }.filter { $0.hasPrefix(prefix) }
+            candidates = Array(Set(accounts + transactionAccounts)).sorted()
+        }
+        return candidates.filter { !PendingCategoryEdit.isPlaceholder($0) }
     }
 
-    private var totalPendingMinorUnits: Int {
-        if session.isLocal { return localWindow?.result.totalMinorUnits ?? 0 }
-        return pendingItems.reduce(0) { sum, item in
-            let p = TransactionPresentation(transaction: item.transaction)
-            return sum + p.minorUnits
+    /// Pending amounts per presentation currency, largest first. Currencies are
+    /// never added together under one symbol.
+    private var pendingTotalsByCurrency: [(currency: String, minorUnits: Int)] {
+        let totals: [String: Int]
+        if session.isLocal {
+            totals = localWindow?.result.minorUnitsByCurrency ?? [:]
+        } else {
+            totals = pendingItems.reduce(into: [:]) { sum, item in
+                let p = TransactionPresentation(transaction: item.transaction)
+                sum[p.currency, default: 0] += p.minorUnits
+            }
         }
+        return totals.map { (currency: $0.key, minorUnits: $0.value) }
+            .sorted { $0.minorUnits == $1.minorUnits ? $0.currency < $1.currency : $0.minorUnits > $1.minorUnits }
     }
 
     private var accountLabels: [String: String] {
@@ -185,7 +204,7 @@ struct PendingInboxView: View {
             .sheet(item: $editingCategoryTarget, onDismiss: revokeAction) { tx in
                 PendingCategorySuggestionSheet(
                     transaction: tx,
-                    availableAccounts: availableExpenseAccounts,
+                    availableAccounts: availableCategoryAccounts(for: tx),
                     accountLabels: accountLabels
                 ) { newAccount in
                     await updateCategory(for: tx, to: newAccount)
@@ -317,11 +336,23 @@ struct PendingInboxView: View {
     /// `.band`: 待整理金额 (`--out` — unresolved money), 涉及笔数 (ink), then a
     /// note explaining that classification is incomplete, not the amounts.
     private var summaryBand: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let totals = pendingTotalsByCurrency
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
                 Text("待整理金额").balancedFont(size: 14).foregroundStyle(BalancedPalette.secondary)
                 Spacer()
-                BalancedAmount(minorUnits: totalPendingMinorUnits, currency: "CNY", size: 15, color: BalancedPalette.expense)
+                // One line per currency; the symbol is shown once there is more
+                // than one, so USD and CNY are never read as one figure.
+                VStack(alignment: .trailing, spacing: 2) {
+                    if totals.isEmpty {
+                        BalancedAmount(minorUnits: 0, currency: "CNY", size: 15, color: BalancedPalette.expense)
+                    } else {
+                        ForEach(totals, id: \.currency) { total in
+                            BalancedAmount(minorUnits: total.minorUnits, currency: total.currency, size: 15,
+                                color: BalancedPalette.expense, showsCurrency: totals.count > 1)
+                        }
+                    }
+                }
             }
             .padding(.vertical, 3)
             HStack(alignment: .firstTextBaseline) {
@@ -425,13 +456,15 @@ struct PendingInboxView: View {
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button("补商户") { prepare(item.transaction, action: .payee) }.tint(BalancedPalette.ink)
             if flagged {
-                Button("已核对") { Task { await markVerified(for: item.transaction) } }.tint(BalancedPalette.income)
+                // Through `prepare` so a local ledger reads the editable original
+                // and holds the write action before `markVerified` saves.
+                Button("已核对") { prepare(item.transaction, action: .verify) }.tint(BalancedPalette.income)
             }
         }
         .contextMenu {
             Button("改分类") { prepare(item.transaction, action: .category) }
             Button("补商户") { prepare(item.transaction, action: .payee) }
-            if flagged { Button("标为已核对") { Task { await markVerified(for: item.transaction) } } }
+            if flagged { Button("标为已核对") { prepare(item.transaction, action: .verify) } }
             Button("完整编辑") { prepare(item.transaction, action: .full) }
         }
     }
@@ -605,13 +638,16 @@ struct PendingInboxView: View {
         updating = true
         let token = feedbackGeneration
         defer { updating = false }
+        // Validate before saving: a rewrite that changes nothing must not be
+        // written or reported as classified, and it keeps the local action.
+        let entry: LedgerTransactionEntry
+        do { entry = try PendingCategoryEdit.entry(for: tx, to: newAccount) }
+        catch {
+            publishFeedback(String(localized: "更新失败：\(error.localizedDescription)"), style: .failure, token: token)
+            return false
+        }
         do {
-            let unknownAcc = tx.postings.first(where: {
-                $0.account.lowercased().contains("unknown")
-                    || $0.account.lowercased().contains("待分类")
-                    || $0.account.lowercased().contains("uncategorized")
-            })?.account ?? ""
-            try await save(tx.entryReplacingAccount(from: unknownAcc, to: newAccount), original: tx)
+            try await save(entry, original: tx)
             publishFeedback(String(localized: "已分类为：\(String(newAccount.split(separator: ":").last ?? ""))"), style: .confirmed, token: token)
             return true
         } catch {
@@ -668,11 +704,12 @@ private struct PendingCategorySuggestionSheet: View {
     @State private var showingFullPicker = false
 
     private var presentation: TransactionPresentation { TransactionPresentation(transaction: transaction) }
-    private var currentAccount: String? {
-        transaction.postings.first(where: { $0.account.hasPrefix("Expenses:") || $0.account.hasPrefix("Income:") })?.account
-    }
+    /// The posting a category change rewrites: the flagged placeholder when
+    /// there is one, so the sheet shows the same account the save replaces.
+    private var currentAccount: String? { PendingCategoryEdit.targetAccount(of: transaction) }
+    private var currentIsPlaceholder: Bool { PendingCategoryEdit.placeholderAccount(of: transaction) != nil }
     private var currentLabel: String {
-        currentAccount.flatMap { accountLabels[$0] } ?? String(localized: "未分类")
+        currentIsPlaceholder ? String(localized: "未分类") : currentAccount.flatMap { accountLabels[$0] } ?? String(localized: "未分类")
     }
 
     private func submit(_ account: String) async {
@@ -748,9 +785,12 @@ private struct PendingCategorySuggestionSheet: View {
 
                     HStack(spacing: 12) {
                         Button("跳过") { dismiss() }.buttonStyle(.balanced(.quiet))
-                        Button("保存") { Task { if let acc = currentAccount { await submit(acc) } } }
-                            .buttonStyle(.balanced(.primary, disabled: submitting || currentAccount == nil))
-                            .disabled(submitting || currentAccount == nil)
+                        // Keeping a real category needs no write; a placeholder
+                        // (`Expenses:Unknown`) can't be kept, so the person must
+                        // pick through 选择其它分类… instead.
+                        Button("保存") { dismiss() }
+                            .buttonStyle(.balanced(.primary, disabled: submitting || currentAccount == nil || currentIsPlaceholder))
+                            .disabled(submitting || currentAccount == nil || currentIsPlaceholder)
                     }
                     .padding(.top, 24)
                 }
@@ -765,7 +805,8 @@ private struct PendingCategorySuggestionSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .sheet(isPresented: $showingFullPicker) {
-            QuickCategoryPickerSheet(transaction: transaction, availableAccounts: availableAccounts, accountLabels: accountLabels) { account in
+            QuickCategoryPickerSheet(transaction: transaction, availableAccounts: availableAccounts, accountLabels: accountLabels,
+                                     incomeCategories: PendingCategoryEdit.isIncome(transaction)) { account in
                 await submit(account)
                 return true
             }
@@ -781,6 +822,9 @@ struct QuickCategoryPickerSheet: View {
     let transaction: LedgerTransaction
     let availableAccounts: [String]
     let accountLabels: [String: String]
+    /// Income placeholders are reclassified among income accounts; the
+    /// expense presets would turn received money into spending.
+    var incomeCategories = false
     let onSelect: (String) async -> Bool
 
     @State private var searchQuery = ""
@@ -831,7 +875,7 @@ struct QuickCategoryPickerSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if searchQuery.isEmpty {
+                if searchQuery.isEmpty, !incomeCategories {
                     Section {
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                             ForEach(presets) { cat in
@@ -889,7 +933,10 @@ struct QuickCategoryPickerSheet: View {
                         }
                     }
                 } header: {
-                    Text("所有支出账户 (\(filteredAccounts.count))").balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.meta)
+                    Group {
+                        if incomeCategories { Text("所有收入账户 (\(filteredAccounts.count))") } else { Text("所有支出账户 (\(filteredAccounts.count))") }
+                    }
+                    .balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.meta)
                 }
             }
             .disabled(submitting)

@@ -391,6 +391,16 @@
         }
       }
     },
+    "%@ · 远程" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Remote"
+          }
+        }
+      }
+    },
     "%@ → %@" : {
       "localizations" : {
         "en" : {
@@ -4104,12 +4114,22 @@
         }
       }
     },
-    "共 %lld 个%@分类，按一级科目分组。加号新增，左滑可停用。" : {
+    "共 %lld 个%@，按一级科目分组。加号新增。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld %@ categories, grouped by top-level account. Tap + to add; swipe left to deactivate."
+            "value" : "%lld %@, grouped by top-level account. Tap + to add."
+          }
+        }
+      }
+    },
+    "共 %lld 个%@，按一级科目分组。加号新增，左滑可停用。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld %@, grouped by top-level account. Tap + to add; swipe left to deactivate."
           }
         }
       }
@@ -4422,6 +4442,16 @@
         }
       }
     },
+    "写入金额合计" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Total written"
+          }
+        }
+      }
+    },
     "农业银行储蓄卡" : {
       "localizations" : {
         "en" : {
@@ -4448,6 +4478,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Net worth "
+          }
+        }
+      }
+    },
+    "净值变动 %@ 与各账户组变动合计一致。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Net worth change %@ matches the total of the account group changes."
           }
         }
       }
@@ -7620,12 +7660,12 @@
         }
       }
     },
-    "已全部加载 %lld 笔。长按可多选，左滑显示改分类与对账。" : {
+    "已全部加载 %lld 笔。长按查看更多操作，左滑可多选或删除，右滑可分享。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "All %lld transactions loaded. Long-press to multi-select; swipe left to recategorize or reconcile."
+            "value" : "All %lld transactions loaded. Long-press for more actions; swipe left to multi-select or delete, swipe right to share."
           }
         }
       }
@@ -7682,12 +7722,12 @@
         }
       }
     },
-    "已加载 %lld 笔，收窄时间范围可以看得更远。长按可多选，左滑显示改分类与对账。" : {
+    "已加载 %lld 笔，收窄时间范围可以看得更远。长按查看更多操作，左滑可多选或删除，右滑可分享。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Loaded %lld transactions. Narrow the date range to see further back. Long-press to multi-select; swipe left to recategorize or reconcile."
+            "value" : "Loaded %lld transactions. Narrow the date range to see further back. Long-press for more actions; swipe left to multi-select or delete, swipe right to share."
           }
         }
       }
@@ -9258,6 +9298,16 @@
         }
       }
     },
+    "所有收入账户 (%lld)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All income accounts (%lld)"
+          }
+        }
+      }
+    },
     "所选交易缺少并发校验信息，暂无法添加标签。" : {
       "localizations" : {
         "en" : {
@@ -9574,6 +9624,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Can't find the latest ledger source for this transaction. Refresh and try again."
+          }
+        }
+      }
+    },
+    "找到 %lld 个匹配的%@。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Found %lld matching %@."
           }
         }
       }
@@ -10738,6 +10798,16 @@
         }
       }
     },
+    "新分类与当前分类相同，未作修改。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The new category is the same as the current one; nothing was changed."
+          }
+        }
+      }
+    },
     "新建分类" : {
       "localizations" : {
         "en" : {
@@ -11314,6 +11384,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Smart categorization"
+          }
+        }
+      }
+    },
+    "智能分类 %lld / %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Smart categorization %lld / %lld"
           }
         }
       }
@@ -12354,6 +12434,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Opening balance"
+          }
+        }
+      }
+    },
+    "期初余额格式无法识别，请输入数字，例如 1000.50" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The opening balance isn't a valid number. Enter a number such as 1000.50."
           }
         }
       }
@@ -13618,6 +13708,16 @@
         }
       }
     },
+    "正在保存" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving"
+          }
+        }
+      }
+    },
     "正在保存..." : {
       "localizations" : {
         "en" : {
@@ -14088,6 +14188,16 @@
         }
       }
     },
+    "正在读取对账日期的账本余额…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading the book balance for the reconcile date…"
+          }
+        }
+      }
+    },
     "正在读取对账账户…" : {
       "localizations" : {
         "en" : {
@@ -14298,6 +14408,16 @@
         }
       }
     },
+    "每个记账日的净值，含区间内波动。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Net worth on each day with entries, including moves within the period."
+          }
+        }
+      }
+    },
     "每周收支" : {
       "localizations" : {
         "en" : {
@@ -14324,6 +14444,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Daily"
+          }
+        }
+      }
+    },
+    "每日 · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daily · %@"
           }
         }
       }
@@ -16778,6 +16908,16 @@
         }
       }
     },
+    "设备密码保护" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device passcode protection"
+          }
+        }
+      }
+    },
     "设置" : {
       "localizations" : {
         "en" : {
@@ -17874,6 +18014,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ledger balance"
+          }
+        }
+      }
+    },
+    "账本余额只计入 %@ 之前的流水。如果实际余额已包含当天的流水，请把对账日期改为次日。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The book balance only counts transactions before %@. If your actual balance already includes that day's transactions, set the reconcile date to the next day."
           }
         }
       }
@@ -19044,6 +19194,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The server is still confirming this transaction. Wait for sync to finish and try again."
+          }
+        }
+      }
+    },
+    "这笔交易没有可替换的分类账户。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This transaction has no category account to replace."
           }
         }
       }

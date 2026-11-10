@@ -1232,6 +1232,8 @@ private enum SafePreviewLedgerData {
             ],
             totalIncome: value(5_050_000),
             totalExpense: value(555_180),
+            // Mirrors the `expense` nodes above and the August transactions, so
+            // 支出构成 sums to totalExpense and its shares match 概览 (68.4%, not 68.5%).
             expenseAnalytics: [
                 LedgerExpenseCategoryAnalytics(
                     account: "Expenses:Housing",
@@ -1239,30 +1241,56 @@ private enum SafePreviewLedgerData {
                     label: "居住",
                     amount: value(380_000),
                     txCount: 1,
-                    share: 0.6845,
+                    share: 0.684463,
                     previousAmount: value(380_000),
                     changeRatio: 0,
                     topPayees: [LedgerPayeeAnalytics(payee: "房屋租金", amount: value(380_000), txCount: 1)]
                 ),
                 LedgerExpenseCategoryAnalytics(
-                    account: "Expenses:Unknown",
-                    alias: "待整理",
-                    label: "待整理",
-                    amount: value(23_600),
-                    txCount: 1,
-                    share: 0.0425,
+                    account: "Expenses:Food",
+                    alias: "餐饮",
+                    label: "餐饮",
+                    amount: value(84_780),
+                    txCount: 3,
+                    share: 0.152708,
                     previousAmount: 0,
                     changeRatio: nil,
-                    topPayees: [LedgerPayeeAnalytics(payee: "山岚咖啡", amount: value(23_600), txCount: 1)]
+                    topPayees: [LedgerPayeeAnalytics(payee: "海岸生鲜", amount: value(42_500), txCount: 1), LedgerPayeeAnalytics(payee: "山岚咖啡", amount: value(23_600), txCount: 1), LedgerPayeeAnalytics(payee: "青禾市场", amount: value(18_680), txCount: 1)]
+                ),
+                LedgerExpenseCategoryAnalytics(
+                    account: "Expenses:Transport",
+                    alias: "交通",
+                    label: "交通",
+                    amount: value(57_600),
+                    txCount: 1,
+                    share: 0.103750,
+                    previousAmount: 0,
+                    changeRatio: nil,
+                    topPayees: [LedgerPayeeAnalytics(payee: "云端出行", amount: value(57_600), txCount: 1)]
+                ),
+                LedgerExpenseCategoryAnalytics(
+                    account: "Expenses:Education",
+                    alias: "教育",
+                    label: "教育",
+                    amount: value(32_800),
+                    txCount: 1,
+                    share: 0.059080,
+                    previousAmount: 0,
+                    changeRatio: nil,
+                    topPayees: [LedgerPayeeAnalytics(payee: "城市书房", amount: value(32_800), txCount: 1)]
                 ),
             ],
             topPayees: [
                 LedgerPayeeAnalytics(payee: "房屋租金", amount: value(380_000), txCount: 1),
-                LedgerPayeeAnalytics(payee: "青禾市场", amount: value(61_180), txCount: 2),
+                LedgerPayeeAnalytics(payee: "云端出行", amount: value(57_600), txCount: 1),
+                LedgerPayeeAnalytics(payee: "海岸生鲜", amount: value(42_500), txCount: 1),
+                LedgerPayeeAnalytics(payee: "城市书房", amount: value(32_800), txCount: 1),
+                LedgerPayeeAnalytics(payee: "山岚咖啡", amount: value(23_600), txCount: 1),
+                LedgerPayeeAnalytics(payee: "青禾市场", amount: value(18_680), txCount: 1),
             ],
             topPaymentAccounts: [
-                LedgerAccountAnalytics(account: "Assets:Bank:Daily", alias: "日常账户", label: "日常账户", amount: value(461_200), txCount: 5),
-                LedgerAccountAnalytics(account: "Liabilities:CreditCard", alias: "信用卡", label: "信用卡", amount: value(93_980), txCount: 3),
+                LedgerAccountAnalytics(account: "Assets:Bank:Daily", alias: "日常账户", label: "日常账户", amount: value(422_280), txCount: 3),
+                LedgerAccountAnalytics(account: "Liabilities:CreditCard", alias: "信用卡", label: "信用卡", amount: value(132_900), txCount: 3),
             ],
             netIncome: value(4_494_820),
             valuationCurrency: valuationCurrency

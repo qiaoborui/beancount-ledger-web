@@ -18,7 +18,7 @@ struct SettingsView: View {
                 Section { StatusBanner(message: error, onDismiss: session.dismissError) }
             }
             Section {
-                SettingsRow(title: String(localized: "底部标签栏"), value: session.compactTabDestinations.map(\.compactTitle).joined(separator: String(localized: "、"))) {
+                SettingsRow(title: String(localized: "底部标签栏"), value: session.compactTabDestinations.map { $0 == .transactions ? String(localized: "流水") : $0.compactTitle }.joined(separator: String(localized: "、"))) {
                     compactTabConfigurationPresented = true
                 }
                 .accessibilityIdentifier("settings-compact-tabs")
@@ -48,7 +48,8 @@ struct SettingsView: View {
                         get: { session.localPrivacyProtectionEnabled },
                         set: { enabled in Task { await session.setLocalPrivacyProtectionEnabled(enabled) } }
                     )) {
-                        SettingsRowLabel(title: String(localized: "\(session.biometricTitle) 保护"), detail: String(localized: "打开账本时验证身份"))
+                        // "设备密码" is Chinese, so it takes no space; "Face ID 保护" keeps one.
+                        SettingsRowLabel(title: session.biometricKind == .unavailable ? String(localized: "设备密码保护") : String(localized: "\(session.biometricTitle) 保护"), detail: String(localized: "打开账本时验证身份"))
                     }
                     .disabled(session.isBiometricSettingBusy || session.isAuthenticationBusy)
                     .accessibilityIdentifier("settings-local-authentication")
@@ -70,7 +71,7 @@ struct SettingsView: View {
                     .listRowSeparator(.hidden)
                 } else {
                     SettingsRowLabel(title: String(localized: "使用设备密码或生物识别解锁"), detail: nil)
-                        .frame(minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
                         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                         .listRowBackground(Color.clear)
@@ -173,7 +174,9 @@ struct SettingsView: View {
                     Text("版本").balancedFont(size: 14).foregroundStyle(BalancedPalette.secondary)
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("本地版 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
+                        // The build is the same for local and remote sessions;
+                        // a "本地版" prefix mislabelled remote connections.
+                        Text(verbatim: "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
                             .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                         // Stamped at build time by scripts/stamp-ios-build-commit.sh.
                         if let commit = Bundle.main.object(forInfoDictionaryKey: "LedgerGitCommit") as? String {

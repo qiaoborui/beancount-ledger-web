@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/borui/beancount-ledger-web/server/internal/ledgercore"
 )
 
 type LedgerWriter struct {
@@ -654,6 +656,9 @@ func (w *LedgerWriter) ReplaceTransactionBlock(source TransactionSource, entry L
 		if err != nil {
 			return err
 		}
+		// Trailing blank and comment lines are not part of the entry: keep the
+		// separator before the next directive and any comments that follow.
+		end = start + ledgercore.TrailingTriviaStart(lines[start:end])
 		replacement := strings.Split(strings.TrimRight(TransactionToBean(entry), "\n"), "\n")
 		nextLines := append([]string{}, lines[:start]...)
 		nextLines = append(nextLines, replacement...)
@@ -946,6 +951,7 @@ func (w *LedgerWriter) CommentTransactionBlock(source TransactionSource, reason 
 		if err != nil {
 			return err
 		}
+		end = start + ledgercore.TrailingTriviaStart(lines[start:end])
 		note := ""
 		if strings.TrimSpace(reason) != "" {
 			note = ": " + escapeBean(strings.TrimSpace(reason))
@@ -1178,11 +1184,7 @@ func transactionBlockAtLine(text string, line int) ([]string, int, int, error) {
 	if start < 0 || start >= len(lines) || !isTransactionHeaderLine(lines[start]) {
 		return nil, 0, 0, errors.New("交易来源行无效")
 	}
-	end := start + 1
-	for end < len(lines) && !isDatedBeanDirectiveLine(lines[end]) && !strings.HasPrefix(strings.TrimSpace(lines[end]), "include ") {
-		end++
-	}
-	return lines, start, end, nil
+	return lines, start, transactionBlockEnd(lines, start), nil
 }
 
 func findTransactionBlockByHash(text, hash string) ([]string, int, int, error) {
@@ -1192,10 +1194,7 @@ func findTransactionBlockByHash(text, hash string) ([]string, int, int, error) {
 		if !isTransactionHeaderLine(lines[start]) {
 			continue
 		}
-		end := start + 1
-		for end < len(lines) && !isDatedBeanDirectiveLine(lines[end]) && !strings.HasPrefix(strings.TrimSpace(lines[end]), "include ") {
-			end++
-		}
+		end := transactionBlockEnd(lines, start)
 		if transactionHash(lines[start:end]) == hash {
 			if matchStart >= 0 {
 				return nil, 0, 0, errors.New("交易来源不唯一，账本可能已被修改，请刷新后重试")
@@ -1209,20 +1208,22 @@ func findTransactionBlockByHash(text, hash string) ([]string, int, int, error) {
 	return nil, 0, 0, errors.New("找不到原交易，账本可能已被修改，请刷新后重试")
 }
 
+// transactionBlockEnd ends the block with the parser's rule, so the block's
+// lines hash to the source hash the parser reported for it.
+func transactionBlockEnd(lines []string, start int) int {
+	end := start + 1
+	for end < len(lines) && ledgercore.IsBlockContinuationLine(lines[end]) {
+		end++
+	}
+	return end
+}
+
 func isTransactionHeaderLine(line string) bool {
 	if strings.TrimSpace(line) == "" || isIndentedBeanLine(line) {
 		return false
 	}
 	tokens := scanBeanLine(line)
 	return len(tokens) >= 2 && isBeanDateToken(tokens[0].Value) && isTransactionFlag(tokens[1].Value)
-}
-
-func isDatedBeanDirectiveLine(line string) bool {
-	if strings.TrimSpace(line) == "" || isIndentedBeanLine(line) {
-		return false
-	}
-	tokens := scanBeanLine(line)
-	return len(tokens) >= 2 && isBeanDateToken(tokens[0].Value)
 }
 
 func TransactionToBean(entry LedgerEntry) string {
@@ -1245,7 +1246,12 @@ func TransactionToBean(entry LedgerEntry) string {
 	if flag == "" {
 		flag = "*"
 	}
-	lines := []string{fmt.Sprintf(`%s %s "%s" "%s"%s`, entry.Date, flag, escapeBean(entry.Payee), escapeBean(entry.Narration), annotationText)}
+	header := fmt.Sprintf(`%s %s "%s" "%s"%s`, entry.Date, flag, escapeBean(entry.Payee), escapeBean(entry.Narration), annotationText)
+	if strings.TrimSpace(entry.Payee) == "" {
+		// A lone string is the narration; `"" "…"` would record an empty payee.
+		header = fmt.Sprintf(`%s %s "%s"%s`, entry.Date, flag, escapeBean(entry.Narration), annotationText)
+	}
+	lines := []string{header}
 	keys := make([]string, 0, len(entry.Metadata))
 	for key := range entry.Metadata {
 		keys = append(keys, key)
