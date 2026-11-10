@@ -1342,3 +1342,200 @@ private extension LocalLedgerCatalog {
         _ = release.wait(timeout: .now() + 5)
     }
 }
+
+// MARK: Shortcuts recording
+
+extension LocalLedgerSessionTests {
+    private actor ShortcutWidgetEngine: LocalLedgerEngine {
+        private(set) var bootstrapCalls = 0
+        private(set) var reportCalls = 0
+        func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data {
+            switch request.path {
+            case "/api/ledger/version": return Data("{}".utf8)
+            case "/api/ledger/bootstrap/page":
+                bootstrapCalls += 1
+                return try SyntheticBootstrapPage.response(Data(LedgerModelsTests.bootstrapJSON.utf8), request: request)
+            case "/api/ledger/overview/categories":
+                return try OverviewCategoriesFixture.data(start: request.query["start"]!, end: request.query["end"]!)
+            case "/api/ledger/home-report":
+                reportCalls += 1
+                return try JSONSerialization.data(withJSONObject: [
+                    "start": request.query["start"] ?? "", "end": request.query["end"] ?? "",
+                    "currency": request.query["valuationCurrency"] ?? "",
+                    "current": ["kpis": ["expense": 1250, "transactionCount": 2], "categorySeries": []],
+                    "previous": ["kpis": ["expense": 1000, "transactionCount": 1], "categorySeries": []],
+                    "dailyExpenseSeries": [], "generatedAt": "2026-08-31T05:30:00Z"
+                ])
+            case "/api/ledger/imports/documents": return Data(#"{"documents":[]}"#.utf8)
+            default: throw LocalLedgerError.operationFailed("Synthetic optional report unavailable")
+            }
+        }
+    }
+
+    private struct ShortcutSessionFixture {
+        let session: LedgerSession
+        let authenticator: Authenticator
+        let catalog: LocalLedgerCatalog
+        let descriptor: LocalLedgerDescriptor
+        let defaults: UserDefaults
+        let store: LedgerWidgetSnapshotStore
+        let engine: ShortcutWidgetEngine
+        var storedTarget: String? { defaults.string(forKey: "ledger.mobile.shortcut-recording-ledger") }
+        /// Publishes a newer revision through a second repository, as the intent does.
+        @MainActor func commitElsewhere() async throws -> UUID {
+            let other = catalog.repository(for: descriptor)
+            let draft = try await other.readFile(path: "main.bean")
+            try await other.saveFile(draft, text: draft.text + "; shortcut synthetic edit \(UUID())\n")
+            let revision = try await other.workspace.currentRevision()
+            return try XCTUnwrap(revision?.id)
+        }
+    }
+
+    private func shortcutSessionFixture() async throws -> ShortcutSessionFixture {
+        let fixture = try fixture()
+        let engine = ShortcutWidgetEngine()
+        let catalog = LocalLedgerCatalog(rootDirectory: fixture.root.appendingPathComponent("managed"),
+            engine: engine, validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Shortcut target")
+        let authenticator = Authenticator()
+        let store = LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root)
+        let session = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: authenticator,
+            defaults: fixture.defaults, widgetSnapshotStore: store, widgetCredentialStore: InertWidgetStore())
+        await session.openLocalLedger(descriptor)
+        XCTAssertEqual(session.phase, .ready)
+        return .init(session: session, authenticator: authenticator, catalog: catalog, descriptor: descriptor,
+            defaults: fixture.defaults, store: store, engine: engine)
+    }
+
+    func testShortcutRecordingOptInAuthenticatesAndPersistsTarget() async throws {
+        let fixture = try await shortcutSessionFixture()
+        let session = fixture.session
+        XCTAssertFalse(session.shortcutRecordingEnabled)
+        fixture.authenticator.rejects = true
+        let calls = fixture.authenticator.calls
+        await session.setShortcutRecordingEnabled(true)
+        XCTAssertEqual(fixture.authenticator.calls, calls + 1)
+        XCTAssertFalse(session.shortcutRecordingEnabled)
+        XCTAssertNil(fixture.storedTarget, "A failed authentication leaves Shortcuts off")
+        fixture.authenticator.rejects = false
+        await session.setShortcutRecordingEnabled(true)
+        XCTAssertEqual(fixture.authenticator.calls, calls + 2)
+        XCTAssertTrue(session.shortcutRecordingEnabled)
+        XCTAssertEqual(fixture.storedTarget, fixture.descriptor.id.uuidString)
+        XCTAssertEqual(LedgerSession.shortcutTarget(defaults: fixture.defaults),
+            .local(id: fixture.descriptor.id, valuationCurrency: "CNY"))
+    }
+
+    func testDisablingShortcutRecordingNeedsNoAuthentication() async throws {
+        let fixture = try await shortcutSessionFixture()
+        await fixture.session.setShortcutRecordingEnabled(true)
+        let calls = fixture.authenticator.calls
+        await fixture.session.setShortcutRecordingEnabled(false)
+        XCTAssertEqual(fixture.authenticator.calls, calls)
+        XCTAssertFalse(fixture.session.shortcutRecordingEnabled)
+        XCTAssertNil(fixture.storedTarget)
+    }
+
+    func testEnablingShortcutRecordingOnAnotherLedgerReplacesTarget() async throws {
+        let fixture = try await shortcutSessionFixture()
+        let session = fixture.session
+        await session.setShortcutRecordingEnabled(true)
+        let other = try await fixture.catalog.create(name: "Second target")
+        await session.openLocalLedger(other)
+        XCTAssertFalse(session.shortcutRecordingEnabled)
+        await session.setShortcutRecordingEnabled(true)
+        XCTAssertEqual(fixture.storedTarget, other.id.uuidString)
+        await session.openLocalLedger(fixture.descriptor)
+        XCTAssertFalse(session.shortcutRecordingEnabled, "Only one ledger is the Shortcuts target")
+        session.chooseLedger()
+        XCTAssertEqual(fixture.storedTarget, other.id.uuidString, "Leaving for the library keeps the target")
+    }
+
+    func testDeletingTargetLedgerClearsShortcutTarget() async throws {
+        let fixture = try await shortcutSessionFixture()
+        await fixture.session.setShortcutRecordingEnabled(true)
+        // Delete the target from another open ledger, as from the library.
+        // The first ledger's in-flight cache writes settle before removal.
+        let other = try await fixture.catalog.create(name: "Remaining ledger")
+        await fixture.session.openLocalLedger(other)
+        try await Task.sleep(for: .milliseconds(300))
+        try await fixture.session.deleteLocalLedger(fixture.descriptor)
+        XCTAssertNil(fixture.storedTarget)
+        XCTAssertNil(fixture.session.shortcutRecordingLedgerID)
+        XCTAssertEqual(LedgerSession.shortcutTarget(defaults: fixture.defaults), .none(remoteMode: false))
+    }
+
+    func testShortcutTargetReadsKeyStorageModeAndValuationCurrency() throws {
+        let fixture = try fixture()
+        let defaults = fixture.defaults
+        XCTAssertEqual(LedgerSession.shortcutTarget(defaults: defaults), .none(remoteMode: false))
+        defaults.set("remote", forKey: "ledger.mobile.storage-mode")
+        XCTAssertEqual(LedgerSession.shortcutTarget(defaults: defaults), .none(remoteMode: true))
+        defaults.set("not-a-uuid", forKey: "ledger.mobile.shortcut-recording-ledger")
+        XCTAssertEqual(LedgerSession.shortcutTarget(defaults: defaults), .none(remoteMode: true))
+        let id = UUID()
+        defaults.set(id.uuidString, forKey: "ledger.mobile.shortcut-recording-ledger")
+        defaults.set(["ledger-local://" + id.uuidString.lowercased(): " usd "], forKey: "ledger.mobile.valuation-currencies")
+        XCTAssertEqual(LedgerSession.shortcutTarget(defaults: defaults), .local(id: id, valuationCurrency: "USD"),
+            "A target wins over remote mode")
+    }
+
+    func testShortcutCommitRefreshesReadySessionAndIgnoresOtherLedgers() async throws {
+        let fixture = try await shortcutSessionFixture()
+        // Move the open ledger's revision first, so a refresh scheduled by
+        // mistake would reach the bootstrap path and be counted.
+        _ = try await fixture.commitElsewhere()
+        try await Task.sleep(for: .milliseconds(100))
+        let before = await fixture.engine.bootstrapCalls
+        await fixture.session.shortcutRecordCommitted(ledgerID: UUID(), catalog: fixture.catalog)
+        try await Task.sleep(for: .milliseconds(500))
+        let unchanged = await fixture.engine.bootstrapCalls
+        XCTAssertEqual(unchanged, before, "Another ledger's commit is a no-op")
+        await fixture.session.shortcutRecordCommitted(ledgerID: fixture.descriptor.id, catalog: fixture.catalog)
+        let deadline = Date().addingTimeInterval(5)
+        var calls = before
+        while calls == before, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+            calls = await fixture.engine.bootstrapCalls
+        }
+        XCTAssertGreaterThan(calls, before, "A ready foreground session refreshes onto the new revision")
+    }
+
+    func testShortcutCommitPublishesWidgetHeadlesslyOnlyWhenAlreadyAllowed() async throws {
+        let fixture = try await shortcutSessionFixture()
+        let session = fixture.session, store = fixture.store
+        // Leaving the foreground flushes the session's own debounced publish;
+        // let it land so it cannot race the assertions below.
+        let flushing = session.hasPendingWidgetPublish
+        await session.updateActivity(isActive: false, isBackground: false)
+        let deadline = Date().addingTimeInterval(3)
+        while flushing, store.load() == nil, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(session.phase, .ready)
+        let repository = fixture.catalog.repository(for: fixture.descriptor)
+
+        // No snapshot: nothing is published.
+        store.clear()
+        _ = try await fixture.commitElsewhere()
+        let reportsBefore = await fixture.engine.reportCalls
+        await session.shortcutRecordCommitted(ledgerID: fixture.descriptor.id, catalog: fixture.catalog)
+        XCTAssertNil(store.load())
+        let reportsAfter = await fixture.engine.reportCalls
+        XCTAssertEqual(reportsAfter, reportsBefore)
+
+        // An existing snapshot on an unlocked ledger is republished.
+        let prepared = try await LocalLedgerWidgetPublisher.prepare(repository: repository, valuationCurrency: "CNY")
+        try store.save(prepared.snapshot, revisionID: prepared.revisionID)
+        let published = try await fixture.commitElsewhere()
+        await session.shortcutRecordCommitted(ledgerID: fixture.descriptor.id, catalog: fixture.catalog)
+        XCTAssertEqual(store.publishedRevision(), published)
+
+        // A locally locked ledger keeps its old snapshot.
+        let origin = "ledger-local://" + fixture.descriptor.id.uuidString.lowercased()
+        fixture.defaults.set([origin], forKey: "ledger.mobile.locally-locked-origins")
+        _ = try await fixture.commitElsewhere()
+        await session.shortcutRecordCommitted(ledgerID: fixture.descriptor.id, catalog: fixture.catalog)
+        XCTAssertEqual(store.publishedRevision(), published)
+        fixture.defaults.removeObject(forKey: "ledger.mobile.locally-locked-origins")
+    }
+}

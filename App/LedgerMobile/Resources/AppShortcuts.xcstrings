@@ -1,0 +1,96 @@
+{
+  "sourceLanguage" : "zh-Hans",
+  "strings" : {
+    "${applicationName} 记账" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add a transaction in ${applicationName}"
+          }
+        }
+      }
+    },
+    "在 ${applicationName} 搜索账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search the ledger in ${applicationName}"
+          }
+        }
+      }
+    },
+    "在 ${applicationName} 查看 ${page}" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show ${page} in ${applicationName}"
+          }
+        }
+      }
+    },
+    "在 ${applicationName} 记一笔" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Log an expense in ${applicationName}"
+          }
+        }
+      }
+    },
+    "打开 ${applicationName} 的 ${page}" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open ${page} in ${applicationName}"
+          }
+        }
+      }
+    },
+    "搜索 ${applicationName}" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search ${applicationName}"
+          }
+        }
+      }
+    },
+    "用 ${applicationName} 记一笔" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record a transaction in ${applicationName}"
+          }
+        }
+      }
+    },
+    "用 ${applicationName} 问账本助手" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask the ledger assistant in ${applicationName}"
+          }
+        }
+      }
+    },
+    "问 ${applicationName} 账本助手" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask ${applicationName} assistant"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

@@ -22,6 +22,9 @@ struct LedgerMobileApp: App {
         LocalLedgerBackgroundSyncService.shared.configure { [weak session] in
             await session?.performBackgroundLocalSync() ?? false
         }
+        LedgerShortcutRecordingHost.shared.configure { [weak session] id, catalog in
+            await session?.shortcutRecordCommitted(ledgerID: id, catalog: catalog)
+        }
         LocalLedgerBackgroundSyncService.shared.startMonitoring { [weak session] reachable in
             session?.updateLocalSyncNetworkAvailability(reachable)
         }

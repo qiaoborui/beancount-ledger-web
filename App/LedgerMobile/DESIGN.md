@@ -25,6 +25,8 @@ Each compact tab retains its own navigation stack. Overflow destinations push wi
 
 Sheets preserve the privacy cover; keyboard dismissal remains available on decimal fields. Honor Reduce Motion. Cold launch and opening a local ledger request device-owner authentication through Face ID, Touch ID, or the device passcode. Returning after the lock interval requires unlock again. Canceling keeps the ledger locked and exposes manual retry. Only a real background visit rearms automatic authentication. Settings describes device protection and local files; automatic Gmail and cloud-service setup stay outside the current app's navigation.
 
+Shortcuts recording is the one write without a preview. It is opt-in per ledger after authentication, writes only flagged `!` entries through the same staging, validation and atomic publish, and the review happens afterwards in 待整理. Its output echoes the caller's input plus account labels, never balances, and it never unlocks the UI or changes amount visibility.
+
 Widget timelines read the local snapshot published by the app. This boundary applies to first launch after an upgrade, stale or missing snapshots, and forced refreshes, including when an older enabled remote credential remains in Keychain. The production timeline composition creates no HTTP client; app updates and WidgetKit scheduling refresh the presentation.
 
 ## Responsive behavior

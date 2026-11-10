@@ -1,6 +1,11 @@
 import CryptoKit
 import Foundation
 
+/// The engine's `/api/ledger/append` reply: `{"ok":true,"beanText":…}`.
+struct LocalAppendResult: Decodable, Sendable {
+    let beanText: String?
+}
+
 struct LocalLedgerFileDraft: Sendable {
     let path: String
     let text: String
@@ -1032,6 +1037,39 @@ actor LocalLedgerRepository: LedgerRepository {
         presentedRevisionID = revision.id
         await storage.didCommit(revision)
         NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
+    }
+    /// Headless append for Shortcuts: opens `openingAccounts` and appends
+    /// `entry` as one revision pinned to `expectedRevisionID`. It validates
+    /// with the plain validator and never promotes a retained stage model,
+    /// because the session's repository for the same ledger retains its own
+    /// and promotion runs outside the workspace lock.
+    func appendTransaction(_ entry: LedgerTransactionEntry, openingAccounts: [LedgerAccountInput],
+                           expectedRevisionID: UUID) async throws -> (receipt: TransactionCommitReceipt, beanText: String?) {
+        var bodies = try openingAccounts.map { ("/api/ledger/accounts", try json($0)) }
+        bodies.append(("/api/ledger/append", try json(entry)))
+        let operations = bodies
+        let engine = engine, validator = validator, entrypoint = descriptor.entrypoint
+        let runtimeRoot = workspace.rootDirectory.appendingPathComponent("runtime").path
+        let box = ResultBox()
+        let revision = try await workspace.commit(expectedRevisionID: expectedRevisionID, changes: [], mutateStage: { root in
+            for (path, body) in operations {
+                let data = try await engine.response(.init(workspaceRoot: root.path, runtimeRoot: runtimeRoot,
+                    entrypoint: entrypoint, method: "POST", path: path, body: body, staging: true))
+                // Decode before publication; malformed replies cannot produce a successful financial write.
+                if path == "/api/ledger/append" {
+                    _ = try data.decode(LocalAppendResult.self)
+                    await box.set(data)
+                } else {
+                    _ = try data.decode(BQLCell.self)
+                }
+            }
+        }, validator: { root in try await validator(root, entrypoint) })
+        presentedRevisionID = revision.id
+        await storage.didCommit(revision)
+        NotificationCenter.default.post(name: Self.didSaveNotification, object: descriptor.id)
+        let beanText = try await box.data?.decode(LocalAppendResult.self).beanText
+        return (TransactionCommitReceipt(ledgerID: descriptor.id, baseRevisionID: expectedRevisionID,
+            revisionID: revision.id), beanText)
     }
     func indexInfo(targetGitSHA: String?) async throws -> LedgerIndexInfo {
         try await read("/api/ledger/index-info")

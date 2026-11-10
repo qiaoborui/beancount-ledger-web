@@ -5058,9 +5058,7 @@ struct TransactionEditorView: View {
     /// first entry is often a ticker like AAPL; prefer the ledger's valuation
     /// currency, then a common fiat code the ledger declares, then CNY.
     static func defaultCurrency(valuation: String?, commodities: [String]) -> String {
-        if let valuation, !valuation.isEmpty { return valuation }
-        let fiat = ["CNY", "USD", "EUR", "HKD", "JPY", "GBP"]
-        return fiat.first(where: commodities.contains) ?? "CNY"
+        LedgerShortcutEntryBuilder.defaultCurrency(valuation: valuation, commodities: commodities)
     }
 
     private struct Draft: Equatable {
@@ -5661,6 +5659,11 @@ enum CookieFundingMemory {
     static func save(_ account: String, defaults: UserDefaults = .standard) {
         guard !account.isEmpty else { return }
         defaults.set(account, forKey: key)
+    }
+
+    /// The stored account unchecked; Shortcuts validates it against its ledger.
+    static func rawValue(defaults: UserDefaults = .standard) -> String? {
+        defaults.string(forKey: key)
     }
 }
 

@@ -69,6 +69,18 @@ struct SettingsView: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+                    Toggle(isOn: Binding(
+                        get: { session.shortcutRecordingEnabled },
+                        set: { enabled in Task { await session.setShortcutRecordingEnabled(enabled) } }
+                    )) {
+                        SettingsRowLabel(title: String(localized: "快捷指令记账"), detail: String(localized: "不打开 App 直接记入本账本，并标记为待核对"))
+                    }
+                    .disabled(session.isBiometricSettingBusy || session.isAuthenticationBusy)
+                    .accessibilityIdentifier("settings-shortcut-recording")
+                    .settingsRowRule()
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 } else {
                     SettingsRowLabel(title: String(localized: "使用设备密码或生物识别解锁"), detail: nil)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)

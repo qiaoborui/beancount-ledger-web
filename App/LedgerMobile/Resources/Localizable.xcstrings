@@ -2054,6 +2054,16 @@
         }
       }
     },
+    "不打开 App 直接记入本账本，并标记为待核对" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record into this ledger without opening the app, flagged for review"
+          }
+        }
+      }
+    },
     "与均值持平" : {
       "localizations" : {
         "en" : {
@@ -3070,6 +3080,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Payment account"
+          }
+        }
+      }
+    },
+    "付款账户必须是资产或负债账户：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account must be an asset or liability account: %@"
           }
         }
       }
@@ -4864,6 +4884,16 @@
         }
       }
     },
+    "分类必须是支出或收入账户：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Category must be an expense or income account: %@"
+          }
+        }
+      }
+    },
     "分类未明确 (%@)" : {
       "localizations" : {
         "en" : {
@@ -5494,6 +5524,16 @@
         }
       }
     },
+    "去重标识" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deduplication ID"
+          }
+        }
+      }
+    },
     "参考历史 · %lld 条" : {
       "localizations" : {
         "en" : {
@@ -5764,6 +5804,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Total"
+          }
+        }
+      }
+    },
+    "同一标识只会记一次，适合自动化重试。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The same ID is recorded only once, which makes automation retries safe."
           }
         }
       }
@@ -6224,6 +6274,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Create or choose a folder in iCloud Drive, one per ledger. On your other devices, choose “Join a Ledger from iCloud Drive” in the library and pick the same folder. If two devices change the same file, you choose which version to keep here."
+          }
+        }
+      }
+    },
+    "在本机 Ledger 账本中直接记一笔交易，不打开 App。记录会标记为待核对（!），出现在「待整理」中。需先在 Ledger 设置中为一个本机账本开启「快捷指令记账」。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Records a transaction in your on-device Ledger without opening the app. Entries are flagged for review (!) and appear in Inbox. Turn on “Shortcuts Recording” for a ledger in Ledger Settings first."
           }
         }
       }
@@ -8054,6 +8114,16 @@
         }
       }
     },
+    "已记入待核对：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recorded for review: %@"
+          }
+        }
+      }
+    },
     "已记账" : {
       "localizations" : {
         "en" : {
@@ -8222,6 +8292,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Currencies & conversion"
+          }
+        }
+      }
+    },
+    "币种代码无效：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invalid currency code: %@"
+          }
+        }
+      }
+    },
+    "币种代码，如 CNY；留空时使用账本的计价币种。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Currency code such as CNY. If empty, the ledger's valuation currency is used."
           }
         }
       }
@@ -8818,6 +8908,16 @@
         }
       }
     },
+    "待分类账户已关闭，请在快捷指令中选择分类：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The uncategorized account is closed. Choose a category in the shortcut: %@"
+          }
+        }
+      }
+    },
     "待判断" : {
       "localizations" : {
         "en" : {
@@ -8974,6 +9074,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "WeChat LingQianTong"
+          }
+        }
+      }
+    },
+    "快捷指令记账" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shortcuts Recording"
+          }
+        }
+      }
+    },
+    "快捷指令记账目前仅支持本机账本。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shortcuts recording works with on-device ledgers only."
           }
         }
       }
@@ -9584,6 +9704,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tag in Bulk"
+          }
+        }
+      }
+    },
+    "找不到开启了快捷指令记账的账本，请在 Ledger 中重新开启。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The ledger set up for Shortcuts was not found. Turn it on again in Ledger."
           }
         }
       }
@@ -10344,6 +10474,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Expense recorded"
+          }
+        }
+      }
+    },
+    "支出或收入分类；留空时按商户历史自动匹配，匹配不到记入待分类。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expense or income category. If empty, Ledger matches it from the merchant's history, or files it as Uncategorized."
           }
         }
       }
@@ -16818,6 +16958,16 @@
         }
       }
     },
+    "记一笔 ${amount}，商户 ${payee}" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record ${amount} at ${payee}"
+          }
+        }
+      }
+    },
     "记一笔 (高级)" : {
       "localizations" : {
         "en" : {
@@ -16914,6 +17064,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Device passcode protection"
+          }
+        }
+      }
+    },
+    "设备重启后需先解锁一次 iPhone 才能记账。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlock your iPhone once after restarting, then try again."
           }
         }
       }
@@ -17114,6 +17274,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sync first to load the current conflicts"
+          }
+        }
+      }
+    },
+    "请先在 Ledger 设置中为一个本机账本开启「快捷指令记账」。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn on “Shortcuts Recording” for an on-device ledger in Ledger Settings first."
           }
         }
       }
@@ -17998,6 +18168,26 @@
         }
       }
     },
+    "账本中没有可用的付款账户，请在快捷指令中选择一个。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No payment account is available. Choose one in the shortcut."
+          }
+        }
+      }
+    },
+    "账本中没有可用账户：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No open account in the ledger: %@"
+          }
+        }
+      }
+    },
     "账本中还没有可用于汇率分析的货币或价格记录。" : {
       "localizations" : {
         "en" : {
@@ -18124,6 +18314,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ledger password"
+          }
+        }
+      }
+    },
+    "账本尚未初始化" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The ledger is not initialized yet"
           }
         }
       }
@@ -18278,12 +18478,32 @@
         }
       }
     },
+    "账本校验未通过，没有写入：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ledger check failed; nothing was written: %@"
+          }
+        }
+      }
+    },
     "账本正在同步，请稍候" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "The ledger is syncing. Please wait"
+          }
+        }
+      }
+    },
+    "账本正忙，请稍后再试。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The ledger is busy. Try again in a moment."
           }
         }
       }
@@ -18494,6 +18714,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Total assets"
+          }
+        }
+      }
+    },
+    "资产或负债账户；留空时使用上次记账用的账户。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asset or liability account. If empty, the account you used last is chosen."
           }
         }
       }
@@ -19214,6 +19444,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "This transaction has too many accounts or too much history. Review it manually."
+          }
+        }
+      }
+    },
+    "这笔已经记过了，没有重复记录。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Already recorded; nothing was added again."
           }
         }
       }
@@ -20094,6 +20334,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Amounts hidden. Amounts, shares, and charts are all hidden together, not just in one place."
+          }
+        }
+      }
+    },
+    "金额必须大于 0。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The amount must be greater than 0."
+          }
+        }
+      }
+    },
+    "金额是多少？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "How much?"
           }
         }
       }
