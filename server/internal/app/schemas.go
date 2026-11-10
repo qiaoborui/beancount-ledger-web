@@ -333,8 +333,10 @@ func (e LedgerEntry) Validate() error {
 		if err := validateDate("date", e.Date); err != nil {
 			return err
 		}
-		if strings.TrimSpace(e.Payee) == "" {
-			return fmt.Errorf("payee is required")
+		// Beancount allows a narration-only transaction; the mobile quick entry
+		// leaves the payee empty and fills the narration from the category.
+		if strings.TrimSpace(e.Payee) == "" && strings.TrimSpace(e.Narration) == "" {
+			return fmt.Errorf("payee or narration is required")
 		}
 		if e.Flag != "" && !isTransactionFlag(e.Flag) {
 			return fmt.Errorf("flag is invalid")

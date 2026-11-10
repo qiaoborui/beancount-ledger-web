@@ -1245,7 +1245,12 @@ func TransactionToBean(entry LedgerEntry) string {
 	if flag == "" {
 		flag = "*"
 	}
-	lines := []string{fmt.Sprintf(`%s %s "%s" "%s"%s`, entry.Date, flag, escapeBean(entry.Payee), escapeBean(entry.Narration), annotationText)}
+	header := fmt.Sprintf(`%s %s "%s" "%s"%s`, entry.Date, flag, escapeBean(entry.Payee), escapeBean(entry.Narration), annotationText)
+	if strings.TrimSpace(entry.Payee) == "" {
+		// A lone string is the narration; `"" "…"` would record an empty payee.
+		header = fmt.Sprintf(`%s %s "%s"%s`, entry.Date, flag, escapeBean(entry.Narration), annotationText)
+	}
+	lines := []string{header}
 	keys := make([]string, 0, len(entry.Metadata))
 	for key := range entry.Metadata {
 		keys = append(keys, key)

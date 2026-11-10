@@ -1211,7 +1211,8 @@ struct LedgerTransactionEntry: Codable, Equatable, Sendable {
         kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "transaction"
         date = try container.decode(String.self, forKey: .date)
         flag = try container.decodeIfPresent(String.self, forKey: .flag)
-        payee = try container.decode(String.self, forKey: .payee)
+        // A narration-only transaction has no payee key.
+        payee = try container.decodeIfPresent(String.self, forKey: .payee) ?? ""
         narration = try container.decodeIfPresent(String.self, forKey: .narration) ?? ""
         metadata = try container.decodeIfPresent([String: LedgerMetadataValue].self, forKey: .metadata) ?? [:]
         tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
@@ -2763,11 +2764,10 @@ enum PendingTransactionClassifier {
             }
         }
 
-        // 4. Missing or generic payee
+        // 4. Missing or generic payee. The payee is optional in quick entry,
+        // so a meaningful narration (`2026-11-10 * "餐饮"`) is enough.
         let trimmedPayee = transaction.payee.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedPayee.isEmpty {
-            reasons.append(.missingPayee)
-        } else if genericPayeePlaceholders.contains(trimmedPayee) {
+        if trimmedPayee.isEmpty || genericPayeePlaceholders.contains(trimmedPayee) {
             let trimmedNarration = transaction.narration.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmedNarration.isEmpty || genericPayeePlaceholders.contains(trimmedNarration) {
                 reasons.append(.missingPayee)

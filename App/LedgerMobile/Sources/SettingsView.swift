@@ -48,7 +48,8 @@ struct SettingsView: View {
                         get: { session.localPrivacyProtectionEnabled },
                         set: { enabled in Task { await session.setLocalPrivacyProtectionEnabled(enabled) } }
                     )) {
-                        SettingsRowLabel(title: String(localized: "\(session.biometricTitle) 保护"), detail: String(localized: "打开账本时验证身份"))
+                        // "设备密码" is Chinese, so it takes no space; "Face ID 保护" keeps one.
+                        SettingsRowLabel(title: session.biometricKind == .unavailable ? String(localized: "设备密码保护") : String(localized: "\(session.biometricTitle) 保护"), detail: String(localized: "打开账本时验证身份"))
                     }
                     .disabled(session.isBiometricSettingBusy || session.isAuthenticationBusy)
                     .accessibilityIdentifier("settings-local-authentication")

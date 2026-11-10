@@ -7560,12 +7560,12 @@
         }
       }
     },
-    "已全部加载 %lld 笔。长按可多选，左滑显示改分类与对账。" : {
+    "已全部加载 %lld 笔。长按查看更多操作，左滑可多选或删除，右滑可分享。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "All %lld transactions loaded. Long-press to multi-select; swipe left to recategorize or reconcile."
+            "value" : "All %lld transactions loaded. Long-press for more actions; swipe left to multi-select or delete, swipe right to share."
           }
         }
       }
@@ -7622,12 +7622,12 @@
         }
       }
     },
-    "已加载 %lld 笔，收窄时间范围可以看得更远。长按可多选，左滑显示改分类与对账。" : {
+    "已加载 %lld 笔，收窄时间范围可以看得更远。长按查看更多操作，左滑可多选或删除，右滑可分享。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Loaded %lld transactions. Narrow the date range to see further back. Long-press to multi-select; swipe left to recategorize or reconcile."
+            "value" : "Loaded %lld transactions. Narrow the date range to see further back. Long-press for more actions; swipe left to multi-select or delete, swipe right to share."
           }
         }
       }
@@ -13518,6 +13518,16 @@
         }
       }
     },
+    "正在保存" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving"
+          }
+        }
+      }
+    },
     "正在保存..." : {
       "localizations" : {
         "en" : {
@@ -16644,6 +16654,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Device passcode"
+          }
+        }
+      }
+    },
+    "设备密码保护" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device passcode protection"
           }
         }
       }

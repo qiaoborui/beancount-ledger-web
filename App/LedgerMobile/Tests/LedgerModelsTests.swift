@@ -939,6 +939,23 @@ final class LedgerModelsTests: XCTestCase {
         }
     }
 
+    func testNarrationOnlyTransactionIsNeitherPendingNorUndecodable() throws {
+        func tx(payee: String, narration: String) -> LedgerTransaction {
+            LedgerTransaction(date: "2026-11-10", payee: payee, narration: narration,
+                postings: [.init(account: "Expenses:Food", amount: 5050, currency: "CNY")],
+                source: .init(file: "fixture.bean", line: 1))
+        }
+        XCTAssertEqual(tx(payee: "", narration: "餐饮").pendingReasons, [])
+        XCTAssertEqual(tx(payee: "", narration: "").pendingReasons, [.missingPayee])
+        XCTAssertEqual(tx(payee: "", narration: "支付宝").pendingReasons, [.missingPayee])
+
+        // The server omits an empty payee, so the key is absent.
+        let json = #"{"kind":"transaction","date":"2026-11-10","narration":"餐饮","postings":[{"account":"Expenses:Food","amount":"50.50","currency":"CNY"}],"currency":"CNY"}"#
+        let entry = try JSONDecoder().decode(LedgerTransactionEntry.self, from: Data(json.utf8))
+        XCTAssertEqual(entry.payee, "")
+        XCTAssertEqual(entry.narration, "餐饮")
+    }
+
     func testEventTagCalculatorAggregatesSpendAndDailyRhythm() {
         let tx1 = LedgerTransaction(
             date: "2026-04-01",

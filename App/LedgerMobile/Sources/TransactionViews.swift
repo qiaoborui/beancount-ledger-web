@@ -1148,9 +1148,9 @@ struct TransactionsView: View {
     private func balancedListFootnote(count: Int) -> String {
         guard filters.kind == .all else { return String(localized: "筛选只作用于当前区间，其余账目未被隐藏。") }
         if session.isLocal, session.localTransactionReachedRowCap {
-            return String(localized: "已加载 \(count) 笔，收窄时间范围可以看得更远。长按可多选，左滑显示改分类与对账。")
+            return String(localized: "已加载 \(count) 笔，收窄时间范围可以看得更远。长按查看更多操作，左滑可多选或删除，右滑可分享。")
         }
-        return String(localized: "已全部加载 \(count) 笔。长按可多选，左滑显示改分类与对账。")
+        return String(localized: "已全部加载 \(count) 笔。长按查看更多操作，左滑可多选或删除，右滑可分享。")
     }
 
     private var navigationContent: some View {
@@ -3558,6 +3558,10 @@ struct CookieKeypadView: View {
             }
         )
         .buttonStyle(PressScaleButtonStyle(enablesHaptic: false))
+        // The glyph alone gives VoiceOver nothing useful, and long-press-to-clear
+        // needs an action it can reach.
+        .accessibilityLabel(String(localized: "删除"))
+        .accessibilityAction(named: Text("清空")) { calculator.clear() }
         .accessibilityIdentifier("keypad-delete")
     }
 
@@ -3578,6 +3582,7 @@ struct CookieKeypadView: View {
 
         }
         .disabled(saving)
+        .accessibilityLabel(saving ? String(localized: "正在保存") : actionTitle)
         // `onCommit` gives this key its one haptic: a tick for "=", a tap for save.
         .buttonStyle(PressScaleButtonStyle(enablesHaptic: false))
         .accessibilityIdentifier("fast-entry-save-button")
