@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/borui/beancount-ledger-web/server/internal/ledgercore"
 )
 
 type Transaction struct {
@@ -307,6 +309,10 @@ func LedgerEntryFromBeanTransaction(entry BeanEntry) LedgerEntry {
 }
 
 func EditableLedgerEntryFromBeanTransaction(entry BeanEntry) *LedgerEntry {
+	// Blank and whole-line comment lines after the last posting or metadata line
+	// belong to the gap before the next directive, not to this entry. The writer
+	// leaves them in place, so they cannot be lost by an edit.
+	entry.RawLines = entry.RawLines[:ledgercore.TrailingTriviaStart(entry.RawLines)]
 	if !transactionMetadataRoundTrips(entry) || !transactionNumbersRoundTrip(entry) || !transactionStringsRoundTrip(entry) {
 		return nil
 	}
@@ -1260,11 +1266,8 @@ func netWorthHistoryInCurrencySequence(sorted iter.Seq[Transaction], prices []Pr
 				assets += valuation
 			}
 			if strings.HasPrefix(account, "Liabilities:") {
-				if valuation < 0 {
-					liabilities += -valuation
-				} else {
-					liabilities += valuation
-				}
+				// Signed, as in balanceTotals: an overpaid card reduces debt.
+				liabilities -= valuation
 			}
 		}
 		rows = append(rows, NetWorthPoint{Date: txn.Date, Assets: assets, Liabilities: liabilities, NetWorth: assets - liabilities})

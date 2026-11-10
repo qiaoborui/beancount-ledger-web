@@ -396,6 +396,10 @@ func dashboardOptionRows(counts map[string]int, accounts map[string]Account) []D
 	return rows
 }
 
+// balanceTotals returns total assets and signed debt. Liabilities balances are
+// normally negative in Beancount, so debt is the negated sum: an overpaid card
+// (a positive Liabilities balance) reduces debt instead of adding to it, and
+// assets - liabilities stays the net worth.
 func balanceTotals(balances []AccountBalance) (int, int) {
 	var assets, liabilities int
 	for _, balance := range balances {
@@ -406,7 +410,7 @@ func balanceTotals(balances []AccountBalance) (int, int) {
 			assets += balance.Valuation
 		}
 		if strings.HasPrefix(balance.Account, "Liabilities:") {
-			liabilities += abs(balance.Valuation)
+			liabilities -= balance.Valuation
 		}
 	}
 	return assets, liabilities

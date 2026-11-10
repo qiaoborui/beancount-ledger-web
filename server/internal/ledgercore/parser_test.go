@@ -67,3 +67,27 @@ func TestParserPreservesLargeExponentBehavior(t *testing.T) {
 		t.Fatalf("amount = %#v", result.Entries[0].AmountValue)
 	}
 }
+
+func TestBlockContinuationAndTrailingTrivia(t *testing.T) {
+	for text, want := range map[string]bool{
+		"":                   true,
+		"  ; note":           true,
+		"; deleted":          true,
+		"  Assets:Cash":      true,
+		"poptag #trip":       false,
+		"* Heading":          false,
+		`option "a" "b"`:     false,
+		"2026-05-02 * \"x\"": false,
+	} {
+		if got := ledgercore.IsBlockContinuationLine(text); got != want {
+			t.Errorf("IsBlockContinuationLine(%q) = %v, want %v", text, got, want)
+		}
+	}
+	lines := []string{`2026-05-01 * "Cafe"`, "  ; inner", "  Assets:Cash 1 CNY", "", "; deleted", "; 2026-05-02 * \"x\"", ""}
+	if got := ledgercore.TrailingTriviaStart(lines); got != 3 {
+		t.Fatalf("TrailingTriviaStart = %d, want 3", got)
+	}
+	if got := ledgercore.TrailingTriviaStart(lines[:1]); got != 1 {
+		t.Fatalf("header-only TrailingTriviaStart = %d, want 1", got)
+	}
+}

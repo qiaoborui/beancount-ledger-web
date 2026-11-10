@@ -364,7 +364,7 @@ export const zhCN = {
     netWorth: "净资产",
     debtRatio: "负债率",
     assetAccountsCount: "{{count}} 个有余额资产账户",
-    liabilitiesAbsolute: "按负债账户绝对值汇总",
+    liabilitiesAbsolute: "按负债账户余额汇总，溢缴款抵减负债",
     assetsMinusLiabilities: "总资产减总负债",
     noAssets: "暂无资产",
     liabilitiesToAssets: "负债占总资产比例",

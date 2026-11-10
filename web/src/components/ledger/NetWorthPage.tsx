@@ -16,7 +16,7 @@ export function NetWorthPage({ rows, monthEndRows, windows, accountBalances, acc
   const displayCurrency = accountBalances.find((row) => row.valuationCurrency)?.valuationCurrency ?? valuationCurrency;
   const valuationBalances = useMemo(() => valuationByAccount(accountBalances), [accountBalances]);
   const assets = Object.entries(valuationBalances).filter(([account]) => account.startsWith("Assets:")).reduce((sum, [, value]) => sum + value, 0);
-  const liabilities = Object.entries(valuationBalances).filter(([account]) => account.startsWith("Liabilities:")).reduce((sum, [, value]) => sum + Math.abs(value), 0);
+  const liabilities = Object.entries(valuationBalances).filter(([account]) => account.startsWith("Liabilities:")).reduce((sum, [, value]) => sum - value, 0);
   const currentNetWorth = assets - liabilities;
   const debtRatio = assets > 0 ? liabilities / assets : null;
   const allocation = assetAllocation(accounts, valuationBalances, t);
@@ -130,7 +130,7 @@ function AssetAllocation({ rows, liabilities, assets, visible, valuationCurrency
       const ratio = row.value / totalAssets;
       return <div key={row.label} className="px-4 py-3 md:px-6"><div className="flex items-center justify-between gap-3"><span className="text-sm text-ink">{row.label}</span><span className="whitespace-nowrap text-sm font-semibold tabular-nums text-ink">{visible ? `${(ratio * 100).toFixed(1)}% · ${formatCompactValuation(row.value / 100, valuationCurrency)}` : "••••••"}</span></div><div className="mt-2 h-1 bg-line"><div className="h-full bg-brand" style={{ width: visible ? `${Math.min(Math.max(ratio * 100, 2), 100)}%` : "0%" }} /></div></div>;
     }) : <ChartEmpty text={t("netWorth.noAssetLayers")} />}
-    <div className="px-4 py-3 md:px-6"><div className="flex items-center justify-between gap-3"><span className="text-sm text-ink">{t("netWorth.liabilitiesOverAssets")}</span><span className="whitespace-nowrap text-sm font-semibold tabular-nums text-ink">{visible ? `${(debtRatio * 100).toFixed(1)}% · ${formatCompactValuation(liabilities / 100, valuationCurrency)}` : "••••••"}</span></div><div className="mt-2 h-1 bg-line"><div className={`h-full ${debtRatio > 0.5 ? "bg-[var(--danger)]" : "bg-stone"}`} style={{ width: visible ? `${Math.min(Math.max(debtRatio * 100, liabilities ? 2 : 0), 100)}%` : "0%" }} /></div></div>
+    <div className="px-4 py-3 md:px-6"><div className="flex items-center justify-between gap-3"><span className="text-sm text-ink">{t("netWorth.liabilitiesOverAssets")}</span><span className="whitespace-nowrap text-sm font-semibold tabular-nums text-ink">{visible ? `${(debtRatio * 100).toFixed(1)}% · ${formatCompactValuation(liabilities / 100, valuationCurrency)}` : "••••••"}</span></div><div className="mt-2 h-1 bg-line"><div className={`h-full ${debtRatio > 0.5 ? "bg-[var(--danger)]" : "bg-stone"}`} style={{ width: visible ? `${Math.min(Math.max(debtRatio * 100, liabilities > 0 ? 2 : 0), 100)}%` : "0%" }} /></div></div>
   </div>;
 }
 

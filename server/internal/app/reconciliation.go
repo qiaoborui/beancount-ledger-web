@@ -53,13 +53,39 @@ func (s *ReconciliationService) Reconcile(input ReconcileRequest) (Reconciliatio
 	return result, nil
 }
 
-func BuildReconciliation(snapshot *LedgerSnapshot, input ReconcileRequest) (ReconciliationResult, error) {
-	accountInfo := reconciliationAccount(snapshot, input.Account)
+// ReconciliationBalance is the book balance a reconciliation on Date compares
+// against: a balance assertion holds at the start of its day, so it excludes
+// transactions dated on or after Date.
+type ReconciliationBalance struct {
+	Account       string `json:"account"`
+	Date          string `json:"date"`
+	Currency      string `json:"currency"`
+	LedgerBalance int    `json:"ledgerBalance"`
+}
+
+// ReconciliationBalanceAsOf is the read-only half of BuildReconciliation, so a
+// client can preview the exact diff a write on that date will produce.
+func ReconciliationBalanceAsOf(snapshot *LedgerSnapshot, account, date string) (ReconciliationBalance, *Account, error) {
+	accountInfo := reconciliationAccount(snapshot, account)
 	if accountInfo == nil {
-		return ReconciliationResult{}, errors.New("不支持的对账账户")
+		return ReconciliationBalance{}, nil, errors.New("不支持的对账账户")
 	}
 	currency := defaultAccountCurrency(accountInfo.Account, accountInfo.Currency)
-	ledgerBalance := balanceBefore(input.Account, currency, snapshot.Transactions, input.BalanceDate)
+	return ReconciliationBalance{
+		Account:       account,
+		Date:          date,
+		Currency:      currency,
+		LedgerBalance: balanceBefore(account, currency, snapshot.Transactions, date),
+	}, accountInfo, nil
+}
+
+func BuildReconciliation(snapshot *LedgerSnapshot, input ReconcileRequest) (ReconciliationResult, error) {
+	asOf, accountInfo, err := ReconciliationBalanceAsOf(snapshot, input.Account, input.BalanceDate)
+	if err != nil {
+		return ReconciliationResult{}, err
+	}
+	currency := asOf.Currency
+	ledgerBalance := asOf.LedgerBalance
 	actual := cents(input.ActualAmount)
 	diff := actual - ledgerBalance
 	adjustmentDate := input.AdjustmentDate
