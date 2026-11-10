@@ -813,7 +813,9 @@ struct NativeImportFlowView: View {
     /// and detection detail fold into one disclosure under it.
     private func previewSummary(_ preview: LedgerImportPreview) -> some View {
         let currency = reviewedEntries.first?.currency ?? "CNY"
-        let selectedTotal = selectedEntries.reduce(0) { $0 + Int(($1.amount * 100).rounded()) }
+        let selectedTotals = ImportReviewTotals.byCurrency(selectedEntries)
+        let progress = ImportClassificationProgress.counts(entryIDs: reviewedEntries.map(\.id), included: includedEntryIDs,
+            completed: classificationCompletedIDs, manuallyReviewed: manuallyReviewedIDs)
         return Section {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -823,7 +825,7 @@ struct NativeImportFlowView: View {
                     Text("已勾选 \(selectedEntries.count) / \(reviewedEntries.count)")
                         .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                 }.padding(.bottom, 14)
-                settleRow(String(localized: "勾选金额合计"), amountText(selectedTotal, currency: currency))
+                settleRow(String(localized: "勾选金额合计"), totalsText(selectedTotals, fallbackCurrency: currency))
                 settleRow(String(localized: "重复，已跳过"), amountText(preview.skippedDuplicateCount, currency: "", suffix: String(localized: " 行")))
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
                     Text("将写入").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
@@ -873,7 +875,7 @@ struct NativeImportFlowView: View {
                     HStack(spacing: 8) {
                         if isClassifying {
                             ProgressView().scaleEffect(0.8)
-                            Text("智能分类 \(classificationCompletedIDs.count) / \(reviewedEntries.count)")
+                            Text("智能分类 \(progress.done) / \(progress.total)")
                                 .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                             Spacer()
                             Button("停止") { classificationPaused = true }.balancedFont(size: 12.5).foregroundStyle(BalancedPalette.ink)
@@ -881,7 +883,7 @@ struct NativeImportFlowView: View {
                             Text(classificationResults.isEmpty ? "智能分类已就绪" : "智能分类已完成 · \(classificationResults.count) 笔已填写")
                                 .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                             Spacer()
-                            if classificationCompletedIDs.count < reviewedEntries.count {
+                            if progress.done < progress.total {
                                 Button("继续分类") {
                                     classificationError = nil
                                     classificationPaused = false
@@ -920,6 +922,18 @@ struct NativeImportFlowView: View {
 
     private func amountText(_ minorUnits: Int, currency: String, suffix: String = "") -> Text {
         let formatted = currency.isEmpty ? "\(minorUnits)\(suffix)" : MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: false) + suffix
+        return Text(formatted)
+            .font(.custom(BalancedWeight.text.sansPostscriptName, size: 15, relativeTo: .body))
+            .monospacedDigit().foregroundColor(BalancedPalette.ink)
+    }
+
+    /// Per-currency totals on one line. A single currency keeps the bare figure
+    /// `amountText` shows; several each carry their own symbol.
+    private func totalsText(_ totals: [(currency: String, minorUnits: Int)], fallbackCurrency: String) -> Text {
+        guard totals.count > 1 else {
+            return amountText(totals.first?.minorUnits ?? 0, currency: totals.first?.currency ?? fallbackCurrency)
+        }
+        let formatted = totals.map { MoneyText.format(minorUnits: $0.minorUnits, currency: $0.currency) }.joined(separator: " · ")
         return Text(formatted)
             .font(.custom(BalancedWeight.text.sansPostscriptName, size: 15, relativeTo: .body))
             .monospacedDigit().foregroundColor(BalancedPalette.ink)
@@ -1216,7 +1230,7 @@ struct NativeImportFlowView: View {
     /// person just confirmed, then where to go next.
     private func completionView(_ result: LedgerImportCommitResult) -> some View {
         let currency = committedEntries.first?.currency ?? reviewedEntries.first?.currency ?? "CNY"
-        let writtenTotal = committedEntries.reduce(0) { $0 + Int(($1.amount * 100).rounded()) }
+        let writtenTotals = ImportReviewTotals.byCurrency(committedEntries)
         let unclassified = committedEntries.filter { ImportReviewQueue.isMissingAccount($0.categoryAccount) }.count
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -1269,7 +1283,7 @@ struct NativeImportFlowView: View {
                                 .padding(.bottom, 10)
                         }
                         if !committedEntries.isEmpty {
-                            settleRow(String(localized: "写入金额合计"), amountText(writtenTotal, currency: currency))
+                            settleRow(String(localized: "写入金额合计"), totalsText(writtenTotals, fallbackCurrency: currency))
                         }
                         if reviewedEntries.count > committedEntries.count, !committedEntries.isEmpty {
                             settleRow(String(localized: "未写入"), amountText(reviewedEntries.count - committedEntries.count,

@@ -158,6 +158,52 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(daily.periodValuationChange, 0)
     }
 
+    /// An overpaid card (a positive Liabilities balance) is owed to the user:
+    /// it lowers debt instead of adding to it, so net worth is not understated
+    /// by twice the overpayment.
+    func testBalanceSheetTotalsTreatAnOverpaidCardAsReducingDebt() throws {
+        let json = Self.bootstrapJSON.replacingOccurrences(of: #""valuation": -235000,"#, with: #""valuation": 50000,"#)
+        let payload = try JSONDecoder().decode(LedgerBootstrap.self, from: Data(json.utf8))
+        XCTAssertEqual(
+            payload.balanceSheetTotals,
+            BalanceSheetTotals(assets: 1_235_000, liabilities: -50_000, netWorth: 1_285_000)
+        )
+    }
+
+    /// The 账户 period totals classify by account prefix like the non-period
+    /// path: a payable in the 应收 group is debt, an Assets account in the 其他
+    /// group is still an asset, and closing valuations are used.
+    func testClosingRowTotalsClassifyByAccountPrefixNotGroup() {
+        func row(_ account: String, group: String, valuation: Int, closing: Int) -> AccountBalanceRow {
+            AccountBalanceRow(
+                account: account, label: account, group: group,
+                nativeCurrency: "CNY", nativeAmount: valuation,
+                valuationCurrency: "CNY", valuation: valuation, valuationMissing: false,
+                periodBalancesAvailable: true,
+                openingNativeAmount: valuation, closingNativeAmount: closing, periodNativeChange: closing - valuation,
+                openingValuation: valuation, closingValuation: closing, periodValuationChange: closing - valuation,
+                periodValuationMissing: false
+            )
+        }
+        let totals = BalanceSheetTotals(closingRows: [
+            row("Assets:Bank", group: "cash", valuation: 0, closing: 1_000_000),
+            row("Assets:Misc", group: "other", valuation: 0, closing: 20_000),
+            row("Liabilities:Payable:Alice", group: "receivable", valuation: 0, closing: -200_000),
+            row("Liabilities:CreditCard", group: "credit", valuation: 0, closing: 30_000),
+            row("Expenses:Food", group: "expense", valuation: 0, closing: 9_999),
+        ])
+        XCTAssertEqual(totals, BalanceSheetTotals(assets: 1_020_000, liabilities: 170_000, netWorth: 850_000))
+    }
+
+    func testAssetsCompositionGroupsByAccountTypeFirst() {
+        XCTAssertEqual(TerminalAssetsIndex.compositionGroup(account: "Liabilities:Payable:Alice", metadataGroup: "receivable"), "liability")
+        XCTAssertEqual(TerminalAssetsIndex.compositionGroup(account: "Liabilities:CreditCard", metadataGroup: "credit"), "liability")
+        XCTAssertEqual(TerminalAssetsIndex.compositionGroup(account: "Assets:Misc", metadataGroup: "other"), "asset")
+        XCTAssertEqual(TerminalAssetsIndex.compositionGroup(account: "Assets:Misc", metadataGroup: nil), "asset")
+        XCTAssertEqual(TerminalAssetsIndex.compositionGroup(account: "Assets:Broker", metadataGroup: "wealth"), "wealth")
+        XCTAssertEqual(TerminalAssetsIndex.compositionGroup(account: "Assets:Receivable:Bob", metadataGroup: "receivable"), "receivable")
+    }
+
     func testNetWorthTrendCutsAtThePagePeriodAndFallsBackToRangeHistory() throws {
         let trend = """
         [
@@ -398,6 +444,63 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(universe.first, "USD")
         XCTAssertTrue(universe.contains("GBP"))
         XCTAssertFalse(universe.contains("QQQ"))
+    }
+
+    func testCurrencyRatesUseExactPriceDecimalAndSkipZeroDirectPrices() throws {
+        let json = Data("""
+        [{"date":"2026-08-29","currency":"JPY","amount":5,"amountValue":"0.0478","quoteCurrency":"CNY"},
+         {"date":"2026-08-29","currency":"IDR","amount":0,"amountValue":"0.00045","quoteCurrency":"CNY"},
+         {"date":"2026-08-29","currency":"KRW","amount":0,"quoteCurrency":"CNY"},
+         {"date":"2026-08-29","currency":"CNY","amount":19,"quoteCurrency":"KRW"},
+         {"date":"2026-08-29","currency":"USD","amount":713,"quoteCurrency":"CNY"}]
+        """.utf8)
+        let prices = try JSONDecoder().decode([LedgerPrice].self, from: json)
+        XCTAssertEqual(prices[0].amountValue, "0.0478")
+        XCTAssertNil(prices[4].amountValue) // older servers send cents only
+        XCTAssertEqual(prices[4], LedgerPrice(date: "2026-08-29", currency: "USD", amount: 713, quoteCurrency: "CNY"))
+
+        let jpy = CurrencyAnalysis.latestRate(currency: "JPY", targetCurrency: "CNY", prices: prices)
+        XCTAssertEqual(jpy?.source, .direct)
+        XCTAssertEqual(jpy?.rate ?? 0, 0.0478, accuracy: 1e-12)
+        XCTAssertEqual(CurrencyAnalysis.latestRate(currency: "IDR", targetCurrency: "CNY", prices: prices)?.rate ?? 0,
+                       0.000_45, accuracy: 1e-12)
+        XCTAssertEqual(CurrencyAnalysis.latestRate(currency: "USD", targetCurrency: "CNY", prices: prices)?.rate ?? 0,
+                       7.13, accuracy: 1e-12)
+        // A zero direct price is missing, not "1 KRW = 0 CNY": the inverse pair answers.
+        let krw = CurrencyAnalysis.latestRate(currency: "KRW", targetCurrency: "CNY", prices: prices)
+        XCTAssertEqual(krw?.source, .inverse)
+        XCTAssertEqual(krw?.rate ?? 0, 1 / 0.19, accuracy: 1e-9)
+        let history = CurrencyAnalysis.rateHistory(currency: "JPY", targetCurrency: "CNY", prices: prices)
+        XCTAssertEqual(history.last?.rate ?? 0, 0.0478, accuracy: 1e-12)
+    }
+
+    /// Mirrors TestLocalOverviewCategoriesValueForeignPostings and the server's
+    /// PriceIndex.Valuation, which values the overview 支出 row.
+    func testPriceValuationMatchesServerIntegerValuation() {
+        let valuation = LedgerPriceValuation(prices: [
+            LedgerPrice(date: "2026-07-01", currency: "JPY", amount: 4, quoteCurrency: "CNY"),
+            LedgerPrice(date: "2026-08-01", currency: "JPY", amount: 5, quoteCurrency: "CNY", amountValue: "0.0478"),
+            LedgerPrice(date: "2026-08-01", currency: "USD", amount: 700, quoteCurrency: "CNY"),
+        ])
+        XCTAssertEqual(valuation.value(10_000, currency: "JPY", in: "CNY"), 500) // latest cents, not the decimal
+        XCTAssertEqual(valuation.value(1_000, currency: "CNY", in: "USD"), 142) // inverse, truncated
+        XCTAssertEqual(valuation.value(10_000, currency: "JPY", in: "USD"), 71) // bridged through CNY
+        XCTAssertEqual(valuation.value(-1_000, currency: "usd ", in: "CNY"), -7_000)
+        XCTAssertEqual(valuation.value(1_000, currency: nil, in: "CNY"), 1_000) // missing currency is CNY
+        XCTAssertNil(valuation.value(1_000, currency: "GBP", in: "CNY"))
+    }
+
+    func testOverviewCategoriesCarryTheirValuationCurrency() throws {
+        let base = #""revision":"r","start":"2026-09-01","end":"2026-10-01","sensitiveUnlocked":true,"positiveTotalMinorUnits":0,"transactionCount":0,"highestExpense":null,"categories":[]"#
+        let valued = try JSONDecoder().decode(LedgerOverviewCategories.self, from: Data("{\(base),\"currency\":\"USD\"}".utf8))
+        XCTAssertEqual(valued.currency, "USD")
+        let restored = try JSONDecoder().decode(LedgerOverviewCategories.self, from: JSONEncoder().encode(valued))
+        XCTAssertEqual(restored.currency, "USD")
+        XCTAssertNil(try JSONDecoder().decode(LedgerOverviewCategories.self, from: Data("{\(base)}".utf8)).currency)
+        XCTAssertEqual(LocalLedgerRepository.overviewQuery(start: "2026-09-01", end: "2026-10-01", valuationCurrency: "USD"),
+                       ["start": "2026-09-01", "end": "2026-10-01", "valuationCurrency": "USD"])
+        XCTAssertEqual(LocalLedgerRepository.overviewQuery(start: "2026-09-01", end: "2026-10-01", valuationCurrency: nil),
+                       ["start": "2026-09-01", "end": "2026-10-01"])
     }
 
     func testCurrencyHistorySamplesLedgerPriceDatesAndBoundsSeriesToNinetyPoints() {
@@ -1008,6 +1111,42 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(summaries.count, 1)
         XCTAssertEqual(summaries.first?.tag, "2026-日本旅行")
         XCTAssertEqual(summaries.first?.totalExpense, 17000)
+    }
+
+    private func reconciliationRow(status: String, ledgerBalance: Int = 95_000) -> LedgerReconciliationRow {
+        LedgerReconciliationRow(account: "Assets:Bank", alias: nil, label: "Bank", currency: "CNY",
+            ledgerBalance: ledgerBalance, status: status, lastAssertion: nil)
+    }
+
+    private func accountStatus(_ status: String, assertion: Int? = nil, computed: Int? = nil) -> LedgerAccountStatus {
+        LedgerAccountStatus(account: "Assets:Bank", status: status, lastEntryDate: "2026-11-05",
+            lastEntryType: status == "yellow" ? "transaction" : "balance", assertionAmount: assertion, computedBalance: computed)
+    }
+
+    func testReconciliationStateGivesEachRowOneClassification() {
+        // Asserted in range, then a later transaction turned it yellow: pending only.
+        XCTAssertEqual(reconciliationRow(status: "asserted").reconciliationState(status: accountStatus("yellow")), .pending)
+        XCTAssertEqual(reconciliationRow(status: "asserted").reconciliationState(status: accountStatus("green")), .asserted)
+        XCTAssertEqual(reconciliationRow(status: "pending").reconciliationState(status: accountStatus("green")), .asserted)
+        XCTAssertEqual(reconciliationRow(status: "asserted").reconciliationState(status: accountStatus("red", assertion: 1, computed: 2)), .error)
+        XCTAssertEqual(reconciliationRow(status: "asserted").reconciliationState(status: nil), .asserted)
+        XCTAssertEqual(reconciliationRow(status: "pending").reconciliationState(status: accountStatus("grey")), .pending)
+    }
+
+    func testAssertionDifferenceUsesTheBalanceTheAssertionWasCheckedAgainst() {
+        // A same-day -50.00 is in the all-time balance (950.00) but not in the
+        // balance before the assertion's day (1000.00) that made it fail.
+        let row = reconciliationRow(status: "asserted", ledgerBalance: 95_000)
+        XCTAssertEqual(row.assertionDifference(status: accountStatus("red", assertion: 95_000, computed: 100_000)), 5_000)
+        XCTAssertEqual(row.assertionDifference(status: accountStatus("red", assertion: 90_000)), 5_000)
+        XCTAssertNil(row.assertionDifference(status: accountStatus("green", assertion: 95_000, computed: 95_000)))
+        XCTAssertNil(row.assertionDifference(status: nil))
+    }
+
+    func testReconciliationBalanceDecodesServerShape() throws {
+        let json = Data(#"{"account":"Assets:Bank","date":"2026-11-10","currency":"CNY","ledgerBalance":100000}"#.utf8)
+        let balance = try JSONDecoder().decode(LedgerReconciliationBalance.self, from: json)
+        XCTAssertEqual(balance, LedgerReconciliationBalance(account: "Assets:Bank", date: "2026-11-10", currency: "CNY", ledgerBalance: 100_000))
     }
 }
 

@@ -104,3 +104,30 @@ enum ImportBulkEdit {
         }
     }
 }
+
+enum ImportReviewTotals {
+    /// Entry amounts summed per currency, largest first, so a mixed-currency
+    /// import never shows USD and CNY added under one symbol. The sum stays
+    /// gross: a purchase and its refund both count.
+    static func byCurrency(_ entries: [LedgerImportEntry]) -> [(currency: String, minorUnits: Int)] {
+        var totals: [String: Int] = [:]
+        for entry in entries {
+            totals[entry.currency.isEmpty ? "CNY" : entry.currency, default: 0] += Int((entry.amount * 100).rounded())
+        }
+        return totals.map { (currency: $0.key, minorUnits: $0.value) }
+            .sorted { $0.minorUnits == $1.minorUnits ? $0.currency < $1.currency : $0.minorUnits > $1.minorUnits }
+    }
+}
+
+enum ImportClassificationProgress {
+    /// Progress over the entries smart classification can still touch: the
+    /// checked ones. An unchecked entry is never classified, so counting it
+    /// would leave 继续分类 showing after a finished run. Entries the person
+    /// already reviewed by hand count as done.
+    static func counts(entryIDs: [String], included: Set<String>, completed: Set<String>,
+                       manuallyReviewed: Set<String>) -> (done: Int, total: Int) {
+        let scope = entryIDs.filter { included.contains($0) }
+        let done = scope.filter { completed.contains($0) || manuallyReviewed.contains($0) }.count
+        return (done, scope.count)
+    }
+}

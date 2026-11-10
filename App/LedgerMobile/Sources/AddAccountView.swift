@@ -69,9 +69,9 @@ struct AddAccountView: View {
         if useLedgerInceptionDate {
             return "1970-01-01"
         }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: openDate)
+        // Gregorian/POSIX: a Buddhist or Japanese system calendar would
+        // otherwise write years like 2569 into the `open` directive.
+        return LedgerDateRange.format(openDate)
     }
 
     var body: some View {

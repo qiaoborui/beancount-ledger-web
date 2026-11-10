@@ -136,18 +136,16 @@ struct ReconciliationView: View {
 
     private var filteredRows: [LedgerReconciliationRow] {
         allRows.filter { row in
-            let rowStatus = status(for: row)
-            let statusIsError = rowStatus?.hasIssue == true
-            let statusIsAsserted = row.status == "asserted" || rowStatus?.isReconciled == true
+            let state = row.reconciliationState(status: status(for: row))
             switch selectedStatus {
             case .all:
                 break
             case .pending:
-                if rowStatus?.isReconciled == true || statusIsError { return false }
+                if state != .pending { return false }
             case .error:
-                if !statusIsError { return false }
+                if state != .error { return false }
             case .asserted:
-                if !statusIsAsserted || statusIsError { return false }
+                if state != .asserted { return false }
             }
             if !searchText.isEmpty {
                 let q = searchText.lowercased()
@@ -177,14 +175,10 @@ struct ReconciliationView: View {
         var pending = 0
         var error = 0
         for row in allRows {
-            let rowStatus = status(for: row)
-            let statusError = rowStatus?.hasIssue == true
-            if statusError {
-                error += 1
-            } else if row.status == "asserted" || rowStatus?.isReconciled == true {
-                asserted += 1
-            } else {
-                pending += 1
+            switch row.reconciliationState(status: status(for: row)) {
+            case .error: error += 1
+            case .asserted: asserted += 1
+            case .pending: pending += 1
             }
         }
         return (total, asserted, pending, error)
@@ -329,15 +323,16 @@ struct ReconciliationView: View {
     private func reconciliationRow(_ row: LedgerReconciliationRow) -> some View {
         let st = status(for: row)
         let isLiability = row.account.hasPrefix("Liabilities:")
-        let hasError = st?.hasIssue == true
-        let isAsserted = (row.status == "asserted" || st?.isReconciled == true) && !hasError
+        let state = row.reconciliationState(status: st)
+        let hasError = state == .error
+        let isAsserted = state == .asserted
         let amountColor: Color = (hasError || isLiability) ? BalancedPalette.expense : BalancedPalette.ink
         let cur = row.currency.isEmpty ? "CNY" : row.currency
 
         let leadText: String
         let tagText: String
-        if hasError, let assertionAmount = st?.assertionAmount {
-            leadText = String(localized: "差异 ") + MoneyText.format(minorUnits: row.ledgerBalance - assertionAmount, currency: cur, showSign: true)
+        if hasError, let difference = row.assertionDifference(status: st) {
+            leadText = String(localized: "差异 ") + MoneyText.format(minorUnits: difference, currency: cur, showSign: true)
             tagText = String(localized: "异常")
         } else if let last = row.lastAssertion {
             leadText = String(localized: "\(last.date) 断言")
@@ -439,12 +434,31 @@ struct ReconciliationFormBody: View {
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var showingDatePicker = false
+    /// The balance the write diffs against for `balanceDate` — only transactions
+    /// before that day, which `row.ledgerBalance` (all-time) is not. Until it
+    /// arrives the form cannot show the 差异 the write will produce, so
+    /// submission waits for it.
+    @State private var asOfBalance: LedgerReconciliationBalance?
+    /// A server without the as-of endpoint still diffs on its own side; the form
+    /// then falls back to the all-time balance, as it did before.
+    @State private var asOfUnsupported = false
+    @State private var asOfError: String?
+    @State private var asOfReload = 0
+    /// The figure seeded into 实际余额. It follows the as-of balance only while
+    /// the field still holds it untouched.
+    @State private var seededAmount: String
 
     init(row: LedgerReconciliationRow, accountStatus: LedgerAccountStatus?, onReconcileSuccess: @escaping (String) -> Void) {
         self.row = row
         self.accountStatus = accountStatus
         self.onReconcileSuccess = onReconcileSuccess
-        _actualAmount = State(initialValue: String(format: "%.2f", Double(row.ledgerBalance) / 100.0))
+        let seed = Self.amountText(row.ledgerBalance)
+        _actualAmount = State(initialValue: seed)
+        _seededAmount = State(initialValue: seed)
+    }
+
+    private static func amountText(_ minorUnits: Int) -> String {
+        String(format: "%.2f", Double(minorUnits) / 100.0)
     }
 
     private var currency: String { row.currency.isEmpty ? "CNY" : row.currency }
@@ -455,9 +469,22 @@ struct ReconciliationFormBody: View {
         return Int(round(d * 100))
     }
 
+    /// 账本余额 as the write will see it on `balanceDate`.
+    private var bookBalance: Int? {
+        if let asOfBalance, asOfBalance.date == balanceDate { return asOfBalance.ledgerBalance }
+        return asOfUnsupported ? row.ledgerBalance : nil
+    }
+
     private var diffCents: Int? {
-        guard let actual = actualCents else { return nil }
-        return actual - row.ledgerBalance
+        guard let actual = actualCents, let book = bookBalance else { return nil }
+        return actual - book
+    }
+
+    /// Explains why 账本余额 differs from the list's balance: transactions on
+    /// or after the reconcile date are not part of it.
+    private var asOfHint: String? {
+        guard let asOfBalance, asOfBalance.date == balanceDate, asOfBalance.ledgerBalance != row.ledgerBalance else { return nil }
+        return String(localized: "账本余额只计入 \(balanceDate) 之前的流水。如果实际余额已包含当天的流水，请把对账日期改为次日。")
     }
 
     private var adjustmentDate: String { LedgerReconciliationDates.previousDay(from: balanceDate) }
@@ -475,6 +502,9 @@ struct ReconciliationFormBody: View {
     /// when the figures already agree, and the real target account (not a
     /// fixed placeholder) when one is written.
     private var noteText: String {
+        if bookBalance == nil {
+            return asOfError ?? String(localized: "正在读取对账日期的账本余额…")
+        }
         guard let diff = diffCents, diff != 0 else {
             return String(localized: "账实一致，仅写入余额断言，不记任何调整分录。")
         }
@@ -503,7 +533,8 @@ struct ReconciliationFormBody: View {
                 .padding(.bottom, 14)
 
             VStack(spacing: 0) {
-                BalancedKeyRow(label: String(localized: "账本余额"), minorUnits: row.ledgerBalance, currency: currency, color: BalancedPalette.ink)
+                BalancedKeyRow(label: String(localized: "账本余额"), minorUnits: bookBalance ?? row.ledgerBalance, currency: currency,
+                    color: bookBalance == nil ? BalancedPalette.meta : BalancedPalette.ink)
                 BalancedKeyRow(label: String(localized: "实际余额"), minorUnits: actualCents ?? row.ledgerBalance, currency: currency, color: BalancedPalette.ink)
                 BalancedKeyRow(label: String(localized: "差异"), minorUnits: abs(diffCents ?? 0), currency: currency,
                     prefix: (diffCents ?? 0) > 0 ? "+" : (diffCents ?? 0) < 0 ? "−" : "",
@@ -518,7 +549,19 @@ struct ReconciliationFormBody: View {
                 .balancedFont(size: 12.5)
                 .foregroundStyle(BalancedPalette.meta)
                 .lineSpacing(2)
-                .padding(.bottom, 18)
+                .padding(.bottom, asOfHint == nil && asOfError == nil ? 18 : 8)
+
+            if let asOfHint {
+                Text(asOfHint)
+                    .balancedFont(size: 12.5)
+                    .foregroundStyle(BalancedPalette.meta)
+                    .lineSpacing(2)
+                    .padding(.bottom, 18)
+            } else if asOfError != nil {
+                Button("重试") { asOfReload += 1 }
+                    .buttonStyle(.balanced(.quiet))
+                    .padding(.bottom, 18)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("实际余额").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
@@ -590,21 +633,60 @@ struct ReconciliationFormBody: View {
         .padding(.top, 8)
         .padding(.bottom, 32)
         .accessibilityIdentifier("reconciliation-card-" + row.account)
+        .task(id: "\(balanceDate)/\(asOfReload)") { await loadAsOfBalance() }
+    }
+
+    private func loadAsOfBalance() async {
+        let date = balanceDate
+        asOfError = nil
+        do {
+            let balance = try await session.reconciliationBalance(account: row.account, date: date)
+            guard !Task.isCancelled, date == balanceDate else { return }
+            asOfBalance = balance
+            if actualAmount == seededAmount {
+                let seed = Self.amountText(balance.ledgerBalance)
+                actualAmount = seed
+                seededAmount = seed
+            }
+        } catch {
+            guard !Task.isCancelled, date == balanceDate else { return }
+            if Self.isUnsupported(error) {
+                asOfUnsupported = true
+            } else {
+                asOfError = error.localizedDescription
+            }
+        }
+    }
+
+    /// An older server (404) or a preview/remote API without the endpoint.
+    private static func isUnsupported(_ error: Error) -> Bool {
+        if let apiError = error as? LedgerAPIError {
+            switch apiError {
+            case .incompatibleServer: return true
+            case let .server(status, _): return status == 404
+            default: return false
+            }
+        }
+        if let repositoryError = error as? LedgerRepositoryError, case .capabilityUnavailable = repositoryError {
+            return true
+        }
+        return false
     }
 
     private func submit() async {
-        guard let diff = diffCents else { return }
+        guard diffCents != nil else { return }
         isSubmitting = true
         errorMessage = nil
         do {
-            try await session.reconcileAccount(
+            let result = try await session.reconcileAccount(
                 account: row.account,
                 actualAmount: actualAmount,
                 balanceDate: balanceDate,
                 adjustmentDate: adjustmentDate
             )
             isSubmitting = false
-            let msg = diff == 0 ? String(localized: "\(row.label) 余额断言已成功记录！") : String(localized: "\(row.label) 平账调整与断言已成功写入！")
+            // Report what the server wrote, not what the form predicted.
+            let msg = result.diff == 0 ? String(localized: "\(row.label) 余额断言已成功记录！") : String(localized: "\(row.label) 平账调整与断言已成功写入！")
             onReconcileSuccess(msg)
             dismiss()
         } catch {

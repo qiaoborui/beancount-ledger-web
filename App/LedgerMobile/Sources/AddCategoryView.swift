@@ -54,6 +54,20 @@ struct AddCategoryView: View {
         !effectiveName.isEmpty && isPathValid && !isSubmitting
     }
 
+    /// Ledger-inception date, matching AddAccountView: a category opened today
+    /// would make bean-check reject any backdated entry booked to it.
+    private static let openDate = "1970-01-01"
+    /// Categories carry no currency constraint; the server only defaults
+    /// Assets/Liabilities to CNY.
+    private static let openCurrency = ""
+
+    /// Built from the exact values `submit()` sends, so the preview cannot drift.
+    private var openDirectivePreview: String {
+        let currency = Self.openCurrency.trimmingCharacters(in: .whitespacesAndNewlines)
+        let line = "\(Self.openDate) open \(calculatedPath)"
+        return currency.isEmpty ? line : "\(line) \(currency)"
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -178,7 +192,7 @@ struct AddCategoryView: View {
 
                 // ── 4. 将创建 ──
                 Section {
-                    Text("2000-01-01 open \(calculatedPath) CNY")
+                    Text(verbatim: openDirectivePreview)
                         .balancedMono(size: 11.5)
                         .foregroundStyle(BalancedPalette.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -271,16 +285,12 @@ struct AddCategoryView: View {
         errorMessage = nil
         defer { isSubmitting = false }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        let today = formatter.string(from: Date())
-
         do {
             try await session.addAccount(
                 account: calculatedPath,
                 alias: effectiveName,
-                currency: "",
-                date: today
+                currency: Self.openCurrency,
+                date: Self.openDate
             )
             LedgerFeedback.selection()
             dismiss()

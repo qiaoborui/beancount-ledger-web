@@ -13,8 +13,11 @@ struct OverviewView: View {
                 if let error = session.errorMessage { StatusBanner(message: error, onDismiss: session.dismissError).padding(.horizontal, 20).padding(.bottom, 16) }
                 if let ledger = session.ledger {
                     retentionHero(ledger); cashflow(ledger)
-                    let categories = session.isLocal ? localSpendingCategories(accountLabels: labels) : spendingCategories(from: ledger.transactions, accountLabels: labels)
-                    spending(categories, currency: ledger.summary.currency)
+                    let breakdown = session.isLocal
+                        ? localSpendingCategories(accountLabels: labels, fallbackCurrency: ledger.summary.currency)
+                        : spendingCategories(from: ledger.transactions, prices: ledger.prices,
+                                             currency: ledger.summary.currency, accountLabels: labels)
+                    spending(breakdown)
                     recentTransactions(ledger, accountLabels: labels)
                 } else { EmptyLedgerState(icon: "chart.line.uptrend.xyaxis", title: String(localized: "暂无财务数据"), detail: String(localized: "下拉刷新重新读取账本。")).padding(.horizontal, 20) }
             }.padding(.bottom, 24).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
@@ -163,8 +166,8 @@ struct OverviewView: View {
         }.padding(EdgeInsets(top: top, leading: 20, bottom: 10, trailing: 20))
     }
 
-    private func spending(_ categories: [OverviewCategorySpending], currency: String) -> some View {
-        let total = categories.reduce(0) { $0 + $1.totalMinorUnits }
+    private func spending(_ breakdown: OverviewSpendingBreakdown) -> some View {
+        let categories = breakdown.categories, total = breakdown.totalMinorUnits, currency = breakdown.currency
         return VStack(alignment: .leading, spacing: 0) {
             sectionHead(String(localized: "支出分类"), top: 18) {
                 if !categories.isEmpty {
@@ -256,10 +259,14 @@ struct OverviewView: View {
     private func comparisonSection(_ title: String, value: LedgerPeriodComparison, currency: String) -> some View { Section(title) { Text("对比 \(value.baselineRange.start) 至 \(value.baselineRange.end)"); if let v = value.current { LabeledContent("本期") { BalancedAmount(minorUnits: v, currency: currency) } }; if let v = value.baseline { LabeledContent("基期") { BalancedAmount(minorUnits: v, currency: currency) } }; if let v = value.delta { LabeledContent("变化金额") { BalancedAmount(minorUnits: v, currency: currency, prefix: v > 0 ? "+" : "") } }; LabeledContent("变化率", value: changeText(value)) } }
     private func changeText(_ c: LedgerPeriodComparison?) -> String { guard session.amountsVisible else { return "••••" }; guard let c, c.delta != nil else { return String(localized: "暂无数据") }; guard let p = c.percentage else { return String(localized: "基期为零") }; return String(format: "%+.1f%%", p * 100) }
 
-    private func localSpendingCategories(accountLabels: [String: String]) -> [OverviewCategorySpending] {
+    /// The engine lists the top four categories but values shares and the header
+    /// against every category, so the header is its full total, not the rows' sum.
+    private func localSpendingCategories(accountLabels: [String: String], fallbackCurrency: String) -> OverviewSpendingBreakdown {
         guard let response = session.localOverviewCategories,
-              response.positiveTotalMinorUnits > 0 else { return [] }
-        return response.categories.sorted {
+              response.positiveTotalMinorUnits > 0 else {
+            return OverviewSpendingBreakdown(categories: [], totalMinorUnits: 0, currency: fallbackCurrency)
+        }
+        let categories = response.categories.sorted {
             $0.totalMinorUnits == $1.totalMinorUnits
                 ? $0.label < $1.label : $0.totalMinorUnits > $1.totalMinorUnits
         }.map { item in
@@ -272,12 +279,19 @@ struct OverviewView: View {
                 totalMinorUnits: item.totalMinorUnits, count: max(1, item.positiveTransactionCount),
                 percentage: Double(item.totalMinorUnits) / Double(response.positiveTotalMinorUnits))
         }
+        return OverviewSpendingBreakdown(categories: categories, totalMinorUnits: response.positiveTotalMinorUnits,
+                                         currency: response.currency ?? fallbackCurrency)
     }
 
+    /// Postings are valued into the summary currency the way the server values
+    /// the 支出 row, so a JPY hotel is not shown as the same number of yuan.
     private func spendingCategories(
         from transactions: [LedgerTransaction],
+        prices: [LedgerPrice],
+        currency: String,
         accountLabels: [String: String]
-    ) -> [OverviewCategorySpending] {
+    ) -> OverviewSpendingBreakdown {
+        let valuation = LedgerPriceValuation(prices: prices)
         var categoryTotals: [String: (label: String, icon: String, color: Color, amount: Int, count: Int)] = [:]
 
         for tx in transactions {
@@ -289,7 +303,10 @@ struct OverviewView: View {
                 presentation: presentation,
                 accountLabels: accountLabels
             )
-            let txExpense = expensePostings.reduce(0) { $0 + $1.amount }
+            // A posting without a price path counts as zero, as in the server summary.
+            let txExpense = expensePostings.reduce(0) {
+                $0 &+ (valuation.value($1.amount, currency: $1.currency, in: currency) ?? 0)
+            }
 
             if var existing = categoryTotals[visual.categoryLabel] {
                 existing.amount += txExpense
@@ -310,9 +327,11 @@ struct OverviewView: View {
 
         let positiveCategories = categoryTotals.values.filter { $0.amount > 0 }
         let overallExpense = positiveCategories.reduce(0) { $0 + $1.amount }
-        guard overallExpense > 0 else { return [] }
+        guard overallExpense > 0 else {
+            return OverviewSpendingBreakdown(categories: [], totalMinorUnits: 0, currency: currency)
+        }
 
-        return positiveCategories
+        let categories = positiveCategories
             .sorted { $0.amount == $1.amount ? $0.label < $1.label : $0.amount > $1.amount }
             .map { item in
                 OverviewCategorySpending(
@@ -325,7 +344,15 @@ struct OverviewView: View {
                     percentage: Double(item.amount) / Double(overallExpense)
                 )
             }
+        return OverviewSpendingBreakdown(categories: categories, totalMinorUnits: overallExpense, currency: currency)
     }
+}
+
+private struct OverviewSpendingBreakdown {
+    let categories: [OverviewCategorySpending]
+    /// Header total: every positive category, including any the list leaves out.
+    let totalMinorUnits: Int
+    let currency: String
 }
 
 

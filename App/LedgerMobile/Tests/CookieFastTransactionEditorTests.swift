@@ -103,4 +103,110 @@ final class CookieFastTransactionEditorTests: XCTestCase {
         XCTAssertEqual(TransactionEditorView.defaultCurrency(valuation: "", commodities: ["AAPL", "HKD"]), "HKD")
         XCTAssertEqual(TransactionEditorView.defaultCurrency(valuation: nil, commodities: ["AAPL"]), "CNY")
     }
+
+    func testPendingExpressionIsEvaluatedBeforeLeavingTheKeypad() {
+        var calc = CookieKeypadCalculator()
+        for key in ["5", "0"] { calc.appendDigit(key) }
+        calc.appendOperator("-")
+        for key in ["2", "0"] { calc.appendDigit(key) }
+        // The expression is still pending; stripping "-" would give 5020.
+        XCTAssertEqual(calc.displayText, "50-20")
+        XCTAssertEqual(calc.committedMagnitudeText, "30")
+
+        calc.appendOperator("+")
+        XCTAssertEqual(calc.committedMagnitudeText, "30")
+
+        var plain = CookieKeypadCalculator()
+        for key in ["1", "2", ".", "5", "0"] { plain.appendDigit(key) }
+        XCTAssertEqual(plain.committedMagnitudeText, "12.50")
+    }
+
+    func testFastEditorDeclinesEntriesItWouldRewrite() {
+        func posting(_ account: String, _ amount: String, _ currency: String = "CNY") -> EditableTransactionPosting {
+            EditableTransactionPosting(account: account, amount: amount, currency: currency)
+        }
+        // Ordinary expense, income and transfer, including an elided amount.
+        XCTAssertTrue(TransactionEditorView.fastEditorRepresents([posting("Expenses:Food", "30"), posting("Assets:Alipay", "-30")]))
+        XCTAssertTrue(TransactionEditorView.fastEditorRepresents([posting("Assets:Alipay", "-30"), posting("Expenses:Food", "", "")]))
+        XCTAssertTrue(TransactionEditorView.fastEditorRepresents([posting("Income:Salary", "-100"), posting("Assets:Bank", "100")]))
+        XCTAssertTrue(TransactionEditorView.fastEditorRepresents([posting("Assets:Bank", "-5"), posting("Assets:Alipay", "5")]))
+        XCTAssertTrue(TransactionEditorView.fastEditorRepresents([posting("Expenses:Food", "12.500"), posting("Assets:Alipay", "-12.500")]))
+        XCTAssertTrue(TransactionEditorView.fastEditorRepresents([]))
+
+        // A refund and a reversed income would flip direction on save.
+        XCTAssertFalse(TransactionEditorView.fastEditorRepresents([posting("Expenses:Food", "-30"), posting("Assets:Alipay", "30")]))
+        XCTAssertFalse(TransactionEditorView.fastEditorRepresents([posting("Assets:Alipay", "30"), posting("Expenses:Food", "", "")]))
+        XCTAssertFalse(TransactionEditorView.fastEditorRepresents([posting("Income:Salary", "100"), posting("Assets:Bank", "-100")]))
+        // The keypad keeps two decimals and one currency.
+        XCTAssertFalse(TransactionEditorView.fastEditorRepresents([posting("Expenses:Food", "1.234"), posting("Assets:Alipay", "-1.234")]))
+        XCTAssertFalse(TransactionEditorView.fastEditorRepresents([posting("Assets:Broker", "0.5", "BTC"), posting("Assets:Bank", "-30000")]))
+        XCTAssertFalse(TransactionEditorView.fastEditorRepresents([
+            posting("Expenses:Food", "10"), posting("Expenses:Fun", "20"), posting("Assets:Bank", "", "")
+        ]))
+        XCTAssertFalse(TransactionEditorView.fastEditorRepresents([
+            EditableTransactionPosting(account: "Assets:Broker", amount: "2", currency: "AAPL",
+                                       costKind: "per", costAmount: "150", costCurrency: "USD"),
+            posting("Assets:Bank", "-300", "USD")
+        ]))
+    }
+
+    func testPostingMatchingFollowsAccountsThenTheOneLeftOver() {
+        XCTAssertEqual(
+            TransactionEditorView.matchedPostingIndices(
+                newAccounts: ["Expenses:Food", "Assets:Alipay"], originalAccounts: ["Assets:Alipay", "Expenses:Food"]),
+            [1, 0])
+        // A changed category still continues the original expense posting.
+        XCTAssertEqual(
+            TransactionEditorView.matchedPostingIndices(
+                newAccounts: ["Expenses:Transport", "Assets:Alipay"], originalAccounts: ["Expenses:Food", "Assets:Alipay"]),
+            [0, 1])
+        XCTAssertEqual(
+            TransactionEditorView.matchedPostingIndices(
+                newAccounts: ["Expenses:Transport", "Assets:Bank"], originalAccounts: ["Expenses:Food", "Assets:Alipay"]),
+            [nil, nil])
+        XCTAssertEqual(
+            TransactionEditorView.matchedPostingIndices(newAccounts: ["Expenses:Food", "Assets:Alipay"], originalAccounts: []),
+            [nil, nil])
+    }
+
+    func testDuplicateCopiesExactAmountsCostAndTagsButNotFlags() {
+        let entry = LedgerTransactionEntry(
+            date: "2026-11-01",
+            flag: "!",
+            narration: "买入",
+            metadata: ["orderId": .string("A1")],
+            tags: ["invest"],
+            links: ["trade-1"],
+            postings: [
+                LedgerTransactionEntryPosting(account: "Assets:Broker", flag: "!", amount: "0.125", currency: "BTC",
+                                              costKind: "per", costAmount: "40000", costCurrency: "USD"),
+                LedgerTransactionEntryPosting(account: "Assets:Bank", amount: "-5000", currency: "USD")
+            ]
+        )
+        let transaction = LedgerTransaction(
+            date: "2026-11-01", payee: "", narration: "买入", tags: ["invest"],
+            postings: [LedgerPosting(account: "Assets:Broker", amount: 13, currency: "BTC"),
+                       LedgerPosting(account: "Assets:Bank", amount: -500000, currency: "USD")],
+            editableEntry: entry,
+            source: TransactionSource(file: "transactions/2026/11.bean", line: 1)
+        )
+        let postings = TransactionEditorView.duplicatePostings(of: transaction)
+        XCTAssertEqual(postings.map(\.amount), ["0.125", "-5000"])
+        XCTAssertEqual(postings.first?.costKind, "per")
+        XCTAssertEqual(postings.first?.costAmount, "40000")
+        XCTAssertNil(postings.first?.flag)
+        XCTAssertEqual(TransactionEditorView.duplicateTags(of: transaction), ["invest"])
+        XCTAssertFalse(TransactionEditorView.fastEditorRepresents(postings))
+
+        // Without an editable entry the two-decimal projection is all there is.
+        let projected = LedgerTransaction(
+            date: "2026-11-01", payee: "店", narration: "午饭",
+            postings: [LedgerPosting(account: "Expenses:Food", amount: 3000, currency: "CNY"),
+                       LedgerPosting(account: "Assets:Alipay", amount: -3000, currency: nil)],
+            source: TransactionSource(file: "transactions/2026/11.bean", line: 9)
+        )
+        XCTAssertEqual(TransactionEditorView.duplicatePostings(of: projected).map(\.amount), ["30.00", "-30.00"])
+        XCTAssertEqual(TransactionEditorView.duplicatePostings(of: projected).map(\.currency), ["CNY", "CNY"])
+        XCTAssertEqual(TransactionEditorView.duplicateTags(of: projected), [])
+    }
 }

@@ -449,7 +449,9 @@ struct TransactionShareSheet: View {
     @State private var selectedTab: ShareTab = .card
     @State private var renderedUIImage: UIImage?
     @State private var tempImageURL: URL?
+    @State private var imageDirectory = ShareImageDirectory()
     @State private var actionNotice: String?
+    @EnvironmentObject private var session: LedgerSession
 
     private var isSingle: Bool {
         transactions.count == 1
@@ -519,6 +521,17 @@ struct TransactionShareSheet: View {
             .task {
                 await Task.yield()
                 renderCard()
+            }
+            // Locking removes the on-disk receipt, as the text export promises;
+            // unlocking renders a fresh one for the still-open sheet.
+            .onChange(of: session.phase) { _, phase in
+                if phase == .ready {
+                    if tempImageURL == nil { renderCard() }
+                } else {
+                    imageDirectory.discard()
+                    tempImageURL = nil
+                    renderedUIImage = nil
+                }
             }
         }
     }
@@ -649,13 +662,10 @@ struct TransactionShareSheet: View {
         if let uiImage = renderer.uiImage {
             self.renderedUIImage = uiImage
             if let data = uiImage.pngData() {
-                let tempDir = FileManager.default.temporaryDirectory
                 let safeDate = transactions.first?.date.replacingOccurrences(of: "-", with: "") ?? "tx"
                 let fileName = isSingle ? "Ledger-Receipt-\(safeDate).png" : "Ledger-Statement-\(transactions.count)tx.png"
-                let fileURL = tempDir.appendingPathComponent(fileName)
                 do {
-                    try data.write(to: fileURL)
-                    self.tempImageURL = fileURL
+                    self.tempImageURL = try imageDirectory.write(data, fileName: fileName)
                 } catch {
                     #if DEBUG
                     print("[Share] Failed to write temp image: \(error)")
@@ -701,6 +711,32 @@ struct TransactionShareSheet: View {
             }
         }
     }
+}
+
+/// Owns the rendered receipt's private temp directory, one per sheet. It lives
+/// in the sheet's state, so it is released when the sheet ends, not when a
+/// system share controller merely hides the sheet while still reading the file.
+private final class ShareImageDirectory {
+    private var directory: URL?
+
+    func write(_ data: Data, fileName: String) throws -> URL {
+        discard()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ledger-share-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        self.directory = directory
+        let fileURL = directory.appendingPathComponent(fileName)
+        try data.write(to: fileURL, options: [.completeFileProtection])
+        return fileURL
+    }
+
+    func discard() {
+        guard let directory else { return }
+        try? FileManager.default.removeItem(at: directory)
+        self.directory = nil
+    }
+
+    deinit { discard() }
 }
 
 /// Explicit file export leaves existing image/text/clipboard sharing unchanged.

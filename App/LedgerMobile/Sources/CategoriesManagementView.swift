@@ -6,6 +6,10 @@ struct CategoriesManagementView: View {
     @State private var showingAddCategory: Bool = false
     @State private var searchText: String = ""
 
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var matchingAccounts: [LedgerAccount] {
         guard let accounts = session.ledger?.accounts else { return [] }
         let prefix = selectedKind.rawValue + ":"
@@ -57,23 +61,26 @@ struct CategoriesManagementView: View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
 
-            Section {
-                Text(searchText.isEmpty
-                    ? "共 \(matchingAccounts.count) 个\(selectedKind.title)，按一级科目分组。加号新增，左滑可停用。"
-                    : "未找到匹配的分类。")
-                    .balancedFont(size: 12.5)
-                    .foregroundStyle(BalancedPalette.meta)
+            if !matchingAccounts.isEmpty {
+                Section {
+                    // Rows have no swipe or tap action; do not promise one here.
+                    Text(isSearching
+                        ? "找到 \(matchingAccounts.count) 个匹配的\(selectedKind.title)。"
+                        : "共 \(matchingAccounts.count) 个\(selectedKind.title)，按一级科目分组。加号新增。")
+                        .balancedFont(size: 12.5)
+                        .foregroundStyle(BalancedPalette.meta)
+                }
+                .listRowInsets(EdgeInsets(top: 2, leading: 20, bottom: 0, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
-            .listRowInsets(EdgeInsets(top: 2, leading: 20, bottom: 0, trailing: 20))
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
 
             if groupedAccounts.isEmpty {
                 Section {
                     VStack(spacing: 6) {
                         Image(systemName: "tag.slash").font(.system(size: 22)).foregroundStyle(BalancedPalette.meta)
                         Text("暂无分类").balancedFont(size: 16, weight: .medium).foregroundStyle(BalancedPalette.ink)
-                        Text(searchText.isEmpty ? "点击右上角 + 添加新分类。" : "未找到匹配的分类。")
+                        Text(isSearching ? "未找到匹配的分类。" : "点击右上角 + 添加新分类。")
                             .balancedFont(size: 13.5)
                             .foregroundStyle(BalancedPalette.meta)
                     }
@@ -115,12 +122,9 @@ struct CategoriesManagementView: View {
                                     Text(acct.account).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
                                 }
                                 Spacer(minLength: 8)
+                                // No chevron: the row has no destination to open.
                                 if !acct.active {
                                     BalancedTag(text: String(localized: "已停用"), kind: .neutral)
-                                } else {
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(BalancedPalette.edge)
                                 }
                             }
                             .frame(minHeight: 44)

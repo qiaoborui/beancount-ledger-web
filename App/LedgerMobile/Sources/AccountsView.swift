@@ -68,11 +68,10 @@ struct AccountsView: View {
         }
         let periodAvailable = session.accountPeriodBalancesAvailable && ledger.periodAccountBalancesAvailable
         if periodAvailable {
-            let assetSections = allSections.filter { $0.id == "cash" || $0.id == "asset" || $0.id == "wealth" || $0.id == "receivable" }
-            let liabilitySections = allSections.filter { $0.id == "credit" || $0.id == "liability" }
-            let assets = assetSections.flatMap(\.rows).reduce(0) { $0 + ($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation) }
-            let liabilities = liabilitySections.flatMap(\.rows).reduce(0) { $0 + abs($1.periodBalancesAvailable ? $1.closingValuation : $1.valuation) }
-            return BalanceSheetTotals(assets: assets, liabilities: liabilities, netWorth: assets - liabilities)
+            // Classify by account prefix, not section id: a section is the
+            // account's display group, so payables sit under 应收 and an
+            // Assets account can sit under 其他.
+            return BalanceSheetTotals(closingRows: allSections.flatMap(\.rows))
         }
         return ledger.balanceSheetTotals
     }

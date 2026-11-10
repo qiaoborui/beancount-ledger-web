@@ -174,7 +174,9 @@ struct SettingsView: View {
                     Text("版本").balancedFont(size: 14).foregroundStyle(BalancedPalette.secondary)
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("本地版 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
+                        // The build is the same for local and remote sessions;
+                        // a "本地版" prefix mislabelled remote connections.
+                        Text(verbatim: "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
                             .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                         // Stamped at build time by scripts/stamp-ios-build-commit.sh.
                         if let commit = Bundle.main.object(forInfoDictionaryKey: "LedgerGitCommit") as? String {
