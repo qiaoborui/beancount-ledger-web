@@ -238,6 +238,8 @@ final class LedgerSession: ObservableObject {
     private let importIndexActivity: ImportIndexActivityCoordinator
     private let defaults: UserDefaults
     private let ledgerNow: () -> Date
+    /// The clock ranges are cut on; previews and tests pin it.
+    var now: Date { ledgerNow() }
     private var applicationActive = true
     private var applicationBackground = false
     private var localAuthenticationForegroundWaiters: [UUID: CheckedContinuation<Void, Error>] = [:]
@@ -5539,6 +5541,7 @@ extension LedgerBootstrap {
             accountBalances: accountBalances,
             netWorthHistory: netWorthHistory,
             netWorthTrend: netWorthTrend,
+            monthlyExpenseTrend: monthlyExpenseTrend,
             monthEndNetWorth: monthEndNetWorth,
             netWorthWindows: netWorthWindows,
             transactions: transactions,

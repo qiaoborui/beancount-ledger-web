@@ -140,22 +140,23 @@ func TestIncomeStatementQueryResultJSONContract(t *testing.T) {
 
 func TestBootstrapResultJSONContract(t *testing.T) {
 	payload := BootstrapResult{
-		Start:              "2026-05-01",
-		End:                "2026-06-01",
-		Summary:            Summary{Currency: "CNY", Days: map[string]map[string]int{}, Categories: map[string]int{}},
-		Balances:           map[string]int{},
-		AccountBalances:    []AccountBalance{},
-		NetWorthHistory:    []NetWorthPoint{},
-		NetWorthTrend:      []NetWorthPoint{},
-		MonthEndNetWorth:   []NetWorthPoint{},
-		CreditCards:        []CreditCardAnalytics{},
-		Investments:        &InvestmentSummary{},
-		Transactions:       []Transaction{},
-		ReconciliationRows: []ReconciliationRow{},
-		Accounts:           []Account{},
-		Commodities:        []string{},
-		Prices:             []Price{},
-		ValuationCurrency:  "CNY",
+		Start:               "2026-05-01",
+		End:                 "2026-06-01",
+		Summary:             Summary{Currency: "CNY", Days: map[string]map[string]int{}, Categories: map[string]int{}},
+		Balances:            map[string]int{},
+		AccountBalances:     []AccountBalance{},
+		NetWorthHistory:     []NetWorthPoint{},
+		NetWorthTrend:       []NetWorthPoint{},
+		MonthlyExpenseTrend: []MonthlyExpensePoint{},
+		MonthEndNetWorth:    []NetWorthPoint{},
+		CreditCards:         []CreditCardAnalytics{},
+		Investments:         &InvestmentSummary{},
+		Transactions:        []Transaction{},
+		ReconciliationRows:  []ReconciliationRow{},
+		Accounts:            []Account{},
+		Commodities:         []string{},
+		Prices:              []Price{},
+		ValuationCurrency:   "CNY",
 		IncomeStatement: IncomeStatementResult{
 			Income:             []IncomeStatementNode{},
 			Expense:            []IncomeStatementNode{},
@@ -178,7 +179,7 @@ func TestBootstrapResultJSONContract(t *testing.T) {
 	}
 	wantFields := []string{
 		"start", "end", "summary", "comparisons", "balances", "accountBalances", "netWorthHistory",
-		"netWorthTrend", "monthEndNetWorth", "netWorthWindows", "creditCards", "investments", "transactions",
+		"netWorthTrend", "monthlyExpenseTrend", "monthEndNetWorth", "netWorthWindows", "creditCards", "investments", "transactions",
 		"reconciliationRows", "accounts", "commodities", "prices", "valuationCurrency",
 		"incomeStatement", "accountStatuses", "ledgerVersion", "sensitiveUnlocked",
 	}

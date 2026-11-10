@@ -14,29 +14,30 @@ type ReconciliationRow struct {
 }
 
 type BootstrapResult struct {
-	Start              string                   `json:"start"`
-	End                string                   `json:"end"`
-	Summary            Summary                  `json:"summary"`
-	Comparisons        *LedgerPeriodComparisons `json:"comparisons"`
-	Balances           map[string]int           `json:"balances"`
-	AccountBalances    []AccountBalance         `json:"accountBalances"`
-	NetWorthHistory    []NetWorthPoint          `json:"netWorthHistory"`
-	NetWorthTrend      []NetWorthPoint          `json:"netWorthTrend"`
-	MonthEndNetWorth   []NetWorthPoint          `json:"monthEndNetWorth"`
-	NetWorthWindows    *NetWorthWindows         `json:"netWorthWindows"`
-	CreditCards        []CreditCardAnalytics    `json:"creditCards"`
+	Start               string                   `json:"start"`
+	End                 string                   `json:"end"`
+	Summary             Summary                  `json:"summary"`
+	Comparisons         *LedgerPeriodComparisons `json:"comparisons"`
+	Balances            map[string]int           `json:"balances"`
+	AccountBalances     []AccountBalance         `json:"accountBalances"`
+	NetWorthHistory     []NetWorthPoint          `json:"netWorthHistory"`
+	NetWorthTrend       []NetWorthPoint          `json:"netWorthTrend"`
+	MonthlyExpenseTrend []MonthlyExpensePoint    `json:"monthlyExpenseTrend"`
+	MonthEndNetWorth    []NetWorthPoint          `json:"monthEndNetWorth"`
+	NetWorthWindows     *NetWorthWindows         `json:"netWorthWindows"`
+	CreditCards         []CreditCardAnalytics    `json:"creditCards"`
 	// Null on the native bootstrap page, which has its own investments endpoint.
-	Investments        *InvestmentSummary       `json:"investments,omitempty"`
-	Transactions       []Transaction            `json:"transactions"`
-	ReconciliationRows []ReconciliationRow      `json:"reconciliationRows"`
-	Accounts           []Account                `json:"accounts"`
-	Commodities        []string                 `json:"commodities"`
-	Prices             []Price                  `json:"prices"`
-	ValuationCurrency  string                   `json:"valuationCurrency"`
-	IncomeStatement    IncomeStatementResult    `json:"incomeStatement"`
-	AccountStatuses    []AccountStatus          `json:"accountStatuses"`
-	LedgerVersion      LedgerVersion            `json:"ledgerVersion"`
-	SensitiveUnlocked  bool                     `json:"sensitiveUnlocked"`
+	Investments        *InvestmentSummary    `json:"investments,omitempty"`
+	Transactions       []Transaction         `json:"transactions"`
+	ReconciliationRows []ReconciliationRow   `json:"reconciliationRows"`
+	Accounts           []Account             `json:"accounts"`
+	Commodities        []string              `json:"commodities"`
+	Prices             []Price               `json:"prices"`
+	ValuationCurrency  string                `json:"valuationCurrency"`
+	IncomeStatement    IncomeStatementResult `json:"incomeStatement"`
+	AccountStatuses    []AccountStatus       `json:"accountStatuses"`
+	LedgerVersion      LedgerVersion         `json:"ledgerVersion"`
+	SensitiveUnlocked  bool                  `json:"sensitiveUnlocked"`
 }
 
 type IncomeStatementResult struct {

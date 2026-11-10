@@ -1,0 +1,334 @@
+<meta charset="utf-8">
+<title>概览 · 支出趋势</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: a gallery of 393pt phone frames (light + dark) per variant, notes beside them. */
+:root {
+  --page: #e8e4dc; --page-fg: #14100c; --page-2: #453e36; --page-3: #6f675a; --page-line: rgba(20,16,12,.14);
+  --sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #0b0a09; --page-fg: #ede8e0; --page-2: #c4bcb0; --page-3: #9a9086; --page-line: rgba(237,232,224,.14); color-scheme: dark } }
+:root[data-theme="dark"] { --page: #0b0a09; --page-fg: #ede8e0; --page-2: #c4bcb0; --page-3: #9a9086; --page-line: rgba(237,232,224,.14); color-scheme: dark }
+
+/* Phone tokens are the app's own BalancedPalette, fixed per frame. */
+.ph-light { --bg:#fbfaf8; --sunken:#f1efe9; --ink:#14100c; --ink-2:#453e36; --ink-3:#6f675a; --rule:#e2ded4; --rule-strong:#c8c2b4; --edge:#88837a; --in:#0d5346; --out:#96401f; color-scheme: light }
+.ph-dark  { --bg:#121110; --sunken:#1b1918; --ink:#f6f3ee; --ink-2:#c4bcb0; --ink-3:#9a9086; --rule:#2b2825; --rule-strong:#423c36; --edge:#78746e; --in:#4fbfab; --out:#cf7a52; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--page); color: var(--page-fg); font-family: var(--sans); font-size: 15px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 96px }
+.wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 64px }
+header.intro { max-width: 68ch; display: grid; gap: 10px }
+h1 { font-size: 26px; font-weight: 500; letter-spacing: -.02em; margin: 0; text-wrap: balance }
+h2 { font-size: 18px; font-weight: 500; margin: 0; letter-spacing: -.01em; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap }
+.intro p, .notes p, .notes li { color: var(--page-2); margin: 0 }
+.tag { font-size: 11.5px; letter-spacing: .06em; padding: 2px 8px; border: 1px solid var(--page-3); border-radius: 2px; color: var(--page-2) }
+.tag.rec { border-color: var(--page-fg); color: var(--page-fg); font-weight: 600 }
+.variant { display: grid; gap: 20px; border-top: 1px solid var(--page-line); padding-top: 28px }
+.row { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start }
+.notes { flex: 1 1 280px; min-width: 0; max-width: 46ch; display: grid; gap: 12px; font-size: 14px }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 6px }
+.notes b { color: var(--page-fg); font-weight: 600 }
+code { font-family: var(--mono); font-size: 12.5px }
+
+/* ── phone ─────────────────────────────────────────── */
+.phone { width: 393px; max-width: 100%; background: var(--bg); color: var(--ink); border-radius: 38px; padding: 14px 0 22px;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.12); overflow: hidden; flex: 0 0 auto }
+.sb { display: flex; justify-content: space-between; padding: 0 28px 6px; font-size: 13px; font-weight: 600 }
+.nav { display: flex; align-items: center; justify-content: space-between; padding: 6px 20px 8px }
+.nav .t { font-size: 16px; font-weight: 600 }
+.nav .pill { font-size: 13px; padding: 5px 12px; border-radius: 99px; background: var(--sunken); color: var(--ink-2) }
+.hero { padding: 14px 20px 18px }
+.lbl { font-size: 12.5px; font-weight: 500; color: var(--ink-2); display: flex; justify-content: space-between }
+.lbl span:last-child { color: var(--ink-3); font-weight: 400 }
+.big { font-size: 30px; font-weight: 500; letter-spacing: -.75px; color: var(--in); font-variant-numeric: tabular-nums; margin-top: 8px }
+.big small { font-size: 18px }
+.meta { font-size: 15px; color: var(--ink-3); font-variant-numeric: tabular-nums }
+.rule { height: 1px; background: var(--rule); margin: 0 20px }
+.sh { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px 6px }
+.sh .h { font-size: 15px; font-weight: 500; letter-spacing: -.12px }
+.seg { display: inline-flex; border: 1px solid var(--edge); border-radius: 2px }
+.seg button { font: inherit; font-size: 12px; padding: 3px 10px; background: none; border: 0; color: var(--ink-2); cursor: pointer }
+.seg button + button { border-left: 1px solid var(--edge) }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg) }
+.seg button:focus-visible, .chart:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px }
+.sum { padding: 4px 20px 2px; font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; min-height: 40px }
+.sum .v { font-size: 20px; font-weight: 500; color: var(--ink); letter-spacing: -.3px }
+.chart { display: block; margin: 6px 20px 0; width: calc(100% - 40px); height: auto; overflow: visible; cursor: pointer; outline: none }
+.foot { display: flex; justify-content: space-between; padding: 6px 20px 0; font-size: 12px; color: var(--ink-3) }
+.foot a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--rule-strong) }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); padding: 0 20px }
+.legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0 }
+.ghost { padding: 4px 20px 0; opacity: .5 }
+.ghost .gr { display: flex; justify-content: space-between; font-size: 14.5px; padding: 10px 0; border-bottom: 1px solid var(--rule) }
+.ghead { display: flex; justify-content: space-between; padding: 22px 20px 4px; font-size: 15px; font-weight: 500; opacity: .5 }
+.spark-row { display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 12px; padding: 11px 20px; border-bottom: 1px solid var(--rule) }
+.spark-row .k { font-size: 14.5px; color: var(--ink-2) }
+.spark-row .r { text-align: right; font-variant-numeric: tabular-nums }
+.spark-row .r b { display: block; font-size: 15px; font-weight: 500 }
+.spark-row .r span { font-size: 12px; color: var(--ink-3) }
+.empty { margin: 8px 20px 4px; padding: 18px 16px; background: var(--sunken); border-radius: 6px; font-size: 13px; color: var(--ink-3) }
+.empty b { display: block; color: var(--ink-2); font-weight: 500; margin-bottom: 2px; font-size: 14px }
+.tbl { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums }
+.tbl th, .tbl td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--page-line) }
+.tbl th:first-child, .tbl td:first-child { text-align: left }
+.tbl th { font-weight: 500; color: var(--page-3) }
+.scroll { overflow-x: auto }
+@media (max-width: 440px) { .phone { border-radius: 24px } }
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <h1>概览 · 支出趋势</h1>
+    <p>概览页现在只回答「这一期怎么样」。这里加一块回答「最近几个月在变好还是变坏」：放在净结余之后、支出分类之前，一屏内看完，不需要进分析页。</p>
+    <p>三个方向，A 为推荐。每个方向左边浅色、右边深色。图表可点按（桌面可悬停）切换月份。示例数据，非真实账本。</p>
+  </header>
+
+  <section class="variant">
+    <h2>A · 月度支出柱 <span class="tag rec">推荐</span></h2>
+    <div class="row" data-variant="A"></div>
+  </section>
+
+  <section class="variant">
+    <h2>B · 收支对照 <span class="tag">备选</span></h2>
+    <div class="row" data-variant="B"></div>
+  </section>
+
+  <section class="variant">
+    <h2>C · 三行迷你趋势 <span class="tag">备选</span></h2>
+    <div class="row" data-variant="C"></div>
+  </section>
+
+  <section class="variant">
+    <h2>A 的边界状态</h2>
+    <div class="row" data-variant="states"></div>
+  </section>
+
+  <section class="variant">
+    <h2>数据与实现要点</h2>
+    <div class="row">
+      <div class="notes" style="max-width:60ch">
+        <ul>
+          <li><b>窗口锚定所选期间的结束月</b>，与净资产趋势同一思路：选 8 月就看 3–8 月或去年 9 月–今年 8 月，高亮柱就是当前期间。选「今年」这类多月区间时，高亮最后一个月。</li>
+          <li><b>新增 bootstrap 字段 <code>monthlyCashflowTrend</code></b>：所选结束月往前 12 个自然月的 <code>{month, income, expense}</code>，最多 12 点，体积可以忽略。服务端复用 <code>dashboardBucketSummaries</code>；本地账本走同一个内嵌 Go 读取层，两种模式一份实现。旧客户端缺这个字段时隐藏模块。</li>
+          <li><b>进行中的月份</b>：实际支出画实心，按日均外推到月底的部分只画虚线框，标「约」。只有当前自然月才外推，过去的月份不外推。</li>
+          <li><b>均值线</b>取窗口内已结束的月份，不含进行中的月份，避免本月拉低均值。</li>
+          <li><b>隐私</b>：金额隐藏时柱形和均值线保留，所有数字换成 ••••，和净资产曲线的规则一致。</li>
+          <li><b>颜色</b>：只有高亮柱用 <code>--out</code>（支出方向色），其余柱用 <code>--edge</code>，对背景 ≥ 3:1。B 方案的收支两色在红色盲下 ΔE 只有 5.8，必须靠图例、左右位置和 2pt 间隙辅助区分，这也是 B 不推荐的原因之一。</li>
+          <li><b>交互</b>：点按柱子在摘要行显示该月金额和相对均值的变化；「查看该月」把全局期间切到那个月。VoiceOver 把每根柱子读作「6 月，支出 9,020 元，高于均值 2%」。</li>
+        </ul>
+      </div>
+      <div class="notes" style="max-width:none;flex:1 1 360px">
+        <p><b>示例数据</b>（CNY，11 月截至 11/10）</p>
+        <div class="scroll"><table class="tbl" id="datatable"></table></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+// Sample months Dec 2025 – Nov 2026; Nov is in progress (10 of 30 days).
+const MONTHS = [
+  ['2025-12',18200,8420],['2026-01',18200,7960],['2026-02',32400,11380],['2026-03',18200,8150],
+  ['2026-04',18200,7640],['2026-05',18600,9020],['2026-06',18600,8710],['2026-07',18600,10240],
+  ['2026-08',18600,8330],['2026-09',18600,7880],['2026-10',19400,9460],['2026-11',6100,3120]
+].map(([m,i,e]) => ({ m, n: +m.slice(5), income: i, expense: e }));
+const PROGRESS = { day: 10, days: 30 };
+const fmt = v => '¥' + Math.round(v).toLocaleString('en-US');
+const k = v => (v / 1000).toFixed(1) + 'k';
+const pct = v => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v * 100).toFixed(0) + '%';
+
+function el(html) { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; }
+
+function phoneShell(theme, inner, opts = {}) {
+  return el(`<div class="phone ph-${theme}">
+    <div class="sb"><span>9:41</span><span>●●● ▮</span></div>
+    <div class="nav"><span class="t">概览</span><span class="pill">2026 年 11 月</span></div>
+    <div class="hero"><div class="lbl"><span>本期净结余</span><span>11 月</span></div>
+      <div class="big">${opts.hidden ? '••••••' : '<small>¥</small>2,980'}</div>
+      <div class="meta">留存率 ${opts.hidden ? '••••' : '48.9%'}</div></div>
+    <div class="rule"></div>
+    ${inner}
+    <div class="ghead"><span>支出分类</span><span style="font-size:12.5px;font-weight:400">${opts.hidden ? '••••' : '3,120 CNY'}</span></div>
+    <div class="ghost"><div class="gr"><span>餐饮</span><span>${opts.hidden ? '••••' : '1,284.50'}</span></div></div>
+  </div>`);
+}
+
+// Top-rounded bar anchored on the baseline.
+function barPath(x, y, w, h, r = 4) {
+  if (h <= 0) return '';
+  r = Math.min(r, w / 2, h);
+  return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+}
+
+/* ── Variant A ─────────────────────────────────────── */
+function variantA(theme, state = {}) {
+  const hidden = !!state.hidden;
+  let win = 6, sel = null;
+  const root = phoneShell(theme, `
+    <div class="sh"><span class="h">支出趋势</span>
+      <span class="seg" role="group" aria-label="窗口"><button aria-pressed="true" data-w="6">6 月</button><button aria-pressed="false" data-w="12">12 月</button></span></div>
+    <div class="sum" aria-live="polite"></div>
+    <svg class="chart" tabindex="0" role="img" viewBox="0 0 353 150"></svg>
+    <div class="foot"><span class="fl"></span><a href="#" class="go">查看该月</a></div>`, { hidden });
+  const svg = root.querySelector('svg'), sum = root.querySelector('.sum'), fl = root.querySelector('.fl');
+  root.querySelector('.go').addEventListener('click', e => e.preventDefault());
+  root.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+    win = +b.dataset.w; sel = null;
+    root.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', x === b)); draw();
+  }));
+  function draw() {
+    const data = MONTHS.slice(-win), last = data.length - 1;
+    if (sel === null) sel = last;
+    const proj = MONTHS.at(-1).expense / PROGRESS.day * PROGRESS.days;
+    const closed = data.slice(0, last), avg = closed.reduce((s, d) => s + d.expense, 0) / closed.length;
+    const W = 353, top = 22, H = 104, base = top + H;
+    const max = Math.max(proj, ...data.map(d => d.expense)) * 1.08;
+    const y = v => base - v / max * H;
+    const band = W / data.length, bw = Math.min(22, band * 0.5);
+    const pid = `h-${theme}-${win}-${hidden ? 1 : 0}`;
+    let s = `<defs><pattern id="${pid}" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="var(--out)" stroke-width="1" opacity=".35"/></pattern></defs>`;
+    s += `<line x1="0" x2="${W}" y1="${base + .5}" y2="${base + .5}" stroke="var(--rule-strong)"/>`;
+    data.forEach((d, i) => {
+      const x = i * band + (band - bw) / 2, isSel = i === sel, isLast = i === last;
+      const fill = isSel ? 'var(--out)' : 'var(--edge)';
+      if (isLast) {
+        const py = y(proj);
+        s += `<path d="${barPath(x + .75, py + .75, bw - 1.5, y(d.expense) - py)}" fill="url(#${pid})" stroke="${fill}" stroke-width="1.5" stroke-dasharray="3 2.5"/>`;
+        s += `<rect x="${x}" y="${y(d.expense)}" width="${bw}" height="${base - y(d.expense)}" fill="${fill}"/>`;
+      } else {
+        s += `<path d="${barPath(x, y(d.expense), bw, base - y(d.expense))}" fill="${fill}"/>`;
+      }
+      const lbl = win === 12 && i % 2 === 1 && !isSel ? '' : d.n + (win === 6 || isSel ? ' 月' : '');
+      s += `<text x="${x + bw / 2}" y="${base + 17}" text-anchor="middle" font-size="11.5" fill="${isSel ? 'var(--ink)' : 'var(--ink-3)'}" font-weight="${isSel ? 600 : 400}">${lbl}</text>`;
+      s += `<rect class="hit" data-i="${i}" x="${i * band}" y="0" width="${band}" height="${base + 22}" fill="transparent"/>`;
+    });
+    // average line + knockout label at the left edge
+    const ay = y(avg);
+    s += `<line x1="0" x2="${W}" y1="${ay}" y2="${ay}" stroke="var(--ink-3)" stroke-width="1" stroke-dasharray="2 3" pointer-events="none"/>`;
+    const al = hidden ? '均值' : '均 ' + k(avg);
+    s += `<rect x="0" y="${ay - 15}" width="${al.length * 7 + 8}" height="13" fill="var(--bg)" pointer-events="none"/><text x="2" y="${ay - 5}" font-size="11" fill="var(--ink-3)" pointer-events="none">${al}</text>`;
+    // value label on the selected bar only
+    const sd = data[sel], sx = sel * band + band / 2, isProj = sel === last;
+    const sv = isProj ? proj : sd.expense;
+    if (!hidden) s += `<text x="${Math.min(Math.max(sx, 24), W - 24)}" y="${y(sv) - 7}" text-anchor="middle" font-size="11.5" font-weight="500" fill="var(--ink)" pointer-events="none">${isProj ? '约 ' : ''}${k(sv)}</text>`;
+    svg.innerHTML = s;
+    svg.setAttribute('aria-label', `近 ${win} 月支出，${data.map(d => d.n + ' 月 ' + (hidden ? '已隐藏' : fmt(d.expense))).join('，')}`);
+    const delta = (sv - avg) / avg;
+    if (hidden) sum.innerHTML = `<span class="v">••••••</span><br>${sd.n} 月${isProj ? '至今' : ''}支出`;
+    else if (isProj) sum.innerHTML = `<span class="v">${fmt(sd.expense)}</span> <span>11 月至今 · 第 ${PROGRESS.day}/${PROGRESS.days} 天</span><br>按当前节奏约 ${fmt(proj)}，<span style="color:var(--ink-2)">比均值 ${pct(delta)}</span>`;
+    else sum.innerHTML = `<span class="v">${fmt(sd.expense)}</span> <span>${sd.m.slice(0, 4)} 年 ${sd.n} 月</span><br><span style="color:var(--ink-2)">比近 ${win} 月均值 ${pct(delta)}</span>`;
+    fl.textContent = hidden ? '虚线框为按日均外推' : `近 ${win} 月均值 ${fmt(avg)} · 虚线框为外推`;
+  }
+  const pick = e => { const h = e.target.closest('.hit'); if (h && +h.dataset.i !== sel) { sel = +h.dataset.i; draw(); } };
+  svg.addEventListener('click', pick);
+  svg.addEventListener('pointerover', e => { if (e.pointerType === 'mouse') pick(e); });
+  svg.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft') { sel = Math.max(0, sel - 1); draw(); e.preventDefault(); }
+    if (e.key === 'ArrowRight') { sel = Math.min(win - 1, sel + 1); draw(); e.preventDefault(); }
+  });
+  draw();
+  return root;
+}
+
+/* ── Variant B ─────────────────────────────────────── */
+function variantB(theme) {
+  let sel = 5;
+  const root = phoneShell(theme, `
+    <div class="sh"><span class="h">收支趋势</span><span style="font-size:12.5px;color:var(--ink-3)">近 6 月</span></div>
+    <div class="legend"><span><i style="background:var(--in)"></i>收入</span><span><i style="background:var(--out)"></i>支出</span></div>
+    <div class="sum" aria-live="polite"></div>
+    <svg class="chart" tabindex="0" role="img" aria-label="近 6 月收入与支出" viewBox="0 0 353 140"></svg>`);
+  const svg = root.querySelector('svg'), sum = root.querySelector('.sum');
+  function draw() {
+    const data = MONTHS.slice(-6), W = 353, top = 10, H = 104, base = top + H;
+    const max = Math.max(...data.map(d => d.income)) * 1.05, y = v => base - v / max * H;
+    const band = W / 6, bw = 11;
+    let s = `<line x1="0" x2="${W}" y1="${base + .5}" y2="${base + .5}" stroke="var(--rule-strong)"/>`;
+    data.forEach((d, i) => {
+      const c = i * band + band / 2, on = i === sel, op = on ? 1 : .45;
+      s += `<path d="${barPath(c - bw - 1, y(d.income), bw, base - y(d.income))}" fill="var(--in)" opacity="${op}"/>`;
+      s += `<path d="${barPath(c + 1, y(d.expense), bw, base - y(d.expense))}" fill="var(--out)" opacity="${op}"/>`;
+      s += `<text x="${c}" y="${base + 17}" text-anchor="middle" font-size="11.5" fill="${on ? 'var(--ink)' : 'var(--ink-3)'}" font-weight="${on ? 600 : 400}">${d.n} 月</text>`;
+      s += `<rect class="hit" data-i="${i}" x="${i * band}" y="0" width="${band}" height="${base + 22}" fill="transparent"/>`;
+    });
+    svg.innerHTML = s;
+    const d = data[sel], net = d.income - d.expense;
+    sum.innerHTML = `<span class="v">${fmt(net)}</span> <span>${d.n} 月${sel === 5 ? '至今' : ''}结余</span><br>收入 ${fmt(d.income)} · 支出 ${fmt(d.expense)} · 留存 ${(net / d.income * 100).toFixed(0)}%`;
+  }
+  const pick = e => { const h = e.target.closest('.hit'); if (h && +h.dataset.i !== sel) { sel = +h.dataset.i; draw(); } };
+  svg.addEventListener('click', pick);
+  svg.addEventListener('pointerover', e => { if (e.pointerType === 'mouse') pick(e); });
+  draw();
+  return root;
+}
+
+/* ── Variant C ─────────────────────────────────────── */
+function spark(vals, color, w = 150, h = 28) {
+  const mn = Math.min(...vals), mx = Math.max(...vals), sx = w / (vals.length - 1);
+  const pts = vals.map((v, i) => [i * sx, h - 3 - (v - mn) / (mx - mn || 1) * (h - 6)]);
+  const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join('');
+  const [ex, ey] = pts.at(-1);
+  return `<svg viewBox="-4 0 ${w + 8} ${h}" width="100%" height="${h}" aria-hidden="true" style="overflow:visible"><path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${ex}" cy="${ey}" r="3.5" fill="${color}" stroke="var(--bg)" stroke-width="2"/></svg>`;
+}
+function variantC(theme) {
+  const closed = MONTHS.slice(-7, -1);   // six finished months
+  const exp = closed.map(d => d.expense), inc = closed.map(d => d.income), ret = closed.map(d => (d.income - d.expense) / d.income);
+  const mean = a => a.slice(0, -1).reduce((x, y) => x + y) / (a.length - 1);
+  const avgE = mean(exp), avgI = mean(inc), avgR = mean(ret);
+  const row = (kname, vals, color, val, sub) => `<div class="spark-row"><span class="k">${kname}</span>${spark(vals, color)}<div class="r"><b>${val}</b><span>${sub}</span></div></div>`;
+  return phoneShell(theme, `
+    <div class="sh"><span class="h">近 6 月走势</span><span style="font-size:12.5px;color:var(--ink-3)">5–10 月</span></div>
+    ${row('支出', exp, 'var(--out)', fmt(exp.at(-1)), '较前 5 月 ' + pct((exp.at(-1) - avgE) / avgE))}
+    ${row('收入', inc, 'var(--in)', fmt(inc.at(-1)), '较前 5 月 ' + pct((inc.at(-1) - avgI) / avgI))}
+    ${row('留存率', ret, 'var(--ink)', (ret.at(-1) * 100).toFixed(1) + '%', '前 5 月 ' + (avgR * 100).toFixed(1) + '%')}
+    <div style="height:4px"></div>`);
+}
+
+function notes(html) { return el(`<div class="notes">${html}</div>`); }
+
+const mount = (v, nodes) => document.querySelector(`[data-variant="${v}"]`).append(...nodes);
+mount('A', [variantA('light'), variantA('dark'), notes(`
+  <p><b>一个问题，一个答案：</b>这个月花得比平时多还是少。</p>
+  <ul>
+    <li>默认 6 个月，可切 12 个月看季节性（春节那根柱子）。</li>
+    <li>高亮柱 = 当前期间，用支出方向色；其他月份是中性灰，均值线是虚线。</li>
+    <li>本月还没过完：实心是已花的，斜线虚框是按日均推到月底的估计。这样月初不会因为柱子很矮误以为花得少。</li>
+    <li>摘要行只放一个数字和一句相对均值的变化，不在每根柱上标数。</li>
+    <li>占用高度约 230pt，和现有「本期收支结算」相当。</li>
+  </ul>`)]);
+mount('B', [variantB('light'), variantB('dark'), notes(`
+  <p><b>收入和支出放在一起，</b>看每个月结余了多少。</p>
+  <ul>
+    <li>信息量更大，但首页已经有净结余和收支结算，这里再画一遍收入，重复度高。</li>
+    <li>收入经常是一大笔加零碎，柱高被收入撑开，支出的起伏被压扁，反而看不清支出趋势。</li>
+    <li>两种方向色并排，在色觉障碍下对比偏弱，需要额外的区分手段。</li>
+    <li>更适合放进分析页的「收支」卡片。</li>
+  </ul>`)]);
+mount('C', [variantC('light'), variantC('dark'), notes(`
+  <p><b>最省地方，</b>三行看完支出、收入、留存率的走向。</p>
+  <ul>
+    <li>适合以后首页再加「净资产」「预算」等行，扩展性好。</li>
+    <li>折线没有刻度，只看形状；具体金额要靠右侧数字。</li>
+    <li>只看已结束的月份，避开了进行中月份的问题，但也就看不到本月节奏。</li>
+    <li>如果你更想要「一眼扫过」而不是「看一个对比」，可以选这个，或者把 C 的支出行换成 A 的柱形。</li>
+  </ul>`)]);
+mount('states', [variantA('light', { hidden: true }),
+  phoneShell('dark', `
+    <div class="sh"><span class="h">支出趋势</span></div>
+    <div class="empty"><b>记满两个月后显示趋势</b>目前只有 11 月的记录。下个月开始，这里会把每个月的支出排成一排，和平均水平对比。</div>`),
+  notes(`<ul>
+    <li><b>金额隐藏</b>（左）：柱形、均值线、外推框都保留，所有数字变成 ••••，和净资产曲线一致。</li>
+    <li><b>账本不足两个月</b>（右）：不画只有一根柱子的图，给一句说明。只有一个已结束月份时照常画，但不画均值线。</li>
+    <li><b>旧服务端</b>没有 <code>monthlyCashflowTrend</code> 时整块不显示，不退回去用当前期间的流水自己算（那只覆盖所选期间）。</li>
+  </ul>`)]);
+
+const tbl = document.getElementById('datatable');
+tbl.innerHTML = '<tr><th>月份</th><th>收入</th><th>支出</th><th>结余</th></tr>' +
+  MONTHS.map(d => `<tr><td>${d.m}${d.m === '2026-11' ? '（至 11/10）' : ''}</td><td>${d.income.toLocaleString('en-US')}</td><td>${d.expense.toLocaleString('en-US')}</td><td>${(d.income - d.expense).toLocaleString('en-US')}</td></tr>`).join('');
+</script>
