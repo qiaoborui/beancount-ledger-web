@@ -501,6 +501,10 @@ struct LedgerBootstrap: Decodable, Sendable {
     /// Empty from servers that predate it; readers fall back to
     /// `netWorthHistory`, which only covers the requested range.
     let netWorthTrend: [LedgerNetWorthPoint]
+    /// Expense per calendar month, up to twelve, ending with the selected
+    /// period's last month (or today's, whichever is earlier). Empty from
+    /// servers that predate it, in which case the overview hides its trend.
+    let monthlyExpenseTrend: [LedgerMonthlyExpensePoint]
     let monthEndNetWorth: [LedgerNetWorthPoint]
     let netWorthWindows: LedgerNetWorthWindows?
     let transactions: [LedgerTransaction]
@@ -520,6 +524,7 @@ struct LedgerBootstrap: Decodable, Sendable {
         case accountBalances
         case netWorthHistory
         case netWorthTrend
+        case monthlyExpenseTrend
         case monthEndNetWorth
         case netWorthWindows
         case transactions
@@ -540,6 +545,7 @@ struct LedgerBootstrap: Decodable, Sendable {
         accountBalances: [AccountBalance],
         netWorthHistory: [LedgerNetWorthPoint] = [],
         netWorthTrend: [LedgerNetWorthPoint] = [],
+        monthlyExpenseTrend: [LedgerMonthlyExpensePoint] = [],
         monthEndNetWorth: [LedgerNetWorthPoint] = [],
         netWorthWindows: LedgerNetWorthWindows? = nil,
         transactions: [LedgerTransaction],
@@ -558,6 +564,7 @@ struct LedgerBootstrap: Decodable, Sendable {
         self.accountBalances = accountBalances
         self.netWorthHistory = netWorthHistory
         self.netWorthTrend = netWorthTrend
+        self.monthlyExpenseTrend = monthlyExpenseTrend
         self.monthEndNetWorth = monthEndNetWorth
         self.netWorthWindows = netWorthWindows
         self.transactions = transactions
@@ -579,6 +586,7 @@ struct LedgerBootstrap: Decodable, Sendable {
         accountBalances = try container.decode([AccountBalance].self, forKey: .accountBalances)
         netWorthHistory = try container.decodeIfPresent([LedgerNetWorthPoint].self, forKey: .netWorthHistory) ?? []
         netWorthTrend = try container.decodeIfPresent([LedgerNetWorthPoint].self, forKey: .netWorthTrend) ?? []
+        monthlyExpenseTrend = try container.decodeIfPresent([LedgerMonthlyExpensePoint].self, forKey: .monthlyExpenseTrend) ?? []
         monthEndNetWorth = try container.decodeIfPresent([LedgerNetWorthPoint].self, forKey: .monthEndNetWorth) ?? []
         netWorthWindows = try container.decodeIfPresent(LedgerNetWorthWindows.self, forKey: .netWorthWindows)
         transactions = try container.decode([LedgerTransaction].self, forKey: .transactions)
@@ -1955,6 +1963,85 @@ extension LedgerBootstrap {
         guard !netWorthTrend.isEmpty else { return sorted }
         let scoped = sorted.filter { $0.date < endExclusive }
         return scoped.count >= 2 ? scoped : sorted
+    }
+}
+
+struct LedgerMonthlyExpensePoint: Decodable, Equatable, Identifiable, Sendable {
+    /// "YYYY-MM"
+    let month: String
+    let expense: Int
+    var id: String { month }
+}
+
+/// The overview's monthly spending bars: one window of months, the average of
+/// the months that have ended, and an estimate for the month in progress.
+struct OverviewExpenseTrend: Equatable {
+    struct Bar: Equatable, Identifiable {
+        let year: Int
+        let month: Int
+        let expense: Int
+        /// Spend so far extrapolated to the month's end at the daily average.
+        /// Only the month in progress has one, and only once enough of it has
+        /// passed for the daily average to mean something.
+        let projected: Int?
+        var id: Int { year * 100 + month }
+    }
+
+    struct Progress: Equatable {
+        let day: Int
+        let days: Int
+    }
+
+    /// Windows the chart offers, in months.
+    static let windows = [6, 12]
+    /// Before this many days the daily average is one or two purchases, so the
+    /// month in progress shows its spend so far without an estimate.
+    static let minimumProjectionDays = 5
+
+    let bars: [Bar]
+    /// Mean of the ended months in the window; nil when none has ended.
+    let average: Int?
+    /// Set when the last bar is the calendar month holding `today`.
+    let progress: Progress?
+
+    /// Nil when the ledger has fewer than two months: one bar is not a trend.
+    init?(points: [LedgerMonthlyExpensePoint], months: Int, today: Date, calendar: Calendar = LedgerDateRange.calendar) {
+        let parsed = points.suffix(max(months, 2)).compactMap { point -> (Int, Int, Int)? in
+            let parts = point.month.split(separator: "-")
+            guard parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]), (1...12).contains(month) else { return nil }
+            return (year, month, point.expense)
+        }
+        guard parsed.count >= 2, let last = parsed.last else { return nil }
+        let now = calendar.dateComponents([.year, .month, .day], from: today)
+        var progress: Progress?
+        if now.year == last.0, now.month == last.1, let day = now.day,
+           let days = calendar.range(of: .day, in: .month, for: today)?.count {
+            progress = Progress(day: day, days: days)
+        }
+        bars = parsed.enumerated().map { index, item in
+            var projected: Int?
+            if index == parsed.count - 1, let progress, progress.day >= Self.minimumProjectionDays, progress.day < progress.days {
+                projected = Int((Double(item.2) / Double(progress.day) * Double(progress.days)).rounded())
+            }
+            return Bar(year: item.0, month: item.1, expense: item.2, projected: projected)
+        }
+        let ended = progress == nil ? bars : Array(bars.dropLast())
+        average = ended.isEmpty ? nil : Int((Double(ended.reduce(0) { $0 + $1.expense }) / Double(ended.count)).rounded())
+        self.progress = progress
+    }
+
+    /// The tallest thing the chart draws, so bars, estimate, and average share one scale.
+    var scaleMaximum: Int {
+        max(1, bars.map { max($0.expense, $0.projected ?? 0) }.max() ?? 0, average ?? 0)
+    }
+
+    /// Relative change of a bar against the average: the estimate for the month
+    /// in progress, the total for an ended month. Nil without a comparison.
+    func change(of bar: Bar) -> Double? {
+        guard let average, average > 0 else { return nil }
+        let isInProgress = progress != nil && bar == bars.last
+        guard let value = isInProgress ? bar.projected : bar.expense else { return nil }
+        return Double(value - average) / Double(average)
     }
 }
 

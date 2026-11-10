@@ -1332,6 +1332,67 @@ func NetWorthTrendPoints(rows []NetWorthPoint) []NetWorthPoint {
 	return append(bounded, trend[len(trend)-(netWorthTrendMaxPoints-1):]...)
 }
 
+// MonthlyExpensePoint is one calendar month of the overview's spending trend.
+type MonthlyExpensePoint struct {
+	Month   string `json:"month"`
+	Expense int    `json:"expense"`
+}
+
+const monthlyExpenseTrendMonths = 12
+
+// MonthlyExpenseTrend returns expense per calendar month for the
+// monthlyExpenseTrendMonths months ending with the month that holds the
+// period's last day (`end` is exclusive), or today's month when the period
+// reaches past today, so 本年 does not chart months that have not happened.
+// Months before the ledger's first transaction are left out, so a new ledger
+// does not chart an empty history. Postings are valued like
+// MonthSummaryWithPriceIndex, so the final month of a one-month period equals
+// that period's expense total.
+func MonthlyExpenseTrend(txns []Transaction, priceIndex PriceIndex, end, today, valuationCurrency string) []MonthlyExpensePoint {
+	endDate, err := time.Parse("2006-01-02", end)
+	if err != nil {
+		return []MonthlyExpensePoint{}
+	}
+	last := endDate.AddDate(0, 0, -1)
+	if todayDate, err := time.Parse("2006-01-02", today); err == nil && todayDate.Before(last) {
+		last = todayDate
+	}
+	first := time.Date(last.Year(), last.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -(monthlyExpenseTrendMonths - 1), 0)
+	valuationCurrency = normalizeValuationCurrency(valuationCurrency)
+	points := make([]MonthlyExpensePoint, monthlyExpenseTrendMonths)
+	index := make(map[string]int, monthlyExpenseTrendMonths)
+	for i := range points {
+		points[i].Month = first.AddDate(0, i, 0).Format("2006-01")
+		index[points[i].Month] = i
+	}
+	windowEnd := first.AddDate(0, monthlyExpenseTrendMonths, 0).Format("2006-01-02")
+	earliest := ""
+	for _, txn := range txns {
+		if len(txn.Date) < 7 || txn.Date >= windowEnd {
+			continue
+		}
+		if earliest == "" || txn.Date < earliest {
+			earliest = txn.Date
+		}
+		i, ok := index[txn.Date[:7]]
+		if !ok {
+			continue
+		}
+		for _, posting := range txn.Postings {
+			if strings.HasPrefix(posting.Account, "Expenses:") {
+				points[i].Expense += postingValuationWithPriceIndex(posting, priceIndex, "", valuationCurrency)
+			}
+		}
+	}
+	if earliest == "" {
+		return []MonthlyExpensePoint{}
+	}
+	for len(points) > 0 && points[0].Month < earliest[:7] {
+		points = points[1:]
+	}
+	return points
+}
+
 func AccountDetail(account string, txns []Transaction) []AccountDetailRow {
 	sorted := append([]Transaction(nil), txns...)
 	sort.Slice(sorted, func(i, j int) bool {

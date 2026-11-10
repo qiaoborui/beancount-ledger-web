@@ -863,6 +863,31 @@ private enum SafePreviewLedgerData {
         )
     }
 
+    /// The sample transactions before August carry no spending, so those months
+    /// take fixed totals, like the hand-written net-worth series beside them.
+    private static let earlierMonthExpenses = [
+        "2026-03": 612_040, "2026-04": 734_800, "2026-05": 518_650, "2026-06": 890_230, "2026-07": 645_510,
+    ]
+
+    /// Mirrors the server's window: up to twelve months ending at the month of
+    /// the period's last day (or today's, if earlier), from the first sample month.
+    private static func monthlyExpenseTrend(end: String, today: String, valuationCurrency: String) -> [LedgerMonthlyExpensePoint] {
+        let calendar = LedgerDateRange.calendar
+        guard let first = transactions.map(\.date).min().flatMap({ LedgerDateRange.parse(String($0.prefix(7)) + "-01") }),
+              let lastDay = LedgerDateRange.parse(end).flatMap({ calendar.date(byAdding: .day, value: -1, to: $0) })
+        else { return [] }
+        let anchor = LedgerDateRange.parse(today).map { min($0, lastDay) } ?? lastDay
+        guard let anchorMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: anchor)) else { return [] }
+        let months = (0..<12).reversed().compactMap { calendar.date(byAdding: .month, value: -$0, to: anchorMonth) }.filter { $0 >= first }
+        return months.map { month in
+            let key = String(LedgerDateRange.format(month).prefix(7))
+            let expenseCNY = (earlierMonthExpenses[key] ?? 0) + transactions.filter { $0.date.hasPrefix(key) }.reduce(0) { total, transaction in
+                total + transaction.postings.filter { $0.account.hasPrefix("Expenses:") }.reduce(0) { $0 + $1.amount }
+            }
+            return LedgerMonthlyExpensePoint(month: key, expense: converted(expenseCNY, from: "CNY", to: valuationCurrency) ?? 0)
+        }
+    }
+
     static func bootstrap(
         start: String,
         end: String,
@@ -929,6 +954,7 @@ private enum SafePreviewLedgerData {
             return LedgerNetWorthPoint(date: LedgerDateRange.format(monthEnd),
                 assets: row.assets, liabilities: row.liabilities, netWorth: row.netWorth)
         }
+        let monthlyExpenseTrend = monthlyExpenseTrend(end: end, today: today, valuationCurrency: valuationCurrency)
         let latest = netWorthRows.last
         let previous = netWorthRows.dropLast().last
         let monthChange = latest.flatMap { latest in previous.map { latest.netWorth - $0.netWorth } }
@@ -941,6 +967,7 @@ private enum SafePreviewLedgerData {
             accountBalances: valuedBalances,
             netWorthHistory: netWorthRows,
             netWorthTrend: netWorthTrend,
+            monthlyExpenseTrend: monthlyExpenseTrend,
             monthEndNetWorth: netWorthRows,
             netWorthWindows: LedgerNetWorthWindows(
                 latest: latest,

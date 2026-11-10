@@ -13,6 +13,10 @@ struct OverviewView: View {
                 if let error = session.errorMessage { StatusBanner(message: error, onDismiss: session.dismissError).padding(.horizontal, 20).padding(.bottom, 16) }
                 if let ledger = session.ledger {
                     retentionHero(ledger); cashflow(ledger)
+                    // An older server sends no trend; the module stays out rather than claim an empty ledger.
+                    if !ledger.monthlyExpenseTrend.isEmpty {
+                        OverviewSpendingTrend(points: ledger.monthlyExpenseTrend, currency: ledger.summary.currency)
+                    }
                     let categories = session.isLocal ? localSpendingCategories(accountLabels: labels) : spendingCategories(from: ledger.transactions, accountLabels: labels)
                     spending(categories, currency: ledger.summary.currency)
                     recentTransactions(ledger, accountLabels: labels)
@@ -322,6 +326,281 @@ struct OverviewView: View {
     }
 }
 
+
+/// Monthly expense bars (design: docs/design/ios-balanced/home-trend.html, variant A).
+/// Only the selected bar carries the expense colour; the month in progress adds a
+/// dashed, hatched box for its month-end estimate, and a dotted rule marks the
+/// mean of the ended months.
+private struct OverviewSpendingTrend: View {
+    @EnvironmentObject private var session: LedgerSession
+    let points: [LedgerMonthlyExpensePoint]
+    let currency: String
+    @State private var window = OverviewExpenseTrend.windows[0]
+    /// Nil follows the last bar, which is the period the page is showing.
+    @State private var selection: Int?
+
+    private static let plotTop: CGFloat = 22
+    private static let plotHeight: CGFloat = 104
+    private static let labelHeight: CGFloat = 24
+
+    var body: some View {
+        let trend = OverviewExpenseTrend(points: points, months: window, today: session.now)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 14) {
+                Text("支出趋势").balancedFont(size: 15, weight: .medium).tracking(-0.12).foregroundStyle(BalancedPalette.ink)
+                Spacer(minLength: 0)
+                // A twelve-month window over six months of history draws the same chart.
+                if trend != nil, points.count > OverviewExpenseTrend.windows[0] { windowPicker }
+            }.padding(EdgeInsets(top: 18, leading: 20, bottom: 6, trailing: 20))
+            if let trend, let selected = trend.bars.first(where: { $0.id == selection }) ?? trend.bars.last {
+                summary(trend, selected: selected)
+                chart(trend, selected: selected)
+                footer(trend, selected: selected)
+            } else {
+                Text("记满两个月后显示趋势").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .padding(EdgeInsets(top: 4, leading: 20, bottom: 12, trailing: 20))
+            }
+        }
+    }
+
+    private var windowPicker: some View {
+        HStack(spacing: 0) {
+            ForEach(OverviewExpenseTrend.windows, id: \.self) { months in
+                let isOn = months == window
+                Button {
+                    withLedgerAnimation(LedgerMotion.segment) { window = months; selection = nil }
+                } label: {
+                    Text(String(localized: "\(months) 月")).balancedFont(size: 12).monospacedDigit()
+                        .foregroundStyle(isOn ? BalancedPalette.page : BalancedPalette.secondary)
+                        .padding(.horizontal, 10).padding(.vertical, 3)
+                        .background(isOn ? BalancedPalette.ink : Color.clear)
+                        .overlay(alignment: .leading) { if months != OverviewExpenseTrend.windows[0] { BalancedPalette.edge.frame(width: 1) } }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(String(localized: "近 \(months) 月")))
+                .accessibilityAddTraits(isOn ? .isSelected : [])
+            }
+        }
+        .overlay { RoundedRectangle(cornerRadius: 2).strokeBorder(BalancedPalette.edge, lineWidth: 1) }
+        .clipShape(RoundedRectangle(cornerRadius: 2))
+        .frame(minHeight: 44).contentShape(Rectangle())
+        .padding(.vertical, -12)
+    }
+
+    // MARK: Summary
+
+    private func summary(_ trend: OverviewExpenseTrend, selected bar: OverviewExpenseTrend.Bar) -> some View {
+        let inProgress = isInProgress(bar, in: trend)
+        let month = LedgerDateLabel.month(number: bar.month)
+        let figure: Text = session.amountsVisible
+            ? Text(money(bar.expense)).font(.custom(BalancedWeight.medium.sansPostscriptName, size: 20, relativeTo: .title3))
+                .tracking(-0.3).foregroundColor(BalancedPalette.ink)
+            : Text("••••••").font(.custom(BalancedWeight.medium.sansPostscriptName, size: 20, relativeTo: .title3)).foregroundColor(BalancedPalette.ink)
+        let caption: String = {
+            if let progress = trend.progress, inProgress {
+                return String(localized: "\(month)至今 · 第 \(progress.day)/\(progress.days) 天")
+            }
+            return Self.yearMonth(year: bar.year, month: bar.month)
+        }()
+        let detail: Text? = {
+            guard session.amountsVisible else { return nil }
+            let change = trend.change(of: bar).map(Self.changeText)
+            if inProgress, let projected = bar.projected {
+                let pace = Text(String(localized: "按当前节奏约 \(money(projected))"))
+                guard let change else { return pace }
+                return pace + Text("，") + Text(change).foregroundColor(BalancedPalette.secondary)
+            }
+            return change.map { Text($0).foregroundColor(BalancedPalette.secondary) }
+        }()
+        return VStack(alignment: .leading, spacing: 2) {
+            (figure + Text("  ") + Text(caption)).lineLimit(1).minimumScaleFactor(0.7)
+            if let detail { detail.lineLimit(1).minimumScaleFactor(0.8) }
+        }
+        .balancedFont(size: 13).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+        .frame(minHeight: 40, alignment: .topLeading)
+        .padding(EdgeInsets(top: 4, leading: 20, bottom: 2, trailing: 20))
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: Chart
+
+    private func chart(_ trend: OverviewExpenseTrend, selected: OverviewExpenseTrend.Bar) -> some View {
+        let scale = Double(trend.scaleMaximum) * 1.08
+        let base = Self.plotTop + Self.plotHeight
+        let y: (Int) -> CGFloat = { base - CGFloat(Double($0) / scale) * Self.plotHeight }
+        return GeometryReader { proxy in
+            let width = proxy.size.width
+            let band = width / CGFloat(trend.bars.count)
+            let barWidth = min(22, band * 0.5)
+            ZStack(alignment: .topLeading) {
+                ZStack(alignment: .topLeading) {
+                    BalancedPalette.ruleStrong.frame(width: width, height: 1).offset(y: base)
+                    ForEach(Array(trend.bars.enumerated()), id: \.element.id) { index, bar in
+                        let isSelected = bar == selected
+                        let fill = isSelected ? BalancedPalette.expense : BalancedPalette.edge
+                        let left = band * CGFloat(index) + (band - barWidth) / 2
+                        if let projected = bar.projected, projected > bar.expense {
+                            let top = UnevenRoundedRectangle(topLeadingRadius: 4, topTrailingRadius: 4)
+                            HatchFill().stroke(fill.opacity(0.35), lineWidth: 1).clipShape(top)
+                                .overlay { top.inset(by: 0.75).stroke(fill, style: StrokeStyle(lineWidth: 1.5, dash: [3, 2.5])) }
+                                .frame(width: barWidth, height: max(0, y(bar.expense) - y(projected)))
+                                .offset(x: left, y: y(projected))
+                            Rectangle().fill(fill)
+                                .frame(width: barWidth, height: base - y(bar.expense)).offset(x: left, y: y(bar.expense))
+                        } else {
+                            UnevenRoundedRectangle(topLeadingRadius: min(4, (base - y(bar.expense)) / 2), topTrailingRadius: min(4, (base - y(bar.expense)) / 2))
+                                .fill(fill)
+                                .frame(width: barWidth, height: base - y(bar.expense)).offset(x: left, y: y(bar.expense))
+                        }
+                        // Twelve labels crowd a phone; every other month, and always the selected one.
+                        if trend.bars.count <= 6 || index % 2 == 0 || isSelected {
+                            Text(LedgerDateLabel.month(number: bar.month))
+                                .balancedFont(size: 11.5, weight: isSelected ? .semibold : .regular).monospacedDigit()
+                                .foregroundStyle(isSelected ? BalancedPalette.ink : BalancedPalette.meta)
+                                .fixedSize()
+                                .frame(width: band).offset(x: band * CGFloat(index), y: base + 5)
+                        }
+                    }
+                    if let average = trend.average, average > 0 {
+                        averageRule(width: width, y: y(average), average: average)
+                    }
+                    if session.amountsVisible, let index = trend.bars.firstIndex(of: selected) {
+                        let value = selected.projected ?? selected.expense
+                        let center = band * (CGFloat(index) + 0.5)
+                        Text((selected.projected != nil ? String(localized: "约") + " " : "") + compact(value))
+                            .balancedFont(size: 11.5, weight: .medium).monospacedDigit().foregroundStyle(BalancedPalette.ink)
+                            .fixedSize()
+                            // Centred on its bar, slid inward by its own width at either edge.
+                            .alignmentGuide(.leading) { label in -min(max(center - label.width / 2, 0), width - label.width) }
+                            .alignmentGuide(.top) { label in -(y(value) - 6 - label.height) }
+                    }
+                }
+                .accessibilityHidden(true)
+                ForEach(Array(trend.bars.enumerated()), id: \.element.id) { index, bar in
+                    Color.clear.contentShape(Rectangle())
+                        .frame(width: band, height: base + Self.labelHeight).offset(x: band * CGFloat(index))
+                        .onTapGesture { select(bar, in: trend) }
+                        .accessibilityElement()
+                        .accessibilityLabel(Text(LedgerDateLabel.month(number: bar.month)))
+                        .accessibilityValue(Text(accessibilityValue(bar, in: trend)))
+                        .accessibilityAddTraits(bar == selected ? [.isButton, .isSelected] : .isButton)
+                        .accessibilityAction { select(bar, in: trend) }
+                }
+            }
+        }
+        .frame(height: base + Self.labelHeight)
+        .padding(.horizontal, 20).padding(.top, 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(String(localized: "近 \(trend.bars.count) 月支出")))
+    }
+
+    private func averageRule(width: CGFloat, y: CGFloat, average: Int) -> some View {
+        ZStack(alignment: .topLeading) {
+            Path { path in path.move(to: CGPoint(x: 0, y: y)); path.addLine(to: CGPoint(x: width, y: y)) }
+                .stroke(BalancedPalette.meta, style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
+            Text(session.amountsVisible ? String(localized: "均") + " " + compact(average) : String(localized: "均值"))
+                .balancedFont(size: 11).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                .fixedSize()
+                .padding(.horizontal, 2).background(BalancedPalette.page)
+                .offset(y: y - 16)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    // MARK: Footer
+
+    private func footer(_ trend: OverviewExpenseTrend, selected: OverviewExpenseTrend.Bar) -> some View {
+        let notes: [String] = [
+            trend.average.flatMap { average -> String? in
+                guard average > 0 else { return nil }
+                let months = trend.progress == nil ? trend.bars.count : trend.bars.count - 1
+                return String(localized: "近 \(months) 月均值") + " " + (session.amountsVisible ? money(average) : "••••")
+            },
+            trend.bars.last?.projected == nil ? nil : String(localized: "虚线框为外推"),
+        ].compactMap { $0 }
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(notes.joined(separator: " · ")).balancedFont(size: 12).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                .lineLimit(1).minimumScaleFactor(0.8)
+            Spacer(minLength: 0)
+            if !isShowing(selected) {
+                Button {
+                    Task { await session.applyRange(.month(year: selected.year, month: selected.month)) }
+                } label: {
+                    Text("查看该月").balancedFont(size: 12).foregroundStyle(BalancedPalette.secondary)
+                        .padding(.bottom, 1).overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).padding(.vertical, -16)
+                .disabled(session.isRangeLoading)
+                .accessibilityLabel(Text(String(localized: "查看 \(Self.yearMonth(year: selected.year, month: selected.month))")))
+            }
+        }
+        .padding(EdgeInsets(top: 6, leading: 20, bottom: 4, trailing: 20))
+    }
+
+    // MARK: Helpers
+
+    private func select(_ bar: OverviewExpenseTrend.Bar, in trend: OverviewExpenseTrend) {
+        withLedgerAnimation(LedgerMotion.selection) { selection = bar == trend.bars.last ? nil : bar.id }
+    }
+
+    private func isInProgress(_ bar: OverviewExpenseTrend.Bar, in trend: OverviewExpenseTrend) -> Bool {
+        trend.progress != nil && bar == trend.bars.last
+    }
+
+    /// True when the page already shows exactly this month.
+    private func isShowing(_ bar: OverviewExpenseTrend.Bar) -> Bool {
+        session.selectedRange == .month(year: bar.year, month: bar.month)
+    }
+
+    private func money(_ minorUnits: Int) -> String {
+        MoneyText.currencySymbol(for: currency) + MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: false)
+    }
+
+    /// Chart labels are a scale, not a figure: no cents, compact once it reaches 万.
+    private func compact(_ minorUnits: Int) -> String {
+        abs(minorUnits) >= 1_000_000
+            ? MoneyText.formatCompact(minorUnits: minorUnits, currency: currency)
+            : MoneyText.format(minorUnits: minorUnits, currency: currency, maximumFractionDigits: 0)
+    }
+
+    private func accessibilityValue(_ bar: OverviewExpenseTrend.Bar, in trend: OverviewExpenseTrend) -> String {
+        guard session.amountsVisible else { return String(localized: "金额已隐藏") }
+        var parts = [String(localized: "支出 \(MoneyText.format(minorUnits: bar.expense, currency: currency))")]
+        if isInProgress(bar, in: trend), let projected = bar.projected {
+            parts.append(String(localized: "预计全月约 \(MoneyText.format(minorUnits: projected, currency: currency))"))
+        }
+        if let change = trend.change(of: bar) { parts.append(Self.changeText(change)) }
+        return parts.joined(separator: "，")
+    }
+
+    private static func changeText(_ change: Double) -> String {
+        let percent = Int((abs(change) * 100).rounded())
+        if percent == 0 { return String(localized: "与均值持平") }
+        return change > 0 ? String(localized: "高于均值 \(percent)%") : String(localized: "低于均值 \(percent)%")
+    }
+
+    private static func yearMonth(year: Int, month: Int) -> String {
+        guard let date = LedgerDateRange.calendar.date(from: DateComponents(year: year, month: month, day: 1)) else { return "\(year)-\(month)" }
+        return date.formatted(.dateTime.year().month(.wide).locale(LedgerLocale.current))
+    }
+}
+
+/// 45° hatching for the month-end estimate, 5pt apart.
+private struct HatchFill: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        var x = rect.minX - rect.height
+        while x < rect.maxX {
+            path.move(to: CGPoint(x: x, y: rect.maxY))
+            path.addLine(to: CGPoint(x: x + rect.height, y: rect.minY))
+            x += 5
+        }
+        return path
+    }
+}
 
 private struct OverviewCategorySpending: Identifiable {
     let id: String
