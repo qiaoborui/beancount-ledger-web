@@ -233,6 +233,81 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(legacy.netWorthTrendHistory(before: "2026-09-01").map(\.date), ["2026-08-01"])
     }
 
+    func testBootstrapDecodesMonthlyExpenseTrendAndToleratesOlderServers() throws {
+        let full = try JSONDecoder().decode(LedgerBootstrap.self, from: Data(Self.trendBootstrapJSON(
+            netWorthTrend: nil,
+            monthlyExpenseTrend: #"[{ "month": "2026-07", "expense": 120 }, { "month": "2026-08", "expense": 0 }]"#
+        ).utf8))
+        XCTAssertEqual(full.monthlyExpenseTrend, [
+            LedgerMonthlyExpensePoint(month: "2026-07", expense: 120),
+            LedgerMonthlyExpensePoint(month: "2026-08", expense: 0),
+        ])
+        let legacy = try JSONDecoder().decode(LedgerBootstrap.self, from: Data(Self.trendBootstrapJSON(netWorthTrend: nil).utf8))
+        XCTAssertTrue(legacy.monthlyExpenseTrend.isEmpty)
+    }
+
+    private static func expensePoints(_ values: [(String, Int)]) -> [LedgerMonthlyExpensePoint] {
+        values.map { LedgerMonthlyExpensePoint(month: $0.0, expense: $0.1) }
+    }
+
+    private static let sixMonths = expensePoints([
+        ("2026-06", 8_000), ("2026-07", 9_000), ("2026-08", 10_000),
+        ("2026-09", 11_000), ("2026-10", 12_000), ("2026-11", 3_000),
+    ])
+
+    func testExpenseTrendProjectsTheMonthInProgressAndAveragesOnlyEndedMonths() throws {
+        let today = try XCTUnwrap(LedgerDateRange.parse("2026-11-10"))
+        let trend = try XCTUnwrap(OverviewExpenseTrend(points: Self.sixMonths, months: 6, today: today))
+        XCTAssertEqual(trend.bars.map(\.id), [202606, 202607, 202608, 202609, 202610, 202611])
+        XCTAssertEqual(trend.progress, OverviewExpenseTrend.Progress(day: 10, days: 30))
+        // November's 3,000 over ten days runs to 9,000 for the month.
+        XCTAssertEqual(trend.bars.last?.projected, 9_000)
+        XCTAssertEqual(trend.bars.dropLast().compactMap(\.projected), [])
+        // The half-spent month would drag the mean down; only June–October count.
+        XCTAssertEqual(trend.average, 10_000)
+        XCTAssertEqual(trend.scaleMaximum, 12_000)
+        XCTAssertEqual(try XCTUnwrap(trend.change(of: trend.bars[4])), 0.2, accuracy: 1e-9)
+        // The month in progress compares its estimate, not its partial total.
+        XCTAssertEqual(try XCTUnwrap(trend.change(of: trend.bars[5])), -0.1, accuracy: 1e-9)
+    }
+
+    func testExpenseTrendSkipsTheEstimateUntilTheMonthHasRunAFewDays() throws {
+        let early = try XCTUnwrap(LedgerDateRange.parse("2026-11-04"))
+        let trend = try XCTUnwrap(OverviewExpenseTrend(points: Self.sixMonths, months: 6, today: early))
+        XCTAssertEqual(trend.progress?.day, 4)
+        XCTAssertNil(trend.bars.last?.projected)
+        XCTAssertNil(trend.change(of: trend.bars[5]))
+        XCTAssertEqual(trend.average, 10_000)
+
+        // On the last day the spend so far is the month; nothing is extrapolated.
+        let lastDay = try XCTUnwrap(LedgerDateRange.parse("2026-11-30"))
+        XCTAssertNil(OverviewExpenseTrend(points: Self.sixMonths, months: 6, today: lastDay)?.bars.last?.projected)
+    }
+
+    func testExpenseTrendForAnEndedPeriodAveragesEveryBar() throws {
+        let later = try XCTUnwrap(LedgerDateRange.parse("2027-01-15"))
+        let trend = try XCTUnwrap(OverviewExpenseTrend(points: Self.sixMonths, months: 6, today: later))
+        XCTAssertNil(trend.progress)
+        XCTAssertNil(trend.bars.last?.projected)
+        XCTAssertEqual(trend.average, 8_833)
+        XCTAssertEqual(try XCTUnwrap(trend.change(of: trend.bars[5])), Double(3_000 - 8_833) / 8_833, accuracy: 1e-9)
+    }
+
+    func testExpenseTrendWindowTakesTheLatestMonthsAndNeedsTwo() throws {
+        let today = try XCTUnwrap(LedgerDateRange.parse("2026-11-10"))
+        let year = Self.expensePoints((1...12).map { (String(format: "2025-%02d", $0), $0 * 100) })
+        XCTAssertEqual(OverviewExpenseTrend(points: year, months: 6, today: today)?.bars.map(\.month), [7, 8, 9, 10, 11, 12])
+        XCTAssertEqual(OverviewExpenseTrend(points: year, months: 12, today: today)?.bars.count, 12)
+
+        XCTAssertNil(OverviewExpenseTrend(points: [], months: 6, today: today))
+        XCTAssertNil(OverviewExpenseTrend(points: Self.expensePoints([("2026-11", 500)]), months: 6, today: today))
+        // One ended month is enough for an average; a zero average compares nothing.
+        let two = try XCTUnwrap(OverviewExpenseTrend(points: Self.expensePoints([("2026-10", 900), ("2026-11", 500)]), months: 6, today: today))
+        XCTAssertEqual(two.average, 900)
+        let fresh = try XCTUnwrap(OverviewExpenseTrend(points: Self.expensePoints([("2026-10", 0), ("2026-11", 500)]), months: 6, today: today))
+        XCTAssertNil(fresh.change(of: fresh.bars[1]))
+    }
+
     func testNetWorthTrendWindowsAnchorOnTheLastPoint() throws {
         // Monthly points from 2025-01 through the series' own last point in
         // 2026-08, so every window is measured from that point, not from today.
@@ -841,8 +916,9 @@ final class LedgerModelsTests: XCTestCase {
         )
     }
 
-    private static func trendBootstrapJSON(netWorthTrend: String?) -> String {
-        let trend = netWorthTrend.map { "\n      \"netWorthTrend\": \($0)," } ?? ""
+    private static func trendBootstrapJSON(netWorthTrend: String?, monthlyExpenseTrend: String? = nil) -> String {
+        let trend = (netWorthTrend.map { "\n      \"netWorthTrend\": \($0)," } ?? "")
+            + (monthlyExpenseTrend.map { "\n      \"monthlyExpenseTrend\": \($0)," } ?? "")
         return """
         {
           "start": "2026-08-01",

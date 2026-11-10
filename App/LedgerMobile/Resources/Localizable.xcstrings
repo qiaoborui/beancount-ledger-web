@@ -593,6 +593,16 @@
         }
       }
     },
+    "%@至今 · 第 %lld/%lld 天" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ so far · day %2$lld of %3$lld"
+          }
+        }
+      }
+    },
     "%@账单" : {
       "localizations" : {
         "en" : {
@@ -879,6 +889,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld to process"
+          }
+        }
+      }
+    },
+    "%lld 月" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld mo"
           }
         }
       }
@@ -2034,6 +2054,16 @@
         }
       }
     },
+    "与均值持平" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Level with the average"
+          }
+        }
+      }
+    },
     "个人养老金" : {
       "localizations" : {
         "en" : {
@@ -3100,6 +3130,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Valuation currency & exchange rates"
+          }
+        }
+      }
+    },
+    "低于均值 %lld%%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld%% below average"
           }
         }
       }
@@ -6214,6 +6254,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Venue tickets"
+          }
+        }
+      }
+    },
+    "均" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avg"
+          }
+        }
+      }
+    },
+    "均值" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Average"
           }
         }
       }
@@ -9838,6 +9898,16 @@
         }
       }
     },
+    "按当前节奏约 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About %@ at this pace"
+          }
+        }
+      }
+    },
     "按日汇总 · 转账不计收支" : {
       "localizations" : {
         "en" : {
@@ -10304,6 +10374,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Expense accounts"
+          }
+        }
+      }
+    },
+    "支出趋势" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spending trend"
           }
         }
       }
@@ -13038,6 +13118,16 @@
         }
       }
     },
+    "查看 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View %@"
+          }
+        }
+      }
+    },
     "查看「%@」流水" : {
       "localizations" : {
         "en" : {
@@ -13104,6 +13194,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "View data · %@"
+          }
+        }
+      }
+    },
+    "查看该月" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View month"
           }
         }
       }
@@ -15998,6 +16098,16 @@
         }
       }
     },
+    "约" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~"
+          }
+        }
+      }
+    },
     "约 1 分钟" : {
       "localizations" : {
         "en" : {
@@ -16528,6 +16638,16 @@
         }
       }
     },
+    "虚线框为外推" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dashed box is projected"
+          }
+        }
+      }
+    },
     "蚂蚁花呗" : {
       "localizations" : {
         "en" : {
@@ -16704,6 +16824,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "New Entry (Advanced)"
+          }
+        }
+      }
+    },
+    "记满两个月后显示趋势" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The trend appears once two months are recorded"
           }
         }
       }
@@ -18768,6 +18898,36 @@
         }
       }
     },
+    "近 %lld 月" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last %lld months"
+          }
+        }
+      }
+    },
+    "近 %lld 月均值" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld-month average"
+          }
+        }
+      }
+    },
+    "近 %lld 月支出" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spending, last %lld months"
+          }
+        }
+      }
+    },
     "近 12 个月" : {
       "localizations" : {
         "en" : {
@@ -20138,6 +20298,16 @@
         }
       }
     },
+    "预计全月约 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projected about %@ for the month"
+          }
+        }
+      }
+    },
     "餐饮" : {
       "localizations" : {
         "en" : {
@@ -20204,6 +20374,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Authenticate to continue. Ledger content stays off screen until then."
+          }
+        }
+      }
+    },
+    "高于均值 %lld%%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld%% above average"
           }
         }
       }
