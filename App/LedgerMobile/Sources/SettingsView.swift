@@ -18,7 +18,7 @@ struct SettingsView: View {
                 Section { StatusBanner(message: error, onDismiss: session.dismissError) }
             }
             Section {
-                SettingsRow(title: String(localized: "底部标签栏"), value: session.compactTabDestinations.map(\.compactTitle).joined(separator: String(localized: "、"))) {
+                SettingsRow(title: String(localized: "底部标签栏"), value: session.compactTabDestinations.map { $0 == .transactions ? String(localized: "流水") : $0.compactTitle }.joined(separator: String(localized: "、"))) {
                     compactTabConfigurationPresented = true
                 }
                 .accessibilityIdentifier("settings-compact-tabs")
@@ -70,7 +70,7 @@ struct SettingsView: View {
                     .listRowSeparator(.hidden)
                 } else {
                     SettingsRowLabel(title: String(localized: "使用设备密码或生物识别解锁"), detail: nil)
-                        .frame(minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
                         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                         .listRowBackground(Color.clear)

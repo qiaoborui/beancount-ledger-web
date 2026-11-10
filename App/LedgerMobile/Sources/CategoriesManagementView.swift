@@ -59,7 +59,7 @@ struct CategoriesManagementView: View {
 
             Section {
                 Text(searchText.isEmpty
-                    ? "共 \(matchingAccounts.count) 个\(selectedKind.title)分类，按一级科目分组。加号新增，左滑可停用。"
+                    ? "共 \(matchingAccounts.count) 个\(selectedKind.title)，按一级科目分组。加号新增，左滑可停用。"
                     : "未找到匹配的分类。")
                     .balancedFont(size: 12.5)
                     .foregroundStyle(BalancedPalette.meta)

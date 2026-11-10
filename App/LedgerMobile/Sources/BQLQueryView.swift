@@ -183,9 +183,8 @@ private struct BQLWorkbench: View {
             Divider().overlay(LedgerPalette.line)
 
             HStack(alignment: .top, spacing: LedgerSpacing.sm) {
-                Image(systemName: "command")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(LedgerPalette.gold)
+                // The hint text already leads with "⌘"; a separate command
+                // glyph rendered it twice ("⌘ ⌘ Return").
                 Text("⌘ Return 运行全部语句。支持 AND / OR / NOT、IN、BETWEEN、正则、DISTINCT 与 HAVING。")
                     .font(.system(size: 10))
                     .foregroundStyle(LedgerPalette.secondary)

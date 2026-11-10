@@ -4064,12 +4064,12 @@
         }
       }
     },
-    "共 %lld 个%@分类，按一级科目分组。加号新增，左滑可停用。" : {
+    "共 %lld 个%@，按一级科目分组。加号新增，左滑可停用。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld %@ categories, grouped by top-level account. Tap + to add; swipe left to deactivate."
+            "value" : "%lld %@, grouped by top-level account. Tap + to add; swipe left to deactivate."
           }
         }
       }
