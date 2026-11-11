@@ -40,12 +40,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify deployment workflow guards
-        run: bash .github/scripts/verify-deploy-google-cloud.sh
-
-      - name: Verify self-hosted deployment guards
-        run: bash .github/scripts/verify-deploy-selfhost.sh
-
       - name: Test self-hosted deployment manifest validation
         run: bash .github/scripts/test-deploy-selfhost-submit.sh
 

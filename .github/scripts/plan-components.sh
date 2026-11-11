@@ -5,18 +5,12 @@ backend=false
 agent=false
 web=false
 ios=false
-cloud_run=false
-agent_service=false
-zip_worker=false
 
 if [[ "${1:-}" == "--all" ]]; then
   backend=true
   agent=true
   web=true
   ios=true
-  cloud_run=true
-  agent_service=true
-  zip_worker=true
 else
   while IFS= read -r file; do
     case "$file" in
@@ -64,33 +58,11 @@ else
         # `swift test` job is the check that covers it.
         ios=true
         ;;
-      .github/workflows/publish-images.yml)
-        ;;
       .github/workflows/*)
         ios=true
         ;;
     esac
-    case "$file" in
-      .dockerignore|.github/workflows/deploy-google-cloud.yml|docker/Dockerfile|server/*|server/**/*|web/*|web/**/*)
-        cloud_run=true
-        ;;
-    esac
-    case "$file" in
-      .dockerignore|.github/workflows/deploy-google-cloud.yml|docker/Dockerfile|.agents/skills/*|.agents/skills/**/*|agent/*|agent/**/*)
-        agent_service=true
-        ;;
-    esac
-    case "$file" in
-      .dockerignore|.github/workflows/deploy-google-cloud.yml|docker/Dockerfile|server/*|server/**/*)
-        zip_worker=true
-        ;;
-    esac
   done
-fi
-
-deploy_any=false
-if [[ "$cloud_run" == "true" || "$agent_service" == "true" || "$zip_worker" == "true" ]]; then
-  deploy_any=true
 fi
 
 jq -cn \
@@ -98,17 +70,9 @@ jq -cn \
   --argjson agent "$agent" \
   --argjson web "$web" \
   --argjson ios "$ios" \
-  --argjson cloud_run "$cloud_run" \
-  --argjson agent_service "$agent_service" \
-  --argjson zip_worker "$zip_worker" \
-  --argjson deploy_any "$deploy_any" \
   '{
     backend: $backend,
     agent: $agent,
     web: $web,
-    ios: $ios,
-    cloud_run: $cloud_run,
-    agent_service: $agent_service,
-    zip_worker: $zip_worker,
-    deploy_any: $deploy_any
+    ios: $ios
   }'

@@ -124,17 +124,9 @@ class PrivateIPATests(unittest.TestCase):
 
     def test_shared_workflows_still_trigger_every_job(self):
         """Workflows that build several components must keep doing so."""
-        for workflow in ("ci.yml", "deploy-selfhost.yml"):
-            plan = plan_components(f".github/workflows/{workflow}")
-            for component in ("backend", "agent", "web", "ios"):
-                self.assertEqual(plan[component], True, f"{workflow} / {component}")
-
-    def test_publish_images_keeps_its_components_but_skips_ios(self):
-        plan = plan_components(".github/workflows/publish-images.yml")
-        self.assertEqual(plan["backend"], True)
-        self.assertEqual(plan["agent"], True)
-        self.assertEqual(plan["web"], True)
-        self.assertEqual(plan["ios"], False)
+        plan = plan_components(".github/workflows/ci.yml")
+        for component in ("backend", "agent", "web", "ios"):
+            self.assertEqual(plan[component], True, component)
 
 
 def plan_components(*paths):

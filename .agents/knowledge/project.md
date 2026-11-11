@@ -45,8 +45,7 @@ iOS app (the shipped product):
 
 Deployment:
 
-- CI runs on pushes to `main` and on pull requests.
-- Pull requests trigger the Raspberry Pi workflow with the `preview` target when
-  the PR is not a draft.
-- The deploy workflow packages `.agents/` into the standalone artifact.
+- CI runs on pull requests and can be dispatched by hand.
+- There are no deploy or image-publishing workflows; deployments are run by
+  hand outside GitHub Actions.
 

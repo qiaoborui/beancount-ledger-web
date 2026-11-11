@@ -1,5 +1,9 @@
 # Local self-hosted CI/CD over Headscale
 
+> **Note:** the GitHub Actions workflow this runbook describes (`deploy-selfhost.yml`)
+> has been removed from the repository. The infrastructure notes below remain
+> for reference; deployments must be run by hand.
+
 This deployment builds immutable application images on GitHub-hosted runners,
 then gives the deployment job temporary TCP/6247 access to the Docker host over
 Headscale. The privileged deploy job does not check out repository code and

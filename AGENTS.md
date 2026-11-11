@@ -49,9 +49,6 @@ through `LEDGER_ROOT`.
 - `docker/` contains container/deployment examples.
 - `.github/workflows/ci.yml` runs selective backend, agent, frontend, and iOS
   core checks.
-- `.github/workflows/deploy-google-cloud.yml` publishes the standalone API and
-  static web image to Cloud Run when the required repository variables are
-  configured.
 - `.agents/` contains Agent4MD config, durable rules, project knowledge, and
   domain skills.
 
@@ -121,14 +118,10 @@ Other rules:
 - After completing feature work, make sure a pull request exists. After opening
   or updating a PR, check the PR status, mergeability, and conflict state; if
   conflicts are reported, resolve them before handing the work back.
-- Deployment is manual. `deploy-selfhost.yml`, `deploy-google-cloud.yml` and
-  `publish-images.yml` are `workflow_dispatch` only, so merging to `main`
-  builds and deploys nothing. Do not add `push` triggers back without an
+- The repository has no deployment or image-publishing workflows; merging to
+  `main` builds and deploys nothing. The only workflows are `ci.yml` and the
+  manual `ios-ipa.yml`. Do not add deploy or publish workflows back without an
   explicit request.
-- Production Google Cloud deployment uses Workload Identity Federation,
-  Artifact Registry, Cloud Run, Secret Manager, and Cloud Scheduler. Keep
-  deployment configuration aligned with
-  `docs/google-cloud-run.md`.
 - When several dependent features must land serially, use Graphite stacked PRs
   instead of mixing the work into one large branch.
 - Avoid starting the local dev server by default. Prefer static checks, tests,
