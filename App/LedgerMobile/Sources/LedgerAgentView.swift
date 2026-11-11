@@ -383,6 +383,7 @@ private struct LedgerAgentChatScreen: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    if #available(iOS 18.0, *) { return }
                     contentHeight = height
                     measureFit()
                 }
@@ -390,6 +391,7 @@ private struct LedgerAgentChatScreen: View {
             .onGeometryChange(for: CGFloat.self) { geometry in
                 geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom
             } action: { height in
+                if #available(iOS 18.0, *) { return }
                 viewportHeight = height
                 measureFit()
             }
@@ -426,9 +428,9 @@ private struct LedgerAgentChatScreen: View {
                 // A conversation still answering opens on its reply.
                 guard conversation.isRunning else { return }
                 following = true
-                DispatchQueue.main.async {
-                    if contentOverflows { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
-                }
+                // Once, before the page has measured whether it overflows; a
+                // single scroll does not bounce the way one per update did.
+                DispatchQueue.main.async { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
             .onChange(of: conversation.pending) { _, _ in follow(proxy) }
             .onChange(of: conversation.recap) { _, _ in follow(proxy) }
@@ -705,7 +707,6 @@ private struct LedgerAgentChatScreen: View {
     /// fits is measured from its frame; from iOS 18 `LedgerAgentScrollTracking`
     /// reads it off the scroll view.
     private func measureFit() {
-        if #available(iOS 18.0, *) { return }
         let overflows = LedgerAgentScrollFit.overflows(contentHeight: Double(contentHeight),
                                                        viewportHeight: Double(viewportHeight))
         if overflows != contentOverflows { contentOverflows = overflows }
