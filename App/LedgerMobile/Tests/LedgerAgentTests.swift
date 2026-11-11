@@ -328,6 +328,51 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(settings.favorites.last?.thinkingLevels, ["off", "low", "high"])
     }
 
+    @MainActor
+    func testProviderListWindowsOutliveARelaunch() async throws {
+        let suite = "LedgerAgentTests-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let keys: (String) -> ClassificationKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
+        let calls = SentRequest()
+        let lister = LedgerAgentModelLister(run: { request in
+            calls.data = request
+            return Data(#"{"version":1,"ok":true,"models":[{"id":"claude-sonnet-4-5","title":"Claude Sonnet 4.5","known":true,"contextWindow":1000000},{"id":"claude-next","title":"Claude Next","known":false}]}"#.utf8)
+        })
+        let settings = LedgerAgentSettings(defaults: defaults, catalog: .fallback, keyStore: keys, lister: lister)
+        let sonnet = LedgerAgentModelChoice(provider: "anthropic", model: "claude-sonnet-4-5")
+        let next = LedgerAgentModelChoice(provider: "anthropic", model: "claude-next")
+        XCTAssertNil(settings.contextWindow(for: sonnet))
+
+        // Without a key nothing is fetched and nothing is shown.
+        await settings.learnContextWindow()
+        XCTAssertNil(calls.data)
+        XCTAssertNil(settings.listError)
+
+        await settings.refreshModels(apiKey: "sk-test")
+        XCTAssertEqual(settings.contextWindow(for: sonnet), 1_000_000)
+        XCTAssertNil(settings.contextWindow(for: next), "a list without a window leaves it to the native side")
+        settings.toggleFavoriteForCurrent()
+        XCTAssertEqual(settings.favorites.last?.contextWindow, 1_000_000)
+
+        let reopened = LedgerAgentSettings(defaults: defaults, catalog: .fallback, keyStore: keys, lister: lister)
+        XCTAssertNil(reopened.listedModels)
+        XCTAssertEqual(reopened.contextWindow(for: sonnet), 1_000_000)
+    }
+
+    func testTurnRequestSendsTheListedContextWindow() throws {
+        var request = LedgerAgentTurnRequest(turnId: "t", workspaceRoot: "/w", runtimeRoot: "/r", entrypoint: "main.bean",
+            sensitiveUnlocked: true, provider: "anthropic", model: "claude-next", apiKey: "k", history: [], message: "m")
+        request.contextWindow = 400_000
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        XCTAssertEqual(object["contextWindow"] as? Int, 400_000)
+        let listed = try JSONDecoder().decode(LedgerAgentListedModel.self,
+            from: Data(#"{"id":"a","title":"A","known":false,"contextWindow":262144}"#.utf8))
+        XCTAssertEqual(listed.contextWindow, 262_144)
+        let older = try JSONDecoder().decode(LedgerAgentListedModel.self, from: Data(#"{"id":"a","title":"A","known":false}"#.utf8))
+        XCTAssertNil(older.contextWindow)
+    }
+
     func testCrashReportShowsOnce() throws {
         let runtime = try root()
         XCTAssertNil(LedgerAgentCrashReport.take(runtimeRoot: runtime))

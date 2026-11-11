@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -30,6 +31,9 @@ type listedModelV1 struct {
 	ThinkingLevels []ai.ModelThinkingLevel `json:"thinkingLevels"`
 	// Known is whether the built-in catalog describes the model.
 	Known bool `json:"known"`
+	// ContextWindow is the model's context in tokens, as the provider's list
+	// gives it, else the catalog's; absent when neither says.
+	ContextWindow int `json:"contextWindow,omitempty"`
 }
 
 type listResponseV1 struct {
@@ -172,21 +176,59 @@ func listEndpoint(provider string, custom *customEndpointV1) (modelListEndpoint,
 	}
 }
 
+// tokenLimit is a context length a list gives as a JSON number. Anything
+// else, and a number that is not positive, reads as unknown, so one odd
+// entry never fails the list.
+type tokenLimit int
+
+func (limit *tokenLimit) UnmarshalJSON(raw []byte) error {
+	var value float64
+	if json.Unmarshal(raw, &value) != nil || value <= 0 || value > math.MaxInt32 {
+		*limit = 0
+		return nil
+	}
+	*limit = tokenLimit(value)
+	return nil
+}
+
+// firstLimit is the first of limits that is known.
+func firstLimit(limits ...tokenLimit) int {
+	for _, limit := range limits {
+		if limit > 0 {
+			return int(limit)
+		}
+	}
+	return 0
+}
+
 // parseModelList reads the OpenAI shape (data[].id), Anthropic's
 // (data[].display_name), OpenRouter's (data[].name, supported_parameters)
-// and Gemini's (models[].name "models/…").
+// and Gemini's (models[].name "models/…"). The context window is
+// Anthropic's max_input_tokens, OpenRouter's context_length or
+// top_provider.context_length, Gemini's inputTokenLimit, or one of the
+// names OpenAI-compatible servers use (context_window, max_context_length,
+// vLLM's max_model_len).
 func parseModelList(provider string, body []byte) ([]listedModelV1, error) {
 	var payload struct {
 		Data []struct {
-			ID                  string   `json:"id"`
-			DisplayName         string   `json:"display_name"`
-			Name                string   `json:"name"`
-			SupportedParameters []string `json:"supported_parameters"`
+			ID                  string     `json:"id"`
+			DisplayName         string     `json:"display_name"`
+			Name                string     `json:"name"`
+			SupportedParameters []string   `json:"supported_parameters"`
+			MaxInputTokens      tokenLimit `json:"max_input_tokens"`
+			ContextLength       tokenLimit `json:"context_length"`
+			TopProvider         *struct {
+				ContextLength tokenLimit `json:"context_length"`
+			} `json:"top_provider"`
+			ContextWindow    tokenLimit `json:"context_window"`
+			MaxContextLength tokenLimit `json:"max_context_length"`
+			MaxModelLen      tokenLimit `json:"max_model_len"`
 		} `json:"data"`
 		Models []struct {
-			Name                       string   `json:"name"`
-			DisplayName                string   `json:"displayName"`
-			SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+			Name                       string     `json:"name"`
+			DisplayName                string     `json:"displayName"`
+			SupportedGenerationMethods []string   `json:"supportedGenerationMethods"`
+			InputTokenLimit            tokenLimit `json:"inputTokenLimit"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -194,13 +236,13 @@ func parseModelList(provider string, body []byte) ([]listedModelV1, error) {
 	}
 	models := []listedModelV1{}
 	seen := map[string]bool{}
-	add := func(id, title string) {
+	add := func(id, title string, window int) {
 		id = strings.TrimSpace(id)
 		if id == "" || seen[id] || !looksLikeChat(id) {
 			return
 		}
 		seen[id] = true
-		models = append(models, describeListed(provider, id, strings.TrimSpace(title)))
+		models = append(models, describeListed(provider, id, strings.TrimSpace(title), window))
 	}
 	for _, entry := range payload.Data {
 		// OpenRouter says which models call tools; the Agent needs them.
@@ -211,30 +253,39 @@ func parseModelList(provider string, body []byte) ([]listedModelV1, error) {
 		if title == "" {
 			title = entry.Name
 		}
-		add(entry.ID, title)
+		var topProvider tokenLimit
+		if entry.TopProvider != nil {
+			topProvider = entry.TopProvider.ContextLength
+		}
+		add(entry.ID, title, firstLimit(entry.MaxInputTokens, entry.ContextLength, topProvider,
+			entry.ContextWindow, entry.MaxContextLength, entry.MaxModelLen))
 	}
 	for _, entry := range payload.Models {
 		if entry.SupportedGenerationMethods != nil && !slices.Contains(entry.SupportedGenerationMethods, "generateContent") {
 			continue
 		}
-		add(strings.TrimPrefix(entry.Name, "models/"), entry.DisplayName)
+		add(strings.TrimPrefix(entry.Name, "models/"), entry.DisplayName, firstLimit(entry.InputTokenLimit))
 	}
 	return models, nil
 }
 
-func describeListed(provider, id, title string) listedModelV1 {
+func describeListed(provider, id, title string, window int) listedModelV1 {
 	if provider != customProvider {
 		if known := ai.GetBuiltinModel(provider, id); known != nil {
 			if title == "" {
 				title = known.DisplayName
 			}
-			return listedModelV1{ID: id, Title: title, ThinkingLevels: ai.GetSupportedThinkingLevels(known), Known: true}
+			if window == 0 {
+				window = max(known.Capabilities.ContextWindow, 0)
+			}
+			return listedModelV1{ID: id, Title: title, ThinkingLevels: ai.GetSupportedThinkingLevels(known), Known: true,
+				ContextWindow: window}
 		}
 	}
 	if title == "" {
 		title = id
 	}
-	return listedModelV1{ID: id, Title: title, ThinkingLevels: assumedThinkingLevels}
+	return listedModelV1{ID: id, Title: title, ThinkingLevels: assumedThinkingLevels, ContextWindow: window}
 }
 
 // nonChatMarkers name model families a list carries that cannot chat with

@@ -134,3 +134,59 @@ func TestListedModelBorrowsTheNearestCatalogEntry(t *testing.T) {
 		t.Fatal("invalid listed model built")
 	}
 }
+
+// listedWindows lists provider (a custom endpoint when custom is set) from
+// body and returns each model's context window.
+func listedWindows(t *testing.T, provider, body string, custom map[string]string) map[string]int {
+	t.Helper()
+	request := map[string]any{"version": 1, "provider": provider, "apiKey": "k"}
+	if custom != nil {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) }))
+		t.Cleanup(server.Close)
+		custom["baseURL"] = server.URL + "/v1"
+		request["custom"] = custom
+	} else {
+		serveList(t, provider, body)
+	}
+	response := listFor(t, request)
+	if !response.OK {
+		t.Fatalf("%s: %+v", provider, response)
+	}
+	windows := map[string]int{}
+	for _, model := range response.Models {
+		windows[model.ID] = model.ContextWindow
+	}
+	return windows
+}
+
+func TestListModelsReadsEachProvidersContextWindow(t *testing.T) {
+	if got := listedWindows(t, "anthropic", `{"data":[{"id":"claude-next-9","max_input_tokens":1000000,"max_tokens":128000}]}`, nil); got["claude-next-9"] != 1_000_000 {
+		t.Fatalf("anthropic = %v", got)
+	}
+	if got := listedWindows(t, "openrouter", `{"data":[{"id":"a/x","supported_parameters":["tools"],"context_length":262144},`+
+		`{"id":"b/y","supported_parameters":["tools"],"context_length":null,"top_provider":{"context_length":65536}}]}`, nil); got["a/x"] != 262144 || got["b/y"] != 65536 {
+		t.Fatalf("openrouter = %v", got)
+	}
+	if got := listedWindows(t, "google", `{"models":[{"name":"models/gemini-next","supportedGenerationMethods":["generateContent"],"inputTokenLimit":1048576}]}`, nil); got["gemini-next"] != 1048576 {
+		t.Fatalf("gemini = %v", got)
+	}
+	got := listedWindows(t, "custom", `{"data":[{"id":"vllm","max_model_len":32768},{"id":"lm","context_window":131072.0},`+
+		`{"id":"other","max_context_length":40960},{"id":"odd","context_length":"big"},{"id":"none","context_length":-1}]}`,
+		map[string]string{"api": "openai-completions"})
+	if got["vllm"] != 32768 || got["lm"] != 131072 || got["other"] != 40960 || got["odd"] != 0 || got["none"] != 0 || len(got) != 5 {
+		t.Fatalf("custom = %v", got)
+	}
+}
+
+func TestListedCatalogModelFallsBackToTheCatalogWindow(t *testing.T) {
+	models := ai.GetBuiltinModels("anthropic")
+	if len(models) == 0 || models[0].Capabilities.ContextWindow <= 0 {
+		t.Skip("no built-in Anthropic model with a window")
+	}
+	builtin := models[0]
+	serveList(t, "anthropic", `{"data":[{"id":"`+builtin.ID+`"}]}`)
+	response := listFor(t, map[string]any{"version": 1, "provider": "anthropic", "apiKey": "k"})
+	if !response.OK || len(response.Models) != 1 || response.Models[0].ContextWindow != builtin.Capabilities.ContextWindow {
+		t.Fatalf("response = %+v, catalog window %d", response, builtin.Capabilities.ContextWindow)
+	}
+}
