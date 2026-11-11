@@ -4,12 +4,18 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
+    inputs:
+      ui_tests:
+        description: Also run the iOS UI tests (slow, and flaky on a loaded machine)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 # Every job below is one area. .github/scripts/plan-components.sh maps the
 # changed paths of a pull request to areas; a manual run checks every area.
+# The iOS UI tests are the exception: they run only when a manual run asks.
 jobs:
   plan:
     name: Plan checks
@@ -19,6 +25,9 @@ jobs:
       agent: ${{ steps.changes.outputs.agent }}
       web: ${{ steps.changes.outputs.web }}
       ios: ${{ steps.changes.outputs.ios }}
+      ios_app: ${{ steps.changes.outputs.ios_app }}
+      ios_widgets: ${{ steps.changes.outputs.ios_widgets }}
+      ios_ui: ${{ steps.changes.outputs.ios_ui }}
       ios_runtime: ${{ steps.changes.outputs.ios_runtime }}
       selfhost: ${{ steps.changes.outputs.selfhost }}
       release: ${{ steps.changes.outputs.release }}
@@ -37,6 +46,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.sha }}
           PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          UI_TESTS: ${{ inputs.ui_tests == true }}
         run: |
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             plan_json="$(.github/scripts/plan-components.sh --all)"
@@ -53,12 +63,15 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-          # The iOS job runs on the owner's self-hosted Mac, so fork pull
-          # requests never reach it: their code is unreviewed and a self-hosted
-          # runner would execute it with the runner's own machine access.
+          plan_json="$(jq -c --argjson ui "$UI_TESTS" '. + {ios_ui: $ui}' <<< "$plan_json")"
+
+          # The iOS jobs run on the owner's self-hosted Mac, so fork pull
+          # requests never reach them: their code is unreviewed and a
+          # self-hosted runner would execute it with the runner's own machine
+          # access.
           if [[ -n "${PR_HEAD_REPOSITORY}" && "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" ]]; then
-            echo "::notice::skipping the iOS job for a fork pull request"
-            plan_json="$(jq -c '.ios = false' <<< "$plan_json")"
+            echo "::notice::skipping the iOS jobs for a fork pull request"
+            plan_json="$(jq -c '.ios = false | .ios_app = false | .ios_widgets = false | .ios_ui = false' <<< "$plan_json")"
           fi
 
           jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "$plan_json" >> "$GITHUB_OUTPUT"
@@ -181,6 +194,49 @@ jobs:
           swift build --triple arm64-apple-ios17.0 \
             --sdk "$(xcrun --sdk iphoneos --show-sdk-path)"
 
+  # The Swift package leaves out the app's UI layer, widgets and share
+  # extension, so iOS core never compiles them. These jobs build the Xcode
+  # schemes for a simulator. They share the one self-hosted Mac, so they queue
+  # behind each other rather than run in parallel.
+  ios_app:
+    name: iOS app
+    needs: plan
+    if: ${{ needs.plan.outputs.ios_app == 'true' }}
+    runs-on: [self-hosted, macOS, ARM64, ledger-ios]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the app scheme and run its unit tests
+        run: bash .github/scripts/ios-app-check.sh app
+
+  ios_widgets:
+    name: iOS widgets
+    needs: plan
+    if: ${{ needs.plan.outputs.ios_widgets == 'true' }}
+    runs-on: [self-hosted, macOS, ARM64, ledger-ios]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the widget scheme and run its tests
+        run: bash .github/scripts/ios-app-check.sh widgets
+
+  ios_ui:
+    name: iOS UI tests
+    needs: plan
+    if: ${{ needs.plan.outputs.ios_ui == 'true' }}
+    runs-on: [self-hosted, macOS, ARM64, ledger-ios]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the app scheme and run its UI tests
+        run: bash .github/scripts/ios-app-check.sh ui-tests
+
   ios_runtime:
     name: iOS Beancount runtime
     needs: plan
@@ -232,7 +288,7 @@ jobs:
   gate:
     name: Gate
     if: ${{ always() }}
-    needs: [plan, backend, agent, web, ios, ios_runtime, selfhost, release]
+    needs: [plan, backend, agent, web, ios, ios_app, ios_widgets, ios_ui, ios_runtime, selfhost, release]
     runs-on: ubuntu-latest
     env:
       NEEDS: ${{ toJSON(needs) }}
