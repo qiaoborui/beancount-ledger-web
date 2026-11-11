@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// AI 开账: the on-device Agent asks about the user's accounts and habits and
-/// drafts the ledger as they talk. The plan under the conversation is the
-/// draft itself; nothing is written until 确认创建, and then through the same
-/// path as the manual wizard, which stays one tap away.
+/// AI 开账: the on-device Agent walks the user through four questions and
+/// drafts the ledger as they talk. A bar above the conversation shows the step
+/// and opens the draft itself in a sheet, so the plan never pushes the replies
+/// away; nothing is written until 确认创建, and then through the same path as
+/// the manual wizard, which stays one tap away.
 struct LedgerOnboardingAgentView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dismiss) private var dismiss
@@ -13,6 +14,7 @@ struct LedgerOnboardingAgentView: View {
     @State private var picked: Set<String> = []
     @State private var settingsPresented = false
     @State private var showingWizard = false
+    @State private var planPresented = false
     @State private var creating = false
     @FocusState private var composerFocused: Bool
 
@@ -41,6 +43,7 @@ struct LedgerOnboardingAgentView: View {
                 NavigationStack { LedgerAgentSettingsView() }.ledgerPrivacyProtectedSheet()
             }
             .sheet(isPresented: $showingWizard) { OnboardingWizardView() }
+            .sheet(isPresented: $planPresented) { planSheet }
             .onChange(of: settings.isReady) { _, ready in if ready { conversation.start() } }
             .onChange(of: session.phase) { _, phase in if phase == .ready { dismiss() } }
             .onDisappear { conversation.stop() }
@@ -76,7 +79,7 @@ struct LedgerOnboardingAgentView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    Text("说说你平时用哪些银行卡、钱包和信用卡，大概的余额，以及主要的收入和花销。账本结构会随着对话出现在下面，确认之前不会创建。")
+                    Text("分四步搭好账本：钱放在哪里、有没有要还的、收入和支出。每次只问一件事，点选项或直接输入都行；你确认之前不会创建。")
                         .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary).lineSpacing(3)
                     ForEach(conversation.messages) { message in
                         switch message.role {
@@ -86,7 +89,6 @@ struct LedgerOnboardingAgentView: View {
                     }
                     if conversation.isRunning { running }
                     if let error = conversation.error { failure(error) }
-                    if !plan.accounts.isEmpty || !plan.incomeCategories.isEmpty || !plan.expenseCategories.isEmpty { planBand }
                     if let error = session.errorMessage {
                         StatusBanner(message: error, onDismiss: session.dismissError)
                     }
@@ -96,6 +98,7 @@ struct LedgerOnboardingAgentView: View {
                 .padding(.vertical, 16)
             }
             .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .top, spacing: 0) { progress }
             .safeAreaInset(edge: .bottom, spacing: 0) { dock.padding(.horizontal, 12).padding(.bottom, 6) }
             .onChange(of: conversation.messages.count) { _, _ in
                 picked = []
@@ -216,20 +219,110 @@ struct LedgerOnboardingAgentView: View {
         .accessibilityIdentifier("ai-onboarding-error")
     }
 
+    // MARK: Progress
+
+    /// Two lines pinned above the conversation: which of the steps the
+    /// conversation is on, and the size of the draft so far. Tapping it opens
+    /// the draft, which used to sit under the replies and crowd them out.
+    private var progress: some View {
+        let state = conversation.state
+        let current = state.currentStep
+        return Button { planPresented = true } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 4) {
+                    ForEach(LedgerOnboardingStep.allCases, id: \.self) { step in
+                        Capsule()
+                            .fill(state.isDone(step) ? BalancedPalette.ink : step == current ? BalancedPalette.edge : BalancedPalette.rule)
+                            .frame(height: 3)
+                    }
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(state.canCreate ? String(localized: "方案已就绪，检查后确认创建")
+                         : String(localized: "第 \(current.rawValue + 1)/\(LedgerOnboardingStep.allCases.count) 步 · \(current.title)"))
+                        .balancedFont(size: 13.5, weight: .medium)
+                        .foregroundStyle(state.canCreate ? BalancedPalette.income : BalancedPalette.ink)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(planSummary).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).lineLimit(1)
+                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(BalancedPalette.meta)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(BalancedPalette.page)
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+        .accessibilityHint(Text("查看账本结构"))
+        .accessibilityIdentifier("ai-onboarding-progress")
+    }
+
+    private var planSummary: String {
+        let categories = plan.incomeCategories.count + plan.expenseCategories.count
+        if plan.accounts.isEmpty && categories == 0 { return String(localized: "账本结构") }
+        return String(localized: "\(plan.accounts.count) 个账户 · \(categories) 个分类")
+    }
+
     // MARK: Plan
+
+    private var planIsEmpty: Bool {
+        plan.accounts.isEmpty && plan.incomeCategories.isEmpty && plan.expenseCategories.isEmpty
+    }
+
+    private var planSheet: some View {
+        NavigationStack {
+            ScrollView {
+                Group {
+                    if planIsEmpty {
+                        Text("还没有内容。回答问题后，账户和分类会出现在这里。")
+                            .balancedFont(size: 14.5).foregroundStyle(BalancedPalette.secondary).lineSpacing(3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .balancedBand(lead: true)
+                    } else {
+                        planBand
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+            }
+            .background(BalancedPalette.page)
+            .navigationTitle("账本结构")
+            .navigationBarTitleDisplayMode(.inline)
+            .terminalNativeChrome()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { planPresented = false }
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if conversation.state.canCreate && !conversation.isRunning {
+                    Button("确认创建「\(plan.title)」") { planPresented = false; create() }
+                        .buttonStyle(.balanced(.primary))
+                        .disabled(creating || session.isLocalOperationBusy)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(BalancedPalette.page)
+                        .accessibilityIdentifier("ai-onboarding-plan-create")
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .ledgerPrivacyProtectedSheet()
+    }
 
     /// The draft as the next 确认创建 would write it: the Agent's own
     /// working copy, shown in the user's words, never as account paths.
     private var planBand: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                TerminalSectionLabel(text: String(localized: "账本结构"))
+                Text(plan.title).balancedFont(size: 17, weight: .medium).foregroundStyle(BalancedPalette.ink)
                 Spacer()
                 Text(conversation.state.canCreate ? String(localized: "方案已就绪") : String(localized: "整理中"))
                     .balancedFont(size: 12).foregroundStyle(conversation.state.canCreate ? BalancedPalette.income : BalancedPalette.meta)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(plan.title).balancedFont(size: 17, weight: .medium).foregroundStyle(BalancedPalette.ink)
                 Text(plan.startDate.isEmpty ? String(localized: "\(plan.currency) · 期初为创建当天") : String(localized: "\(plan.currency) · 期初 \(plan.startDate)"))
                     .balancedMono(size: 12).foregroundStyle(BalancedPalette.meta)
             }
@@ -283,12 +376,19 @@ struct LedgerOnboardingAgentView: View {
     private var dock: some View {
         VStack(alignment: .leading, spacing: 8) {
             if conversation.state.canCreate && !conversation.isRunning {
-                Button { create() } label: {
-                    if creating { ProgressView().tint(BalancedPalette.page) } else { Text("确认创建「\(plan.title)」") }
+                HStack(spacing: 8) {
+                    Button("查看结构") { planPresented = true }
+                        .buttonStyle(.balanced())
+                        .fixedSize()
+                        .disabled(creating)
+                        .accessibilityIdentifier("ai-onboarding-review")
+                    Button { create() } label: {
+                        if creating { ProgressView().tint(BalancedPalette.page) } else { Text("确认创建「\(plan.title)」").lineLimit(1) }
+                    }
+                    .buttonStyle(.balanced(.primary))
+                    .disabled(creating || session.isLocalOperationBusy)
+                    .accessibilityIdentifier("ai-onboarding-create")
                 }
-                .buttonStyle(.balanced(.primary))
-                .disabled(creating || session.isLocalOperationBusy)
-                .accessibilityIdentifier("ai-onboarding-create")
             }
             HStack(alignment: .bottom, spacing: 4) {
                 TextField(text: $draft, prompt: Text("回答问题，或补充想调整的地方").foregroundStyle(BalancedPalette.meta), axis: .vertical) {

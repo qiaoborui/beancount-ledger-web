@@ -100,6 +100,41 @@ struct LedgerOnboardingState: Codable, Equatable, Sendable {
     var ready = false
 
     var canCreate: Bool { ready && draft.isComplete }
+
+    /// A step is done once the draft holds its answer. Amounts owed are
+    /// optional, so that step also counts as done once the conversation has
+    /// moved on to the categories.
+    func isDone(_ step: LedgerOnboardingStep) -> Bool {
+        switch step {
+        case .funds: draft.accounts.contains { !$0.isLiability }
+        case .debts: draft.accounts.contains(where: \.isLiability) || !draft.incomeCategories.isEmpty || !draft.expenseCategories.isEmpty
+        case .income: !draft.incomeCategories.isEmpty
+        case .expenses: !draft.expenseCategories.isEmpty
+        case .review: canCreate
+        }
+    }
+
+    /// The first step still open, so a user who answered ahead skips the
+    /// steps they already covered.
+    var currentStep: LedgerOnboardingStep {
+        LedgerOnboardingStep.allCases.first { !isDone($0) } ?? .review
+    }
+}
+
+/// The steps AI 开账 walks through, in the order the onboarding prompt asks
+/// them: four questions, then the review.
+enum LedgerOnboardingStep: Int, CaseIterable, Sendable {
+    case funds, debts, income, expenses, review
+
+    var title: String {
+        switch self {
+        case .funds: String(localized: "资金账户")
+        case .debts: String(localized: "待还款项")
+        case .income: String(localized: "收入分类")
+        case .expenses: String(localized: "支出分类")
+        case .review: String(localized: "确认方案")
+        }
+    }
 }
 
 /// An onboarding conversation: the on-device Agent asks about the user's
