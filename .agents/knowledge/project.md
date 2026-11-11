@@ -45,7 +45,9 @@ iOS app (the shipped product):
 
 Deployment:
 
-- CI runs on pull requests and can be dispatched by hand.
-- There are no deploy or image-publishing workflows; deployments are run by
-  hand outside GitHub Actions.
+- CI is the only workflow. It runs on pull requests, checking only the areas
+  the changed paths map to in `.github/scripts/plan-components.sh`, and checks
+  every area when dispatched by hand.
+- There are no deploy, image-publishing or IPA packaging workflows; deployments
+  and IPA packaging are run by hand outside GitHub Actions.
 

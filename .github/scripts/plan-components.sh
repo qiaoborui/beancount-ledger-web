@@ -1,78 +1,76 @@
 #!/usr/bin/env bash
+# Map changed paths (one per line on stdin) to the CI areas they affect and
+# print one JSON object of booleans. `--all` turns every area on.
+#
+# Each area is one job in .github/workflows/ci.yml:
+#   backend      Go tests and build (server/)
+#   agent        Bub Agent pytest (agent/)
+#   web          typecheck, tests, audit and build (web/)
+#   ios          swift test and iOS SDK build (self-hosted Mac)
+#   ios_runtime  Python ledger validator bundled into the app
+#   selfhost     Compose validation and deploy manifest checks
+#   release      IPA packaging and SideStore publishing script tests
+#
+# Paths no rule matches (docs, Markdown, design notes) run nothing.
 set -euo pipefail
 
-backend=false
-agent=false
-web=false
-ios=false
+areas="backend agent web ios ios_runtime selfhost release"
+for area in $areas; do
+  eval "$area=false"
+done
+
+mark() {
+  local area
+  for area in "$@"; do
+    eval "$area=true"
+  done
+}
 
 if [[ "${1:-}" == "--all" ]]; then
-  backend=true
-  agent=true
-  web=true
-  ios=true
+  # shellcheck disable=SC2086 # word splitting is the point
+  mark $areas
 else
   while IFS= read -r file; do
     case "$file" in
-      .github/scripts/*|.github/scripts/**/*|.dockerignore|docker/*|docker/**/*|server/*|server/**/*|examples/*|examples/**/*)
-        backend=true
-        ;;
-      # A workflow only concerns the components it builds. Treating every
-      # workflow as a change to everything made an iOS packaging tweak run the
-      # backend, agent and frontend suites, where an unrelated upstream advisory
-      # could then block an iOS-only pull request.
-      .github/workflows/ios-ipa.yml)
-        ;;
-      .github/workflows/*)
-        backend=true
-        ;;
-    esac
-    case "$file" in
-      .github/scripts/*|.github/scripts/**/*|.dockerignore|docker/*|docker/**/*|.agents/*|.agents/**/*|agent/*|agent/**/*)
-        agent=true
-        ;;
-      .github/workflows/ios-ipa.yml)
-        ;;
-      .github/workflows/*)
-        agent=true
-        ;;
-    esac
-    case "$file" in
-      .github/scripts/*|.github/scripts/**/*|.dockerignore|docker/*|docker/**/*|web/*|web/**/*)
-        web=true
-        ;;
-      .github/workflows/ios-ipa.yml)
-        ;;
-      .github/workflows/*)
-        web=true
-        ;;
-    esac
-    case "$file" in
-      # The iOS app links the Go ledger core and the Beancount runtime built
-      # from these trees, so its Swift package tests follow them too.
-      .github/scripts/*|.github/scripts/**/*|App/*|App/**/*|server/*|server/**/*|examples/*|examples/**/*)
-        ios=true
-        ;;
-      .github/workflows/ios-ipa.yml)
-        # The repository's own iOS packaging workflow is iOS work, and the
-        # `swift test` job is the check that covers it.
-        ios=true
-        ;;
-      .github/workflows/*)
-        ios=true
-        ;;
+      # The pipeline itself: a change here can alter any job.
+      .github/workflows/*|.github/scripts/plan-components.sh|.github/scripts/test_plan_components.py)
+        # shellcheck disable=SC2086
+        mark $areas ;;
+      .github/scripts/select-xcode.sh)
+        mark ios ;;
+      .github/scripts/test-deploy-selfhost-submit.sh)
+        mark selfhost ;;
+
+      # The app links the Go ledger core and Go tests load the example ledgers,
+      # so both trees are checked by the Go and Swift suites.
+      server/*|examples/*)
+        mark backend ios ;;
+      # Go tests import the bundled validator for canonical-export parity.
+      App/LedgerMobile/Runtime/*)
+        mark ios ios_runtime backend ;;
+      App/*)
+        mark ios ;;
+
+      # Agent tests discover the project skills under .agents/.
+      agent/*|.agents/*)
+        mark agent ;;
+
+      web/*)
+        mark web ;;
+
+      docker/*|scripts/selfhost/*|.env.selfhost.example|.dockerignore)
+        mark selfhost ;;
+
+      scripts/build-ios-ipa.sh|scripts/test_ios_private_ipa.py|scripts/publish-sidestore-release.py|scripts/test_sidestore_publish.py)
+        mark release ;;
     esac
   done
 fi
 
-jq -cn \
-  --argjson backend "$backend" \
-  --argjson agent "$agent" \
-  --argjson web "$web" \
-  --argjson ios "$ios" \
-  '{
-    backend: $backend,
-    agent: $agent,
-    web: $web,
-    ios: $ios
-  }'
+json="{"
+separator=""
+for area in $areas; do
+  json+="${separator}\"${area}\":${!area}"
+  separator=","
+done
+echo "${json}}"

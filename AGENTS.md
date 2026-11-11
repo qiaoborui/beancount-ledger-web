@@ -47,8 +47,8 @@ through `LEDGER_ROOT`.
 - `docs/` contains privacy, ledger layout, self-hosting, backend architecture,
   and Ubuntu server deployment documentation.
 - `docker/` contains container/deployment examples.
-- `.github/workflows/ci.yml` runs selective backend, agent, frontend, and iOS
-  core checks.
+- `.github/workflows/ci.yml` is the only workflow. It runs the checks of the
+  areas a pull request touches; see Validation.
 - `.agents/` contains Agent4MD config, durable rules, project knowledge, and
   domain skills.
 
@@ -118,10 +118,10 @@ Other rules:
 - After completing feature work, make sure a pull request exists. After opening
   or updating a PR, check the PR status, mergeability, and conflict state; if
   conflicts are reported, resolve them before handing the work back.
-- The repository has no deployment or image-publishing workflows; merging to
-  `main` builds and deploys nothing. The only workflows are `ci.yml` and the
-  manual `ios-ipa.yml`. Do not add deploy or publish workflows back without an
-  explicit request.
+- The only workflow is `ci.yml`. There are no deployment, image-publishing or
+  IPA packaging workflows; merging to `main` builds and deploys nothing, and
+  IPAs are packaged locally with `scripts/build-ios-ipa.sh`. Do not add other
+  workflows back without an explicit request.
 - When several dependent features must land serially, use Graphite stacked PRs
   instead of mixing the work into one large branch.
 - Avoid starting the local dev server by default. Prefer static checks, tests,
@@ -238,11 +238,26 @@ go build ./cmd/ledger-web
 ```
 
 CI uses Node.js 24 for the frontend job and the Go version declared in
-`server/go.mod` for the backend job. The CI workflow selectively runs backend
-checks for `server/`, `examples/`, `docker/`, and CI changes, frontend checks
-for `web/`, `docker/`, and CI changes, and portable Swift package tests for
-`App/`, `server/`, `examples/`, and CI changes. The iOS job runs on the
-self-hosted Mac runner and selects its Xcode through
+`server/go.mod` for the backend job. Each CI job is one area, and
+`.github/scripts/plan-components.sh` maps a pull request's changed paths to
+areas (its test is `.github/scripts/test_plan_components.py`):
+
+| Changed path | Jobs |
+|---|---|
+| `web/` | Frontend |
+| `agent/`, `.agents/` | Bub Agent |
+| `server/`, `examples/` | Backend, iOS core |
+| `App/LedgerMobile/Runtime/` | iOS core, iOS Beancount runtime, Backend |
+| other `App/` | iOS core |
+| `docker/`, `scripts/selfhost/`, `.env.selfhost.example`, `.dockerignore` | Self-hosted stack |
+| IPA packaging and SideStore publishing scripts | Release tooling |
+| `.github/workflows/`, the planner and its test | every job |
+| docs and anything unmatched | nothing |
+
+A manual run checks every area. `Gate` is the required status check: it
+passes only when every planned job succeeded and every other job was skipped.
+When a new directory needs CI, add it to the planner and its test in the same
+change. The iOS job runs on the self-hosted Mac runner and selects its Xcode through
 `.github/scripts/select-xcode.sh`; it needs no Xcode project because
 `swift test` in `App/LedgerMobile` covers the portable core, while app-host
 tests (SwiftUI rendering, bundled resources) stay in the Xcode scheme.
