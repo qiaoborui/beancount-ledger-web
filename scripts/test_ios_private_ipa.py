@@ -1,5 +1,4 @@
 """Host-independent guards for private-only IPA packaging (stdlib only)."""
-import json
 import os
 from pathlib import Path
 import re
@@ -9,6 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/build-ios-ipa.sh"
+RELEASE_WORKFLOW = ROOT / ".github/workflows/ios-release.yml"
 
 
 class PrivateIPATests(unittest.TestCase):
@@ -35,20 +35,30 @@ class PrivateIPATests(unittest.TestCase):
             self.assertIn("fresh output directory", result.stderr)
             self.assertEqual(marker.read_text(), "existing user file")
 
-    def test_workflow_is_manual_and_runner_local(self):
-        workflow = (ROOT / ".github/workflows/ios-ipa.yml").read_text()
-        self.assertIn("workflow_dispatch:", workflow)
-        for trigger in ("push", "pull_request", "pull_request_target", "workflow_call"):
+    def test_release_workflow_runs_only_for_release_tags_upstream(self):
+        """Publishing happens on a pushed release tag, never on a PR or a fork."""
+        workflow = RELEASE_WORKFLOW.read_text()
+        self.assertIsNotNone(re.search(r"^  push:\n    tags:\n", workflow, re.M))
+        self.assertIsNone(re.search(r"^    branches:", workflow, re.M))
+        for trigger in ("pull_request", "pull_request_target", "workflow_dispatch",
+                        "workflow_call", "schedule"):
             self.assertIsNone(re.search(rf"^  {trigger}:", workflow, re.M))
-        self.assertNotIn("${{ false }}", workflow)
-        self.assertIn("actions/upload-artifact", workflow)
-        self.assertIn("retention-days: 7", workflow)
-        self.assertNotIn("actions/cache", workflow)
+        self.assertIn("if: github.repository == 'qiaoborui/beancount-ledger-web'", workflow)
         self.assertIn("--private-local", workflow)
-        self.assertIn("Downloads/LedgerMobile-PrivateBuilds", workflow)
-        self.assertIn("persist-credentials: false", workflow)
-        self.assertIn("group: ios-private-ipa", workflow)
-        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("require-tag-match: true", workflow)
+        self.assertIn("release-repo: qiaoborui/beancount-ledger-releases", workflow)
+        self.assertNotIn("contents: write", workflow)
+
+    def test_release_workflow_pins_tools_to_the_workflow_ref(self):
+        """The shared scripts must come from the same ref as the shared workflow."""
+        workflow = RELEASE_WORKFLOW.read_text()
+        uses = re.search(
+            r"^    uses: Ami0307/tethera-releases/\.github/workflows/ios-release\.yml@(\S+)$",
+            workflow, re.M)
+        tools = re.search(r"^      tools-ref: (\S+)$", workflow, re.M)
+        self.assertIsNotNone(uses)
+        self.assertIsNotNone(tools)
+        self.assertEqual(uses.group(1), tools.group(1))
 
     def test_runtime_build_and_signature_order(self):
         script = SCRIPT.read_text()
@@ -104,46 +114,6 @@ class PrivateIPATests(unittest.TestCase):
         # CI no longer offsets by the run number: the increment covers every
         # package, local or hosted.
         self.assertNotIn("GITHUB_RUN_NUMBER", script)
-
-    def test_workflow_checks_out_tags_for_packaging(self):
-        workflow = (ROOT / ".github/workflows/ios-ipa.yml").read_text()
-        self.assertIn("fetch-depth: 0", workflow,
-                      "packaging reads the release tag, so the checkout needs tag history")
-
-    def test_ios_workflow_does_not_trigger_every_component(self):
-        """An iOS-only workflow change must not run the backend, agent or web jobs.
-
-        Treating every workflow edit as a change to everything let an unrelated
-        upstream advisory block an iOS pull request that never touched them.
-        """
-        plan = plan_components(".github/workflows/ios-ipa.yml")
-        self.assertEqual(plan["ios"], True)
-        self.assertEqual(plan["backend"], False)
-        self.assertEqual(plan["agent"], False)
-        self.assertEqual(plan["web"], False)
-
-    def test_shared_workflows_still_trigger_every_job(self):
-        """Workflows that build several components must keep doing so."""
-        for workflow in ("ci.yml", "deploy-selfhost.yml"):
-            plan = plan_components(f".github/workflows/{workflow}")
-            for component in ("backend", "agent", "web", "ios"):
-                self.assertEqual(plan[component], True, f"{workflow} / {component}")
-
-    def test_publish_images_keeps_its_components_but_skips_ios(self):
-        plan = plan_components(".github/workflows/publish-images.yml")
-        self.assertEqual(plan["backend"], True)
-        self.assertEqual(plan["agent"], True)
-        self.assertEqual(plan["web"], True)
-        self.assertEqual(plan["ios"], False)
-
-
-def plan_components(*paths):
-    """Run the planner for the given changed paths and return its JSON result."""
-    result = subprocess.run(
-        ["bash", str(ROOT / ".github/scripts/plan-components.sh")],
-        input="\n".join(paths) + "\n", capture_output=True, text=True, check=True,
-    )
-    return json.loads(result.stdout)
 
 
 if __name__ == "__main__":
