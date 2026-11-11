@@ -959,6 +959,15 @@ private enum SafePreviewLedgerData {
         let previous = netWorthRows.dropLast().last
         let monthChange = latest.flatMap { latest in previous.map { latest.netWorth - $0.netWorth } }
         let emptyDelta = LedgerNetWorthDelta(baseline: nil, change: nil, changeRatio: nil)
+        let statement = incomeStatement(start: start, end: end, valuationCurrency: valuationCurrency)
+        // One card, owed what its balance row says; the bill cycle containing
+        // previewNow (2026-08-31) at the server's default days 18 and 5.
+        let creditCards = accounts.filter { $0.group == "credit" }.map { account in
+            LedgerCreditCard(account: account.account, alias: account.alias, label: account.label,
+                outstanding: max(0, -(valuedBalances.first { $0.account == account.account }?.valuation ?? 0)),
+                periodSpend: statement.topPaymentAccounts.first { $0.account == account.account }?.amount ?? 0,
+                billCycleSpend: 32_800, statementDate: "2026-09-18", dueDate: "2026-10-05")
+        }
         return LedgerBootstrap(
             start: start,
             end: end,
@@ -976,12 +985,15 @@ private enum SafePreviewLedgerData {
                 sixMonth: emptyDelta,
                 twelveMonth: emptyDelta
             ),
+            creditCards: creditCards,
             transactions: visible,
             reconciliationRows: reconciliationRows,
             accounts: accounts,
             commodities: commodities,
             prices: prices,
             valuationCurrency: valuationCurrency,
+            incomeStatement: LedgerPeriodIncomeStatement(income: statement.income, totalIncome: statement.totalIncome,
+                                                         topPayees: statement.topPayees),
             accountStatuses: accountStatuses,
             sensitiveUnlocked: true
         )

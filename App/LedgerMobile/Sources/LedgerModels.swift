@@ -507,12 +507,18 @@ struct LedgerBootstrap: Decodable, Sendable {
     let monthlyExpenseTrend: [LedgerMonthlyExpensePoint]
     let monthEndNetWorth: [LedgerNetWorthPoint]
     let netWorthWindows: LedgerNetWorthWindows?
+    /// Credit-card liabilities with their bill cycle. Empty while locked and
+    /// from servers that predate it.
+    let creditCards: [LedgerCreditCard]
     let transactions: [LedgerTransaction]
     let reconciliationRows: [LedgerReconciliationRow]
     let accounts: [LedgerAccount]
     let commodities: [String]
     let prices: [LedgerPrice]
     let valuationCurrency: String
+    /// The period's income tree and top payees, which the overview reads
+    /// instead of aggregating `transactions` (a local page holds only 100).
+    let incomeStatement: LedgerPeriodIncomeStatement?
     let accountStatuses: [LedgerAccountStatus]
     let sensitiveUnlocked: Bool
 
@@ -527,12 +533,14 @@ struct LedgerBootstrap: Decodable, Sendable {
         case monthlyExpenseTrend
         case monthEndNetWorth
         case netWorthWindows
+        case creditCards
         case transactions
         case reconciliationRows
         case accounts
         case commodities
         case prices
         case valuationCurrency
+        case incomeStatement
         case accountStatuses
         case sensitiveUnlocked
     }
@@ -548,12 +556,14 @@ struct LedgerBootstrap: Decodable, Sendable {
         monthlyExpenseTrend: [LedgerMonthlyExpensePoint] = [],
         monthEndNetWorth: [LedgerNetWorthPoint] = [],
         netWorthWindows: LedgerNetWorthWindows? = nil,
+        creditCards: [LedgerCreditCard] = [],
         transactions: [LedgerTransaction],
         reconciliationRows: [LedgerReconciliationRow] = [],
         accounts: [LedgerAccount],
         commodities: [String] = [],
         prices: [LedgerPrice] = [],
         valuationCurrency: String,
+        incomeStatement: LedgerPeriodIncomeStatement? = nil,
         accountStatuses: [LedgerAccountStatus] = [],
         sensitiveUnlocked: Bool
     ) {
@@ -567,12 +577,14 @@ struct LedgerBootstrap: Decodable, Sendable {
         self.monthlyExpenseTrend = monthlyExpenseTrend
         self.monthEndNetWorth = monthEndNetWorth
         self.netWorthWindows = netWorthWindows
+        self.creditCards = creditCards
         self.transactions = transactions
         self.reconciliationRows = reconciliationRows
         self.accounts = accounts
         self.commodities = commodities
         self.prices = prices
         self.valuationCurrency = valuationCurrency
+        self.incomeStatement = incomeStatement
         self.accountStatuses = accountStatuses
         self.sensitiveUnlocked = sensitiveUnlocked
     }
@@ -589,12 +601,14 @@ struct LedgerBootstrap: Decodable, Sendable {
         monthlyExpenseTrend = try container.decodeIfPresent([LedgerMonthlyExpensePoint].self, forKey: .monthlyExpenseTrend) ?? []
         monthEndNetWorth = try container.decodeIfPresent([LedgerNetWorthPoint].self, forKey: .monthEndNetWorth) ?? []
         netWorthWindows = try container.decodeIfPresent(LedgerNetWorthWindows.self, forKey: .netWorthWindows)
+        creditCards = try container.decodeIfPresent([LedgerCreditCard].self, forKey: .creditCards) ?? []
         transactions = try container.decode([LedgerTransaction].self, forKey: .transactions)
         reconciliationRows = try container.decodeIfPresent([LedgerReconciliationRow].self, forKey: .reconciliationRows) ?? []
         accounts = try container.decode([LedgerAccount].self, forKey: .accounts)
         commodities = try container.decodeIfPresent([String].self, forKey: .commodities) ?? []
         prices = try container.decodeIfPresent([LedgerPrice].self, forKey: .prices) ?? []
         valuationCurrency = try container.decode(String.self, forKey: .valuationCurrency)
+        incomeStatement = try container.decodeIfPresent(LedgerPeriodIncomeStatement.self, forKey: .incomeStatement)
         accountStatuses = try container.decodeIfPresent([LedgerAccountStatus].self, forKey: .accountStatuses) ?? []
         sensitiveUnlocked = try container.decode(Bool.self, forKey: .sensitiveUnlocked)
     }
@@ -2237,6 +2251,49 @@ struct LedgerIncomeNode: Decodable, Equatable, Identifiable, Sendable {
     var id: String { account }
 }
 
+/// One credit card as the bootstrap reports it. `outstanding` is the amount
+/// owed in the valuation currency (an overpaid card reads 0); the statement
+/// and due dates belong to the bill cycle that contains today.
+struct LedgerCreditCard: Decodable, Equatable, Identifiable, Sendable {
+    let account: String
+    let alias: String?
+    let label: String
+    let outstanding: Int
+    let periodSpend: Int
+    let billCycleSpend: Int
+    let statementDate: String
+    let dueDate: String
+    var id: String { account }
+}
+
+/// The part of the bootstrap's `incomeStatement` the overview reads. It has no
+/// range of its own (the bootstrap's applies), so it cannot be decoded as a
+/// `LedgerIncomeStatement`. The income tree is empty while locked.
+struct LedgerPeriodIncomeStatement: Decodable, Equatable, Sendable {
+    let income: [LedgerIncomeNode]
+    let totalIncome: Int
+    let topPayees: [LedgerPayeeAnalytics]
+
+    private enum CodingKeys: String, CodingKey {
+        case income
+        case totalIncome
+        case topPayees
+    }
+
+    init(income: [LedgerIncomeNode] = [], totalIncome: Int = 0, topPayees: [LedgerPayeeAnalytics] = []) {
+        self.income = income
+        self.totalIncome = totalIncome
+        self.topPayees = topPayees
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        income = try container.decodeIfPresent([LedgerIncomeNode].self, forKey: .income) ?? []
+        totalIncome = try container.decodeIfPresent(Int.self, forKey: .totalIncome) ?? 0
+        topPayees = try container.decodeIfPresent([LedgerPayeeAnalytics].self, forKey: .topPayees) ?? []
+    }
+}
+
 struct LedgerInvestmentSummary: Decodable, Equatable, Sendable {
     let totalMarketValueCny: Int
     let realizedPnlCny: Int?
@@ -3515,6 +3572,7 @@ struct OverviewPeriodStats: Equatable {
     let expenseMonthOverMonth: LedgerPeriodComparison?
     let incomeMonthOverMonth: LedgerPeriodComparison?
     let expenseYearOverYear: LedgerPeriodComparison?
+    let incomeYearOverYear: LedgerPeriodComparison?
     let netWorth: Int?
     let netWorthMonthChange: Int?
 
@@ -3539,6 +3597,7 @@ struct OverviewPeriodStats: Equatable {
         expenseMonthOverMonth = comparisons?.expense.monthOverMonth.nonEmpty
         incomeMonthOverMonth = comparisons?.income.monthOverMonth.nonEmpty
         expenseYearOverYear = comparisons?.expense.yearOverYear.nonEmpty
+        incomeYearOverYear = comparisons?.income.yearOverYear.nonEmpty
         netWorth = netWorthWindows?.latest?.netWorth
         netWorthMonthChange = netWorthWindows?.monthChange
     }
@@ -3547,4 +3606,196 @@ struct OverviewPeriodStats: Equatable {
 extension LedgerPeriodComparison {
     /// nil unless both periods have data to compare.
     var nonEmpty: LedgerPeriodComparison? { delta == nil ? nil : self }
+}
+
+// MARK: - Overview sections
+
+/// A block of the overview page. Which blocks show, and in what order, is one
+/// list per device shared by every ledger, like the compact tabs. A block with
+/// nothing to say for the period hides itself rather than draw an empty frame.
+enum OverviewSection: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
+    case retention
+    case periodStats
+    case spendingTrend
+    case spendingCategories
+    case creditCards
+    case topPayees
+    case incomeBreakdown
+    case balanceSheet
+    case currencyExposure
+
+    static let defaultSections: [OverviewSection] = allCases
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .retention: String(localized: "本期结余")
+        case .periodStats: String(localized: "本期指标")
+        case .spendingTrend: String(localized: "支出趋势")
+        case .spendingCategories: String(localized: "支出分类")
+        case .creditCards: String(localized: "信用卡待还")
+        case .topPayees: String(localized: "商户排行")
+        case .incomeBreakdown: String(localized: "收入构成")
+        case .balanceSheet: String(localized: "资产与负债")
+        case .currencyExposure: String(localized: "币种分布")
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .retention: String(localized: "净结余、留存率与收支")
+        case .periodStats: String(localized: "日均、笔数、环比与同比")
+        case .spendingTrend: String(localized: "近 6 或 12 个月支出")
+        case .spendingCategories: String(localized: "本期各分类支出占比")
+        case .creditCards: String(localized: "每张卡的待还金额与还款日")
+        case .topPayees: String(localized: "本期支出最多的商户")
+        case .incomeBreakdown: String(localized: "本期收入来源")
+        case .balanceSheet: String(localized: "总资产、总负债与负债率")
+        case .currencyExposure: String(localized: "资产按原币种的占比")
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .retention: "equal.circle"
+        case .periodStats: "square.grid.2x2"
+        case .spendingTrend: "chart.bar"
+        case .spendingCategories: "list.bullet.indent"
+        case .creditCards: "creditcard"
+        case .topPayees: "storefront"
+        case .incomeBreakdown: "arrow.down.circle"
+        case .balanceSheet: "scalemass"
+        case .currencyExposure: "dollarsign.arrow.circlepath"
+        }
+    }
+
+    /// Keeps order, drops repeats, and falls back to the default page when
+    /// nothing is left, so the overview is never blank by configuration.
+    static func normalized(_ sections: [OverviewSection]) -> [OverviewSection] {
+        var seen = Set<OverviewSection>()
+        let normalized = sections.filter { seen.insert($0).inserted }
+        return normalized.isEmpty ? defaultSections : normalized
+    }
+}
+
+/// 信用卡待还: cards that owe something or have spending on the current bill,
+/// most owed first (the server's order), with days left until the due date.
+struct OverviewCreditCardSummary: Equatable {
+    struct Row: Equatable, Identifiable {
+        let card: LedgerCreditCard
+        /// Days from today to the due date; negative once it has passed.
+        let daysUntilDue: Int?
+        var id: String { card.id }
+    }
+
+    let rows: [Row]
+    let totalOutstanding: Int
+
+    init?(cards: [LedgerCreditCard], today: String) {
+        let active = cards.filter { $0.outstanding > 0 || $0.billCycleSpend > 0 }
+        guard !active.isEmpty else { return nil }
+        let todayDate = LedgerDateRange.parse(today)
+        rows = active.map { card in
+            let days = todayDate.flatMap { start in
+                LedgerDateRange.parse(card.dueDate).flatMap {
+                    LedgerDateRange.calendar.dateComponents([.day], from: start, to: $0).day
+                }
+            }
+            return Row(card: card, daysUntilDue: days)
+        }
+        totalOutstanding = active.reduce(0) { $0 + $1.outstanding }
+    }
+}
+
+/// A ranked list of named amounts with shares of their total, used by
+/// 商户排行 and 收入构成. Rows past `limit` fold into one 其他 row so the
+/// shares still add up to the whole.
+struct OverviewRankedShares: Equatable {
+    struct Row: Equatable, Identifiable {
+        let id: String
+        let label: String
+        let amount: Int
+        let share: Double
+        let count: Int?
+    }
+
+    let rows: [Row]
+    let total: Int
+
+    init?(items: [(id: String, label: String, amount: Int, count: Int?)], limit: Int, foldsRemainder: Bool) {
+        let positive = items.filter { $0.amount > 0 }.sorted {
+            $0.amount == $1.amount ? $0.label < $1.label : $0.amount > $1.amount
+        }
+        let total = positive.reduce(0) { $0 + $1.amount }
+        guard total > 0 else { return nil }
+        let shown = positive.prefix(limit)
+        var rows = shown.map {
+            Row(id: $0.id, label: $0.label, amount: $0.amount, share: Double($0.amount) / Double(total), count: $0.count)
+        }
+        let rest = positive.dropFirst(limit)
+        if foldsRemainder, !rest.isEmpty {
+            let amount = rest.reduce(0) { $0 + $1.amount }
+            rows.append(Row(id: "overview.other", label: String(localized: "其他"), amount: amount,
+                            share: Double(amount) / Double(total), count: nil))
+        }
+        self.rows = rows
+        self.total = total
+    }
+
+    /// Top-level income categories (`Income:Salary`, `Income:Bonus`…). The
+    /// tree's top level is one row per category, already valued.
+    static func income(_ statement: LedgerPeriodIncomeStatement?, limit: Int = 5) -> OverviewRankedShares? {
+        guard let statement else { return nil }
+        return OverviewRankedShares(
+            items: statement.income.map { (id: $0.account, label: $0.alias ?? $0.label, amount: $0.amount, count: $0.txCount) },
+            limit: limit, foldsRemainder: true)
+    }
+
+    /// The server ranks at most eight payees, so shares are of those eight,
+    /// not of all spending, and nothing folds into 其他.
+    static func payees(_ statement: LedgerPeriodIncomeStatement?, limit: Int = 5) -> OverviewRankedShares? {
+        guard let statement else { return nil }
+        return OverviewRankedShares(
+            // The server files payee-less spending under one Chinese placeholder.
+            items: statement.topPayees.map {
+                (id: $0.payee, label: $0.payee == "（无商户）" ? String(localized: "未填商户") : $0.payee, amount: $0.amount, count: $0.txCount)
+            },
+            limit: limit, foldsRemainder: false)
+    }
+}
+
+/// 币种分布: asset holdings grouped by their own currency, valued into the
+/// page currency. Rows without a price path are left out and named, so the
+/// shares never pretend a holding is worth zero. Nil with fewer than two
+/// currencies, where there is nothing to compare.
+struct OverviewCurrencyExposure: Equatable {
+    struct Slice: Equatable, Identifiable {
+        let currency: String
+        let valuation: Int
+        let share: Double
+        var id: String { currency }
+    }
+
+    let slices: [Slice]
+    let total: Int
+    let unvaluedCurrencies: [String]
+
+    init?(balances: [AccountBalance]) {
+        var totals: [String: Int] = [:]
+        var unvalued = Set<String>()
+        for row in balances where row.account.hasPrefix("Assets:") && row.amount > 0 {
+            if row.valuationMissing ?? false {
+                unvalued.insert(row.currency)
+            } else if row.valuation > 0 {
+                totals[row.currency, default: 0] += row.valuation
+            }
+        }
+        let total = totals.values.reduce(0, +)
+        guard totals.count >= 2, total > 0 else { return nil }
+        slices = totals.map { Slice(currency: $0.key, valuation: $0.value, share: Double($0.value) / Double(total)) }
+            .sorted { $0.valuation == $1.valuation ? $0.currency < $1.currency : $0.valuation > $1.valuation }
+        self.total = total
+        unvaluedCurrencies = unvalued.subtracting(totals.keys).sorted()
+    }
 }

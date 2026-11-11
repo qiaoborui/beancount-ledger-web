@@ -2994,6 +2994,16 @@
         }
       }
     },
+    "今天到期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Due today"
+          }
+        }
+      }
+    },
     "今年" : {
       "localizations" : {
         "en" : {
@@ -3780,6 +3790,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "For credit cards, enter the current amount owed (leave blank if paid off). Don't enter your credit limit, or your net worth will be understated."
+          }
+        }
+      }
+    },
+    "信用卡待还" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Credit cards due"
           }
         }
       }
@@ -4652,6 +4672,16 @@
         }
       }
     },
+    "净结余、留存率与收支" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Net balance, savings rate, income and spending"
+          }
+        }
+      }
+    },
     "净结余趋势" : {
       "localizations" : {
         "en" : {
@@ -4668,6 +4698,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Net worth"
+          }
+        }
+      }
+    },
+    "净资产 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Net worth %@"
+          }
+        }
+      }
+    },
+    "净资产 ••••" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Net worth ••••"
           }
         }
       }
@@ -8284,6 +8334,16 @@
         }
       }
     },
+    "已还清" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paid off"
+          }
+        }
+      }
+    },
     "已连接" : {
       "localizations" : {
         "en" : {
@@ -8452,6 +8512,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Currency code such as CNY. If empty, the ledger's valuation currency is used."
+          }
+        }
+      }
+    },
+    "币种分布" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Currency mix"
           }
         }
       }
@@ -9398,6 +9468,16 @@
         }
       }
     },
+    "总资产、总负债与负债率" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Total assets, total liabilities and debt ratio"
+          }
+        }
+      }
+    },
     "恢复为新账本" : {
       "localizations" : {
         "en" : {
@@ -10048,6 +10128,16 @@
         }
       }
     },
+    "拖动右侧排序控件调整顺序。本期没有数据的模块会自动隐藏。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag the handles on the right to reorder. Sections with no data this period hide automatically."
+          }
+        }
+      }
+    },
     "招商永隆银行(香港)" : {
       "localizations" : {
         "en" : {
@@ -10618,6 +10708,16 @@
         }
       }
     },
+    "支出同比" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spending YoY"
+          }
+        }
+      }
+    },
     "支出商户" : {
       "localizations" : {
         "en" : {
@@ -10814,6 +10914,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Income categories (%lld)"
+          }
+        }
+      }
+    },
+    "收入同比" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Income YoY"
+          }
+        }
+      }
+    },
+    "收入构成" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Income breakdown"
           }
         }
       }
@@ -11504,6 +11624,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ per day"
+          }
+        }
+      }
+    },
+    "日均、笔数、环比与同比" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daily average, count, month-over-month and year-over-year"
           }
         }
       }
@@ -12958,6 +13088,16 @@
         }
       }
     },
+    "未填商户" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No payee"
+          }
+        }
+      }
+    },
     "未找到“%@”的匹配结果，试试其他关键词。" : {
       "localizations" : {
         "en" : {
@@ -13004,6 +13144,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Not asserted"
+          }
+        }
+      }
+    },
+    "未计入缺少汇率的 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Excludes %@ (no exchange rate)"
           }
         }
       }
@@ -13318,6 +13468,16 @@
         }
       }
     },
+    "本期各分类支出占比" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share of spending by category this period"
+          }
+        }
+      }
+    },
     "本期指标" : {
       "localizations" : {
         "en" : {
@@ -13328,12 +13488,22 @@
         }
       }
     },
-    "本期收支结算" : {
+    "本期支出最多的商户" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Income & expenses"
+            "value" : "Merchants you spent most with this period"
+          }
+        }
+      }
+    },
+    "本期收入来源" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Where this period's income came from"
           }
         }
       }
@@ -13354,6 +13524,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Savings rate this period"
+          }
+        }
+      }
+    },
+    "本期结余" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Period balance"
           }
         }
       }
@@ -14898,6 +15078,16 @@
         }
       }
     },
+    "每张卡的待还金额与还款日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amount owed and due date for each card"
+          }
+        }
+      }
+    },
     "每日" : {
       "localizations" : {
         "en" : {
@@ -14974,6 +15164,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "vs. last month-end"
+          }
+        }
+      }
+    },
+    "比去年同月" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vs. same month last year"
+          }
+        }
+      }
+    },
+    "比去年同期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vs. same days last year"
           }
         }
       }
@@ -17078,6 +17288,16 @@
         }
       }
     },
+    "自定义首页" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Customize Home"
+          }
+        }
+      }
+    },
     "节日馈赠" : {
       "localizations" : {
         "en" : {
@@ -18148,6 +18368,26 @@
         }
       }
     },
+    "负债率 —" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Debt ratio —"
+          }
+        }
+      }
+    },
+    "负债率 ••••" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Debt ratio ••••"
+          }
+        }
+      }
+    },
     "负债结构与账户" : {
       "localizations" : {
         "en" : {
@@ -19128,6 +19368,16 @@
         }
       }
     },
+    "资产与负债" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Assets & liabilities"
+          }
+        }
+      }
+    },
     "资产出租" : {
       "localizations" : {
         "en" : {
@@ -19164,6 +19414,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Asset or liability account. If empty, the account you used last is chosen."
+          }
+        }
+      }
+    },
+    "资产按原币种的占比" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share of assets by original currency"
           }
         }
       }
@@ -19658,6 +19918,16 @@
         }
       }
     },
+    "近 6 或 12 个月支出" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spending over the last 6 or 12 months"
+          }
+        }
+      }
+    },
     "近 7 天" : {
       "localizations" : {
         "en" : {
@@ -19738,12 +20008,32 @@
         }
       }
     },
+    "还有 %lld 天" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld days left"
+          }
+        }
+      }
+    },
     "还款" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Repayment"
+          }
+        }
+      }
+    },
+    "还款日 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Due %@"
           }
         }
       }
@@ -20448,6 +20738,16 @@
         }
       }
     },
+    "逾期 %lld 天" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld days overdue"
+          }
+        }
+      }
+    },
     "邮件账单" : {
       "localizations" : {
         "en" : {
@@ -20938,6 +21238,16 @@
         }
       }
     },
+    "隐藏%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide %@"
+          }
+        }
+      }
+    },
     "隐藏金额" : {
       "localizations" : {
         "en" : {
@@ -21074,6 +21384,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pie"
+          }
+        }
+      }
+    },
+    "首页模块" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Home Sections"
           }
         }
       }
