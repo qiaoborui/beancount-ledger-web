@@ -74,11 +74,15 @@ forgotten.
 
 ### Cutting a release
 
+Follow `.agents/skills/ios-release/SKILL.md` for the full runbook: choosing
+the version, writing the notes, watching the run, verifying the source, and
+recovering from a failed run.
+
 When a batch of merged PRs is ready, tag the `main` commit to ship and push the
 tag:
 
 ```bash
-git tag -a v<version> -F notes.md
+git tag -a --cleanup=whitespace v<version> -F notes.md
 git push origin v<version>
 ```
 
@@ -88,6 +92,8 @@ git push origin v<version>
 - The tag message carries the release notes. Its first line is a title and is
   dropped; the rest is written in Chinese for users, one line per change with
   its PR number. A line that is exactly `---` ends the part shown in SideStore.
+  `--cleanup=whitespace` keeps `## ` headings, which `git tag` otherwise strips
+  as comments.
 - The push runs `.github/workflows/ios-release.yml`, which packages the IPA on
   the Mac runner, uploads it to the `v<version>` release of the public
   `beancount-ledger-releases` repository, and adds it to `sidestore/source.json`
@@ -95,8 +101,9 @@ git push origin v<version>
 
 Manual fallback: from a checkout of the tag, run
 `bash scripts/build-ios-ipa.sh --private-local <new-dir>` and then
-`python3 scripts/publish-sidestore-release.py --public <ipa> --notes <notes.md>`,
-with `--dry-run` first. `build-ios-ipa.sh` refuses a commit without a release tag
+`python3 scripts/publish-sidestore-release.py --public <ipa> --notes <body.md>`,
+with `--dry-run` first. That script publishes its notes file as-is, so pass the
+body without the title line or anything after `---`. `build-ios-ipa.sh` refuses a commit without a release tag
 or with a tag that is not the newest one.
 
 Other rules:
@@ -285,6 +292,8 @@ under `.agents/`:
 - `.agents/skills/beancount-bookkeeping/` supports manual-first bookkeeping
   drafts and appends.
 - `.agents/skills/beancount-insights/` supports read-only ledger analysis.
+- `.agents/skills/ios-release/` is the step-by-step runbook for cutting,
+  verifying, and recovering an iOS release.
 - `.agents/skills/telegram-ledger-agent/` supports Telegram-facing ledger
   flows.
 

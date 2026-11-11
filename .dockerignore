@@ -3,6 +3,8 @@
 .agents/*
 !.agents/skills/
 !.agents/skills/**
+# A maintainer runbook, not a skill for the deployed agent.
+.agents/skills/ios-release
 .codegraph
 gha-creds-*.json
 **/.DS_Store
