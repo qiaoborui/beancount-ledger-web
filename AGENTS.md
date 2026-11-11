@@ -80,9 +80,9 @@ not forgotten.
 Cutting a release is its own step, when a batch is ready:
 
 1. Refresh `MARKETING_VERSION` in `project.yml` to the version being released
-   (+MINOR for a capability release, +PATCH for a fix-only release; pre-1.0,
-   `0.x.0` marks a capability release, and `1.0.0` is reserved for the first
-   publicly distributed build).
+   (+PATCH by default, whether the batch adds capabilities or only fixes, so
+   releases go 1.4.0 → 1.4.1 → 1.4.2; +MINOR only when the maintainer asks for
+   one to mark a milestone. `1.0.0` was the first publicly distributed build).
 2. `git tag -a v<version> -m "<one-line summary>"` and push the tag.
 3. Package. `scripts/build-ios-ipa.sh` refuses to run without a tag, refuses
    when the tag and `project.yml` disagree, and advances the build number by one
