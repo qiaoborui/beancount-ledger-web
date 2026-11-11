@@ -181,6 +181,12 @@ final class LedgerSessionTests: XCTestCase {
         session.primaryDestinationID = "accounts"
         session.openWidgetURL(URL(string: "ledger://transactions?date=2026-08-31")!)
         XCTAssertTrue(session.canPresentWidgetDay)
+        // A day opened from a link in the assistant's sheet waits until the
+        // sheet has finished going away.
+        session.agentSheetOnScreen = true
+        XCTAssertFalse(session.canPresentWidgetDay)
+        session.agentSheetOnScreen = false
+        XCTAssertTrue(session.canPresentWidgetDay)
         _ = try await session.widgetDayLedger("2026-08-31")
         let request = await api.bootstrapRequests().last
         XCTAssertEqual(request?.start, "2026-08-31")

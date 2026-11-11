@@ -495,7 +495,7 @@ private struct MainTabView: View {
 
     private func quickEntryBinding(_ kind: LedgerQuickEntryRequest.Kind) -> Binding<LedgerQuickEntryRequest?> {
         Binding(
-            get: { session.quickEntry?.kind == kind ? session.quickEntry : nil },
+            get: { session.quickEntry?.kind == kind && !session.agentSheetOnScreen ? session.quickEntry : nil },
             set: { if $0 == nil, session.quickEntry?.kind == kind { session.quickEntry = nil } }
         )
     }
@@ -556,12 +556,13 @@ private struct MainTabView: View {
         // 账本助手 over the current tab, without the tab bar, so its composer
         // sits at the bottom of the screen. Closing it keeps the conversation,
         // and a running reply, in `LedgerAgentSessions`.
-        .sheet(isPresented: agentSheetBinding) {
+        .sheet(isPresented: agentSheetBinding, onDismiss: { session.agentSheetOnScreen = false }) {
             NavigationStack {
                 LedgerAgentView(isRoot: true, onClose: { session.agentPresented = false })
             }
             .presentationDetents([.large])
             .ledgerPrivacyProtectedSheet()
+            .onAppear { session.agentSheetOnScreen = true }
         }
         .onChange(of: session.primaryDestinationID, initial: true) { previous, _ in routeAgent(previous: previous) }
         .onChange(of: session.agentPresented) { _, _ in routeAgent() }

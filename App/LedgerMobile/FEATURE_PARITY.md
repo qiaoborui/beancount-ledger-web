@@ -88,7 +88,10 @@ finished:
 - Whole-ledger search is an ordinary destination: it can be chosen as a tab and
   otherwise opens from 更多's 账本工具. With a remote ledger, where the assistant
   doesn't run, search keeps the floating button (and a trailing 搜索 tab item
-  before iOS 26). A tab list saved with 助手 as a tab shows 搜索 in its place.
+  before iOS 26), and a 搜索 tab chosen for the bar isn't drawn a second time.
+  A tab list saved with 助手 as a tab shows 搜索 in its place. A link in an
+  answer that opens a sheet (a day's transactions) or a quick entry closes the
+  assistant first and appears once it has gone.
 - Financial writes keep the shared preview, canonical workspace validation,
   confirmation, and rollback boundaries. Nothing writes a ledger without
   canonical validation of the whole workspace.
