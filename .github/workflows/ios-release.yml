@@ -19,10 +19,9 @@ name: iOS release
 # already do for local packages; otherwise the next tag repeats it and the
 # shared workflow rejects the release.
 #
-# TODO: Ami0307/tethera-releases#8 (which adds the reusable workflow) is not
-# merged yet, so this workflow cannot run. After it is merged, replace both
-# `@main` in `uses:` and `tools-ref: main` with the SHA of that merge commit,
-# and keep the two equal from then on.
+# The reusable workflow is pinned to the merge commit of
+# Ami0307/tethera-releases#8. To upgrade, change the SHA in `uses:` and in
+# `tools-ref` together and keep the two equal.
 #
 # Public distribution is still subject to the open issue recorded in
 # App/LedgerMobile/Runtime/THIRD_PARTY.md: pushing a tag publishes the IPA.
@@ -42,7 +41,7 @@ jobs:
     if: github.repository == 'qiaoborui/beancount-ledger-web'
     permissions:
       contents: read
-    uses: Ami0307/tethera-releases/.github/workflows/ios-release.yml@main
+    uses: Ami0307/tethera-releases/.github/workflows/ios-release.yml@8bf721755959d75eded7c41d739706b78a420ac8
     with:
       app-name: Ledger
       bundle-id: com.qiaoborui.ledger.mobile
@@ -72,7 +71,7 @@ jobs:
       check-ascii-bundle-names: false
       require-tag-match: true
       timeout-minutes: 45
-      tools-ref: main
+      tools-ref: 8bf721755959d75eded7c41d739706b78a420ac8
     secrets:
       # Fine-grained token with Contents read/write on
       # qiaoborui/beancount-ledger-releases only.
