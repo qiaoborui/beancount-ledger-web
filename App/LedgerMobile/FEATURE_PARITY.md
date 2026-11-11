@@ -14,7 +14,7 @@ push — stay out of scope by design, not as pending work.
 | Product area | Native status | Access | Source of truth |
 | --- | --- | --- | --- |
 | Library and local ledgers | Create, import a folder, add an HTTPS Git repository, restore a `.ledgerbackup`, switch, rename, delete | Local write | `LocalLedgerViews.swift`, `LedgerLibraryView` |
-| Overview | Balance sheet, retention, period cashflow, monthly spending trend (6/12 months, average of ended months, month-end estimate, jump to a month), category spending, recent transactions | Read | `OverviewView.swift` |
+| Overview | Balance sheet, retention, period cashflow, monthly spending trend (6/12 months, average of ended months, month-end estimate, jump to a month), period stats (daily spending, transaction count, spending and income month-over-month, largest expense, net worth vs. last month-end), category spending | Read | `OverviewView.swift` |
 | Transactions | List with infinite scroll, keyword/type/account/tag filters, detail, fast and advanced editing, duplicate, confirmed deletion, bulk tagging, selection share/export | Read and validated write | `TransactionViews.swift`, `LedgerSession` mutations |
 | Accounts | Period closing net worth with a whole-ledger trend line and 1月 / 3月 / 6月 / 今年 / 1年 / 全部 windows, grouped balance cards with a category filter bar (全部/资金/信用/理财/应收), account detail with running history and trend, per-account reconciliation | Read and validated write | `AccountsView.swift` |
 | Reconciliation | Balance review across accounts, per-account actual-balance entry, difference adjustment written as a validated transaction | Write with preview | `ReconciliationView.swift` |
