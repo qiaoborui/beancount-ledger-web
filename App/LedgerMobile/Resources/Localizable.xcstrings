@@ -3984,16 +3984,6 @@
         }
       }
     },
-    "全部 %lld 笔" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "All %lld transactions"
-          }
-        }
-      }
-    },
     "全部勾选" : {
       "localizations" : {
         "en" : {
@@ -4152,6 +4142,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "共 %lld 天" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld days"
           }
         }
       }
@@ -8074,6 +8074,16 @@
         }
       }
     },
+    "已过 %lld 天" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld days so far"
+          }
+        }
+      }
+    },
     "已连接" : {
       "localizations" : {
         "en" : {
@@ -10368,6 +10378,16 @@
         }
       }
     },
+    "支出环比" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spending change"
+          }
+        }
+      }
+    },
     "支出账户" : {
       "localizations" : {
         "en" : {
@@ -10504,6 +10524,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Income categories (%lld)"
+          }
+        }
+      }
+    },
+    "收入环比" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Income change"
           }
         }
       }
@@ -11148,6 +11178,16 @@
         }
       }
     },
+    "日均 %@ 笔" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ per day"
+          }
+        }
+      }
+    },
     "日均开销" : {
       "localizations" : {
         "en" : {
@@ -11478,6 +11518,16 @@
         }
       }
     },
+    "暂无上月末数据" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No month-end data"
+          }
+        }
+      }
+    },
     "暂无事件与项目" : {
       "localizations" : {
         "en" : {
@@ -11534,6 +11584,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No accounts to reconcile"
+          }
+        }
+      }
+    },
+    "暂无可比数据" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing to compare"
           }
         }
       }
@@ -11798,6 +11858,16 @@
         }
       }
     },
+    "最大一笔" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Largest expense"
+          }
+        }
+      }
+    },
     "最新" : {
       "localizations" : {
         "en" : {
@@ -11894,16 +11964,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Recent searches"
-          }
-        }
-      }
-    },
-    "最近流水" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Recent transactions"
           }
         }
       }
@@ -12518,6 +12578,16 @@
         }
       }
     },
+    "期间未开始" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Period not started"
+          }
+        }
+      }
+    },
     "期间结余" : {
       "localizations" : {
         "en" : {
@@ -12908,12 +12978,42 @@
         }
       }
     },
+    "本期交易" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This period"
+          }
+        }
+      }
+    },
+    "本期指标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This period"
+          }
+        }
+      }
+    },
     "本期收支结算" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Income & expenses"
+          }
+        }
+      }
+    },
+    "本期暂无支出" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No spending yet"
           }
         }
       }
@@ -13194,6 +13294,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "View data · %@"
+          }
+        }
+      }
+    },
+    "查看比较口径" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows how the comparison is measured"
           }
         }
       }
@@ -14484,6 +14594,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Each time you tap “Send and parse”, only the text you entered, the reference date, time zone, and this ledger's candidate accounts are sent to the configured server."
+          }
+        }
+      }
+    },
+    "比上月" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vs. last month"
+          }
+        }
+      }
+    },
+    "比上月同期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vs. same days last month"
           }
         }
       }
@@ -16878,6 +17008,16 @@
         }
       }
     },
+    "记账笔数" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transactions"
+          }
+        }
+      }
+    },
     "记账货币" : {
       "localizations" : {
         "en" : {
@@ -18744,6 +18884,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Transfers, not counted"
+          }
+        }
+      }
+    },
+    "较上月末 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vs. last month-end %@"
+          }
+        }
+      }
+    },
+    "较上月末 ••••" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vs. last month-end ••••"
           }
         }
       }

@@ -3500,3 +3500,51 @@ struct OverviewTransactionStats: Equatable, Sendable {
         }
     }
 }
+
+/// The overview's 本期指标 grid. Every figure comes from the bootstrap or the
+/// category aggregate the page already holds, so the grid never waits on a
+/// read of its own.
+struct OverviewPeriodStats: Equatable {
+    /// Days the daily figures divide by: the whole period once it has ended,
+    /// otherwise the days up to and including today. nil for a period that has
+    /// not started.
+    let elapsedDays: Int?
+    let isInProgress: Bool
+    let dailyExpense: Int?
+    let transactionCount: Int?
+    let expenseMonthOverMonth: LedgerPeriodComparison?
+    let incomeMonthOverMonth: LedgerPeriodComparison?
+    let expenseYearOverYear: LedgerPeriodComparison?
+    let netWorth: Int?
+    let netWorthMonthChange: Int?
+
+    init(start: String, end: String, today: String, summary: LedgerSummary,
+         comparisons: LedgerPeriodComparisons?, netWorthWindows: LedgerNetWorthWindows?,
+         transactionCount: Int?) {
+        let calendar = LedgerDateRange.calendar
+        if let startDate = LedgerDateRange.parse(start), let endDate = LedgerDateRange.parse(end),
+           let todayDate = LedgerDateRange.parse(today), todayDate >= startDate, endDate >= startDate {
+            let last = min(todayDate, endDate)
+            let days = (calendar.dateComponents([.day], from: startDate, to: last).day ?? 0) + 1
+            elapsedDays = days
+            isInProgress = todayDate <= endDate
+            dailyExpense = summary.expense / days
+        } else {
+            elapsedDays = nil
+            isInProgress = false
+            dailyExpense = nil
+        }
+        self.transactionCount = transactionCount
+        // Comparisons exist only for calendar months; a figure with no baseline says nothing.
+        expenseMonthOverMonth = comparisons?.expense.monthOverMonth.nonEmpty
+        incomeMonthOverMonth = comparisons?.income.monthOverMonth.nonEmpty
+        expenseYearOverYear = comparisons?.expense.yearOverYear.nonEmpty
+        netWorth = netWorthWindows?.latest?.netWorth
+        netWorthMonthChange = netWorthWindows?.monthChange
+    }
+}
+
+extension LedgerPeriodComparison {
+    /// nil unless both periods have data to compare.
+    var nonEmpty: LedgerPeriodComparison? { delta == nil ? nil : self }
+}
