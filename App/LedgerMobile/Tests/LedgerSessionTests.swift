@@ -392,6 +392,26 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(restored.compactTabDestinations, session.compactTabDestinations)
     }
 
+    func testOverviewSectionsLoadNormalizeAndPersistInDeviceDefaults() {
+        let suiteName = "ledger-mobile-overview-sections-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertEqual(LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults).overviewSections,
+                       OverviewSection.defaultSections)
+
+        defaults.set(["creditCards", "unknown", "creditCards", "retention"], forKey: "ledger.mobile.overview-sections")
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        XCTAssertEqual(session.overviewSections, [.creditCards, .retention])
+
+        session.setOverviewSections([.balanceSheet, .periodStats, .balanceSheet])
+        XCTAssertEqual(session.overviewSections, [.balanceSheet, .periodStats])
+        XCTAssertEqual(defaults.stringArray(forKey: "ledger.mobile.overview-sections"), ["balanceSheet", "periodStats"])
+
+        let restored = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        XCTAssertEqual(restored.overviewSections, session.overviewSections)
+    }
+
     func testBackgroundRefreshKeepsAmountsConcealed() async {
         let suiteName = "ledger-mobile-session-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

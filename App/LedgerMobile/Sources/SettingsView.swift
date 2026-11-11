@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var compactTabConfigurationPresented = false
+    @State private var overviewSectionsPresented = false
     @State private var editingCurrentLedger = false
     @State private var confirmingDeleteCurrent = false
     @State private var showingLockIntervalPicker = false
@@ -22,6 +23,10 @@ struct SettingsView: View {
                     compactTabConfigurationPresented = true
                 }
                 .accessibilityIdentifier("settings-compact-tabs")
+                SettingsRow(title: String(localized: "首页模块"), value: String(localized: "已显示 \(session.overviewSections.count)/\(OverviewSection.allCases.count)")) {
+                    overviewSectionsPresented = true
+                }
+                .accessibilityIdentifier("settings-overview-sections")
             } header: { TerminalSectionLabel(text: String(localized: "导航")).listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
 
@@ -225,6 +230,12 @@ struct SettingsView: View {
         .listStyle(.plain)
         .listSectionSeparator(.hidden, edges: .top)
         .ledgerNavigation(String(localized: "设置"), isRoot: isRoot)
+        .sheet(isPresented: $overviewSectionsPresented) {
+            OverviewSectionConfigurationView(initialSections: session.overviewSections) { sections in
+                session.setOverviewSections(sections)
+            }
+            .ledgerPrivacyProtectedSheet()
+        }
         .sheet(isPresented: $compactTabConfigurationPresented) {
             CompactTabConfigurationView(initialDestinations: session.compactTabDestinations) { destinations in
                 session.setCompactTabDestinations(destinations)
@@ -498,6 +509,142 @@ private struct CompactTabConfigurationView: View {
     private func remove(_ destination: LedgerDestination) {
         guard destinations.count > 1 else { return }
         destinations.removeAll { $0 == destination }
+    }
+}
+
+/// 自定义首页: which overview blocks show and in what order. Opened from the
+/// overview's toolbar and from 设置 › 首页模块; one list per device.
+struct OverviewSectionConfigurationView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var sections: [OverviewSection]
+
+    let onSave: ([OverviewSection]) -> Void
+
+    init(initialSections: [OverviewSection], onSave: @escaping ([OverviewSection]) -> Void) {
+        _sections = State(initialValue: OverviewSection.normalized(initialSections))
+        self.onSave = onSave
+    }
+
+    private var hiddenSections: [OverviewSection] {
+        OverviewSection.allCases.filter { !sections.contains($0) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(sections) { section in
+                        HStack(spacing: 12) {
+                            label(section)
+                            Spacer(minLength: 8)
+                            Button {
+                                guard sections.count > 1 else { return }
+                                sections.removeAll { $0 == section }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .font(.system(size: 17, weight: .medium))
+                                    .foregroundStyle(sections.count > 1 ? BalancedPalette.expense : BalancedPalette.meta)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(sections.count <= 1)
+                            .accessibilityLabel("隐藏\(section.title)")
+                            .accessibilityIdentifier("overview-section-remove-\(section.rawValue)")
+                        }
+                        .frame(minHeight: 52)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+                    .onMove { source, destination in
+                        sections.move(fromOffsets: source, toOffset: destination)
+                    }
+                } header: {
+                    TerminalSectionLabel(text: String(localized: "已显示 \(sections.count)/\(OverviewSection.allCases.count)"))
+                        .listRowBackground(BalancedPalette.page)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                } footer: {
+                    Text("拖动右侧排序控件调整顺序。本期没有数据的模块会自动隐藏。")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        .listRowBackground(BalancedPalette.page)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                }
+
+                if !hiddenSections.isEmpty {
+                    Section {
+                        ForEach(hiddenSections) { section in
+                            Button {
+                                if !sections.contains(section) { sections.append(section) }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    label(section)
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.system(size: 17, weight: .medium))
+                                        .foregroundStyle(BalancedPalette.ink)
+                                }
+                                .frame(minHeight: 52)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("overview-section-add-\(section.rawValue)")
+                            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        }
+                    } header: { TerminalSectionLabel(text: String(localized: "可添加")).listRowBackground(BalancedPalette.page)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
+                }
+
+                Section {
+                    Button("恢复默认") {
+                        sections = OverviewSection.defaultSections
+                    }
+                    .balancedFont(size: 15)
+                    .foregroundStyle(BalancedPalette.ink)
+                    .accessibilityIdentifier("overview-section-reset")
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+            }
+            .accessibilityIdentifier("overview-section-list")
+            .environment(\.editMode, .constant(.active))
+            .scrollContentBackground(.hidden)
+            .background(BalancedPalette.page)
+            .navigationTitle("自定义首页")
+            .terminalNativeChrome()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        onSave(sections)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .accessibilityIdentifier("overview-section-save")
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func label(_ section: OverviewSection) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: section.systemImage)
+                .font(.system(size: 15))
+                .foregroundStyle(BalancedPalette.ink)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(section.title).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                Text(section.detail).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

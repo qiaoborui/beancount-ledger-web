@@ -4,6 +4,7 @@ struct OverviewView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var comparisonDetails: OverviewComparisonDetails?
+    @State private var customizing = false
     var isRoot = true
 
     var body: some View {
@@ -12,22 +13,18 @@ struct OverviewView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let error = session.errorMessage { StatusBanner(message: error, onDismiss: session.dismissError).padding(.horizontal, 20).padding(.bottom, 16) }
                 if let ledger = session.ledger {
-                    retentionHero(ledger); cashflow(ledger); periodStats(ledger)
-                    // An older server sends no trend; the module stays out rather than claim an empty ledger.
-                    if !ledger.monthlyExpenseTrend.isEmpty {
-                        OverviewSpendingTrend(points: ledger.monthlyExpenseTrend, currency: ledger.summary.currency)
+                    ForEach(session.overviewSections) { section in
+                        overviewSection(section, ledger: ledger, labels: labels)
                     }
-                    let breakdown = session.isLocal
-                        ? localSpendingCategories(accountLabels: labels, fallbackCurrency: ledger.summary.currency)
-                        : spendingCategories(from: ledger.transactions, prices: ledger.prices,
-                                             currency: ledger.summary.currency, accountLabels: labels)
-                    spending(breakdown)
                 } else { EmptyLedgerState(icon: "chart.line.uptrend.xyaxis", title: String(localized: "暂无财务数据"), detail: String(localized: "下拉刷新重新读取账本。")).padding(.horizontal, 20) }
             }.padding(.bottom, 24).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
         }
         .scrollContentBackground(.hidden).background(BalancedPalette.page)
         .terminalPageChrome(String(localized: "财务概览"), compactTitle: String(localized: "概览"), isRoot: isRoot, showsTimeRange: true,
-                            actions: AnyView(LedgerQuickEntryButton(accessibilityID: "overview-quick-entry")))
+                            actions: AnyView(HStack(spacing: 0) {
+                                customizeButton
+                                LedgerQuickEntryButton(accessibilityID: "overview-quick-entry")
+                            }))
         .refreshable { await Task { await session.refresh() }.value }
         .sheet(item: $comparisonDetails) { details in
             NavigationStack {
@@ -39,6 +36,75 @@ struct OverviewView: View {
                 }.navigationTitle("\(details.title) · 比较口径").terminalNativeChrome()
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { comparisonDetails = nil } } }
             }.ledgerPrivacyProtectedSheet()
+        }
+        .sheet(isPresented: $customizing) {
+            OverviewSectionConfigurationView(initialSections: session.overviewSections) { sections in
+                session.setOverviewSections(sections)
+            }
+            .ledgerPrivacyProtectedSheet()
+        }
+    }
+
+    private var customizeButton: some View {
+        Button {
+            LedgerFeedback.light()
+            customizing = true
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 17, weight: .regular))
+                .foregroundStyle(BalancedPalette.ink)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("自定义首页")
+        .accessibilityIdentifier("overview-customize")
+    }
+
+    /// One block of the page, in the order the device keeps. Blocks with nothing
+    /// to say for the period (no cards, a locked income tree, one currency) draw nothing.
+    @ViewBuilder
+    private func overviewSection(_ section: OverviewSection, ledger: LedgerBootstrap, labels: [String: String]) -> some View {
+        switch section {
+        case .retention:
+            VStack(spacing: 0) { retentionHero(ledger); cashflow(ledger) }
+        case .periodStats:
+            periodStats(ledger)
+        case .spendingTrend:
+            // An older server sends no trend; the module stays out rather than claim an empty ledger.
+            if !ledger.monthlyExpenseTrend.isEmpty {
+                OverviewSpendingTrend(points: ledger.monthlyExpenseTrend, currency: ledger.summary.currency)
+            }
+        case .spendingCategories:
+            spending(session.isLocal
+                ? localSpendingCategories(accountLabels: labels, fallbackCurrency: ledger.summary.currency)
+                : spendingCategories(from: ledger.transactions, prices: ledger.prices,
+                                     currency: ledger.summary.currency, accountLabels: labels))
+        case .creditCards:
+            if let summary = OverviewCreditCardSummary(cards: ledger.creditCards, today: LedgerDateRange.today(now: session.now)) {
+                creditCards(summary, currency: ledger.valuationCurrency)
+            }
+        case .topPayees:
+            if let shares = OverviewRankedShares.payees(ledger.incomeStatement) {
+                ranked(String(localized: "商户排行"), shares, currency: ledger.valuationCurrency, showsTotal: false) { row in
+                    row.count.map { String(localized: "\($0) 笔") } ?? ""
+                }
+            }
+        case .incomeBreakdown:
+            if let shares = OverviewRankedShares.income(ledger.incomeStatement) {
+                ranked(String(localized: "收入构成"), shares, currency: ledger.valuationCurrency, showsTotal: true) { row in
+                    session.amountsVisible ? String(format: "%.1f%%", row.share * 100) : "—"
+                }
+            }
+        case .balanceSheet:
+            let totals = ledger.balanceSheetTotals
+            if totals.assets != 0 || totals.liabilities != 0 {
+                balanceSheet(totals, currency: ledger.valuationCurrency)
+            }
+        case .currencyExposure:
+            if let exposure = OverviewCurrencyExposure(balances: ledger.accountBalances) {
+                currencyExposure(exposure, currency: ledger.valuationCurrency)
+            }
         }
     }
 
@@ -97,15 +163,14 @@ struct OverviewView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// The hero's two terms, itemised under it in the same block.
     private func cashflow(_ ledger: LedgerBootstrap) -> some View {
         let currency = ledger.summary.currency
-        // The net total is the hero at the top of the page; this block only itemises it.
-        return settle(title: String(localized: "本期收支结算"), aside: periodShortLabel) {
+        return VStack(alignment: .leading, spacing: 0) {
             settleRow(String(localized: "收入"), amount(ledger.summary.income, currency: currency))
             settleRow(String(localized: "支出"), amount(ledger.summary.expense, currency: currency))
-        } total: {
-            EmptyView()
         }
+        .padding(EdgeInsets(top: 8, leading: 20, bottom: 6, trailing: 20))
         .overlay(alignment: .top) { insetRule }
     }
 
@@ -119,6 +184,7 @@ struct OverviewView: View {
             summary: ledger.summary, comparisons: ledger.comparisons, netWorthWindows: ledger.netWorthWindows,
             transactionCount: transactionStats?.transactionCount)
         let baseline = stats.isInProgress ? String(localized: "比上月同期") : String(localized: "比上月")
+        let yearBaseline = stats.isInProgress ? String(localized: "比去年同期") : String(localized: "比去年同月")
         return VStack(alignment: .leading, spacing: 0) {
             sectionHead(String(localized: "本期指标")) { EmptyView() }
             statRow {
@@ -139,6 +205,13 @@ struct OverviewView: View {
                                currency: currency, details: ledger.comparisons.map { (String(localized: "支出"), $0.expense) })
             } trailing: {
                 comparisonTile(String(localized: "收入环比"), stats.incomeMonthOverMonth, baseline: baseline,
+                               currency: currency, details: ledger.comparisons.map { (String(localized: "收入"), $0.income) })
+            }
+            statRow {
+                comparisonTile(String(localized: "支出同比"), stats.expenseYearOverYear, baseline: yearBaseline,
+                               currency: currency, details: ledger.comparisons.map { (String(localized: "支出"), $0.expense) })
+            } trailing: {
+                comparisonTile(String(localized: "收入同比"), stats.incomeYearOverYear, baseline: yearBaseline,
                                currency: currency, details: ledger.comparisons.map { (String(localized: "收入"), $0.income) })
             }
             statRow {
@@ -207,20 +280,6 @@ struct OverviewView: View {
         } else {
             tile
         }
-    }
-
-    private func settle<Rows: View, Total: View>(title: String, aside: String, @ViewBuilder rows: () -> Rows, @ViewBuilder total: () -> Total) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(title).balancedFont(size: 12.5, weight: .medium).foregroundStyle(BalancedPalette.secondary)
-                Spacer(minLength: 0)
-                Text(aside).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
-            }.padding(.bottom, 14)
-            rows()
-            total()
-        }
-        .padding(EdgeInsets(top: 18, leading: 20, bottom: 0, trailing: 20))
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Under Liquid Glass nothing on this page runs edge to edge: full-bleed
@@ -311,6 +370,145 @@ struct OverviewView: View {
             // Grows past 54pt at large text sizes instead of truncating "68.4%" to "68…".
             share().lineLimit(1).fixedSize().frame(minWidth: 54, alignment: .trailing).padding(.leading, 28)
         }.padding(.horizontal, 20)
+    }
+
+    // MARK: Added blocks
+
+    private func creditCards(_ summary: OverviewCreditCardSummary, currency: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHead(String(localized: "信用卡待还")) {
+                amount(summary.totalOutstanding, currency: currency, size: 12.5, weight: .regular, color: BalancedPalette.meta)
+            }
+            ForEach(summary.rows) { row in
+                let urgent = row.card.outstanding > 0 && (row.daysUntilDue ?? .max) <= 3
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(row.card.alias ?? row.card.label).balancedFont(size: 14.5).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                        Text(dueCaption(row)).balancedFont(size: 12).monospacedDigit()
+                            .foregroundStyle(urgent ? BalancedPalette.expense : BalancedPalette.meta).lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    amount(row.card.outstanding, currency: currency, size: 14.5, weight: .medium,
+                           color: row.card.outstanding > 0 ? BalancedPalette.ink : BalancedPalette.meta)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 20).padding(.vertical, 11)
+                .overlay(alignment: .top) { insetRule }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    private func dueCaption(_ row: OverviewCreditCardSummary.Row) -> String {
+        var parts: [String] = []
+        if let due = LedgerDateRange.parse(row.card.dueDate) {
+            parts.append(String(localized: "还款日 \(LedgerDateLabel.monthDay(due))"))
+        }
+        if row.card.outstanding > 0, let days = row.daysUntilDue {
+            parts.append(days > 0 ? String(localized: "还有 \(days) 天")
+                : days == 0 ? String(localized: "今天到期") : String(localized: "逾期 \(-days) 天"))
+        } else if row.card.outstanding == 0 {
+            parts.append(String(localized: "已还清"))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func ranked(_ title: String, _ shares: OverviewRankedShares, currency: String, showsTotal: Bool,
+                        trailing: @escaping (OverviewRankedShares.Row) -> String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHead(title) {
+                if showsTotal {
+                    amount(shares.total, currency: currency, size: 12.5, weight: .regular, color: BalancedPalette.meta)
+                }
+            }
+            ForEach(shares.rows) { row in
+                spendingRow {
+                    Text(row.label).balancedFont(size: 14.5).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                } amount: {
+                    amount(row.amount, currency: currency, size: 14.5, weight: .medium)
+                } share: {
+                    Text(trailing(row)).balancedFont(size: 14.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                }
+                .padding(.vertical, 11)
+                .overlay(alignment: .top) { insetRule }
+            }
+        }
+    }
+
+    private func balanceSheet(_ totals: BalanceSheetTotals, currency: String) -> some View {
+        let ratio: Double? = totals.assets > 0 ? Double(max(totals.liabilities, 0)) / Double(totals.assets) : nil
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHead(String(localized: "资产与负债")) { EmptyView() }
+            statRow {
+                statTile(String(localized: "总资产"),
+                         value: amount(abs(totals.assets), currency: currency, prefix: totals.assets < 0 ? "−" : "", size: 18, weight: .medium),
+                         caption: {
+                            guard session.amountsVisible else { return String(localized: "净资产 ••••") }
+                            let sign = totals.netWorth < 0 ? "−" : ""
+                            return String(localized: "净资产 \(sign + MoneyText.format(minorUnits: abs(totals.netWorth), currency: currency, showsCurrency: false))")
+                         }())
+            } trailing: {
+                statTile(String(localized: "总负债"),
+                         value: amount(abs(totals.liabilities), currency: currency, prefix: totals.liabilities < 0 ? "−" : "", size: 18, weight: .medium),
+                         caption: {
+                            guard let ratio else { return String(localized: "负债率 —") }
+                            guard session.amountsVisible else { return String(localized: "负债率 ••••") }
+                            return String(localized: "负债率 \(String(format: "%.1f%%", ratio * 100))")
+                         }())
+            }
+            if let ratio {
+                // Debt against assets: the expense share is what the assets already owe.
+                GeometryReader { proxy in
+                    HStack(spacing: 3) {
+                        Capsule().fill(BalancedPalette.expense).frame(width: max(0, (proxy.size.width - 3) * min(ratio, 1)))
+                        Capsule().fill(BalancedPalette.ink).frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(height: 6).padding(.horizontal, 20).padding(.top, 2).padding(.bottom, 10)
+                .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private func currencyExposure(_ exposure: OverviewCurrencyExposure, currency: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHead(String(localized: "币种分布")) {
+                amount(exposure.total, currency: currency, size: 12.5, weight: .regular, color: BalancedPalette.meta)
+            }
+            GeometryReader { proxy in
+                let gaps = CGFloat(exposure.slices.count - 1) * 2
+                HStack(spacing: 2) {
+                    ForEach(Array(exposure.slices.enumerated()), id: \.element.id) { index, slice in
+                        Rectangle().fill(BalancedPalette.ink.opacity(max(0.22, 1 - Double(index) * 0.2)))
+                            .frame(width: max(2, (proxy.size.width - gaps) * slice.share))
+                    }
+                }
+            }
+            .frame(height: 6).clipShape(Capsule()).padding(EdgeInsets(top: 2, leading: 20, bottom: 12, trailing: 20))
+            .accessibilityHidden(true)
+            ForEach(exposure.slices) { slice in
+                spendingRow {
+                    HStack(spacing: 6) {
+                        Text(slice.currency).balancedFont(size: 14.5).foregroundStyle(BalancedPalette.ink)
+                        if let name = LedgerLocale.current.localizedString(forCurrencyCode: slice.currency) {
+                            Text(name).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta).lineLimit(1)
+                        }
+                    }
+                } amount: {
+                    amount(slice.valuation, currency: currency, size: 14.5, weight: .medium)
+                } share: {
+                    Text(session.amountsVisible ? String(format: "%.1f%%", slice.share * 100) : "—")
+                        .balancedFont(size: 14.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                }
+                .padding(.vertical, 11)
+                .overlay(alignment: .top) { insetRule }
+            }
+            if !exposure.unvaluedCurrencies.isEmpty {
+                Text(String(localized: "未计入缺少汇率的 \(exposure.unvaluedCurrencies.joined(separator: String(localized: "、")))"))
+                    .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .padding(EdgeInsets(top: 8, leading: 20, bottom: 4, trailing: 20))
+            }
+        }
     }
 
     private func comparisonSection(_ title: String, value: LedgerPeriodComparison, currency: String) -> some View { Section(title) { Text("对比 \(value.baselineRange.start) 至 \(value.baselineRange.end)"); if let v = value.current { LabeledContent("本期") { BalancedAmount(minorUnits: v, currency: currency) } }; if let v = value.baseline { LabeledContent("基期") { BalancedAmount(minorUnits: v, currency: currency) } }; if let v = value.delta { LabeledContent("变化金额") { BalancedAmount(minorUnits: v, currency: currency, prefix: v > 0 ? "+" : "") } }; LabeledContent("变化率", value: changeText(value)) } }

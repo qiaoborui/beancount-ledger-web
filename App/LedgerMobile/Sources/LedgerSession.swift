@@ -193,6 +193,8 @@ final class LedgerSession: ObservableObject {
     @Published var pendingTransactionFilter: LedgerTransactionFilter?
     @Published private(set) var pendingWidgetExpenseDay: String?
     @Published private(set) var compactTabDestinations = LedgerDestination.defaultCompactTabs
+    /// The overview's blocks in display order; one list per device, like the tabs.
+    @Published private(set) var overviewSections = OverviewSection.defaultSections
     @Published private(set) var selectedRange: LedgerDateRange {
         didSet { if selectedRange != oldValue { resetLocalTransactionWindow() } }
     }
@@ -527,6 +529,7 @@ final class LedgerSession: ObservableObject {
     private static let backgroundDatesKey = "ledger.mobile.background-dates"
     private static let gmailOAuthStatesKey = "ledger.mobile.gmail-oauth-states"
     private static let compactTabsKey = "ledger.mobile.compact-tabs"
+    private static let overviewSectionsKey = "ledger.mobile.overview-sections"
     private static let sessionCookieName = "ledger_session"
     private static let sensitiveCookieName = "ledger_sensitive_until"
 
@@ -617,6 +620,7 @@ final class LedgerSession: ObservableObject {
             defaults.set("library", forKey: Self.storageModeKey)
         }
         compactTabDestinations = Self.storedCompactTabs(in: defaults)
+        overviewSections = Self.storedOverviewSections(in: defaults)
         let normalized = try? ServerConfiguration.normalize(stored)
         serverInput = stored
         location = localOnly ? nil : normalized.map(LedgerLocation.remote)
@@ -3533,6 +3537,20 @@ final class LedgerSession: ObservableObject {
         return LedgerDestination.normalizedCompactTabs(rawValues.compactMap(LedgerDestination.init(rawValue:)))
     }
 
+    func setOverviewSections(_ sections: [OverviewSection]) {
+        let normalized = OverviewSection.normalized(sections)
+        overviewSections = normalized
+        defaults.set(normalized.map(\.rawValue), forKey: Self.overviewSectionsKey)
+    }
+
+    /// Raw values a later build no longer knows are dropped rather than failing the list.
+    private static func storedOverviewSections(in defaults: UserDefaults) -> [OverviewSection] {
+        guard let rawValues = defaults.stringArray(forKey: overviewSectionsKey) else {
+            return OverviewSection.defaultSections
+        }
+        return OverviewSection.normalized(rawValues.compactMap(OverviewSection.init(rawValue:)))
+    }
+
     @Published private(set) var sharedImportRevision = 0
 
     func receiveSharedFile(_ url: URL) async {
@@ -5773,12 +5791,14 @@ extension LedgerBootstrap {
             monthlyExpenseTrend: monthlyExpenseTrend,
             monthEndNetWorth: monthEndNetWorth,
             netWorthWindows: netWorthWindows,
+            creditCards: creditCards,
             transactions: transactions,
             reconciliationRows: reconciliationRows,
             accounts: accounts,
             commodities: commodities,
             prices: prices,
             valuationCurrency: valuationCurrency,
+            incomeStatement: incomeStatement,
             accountStatuses: accountStatuses,
             sensitiveUnlocked: sensitiveUnlocked
         )
