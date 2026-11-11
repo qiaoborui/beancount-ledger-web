@@ -425,7 +425,7 @@ private struct CompactTabConfigurationView: View {
                         .listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 } footer: {
-                    Text("拖动右侧排序控件调整显示顺序，底栏固定保留“更多”和“搜索”。")
+                    Text("拖动右侧排序控件调整显示顺序，底栏固定保留“更多”和右侧的浮出按钮。")
                         .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                         .listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))

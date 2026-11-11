@@ -457,15 +457,34 @@ private struct MainTabView: View {
         )
     }
 
+    /// 账本助手 takes the floating button from search where it can run.
+    private var agentFloats: Bool { session.agentFloatsInTabBar }
+
+    /// The configured tabs shown in the bar. Where search keeps its floating
+    /// button, it isn't drawn twice.
+    private var barDestinations: [LedgerDestination] {
+        agentFloats ? session.compactTabDestinations : session.compactTabDestinations.filter { $0 != .search }
+    }
+
+    private var directDestinations: [LedgerDestination] {
+        LedgerDestination.compactDirectDestinations(session.compactTabDestinations, agentFloats: agentFloats)
+    }
+
     private var compactSelection: Binding<LedgerDestination> {
         Binding(
             get: {
                 LedgerDestination.stored(session.primaryDestinationID)
-                    .compactSelection(in: session.compactTabDestinations)
+                    .compactSelection(in: directDestinations)
             },
             set: { destination in
+                // The assistant's button opens its sheet over the current tab
+                // and never becomes the selected tab.
+                if destination == .agent, agentFloats {
+                    session.agentPresented = true
+                    return
+                }
                 let overflow = moreDestination.flatMap {
-                    $0.isCompactOverflow(in: session.compactTabDestinations) ? $0 : nil
+                    $0.isCompactOverflow(in: directDestinations) ? $0 : nil
                 }
                 session.primaryDestinationID = destination == .settings
                     ? (overflow ?? .settings).rawValue
@@ -479,6 +498,33 @@ private struct MainTabView: View {
             get: { session.quickEntry?.kind == kind ? session.quickEntry : nil },
             set: { if $0 == nil, session.quickEntry?.kind == kind { session.quickEntry = nil } }
         )
+    }
+
+    private var agentSheetBinding: Binding<Bool> {
+        Binding(
+            get: { session.agentPresented && agentFloats && horizontalSizeClass != .regular },
+            set: { if !$0 { session.agentPresented = false } }
+        )
+    }
+
+    /// The assistant is a sheet on compact layouts with the local ledger and a
+    /// page everywhere else (the iPad sidebar, a remote ledger's 更多). A
+    /// request for one becomes the other here, so every entry point — the
+    /// floating button, a shortcut, a notification, a restored page — lands
+    /// on whichever this layout has.
+    private func routeAgent(previous: String? = nil) {
+        let compactSheet = agentFloats && horizontalSizeClass != .regular
+        if compactSheet, session.primaryDestinationID == LedgerDestination.agent.rawValue {
+            var fallback = barDestinations.first ?? .overview
+            if let previous, LedgerDestination.stored(previous) != .agent {
+                fallback = LedgerDestination.stored(previous)
+            }
+            session.primaryDestinationID = fallback.rawValue
+            session.agentPresented = true
+        } else if !compactSheet, session.agentPresented {
+            session.agentPresented = false
+            session.primaryDestinationID = LedgerDestination.agent.rawValue
+        }
     }
 
     var body: some View {
@@ -507,6 +553,20 @@ private struct MainTabView: View {
         .fullScreenCover(item: quickEntryBinding(.sentence)) { _ in
             NaturalLanguageBookkeepingView(onSaved: { session.quickEntry = nil })
         }
+        // 账本助手 over the current tab, without the tab bar, so its composer
+        // sits at the bottom of the screen. Closing it keeps the conversation,
+        // and a running reply, in `LedgerAgentSessions`.
+        .sheet(isPresented: agentSheetBinding) {
+            NavigationStack {
+                LedgerAgentView(isRoot: true, onClose: { session.agentPresented = false })
+            }
+            .presentationDetents([.large])
+            .ledgerPrivacyProtectedSheet()
+        }
+        .onChange(of: session.primaryDestinationID, initial: true) { previous, _ in routeAgent(previous: previous) }
+        .onChange(of: session.agentPresented) { _, _ in routeAgent() }
+        .onChange(of: horizontalSizeClass) { _, _ in routeAgent() }
+        .onChange(of: session.isLocal) { _, _ in routeAgent() }
         .task(id: session.pendingExternalRoute?.id) { await session.applyPendingExternalRoute() }
         // The shell now outlives a lock, so a route that arrived while locked is
         // applied on unlock rather than on the next mount.
@@ -526,7 +586,7 @@ private struct MainTabView: View {
     @available(iOS 26.0, *)
     private var nativeTabs: some View {
         TabView(selection: compactSelection) {
-            ForEach(session.compactTabDestinations) { destination in
+            ForEach(barDestinations) { destination in
                 Tab(destination == .transactions ? String(localized: "流水") : destination.compactTitle,
                     systemImage: destination.systemImage, value: destination) {
                     NavigationStack { LedgerDestinationView(destination: destination, isRoot: true) }
@@ -535,15 +595,25 @@ private struct MainTabView: View {
             Tab("更多", systemImage: "ellipsis", value: LedgerDestination.settings) {
                 NavigationStack { MoreView(overflowDestination: $moreDestination) }
             }
-            // Search floats as its own button beside the tab bar, one tap from every root page.
-            Tab("搜索", systemImage: "magnifyingglass", value: LedgerDestination.search, role: Self.searchTabRole) {
-                NavigationStack { SearchTabRoot() }
+            // One button floats beside the tab bar, one tap from every root page:
+            // 账本助手 where it can run, search otherwise.
+            if agentFloats {
+                // Selecting it opens the assistant's sheet (`compactSelection`), so
+                // the tab itself never shows.
+                Tab("助手", systemImage: LedgerDestination.agent.systemImage, value: LedgerDestination.agent, role: Self.searchTabRole) {
+                    Color.clear
+                }
+            } else {
+                Tab("搜索", systemImage: "magnifyingglass", value: LedgerDestination.search, role: Self.searchTabRole) {
+                    NavigationStack { SearchTabRoot() }
+                }
             }
         }
     }
 
     /// iOS 26 detaches a search-role tab by itself. Built with the iOS 27 SDK it stays
-    /// inside the bar, and only the prominent role sets a tab apart.
+    /// inside the bar, and only the prominent role sets a tab apart. The floating
+    /// button is 账本助手's where it can run, and search's otherwise.
     @available(iOS 26.0, *)
     private static var searchTabRole: TabRole {
         if #available(iOS 27.0, *) { .prominent } else { .search }
@@ -551,7 +621,7 @@ private struct MainTabView: View {
 
     private var compactTabs: some View {
         TabView(selection: compactSelection) {
-            ForEach(session.compactTabDestinations) { destination in
+            ForEach(barDestinations) { destination in
                 NavigationStack {
                     LedgerDestinationView(destination: destination, isRoot: true)
                 }
@@ -561,15 +631,23 @@ private struct MainTabView: View {
             NavigationStack { MoreView(overflowDestination: $moreDestination) }
                 .tabItem { Label("更多", systemImage: "ellipsis") }
                 .tag(LedgerDestination.settings)
-            NavigationStack { GlobalSearchPage() }
-                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
-                .tag(LedgerDestination.search)
+            if agentFloats {
+                // Selecting it opens the assistant's sheet (`compactSelection`).
+                Color.clear
+                    .tabItem { Label("助手", systemImage: LedgerDestination.agent.systemImage) }
+                    .tag(LedgerDestination.agent)
+            } else {
+                NavigationStack { GlobalSearchPage() }
+                    .tabItem { Label("搜索", systemImage: "magnifyingglass") }
+                    .tag(LedgerDestination.search)
+            }
         }
     }
 }
 
-/// A prominent tab no longer hands its field to the tab bar, so on iOS 27 search keeps
-/// the field in its own navigation bar.
+/// Root of search's floating button, where 账本助手 can't take it. A prominent tab no
+/// longer hands its field to the tab bar, so on iOS 27 search keeps the field in its
+/// own navigation bar.
 @available(iOS 26.0, *)
 private struct SearchTabRoot: View {
     var body: some View {

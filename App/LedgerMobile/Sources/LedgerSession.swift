@@ -178,6 +178,9 @@ final class LedgerSession: ObservableObject {
         if case .local = location { return true }
         return false
     }
+    /// 账本助手 runs on the local ledger only. Where it does, it takes the
+    /// floating button beside the compact tab bar from search.
+    var agentFloatsInTabBar: Bool { isLocal }
     var currentLocalLedgerDescriptor: LocalLedgerDescriptor? {
         guard case let .local(id) = location else { return nil }
         return localLedgers.first(where: { $0.id == id })
@@ -193,6 +196,10 @@ final class LedgerSession: ObservableObject {
     @Published var pendingTransactionFilter: LedgerTransactionFilter?
     @Published private(set) var pendingWidgetExpenseDay: String?
     @Published private(set) var compactTabDestinations = LedgerDestination.defaultCompactTabs
+    /// The assistant sheet opened from the floating button or an external
+    /// route, over whichever tab is open. Closing it leaves the conversation
+    /// running in `LedgerAgentSessions`.
+    @Published var agentPresented = false
     /// The overview's blocks in display order; one list per device, like the tabs.
     @Published private(set) var overviewSections = OverviewSection.defaultSections
     @Published private(set) var selectedRange: LedgerDateRange {
@@ -1213,6 +1220,7 @@ final class LedgerSession: ObservableObject {
         clearWidgetSnapshot()
         pendingWidgetExpenseDay = nil
         pendingExternalRoute = nil
+        agentPresented = false
         externalAccount = nil
         ledger = nil
         localPresentation = nil
@@ -3412,6 +3420,7 @@ final class LedgerSession: ObservableObject {
         guard let contextURL else { return }
         pendingWidgetExpenseDay = nil
         pendingExternalRoute = nil
+        agentPresented = false
         externalAccount = nil
         resetGlobalSearch()
         _ = invalidateSession()
@@ -3438,6 +3447,7 @@ final class LedgerSession: ObservableObject {
         pendingWidgetExpenseDay = nil
         resetGlobalSearch()
         pendingExternalRoute = nil
+        agentPresented = false
         externalAccount = nil
         let previousServerURL = contextURL
         _ = invalidateSession()
@@ -3550,7 +3560,7 @@ final class LedgerSession: ObservableObject {
         guard let rawValues = defaults.stringArray(forKey: compactTabsKey) else {
             return LedgerDestination.defaultCompactTabs
         }
-        return LedgerDestination.normalizedCompactTabs(rawValues.compactMap(LedgerDestination.init(rawValue:)))
+        return LedgerDestination.migratedCompactTabs(rawValues.compactMap(LedgerDestination.init(rawValue:)))
     }
 
     func setOverviewSections(_ sections: [OverviewSection]) {
@@ -3630,7 +3640,8 @@ final class LedgerSession: ObservableObject {
         guard phase == .ready, !isRangeLoading, !isValuationCurrencyLoading,
               let request = pendingExternalRoute else { return }
         switch request.route {
-        case .page: break
+        case let .page(destination):
+            if destination == .agent { agentPresented = true }
         case let .account(path, currency):
             if let account = ledger?.accounts.first(where: { $0.account == path }) {
                 externalAccount = LedgerExternalAccount(account: path, currency: currency.isEmpty ? account.currency : currency)
@@ -3645,6 +3656,7 @@ final class LedgerSession: ObservableObject {
             prepareExternalSearch(query)
         case let .agent(question):
             pendingAgentQuestion = LedgerAgentPendingQuestion(text: question)
+            agentPresented = true
         case .record, .sentence:
             // Both entry forms write through the local repository only.
             if isLocal {
@@ -3658,6 +3670,16 @@ final class LedgerSession: ObservableObject {
 
     func openWidgetURL(_ url: URL) {
         guard url.scheme?.lowercased() == "ledger" else { return }
+        let route = LedgerExternalRoute.parse(url)
+        // The assistant opens as a sheet over the current tab once the ledger
+        // is ready (`applyPendingExternalRoute`); any other page closes it, so
+        // a link in one of its replies shows the page it names.
+        if let route, route.opensAgent {
+            pendingWidgetExpenseDay = nil
+            pendingExternalRoute = LedgerExternalRouteRequest(route: route)
+            return
+        }
+        agentPresented = false
         if url.host?.lowercased() == "transactions",
            let day = LedgerWidgetLink.expenseDay(from: url) {
             pendingExternalRoute = nil
@@ -3665,7 +3687,7 @@ final class LedgerSession: ObservableObject {
             return
         }
         if url.host?.lowercased() != "gmail-import" {
-            guard let route = LedgerExternalRoute.parse(url) else { return }
+            guard let route else { return }
             if case let .search(query) = route, phase == .ready { prepareExternalSearch(query) }
             pendingWidgetExpenseDay = nil
             primaryDestinationID = route.destination.rawValue

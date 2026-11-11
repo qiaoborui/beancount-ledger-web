@@ -305,7 +305,11 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["关闭"].firstMatch.tap()
         // Native global search uses complete metadata candidates, not the
         // legacy all-history transaction array. Drill-down must survive refresh.
-        let searchEntry = app.tabBars.buttons["搜索"]
+        // On the local ledger 账本助手 takes the floating button, and search
+        // opens from 更多 unless it is one of the chosen tabs.
+        XCTAssertTrue(app.tabBars.buttons["助手"].waitForExistence(timeout: 5), app.debugDescription)
+        app.tabBars.buttons["更多"].tap()
+        let searchEntry = app.buttons["more-search"]
         XCTAssertTrue(searchEntry.waitForExistence(timeout: 5), app.debugDescription)
         searchEntry.tap()
         let search = app.searchFields["搜索整个账本"]

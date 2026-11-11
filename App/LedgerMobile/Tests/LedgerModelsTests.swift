@@ -11,14 +11,25 @@ final class LedgerModelsTests: XCTestCase {
         XCTAssertEqual(LedgerDateRange.custom(start: now, end: now).toolbarTitle(relativeTo: now), "8/31")
     }
 
-    func testSearchAndMoreNeverBecomeOverflowRoutes() {
+    func testSearchRoutesThroughMoreUnlessItIsATabOrFloats() {
         for tabs: [LedgerDestination] in [[.overview, .transactions, .accounts], [.assets]] {
-            XCTAssertFalse(LedgerDestination.search.isCompactOverflow(in: tabs))
+            // The assistant floats beside the tab bar: search opens from 更多.
+            let withAgent = LedgerDestination.compactDirectDestinations(tabs, agentFloats: true)
+            XCTAssertEqual(withAgent, tabs)
+            XCTAssertTrue(LedgerDestination.search.isCompactOverflow(in: withAgent))
+            XCTAssertEqual(LedgerDestination.search.compactSelection(in: withAgent), .settings)
+            // Without the assistant, search keeps its floating button.
+            let withoutAgent = LedgerDestination.compactDirectDestinations(tabs, agentFloats: false)
+            XCTAssertFalse(LedgerDestination.search.isCompactOverflow(in: withoutAgent))
+            XCTAssertEqual(LedgerDestination.search.compactSelection(in: withoutAgent), .search)
             XCTAssertFalse(LedgerDestination.settings.isCompactOverflow(in: tabs))
-            XCTAssertEqual(LedgerDestination.search.compactSelection(in: tabs), .search)
-            XCTAssertTrue(LedgerDestination.imports.isCompactOverflow(in: tabs))
-            XCTAssertEqual(LedgerDestination.imports.compactSelection(in: tabs), .settings)
+            XCTAssertTrue(LedgerDestination.imports.isCompactOverflow(in: withAgent))
+            XCTAssertEqual(LedgerDestination.imports.compactSelection(in: withAgent), .settings)
         }
+        let searchTab: [LedgerDestination] = [.overview, .search]
+        XCTAssertEqual(LedgerDestination.compactDirectDestinations(searchTab, agentFloats: false), searchTab)
+        XCTAssertFalse(LedgerDestination.search.isCompactOverflow(in: searchTab))
+        XCTAssertEqual(LedgerDestination.search.compactSelection(in: searchTab), .search)
     }
 
     func testCompactTabsPreserveOrderDeduplicateLimitAndFallback() {
@@ -34,9 +45,10 @@ final class LedgerModelsTests: XCTestCase {
             [.transactions, .imports, .assets]
         )
         XCTAssertEqual(
-            LedgerDestination.normalizedCompactTabs([.settings, .search]),
+            LedgerDestination.normalizedCompactTabs([.settings, .agent]),
             LedgerDestination.defaultCompactTabs
         )
+        XCTAssertEqual(LedgerDestination.normalizedCompactTabs([.settings, .search]), [.search])
         XCTAssertEqual(
             LedgerDestination.overview.compactSelection(in: [.transactions, .accounts]),
             .settings
@@ -47,12 +59,21 @@ final class LedgerModelsTests: XCTestCase {
         )
     }
 
-    func testAgentCanBeChosenAsACompactTab() {
-        XCTAssertTrue(LedgerDestination.compactTabCandidates.contains(.agent))
-        XCTAssertEqual(LedgerDestination.normalizedCompactTabs([.overview, .transactions, .agent]), [.overview, .transactions, .agent])
-        XCTAssertEqual(LedgerDestination.agent.compactSelection(in: [.overview, .transactions, .agent]), .agent)
+    func testAgentFloatsInsteadOfBeingACompactTab() {
+        XCTAssertFalse(LedgerDestination.compactTabCandidates.contains(.agent))
+        XCTAssertTrue(LedgerDestination.compactTabCandidates.contains(.search))
+        XCTAssertFalse(LedgerDestination.compactTabCandidates.contains(.settings))
+        XCTAssertEqual(LedgerDestination.normalizedCompactTabs([.overview, .transactions, .agent]), [.overview, .transactions])
+        XCTAssertEqual(LedgerDestination.normalizedCompactTabs([.overview, .search, .accounts]), [.overview, .search, .accounts])
         XCTAssertEqual(LedgerDestination.agent.compactSelection(in: LedgerDestination.defaultCompactTabs), .settings)
         XCTAssertEqual(LedgerDestination.stored("agent"), .agent)
+    }
+
+    func testSavedAgentTabBecomesSearchKeepingTheTabCount() {
+        XCTAssertEqual(LedgerDestination.migratedCompactTabs([.overview, .transactions, .agent]), [.overview, .transactions, .search])
+        XCTAssertEqual(LedgerDestination.migratedCompactTabs([.agent, .accounts]), [.search, .accounts])
+        XCTAssertEqual(LedgerDestination.migratedCompactTabs([.agent]), [.search])
+        XCTAssertEqual(LedgerDestination.migratedCompactTabs([.overview, .transactions, .accounts]), [.overview, .transactions, .accounts])
     }
 
     func testPasskeyAssertionUsesUnpaddedBase64URLWebAuthnJSON() throws {

@@ -64,6 +64,10 @@ final class LedgerExternalRouteTests: XCTestCase {
         url.queryItems = [URLQueryItem(name: "q", value: "这个月花了多少 & 主要花在哪？")]
         XCTAssertEqual(LedgerExternalRoute.parse(try XCTUnwrap(url.url)), .agent("这个月花了多少 & 主要花在哪？"))
         XCTAssertEqual(LedgerExternalRoute.agent("x").destination, .agent)
+        XCTAssertTrue(LedgerExternalRoute.agent("x").opensAgent)
+        XCTAssertTrue(LedgerExternalRoute.page(.agent).opensAgent)
+        XCTAssertFalse(LedgerExternalRoute.page(.search).opensAgent)
+        XCTAssertFalse(LedgerExternalRoute.search("x").opensAgent)
         for raw in ["ledger://agent?q=", "ledger://agent?q=%20", "ledger://agent?other=1", "ledger://agent?q=a&q=b", "ledger://agent?q=a&x=1"] {
             XCTAssertNil(try parse(raw), raw)
         }

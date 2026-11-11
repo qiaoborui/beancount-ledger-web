@@ -33,8 +33,10 @@ struct MoreView: View {
                     accessibilityIdentifier: "more-analysis-\(kind.rawValue)")
             }} header: { TerminalSectionLabel(text: String(localized: "财务分析")) }
             Section {
-                if session.isLocal, !session.compactTabDestinations.contains(.agent) {
-                    MoreDestinationButton(destination: .agent, detail: String(localized: "用对话查询账本 · 只读"), accessibilityIdentifier: "more-agent")
+                // Search floats beside the tab bar where 账本助手 can't take that
+                // button, and is a tab when chosen; otherwise it opens from here.
+                if !directDestinations.contains(.search) {
+                    MoreDestinationButton(destination: .search, detail: String(localized: "交易、账户、标签与文件"), accessibilityIdentifier: "more-search")
                 }
                 NavigationLink { CategoriesManagementView() } label: {
                     MoreNavigationRow(index: "01", icon: "tag", title: String(localized: "分类管理"), detail: String(localized: "查看与新增收支分类"))
@@ -59,13 +61,17 @@ struct MoreView: View {
         .onChange(of: overflowDestination) { _, destination in
             guard destination == nil else { return }
             let current = LedgerDestination.stored(session.primaryDestinationID)
-            if current.isCompactOverflow(in: session.compactTabDestinations) { session.primaryDestinationID = LedgerDestination.settings.rawValue }
+            if current.isCompactOverflow(in: directDestinations) { session.primaryDestinationID = LedgerDestination.settings.rawValue }
         }
+    }
+
+    private var directDestinations: [LedgerDestination] {
+        LedgerDestination.compactDirectDestinations(session.compactTabDestinations, agentFloats: session.agentFloatsInTabBar)
     }
 
     private func restoreOverflowRoute() {
         let destination = LedgerDestination.stored(session.primaryDestinationID)
-        guard destination.isCompactOverflow(in: session.compactTabDestinations) else { return }
+        guard destination.isCompactOverflow(in: directDestinations) else { return }
         overflowDestination = destination
     }
 

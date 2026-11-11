@@ -131,6 +131,43 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(session.pendingWidgetExpenseDay, "2026-08-09")
     }
 
+    func testAgentRoutesOpenTheAssistantSheetOverTheCurrentPage() async throws {
+        let suiteName = "ledger-agent-route-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        await session.resume()
+        XCTAssertEqual(session.phase, .ready)
+        session.primaryDestinationID = "accounts"
+
+        var question = URLComponents()
+        question.scheme = "ledger"
+        question.host = "agent"
+        question.queryItems = [URLQueryItem(name: "q", value: "这个月花了多少？")]
+        session.openWidgetURL(try XCTUnwrap(question.url))
+        XCTAssertEqual(session.primaryDestinationID, "accounts")
+        XCTAssertFalse(session.agentPresented)
+        await session.applyPendingExternalRoute()
+        XCTAssertTrue(session.agentPresented)
+        XCTAssertNil(session.pendingExternalRoute)
+        XCTAssertEqual(session.primaryDestinationID, "accounts")
+        XCTAssertEqual(session.takePendingAgentQuestion(), "这个月花了多少？")
+
+        session.agentPresented = false
+        session.openWidgetURL(URL(string: "ledger://agent")!)
+        await session.applyPendingExternalRoute()
+        XCTAssertTrue(session.agentPresented)
+        XCTAssertEqual(session.primaryDestinationID, "accounts")
+        XCTAssertNil(session.takePendingAgentQuestion())
+
+        // A link to another page, such as one in an answer, closes the sheet
+        // so the page it names shows.
+        session.openWidgetURL(URL(string: "ledger://imports")!)
+        XCTAssertFalse(session.agentPresented)
+        XCTAssertEqual(session.primaryDestinationID, "imports")
+    }
+
     func testWidgetDayRoutePreservesGlobalRangeAndNavigation() async throws {
         let suiteName = "ledger-widget-warm-route-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -390,6 +427,19 @@ final class LedgerSessionTests: XCTestCase {
 
         let restored = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
         XCTAssertEqual(restored.compactTabDestinations, session.compactTabDestinations)
+    }
+
+    func testStoredAgentTabMigratesToSearch() {
+        let suiteName = "ledger-mobile-compact-tabs-agent-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set(["overview", "agent", "accounts"], forKey: "ledger.mobile.compact-tabs")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+
+        XCTAssertEqual(session.compactTabDestinations, [.overview, .search, .accounts])
+        session.setCompactTabDestinations([.overview, .agent, .search])
+        XCTAssertEqual(session.compactTabDestinations, [.overview, .search])
     }
 
     func testOverviewSectionsLoadNormalizeAndPersistInDeviceDefaults() {

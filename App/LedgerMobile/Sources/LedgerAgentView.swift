@@ -13,13 +13,15 @@ import UniformTypeIdentifiers
 /// the thinking effort follow `docs/design/ios-balanced/agent-history.html`.
 struct LedgerAgentView: View {
     var isRoot = false
+    /// Set when the assistant is a sheet: a close button joins the header.
+    var onClose: (() -> Void)? = nil
     @EnvironmentObject private var session: LedgerSession
     /// Shared, so a turn keeps going when this page closes or the app leaves
     /// the screen; `LedgerAgentBackgroundRun` holds it while it runs there.
     @ObservedObject private var sessions = LedgerAgentSessions.shared
 
     var body: some View {
-        LedgerAgentChatScreen(isRoot: isRoot, conversation: sessions.current)
+        LedgerAgentChatScreen(isRoot: isRoot, onClose: onClose, conversation: sessions.current)
             .id(sessions.current.id)
             // The lock and privacy cover hide this page; the conversations
             // stay, so a turn sent before leaving the app still lands here.
@@ -41,6 +43,7 @@ struct LedgerAgentView: View {
 
 private struct LedgerAgentChatScreen: View {
     var isRoot: Bool
+    var onClose: (() -> Void)?
     @ObservedObject var conversation: LedgerAgentConversation
     @EnvironmentObject private var session: LedgerSession
     @ObservedObject private var settings = LedgerAgentSettings.shared
@@ -276,6 +279,14 @@ private struct LedgerAgentChatScreen: View {
             }
             .accessibilityLabel("模型与密钥")
             .accessibilityIdentifier("ledger-agent-settings")
+            if let onClose {
+                Button(action: onClose) {
+                    Image(systemName: "xmark").font(.system(size: 16)).frame(width: 44, height: 44)
+                        .foregroundStyle(BalancedPalette.ink)
+                }
+                .accessibilityLabel("关闭")
+                .accessibilityIdentifier("ledger-agent-close")
+            }
         }
         .buttonStyle(.plain)
         .ledgerAgentRenameAlert($renaming)
