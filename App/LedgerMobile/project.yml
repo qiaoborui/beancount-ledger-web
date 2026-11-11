@@ -159,7 +159,7 @@ targets:
     info:
       path: WidgetExtension/Info.plist
       properties:
-        CFBundleDisplayName: Ledger 小组件
+        CFBundleDisplayName: Ledger Widgets
         CFBundleDevelopmentRegion: zh-Hans
         CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -196,7 +196,7 @@ targets:
     info:
       path: ShareExtension/Info.plist
       properties:
-        CFBundleDisplayName: 存入 Ledger
+        CFBundleDisplayName: Save to Ledger
         CFBundleDevelopmentRegion: zh-Hans
         CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
