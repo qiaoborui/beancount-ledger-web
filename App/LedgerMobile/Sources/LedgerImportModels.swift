@@ -508,6 +508,51 @@ struct LedgerImportPostDateFill: Codable, Equatable, Identifiable, Sendable {
     let bankPayee: String
 }
 
+/// Scan of archived HSBC HK statements for post dates the ledger lacks.
+struct LedgerPostDateBackfill: Decodable, Equatable, Sendable {
+    struct Entry: Decodable, Equatable, Sendable {
+        let date: String
+        let payee: String
+        let narration: String
+        let amount: String
+        let currency: String
+        let postDate: String?
+        let source: String?
+        let file: String
+        let line: Int
+    }
+
+    struct Review: Decodable, Equatable, Sendable {
+        let bankDate: String
+        let postDate: String
+        let bankPayee: String
+        let amount: String
+        let currency: String
+        let hint: LedgerImportDuplicateHint
+    }
+
+    struct DuplicatePair: Decodable, Equatable, Sendable {
+        let bank: Entry
+        let existing: Entry
+        let amountDiff: String
+    }
+
+    let documents: Int
+    let bankRows: Int
+    let missingPostDate: Int
+    let fills: [LedgerImportPostDateFill]
+    let reviews: [Review]
+    let possibleDuplicates: [DuplicatePair]
+    let warnings: [String]
+}
+
+struct LedgerPostDateBackfillApplyResult: Decodable, Equatable, Sendable {
+    let ok: Bool
+    let count: Int
+    let readModelPending: Bool?
+    let indexGitSHA: String?
+}
+
 struct LedgerImportCommitRequest: Encodable, Equatable, Sendable {
     let importID: String
     let provider: String

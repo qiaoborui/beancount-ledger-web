@@ -42,6 +42,9 @@ type importPostDateFill struct {
 	PostDate  string            `json:"postDate"`
 	BankDate  string            `json:"bankDate"`
 	BankPayee string            `json:"bankPayee"`
+	// Source is the post_date_source written with the fill; empty means the
+	// statement being imported.
+	Source string `json:"source,omitempty"`
 }
 
 // ImportDuplicateHint marks a preview entry that is probably the same purchase
@@ -72,6 +75,7 @@ type postDateBankRow struct {
 	currency string
 	payee    string
 	key      string
+	source   string
 }
 
 type postDateTarget struct {
@@ -99,37 +103,66 @@ func matchImportPostDates(existing []Transaction, beanText string) (postDateMatc
 		return result, parsed.Errors[0]
 	}
 	blocks := []string{}
-	banks := []postDateBankRow{}
-	alreadyImported := map[string]int{}
-	for _, txn := range existing {
-		if metadataString(txn.Metadata["post_date"]) == "" {
-			continue
-		}
-		for _, posting := range txn.Postings {
-			if strings.HasPrefix(posting.Account, "Liabilities:") && posting.Amount != 0 {
-				alreadyImported[postDateBankKey(txn.Date, metadataString(txn.Metadata["post_date"]), posting.Account, posting.Amount, posting.Currency)]++
-			}
-		}
-	}
+	rows := []postDateBankRow{}
 	for _, entry := range parsed.Entries {
 		if entry.Kind != "transaction" || len(entry.RawLines) == 0 {
 			continue
 		}
 		index := len(blocks)
 		blocks = append(blocks, strings.TrimRight(strings.Join(entry.RawLines, "\n"), "\n"))
-		row, ok := postDateBankRowFromEntry(entry, index)
-		if !ok {
+		if row, ok := postDateBankRowFromEntry(entry, index); ok {
+			rows = append(rows, row)
+		}
+	}
+	fills, hints, matched := pairPostDateRows(existing, unimportedPostDateRows(existing, rows))
+	result.Fills = fills
+	for _, hint := range hints {
+		result.Hints[hint.bank.key] = hint.hint
+	}
+	for index, block := range blocks {
+		if !matched[index] {
+			result.Kept = append(result.Kept, block)
+		}
+	}
+	return result, nil
+}
+
+// unimportedPostDateRows drops statement rows already in the ledger as their
+// own bank entry. Those are left to normal deduplication; matching them would
+// hide an existing duplicate.
+func unimportedPostDateRows(existing []Transaction, rows []postDateBankRow) []postDateBankRow {
+	alreadyImported := map[string]int{}
+	for _, txn := range existing {
+		postDate := metadataString(txn.Metadata["post_date"])
+		if postDate == "" {
 			continue
 		}
-		// A row already in the ledger as its own bank entry is left to normal
-		// deduplication; matching it would hide an existing duplicate.
+		for _, posting := range txn.Postings {
+			if strings.HasPrefix(posting.Account, "Liabilities:") && posting.Amount != 0 {
+				alreadyImported[postDateBankKey(txn.Date, postDate, posting.Account, posting.Amount, posting.Currency)]++
+			}
+		}
+	}
+	kept := make([]postDateBankRow, 0, len(rows))
+	for _, row := range rows {
 		if alreadyImported[row.key] > 0 {
 			alreadyImported[row.key]--
 			continue
 		}
-		banks = append(banks, row)
+		kept = append(kept, row)
 	}
+	return kept
+}
 
+type postDateRowHint struct {
+	bank postDateBankRow
+	hint ImportDuplicateHint
+}
+
+// pairPostDateRows pairs bank rows with existing entries that lack a post
+// date. Exact unique pairs become fills; ambiguous exact pairs and pairs
+// within the tolerance become hints. matched holds the fills' row indexes.
+func pairPostDateRows(existing []Transaction, banks []postDateBankRow) ([]importPostDateFill, []postDateRowHint, map[int]bool) {
 	targets := postDateTargets(existing, banks)
 	exact, near := []postDatePair{}, []postDatePair{}
 	for b, bank := range banks {
@@ -151,18 +184,19 @@ func matchImportPostDates(existing []Transaction, beanText string) (postDateMatc
 		}
 	}
 
+	fills := []importPostDateFill{}
+	hints := []postDateRowHint{}
+	matched := map[int]bool{}
 	bankTaken := make([]bool, len(banks))
 	targetTaken := make([]bool, len(targets))
-	chosen := assignPostDatePairs(exact, bankTaken, targetTaken)
-	removed := map[int]bool{}
-	for _, pair := range chosen {
+	for _, pair := range assignPostDatePairs(exact, bankTaken, targetTaken) {
 		bank, target := banks[pair.bank], targets[pair.target]
 		if postDatePairAmbiguous(pair, exact, banks, targets, bankTaken, targetTaken) {
-			result.Hints[bank.key] = postDateHint(duplicateHintAmbiguous, target)
+			hints = append(hints, postDateRowHint{bank: bank, hint: postDateHint(duplicateHintAmbiguous, target)})
 			continue
 		}
-		removed[bank.index] = true
-		result.Fills = append(result.Fills, importPostDateFill{
+		matched[bank.index] = true
+		fills = append(fills, importPostDateFill{
 			ID:        fmt.Sprintf("%s|%s:%d", bank.key, target.txn.Source.File, target.txn.Source.Line),
 			Target:    target.txn.Source,
 			Date:      target.txn.Date,
@@ -174,19 +208,15 @@ func matchImportPostDates(existing []Transaction, beanText string) (postDateMatc
 			PostDate:  bank.postDate,
 			BankDate:  bank.dateText,
 			BankPayee: bank.payee,
+			Source:    bank.source,
 		})
 	}
 	// Near pairs only ever pair leftovers on both sides, so a row with an exact
 	// counterpart is never reported against a different entry.
 	for _, pair := range assignPostDatePairs(near, bankTaken, targetTaken) {
-		result.Hints[banks[pair.bank].key] = postDateHint(duplicateHintAmountDiffers, targets[pair.target])
+		hints = append(hints, postDateRowHint{bank: banks[pair.bank], hint: postDateHint(duplicateHintAmountDiffers, targets[pair.target])})
 	}
-	for index, block := range blocks {
-		if !removed[index] {
-			result.Kept = append(result.Kept, block)
-		}
-	}
-	return result, nil
+	return fills, hints, matched
 }
 
 func postDateBankRowFromEntry(entry BeanEntry, index int) (postDateBankRow, bool) {
@@ -403,10 +433,7 @@ func applyPostDateFills(tx *LedgerWriteTransaction, cfg Config, fills []importPo
 	if err := tx.PrefetchFiles(files); err != nil {
 		return err
 	}
-	source := "hsbchk-credit"
-	if len(statementHash) >= 12 {
-		source += ":" + statementHash[:12]
-	}
+	statementSource := postDateStatementSource(statementHash)
 	for _, file := range files {
 		before, err := tx.ReadFile(file)
 		if err != nil {
@@ -417,7 +444,7 @@ func applyPostDateFills(tx *LedgerWriteTransaction, cfg Config, fills []importPo
 		fileFills := byFile[file]
 		sort.SliceStable(fileFills, func(i, j int) bool { return fileFills[i].Target.Line > fileFills[j].Target.Line })
 		for _, fill := range fileFills {
-			text, err = insertPostDateMetadata(text, fill, source)
+			text, err = insertPostDateMetadata(text, fill, valueOr(fill.Source, statementSource))
 			if err != nil {
 				return err
 			}
@@ -505,4 +532,12 @@ func selectPostDateFills(fills []importPostDateFill, excluded []string) []import
 		}
 	}
 	return selected
+}
+
+func postDateStatementSource(statementHash string) string {
+	source := "hsbchk-credit"
+	if len(statementHash) >= 12 {
+		source += ":" + statementHash[:12]
+	}
+	return source
 }

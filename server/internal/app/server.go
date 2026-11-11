@@ -254,6 +254,8 @@ func (s *Server) registerAPI(api *gin.RouterGroup) {
 	ledger.GET("/imports/pending/:id", noStore(), s.gmailPendingImport)
 	ledger.POST("/imports/preview", s.importsPreview)
 	ledger.POST("/imports/commit", s.importsCommit)
+	ledger.POST("/imports/post-date-backfill", noStore(), s.importsPostDateBackfillPreview)
+	ledger.POST("/imports/post-date-backfill/apply", s.importsPostDateBackfillApply)
 	ledger.DELETE("/imports/pending/:id", s.gmailDismissPendingImport)
 
 	ledgerRead30s.GET("/editor/files", s.editorFiles)

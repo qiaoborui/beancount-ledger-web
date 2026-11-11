@@ -331,6 +331,16 @@
         }
       }
     },
+    "%@ · %@:%lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · %@:%lld"
+          }
+        }
+      }
+    },
     "%@ · %lld 条候选交易" : {
       "localizations" : {
         "en" : {
@@ -3130,6 +3140,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Transferred 3,000 yuan from my ICBC debit card to pay off my CMB credit card."
+          }
+        }
+      }
+    },
+    "从已归档的汇丰账单为支付宝/微信分录补上记账日，并检查重复记账。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill post dates on Alipay and WeChat entries from archived HSBC statements, and check for double bookings."
           }
         }
       }
@@ -6028,6 +6048,16 @@
         }
       }
     },
+    "同一张卡上，银行导入的分录与支付宝/微信/手记分录金额接近、日期相近，可能记了两次。请核对后手动删除多余的一条，这里不会自动删除。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On the same card, a bank-imported entry and an Alipay, WeChat or manual entry have close amounts and dates and may be the same purchase. Check them and delete the extra one yourself; nothing is deleted here."
+          }
+        }
+      }
+    },
     "同一标识只会记一次，适合自动化重试。" : {
       "localizations" : {
         "en" : {
@@ -7926,6 +7956,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Difference %@"
+          }
+        }
+      }
+    },
+    "已为 %lld 笔分录补写记账日。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filled post dates on %lld entries."
           }
         }
       }
@@ -10014,6 +10054,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Paying/receiving account"
+          }
+        }
+      }
+    },
+    "扫描 %lld 份账单、%lld 条银行记录；账本里还有 %lld 笔卡片分录缺少记账日。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scanned %1$lld statements and %2$lld bank rows; %3$lld card entries still lack a post date."
           }
         }
       }
@@ -12878,6 +12928,16 @@
         }
       }
     },
+    "服务器暂不支持补写记账日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server does not support filling post dates yet"
+          }
+        }
+      }
+    },
     "服务器暂不支持账单导入" : {
       "localizations" : {
         "en" : {
@@ -14698,6 +14758,16 @@
         }
       }
     },
+    "正在扫描已归档的汇丰账单…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scanning archived HSBC statements…"
+          }
+        }
+      }
+    },
     "正在搜索…" : {
       "localizations" : {
         "en" : {
@@ -14894,6 +14964,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Counting selection"
+          }
+        }
+      }
+    },
+    "正在补写…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filling…"
           }
         }
       }
@@ -15434,6 +15514,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No matching accounts"
+          }
+        }
+      }
+    },
+    "没有可补写的记账日，也没有发现疑似重复。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No post dates to fill and no possible duplicates found."
           }
         }
       }
@@ -16174,6 +16264,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Saved"
+          }
+        }
+      }
+    },
+    "疑似重复记账 %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Possible double bookings %lld"
           }
         }
       }
@@ -17564,6 +17664,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Complete Payee & Note"
+          }
+        }
+      }
+    },
+    "补写 %lld 笔记账日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill %lld post dates"
+          }
+        }
+      }
+    },
+    "补写汇丰记账日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill HSBC post dates"
           }
         }
       }
@@ -20258,6 +20378,16 @@
         }
       }
     },
+    "这些已有分录与汇丰账单里的同一笔金额一致、日期相近，补写后可以按结单账期对账。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These entries match a purchase on an HSBC statement by amount and date. Filling the post date lets you reconcile by statement period."
+          }
+        }
+      }
+    },
     "这些文件在本机和远端均有修改：%@。两边内容已保留，请处理冲突后再同步。" : {
       "localizations" : {
         "en" : {
@@ -21308,6 +21438,16 @@
         }
       }
     },
+    "金额略有差异或有多条同金额候选，没有自动补写。确认是同一笔后，请在交易详情里修改金额并补上记账日。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The amount differs slightly or several entries share the amount, so nothing was filled. If it is the same purchase, edit the amount and add the post date in the transaction details."
+          }
+        }
+      }
+    },
     "金额：%@%@" : {
       "localizations" : {
         "en" : {
@@ -21434,6 +21574,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hide amounts"
+          }
+        }
+      }
+    },
+    "需要人工确认 %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Needs review %lld"
           }
         }
       }

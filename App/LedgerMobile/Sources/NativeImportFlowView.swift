@@ -2382,7 +2382,7 @@ private struct ImportEntryReviewRow: View {
 
 /// One matched bank row: the existing entry it belongs to and the post date
 /// the commit writes onto it. Same flat checkbox as the entry rows.
-private struct ImportPostDateFillRow: View {
+struct ImportPostDateFillRow: View {
     let fill: LedgerImportPostDateFill
     let included: Bool
     let onToggle: () -> Void

@@ -7,6 +7,7 @@ import i18n from "@/i18n";
 import { activeApiEndpointRequestUrl, apiEndpointScopedStorageKey } from "@/lib/apiEndpoints";
 import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
+import { PostDateBackfillPanel } from "./PostDateBackfillPanel";
 import { duplicateHintLabel, ImportPostDateMatchPanel, initialImportEntries, restoreImportEntry, type ImportDuplicateHint, type ImportPostDateFill } from "./ImportPostDateMatchPanel";
 import { Alert } from "@/components/ui/alert";
 import {
@@ -1399,6 +1400,10 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
           onOpenChange={setSuccessDialogOpen}
           onImportAnother={clearImportState}
         />
+      ) : null}
+
+      {importDocuments.some((document) => document.provider === "hsbchk-credit") ? (
+        <PostDateBackfillPanel showToast={showToast} onWritten={onImported} />
       ) : null}
 
       <ImportHistoryPanel documents={importDocuments} loading={documentsLoading} error={documentsError} providerChoices={providerChoices} onRefresh={() => void loadImportDocuments(true)} />
