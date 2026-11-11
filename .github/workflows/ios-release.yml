@@ -1,0 +1,78 @@
+name: iOS release
+
+# Pushing a release tag v<MAJOR>.<MINOR>.<PATCH> builds the ad-hoc signed IPA on
+# the owner's Mac runner, uploads it to the v<version> release of
+# qiaoborui/beancount-ledger-releases and adds that version to
+# sidestore/source.json there. The build, upload and source update are done by
+# the shared reusable workflow in Ami0307/tethera-releases.
+#
+# The tag must be annotated and carry the release notes:
+#   git tag -a v1.4.0 -F notes.md
+# The first line of notes.md is a title and is dropped; the rest are the notes.
+# A line that is exactly `---` ends the part shown in SideStore; the GitHub
+# Release gets all of it.
+#
+# build-ios-ipa.sh still checks that the newest release tag equals
+# MARKETING_VERSION in project.yml, and packages build CURRENT_PROJECT_VERSION+1.
+# Its write-back of that bump is lost with the runner's checkout, so after each
+# release commit the build number it reports, as the "record build N" commits
+# already do for local packages; otherwise the next tag repeats it and the
+# shared workflow rejects the release.
+#
+# The reusable workflow is pinned to the merge commit of
+# Ami0307/tethera-releases#8. To upgrade, change the SHA in `uses:` and in
+# `tools-ref` together and keep the two equal.
+#
+# Public distribution is still subject to the open issue recorded in
+# App/LedgerMobile/Runtime/THIRD_PARTY.md: pushing a tag publishes the IPA.
+
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+
+permissions:
+  contents: read
+
+jobs:
+  ipa:
+    name: Build IPA and update SideStore source
+    # Forks never run it, and neither does anything but a tag push.
+    if: github.repository == 'qiaoborui/beancount-ledger-web'
+    permissions:
+      contents: read
+    uses: Ami0307/tethera-releases/.github/workflows/ios-release.yml@8bf721755959d75eded7c41d739706b78a420ac8
+    with:
+      app-name: Ledger
+      bundle-id: com.qiaoborui.ledger.mobile
+      runner-labels: '["self-hosted", "macOS", "ARM64", "ledger-ios"]'
+      # One step: `source` keeps the DEVELOPER_DIR picked by select-xcode.sh for
+      # build-ios-ipa.sh. The script needs a new output directory, so it gets a
+      # subdirectory of OUTPUT_DIR and leaves the IPA, its .sha256 and
+      # build-info.txt there.
+      build-command: |
+        source .github/scripts/select-xcode.sh
+        export PATH="/opt/homebrew/bin:$PATH"
+        xcodegen --version
+        go version
+        python3 --version
+        "$(brew --prefix bison)/bin/bison" --version
+        "$(brew --prefix flex)/bin/flex" --version
+        bash scripts/build-ios-ipa.sh --private-local "$OUTPUT_DIR/ipa"
+      release-repo: qiaoborui/beancount-ledger-releases
+      release-tag-prefix: v
+      asset-name: "LedgerMobile-{version}-{build}-SideStore.ipa"
+      source-path: sidestore/source.json
+      app-template-path: sidestore/app.json
+      keep-versions: 0
+      mark-latest: true
+      # The Widget and Share extensions have Chinese CFBundleDisplayName values;
+      # see the open question in the pull request that added this file.
+      check-ascii-bundle-names: false
+      require-tag-match: true
+      timeout-minutes: 45
+      tools-ref: 8bf721755959d75eded7c41d739706b78a420ac8
+    secrets:
+      # Fine-grained token with Contents read/write on
+      # qiaoborui/beancount-ledger-releases only.
+      release-token: ${{ secrets.LEDGER_RELEASES_TOKEN }}

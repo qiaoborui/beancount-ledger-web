@@ -911,7 +911,8 @@ final class LedgerSession: ObservableObject {
         name: String,
         currency: String,
         accounts: [OnboardingAccountSelection],
-        categories: [OnboardingCategorySelection]
+        categories: [OnboardingCategorySelection],
+        openingDate: String? = nil
     ) async {
         guard !isLocalOperationBusy, !isAuthenticationBusy, let localCatalog else { return }
         isLocalOperationBusy = true
@@ -926,7 +927,8 @@ final class LedgerSession: ObservableObject {
                 name: name,
                 currency: currency,
                 accounts: accounts,
-                categories: categories
+                categories: categories,
+                openingDate: openingDate
             )
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
             await refreshLocalLedgers()

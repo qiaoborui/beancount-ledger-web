@@ -310,10 +310,16 @@ actor LocalLedgerCatalog {
         name: String,
         currency: String = "CNY",
         accounts: [OnboardingAccountSelection] = [],
-        categories: [OnboardingCategorySelection] = []
+        categories: [OnboardingCategorySelection] = [],
+        openingDate: String? = nil
     ) async throws -> LocalLedgerDescriptor {
-        guard currency.range(of: "^[A-Z][A-Z0-9._-]{0,23}$", options: .regularExpression) != nil else {
+        // Beancount currencies end in a letter or digit.
+        guard currency.range(of: "^[A-Z]([A-Z0-9._-]{0,22}[A-Z0-9])?$", options: .regularExpression) != nil else {
             throw LocalLedgerError.invalidConfiguration(String(localized: "请输入有效的币种代码"))
+        }
+        if let openingDate, openingDate.range(of: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", options: .regularExpression) == nil
+            || openingDate < "1970-01-01" {
+            throw LocalLedgerError.invalidConfiguration(String(localized: "期初日期无效"))
         }
         let descriptor = try makeDescriptor(name: name, entrypoint: "main.bean")
         let workspace = workspace(for: descriptor)
@@ -360,8 +366,11 @@ actor LocalLedgerCatalog {
             OnboardingCategorySelection(name: String(localized: "其他支出"), account: "Expenses:Other", currency: currency)
         ] : categories
 
+        // A category takes every currency the ledger holds, so spending from
+        // a foreign-currency account is not rejected by its open constraint.
         for c in effectiveCategories {
-            lines.append("1970-01-01 open \(c.account) \(c.currency)")
+            let currencies = [c.currency].filter { !$0.isEmpty } + allCurrencies.sorted().filter { $0 != c.currency }
+            lines.append("1970-01-01 open \(c.account) \(currencies.joined(separator: ","))")
             if !c.name.isEmpty {
                 lines.append("  alias: \"\(escape(c.name))\"")
             }
@@ -378,10 +387,10 @@ actor LocalLedgerCatalog {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.dateFormat = "yyyy-MM-dd"
-            let today = formatter.string(from: Date())
+            let today = openingDate ?? formatter.string(from: Date())
 
             for (acct, dec) in initialBalanceAccounts {
-                let formatted = String(format: "%.2f", NSDecimalNumber(decimal: dec).doubleValue)
+                let formatted = Self.openingAmount(dec)
                 if acct.isLiability {
                     lines.append(String(localized: "\(today) * \"期初余额\" \"初始化账户欠款 - \(escape(acct.name))\""))
                     lines.append("  \(acct.account)  -\(formatted) \(acct.currency)")
@@ -430,6 +439,17 @@ actor LocalLedgerCatalog {
         }
         try persist(descriptor)
         return descriptor
+    }
+
+    /// An opening balance with two decimals, rounded in decimal: going through
+    /// `Double` could print a large balance a cent off.
+    nonisolated static func openingAmount(_ value: Decimal) -> String {
+        var source = value, rounded = Decimal()
+        NSDecimalRound(&rounded, &source, 2, .plain)
+        let plain = NSDecimalNumber(decimal: rounded).description(withLocale: Locale(identifier: "en_US_POSIX"))
+        let parts = plain.split(separator: ".", maxSplits: 1)
+        let fraction = parts.count > 1 ? String(parts[1]) : ""
+        return parts[0] + "." + fraction.padding(toLength: 2, withPad: "0", startingAt: 0)
     }
 
     func importLedger(from directory: URL, name: String, entrypoint: String = "main.bean") async throws -> LocalLedgerDescriptor {

@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct LedgerLibraryView: View {
     @EnvironmentObject private var session: LedgerSession
     @State private var showingWizard = false
+    @State private var showingAIOnboarding = false
     @State private var creating = false
     @State private var importing = false
     @State private var addingGit = false
@@ -20,17 +21,20 @@ struct LedgerLibraryView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(alignment: .firstTextBaseline) {
-                            Text("新手开账向导").balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                            Text("AI 开账").balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink)
                             Spacer()
-                            Text("约 1 分钟").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                            Text("聊几句就好").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                         }
-                        Text("无需编写代码或配置 Git，可视化勾选微信、支付宝、银行卡与日常分类，数据 100% 离线存放在本设备。")
+                        Text("告诉账本助手你用哪些卡和钱包、主要的收支，它会搭好账户、分类和期初余额。确认后才创建，数据只存放在本设备。")
                             .balancedFont(size: 13.5)
                             .foregroundStyle(BalancedPalette.secondary)
                             .lineSpacing(3)
 
-                        Button("开启向导") { showingWizard = true }
+                        Button("开始 AI 开账") { showingAIOnboarding = true }
                             .buttonStyle(.balanced(.primary))
+                            .accessibilityIdentifier("local-ledger-open-ai-onboarding")
+                        Button("手动开账向导") { showingWizard = true }
+                            .buttonStyle(.balanced())
                             .accessibilityIdentifier("local-ledger-open-wizard")
                     }
                     .balancedBand(lead: true)
@@ -183,6 +187,7 @@ struct LedgerLibraryView: View {
             .disabled(session.isLocalOperationBusy)
             .task { await session.refreshLocalLedgers() }
             .sheet(isPresented: $showingWizard) { OnboardingWizardView() }
+            .sheet(isPresented: $showingAIOnboarding) { LedgerOnboardingAgentView() }
             .sheet(isPresented: $creating) { LocalLedgerSetupView(importing: false) }
             .sheet(isPresented: $importing) { LocalLedgerSetupView(importing: true) }
             .sheet(isPresented: $addingGit) { GitLedgerSetupView() }
@@ -223,13 +228,18 @@ private struct LocalLedgerSetupView: View {
     @State private var entrypoint = "main.bean"
     @State private var selectingFolder = false
     @State private var showingWizard = false
+    @State private var showingAIOnboarding = false
 
     var body: some View {
         NavigationStack {
             List {
                 if !importing {
                     Section {
-                        LibraryActionRow(title: String(localized: "使用新手向导开账（推荐）"), detail: String(localized: "可视化配置微信、支付宝、银行卡与日常分类")) {
+                        LibraryActionRow(title: String(localized: "用 AI 开账（推荐）"), detail: String(localized: "和账本助手聊几句，按你的账户和习惯搭好账本")) {
+                            showingAIOnboarding = true
+                        }
+                        .accessibilityIdentifier("local-ledger-setup-ai-onboarding")
+                        LibraryActionRow(title: String(localized: "手动开账向导"), detail: String(localized: "可视化配置微信、支付宝、银行卡与日常分类")) {
                             showingWizard = true
                         }
                     }
@@ -309,6 +319,7 @@ private struct LocalLedgerSetupView: View {
             .sheet(isPresented: $showingWizard) {
                 OnboardingWizardView()
             }
+            .sheet(isPresented: $showingAIOnboarding) { LedgerOnboardingAgentView() }
             .onChange(of: session.phase) { _, newPhase in
                 if newPhase == .ready { dismiss() }
             }

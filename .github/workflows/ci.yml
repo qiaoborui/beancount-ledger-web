@@ -3,29 +3,13 @@ name: CI
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  workflow_call:
-    inputs:
-      reusable_call:
-        required: true
-        type: boolean
-      backend:
-        required: true
-        type: boolean
-      agent:
-        required: true
-        type: boolean
-      web:
-        required: true
-        type: boolean
-      ios:
-        required: false
-        type: boolean
-        default: false
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Every job below is one area. .github/scripts/plan-components.sh maps the
+# changed paths of a pull request to areas; a manual run checks every area.
 jobs:
   plan:
     name: Plan checks
@@ -35,63 +19,38 @@ jobs:
       agent: ${{ steps.changes.outputs.agent }}
       web: ${{ steps.changes.outputs.web }}
       ios: ${{ steps.changes.outputs.ios }}
+      ios_runtime: ${{ steps.changes.outputs.ios_runtime }}
+      selfhost: ${{ steps.changes.outputs.selfhost }}
+      release: ${{ steps.changes.outputs.release }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Verify deployment workflow guards
-        run: bash .github/scripts/verify-deploy-google-cloud.sh
+      - name: Test the area planner
+        run: python3 .github/scripts/test_plan_components.py
 
-      - name: Verify self-hosted deployment guards
-        run: bash .github/scripts/verify-deploy-selfhost.sh
-
-      - name: Test self-hosted deployment manifest validation
-        run: bash .github/scripts/test-deploy-selfhost-submit.sh
-
-      - name: Verify private IPA packaging guards
-        run: python3 scripts/test_ios_private_ipa.py
-
-      - name: Test SideStore source publishing
-        run: python3 scripts/test_sidestore_publish.py
-
-      # Static Compose validation runs once here instead of in both the backend
-      # and agent jobs, which each repeated it.
-      - name: Validate complete self-hosted Compose
-        env:
-          POSTGRES_PASSWORD: ci-postgres-password
-          AUTH_SECRET: ci-auth-secret
-          APP_PASSWORD: ci-app-password
-          AGENT_SERVICE_TOKEN: ci-agent-service-token
-        run: docker compose --env-file .env.selfhost.example -f docker/docker-compose.selfhost.yml config --quiet
-
-      - name: Detect changed components
+      - name: Detect changed areas
         id: changes
         env:
-          INPUT_REUSABLE_CALL: ${{ inputs.reusable_call }}
-          INPUT_BACKEND: ${{ inputs.backend }}
-          INPUT_AGENT: ${{ inputs.agent }}
-          INPUT_WEB: ${{ inputs.web }}
-          INPUT_IOS: ${{ inputs.ios }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
           PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
-          if [[ "${INPUT_REUSABLE_CALL}" == "true" ]]; then
-            backend="${INPUT_BACKEND}"
-            agent="${INPUT_AGENT}"
-            web="${INPUT_WEB}"
-            ios="${INPUT_IOS:-false}"
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             plan_json="$(.github/scripts/plan-components.sh --all)"
-            backend="$(jq -r '.backend' <<< "$plan_json")"
-            agent="$(jq -r '.agent' <<< "$plan_json")"
-            web="$(jq -r '.web' <<< "$plan_json")"
           else
-            files="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}")"
-            plan_json="$(printf '%s\n' "$files" | .github/scripts/plan-components.sh)"
-            backend="$(jq -r '.backend' <<< "$plan_json")"
-            agent="$(jq -r '.agent' <<< "$plan_json")"
-            web="$(jq -r '.web' <<< "$plan_json")"
-            ios="$(jq -r '.ios' <<< "$plan_json")"
+            changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+            plan_json="$(printf '%s\n' "$changed" | .github/scripts/plan-components.sh)"
+            {
+              echo "## Changed files"
+              echo
+              echo '```'
+              echo "$changed"
+              echo '```'
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
           # The iOS job runs on the owner's self-hosted Mac, so fork pull
@@ -99,23 +58,17 @@ jobs:
           # runner would execute it with the runner's own machine access.
           if [[ -n "${PR_HEAD_REPOSITORY}" && "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" ]]; then
             echo "::notice::skipping the iOS job for a fork pull request"
-            ios=false
+            plan_json="$(jq -c '.ios = false' <<< "$plan_json")"
           fi
 
-          echo "backend=${backend}" >> "$GITHUB_OUTPUT"
-          echo "agent=${agent}" >> "$GITHUB_OUTPUT"
-          echo "web=${web}" >> "$GITHUB_OUTPUT"
-          echo "ios=${ios}" >> "$GITHUB_OUTPUT"
+          jq -r 'to_entries[] | "\(.key)=\(.value)"' <<< "$plan_json" >> "$GITHUB_OUTPUT"
           {
             echo "## CI plan"
             echo
-            echo "- Backend: \`${backend}\`"
-            echo "- Agent: \`${agent}\`"
-            echo "- Web: \`${web}\`"
-            echo "- iOS: \`${ios}\`"
+            jq -r 'to_entries[] | "- \(.key): `\(.value)`"' <<< "$plan_json"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  go:
+  backend:
     name: Backend
     needs: plan
     if: ${{ needs.plan.outputs.backend == 'true' }}
@@ -228,10 +181,10 @@ jobs:
           swift build --triple arm64-apple-ios17.0 \
             --sdk "$(xcrun --sdk iphoneos --show-sdk-path)"
 
-  ios-runtime:
+  ios_runtime:
     name: iOS Beancount runtime
     needs: plan
-    if: ${{ needs.plan.outputs.ios == 'true' }}
+    if: ${{ needs.plan.outputs.ios_runtime == 'true' }}
     # The app's Python validator (preflight, canonical export, loader cache and
     # booking checkpoint) only needs CPython and the pinned Beancount, so it
     # runs on a hosted runner rather than the self-hosted Mac.
@@ -247,48 +200,66 @@ jobs:
         working-directory: App/LedgerMobile/Runtime
         run: python -m unittest -v test_ledger_validator
 
+  selfhost:
+    name: Self-hosted stack
+    needs: plan
+    if: ${{ needs.plan.outputs.selfhost == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate complete self-hosted Compose
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          AUTH_SECRET: ci-auth-secret
+          APP_PASSWORD: ci-app-password
+          AGENT_SERVICE_TOKEN: ci-agent-service-token
+        run: docker compose --env-file .env.selfhost.example -f docker/docker-compose.selfhost.yml config --quiet
+      - name: Test deployment manifest validation
+        run: bash .github/scripts/test-deploy-selfhost-submit.sh
+
+  release:
+    name: Release tooling
+    needs: plan
+    if: ${{ needs.plan.outputs.release == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test private IPA packaging guards
+        run: python3 scripts/test_ios_private_ipa.py
+      - name: Test SideStore source publishing
+        run: python3 scripts/test_sidestore_publish.py
+
   gate:
     name: Gate
     if: ${{ always() }}
-    needs: [plan, go, agent, web, ios, ios-runtime]
+    needs: [plan, backend, agent, web, ios, ios_runtime, selfhost, release]
     runs-on: ubuntu-latest
     env:
-      PLAN_RESULT: ${{ needs.plan.result }}
-      BACKEND_REQUIRED: ${{ needs.plan.outputs.backend }}
-      BACKEND_RESULT: ${{ needs.go.result }}
-      AGENT_REQUIRED: ${{ needs.plan.outputs.agent }}
-      AGENT_RESULT: ${{ needs.agent.result }}
-      WEB_REQUIRED: ${{ needs.plan.outputs.web }}
-      WEB_RESULT: ${{ needs.web.result }}
-      IOS_REQUIRED: ${{ needs.plan.outputs.ios }}
-      IOS_RESULT: ${{ needs.ios.result }}
-      IOS_RUNTIME_RESULT: ${{ needs.ios-runtime.result }}
+      NEEDS: ${{ toJSON(needs) }}
     steps:
       - name: Require every planned check to pass
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$PLAN_RESULT" != "success" ]]; then
+          if [[ "$(jq -r '.plan.result' <<< "$NEEDS")" != "success" ]]; then
             echo "::error::CI planning failed"
             exit 1
           fi
 
-          check_result() {
-            local component="$1"
-            local required="$2"
-            local result="$3"
+          # Job IDs are area names, so each job's requirement is the plan
+          # output of the same name. A planned job must succeed; an unplanned
+          # one must have been skipped.
+          failed=0
+          while read -r job required result; do
+            echo "${job}: required=${required} result=${result}"
             if [[ "$required" == "true" && "$result" != "success" ]]; then
-              echo "::error::${component} was required but finished with ${result}"
-              return 1
+              echo "::error::${job} was required but finished with ${result}"
+              failed=1
+            elif [[ "$required" != "true" && "$result" != "skipped" ]]; then
+              echo "::error::${job} was not required but finished with ${result}"
+              failed=1
             fi
-            if [[ "$required" != "true" && "$result" != "skipped" ]]; then
-              echo "::error::${component} was not required but finished with ${result}"
-              return 1
-            fi
-          }
-
-          check_result Backend "$BACKEND_REQUIRED" "$BACKEND_RESULT"
-          check_result Agent "$AGENT_REQUIRED" "$AGENT_RESULT"
-          check_result Frontend "$WEB_REQUIRED" "$WEB_RESULT"
-          check_result iOS "$IOS_REQUIRED" "$IOS_RESULT"
-          check_result "iOS runtime" "$IOS_REQUIRED" "$IOS_RUNTIME_RESULT"
+          done < <(jq -r '.plan.outputs as $plan
+            | del(.plan) | to_entries[]
+            | "\(.key) \($plan[.key] // "false") \(.value.result)"' <<< "$NEEDS")
+          exit "$failed"
