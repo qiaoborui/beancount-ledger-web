@@ -26,6 +26,7 @@ struct LedgerImportDraft: Codable, Equatable, Sendable {
     var classificationManualReasons: [String: String]
     var classificationEvidence: [String: [ImportClassificationRequest.Example]]
     var onlyClassificationReview: Bool
+    var excludedPostDateFillIDs: Set<String> = []
 
     var selectedFile: LedgerImportSelectedFile {
         LedgerImportSelectedFile(id: fileID, name: fileName, data: fileData)
@@ -36,7 +37,8 @@ struct LedgerImportDraft: Codable, Equatable, Sendable {
              alipayFundRounding, preview, reviewedEntries, includedEntryIDs,
              classificationResults, classificationOriginals, manuallyReviewedIDs,
              classificationCompletedIDs, classificationAcceptedFields,
-             classificationManualReasons, classificationEvidence, onlyClassificationReview
+             classificationManualReasons, classificationEvidence, onlyClassificationReview,
+             excludedPostDateFillIDs
     }
 
     init(
@@ -55,7 +57,8 @@ struct LedgerImportDraft: Codable, Equatable, Sendable {
         classificationAcceptedFields: [String: Set<String>],
         classificationManualReasons: [String: String],
         classificationEvidence: [String: [ImportClassificationRequest.Example]],
-        onlyClassificationReview: Bool
+        onlyClassificationReview: Bool,
+        excludedPostDateFillIDs: Set<String> = []
     ) {
         self.version = Self.currentVersion
         self.savedAt = savedAt
@@ -76,6 +79,7 @@ struct LedgerImportDraft: Codable, Equatable, Sendable {
         self.classificationManualReasons = classificationManualReasons
         self.classificationEvidence = classificationEvidence
         self.onlyClassificationReview = onlyClassificationReview
+        self.excludedPostDateFillIDs = excludedPostDateFillIDs
     }
 
     init(from decoder: Decoder) throws {
@@ -98,6 +102,7 @@ struct LedgerImportDraft: Codable, Equatable, Sendable {
         classificationManualReasons = try container.decode([String: String].self, forKey: .classificationManualReasons)
         classificationEvidence = try container.decode([String: [ImportClassificationRequest.Example]].self, forKey: .classificationEvidence)
         onlyClassificationReview = try container.decode(Bool.self, forKey: .onlyClassificationReview)
+        excludedPostDateFillIDs = try container.decodeIfPresent(Set<String>.self, forKey: .excludedPostDateFillIDs) ?? []
         fileData = Data()
     }
 
@@ -121,6 +126,7 @@ struct LedgerImportDraft: Codable, Equatable, Sendable {
         try container.encode(classificationManualReasons, forKey: .classificationManualReasons)
         try container.encode(classificationEvidence, forKey: .classificationEvidence)
         try container.encode(onlyClassificationReview, forKey: .onlyClassificationReview)
+        try container.encode(excludedPostDateFillIDs, forKey: .excludedPostDateFillIDs)
     }
 }
 

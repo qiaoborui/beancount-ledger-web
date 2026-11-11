@@ -265,6 +265,9 @@ struct LedgerImportEntry: Codable, Equatable, Identifiable, Sendable {
     var tags: [String]? = nil
     let metadata: [String: String]
     let postings: [LedgerImportPosting]
+    /// Set by the server when a bank row is probably a purchase already in the
+    /// ledger; such entries start unchecked.
+    var duplicateHint: LedgerImportDuplicateHint? = nil
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -287,6 +290,7 @@ struct LedgerImportEntry: Codable, Equatable, Identifiable, Sendable {
         case tags
         case metadata
         case postings
+        case duplicateHint
     }
 
     var supportsMainAmountEditing: Bool {
@@ -441,6 +445,14 @@ struct LedgerImportPreview: Codable, Equatable, Sendable {
     let dateStart: String?
     let dateEnd: String?
     let warnings: [String]
+    /// Bank rows matched to existing entries: committing writes their post date
+    /// onto those entries instead of importing the row.
+    var postDateFills: [LedgerImportPostDateFill]? = nil
+
+    /// Entries checked when a review starts: probable duplicates begin unchecked.
+    var defaultIncludedEntryIDs: Set<String> {
+        Set(entries.filter { $0.duplicateHint == nil }.map(\.id))
+    }
 
     private enum CodingKeys: String, CodingKey {
         case importID = "importId"
@@ -458,18 +470,56 @@ struct LedgerImportPreview: Codable, Equatable, Sendable {
         case dateStart
         case dateEnd
         case warnings
+        case postDateFills
     }
+}
+
+struct LedgerImportDuplicateHint: Codable, Equatable, Sendable {
+    let reason: String
+    let date: String
+    let payee: String
+    let narration: String
+    let amount: String
+    let currency: String
+    let source: String?
+
+    var summary: String {
+        let name = payee.isEmpty ? narration : payee
+        let amountText = amount.hasPrefix("-") ? String(amount.dropFirst()) : amount
+        let existing = "\(date) \(name) \(amountText) \(currency)"
+        if reason == "ambiguous" {
+            return String(localized: "可能与 \(existing) 是同一笔（有多条同金额候选，未自动匹配）")
+        }
+        let origin = source.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "已有分录")
+        return String(localized: "可能与\(origin)的 \(existing) 是同一笔（金额略有差异）")
+    }
+}
+
+struct LedgerImportPostDateFill: Codable, Equatable, Identifiable, Sendable {
+    let id: String
+    let date: String
+    let payee: String
+    let narration: String
+    let account: String
+    let amount: String
+    let currency: String
+    let postDate: String
+    let bankDate: String
+    let bankPayee: String
 }
 
 struct LedgerImportCommitRequest: Encodable, Equatable, Sendable {
     let importID: String
     let provider: String
     let entries: [LedgerImportEntry]
+    /// Preview post date fills the person declined.
+    var excludedPostDateFills: [String]? = nil
 
     private enum CodingKeys: String, CodingKey {
         case importID = "importId"
         case provider
         case entries
+        case excludedPostDateFills
     }
 }
 
@@ -479,6 +529,7 @@ struct LedgerImportCommitResult: Decodable, Equatable, Sendable {
     let includeFile: String?
     let documentFile: String?
     let count: Int
+    var postDateFillCount: Int? = nil
     let beanText: String?
     let readModelPending: Bool?
     let indexGitSHA: String?

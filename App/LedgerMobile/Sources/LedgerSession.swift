@@ -2465,14 +2465,16 @@ final class LedgerSession: ObservableObject {
 
     func commitImport(
         preview: LedgerImportPreview,
-        entries: [LedgerImportEntry]
+        entries: [LedgerImportEntry],
+        excludedPostDateFills: [String] = []
     ) async throws -> LedgerImportCommitResult {
         let result = try await performSensitiveRequest { repository in
             try await repository.commitImport(
                 request: LedgerImportCommitRequest(
                     importID: preview.importID,
                     provider: preview.provider,
-                    entries: entries
+                    entries: entries,
+                    excludedPostDateFills: excludedPostDateFills.isEmpty ? nil : excludedPostDateFills
                 )
             )
         }

@@ -421,6 +421,16 @@
         }
       }
     },
+    "%@ · 银行 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · bank %@"
+          }
+        }
+      }
+    },
     "%@ → %@" : {
       "localizations" : {
         "en" : {
@@ -2300,6 +2310,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bank of China (Hong Kong)"
+          }
+        }
+      }
+    },
+    "为 %@ 补写记账日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill the post date for %@"
           }
         }
       }
@@ -5826,6 +5846,16 @@
         }
       }
     },
+    "另为 %lld 笔已有交易补写了记账日。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Also filled post dates on %lld existing transactions."
+          }
+        }
+      }
+    },
     "只检查导入归档，不会再次提交" : {
       "localizations" : {
         "en" : {
@@ -5902,6 +5932,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Available"
+          }
+        }
+      }
+    },
+    "可能与 %@ 是同一笔（有多条同金额候选，未自动匹配）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "May be the same purchase as %@ (several equal candidates, not matched automatically)"
+          }
+        }
+      }
+    },
+    "可能与%@的 %@ 是同一笔（金额略有差异）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "May be the same purchase as %2$@ from %1$@ (amount differs slightly)"
           }
         }
       }
@@ -8260,6 +8310,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Already have .bean files? Take them over directly"
+          }
+        }
+      }
+    },
+    "已有分录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "an existing entry"
           }
         }
       }
@@ -17508,6 +17568,16 @@
         }
       }
     },
+    "补写记账日 %lld / %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill post dates %lld / %lld"
+          }
+        }
+      }
+    },
     "补商户" : {
       "localizations" : {
         "en" : {
@@ -17684,6 +17754,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Entries saved"
+          }
+        }
+      }
+    },
+    "记账日 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Post date %@"
           }
         }
       }
@@ -19668,6 +19748,16 @@
         }
       }
     },
+    "跳过为 %@ 补写记账日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skip filling the post date for %@"
+          }
+        }
+      }
+    },
     "跳过，手动开账" : {
       "localizations" : {
         "en" : {
@@ -20184,6 +20274,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "These transactions are already recorded; only the category or payee is missing. Filling them in doesn't change amounts."
+          }
+        }
+      }
+    },
+    "这些银行行与账本里已有的支付宝/微信分录金额一致，写入时只把记账日补到已有分录上，不新增交易。取消勾选则跳过补写。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These bank rows match existing Alipay/WeChat entries exactly. Saving writes the post date onto those entries instead of adding transactions. Uncheck one to skip it."
           }
         }
       }
