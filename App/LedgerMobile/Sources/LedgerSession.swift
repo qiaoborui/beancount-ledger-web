@@ -200,6 +200,11 @@ final class LedgerSession: ObservableObject {
     /// route, over whichever tab is open. Closing it leaves the conversation
     /// running in `LedgerAgentSessions`.
     @Published var agentPresented = false
+    /// True from the assistant sheet's appearance until its dismissal has
+    /// finished. Another sheet asked for meanwhile (a day's transactions from
+    /// a link in a reply, a quick entry) waits for it, since UIKit drops a
+    /// presentation requested while another is still going away.
+    @Published var agentSheetOnScreen = false
     /// The overview's blocks in display order; one list per device, like the tabs.
     @Published private(set) var overviewSections = OverviewSection.defaultSections
     @Published private(set) var selectedRange: LedgerDateRange {
@@ -1221,6 +1226,7 @@ final class LedgerSession: ObservableObject {
         pendingWidgetExpenseDay = nil
         pendingExternalRoute = nil
         agentPresented = false
+        agentSheetOnScreen = false
         externalAccount = nil
         ledger = nil
         localPresentation = nil
@@ -3421,6 +3427,7 @@ final class LedgerSession: ObservableObject {
         pendingWidgetExpenseDay = nil
         pendingExternalRoute = nil
         agentPresented = false
+        agentSheetOnScreen = false
         externalAccount = nil
         resetGlobalSearch()
         _ = invalidateSession()
@@ -3448,6 +3455,7 @@ final class LedgerSession: ObservableObject {
         resetGlobalSearch()
         pendingExternalRoute = nil
         agentPresented = false
+        agentSheetOnScreen = false
         externalAccount = nil
         let previousServerURL = contextURL
         _ = invalidateSession()
@@ -3719,7 +3727,7 @@ final class LedgerSession: ObservableObject {
     }
 
     var canPresentWidgetDay: Bool {
-        pendingWidgetExpenseDay != nil && phase == .ready
+        pendingWidgetExpenseDay != nil && phase == .ready && !agentSheetOnScreen
             && !isAuthenticationBusy
     }
 
