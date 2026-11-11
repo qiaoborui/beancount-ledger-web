@@ -6,7 +6,7 @@
 #   backend      Go tests and build (server/)
 #   agent        Bub Agent pytest (agent/)
 #   web          typecheck, tests, audit and build (web/)
-#   ios          swift test and iOS SDK build (self-hosted Mac)
+#   ios          swift test, iOS SDK build, app scheme build and unit tests (self-hosted Mac)
 #   ios_runtime  Python ledger validator bundled into the app
 #   selfhost     Compose validation and deploy manifest checks
 #   release      IPA packaging and SideStore publishing script tests

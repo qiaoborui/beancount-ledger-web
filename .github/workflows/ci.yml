@@ -159,7 +159,7 @@ jobs:
     # `swift test` needs a full Xcode; the self-hosted Mac is the only runner
     # with one, and it is the machine the IPA is built on.
     runs-on: [self-hosted, macOS, ARM64, ledger-ios]
-    timeout-minutes: 30
+    timeout-minutes: 75
     steps:
       # Self-hosted runners keep the workspace between jobs, so never leave the
       # job's credentials in its git config.
@@ -180,6 +180,11 @@ jobs:
         run: |
           swift build --triple arm64-apple-ios17.0 \
             --sdk "$(xcrun --sdk iphoneos --show-sdk-path)"
+      # The package leaves out the app's UI layer, widgets and share extension,
+      # so neither step above compiles them. Building the Xcode scheme does,
+      # and its unit tests run on a simulator.
+      - name: Build the app scheme and run its unit tests
+        run: bash .github/scripts/ios-app-check.sh
 
   ios_runtime:
     name: iOS Beancount runtime
