@@ -93,8 +93,13 @@ struct QuickActionsWidget: Widget {
     }
 }
 
+/// In full colour the wide button is ink with page-coloured content and the
+/// round buttons are page tiles on the sunken background. Tinted and clear
+/// Home Screens keep only opacity, so there the wide button becomes an outline
+/// and the tiles gain a hairline (`ledgerWidgetPrimaryButton`, `ledgerWidgetTile`).
 struct QuickActionsWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.widgetRenderingMode) private var renderingMode
     let entry: QuickActionsEntry
     var familyOverride: WidgetFamily?
 
@@ -106,7 +111,7 @@ struct QuickActionsWidgetView: View {
                 if (familyOverride ?? family) == .accessoryCircular {
                     AccessoryWidgetBackground()
                 } else {
-                    LedgerWidgetColors.panel
+                    LedgerWidgetColors.sunken
                 }
             }
     }
@@ -144,47 +149,37 @@ struct QuickActionsWidgetView: View {
     private func primary(height: CGFloat) -> some View {
         HStack(spacing: 10) {
             Image(systemName: entry.primary.systemImage)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(LedgerWidgetColors.accent)
-                .widgetAccentable()
+                .font(.system(size: 18, weight: .semibold))
             Text(entry.primary.shortTitle)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(LedgerWidgetColors.ink)
+                .font(LedgerWidgetFont.medium(16))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
         .frame(height: height)
-        .background(Capsule(style: .continuous).fill(LedgerWidgetColors.raised))
-        .contentShape(Capsule(style: .continuous))
+        .ledgerWidgetPrimaryButton()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(entry.primary.title)
     }
 
     private func round(_ link: LedgerQuickLink, labelled: Bool) -> some View {
-        VStack(spacing: 4) {
+        let tone = LedgerWidgetTone(renderingMode)
+        return VStack(spacing: 4) {
             Image(systemName: link.systemImage)
                 .font(.system(size: labelled ? 17 : 20, weight: .medium))
-                .foregroundStyle(LedgerWidgetColors.ink)
+                .foregroundStyle(tone.ink)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             if labelled {
                 Text(link.shortTitle)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(LedgerWidgetColors.secondary)
+                    .font(LedgerWidgetFont.text(10))
+                    .foregroundStyle(tone.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .padding(.bottom, 8)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background {
-            if labelled {
-                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(LedgerWidgetColors.raised)
-            } else {
-                Circle().fill(LedgerWidgetColors.raised)
-            }
-        }
-        .contentShape(Rectangle())
+        .ledgerWidgetTile(labelled ? AnyShape(RoundedRectangle(cornerRadius: 14, style: .continuous)) : AnyShape(Circle()))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(link.title)
     }

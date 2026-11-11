@@ -145,6 +145,17 @@ targets:
       - path: Sources/ImportIndexActivityAttributes.swift
       - path: Sources/LedgerAgentActivityAttributes.swift
       - path: Sources/LedgerQuickLink.swift
+      # The extension cannot read the app's fonts, so it bundles its own Plex.
+      - path: Resources/Fonts/IBMPlexSans-Regular.ttf
+        buildPhase: resources
+      - path: Resources/Fonts/IBMPlexSans-Text.ttf
+        buildPhase: resources
+      - path: Resources/Fonts/IBMPlexSans-Medium.ttf
+        buildPhase: resources
+      - path: Resources/Fonts/IBMPlexSans-SemiBold.ttf
+        buildPhase: resources
+      - path: Resources/Fonts/OFL-IBMPlexSans.txt
+        buildPhase: resources
     info:
       path: WidgetExtension/Info.plist
       properties:
@@ -154,6 +165,11 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
+        UIAppFonts:
+          - IBMPlexSans-Regular.ttf
+          - IBMPlexSans-Text.ttf
+          - IBMPlexSans-Medium.ttf
+          - IBMPlexSans-SemiBold.ttf
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
@@ -237,12 +253,24 @@ targets:
       - path: WidgetExtension/ExpenseHistoryWidgets.swift
       - path: WidgetExtension/ExpenseLockScreenWidget.swift
       - path: WidgetExtension/ImportStatusWidget.swift
+      - path: WidgetExtension/QuickActionsWidget.swift
+      - path: WidgetExtension/QuickRecordWidget.swift
       - path: WidgetExtension/WidgetDesign.swift
+      - path: Sources/LedgerQuickLink.swift
       - path: Sources/LedgerWidgetSnapshot.swift
       - path: Sources/LedgerWidgetCredentialStore.swift
       - path: Sources/LedgerWidgetRefreshClient.swift
       - path: Sources/MoneyText.swift
       - path: Sources/LedgerLocale.swift
+      # Registered by the render tests so the images use the shipped face.
+      - path: Resources/Fonts/IBMPlexSans-Regular.ttf
+        buildPhase: resources
+      - path: Resources/Fonts/IBMPlexSans-Text.ttf
+        buildPhase: resources
+      - path: Resources/Fonts/IBMPlexSans-Medium.ttf
+        buildPhase: resources
+      - path: Resources/Fonts/IBMPlexSans-SemiBold.ttf
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiaoborui.ledger.mobile.widgettests

@@ -26,11 +26,23 @@ struct ExpenseCalendarProvider: TimelineProvider {
             let result = await LedgerWidgetTimelineLoader.shared.load(now: now)
             completion(
                 Timeline(
-                    entries: [ExpenseCalendarEntry(date: now, snapshot: result.snapshot)],
+                    entries: Self.entries(snapshot: result.snapshot, now: now, refreshInterval: result.refreshInterval),
                     policy: .after(now.addingTimeInterval(result.refreshInterval))
                 )
             )
         }
+    }
+
+    /// Adds an entry at the next local midnight when the refresh falls after
+    /// it, so today's outline and 今天支出 move to the new day on time.
+    static func entries(snapshot: LedgerWidgetSnapshot?, now: Date, refreshInterval: TimeInterval,
+                        calendar: Calendar = .current) -> [ExpenseCalendarEntry] {
+        var entries = [ExpenseCalendarEntry(date: now, snapshot: snapshot)]
+        if let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)),
+           midnight < now.addingTimeInterval(refreshInterval) {
+            entries.append(ExpenseCalendarEntry(date: midnight, snapshot: snapshot))
+        }
+        return entries
     }
 }
 
@@ -47,58 +59,72 @@ struct ExpenseCalendarWidget: Widget {
     }
 }
 
+/// A locked device keeps the grid and masks the figures and heat; the day
+/// links are dropped with them.
 struct ExpenseCalendarWidgetView: View {
     @Environment(\.widgetFamily) private var family
     @Environment(\.redactionReasons) private var redactionReasons
+    @Environment(\.widgetRenderingMode) private var renderingMode
     let entry: ExpenseCalendarEntry
     var familyOverride: WidgetFamily?
 
+    /// The month to draw, or nil once it is over: after a rollover the stored
+    /// month is last month's, which the overview already hides the same way.
+    static func expense(in snapshot: LedgerWidgetSnapshot, now: Date) -> LedgerWidgetExpenseSnapshot? {
+        LedgerWidgetPeriod.month.currentExpense(in: snapshot, now: now)
+    }
+
     var body: some View {
         Group {
-            if !redactionReasons.isEmpty {
-                LedgerWidgetPrivacyView(title: String(localized: "消费日历"))
-            } else if let snapshot = entry.snapshot {
-                content(snapshot)
+            if let snapshot = entry.snapshot, let expense = Self.expense(in: snapshot, now: entry.date) {
+                content(expense, updated: snapshot.updatedAt)
             } else {
-                LedgerWidgetUnavailableView(title: String(localized: "等待消费日历"), detail: String(localized: "打开 Ledger 并刷新一次"), symbol: "calendar")
+                LedgerWidgetUnavailableView(title: String(localized: "消费日历"))
             }
         }
         .widgetURL(URL(string: "ledger://transactions"))
-        .containerBackground(for: .widget) { LedgerWidgetColors.panel }
+        .containerBackground(for: .widget) { LedgerWidgetColors.sunken }
     }
 
-    private func content(_ snapshot: LedgerWidgetSnapshot) -> some View {
-        let expense = snapshot.expense
+    private func content(_ expense: LedgerWidgetExpenseSnapshot, updated: Date) -> some View {
+        let tone = LedgerWidgetTone(renderingMode)
         let layout = ExpenseCalendarLayout(expense: expense, now: entry.date)
         let large = (familyOverride ?? family) == .systemLarge
-        return VStack(alignment: .leading, spacing: large ? 12 : 6) {
+        let grid = ExpenseMonthGrid(layout: layout, currency: expense.currency, compact: !large,
+                                    isRedacted: !redactionReasons.isEmpty, mode: renderingMode)
+        return VStack(alignment: .leading, spacing: large ? 10 : 6) {
             LedgerWidgetHeader(title: String(localized: "消费日历"), detail: expense.periodTitle)
             if large {
                 HStack(alignment: .firstTextBaseline) {
-                    LedgerWidgetAmount(amount: expense.amount, currency: expense.currency, size: 26)
+                    LedgerWidgetAmount(amount: expense.amount, currency: expense.currency, size: 27)
                     Spacer(minLength: 0)
-                    Text("\(layout.spendingDayCount)天有消费").font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
+                    Text("\(layout.spendingDayCount)天有消费").font(LedgerWidgetFont.text(10))
+                        .monospacedDigit().foregroundStyle(tone.meta).privacySensitive()
                 }
-                ExpenseMonthGrid(layout: layout, currency: expense.currency, compact: false)
-                Rectangle().fill(LedgerWidgetColors.line).frame(height: 1)
+                grid
+                Rectangle().fill(tone.rule).frame(height: 1)
                 HStack(spacing: 4) {
-                    Text(layout.peakDay.map { String(localized: "最高 \(LedgerWidgetHeat.shortDate(layout.date(for: $0))) ") + MoneyText.formatWidget(minorUnits: layout.peakAmount, currency: expense.currency) } ?? String(localized: "暂无消费记录"))
+                    Text(layout.peakDay.map { String(localized: "最高 \(LedgerWidgetHeat.shortDate(layout.date(for: $0))) \(MoneyText.formatWidget(minorUnits: layout.peakAmount, currency: expense.currency))") } ?? String(localized: "暂无消费记录"))
                     Spacer(minLength: 0)
-                    Text("日均 \(MoneyText.formatWidget(minorUnits: expense.amount / max(layout.elapsedDayCount, 1), currency: expense.currency))")
-                }.font(.system(size: 9)).foregroundStyle(LedgerWidgetColors.secondary).lineLimit(1).minimumScaleFactor(0.75)
+                    Text("日均 \(MoneyText.formatWidget(minorUnits: expense.amount / max(expense.elapsedDays(now: entry.date), 1), currency: expense.currency))")
+                }.font(LedgerWidgetFont.text(10)).monospacedDigit().foregroundStyle(tone.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.75).privacySensitive()
             } else {
                 HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        LedgerWidgetAmount(amount: expense.amount, currency: expense.currency, size: 17)
-                        Text("\(layout.spendingDayCount)天有消费")
-                        Text("色阶表示金额高低").font(.system(size: 9))
-                    }.font(.system(size: 10)).foregroundStyle(LedgerWidgetColors.secondary)
-                        .frame(width: 96, alignment: .leading)
-                    ExpenseMonthGrid(layout: layout, currency: expense.currency, compact: true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        LedgerWidgetAmount(amount: expense.amount, currency: expense.currency, size: 23)
+                        Text("\(layout.spendingDayCount)天有消费").monospacedDigit()
+                            .foregroundStyle(tone.secondary).privacySensitive()
+                        Spacer(minLength: 0)
+                        Text("颜色越深支出越多").foregroundStyle(tone.meta)
+                    }.font(LedgerWidgetFont.text(10)).lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(width: 104, alignment: .leading)
+                    grid
                 }.frame(maxHeight: .infinity)
             }
-            LedgerWidgetFooter(label: large ? String(localized: "每日金额 · \(expense.currency)") : String(localized: "描边为今天"), date: snapshot.updatedAt, now: entry.date)
-        }.privacySensitive()
+            LedgerWidgetFooter(label: large ? String(localized: "每日金额 · \(expense.currency)") : String(localized: "描边为今天"),
+                               date: updated, now: entry.date)
+        }
     }
 }
 
@@ -109,10 +135,15 @@ private struct ExpenseMonthGrid: View {
         return Array(symbols[1...]) + [symbols[0]]
     }
 
-    @Environment(\.colorScheme) private var colorScheme
     let layout: ExpenseCalendarLayout
     let currency: String
     let compact: Bool
+    /// A masked grid carries no dates in its links and no heat: shapes are
+    /// not redacted by `privacySensitive`, so the fill would show relative spend.
+    let isRedacted: Bool
+    let mode: WidgetRenderingMode
+
+    private var tone: LedgerWidgetTone { LedgerWidgetTone(mode) }
 
     // Trim only the trailing empty week; retain the calendar model's 42-cell contract.
     private var weeks: Int { ((layout.cells.lastIndex { $0 != nil } ?? 27) / 7) + 1 }
@@ -125,7 +156,7 @@ private struct ExpenseMonthGrid: View {
                 HStack(spacing: gap) {
                     ForEach(0..<7, id: \.self) { index in
                         let day = Self.weekdayHeaders[index]
-                        Text(day).font(.system(size: 9)).foregroundStyle(LedgerWidgetColors.secondary)
+                        Text(day).font(LedgerWidgetFont.text(9)).foregroundStyle(tone.meta)
                             .frame(maxWidth: .infinity).frame(height: header)
                     }
                 }
@@ -143,28 +174,57 @@ private struct ExpenseMonthGrid: View {
     @ViewBuilder private func cell(_ day: Int?, height: CGFloat) -> some View {
         if let day, let url = layout.url(for: day) {
             let amount = layout.amounts[day] ?? 0
-            let level = LedgerWidgetHeat.level(amount)
-            let ink = level >= 3 ? LedgerWidgetColors.heatInk : LedgerWidgetColors.ink
-            Link(destination: url) {
-                VStack(spacing: 2) {
-                    Text("\(day)").font(.system(size: compact ? 9 : 11, design: .monospaced))
-                    if !compact {
-                        Text(layout.isFuture(day) ? "–" : amount == 0 ? "·" : String(format: "%.0f", Double(amount) / 100))
-                            .font(.system(size: 9, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.5)
-                    }
-                }.foregroundStyle(layout.isFuture(day) ? LedgerWidgetColors.secondary : ink)
-                    .frame(maxWidth: .infinity).frame(height: height)
-                    .background(layout.isFuture(day) ? Color.clear : LedgerWidgetHeat.color(amount))
-                    .clipShape(RoundedRectangle(cornerRadius: 2))
-                    .overlay {
-                        if day == layout.today {
-                            RoundedRectangle(cornerRadius: 2).strokeBorder(LedgerWidgetColors.accent, lineWidth: 1)
-                        }
-                    }
-            }.buttonStyle(.plain)
+            let face = cellFace(day: day, amount: amount, height: height)
                 .accessibilityLabel("\(layout.date(for: day))，支出 \(MoneyText.format(minorUnits: amount, currency: currency))")
+            if !isRedacted {
+                Link(destination: url) { face }.buttonStyle(.plain)
+            } else {
+                face
+            }
         } else {
             Color.clear.frame(maxWidth: .infinity).frame(height: height)
+        }
+    }
+
+    private func cellFace(day: Int, amount: Int, height: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 3, style: .continuous)
+        let future = layout.isFuture(day)
+        let level = future || isRedacted ? 0 : LedgerWidgetHeat.level(amount)
+        return ZStack {
+            if future {
+                label(day: day, amount: amount, future: true).foregroundStyle(tone.meta)
+            } else if level >= 3 && !tone.isFullColor {
+                // Tinted modes keep only opacity: cut the label out of a dark
+                // cell instead of drawing one tint on top of another.
+                shape.fill(LedgerWidgetHeat.color(level: level, mode: mode))
+                    .mask {
+                        ZStack {
+                            Rectangle()
+                            label(day: day, amount: amount, future: false).blendMode(.destinationOut)
+                        }.compositingGroup()
+                    }
+            } else {
+                shape.fill(LedgerWidgetHeat.color(level: level, mode: mode))
+                label(day: day, amount: amount, future: false)
+                    .foregroundStyle(level >= 3 ? LedgerWidgetColors.page : tone.ink)
+            }
+        }
+        .frame(maxWidth: .infinity).frame(height: height)
+        .overlay {
+            if day == layout.today {
+                shape.strokeBorder(tone.expense, lineWidth: 1.5).widgetAccentable()
+            }
+        }
+        .privacySensitive()
+    }
+
+    private func label(day: Int, amount: Int, future: Bool) -> some View {
+        VStack(spacing: 1) {
+            Text(verbatim: "\(day)").font(LedgerWidgetFont.text(compact ? 9 : 11)).monospacedDigit()
+            if !compact {
+                Text(verbatim: future ? "–" : amount == 0 ? "·" : String(format: "%.0f", Double(amount) / 100))
+                    .font(LedgerWidgetFont.text(9)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.5)
+            }
         }
     }
 }
@@ -178,9 +238,6 @@ struct ExpenseCalendarLayout {
     let spendingDayCount: Int
     let monthPrefix: String
     let today: Int?
-    var elapsedDayCount: Int {
-        cells.compactMap { $0 }.filter { !isFuture($0) }.count
-    }
     private let currentDay: String
 
     func date(for day: Int) -> String { String(format: "%@-%02d", monthPrefix, day) }

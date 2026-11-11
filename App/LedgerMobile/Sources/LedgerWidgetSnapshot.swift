@@ -120,8 +120,7 @@ enum LedgerWidgetPeriod: String, Codable, CaseIterable, Sendable {
 
     func currentExpense(in snapshot: LedgerWidgetSnapshot, now: Date) -> LedgerWidgetExpenseSnapshot? {
         guard let expense = expense(in: snapshot) else { return nil }
-        let parts = Calendar.current.dateComponents([.year, .month, .day], from: now)
-        let today = String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
+        let today = LedgerWidgetDates.localDay(now)
         guard expense.start <= today, today < expense.end else { return nil }
         return expense
     }
@@ -142,6 +141,13 @@ enum LedgerWidgetDates {
     }
 
     static func day(_ date: Date) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
+    }
+
+    /// The device's civil day for `date`. Periods are civil ranges, so "today"
+    /// is read on the wall clock, unlike `day(_:)`, which reads UTC.
+    static func localDay(_ date: Date, calendar: Calendar = .current) -> String {
         let parts = calendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
     }
@@ -180,6 +186,26 @@ struct LedgerWidgetExpenseSnapshot: Codable, Equatable, Sendable {
     let yearOverYearPercentage: Double?
     let categories: [LedgerWidgetExpenseCategory]
     let dailySeries: [LedgerWidgetDailyExpense]
+
+    /// Days of the period that have begun by `now`: 0 before the period, its
+    /// full length after it. Callers dividing by it guard against 0.
+    func elapsedDays(now: Date, calendar: Calendar = .current) -> Int {
+        guard let first = LedgerWidgetDates.date(start), let last = LedgerWidgetDates.date(end),
+              let length = LedgerWidgetDates.calendar.dateComponents([.day], from: first, to: last).day,
+              length > 0 else { return 0 }
+        let today = LedgerWidgetDates.localDay(now, calendar: calendar)
+        guard today >= start else { return 0 }
+        guard today < end, let current = LedgerWidgetDates.date(today) else { return length }
+        return (LedgerWidgetDates.calendar.dateComponents([.day], from: first, to: current).day ?? 0) + 1
+    }
+
+    /// Expense on one civil day of the period. The daily series omits days
+    /// that net to zero or below, so a missing day inside the period is 0; a
+    /// day outside it is unknown. It need not add up to `amount`.
+    func amount(onDay day: String) -> Int? {
+        guard LedgerWidgetLink.isValidDay(day), start <= day, day < end else { return nil }
+        return dailySeries.reduce(0) { $1.date == day ? $0 + $1.amount : $0 }
+    }
 }
 
 struct LedgerWidgetExpenseCategory: Codable, Equatable, Identifiable, Sendable {
@@ -208,6 +234,39 @@ struct LedgerWidgetAccountSnapshot: Codable, Equatable, Identifiable, Sendable {
 
     var id: String { account }
     var isLiability: Bool { account.hasPrefix("Liabilities:") }
+}
+
+/// Net worth from the balances the snapshot already carries. Rows are summed
+/// per currency, never keyed by `id`: one account appears once per currency.
+enum LedgerWidgetNetWorth {
+    struct Total: Equatable, Sendable {
+        let currency: String
+        /// Signed sums in minor units; liabilities are normally negative.
+        let assets: Int
+        let liabilities: Int
+        var net: Int { assets + liabilities }
+    }
+
+    static func summarize(_ rows: [LedgerWidgetAccountSnapshot]) -> [Total] {
+        var assets: [String: Int] = [:]
+        var liabilities: [String: Int] = [:]
+        for row in rows {
+            if row.isLiability {
+                liabilities[row.currency, default: 0] += row.balance
+            } else {
+                assets[row.currency, default: 0] += row.balance
+            }
+        }
+        return Set(assets.keys).union(liabilities.keys).sorted().map {
+            Total(currency: $0, assets: assets[$0] ?? 0, liabilities: liabilities[$0] ?? 0)
+        }
+    }
+
+    /// The only total worth showing: a sum across currencies would need rates.
+    static func single(_ rows: [LedgerWidgetAccountSnapshot]) -> Total? {
+        let totals = summarize(rows)
+        return totals.count == 1 ? totals[0] : nil
+    }
 }
 
 struct LedgerWidgetImportSnapshot: Codable, Equatable, Identifiable, Sendable {
