@@ -66,9 +66,10 @@ jobs:
       app-template-path: sidestore/app.json
       keep-versions: 0
       mark-latest: true
-      # The Widget and Share extensions have Chinese CFBundleDisplayName values;
-      # see the open question in the pull request that added this file.
-      check-ascii-bundle-names: false
+      # SideStore registers each extension's App ID as "<app> <extension>" from
+      # the unlocalized CFBundleDisplayName, and Apple rejects non-ASCII names.
+      # The Chinese names live in InfoPlist.xcstrings instead.
+      check-ascii-bundle-names: true
       require-tag-match: true
       timeout-minutes: 45
       tools-ref: b58e5712dd8c8b1f4d5465717f23b3269f740771
