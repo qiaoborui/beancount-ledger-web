@@ -573,4 +573,27 @@ final class LedgerAgentTimelineTests: XCTestCase {
         }
         XCTAssertFalse(conversation.isRunning)
     }
+
+    // MARK: Scroll fit
+
+    func testShortConversationHasNothingToScroll() {
+        XCTAssertFalse(LedgerAgentScrollFit.overflows(contentHeight: 300, topInset: 60, bottomInset: 120,
+                                                      viewportHeight: 800))
+        // Exactly filling the page, or within the rounding slack, still fits.
+        XCTAssertFalse(LedgerAgentScrollFit.overflows(contentHeight: 620, topInset: 60, bottomInset: 120,
+                                                      viewportHeight: 800))
+        XCTAssertFalse(LedgerAgentScrollFit.overflows(contentHeight: 620.5, topInset: 60, bottomInset: 120,
+                                                      viewportHeight: 800))
+    }
+
+    func testInsetsCountTowardOverflowing() {
+        XCTAssertTrue(LedgerAgentScrollFit.overflows(contentHeight: 700, topInset: 60, bottomInset: 120,
+                                                     viewportHeight: 800))
+        XCTAssertFalse(LedgerAgentScrollFit.overflows(contentHeight: 700, viewportHeight: 800))
+        XCTAssertTrue(LedgerAgentScrollFit.overflows(contentHeight: 900, viewportHeight: 800))
+    }
+
+    func testUnmeasuredPageNeverScrolls() {
+        XCTAssertFalse(LedgerAgentScrollFit.overflows(contentHeight: 900, viewportHeight: 0))
+    }
 }

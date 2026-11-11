@@ -361,6 +361,24 @@ enum LedgerAgentLiveActivity: Equatable, Sendable {
     }
 }
 
+/// Whether the chat page has anything to scroll. Content shorter than the
+/// page rests at the top, and following the reply must leave it there: a
+/// scroll to the bottom anchor of content that fits asks for an offset the
+/// page cannot hold, so the whole conversation moves and springs back on
+/// every update.
+enum LedgerAgentScrollFit {
+    /// Rounding slack, in points.
+    static let tolerance = 1.0
+
+    /// The content, with the insets the page keeps clear above and below it
+    /// (the top bar, the composer, the keyboard), is taller than the page.
+    static func overflows(contentHeight: Double, topInset: Double = 0, bottomInset: Double = 0,
+                          viewportHeight: Double) -> Bool {
+        guard viewportHeight > 0 else { return false }
+        return contentHeight + topInset + bottomInset > viewportHeight + tolerance
+    }
+}
+
 /// A turn's steps as the timeline draws them: each reasoning block, each run
 /// of adjacent tool calls as one group, and the text between them, in order.
 /// The answer is drawn last by the reply itself, so its text step is left out.
