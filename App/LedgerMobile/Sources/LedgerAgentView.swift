@@ -1946,6 +1946,17 @@ private struct LedgerAgentScrollTracking: ViewModifier {
     /// Within this many points of the bottom still counts as at it.
     private static let slack: CGFloat = 24
 
+    /// The page's whole height, the parts under the top bar and the composer
+    /// included, which the content insets are measured against.
+    /// `containerSize` and `bounds` leave the insets out (with the keyboard
+    /// up they are a third of the page), so adding the insets to the content
+    /// and comparing with them made a two-line chat "overflow" and left the
+    /// bottom hundreds of points away even when the page was resting on it.
+    @available(iOS 18.0, *)
+    private static func pageHeight(_ geometry: ScrollGeometry) -> CGFloat {
+        geometry.visibleRect.height
+    }
+
     private struct Position: Equatable {
         var offset: CGFloat
         var toBottom: CGFloat
@@ -1970,7 +1981,7 @@ private struct LedgerAgentScrollTracking: ViewModifier {
         if #available(iOS 18.0, *) {
             content
                 .onScrollGeometryChange(for: Position.self) { geometry in
-                    let bottom = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
+                    let bottom = geometry.contentSize.height + geometry.contentInsets.bottom - Self.pageHeight(geometry)
                     return Position(offset: geometry.contentOffset.y, toBottom: bottom - geometry.contentOffset.y)
                 } action: { old, new in
                     toBottom = new.toBottom
@@ -1986,7 +1997,7 @@ private struct LedgerAgentScrollTracking: ViewModifier {
                                contentHeight: Double(geometry.contentSize.height),
                                topInset: Double(geometry.contentInsets.top),
                                bottomInset: Double(geometry.contentInsets.bottom),
-                               viewportHeight: Double(geometry.containerSize.height)))
+                               viewportHeight: Double(Self.pageHeight(geometry))))
                 } action: { old, new in
                     if new.overflows != overflows { overflows = new.overflows }
                     // Content that still fits rests at the top: a scroll to
