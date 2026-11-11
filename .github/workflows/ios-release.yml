@@ -20,7 +20,7 @@ name: iOS release
 # shared workflow rejects the release.
 #
 # The reusable workflow is pinned to the merge commit of
-# Ami0307/tethera-releases#8. To upgrade, change the SHA in `uses:` and in
+# Ami0307/tethera-releases#9. To upgrade, change the SHA in `uses:` and in
 # `tools-ref` together and keep the two equal.
 #
 # Public distribution is still subject to the open issue recorded in
@@ -41,7 +41,7 @@ jobs:
     if: github.repository == 'qiaoborui/beancount-ledger-web'
     permissions:
       contents: read
-    uses: Ami0307/tethera-releases/.github/workflows/ios-release.yml@8bf721755959d75eded7c41d739706b78a420ac8
+    uses: Ami0307/tethera-releases/.github/workflows/ios-release.yml@b58e5712dd8c8b1f4d5465717f23b3269f740771
     with:
       app-name: Ledger
       bundle-id: com.qiaoborui.ledger.mobile
@@ -71,7 +71,7 @@ jobs:
       check-ascii-bundle-names: false
       require-tag-match: true
       timeout-minutes: 45
-      tools-ref: 8bf721755959d75eded7c41d739706b78a420ac8
+      tools-ref: b58e5712dd8c8b1f4d5465717f23b3269f740771
     secrets:
       # Fine-grained token with Contents read/write on
       # qiaoborui/beancount-ledger-releases only.
