@@ -2482,6 +2482,18 @@ final class LedgerSession: ObservableObject {
         return result
     }
 
+    func postDateBackfill() async throws -> LedgerPostDateBackfill {
+        try await performSensitiveRequest { repository in
+            try await repository.postDateBackfill()
+        }
+    }
+
+    func applyPostDateBackfill(fillIDs: [String]) async throws -> LedgerPostDateBackfillApplyResult {
+        try await performSensitiveRequest { repository in
+            try await repository.applyPostDateBackfill(fillIDs: fillIDs)
+        }
+    }
+
     func updateTransaction(
         source: TransactionSource,
         entry: LedgerTransactionEntry

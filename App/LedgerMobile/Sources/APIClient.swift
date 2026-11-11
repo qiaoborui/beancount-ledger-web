@@ -114,6 +114,8 @@ protocol LedgerAPI: Sendable {
         baseURL: URL,
         request: LedgerImportCommitRequest
     ) async throws -> LedgerImportCommitResult
+    func postDateBackfill(baseURL: URL) async throws -> LedgerPostDateBackfill
+    func applyPostDateBackfill(baseURL: URL, fillIDs: [String]) async throws -> LedgerPostDateBackfillApplyResult
     func updateTransaction(
         baseURL: URL,
         source: TransactionSource,
@@ -172,6 +174,14 @@ extension LedgerAPI {
         valuationCurrency: String
     ) async throws -> LedgerHomeReport {
         throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持首页消费报告"))
+    }
+
+    func postDateBackfill(baseURL: URL) async throws -> LedgerPostDateBackfill {
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持补写记账日"))
+    }
+
+    func applyPostDateBackfill(baseURL: URL, fillIDs: [String]) async throws -> LedgerPostDateBackfillApplyResult {
+        throw LedgerAPIError.incompatibleServer(String(localized: "服务器暂不支持补写记账日"))
     }
 
     func globalTransactions(baseURL: URL) async throws -> LedgerGlobalTransactions {
@@ -372,6 +382,8 @@ protocol LedgerRepository: AnyObject, Sendable {
         archivePassword: String
     ) async throws -> LedgerImportPreview
     func commitImport(request: LedgerImportCommitRequest) async throws -> LedgerImportCommitResult
+    func postDateBackfill() async throws -> LedgerPostDateBackfill
+    func applyPostDateBackfill(fillIDs: [String]) async throws -> LedgerPostDateBackfillApplyResult
     func updateTransaction(source: TransactionSource, entry: LedgerTransactionEntry) async throws
     func deleteTransaction(source: TransactionSource, reason: String) async throws
     func addTransactionTags(sources: [TransactionSource], tags: [String]) async throws
@@ -416,6 +428,14 @@ extension LedgerRepository {
 
     func addAccount(input: LedgerAccountInput) async throws {
         throw LedgerRepositoryError.capabilityUnavailable("add account")
+    }
+
+    func postDateBackfill() async throws -> LedgerPostDateBackfill {
+        throw LedgerRepositoryError.capabilityUnavailable("post date backfill")
+    }
+
+    func applyPostDateBackfill(fillIDs: [String]) async throws -> LedgerPostDateBackfillApplyResult {
+        throw LedgerRepositoryError.capabilityUnavailable("post date backfill")
     }
 }
 
@@ -535,6 +555,12 @@ final class RemoteLedgerRepository: LedgerRepository, RemoteLedgerCapabilities {
     }
     func commitImport(request: LedgerImportCommitRequest) async throws -> LedgerImportCommitResult {
         try await api.commitImport(baseURL: baseURL, request: request)
+    }
+    func postDateBackfill() async throws -> LedgerPostDateBackfill {
+        try await api.postDateBackfill(baseURL: baseURL)
+    }
+    func applyPostDateBackfill(fillIDs: [String]) async throws -> LedgerPostDateBackfillApplyResult {
+        try await api.applyPostDateBackfill(baseURL: baseURL, fillIDs: fillIDs)
     }
     func updateTransaction(source: TransactionSource, entry: LedgerTransactionEntry) async throws {
         try await api.updateTransaction(baseURL: baseURL, source: source, entry: entry)
@@ -908,6 +934,17 @@ struct LedgerAPIClient: LedgerAPI, @unchecked Sendable {
             method: "POST",
             body: request
         )
+    }
+
+    func postDateBackfill(baseURL: URL) async throws -> LedgerPostDateBackfill {
+        struct Empty: Encodable {}
+        return try await send(baseURL: baseURL, path: "/api/ledger/imports/post-date-backfill", method: "POST", body: Empty())
+    }
+
+    func applyPostDateBackfill(baseURL: URL, fillIDs: [String]) async throws -> LedgerPostDateBackfillApplyResult {
+        struct Body: Encodable { let fillIds: [String] }
+        return try await send(baseURL: baseURL, path: "/api/ledger/imports/post-date-backfill/apply", method: "POST",
+                              body: Body(fillIds: fillIDs))
     }
 
     func reconciliation(baseURL: URL, start: String, end: String) async throws -> LedgerReconciliationResponse {

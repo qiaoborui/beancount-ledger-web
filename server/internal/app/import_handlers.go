@@ -137,3 +137,45 @@ func (s *Server) importsCommit(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+func (s *Server) importsPostDateBackfillPreview(c *gin.Context) {
+	if !s.limiter.Check(c, "imports.postDateBackfill", 10, time.Minute) {
+		return
+	}
+	if !requireAuth(c) {
+		return
+	}
+	if err := ensureLedgerReady(s.cfg); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	result, err := s.buildPostDateBackfill(c.Request.Context())
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) importsPostDateBackfillApply(c *gin.Context) {
+	if !s.limiter.Check(c, "imports.postDateBackfillApply", 10, time.Minute) {
+		return
+	}
+	if !requireAuth(c) {
+		return
+	}
+	var input PostDateBackfillApplyRequest
+	if !bindJSON(c, &input) {
+		return
+	}
+	if err := ensureLedgerReady(s.cfg); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	result, err := s.applyPostDateBackfill(c.Request.Context(), input.FillIDs)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}

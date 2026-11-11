@@ -25,6 +25,7 @@ struct ImportHistoryView: View {
     @State private var showsAllDocuments = false
     @State private var isReadingFile = false
     @State private var debugImportFlowPresented = false
+    @State private var postDateBackfillPresented = false
     @State private var gmailStatus: LedgerGmailStatus?
     @State private var gmailPending: [LedgerGmailPendingImport] = []
     @State private var gmailErrorMessage: String?
@@ -92,6 +93,12 @@ struct ImportHistoryView: View {
                 }
                 .environmentObject(session)
             }
+        }
+        .sheet(isPresented: $postDateBackfillPresented) {
+            PostDateBackfillView {
+                Task { await load(replacingContent: false) }
+            }
+            .environmentObject(session)
         }
         .sheet(item: $gmailReview) { review in
             NativeImportFlowView(preview: review.preview, providers: providers) { _ in
@@ -197,6 +204,7 @@ struct ImportHistoryView: View {
             } else {
                 channelSection
                 historySection
+                postDateBackfillSection
             }
             Section {} footer: {
                 Text("支持 CSV、Excel、PDF、邮件和 ZIP，最大 10MB。账单先生成预览，确认后才写入账本。")
@@ -670,6 +678,34 @@ struct ImportHistoryView: View {
     }
 
     private static let collapsedDocumentCount = 2
+
+    /// Offered once an HSBC HK statement is archived: older card entries from
+    /// Alipay/WeChat can take their bank post date from it.
+    @ViewBuilder
+    private var postDateBackfillSection: some View {
+        if documents.contains(where: { $0.provider == "hsbchk-credit" }) {
+            Section {
+                Button {
+                    postDateBackfillPresented = true
+                } label: {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("补写汇丰记账日").balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                            Text("从已归档的汇丰账单为支付宝/微信分录补上记账日，并检查重复记账。")
+                                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right").font(.footnote).foregroundStyle(BalancedPalette.meta)
+                    }
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("import-post-date-backfill")
+            }
+        }
+    }
 
     @ViewBuilder
     private var historySection: some View {
