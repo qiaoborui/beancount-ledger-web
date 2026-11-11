@@ -252,16 +252,20 @@ areas (its test is `.github/scripts/test_plan_components.py`):
 |---|---|
 | `web/` | Frontend |
 | `agent/`, `.agents/` | Bub Agent |
-| `server/`, `examples/` | Backend, iOS core, iOS app |
-| `App/LedgerMobile/Runtime/` | iOS core, iOS Beancount runtime, Backend, iOS app |
-| `App/LedgerMobile/project.yml` | iOS core, iOS app, iOS widgets |
-| `Sources/`, `Resources/`, `Supporting/`, `ShareExtension/`, `Tests/`, `UITests/` under `App/LedgerMobile/` | iOS core, iOS app |
-| `WidgetExtension/`, `WidgetTests/` under `App/LedgerMobile/`, and the shared files the widget targets list in `project.yml` | iOS core, iOS widgets |
+| `server/` code that LedgerCore compiles (`mobile*/`, most of `internal/`) | Backend, iOS app |
+| `server/` Go tests, `cmd/`, `internal/httpservice/`, `internal/logging/`; `examples/` | Backend |
+| `App/LedgerMobile/Runtime/` | iOS Beancount runtime, Backend, iOS app |
+| `App/LedgerMobile/Package.swift`, and the `Sources/` files it lists | iOS core (those files also iOS app) |
+| `App/LedgerMobile/Tests/` | iOS core, iOS app |
+| `App/LedgerMobile/project.yml` | iOS app, iOS widgets |
+| other `Sources/`, and `Resources/`, `Supporting/`, `ShareExtension/`, `UITests/` under `App/LedgerMobile/` | iOS app |
+| `WidgetExtension/`, `WidgetTests/` under `App/LedgerMobile/`, and the shared files the widget targets list in `project.yml` | iOS widgets |
+| Markdown and `Screenshots/` under `App/` | nothing |
 | other `App/` | iOS core |
 | the app's framework and build-phase scripts under `scripts/` | iOS app |
 | `docker/`, `scripts/selfhost/`, `.env.selfhost.example`, `.dockerignore` | Self-hosted stack |
 | IPA packaging and SideStore publishing scripts | Release tooling |
-| `.github/workflows/`, the planner and its test | every job |
+| `.github/workflows/`, the planner and its test | every job except iOS UI tests |
 | docs and anything unmatched | nothing |
 
 A manual run checks every area. `Gate` is the required status check: it

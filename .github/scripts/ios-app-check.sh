@@ -53,7 +53,8 @@ export PATH="/opt/homebrew/bin:$PATH"
 
 if [[ "$needs_frameworks" == true ]]; then
   # The frameworks the app links: LedgerCore (gomobile) and the embedded
-  # Beancount runtime with its Python. Both scripts reuse their downloads.
+  # Beancount runtime with its Python. They are built under server/.build,
+  # which the checkout step cleans, so every CI run builds them afresh.
   echo "::group::Build LedgerCore and the Beancount runtime"
   bash "$repo_root/scripts/build-ledgercore-xcframework.sh"
   bash "$repo_root/scripts/build-beancount-ios.sh"
@@ -117,5 +118,9 @@ print("%s: %s passed, %s failed, %s skipped" % (result, summary.get("passedTests
       summary.get("failedTests"), summary.get("skippedTests")))
 for failure in summary.get("testFailures", []):
     print("::error::%s: %s" % (failure.get("testIdentifierString"), failure.get("failureText")))
+# A filter that matches nothing also reports Passed.
+if not summary.get("passedTests"):
+    print("::error::no tests ran")
+    sys.exit(1)
 sys.exit(0 if result == "Passed" else 1)
 '

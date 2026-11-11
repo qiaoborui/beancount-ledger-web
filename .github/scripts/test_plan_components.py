@@ -1,5 +1,6 @@
 """Guards for the path-to-area table in plan-components.sh (stdlib only)."""
 import json
+import shutil
 from pathlib import Path
 import subprocess
 import unittest
@@ -35,18 +36,23 @@ class PlanComponentsTests(unittest.TestCase):
             "web/package.json": {"web"},
             "agent/src/bub_ledger/plugin.py": {"agent"},
             ".agents/skills/telegram-ledger-agent/SKILL.md": {"agent"},
-            "server/internal/app/ledger.go": {"backend", "ios", "ios_app"},
-            "examples/minimal-ledger/main.bean": {"backend", "ios", "ios_app"},
-            "App/LedgerMobile/Sources/RootView.swift": {"ios", "ios_app"},
+            "server/internal/app/ledger.go": {"backend", "ios_app"},
+            "server/mobilecore/core.go": {"backend", "ios_app"},
+            "server/go.mod": {"backend", "ios_app"},
+            "server/internal/app/ledger_test.go": {"backend"},
+            "server/cmd/ledger-web/main.go": {"backend"},
+            "server/internal/httpservice/server.go": {"backend"},
+            "examples/minimal-ledger/main.bean": {"backend"},
+            "App/LedgerMobile/Sources/RootView.swift": {"ios_app"},
+            "App/LedgerMobile/Sources/LedgerSession.swift": {"ios", "ios_app"},
             "App/LedgerMobile/Tests/LedgerSessionTests.swift": {"ios", "ios_app"},
-            "App/LedgerMobile/UITests/LocalLedgerUITests.swift": {"ios", "ios_app"},
-            "App/LedgerMobile/ShareExtension/ShareViewController.swift": {"ios", "ios_app"},
-            "App/LedgerMobile/WidgetExtension/QuickRecordWidget.swift": {"ios", "ios_widgets"},
-            "App/LedgerMobile/WidgetTests/LedgerWidgetVisualTests.swift": {"ios", "ios_widgets"},
-            "App/LedgerMobile/project.yml": {"ios", "ios_app", "ios_widgets"},
+            "App/LedgerMobile/UITests/LocalLedgerUITests.swift": {"ios_app"},
+            "App/LedgerMobile/ShareExtension/ShareViewController.swift": {"ios_app"},
+            "App/LedgerMobile/WidgetExtension/QuickRecordWidget.swift": {"ios_widgets"},
+            "App/LedgerMobile/WidgetTests/LedgerWidgetVisualTests.swift": {"ios_widgets"},
+            "App/LedgerMobile/project.yml": {"ios_app", "ios_widgets"},
             "App/LedgerMobile/Package.swift": {"ios"},
-            "App/LedgerMobile/FEATURE_PARITY.md": {"ios"},
-            "App/LedgerMobile/Runtime/ledger_validator.py": {"ios", "ios_runtime", "backend", "ios_app"},
+            "App/LedgerMobile/Runtime/ledger_validator.py": {"ios_runtime", "backend", "ios_app"},
             "scripts/build-ledgercore-xcframework.sh": {"ios_app"},
             ".github/scripts/ios-app-check.sh": {"ios_app", "ios_widgets"},
             "docker/docker-compose.selfhost.yml": {"selfhost"},
@@ -68,13 +74,40 @@ class PlanComponentsTests(unittest.TestCase):
         self.assertEqual(enabled("App/LedgerMobile/Sources/MoneyText.swift"),
                          {"ios", "ios_app", "ios_widgets"})
         self.assertEqual(enabled("App/LedgerMobile/Resources/Fonts/IBMPlexSans-Regular.ttf"),
-                         {"ios", "ios_app", "ios_widgets"})
+                         {"ios_app", "ios_widgets"})
         project = (ROOT / "App/LedgerMobile/project.yml").read_text()
         self.assertIn("- path: Sources/MoneyText.swift", project)
         self.assertNotIn("- path: Sources/RootView.swift", project)
 
+    def test_package_sources_come_from_package_swift(self):
+        # The package lists LedgerSession.swift; RootView.swift is excluded.
+        package = (ROOT / "App/LedgerMobile/Package.swift").read_text()
+        self.assertIn('"LedgerSession.swift"', package)
+        self.assertIn('"RootView.swift"', package.split("sources:")[0])
+
+    def test_backend_only_go_packages_stay_out_of_ledgercore(self):
+        # The planner skips the app for these server paths. Fail if LedgerCore
+        # (gomobile binds server/mobile*) ever starts importing one of them.
+        backend_only = ("/cmd/", "/internal/httpservice", "/internal/logging")
+        if shutil.which("go") is None:
+            self.skipTest("go is not installed")
+        server = ROOT / "server"
+        result = subprocess.run(
+            ["go", "list", "-deps", "-f", "{{.Dir}}", "./mobilecore", "./mobilegit", "./mobileagent"],
+            cwd=server, capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            self.skipTest("go list failed: " + result.stderr.strip()[:200])
+        for directory in result.stdout.split():
+            relative = "/" + Path(directory).relative_to(server).as_posix() if directory.startswith(str(server)) else ""
+            with self.subTest(package=relative):
+                self.assertFalse(any(part in relative + "/" for part in backend_only), relative)
+
     def test_documentation_runs_nothing(self):
         self.assertEqual(enabled("README.md", "docs/self-hosted-compose.md", "AGENTS.md"), set())
+        self.assertEqual(enabled("App/LedgerMobile/FEATURE_PARITY.md", "App/LedgerMobile/README.md",
+                                 "App/LedgerMobile/Runtime/THIRD_PARTY.md",
+                                 "App/LedgerMobile/Screenshots/home.png"), set())
 
     def test_pipeline_changes_run_everything(self):
         for path in (".github/workflows/ci.yml", ".github/scripts/plan-components.sh",
