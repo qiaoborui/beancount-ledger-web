@@ -1294,7 +1294,7 @@ actor LocalLedgerRepository: LedgerRepository {
                       choice: LedgerAgentModelChoice, apiKey: String, sensitiveUnlocked: Bool,
                       thinking: LedgerAgentThinking? = nil, draft: URL? = nil, transcript: String? = nil,
                       conversationID: UUID? = nil, attachments: [LedgerAgentAttachment.Payload] = [],
-                      usesMemory: Bool = false, runner: LedgerAgentRunner = .native,
+                      usesMemory: Bool = false, contextWindow: Int? = nil, runner: LedgerAgentRunner = .native,
                       onStep: LedgerAgentSteps.Handler? = nil) async throws -> LedgerAgentTurnResponse {
         if draft != nil { LedgerAgentChecker.install() }
         let engine = engine, entrypoint = descriptor.entrypoint
@@ -1321,7 +1321,7 @@ actor LocalLedgerRepository: LedgerRepository {
                     scratchRoot: draft?.path, transcript: transcript,
                     conversationId: conversationID?.uuidString,
                     attachments: attachments.isEmpty ? nil : attachments,
-                    memoryPath: memoryPath, streamEvents: onStep != nil ? true : nil)
+                    memoryPath: memoryPath, streamEvents: onStep != nil ? true : nil, contextWindow: contextWindow)
                 let encoded = try JSONEncoder().encode(request)
                 if let onStep {
                     onStep(.startingLoop)

@@ -681,6 +681,9 @@ struct LedgerAgentListedModel: Codable, Identifiable, Hashable, Sendable {
     var thinkingLevels: [String]? = nil
     /// The native catalog describes it; otherwise its levels are assumed.
     var known = false
+    /// Its context in tokens, from the provider's list or else the catalog;
+    /// nil when neither says.
+    var contextWindow: Int? = nil
 
     var thinking: [LedgerAgentThinking] {
         let levels = (thinkingLevels ?? []).compactMap(LedgerAgentThinking.init(rawValue:))
@@ -764,6 +767,9 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     /// The device's calendar day, yyyy-MM-dd: Go on iOS keeps time in UTC,
     /// so an onboarding turn takes "today" from here.
     var today: String? = nil
+    /// The model's context in tokens as the provider's list gave it; nil
+    /// keeps the native catalog's window, or a common one.
+    var contextWindow: Int? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {

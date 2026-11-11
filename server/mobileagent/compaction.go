@@ -71,8 +71,11 @@ type compactor struct {
 	network *turnHTTP
 	model   *ai.Model
 	assumed bool
-	key     string
-	feed    *eventFeed
+	// listed is the window the shell read from the provider's list for this
+	// model; zero when it has none.
+	listed int
+	key    string
+	feed   *eventFeed
 	// spend, when set, is given the tokens of the summary request, so the
 	// turn's usage counts them.
 	spend func(ai.Usage)
@@ -88,7 +91,7 @@ type compactor struct {
 // The only error is the turn being stopped or out of time.
 func (c compactor) compact(ctx context.Context, messages []agent.AgentMessage) ([]agent.AgentMessage, int, error) {
 	sizes, total, encodes := messageSizes(messages)
-	if !encodes || (total <= transcriptBudget && contextEstimate(messages) < int(float64(contextWindow(c.model, c.assumed))*compactionThreshold)) {
+	if !encodes || (total <= transcriptBudget && contextEstimate(messages) < int(float64(contextWindow(c.model, c.assumed, c.listed))*compactionThreshold)) {
 		return messages, 0, nil
 	}
 	head, cut, turns, ok := compactionCut(messages, sizes)
@@ -127,9 +130,13 @@ func (c compactor) summarize(ctx context.Context, older []agent.AgentMessage) (s
 	return summary, nil
 }
 
-// contextWindow is the window the threshold is a share of. A model whose
-// abilities are assumed may have any window, so it gets a common one.
-func contextWindow(model *ai.Model, assumed bool) int {
+// contextWindow is the window the threshold is a share of: the one the
+// provider's list gave, else the model's. A model whose abilities are
+// assumed may have any window, so without a listed one it gets a common one.
+func contextWindow(model *ai.Model, assumed bool, listed int) int {
+	if listed > 0 {
+		return listed
+	}
 	if assumed || model.Capabilities.ContextWindow <= 0 {
 		return assumedContextWindow
 	}
