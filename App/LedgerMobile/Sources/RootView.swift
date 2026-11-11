@@ -553,14 +553,15 @@ private struct MainTabView: View {
         .fullScreenCover(item: quickEntryBinding(.sentence)) { _ in
             NaturalLanguageBookkeepingView(onSaved: { session.quickEntry = nil })
         }
-        // 账本助手 over the current tab, without the tab bar, so its composer
-        // sits at the bottom of the screen. Closing it keeps the conversation,
-        // and a running reply, in `LedgerAgentSessions`.
-        .sheet(isPresented: agentSheetBinding, onDismiss: { session.agentSheetOnScreen = false }) {
+        // 账本助手 covers the whole screen, without the tab bar, so its composer
+        // sits at the bottom of the screen. A cover rather than a sheet: a
+        // downward drag scrolls the conversation instead of dismissing it, and
+        // only the close button leaves. Closing it keeps the conversation, and
+        // a running reply, in `LedgerAgentSessions`.
+        .fullScreenCover(isPresented: agentSheetBinding, onDismiss: { session.agentSheetOnScreen = false }) {
             NavigationStack {
                 LedgerAgentView(isRoot: true, onClose: { session.agentPresented = false })
             }
-            .presentationDetents([.large])
             .ledgerPrivacyProtectedSheet()
             .onAppear { session.agentSheetOnScreen = true }
         }

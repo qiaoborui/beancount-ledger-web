@@ -23,7 +23,7 @@ enum LedgerExternalRoute: Equatable, Sendable {
         }
     }
 
-    /// 账本助手 is a sheet over the current tab rather than a tab of its own.
+    /// 账本助手 is a full-screen cover over the current tab rather than a tab of its own.
     var opensAgent: Bool {
         switch self {
         case .agent, .page(.agent): true
