@@ -1,8 +1,9 @@
 # 20261111-hsbc-post-date-match
 
-- Status: active (all three PRs open, awaiting review/merge)
-- Last updated: 2026-11-11 21:45 +08
-- Branches: `codex/hsbc-post-date-match` (based on `main` @ 6ce9359e) -> `codex/hsbc-post-date-ui` -> `codex/hsbc-post-date-backfill`
+- Status: completed
+- Last updated: 2026-11-11 22:10 +08
+- Covers: `main` @ ad24c89b (merge of #648, which carries #649 and #650)
+- Released: iOS v1.4.4 (build 10404), published to the SideStore source
 
 ## Goal
 
@@ -59,12 +60,20 @@ statement-period reconciliation by post date works.
      archived); iOS `PostDateBackfillView` from the import history page; local
      ledgers write through the change preview (`preparePostDateBackfill`).
 
-## Remaining
+## Outcome
 
-1. Merge in order #648 -> #649 -> PR 3, retargeting each base to `main` after
-   the one below it merges.
-2. Release note needed (iOS embeds LedgerCore; new UI).
-3. Optional: statement-period reconciliation by `post_date`.
+- #650 was merged into the #649 branch and #649 into the #648 branch, then #648
+  was updated with `main` and merged once CI passed (Backend, Frontend, iOS
+  core, Gate).
+- Tag `v1.4.4` on `main` @ ad24c89b; the `ios-release` run succeeded and the
+  IPA, `.sha256` and `.build-info.txt` are on the `v1.4.4` release, with
+  `1.4.4 (10404)` at the top of the SideStore source.
+
+## Follow-ups (not started)
+
+- On a device: install 1.4.4, run 补写汇丰记账日 against the real ledger and
+  review the fills, reviews and possible duplicates before writing.
+- Optional: statement-period reconciliation by `post_date`.
 
 ## Validation (PR 3 head)
 
