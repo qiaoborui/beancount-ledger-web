@@ -338,23 +338,16 @@ These notes cover installation and renewal of a private local build. Public
 binary distribution remains gated by [the runtime licensing issue](Runtime/THIRD_PARTY.md).
 Keep the embedded Python framework and standard-library extension frameworks
 when packaging or re-signing; they must receive valid signatures with the app.
-### Private GitHub Actions packaging
+### Private packaging
 
-Open Actions → **iOS SideStore IPA** → **Run workflow**, select `main`, and run
-the workflow. The Mac runner builds the embedded Go and Beancount frameworks,
-archives the app, and signs Python and all standard-library extension frameworks
-before signing the app and its Widget/Share extensions.
+There is no Actions workflow for packaging; build the IPA on the Mac. The script
+builds the embedded Go and Beancount frameworks, archives the app, and signs
+Python and all standard-library extension frameworks before signing the app and
+its Widget/Share extensions. The output directory also receives a SHA-256
+checksum and `build-info.txt` with the source commit, app version and actual
+Xcode/SDK versions. Import the `.ipa` into SideStore using **+**.
 
-The result is uploaded as a private Actions artifact for 7 days and also stays
-on the Mac runner at
-`~/Downloads/LedgerMobile-PrivateBuilds/<run-id>-<attempt>/`, with owner-only
-permissions. Download the artifact from the run summary, extract it, and import
-the `.ipa` into SideStore using **+**. It also contains a SHA-256 checksum and
-`build-info.txt` with the source commit, app version and actual Xcode/SDK
-versions. GitHub retains the private artifact for 7 days. Automatic push builds
-remain disabled; the local copy stays until the owner removes it.
-
-For a direct private build, select Xcode through `DEVELOPER_DIR`, then run:
+Select Xcode through `DEVELOPER_DIR`, then run:
 
 ```sh
 bash scripts/build-ios-ipa.sh --private-local /absolute/path/to/new-output-directory

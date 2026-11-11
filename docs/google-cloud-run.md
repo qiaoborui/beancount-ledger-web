@@ -1,5 +1,9 @@
 # Google Cloud Run deployment
 
+> **Note:** the GitHub Actions workflows this runbook describes (`deploy-google-cloud.yml`, `publish-images.yml`)
+> have been removed from the repository. The infrastructure notes below remain
+> for reference; deployments must be run by hand.
+
 The hosted topology runs the standalone web/API container plus a private,
 single-instance Bub Agent service on Cloud Run. The Go process
 serves the Vite build and `/api/*` from the same origin, preserving the existing
