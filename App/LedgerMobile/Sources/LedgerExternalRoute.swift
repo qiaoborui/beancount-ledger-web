@@ -23,6 +23,14 @@ enum LedgerExternalRoute: Equatable, Sendable {
         }
     }
 
+    /// 账本助手 is a sheet over the current tab rather than a tab of its own.
+    var opensAgent: Bool {
+        switch self {
+        case .agent, .page(.agent): true
+        default: false
+        }
+    }
+
     static func parse(_ url: URL) -> Self? {
         guard url.scheme?.lowercased() == "ledger", url.user == nil, url.password == nil,
               url.port == nil, url.path.isEmpty || url.path == "/", url.fragment == nil,

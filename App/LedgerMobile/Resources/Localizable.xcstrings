@@ -2584,6 +2584,16 @@
         }
       }
     },
+    "交易、账户、标签与文件" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transactions, accounts, tags and files"
+          }
+        }
+      }
+    },
     "交易信息" : {
       "localizations" : {
         "en" : {
@@ -10258,12 +10268,12 @@
         }
       }
     },
-    "拖动右侧排序控件调整显示顺序，底栏固定保留“更多”和“搜索”。" : {
+    "拖动右侧排序控件调整显示顺序，底栏固定保留“更多”和右侧的浮出按钮。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Drag the handles on the right to reorder. The tab bar always keeps “More” and “Search”."
+            "value" : "Drag the handles on the right to reorder. The tab bar always keeps “More” and the floating button beside it."
           }
         }
       }
