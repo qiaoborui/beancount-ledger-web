@@ -12,12 +12,10 @@ name: iOS release
 # A line that is exactly `---` ends the part shown in SideStore; the GitHub
 # Release gets all of it.
 #
-# build-ios-ipa.sh still checks that the newest release tag equals
-# MARKETING_VERSION in project.yml, and packages build CURRENT_PROJECT_VERSION+1.
-# Its write-back of that bump is lost with the runner's checkout, so after each
-# release commit the build number it reports, as the "record build N" commits
-# already do for local packages; otherwise the next tag repeats it and the
-# shared workflow rejects the release.
+# The tag is the only input: build-ios-ipa.sh takes the version from it and
+# derives the build number as MAJOR*10000 + MINOR*100 + PATCH (v1.4.3 -> 10403),
+# overriding the development values in project.yml. Nothing is written back, so
+# there is no version-bump or build-record commit before or after a release.
 #
 # The reusable workflow is pinned to the merge commit of
 # Ami0307/tethera-releases#9. To upgrade, change the SHA in `uses:` and in

@@ -45,6 +45,7 @@ class PlanComponentsTests(unittest.TestCase):
             ".github/scripts/test-deploy-selfhost-submit.sh": {"selfhost"},
             ".github/scripts/select-xcode.sh": {"ios"},
             "scripts/build-ios-ipa.sh": {"release"},
+            "scripts/ios-release-version.sh": {"release"},
             "scripts/publish-sidestore-release.py": {"release"},
             ".github/workflows/ios-release.yml": {"release"},
         }
