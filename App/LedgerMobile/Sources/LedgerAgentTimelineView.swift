@@ -171,9 +171,9 @@ struct LedgerAgentThinkingBlock: View {
 /// A run of tool calls under one summary line, collapsed until tapped so a
 /// long run of reads does not push the reply down the page; while collapsed,
 /// the call still running shows in the live footer rather than under the
-/// line, so the group does not grow and shrink with each call. Live and saved groups both start
-/// collapsed, so a group opened during the turn closes again when the saved
-/// answer replaces the live turn. Each row says whether the call is
+/// line, so the group does not grow and shrink with each call. Live and
+/// saved groups both start collapsed, so a group opened during the turn
+/// closes again when the saved answer replaces the live turn. Each row says whether the call is
 /// running, done or failed, and how long it took; a row expands to what it
 /// was asked and the start of what came back.
 struct LedgerAgentToolTimeline: View {
