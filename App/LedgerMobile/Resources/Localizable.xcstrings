@@ -14768,6 +14768,16 @@
         }
       }
     },
+    "正在思考…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking…"
+          }
+        }
+      }
+    },
     "正在思考：%@" : {
       "localizations" : {
         "en" : {

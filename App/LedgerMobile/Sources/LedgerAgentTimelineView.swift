@@ -96,9 +96,8 @@ struct LedgerAgentLiveTimeline: View {
     /// and keeps the last of them between steps.
     private var footer: some View {
         TimelineView(.periodic(from: since, by: 1)) { context in
-            let hint = context.date.timeIntervalSince(quietSince) >= Self.slowAfter
-                ? String(localized: "模型这一步比较慢。网络不好时可以点停止，再发一次。")
-                : String(localized: "可以离开这一页或切到后台，答完会通知你")
+            let slow = context.date.timeIntervalSince(quietSince) >= Self.slowAfter
+            let hint = slow ? Self.slowHint : Self.leaveHint
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.mini).tint(BalancedPalette.meta)
@@ -110,7 +109,13 @@ struct LedgerAgentLiveTimeline: View {
                         .lineLimit(1).truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text(hint).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                // Both hints are laid out and one is shown, so the longer slow
+                // hint wrapping cannot grow the page and then shrink it.
+                ZStack(alignment: .topLeading) {
+                    Text(Self.leaveHint).opacity(slow ? 0 : 1)
+                    Text(Self.slowHint).opacity(slow ? 1 : 0)
+                }
+                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("正在回答")
@@ -120,6 +125,9 @@ struct LedgerAgentLiveTimeline: View {
     }
 
     private var activity: String? { turn.activity?.text }
+
+    private static var leaveHint: String { String(localized: "可以离开这一页或切到后台，答完会通知你") }
+    private static var slowHint: String { String(localized: "模型这一步比较慢。网络不好时可以点停止，再发一次。") }
 }
 
 /// One reasoning block. Collapsed, it says how long the model thought, or
