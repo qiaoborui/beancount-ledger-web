@@ -361,6 +361,26 @@
         }
       }
     },
+    "%@ · 期初 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · opening balances on %@"
+          }
+        }
+      }
+    },
+    "%@ · 期初为创建当天" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · opening balances dated on creation"
+          }
+        }
+      }
+    },
     "%@ · 本地" : {
       "localizations" : {
         "en" : {
@@ -1311,6 +1331,26 @@
         }
       }
     },
+    "AI 开账" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI setup"
+          }
+        }
+      }
+    },
+    "AI 开账用的是账本助手：选一个模型服务并填入你自己的 API Key，它会和你聊几句，按你实际用的账户和收支习惯搭好账本。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI setup uses the ledger assistant. Pick a model provider and enter your own API key; it chats with you briefly and builds the ledger around the accounts and spending you actually have."
+          }
+        }
+      }
+    },
     "AI 提示" : {
       "localizations" : {
         "en" : {
@@ -1649,6 +1689,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Encrypted over HTTPS"
+          }
+        }
+      }
+    },
+    "Key 只保存在这台设备的钥匙串里。对话只发送给你选的模型服务，确认创建前不会写入任何文件。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The key is stored only in this device's Keychain. The chat goes only to the provider you pick, and no file is written until you confirm."
           }
         }
       }
@@ -2270,6 +2320,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Main currency"
+          }
+        }
+      }
+    },
+    "也可以直接在下面输入" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Or type below"
           }
         }
       }
@@ -3334,16 +3394,6 @@
         }
       }
     },
-    "使用新手向导开账（推荐）" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Set Up with the Assistant (Recommended)"
-          }
-        }
-      }
-    },
     "使用生物识别快速解锁账本" : {
       "localizations" : {
         "en" : {
@@ -3864,6 +3914,16 @@
         }
       }
     },
+    "储蓄" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Savings"
+          }
+        }
+      }
+    },
     "储蓄与投资" : {
       "localizations" : {
         "en" : {
@@ -3910,6 +3970,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Metadata must be a JSON object"
+          }
+        }
+      }
+    },
+    "先接上模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect a model first"
           }
         }
       }
@@ -4326,6 +4396,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Other income"
+          }
+        }
+      }
+    },
+    "其他欠款" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other debts"
           }
         }
       }
@@ -5566,6 +5646,16 @@
         }
       }
     },
+    "发送" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send"
+          }
+        }
+      }
+    },
     "发送内容" : {
       "localizations" : {
         "en" : {
@@ -5722,6 +5812,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ready to review"
+          }
+        }
+      }
+    },
+    "可多选；也可以直接在下面输入" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick several, or type below"
           }
         }
       }
@@ -6088,12 +6188,32 @@
         }
       }
     },
+    "告诉账本助手你用哪些卡和钱包、主要的收支，它会搭好账户、分类和期初余额。确认后才创建，数据只存放在本设备。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tell the ledger assistant which cards and wallets you use and where your money comes from and goes. It sets up accounts, categories and opening balances. Nothing is created until you confirm, and data stays on this device."
+          }
+        }
+      }
+    },
     "周期" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Period"
+          }
+        }
+      }
+    },
+    "和账本助手聊几句，按你的账户和习惯搭好账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chat with the ledger assistant to build a ledger around your accounts and habits"
           }
         }
       }
@@ -6234,6 +6354,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Merchant ranking"
+          }
+        }
+      }
+    },
+    "回答问题，或补充想调整的地方" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Answer, or say what to change"
           }
         }
       }
@@ -8558,22 +8688,22 @@
         }
       }
     },
-    "开启向导" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Start Assistant"
-          }
-        }
-      }
-    },
     "开始" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Start"
+          }
+        }
+      }
+    },
+    "开始 AI 开账" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start AI setup"
           }
         }
       }
@@ -9574,6 +9704,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No trend data in the selected range"
+          }
+        }
+      }
+    },
+    "手动开账" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manual"
+          }
+        }
+      }
+    },
+    "手动开账向导" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manual setup assistant"
           }
         }
       }
@@ -10848,6 +10998,36 @@
         }
       }
     },
+    "整理中" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In progress"
+          }
+        }
+      }
+    },
+    "整理分类" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arrange categories"
+          }
+        }
+      }
+    },
+    "整理账户" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arrange accounts"
+          }
+        }
+      }
+    },
     "文件" : {
       "localizations" : {
         "en" : {
@@ -11054,6 +11234,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Setup assistant"
+          }
+        }
+      }
+    },
+    "方案已就绪" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plan ready"
           }
         }
       }
@@ -11284,16 +11474,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Can't lock the local sync folder"
-          }
-        }
-      }
-    },
-    "无需编写代码或配置 Git，可视化勾选微信、支付宝、银行卡与日常分类，数据 100% 离线存放在本设备。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No code or Git setup needed. Pick WeChat, Alipay, bank cards, and everyday categories visually. Data stays 100% offline on this device."
           }
         }
       }
@@ -12658,6 +12838,16 @@
         }
       }
     },
+    "期初日期无效" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invalid opening date"
+          }
+        }
+      }
+    },
     "期末" : {
       "localizations" : {
         "en" : {
@@ -13918,6 +14108,16 @@
         }
       }
     },
+    "欠 %@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Owes %@ %@"
+          }
+        }
+      }
+    },
     "欢迎使用 Ledger" : {
       "localizations" : {
         "en" : {
@@ -14174,6 +14374,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Securely restoring ledger"
+          }
+        }
+      }
+    },
+    "正在思考" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking"
           }
         }
       }
@@ -15528,6 +15738,16 @@
         }
       }
     },
+    "生成开账方案" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Draft setup plan"
+          }
+        }
+      }
+    },
     "生效日期" : {
       "localizations" : {
         "en" : {
@@ -15554,6 +15774,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Biometric authentication was canceled"
+          }
+        }
+      }
+    },
+    "用 AI 开账（推荐）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set up with AI (recommended)"
           }
         }
       }
@@ -15754,6 +15984,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Write to ledger?"
+          }
+        }
+      }
+    },
+    "确认创建「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create “%@”"
           }
         }
       }
@@ -16378,16 +16618,6 @@
         }
       }
     },
-    "约 1 分钟" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "About 1 minute"
-          }
-        }
-      }
-    },
     "结余" : {
       "localizations" : {
         "en" : {
@@ -16704,6 +16934,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Beauty & skincare"
+          }
+        }
+      }
+    },
+    "聊几句就好" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Just a short chat"
           }
         }
       }
@@ -17228,6 +17468,36 @@
         }
       }
     },
+    "设置模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set up model"
+          }
+        }
+      }
+    },
+    "设置模型与 API Key" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set up model and API key"
+          }
+        }
+      }
+    },
+    "设置账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ledger settings"
+          }
+        }
+      }
+    },
     "访问令牌" : {
       "localizations" : {
         "en" : {
@@ -17394,6 +17664,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Description / note"
+          }
+        }
+      }
+    },
+    "说说你平时用哪些银行卡、钱包和信用卡，大概的余额，以及主要的收入和花销。账本结构会随着对话出现在下面，确认之前不会创建。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tell it which bank cards, wallets and credit cards you use, roughly what they hold, and your main income and spending. The ledger takes shape below as you talk, and nothing is created until you confirm."
           }
         }
       }
@@ -18708,6 +18988,16 @@
         }
       }
     },
+    "账本结构" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ledger structure"
+          }
+        }
+      }
+    },
     "账本起始日生效 (推荐)" : {
       "localizations" : {
         "en" : {
@@ -18774,6 +19064,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Shopping refunds"
+          }
+        }
+      }
+    },
+    "贷款" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loans"
           }
         }
       }
@@ -19034,6 +19334,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skip"
+          }
+        }
+      }
+    },
+    "跳过，手动开账" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skip and set up manually"
           }
         }
       }
@@ -20534,6 +20844,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bank debit card"
+          }
+        }
+      }
+    },
+    "银行卡" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bank cards"
           }
         }
       }
