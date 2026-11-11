@@ -187,6 +187,14 @@ targets:
         SUPPORTED_PLATFORMS: "iphoneos iphonesimulator macosx"
         SUPPORTS_MACCATALYST: YES
         DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+    # Builds the extension without the app, so CI checks a widget change
+    # without building LedgerCore and the Beancount runtime. Same locale as the
+    # LedgerMobile scheme, which also runs these tests.
+    scheme:
+      language: zh-Hans
+      region: CN
+      testTargets:
+        - LedgerWidgetsTests
 
   LedgerShare:
     type: app-extension

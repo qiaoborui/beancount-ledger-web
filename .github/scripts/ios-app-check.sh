@@ -1,35 +1,64 @@
 #!/usr/bin/env bash
-# Build the whole LedgerMobile scheme for an iOS simulator and run its unit tests.
+# Build an Xcode scheme of the iOS app for a simulator and run one test target.
 #
 # `swift test` and the iOS SDK cross-build in the iOS core job only compile the
 # files Package.swift lists. The app's UI layer (RootView, MoreView, the agent
-# screen, the widgets and the share extension) is compiled only by Xcode, so a
-# change there could pass CI and still break the IPA build. This builds the
-# app, its extensions and every test bundle, then runs the unit test targets.
+# screen), the widgets and the share extension are compiled only by Xcode, so a
+# change there could pass that job and still break the IPA build.
 #
-# The UI test target is built but not run: on a loaded machine several of its
-# screenshot and navigation tests time out, so it would fail for reasons that
-# have nothing to do with the change.
-#
-# Usage: bash .github/scripts/ios-app-check.sh   (from any directory)
+# Usage: bash .github/scripts/ios-app-check.sh <mode>   (from any directory)
+#   app       build the LedgerMobile scheme (the app, both extensions and every
+#             test bundle) and run LedgerMobileTests
+#   widgets   build the LedgerWidgets scheme and run LedgerWidgetsTests; needs
+#             neither LedgerCore nor the Beancount runtime, so it is quick
+#   ui-tests  build the LedgerMobile scheme and run LedgerMobileUITests; several
+#             of them time out on a loaded machine, so CI runs them only when a
+#             manual run asks for them
 set -euo pipefail
+
+mode="${1:-}"
+skipped_tests=()
+case "$mode" in
+  app)
+    scheme=LedgerMobile
+    test_target=LedgerMobileTests
+    needs_frameworks=true
+    # Unsigned simulator builds have no keychain access group, so these tests
+    # fail on every unsigned run regardless of the change.
+    skipped_tests=(
+      LedgerMobileTests/BookkeepingPipelineTests/testSemanticCredentialsStayLocalAndChangingEndpointRequiresFreshKey
+      LedgerMobileTests/ImportClassificationTests/testConsentIsPerLedgerAndKeyIsStoredSeparatelyFromPreferences
+      LedgerMobileTests/LocalGitBackgroundCredentialTests/testDeviceOnlyCredentialMigratesAccessibilityWithoutChangingToken
+    )
+    ;;
+  widgets)
+    scheme=LedgerWidgets
+    test_target=LedgerWidgetsTests
+    needs_frameworks=false
+    ;;
+  ui-tests)
+    scheme=LedgerMobile
+    test_target=LedgerMobileUITests
+    needs_frameworks=true
+    ;;
+  *)
+    echo "usage: $0 app|widgets|ui-tests" >&2
+    exit 2
+    ;;
+esac
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/.github/scripts/select-xcode.sh"
 export PATH="/opt/homebrew/bin:$PATH"
 
-# Unsigned simulator builds have no keychain access group, so these tests fail
-# on every unsigned run regardless of the change.
-skipped_tests=(
-  LedgerMobileTests/BookkeepingPipelineTests/testSemanticCredentialsStayLocalAndChangingEndpointRequiresFreshKey
-  LedgerMobileTests/ImportClassificationTests/testConsentIsPerLedgerAndKeyIsStoredSeparatelyFromPreferences
-  LedgerMobileTests/LocalGitBackgroundCredentialTests/testDeviceOnlyCredentialMigratesAccessibilityWithoutChangingToken
-)
-
-# The frameworks project.yml links: LedgerCore (gomobile) and the embedded
-# Beancount runtime with its Python. Both scripts reuse their downloads.
-bash "$repo_root/scripts/build-ledgercore-xcframework.sh"
-bash "$repo_root/scripts/build-beancount-ios.sh"
+if [[ "$needs_frameworks" == true ]]; then
+  # The frameworks the app links: LedgerCore (gomobile) and the embedded
+  # Beancount runtime with its Python. Both scripts reuse their downloads.
+  echo "::group::Build LedgerCore and the Beancount runtime"
+  bash "$repo_root/scripts/build-ledgercore-xcframework.sh"
+  bash "$repo_root/scripts/build-beancount-ios.sh"
+  echo "::endgroup::"
+fi
 
 cd "$repo_root/App/LedgerMobile"
 # The Xcode project is generated and git-ignored.
@@ -58,27 +87,28 @@ derived_data="$(mktemp -d "${TMPDIR:-/tmp}/ledger-ios-app.XXXXXX")"
 trap 'rm -rf "$derived_data"' EXIT
 common=(
   -project LedgerMobile.xcodeproj
-  -scheme LedgerMobile
+  -scheme "$scheme"
   -destination "platform=iOS Simulator,id=$simulator"
   -derivedDataPath "$derived_data"
   CODE_SIGNING_ALLOWED=NO
 )
 
-echo "::group::Build the app, its extensions and the test bundles"
+echo "::group::Build the $scheme scheme and its test bundles"
 xcodebuild build-for-testing -quiet "${common[@]}"
 echo "::endgroup::"
 
 skip_args=()
-for test in "${skipped_tests[@]}"; do skip_args+=("-skip-testing:$test"); done
+for test in ${skipped_tests[@]+"${skipped_tests[@]}"}; do
+  skip_args+=("-skip-testing:$test")
+done
 xcodebuild test-without-building "${common[@]}" \
-  -only-testing:LedgerMobileTests \
-  -only-testing:LedgerWidgetsTests \
-  "${skip_args[@]}" \
-  -resultBundlePath "$derived_data/UnitTests.xcresult" \
+  "-only-testing:$test_target" \
+  ${skip_args[@]+"${skip_args[@]}"} \
+  -resultBundlePath "$derived_data/Tests.xcresult" \
   | grep -E --line-buffered '(error|failed|passed|Executed|TEST (SUCCEEDED|FAILED)|\*\* )' \
   || true
 # grep hides the full log, so take the verdict from the result bundle.
-xcrun xcresulttool get test-results summary --path "$derived_data/UnitTests.xcresult" \
+xcrun xcresulttool get test-results summary --path "$derived_data/Tests.xcresult" \
   | python3 -c '
 import json, sys
 summary = json.load(sys.stdin)

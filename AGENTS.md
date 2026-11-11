@@ -252,9 +252,13 @@ areas (its test is `.github/scripts/test_plan_components.py`):
 |---|---|
 | `web/` | Frontend |
 | `agent/`, `.agents/` | Bub Agent |
-| `server/`, `examples/` | Backend, iOS core |
-| `App/LedgerMobile/Runtime/` | iOS core, iOS Beancount runtime, Backend |
+| `server/`, `examples/` | Backend, iOS core, iOS app |
+| `App/LedgerMobile/Runtime/` | iOS core, iOS Beancount runtime, Backend, iOS app |
+| `App/LedgerMobile/project.yml` | iOS core, iOS app, iOS widgets |
+| `Sources/`, `Resources/`, `Supporting/`, `ShareExtension/`, `Tests/`, `UITests/` under `App/LedgerMobile/` | iOS core, iOS app |
+| `WidgetExtension/`, `WidgetTests/` under `App/LedgerMobile/`, and the shared files the widget targets list in `project.yml` | iOS core, iOS widgets |
 | other `App/` | iOS core |
+| the app's framework and build-phase scripts under `scripts/` | iOS app |
 | `docker/`, `scripts/selfhost/`, `.env.selfhost.example`, `.dockerignore` | Self-hosted stack |
 | IPA packaging and SideStore publishing scripts | Release tooling |
 | `.github/workflows/`, the planner and its test | every job |
@@ -263,12 +267,16 @@ areas (its test is `.github/scripts/test_plan_components.py`):
 A manual run checks every area. `Gate` is the required status check: it
 passes only when every planned job succeeded and every other job was skipped.
 When a new directory needs CI, add it to the planner and its test in the same
-change. The iOS job runs on the self-hosted Mac runner and selects its Xcode through
-`.github/scripts/select-xcode.sh`. `swift test` in `App/LedgerMobile` covers
-the portable core, but Package.swift leaves out the app's UI layer, widgets and
-share extension, so the job also runs `.github/scripts/ios-app-check.sh`: it
-builds the full Xcode scheme for a simulator and runs the unit test targets.
-The UI test target is built but not run, because it is flaky under load.
+change. The iOS jobs run on the self-hosted Mac runner, one at a time, and
+select their Xcode through `.github/scripts/select-xcode.sh`. iOS core runs
+`swift test` in `App/LedgerMobile` on the portable core, but Package.swift
+leaves out the app's UI layer, widgets and share extension. iOS app and iOS
+widgets compile those with `.github/scripts/ios-app-check.sh`: iOS app builds
+the LedgerMobile scheme for a simulator and runs `LedgerMobileTests`, and iOS
+widgets builds the LedgerWidgets scheme and runs `LedgerWidgetsTests`. The UI
+tests are flaky under load, so pull requests only compile them; run them by
+starting CI manually with `ui_tests` checked
+(`gh workflow run ci.yml --ref <branch> -f ui_tests=true`).
 
 When an integration-level behavior depends on hosted infrastructure, GitHub API
 ledger storage, the Postgres read model, or hosted runtime configuration, prefer
