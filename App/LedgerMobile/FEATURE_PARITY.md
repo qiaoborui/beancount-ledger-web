@@ -34,7 +34,7 @@ push — stay out of scope by design, not as pending work.
 | Backup and restore | iCloud Drive (or any folder) snapshots with hash verification, restore into the current ledger or as a new one, daily automatic backup | Local read/write | `LocalLedgerBackup*.swift` |
 | Git synchronization | HTTPS remote, branch, Keychain credentials, pull/validate/push, conflict review and resolution, automatic sync | Network | `GitLocalStorage.swift`, `LocalLedgerAutoSyncCoordinator.swift` |
 | iCloud Drive folder sync | Third storage provider beside device-only and Git: a picked folder holds immutable content-addressed snapshots plus one head file per device; peers merge three-way and reuse the conflict review; no push, so peers are picked up on save, foreground, periodic or background sync, or 立即同步 | Local read/write over iCloud Drive | `FolderLocalStorage.swift`, `LocalLedgerStorageView.swift` |
-| App Intents and URL routes | Open a page, search, `ledger://` deep links | Read | `LedgerAppIntents.swift`, `LedgerExternalRoute.swift` |
+| App Intents and URL routes | Open a page, search, `ledger://` deep links; record a transaction from Shortcuts without opening the app (one opted-in on-device ledger, flagged `!` for review) | Read, Write | `LedgerAppIntents.swift`, `LedgerRecordIntents.swift`, `LedgerShortcutRecording.swift`, `LedgerExternalRoute.swift` |
 
 ## Deliberately out of scope
 

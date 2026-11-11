@@ -208,6 +208,9 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var privacyCoverArmed = false
     @Published private(set) var isAuthenticationBusy = false
     @Published private(set) var isBiometricSettingBusy = false
+    /// The one on-device ledger Shortcuts may write to, chosen with an
+    /// authenticated opt-in. Independent of the active ledger.
+    @Published private(set) var shortcutRecordingLedgerID: String?
     @Published private var localAuthenticationDisabledLedgers: Set<String> = []
     @Published private var localPrivacyCoverPreferences: [String: Bool] = [:]
     @Published private(set) var isWidgetRefreshBusy = false
@@ -514,12 +517,13 @@ final class LedgerSession: ObservableObject {
     private var widgetCredentialRegistrationInFlight = false
     private static let serverKey = "ledger.mobile.server-origin"
     private static let activeLocalLedgerKey = "ledger.mobile.active-local-ledger"
-    private static let storageModeKey = "ledger.mobile.storage-mode"
+    nonisolated private static let storageModeKey = "ledger.mobile.storage-mode"
     private static let locallyLockedOriginsKey = "ledger.mobile.locally-locked-origins"
     private static let lockIntervalsKey = "ledger.mobile.lock-intervals"
     private static let localPrivacyCoverKey = "ledger.mobile.local-privacy-cover"
     private static let localAuthenticationDisabledKey = "ledger.mobile.local-authentication-disabled"
-    private static let valuationCurrenciesKey = "ledger.mobile.valuation-currencies"
+    nonisolated private static let shortcutRecordingLedgerKey = "ledger.mobile.shortcut-recording-ledger"
+    nonisolated private static let valuationCurrenciesKey = "ledger.mobile.valuation-currencies"
     private static let backgroundDatesKey = "ledger.mobile.background-dates"
     private static let gmailOAuthStatesKey = "ledger.mobile.gmail-oauth-states"
     private static let compactTabsKey = "ledger.mobile.compact-tabs"
@@ -547,6 +551,7 @@ final class LedgerSession: ObservableObject {
         selectedRange = initialRange
         draftRange = initialRange
         self.defaults = defaults
+        shortcutRecordingLedgerID = defaults.string(forKey: Self.shortcutRecordingLedgerKey)
         let disabledAuthentication = Set(defaults.stringArray(forKey: Self.localAuthenticationDisabledKey) ?? [])
         localAuthenticationDisabledLedgers = disabledAuthentication
         // Preserve the behavior of installed versions that coupled the two settings.
@@ -714,6 +719,81 @@ final class LedgerSession: ObservableObject {
             amountsVisible = true
         } catch {
             if location == expectedLocation { errorMessage = error.localizedDescription }
+        }
+    }
+
+    var shortcutRecordingEnabled: Bool {
+        guard case let .local(id) = location else { return false }
+        return id.uuidString == shortcutRecordingLedgerID
+    }
+
+    /// Lets Shortcuts write into the current local ledger without opening the
+    /// app. Turning it on authenticates even when ordinary entry does not, and
+    /// prepares file protection so locked-device writes work after the first
+    /// unlock. Turning it off needs no prompt.
+    func setShortcutRecordingEnabled(_ enabled: Bool) async {
+        guard case let .local(id) = location, phase == .ready, enabled != shortcutRecordingEnabled,
+              !isBiometricSettingBusy, !isAuthenticationBusy, !isLocalOperationBusy else { return }
+        isBiometricSettingBusy = true
+        defer { isBiometricSettingBusy = false }
+        let epoch = sessionEpoch, expectedLocation = location
+        errorMessage = nil
+        guard enabled else {
+            defaults.removeObject(forKey: Self.shortcutRecordingLedgerKey)
+            shortcutRecordingLedgerID = nil
+            return
+        }
+        do {
+            try await authenticateLocalLedger(epoch: epoch, location: expectedLocation)
+            try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
+            guard let repository = localRepository, repository.descriptor.id == id else { return }
+            try await LocalLedgerBackgroundProtection.prepareForBackgroundSync(
+                rootDirectory: repository.workspace.rootDirectory, configurationID: nil)
+            try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
+            guard phase == .ready else { return }
+            // One target only: enabling here replaces any previous ledger.
+            defaults.set(id.uuidString, forKey: Self.shortcutRecordingLedgerKey)
+            shortcutRecordingLedgerID = id.uuidString
+        } catch {
+            if location == expectedLocation { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// The Shortcuts target as the intent process sees it, read straight from
+    /// defaults so it works without a session.
+    nonisolated static func shortcutTarget(defaults: UserDefaults = .standard) -> LedgerShortcutTarget {
+        if let stored = defaults.string(forKey: shortcutRecordingLedgerKey), let id = UUID(uuidString: stored) {
+            return .local(id: id, valuationCurrency: storedValuationCurrency(
+                origin: "ledger-local://" + id.uuidString.lowercased(), defaults: defaults))
+        }
+        return .none(remoteMode: defaults.string(forKey: storageModeKey) == "remote")
+    }
+
+    /// After a Shortcuts commit. A foreground session on that ledger refreshes
+    /// onto the new revision; otherwise the widget is republished headlessly,
+    /// but only where a snapshot already exists and the ledger is not locked,
+    /// so it never shows more than it already did.
+    func shortcutRecordCommitted(ledgerID: UUID, catalog: LocalLedgerCatalog) async {
+        guard location == .local(ledgerID) else { return }
+        if phase == .ready && applicationActive {
+            scheduleLocalResumeRefresh()
+            return
+        }
+        let origin = URL(string: "ledger-local://" + ledgerID.uuidString.lowercased())!
+        let epoch = sessionEpoch
+        guard widgetSnapshotStore.load() != nil, !isLocallyLocked(origin),
+              let descriptor = try? await catalog.list().first(where: { $0.id == ledgerID }) else { return }
+        let publication = try? await LocalLedgerWidgetPublisher.refreshReportingChange(
+            repository: catalog.repository(for: descriptor),
+            valuationCurrency: Self.storedValuationCurrency(origin: origin.absoluteString, defaults: defaults),
+            store: widgetSnapshotStore, now: ledgerNow()) {
+                !Task.isCancelled && self.sessionEpoch == epoch && self.location == .local(ledgerID)
+                    && self.widgetSnapshotStore.load() != nil && !self.isLocallyLocked(origin)
+            }
+        if publication?.changed == true {
+            #if canImport(WidgetKit)
+            WidgetCenter.shared.reloadAllTimelines()
+            #endif
         }
     }
 
@@ -917,6 +997,10 @@ final class LedgerSession: ObservableObject {
             repositories.removeValue(forKey: .local(descriptor.id))
             if defaults.string(forKey: Self.activeLocalLedgerKey) == descriptor.id.uuidString {
                 defaults.removeObject(forKey: Self.activeLocalLedgerKey)
+            }
+            if defaults.string(forKey: Self.shortcutRecordingLedgerKey) == descriptor.id.uuidString {
+                defaults.removeObject(forKey: Self.shortcutRecordingLedgerKey)
+                shortcutRecordingLedgerID = nil
             }
             if case let .local(id) = location, id == descriptor.id {
                 chooseLedger()
@@ -4278,8 +4362,12 @@ final class LedgerSession: ObservableObject {
     }
 
     private func storedValuationCurrency(for contextURL: URL) -> String {
-        let currencies = defaults.dictionary(forKey: Self.valuationCurrenciesKey) as? [String: String]
-        let stored = currencies?[contextURL.absoluteString]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        Self.storedValuationCurrency(origin: contextURL.absoluteString, defaults: defaults)
+    }
+
+    nonisolated static func storedValuationCurrency(origin: String, defaults: UserDefaults) -> String {
+        let currencies = defaults.dictionary(forKey: valuationCurrenciesKey) as? [String: String]
+        let stored = currencies?[origin]?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if let stored, !stored.isEmpty { return stored }
         return "CNY"
     }

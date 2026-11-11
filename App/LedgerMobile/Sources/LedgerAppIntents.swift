@@ -101,9 +101,15 @@ struct LedgerAppShortcuts: AppShortcutsProvider {
         )
         AppShortcut(
             intent: AskLedgerAgentIntent(),
-            phrases: ["问 \(.applicationName) 账本助手", "用 \(.applicationName) 问账本助手", "在 \(.applicationName) 记一笔"],
+            phrases: ["问 \(.applicationName) 账本助手", "用 \(.applicationName) 问账本助手"],
             shortTitle: "问账本助手",
             systemImageName: "sparkles"
+        )
+        AppShortcut(
+            intent: RecordLedgerTransactionIntent(),
+            phrases: ["用 \(.applicationName) 记一笔", "在 \(.applicationName) 记一笔", "\(.applicationName) 记账"],
+            shortTitle: "记一笔",
+            systemImageName: "square.and.pencil"
         )
         AppShortcut(
             intent: SearchLedgerIntent(),

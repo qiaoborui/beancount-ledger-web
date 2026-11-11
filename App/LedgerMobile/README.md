@@ -79,6 +79,14 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
   the resulting ledger on device.
 - Refresh data, hide amounts, lock sensitive access, and cover App Switcher
   snapshots while the app is inactive.
+- Record a transaction from Shortcuts (「记一笔」) without opening the app, for
+  Wallet, message, NFC or Back Tap automations and Siri. Settings → 快捷指令记账
+  opts one on-device ledger in after Face ID or the passcode; the target stays
+  set when another ledger is opened. Each run is one validated commit flagged
+  `!` with `source: "shortcuts"`, so it lands in 待整理 → 待核对. Accounts are
+  matched on device from the merchant's history and keywords, falling back to
+  `Expenses:Uncategorized`; an optional deduplication ID makes retries safe.
+  Server ledgers are not written. The action returns only the written entry.
 - Keep financial typography stable by switching constrained amounts to compact
   `w`, `k`, `M`, `B`, and `亿` notation.
 - Add Home Screen widgets for configurable weekly/monthly/yearly spending, a monthly expense
