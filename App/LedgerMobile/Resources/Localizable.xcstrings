@@ -571,6 +571,16 @@
         }
       }
     },
+    "%@ 等 %lld 个调用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ (%2$lld calls)"
+          }
+        }
+      }
+    },
     "%@ 至 %@" : {
       "localizations" : {
         "en" : {
@@ -14754,6 +14764,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Thinking"
+          }
+        }
+      }
+    },
+    "正在思考…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking…"
+          }
+        }
+      }
+    },
+    "正在思考：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking: %@"
           }
         }
       }

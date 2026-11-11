@@ -111,6 +111,63 @@ final class LedgerAgentTimelineTests: XCTestCase {
         XCTAssertTrue(turn.compacted)
     }
 
+    func testLiveActivityFollowsTheCallOrReasoningAndHoldsBetweenSteps() {
+        var turn = LedgerAgentLiveTurn()
+        XCTAssertNil(turn.activity)
+
+        // Reasoning: its last line with anything on it, as it streams.
+        turn.apply(.thinkingDelta("先查十月"))
+        XCTAssertEqual(turn.activity, .thinking(line: "先查十月"))
+        turn.apply(.thinkingDelta("\n  再看餐饮  \n\n"))
+        XCTAssertEqual(turn.activity, .thinking(line: "再看餐饮"))
+        XCTAssertEqual(turn.activity?.text, String(localized: "正在思考：\("再看餐饮")"))
+
+        // Its end, and text after it, keep the line rather than blank it.
+        turn.apply(.thinkingEnd(durationMs: 1200, redacted: false))
+        XCTAssertEqual(turn.activity, .thinking(line: "再看餐饮"))
+        turn.apply(.textDelta("我查一下。"))
+        XCTAssertEqual(turn.activity, .thinking(line: "再看餐饮"))
+
+        // A call running.
+        let bql = LedgerAgentToolCall(name: "run_bql", isError: false, callId: "c1")
+        turn.apply(.toolStart(bql))
+        XCTAssertEqual(turn.activity, .tool(title: bql.title, others: 0))
+        XCTAssertEqual(turn.activity?.text, bql.title)
+
+        // The gap between two steps keeps the call that just ended.
+        turn.apply(.toolEnd(.init(name: "run_bql", isError: false, callId: "c1", durationMs: 40)))
+        XCTAssertEqual(turn.activity, .tool(title: bql.title, others: 0))
+
+        // Parallel calls: the latest started, and how many run.
+        let file = LedgerAgentToolCall(name: "read_file", isError: false, callId: "c2")
+        let search = LedgerAgentToolCall(name: "search_transactions", isError: false, callId: "c3")
+        turn.apply(.toolStart(file))
+        turn.apply(.toolStart(search))
+        XCTAssertEqual(turn.activity, .tool(title: search.title, others: 1))
+        XCTAssertEqual(turn.activity?.text, String(localized: "\(search.title) 等 \(2) 个调用"))
+        turn.apply(.toolEnd(.init(name: "search_transactions", isError: false, callId: "c3", durationMs: 5)))
+        XCTAssertEqual(turn.activity, .tool(title: file.title, others: 0))
+        turn.apply(.toolEnd(.init(name: "read_file", isError: false, callId: "c2", durationMs: 5)))
+        XCTAssertEqual(turn.activity, .tool(title: file.title, others: 0))
+
+        // Reasoning with no line yet, and usage between steps, change nothing
+        // they should not.
+        turn.apply(.usage(.init(contextTokens: 10, contextWindow: 100)))
+        XCTAssertEqual(turn.activity, .tool(title: file.title, others: 0))
+        turn.apply(.thinkingDelta("  \n"))
+        XCTAssertEqual(turn.activity, .thinking(line: nil))
+        XCTAssertEqual(turn.activity?.text, String(localized: "正在思考…"))
+    }
+
+    func testLastLineSkipsBlankLinesFromTheEnd() {
+        XCTAssertNil(LedgerAgentLiveTurn.lastLine(""))
+        XCTAssertNil(LedgerAgentLiveTurn.lastLine(" \n\n  "))
+        XCTAssertEqual(LedgerAgentLiveTurn.lastLine("一"), "一")
+        XCTAssertEqual(LedgerAgentLiveTurn.lastLine("一\n 二 \n\n"), "二")
+        XCTAssertEqual(LedgerAgentLiveTurn.lastLine("\n一"), "一")
+        XCTAssertEqual(LedgerAgentLiveTurn.lastLine("一\r\n二"), "二")
+    }
+
     func testTimelineGroupsAdjacentToolsAndLeavesTheAnswerLast() {
         let steps: [LedgerAgentStepRecord] = [
             .init(kind: .thinking, text: "想", durationMs: 1000),
