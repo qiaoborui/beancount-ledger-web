@@ -46,6 +46,7 @@ class PlanComponentsTests(unittest.TestCase):
             ".github/scripts/select-xcode.sh": {"ios"},
             "scripts/build-ios-ipa.sh": {"release"},
             "scripts/publish-sidestore-release.py": {"release"},
+            ".github/workflows/ios-release.yml": {"release"},
         }
         for path, expected in cases.items():
             with self.subTest(path=path):

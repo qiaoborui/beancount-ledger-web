@@ -32,6 +32,10 @@ if [[ "${1:-}" == "--all" ]]; then
 else
   while IFS= read -r file; do
     case "$file" in
+      # The tag-triggered release workflow is not part of CI; its guards live in
+      # the release tooling tests.
+      .github/workflows/ios-release.yml)
+        mark release ;;
       # The pipeline itself: a change here can alter any job.
       .github/workflows/*|.github/scripts/plan-components.sh|.github/scripts/test_plan_components.py)
         # shellcheck disable=SC2086
