@@ -120,7 +120,7 @@ func (s *Server) importsCommit(c *gin.Context) {
 		errorJSON(c, http.StatusConflict, err)
 		return
 	}
-	result, err := s.commitImport(c.Request.Context(), input.ImportID, input.Provider, input.Entries)
+	result, err := s.commitImportWithOptions(c.Request.Context(), input.ImportID, input.Provider, input.Entries, input.ExcludedPostDateFills)
 	if err != nil {
 		if claimedPending {
 			if statusErr := s.updateGmailPendingStatus(c.Request.Context(), input.ImportID, "ready", err.Error()); statusErr != nil {

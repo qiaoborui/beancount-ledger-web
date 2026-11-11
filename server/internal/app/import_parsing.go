@@ -334,7 +334,7 @@ func (s *Server) cleanupImportRuntime(ctx context.Context, importID string) erro
 			errs = append(errs, err)
 		}
 	}
-	for _, name := range []string{"original", "document", "generated", "deduped"} {
+	for _, name := range []string{"original", "document", "generated", "deduped", postDateMatchFileName} {
 		if err := s.runtime().DeleteFile(ctx, "imports", importFileKey(importID, name)); err != nil {
 			errs = append(errs, err)
 		}
@@ -377,11 +377,16 @@ func (s *Server) rebuildImportPreview(ctx context.Context, importID string, stat
 		return nil, fmt.Errorf("%w: 未知导入 provider %q", errImportPreviewMalformed, meta.Provider)
 	}
 	importer.DecorateEntries(meta, entries)
+	postDateMatch, err := s.loadPostDateMatch(ctx, importID)
+	if err != nil {
+		return nil, err
+	}
+	decoratePostDateHints(entries, postDateMatch.Hints)
 	accountOptions, err := s.importAccountOptions()
 	if err != nil {
 		return nil, err
 	}
-	return importPreviewResponseFromState(importID, meta, state, generated.Content, ginH{"entries": entries, "accountOptions": accountOptions}), nil
+	return importPreviewResponseFromState(importID, meta, state, generated.Content, ginH{"entries": entries, "accountOptions": accountOptions, "postDateFills": postDateFillsOrEmpty(postDateMatch.Fills)}), nil
 }
 
 func importPreviewResponseFromState(importID string, meta importMeta, state importPreviewState, generated []byte, derived ginH) ginH {
