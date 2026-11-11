@@ -309,6 +309,12 @@ private struct LedgerAgentChatScreen: View {
     /// The reader's finger, or a fling or scroll they started, is moving the
     /// page.
     @State private var readerScrolling = false
+    /// The conversation is taller than the page. Until it is, the page rests
+    /// at the top and following never scrolls it (`LedgerAgentScrollFit`).
+    @State private var contentOverflows = false
+    /// Before iOS 18, the measures `contentOverflows` is worked out from.
+    @State private var contentHeight: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
 
     private var showsJumpButton: Bool {
         // Not while the page is on its way down to a growing reply.
@@ -376,13 +382,31 @@ private struct LedgerAgentChatScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    if #available(iOS 18.0, *) { return }
+                    contentHeight = height
+                    measureFit()
+                }
+            }
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom
+            } action: { height in
+                if #available(iOS 18.0, *) { return }
+                viewportHeight = height
+                measureFit()
             }
             .scrollDismissesKeyboard(.interactively)
-            .modifier(LedgerAgentScrollTracking(following: $following, scrolling: $readerScrolling, isAtBottom: isAtBottom) {
+            .modifier(LedgerAgentScrollTracking(following: $following, scrolling: $readerScrolling,
+                                                overflows: $contentOverflows, isAtBottom: isAtBottom) {
                 // Rows, text and charts take their height after the update
                 // that added them; follow that too while a turn runs.
                 if conversation.isRunning { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             })
+            // The conversation just outgrew the page: bring the bottom into
+            // view once, from where it rested at the top.
+            .onChange(of: contentOverflows) { _, overflows in
+                if overflows, following { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            }
             .onChange(of: conversation.messages.count) { _, _ in
                 // Another version on screen: nothing was asked or answered,
                 // and the user stays by the switch they tapped.
@@ -395,7 +419,7 @@ private struct LedgerAgentChatScreen: View {
             // The reply growing while it streams is followed without an
             // animation per redraw.
             .onChange(of: conversation.live) { _, _ in
-                if following { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+                if following, contentOverflows { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
             // Opening a tool group or reasoning block is reading back: the
             // rows it shows stay where they were tapped.
@@ -404,6 +428,8 @@ private struct LedgerAgentChatScreen: View {
                 // A conversation still answering opens on its reply.
                 guard conversation.isRunning else { return }
                 following = true
+                // Once, before the page has measured whether it overflows; a
+                // single scroll does not bounce the way one per update did.
                 DispatchQueue.main.async { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
             .onChange(of: conversation.pending) { _, _ in follow(proxy) }
@@ -671,8 +697,19 @@ private struct LedgerAgentChatScreen: View {
     }
 
     private func follow(_ proxy: ScrollViewProxy, force: Bool = false) {
-        guard force || following else { return }
+        // Content that fits already shows its bottom; scrolling it would
+        // only shift the page and spring it back.
+        guard force || following, contentOverflows else { return }
         scrollToBottom(proxy)
+    }
+
+    /// Before iOS 18 the page has no scroll geometry, so whether the content
+    /// fits is measured from its frame; from iOS 18 `LedgerAgentScrollTracking`
+    /// reads it off the scroll view.
+    private func measureFit() {
+        let overflows = LedgerAgentScrollFit.overflows(contentHeight: Double(contentHeight),
+                                                       viewportHeight: Double(viewportHeight))
+        if overflows != contentOverflows { contentOverflows = overflows }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
@@ -1395,7 +1432,7 @@ private struct LedgerAgentAnswer: View {
             }
             // Replies from older builds have only their tool calls.
             if !message.steps.isEmpty {
-                LedgerAgentStepTimeline(steps: message.steps, onAsk: onAsk)
+                LedgerAgentStepTimeline(steps: message.steps, duration: message.duration, onAsk: onAsk)
             } else if !message.toolCalls.isEmpty {
                 tools
             }
@@ -1551,7 +1588,7 @@ private struct LedgerAgentAnswer: View {
         }
     }
 
-    private var toolsSummary: String { LedgerAgentToolTimeline.summary(message.toolCalls) }
+    private var toolsSummary: String { LedgerAgentProcess.toolSummary(message.toolCalls) }
 
     private var footer: String? {
         guard let duration = message.duration else { return nil }
@@ -1898,9 +1935,12 @@ private struct LedgerAgentScrollTracking: ViewModifier {
     @Binding var following: Bool
     /// The reader is moving the page.
     @Binding var scrolling: Bool
+    /// The content is taller than the page (iOS 18; the view measures it
+    /// before).
+    @Binding var overflows: Bool
     /// The bottom anchor is on screen (the only measure before iOS 18).
     let isAtBottom: Bool
-    /// The content grew while following.
+    /// The content grew while following, past the page's height.
     let onGrow: () -> Void
 
     /// Within this many points of the bottom still counts as at it.
@@ -1909,6 +1949,11 @@ private struct LedgerAgentScrollTracking: ViewModifier {
     private struct Position: Equatable {
         var offset: CGFloat
         var toBottom: CGFloat
+    }
+
+    private struct Extent: Equatable {
+        var height: CGFloat
+        var overflows: Bool
     }
 
     /// How far the page is from its bottom, measured on every move; nil
@@ -1935,8 +1980,18 @@ private struct LedgerAgentScrollTracking: ViewModifier {
                     // and layout settling at rest is not a scroll.
                     if inMotion, new.offset < old.offset - 1, new.toBottom > Self.slack { following = false }
                 }
-                .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { old, new in
-                    if new > old, following { onGrow() }
+                .onScrollGeometryChange(for: Extent.self) { geometry in
+                    Extent(height: geometry.contentSize.height,
+                           overflows: LedgerAgentScrollFit.overflows(
+                               contentHeight: Double(geometry.contentSize.height),
+                               topInset: Double(geometry.contentInsets.top),
+                               bottomInset: Double(geometry.contentInsets.bottom),
+                               viewportHeight: Double(geometry.containerSize.height)))
+                } action: { old, new in
+                    if new.overflows != overflows { overflows = new.overflows }
+                    // Content that still fits rests at the top: a scroll to
+                    // its bottom only shifts the page and springs it back.
+                    if new.height > old.height, new.overflows, following { onGrow() }
                 }
                 .onScrollPhaseChange { _, phase in
                     inMotion = phase != .idle

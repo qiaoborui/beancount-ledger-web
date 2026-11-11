@@ -901,6 +901,16 @@
         }
       }
     },
+    "%lld 分 %lld 秒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld min %lld s"
+          }
+        }
+      }
+    },
     "%lld 大类配置" : {
       "localizations" : {
         "en" : {
@@ -1033,6 +1043,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "%lld 秒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld s"
           }
         }
       }
@@ -8474,6 +8494,16 @@
         }
       }
     },
+    "已运行 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ran for %@"
+          }
+        }
+      }
+    },
     "已还清" : {
       "localizations" : {
         "en" : {
@@ -9554,6 +9584,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ignore this statement?"
+          }
+        }
+      }
+    },
+    "思考了 %lld 秒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thought for %lld s"
+          }
+        }
+      }
+    },
+    "思考过程" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reasoning"
           }
         }
       }
@@ -18578,6 +18628,16 @@
         }
       }
     },
+    "读取了账本 %lld 次" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read the ledger %lld times"
+          }
+        }
+      }
+    },
     "读取已中断，请重试。" : {
       "localizations" : {
         "en" : {
@@ -18594,6 +18654,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Loading status"
+          }
+        }
+      }
+    },
+    "读取附件和账本 %lld 次" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read attachments and the ledger %lld times"
           }
         }
       }
@@ -18624,6 +18694,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Adjust the filters and try again."
+          }
+        }
+      }
+    },
+    "调用了 %lld 次工具，改了草稿 %lld 处" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Called tools %lld times, changed the draft in %lld places"
           }
         }
       }

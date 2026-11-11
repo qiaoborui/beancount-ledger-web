@@ -573,4 +573,69 @@ final class LedgerAgentTimelineTests: XCTestCase {
         }
         XCTAssertFalse(conversation.isRunning)
     }
+
+    // MARK: Scroll fit
+
+    func testShortConversationHasNothingToScroll() {
+        XCTAssertFalse(LedgerAgentScrollFit.overflows(contentHeight: 300, topInset: 60, bottomInset: 120,
+                                                      viewportHeight: 800))
+        // Exactly filling the page, or within the rounding slack, still fits.
+        XCTAssertFalse(LedgerAgentScrollFit.overflows(contentHeight: 620, topInset: 60, bottomInset: 120,
+                                                      viewportHeight: 800))
+        XCTAssertFalse(LedgerAgentScrollFit.overflows(contentHeight: 620.5, topInset: 60, bottomInset: 120,
+                                                      viewportHeight: 800))
+    }
+
+    func testInsetsCountTowardOverflowing() {
+        XCTAssertTrue(LedgerAgentScrollFit.overflows(contentHeight: 700, topInset: 60, bottomInset: 120,
+                                                     viewportHeight: 800))
+        XCTAssertFalse(LedgerAgentScrollFit.overflows(contentHeight: 700, viewportHeight: 800))
+        XCTAssertTrue(LedgerAgentScrollFit.overflows(contentHeight: 900, viewportHeight: 800))
+    }
+
+    func testUnmeasuredPageNeverScrolls() {
+        XCTAssertFalse(LedgerAgentScrollFit.overflows(contentHeight: 900, viewportHeight: 0))
+    }
+
+    // MARK: Process line
+
+    private func tool(_ name: String) -> LedgerAgentStepRecord {
+        LedgerAgentStepRecord(kind: .tool, call: LedgerAgentToolCall(name: name, isError: false))
+    }
+
+    func testProcessLineCountsTimeReasoningAndCalls() {
+        let steps = [
+            LedgerAgentStepRecord(kind: .thinking, text: "先查", durationMs: 4_200),
+            tool("run_bql"), tool("search_transactions"),
+            LedgerAgentStepRecord(kind: .text, text: "再看一下"),
+            LedgerAgentStepRecord(kind: .thinking, text: "够了", durationMs: 7_600),
+            tool("read_file"),
+            LedgerAgentStepRecord(kind: .text, text: "共 1385 元"),
+        ]
+        XCTAssertEqual(LedgerAgentProcess.summary(steps, elapsed: 100), "已运行 1 分 40 秒 · 思考了 12 秒 · 读取了账本 3 次")
+        XCTAssertEqual(LedgerAgentProcess.indices(steps), [0, 1, 2, 4, 5])
+        // Saved, the last text is the answer, drawn by the reply; live, it
+        // stays in the list.
+        XCTAssertEqual(LedgerAgentProcess.textIndices(steps), [3])
+        XCTAssertEqual(LedgerAgentProcess.textIndices(steps, includesAnswer: true), [3, 6])
+        XCTAssertTrue(LedgerAgentProcess.hasSteps(steps))
+    }
+
+    func testProcessLineWithoutDurationOrFinishedReasoning() {
+        // A save from before the duration was kept, with reasoning still
+        // streaming (no duration yet) and a draft edit.
+        let steps = [LedgerAgentStepRecord(kind: .thinking, text: "想"), tool("edit_file"), tool("run_bql")]
+        XCTAssertEqual(LedgerAgentProcess.summary(steps, elapsed: nil), "调用了 2 次工具，改了草稿 1 处")
+        XCTAssertEqual(LedgerAgentProcess.summary([LedgerAgentStepRecord(kind: .thinking, text: "想")], elapsed: nil),
+                       "思考过程")
+        XCTAssertEqual(LedgerAgentProcess.summary([], elapsed: 3), "已运行 3 秒")
+        XCTAssertFalse(LedgerAgentProcess.hasSteps([LedgerAgentStepRecord(kind: .text, text: "好")]))
+    }
+
+    func testProcessDurationReadsInMinutesFromOneMinute() {
+        XCTAssertEqual(LedgerAgentProcess.duration(seconds: 0), "0 秒")
+        XCTAssertEqual(LedgerAgentProcess.duration(seconds: 59), "59 秒")
+        XCTAssertEqual(LedgerAgentProcess.duration(seconds: 60), "1 分 0 秒")
+        XCTAssertEqual(LedgerAgentProcess.duration(seconds: -4), "0 秒")
+    }
 }

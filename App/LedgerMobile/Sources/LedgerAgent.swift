@@ -361,6 +361,80 @@ enum LedgerAgentLiveActivity: Equatable, Sendable {
     }
 }
 
+/// Whether the chat page has anything to scroll. Content shorter than the
+/// page rests at the top, and following the reply must leave it there: a
+/// scroll to the bottom anchor of content that fits asks for an offset the
+/// page cannot hold, so the whole conversation moves and springs back on
+/// every update.
+enum LedgerAgentScrollFit {
+    /// Rounding slack, in points.
+    static let tolerance = 1.0
+
+    /// The content, with the insets the page keeps clear above and below it
+    /// (the top bar, the composer, the keyboard), is taller than the page.
+    static func overflows(contentHeight: Double, topInset: Double = 0, bottomInset: Double = 0,
+                          viewportHeight: Double) -> Bool {
+        guard viewportHeight > 0 else { return false }
+        return contentHeight + topInset + bottomInset > viewportHeight + tolerance
+    }
+}
+
+/// An answer's process, the reasoning and tool calls behind it, folded into
+/// one line above the reply: how long the turn ran and what it did, counted
+/// in the words the tool groups have always used. The line opens to every
+/// step in order; the reply's own text stays out of it.
+enum LedgerAgentProcess {
+    /// The steps the line folds, in order: reasoning and tool calls.
+    static func indices(_ steps: [LedgerAgentStepRecord]) -> [Int] {
+        steps.indices.filter { steps[$0].kind != .text }
+    }
+
+    /// The text steps drawn under the line, in order. `includesAnswer` keeps
+    /// the last one too, for the live turn, which draws its reply itself.
+    static func textIndices(_ steps: [LedgerAgentStepRecord], includesAnswer: Bool = false) -> [Int] {
+        LedgerAgentTimelineItem.items(steps, includesAnswer: includesAnswer).compactMap { item in
+            guard case let .text(index) = item else { return nil }
+            return index
+        }
+    }
+
+    static func hasSteps(_ steps: [LedgerAgentStepRecord]) -> Bool {
+        steps.contains { $0.kind != .text }
+    }
+
+    /// The folded line: `已运行 1 分 40 秒 · 思考了 12 秒 · 读取了账本 6 次`.
+    /// `elapsed` is nil for an answer saved without its duration.
+    static func summary(_ steps: [LedgerAgentStepRecord], elapsed: Int?) -> String {
+        var parts: [String] = []
+        if let elapsed { parts.append(String(localized: "已运行 \(duration(seconds: elapsed))")) }
+        let thought = steps.filter { $0.kind == .thinking }.compactMap(\.durationMs).reduce(0, +)
+        if thought > 0 {
+            parts.append(String(localized: "思考了 \(max(Int((Double(thought) / 1000).rounded()), 1)) 秒"))
+        }
+        let calls = steps.compactMap(\.call)
+        if !calls.isEmpty { parts.append(toolSummary(calls)) }
+        return parts.isEmpty ? String(localized: "思考过程") : parts.joined(separator: " · ")
+    }
+
+    /// `12 秒`, or `1 分 40 秒` from a minute on.
+    static func duration(seconds: Int) -> String {
+        let seconds = max(seconds, 0)
+        guard seconds >= 60 else { return String(localized: "\(seconds) 秒") }
+        return String(localized: "\(seconds / 60) 分 \(seconds % 60) 秒")
+    }
+
+    /// The tool calls, in the words the answer has always used.
+    static func toolSummary(_ calls: [LedgerAgentToolCall]) -> String {
+        let edits = calls.filter(\.editsDraft).count
+        if edits == 0, calls.contains(where: { $0.name == "reconcile_attachment" }) {
+            return String(localized: "读取附件和账本 \(calls.count) 次")
+        }
+        return edits == 0
+            ? String(localized: "读取了账本 \(calls.count) 次")
+            : String(localized: "调用了 \(calls.count) 次工具，改了草稿 \(edits) 处")
+    }
+}
+
 /// A turn's steps as the timeline draws them: each reasoning block, each run
 /// of adjacent tool calls as one group, and the text between them, in order.
 /// The answer is drawn last by the reply itself, so its text step is left out.
