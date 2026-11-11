@@ -19,64 +19,64 @@ extension EnvironmentValues {
     }
 }
 
-/// The steps behind an answer: reasoning blocks, groups of tool calls and the
-/// text written between them, in the order they happened. The answer itself
-/// is drawn after this by `LedgerAgentAnswer`.
+/// The steps behind an answer: its process folded into one line
+/// (`LedgerAgentProcessLine`), then any text written between steps. The
+/// answer itself is drawn after this by `LedgerAgentAnswer`.
 struct LedgerAgentStepTimeline: View {
     let steps: [LedgerAgentStepRecord]
+    /// How long the turn ran; nil in saves from before it was kept.
+    var duration: TimeInterval? = nil
     var onAsk: (String) -> Void = { _ in }
 
     var body: some View {
-        ForEach(LedgerAgentTimelineItem.items(steps)) { item in
-            switch item {
-            case let .thinking(index):
-                LedgerAgentThinkingBlock(step: steps[index])
-            case let .tools(indices):
-                LedgerAgentToolTimeline(rows: indices.compactMap { index in steps[index].call.map { .init(id: index, call: $0) } })
-            case let .text(index):
-                LedgerAgentStreamingReply(text: steps[index].text, streaming: false, onAsk: onAsk)
-            }
+        if LedgerAgentProcess.hasSteps(steps) {
+            LedgerAgentProcessLine(steps: steps,
+                                   summary: LedgerAgentProcess.summary(steps, elapsed: duration.map { Int($0.rounded()) }))
+        }
+        ForEach(LedgerAgentProcess.textIndices(steps), id: \.self) { index in
+            LedgerAgentStreamingReply(text: steps[index].text, streaming: false, onAsk: onAsk)
         }
     }
 }
 
-/// The running turn as it streams in. The reply grows at the bottom; rows
-/// and blocks appear as the model reaches them. Above the footer the page
-/// only ever grows while the turn runs: groups and reasoning blocks keep to
-/// their one summary line, and what is under way right now is the footer's
-/// one line, so the page following the reply never sees it shrink.
+/// The running turn as it streams in: the process line, whose time and
+/// counts tick while it stays one line, the one line of what is under way
+/// right now, and the reply growing under them. Above the reply nothing
+/// changes height while the turn runs unless the reader opens the line, so
+/// the page following the reply never sees it shrink.
 struct LedgerAgentLiveTimeline: View {
     let turn: LedgerAgentLiveTurn
     let since: Date
     /// When the stream last sent anything.
     let quietSince: Date
-    /// The page is following the reply. New blocks then land in place, with
+    /// The page is following the reply. New text then lands in place, with
     /// no slide or layout animation for the page's jump to the bottom to
-    /// race; read back, they come in as they always have.
+    /// race; read back, it comes in as it always has.
     var following = false
 
     /// A stream quiet this long gets the hint to stop and send again.
     static let slowAfter: TimeInterval = 45
 
     var body: some View {
-        // Every text step stays in the one list by its index, so the reply
-        // keeps its view when a tool or reasoning follows it.
-        let items = LedgerAgentTimelineItem.items(turn.steps, includesAnswer: true)
+        // Every text step keeps its view by its index, so the reply keeps
+        // its place when a tool or reasoning follows it.
+        let texts = LedgerAgentProcess.textIndices(turn.steps, includesAnswer: true)
         VStack(alignment: .leading, spacing: 14) {
-            ForEach(items) { item in
-                Group {
-                    switch item {
-                    case let .thinking(index):
-                        LedgerAgentThinkingBlock(step: turn.steps[index], isLive: turn.isThinking(index))
-                    case let .tools(indices):
-                        LedgerAgentToolTimeline(rows: indices.compactMap { index in
-                            turn.steps[index].call.map { .init(id: index, call: $0, isRunning: turn.running.contains(index)) }
-                        })
-                    case let .text(index):
-                        LedgerAgentStreamingReply(text: turn.steps[index].text, streaming: index == turn.steps.indices.last)
-                    }
+            VStack(alignment: .leading, spacing: 6) {
+                TimelineView(.periodic(from: since, by: 1)) { context in
+                    LedgerAgentProcessLine(
+                        steps: turn.steps,
+                        summary: LedgerAgentProcess.summary(
+                            turn.steps, elapsed: Int(context.date.timeIntervalSince(since).rounded(.down))),
+                        running: turn.running,
+                        thinking: Set(turn.steps.indices.filter { turn.isThinking($0) }),
+                        isLive: true)
                 }
-                .transition(following ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .offset(y: 6)))
+                activityLine
+            }
+            ForEach(texts, id: \.self) { index in
+                LedgerAgentStreamingReply(text: turn.steps[index].text, streaming: index == turn.steps.indices.last)
+                    .transition(following ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .offset(y: 6)))
             }
             if turn.compacting {
                 Text("正在压缩较早的对话…").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
@@ -84,42 +84,38 @@ struct LedgerAgentLiveTimeline: View {
             }
             footer
         }
-        // Following, the value stands still, so a new block is not animated.
-        .ledgerAnimation(LedgerMotion.disclose, value: following ? -1 : items.count)
+        // Following, the value stands still, so new text is not animated.
+        .ledgerAnimation(LedgerMotion.disclose, value: following ? -1 : texts.count)
         .accessibilityIdentifier("ledger-agent-live")
     }
 
-    /// How long the turn has run, under whatever it is doing, with the same
-    /// hints as before the stream began: the page can be left, and a stream
-    /// gone quiet can be stopped and sent again. The call running or the
-    /// reasoning's last line sits beside the seconds, one line always held,
-    /// and keeps the last of them between steps.
+    /// The call running or the reasoning's last line, one line always held
+    /// (with a space before there is anything to say), keeping the last of
+    /// them between steps.
+    private var activityLine: some View {
+        Text(activity ?? " ").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            .lineLimit(1).truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 12)
+            .accessibilityHidden(activity == nil)
+            .accessibilityIdentifier("ledger-agent-activity")
+    }
+
+    /// The same hints as before the stream began: the page can be left, and
+    /// a stream gone quiet can be stopped and sent again.
     private var footer: some View {
         TimelineView(.periodic(from: since, by: 1)) { context in
             let slow = context.date.timeIntervalSince(quietSince) >= Self.slowAfter
-            let hint = slow ? Self.slowHint : Self.leaveHint
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.mini).tint(BalancedPalette.meta)
-                    Text("\(max(Int(context.date.timeIntervalSince(since).rounded(.down)), 0)) 秒")
-                        .balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
-                        .fixedSize()
-                    // Held with a space before there is anything to say.
-                    Text(activity ?? " ").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-                        .lineLimit(1).truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                // Both hints are laid out and one is shown, so the longer slow
-                // hint wrapping cannot grow the page and then shrink it.
-                ZStack(alignment: .topLeading) {
-                    Text(Self.leaveHint).opacity(slow ? 0 : 1)
-                    Text(Self.slowHint).opacity(slow ? 1 : 0)
-                }
-                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            // Both hints are laid out and one is shown, so the longer slow
+            // hint wrapping cannot grow the page and then shrink it.
+            ZStack(alignment: .topLeading) {
+                Text(Self.leaveHint).opacity(slow ? 0 : 1)
+                Text(Self.slowHint).opacity(slow ? 1 : 0)
             }
-            .accessibilityElement(children: .combine)
+            .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel("正在回答")
-            .accessibilityValue([activity, hint].compactMap { $0 }.joined(separator: "，"))
+            .accessibilityValue([activity, slow ? Self.slowHint : Self.leaveHint].compactMap { $0 }.joined(separator: "，"))
         }
         .accessibilityIdentifier("ledger-agent-running")
     }
@@ -130,9 +126,81 @@ struct LedgerAgentLiveTimeline: View {
     private static var slowHint: String { String(localized: "模型这一步比较慢。网络不好时可以点停止，再发一次。") }
 }
 
-/// One reasoning block. Collapsed, it says how long the model thought, or
-/// that it still is (the line it is on shows in the live footer, so the
-/// block keeps one height); expanded, the whole text.
+/// An answer's reasoning and tool calls folded into one line, collapsed
+/// until tapped, live and saved alike, so a long run of reads never pushes
+/// the reply down the page and the running turn's line becomes the saved
+/// answer's in the same place. Opened, it lists every step in order: each
+/// reasoning block, and each call with how it went and the start of what
+/// came back.
+struct LedgerAgentProcessLine: View {
+    let steps: [LedgerAgentStepRecord]
+    let summary: String
+    /// Calls still running, by step index.
+    var running: Set<Int> = []
+    /// The reasoning still streaming, by step index.
+    var thinking: Set<Int> = []
+    var isLive = false
+    @State private var expanded = false
+    @Environment(\.ledgerAgentFollowPause) private var followPause
+
+    var body: some View {
+        let indices = LedgerAgentProcess.indices(steps)
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                followPause?.pause()
+                withLedgerAnimation(LedgerMotion.disclose) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 10) {
+                    Group {
+                        if isLive {
+                            ProgressView().controlSize(.mini).tint(BalancedPalette.meta)
+                        } else {
+                            Image(systemName: "list.bullet").font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(BalancedPalette.edge)
+                        }
+                    }
+                    .frame(width: 16)
+                    Text(summary).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                        .lineLimit(1).truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(BalancedPalette.edge)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                }
+                .padding(.horizontal, 12)
+                .frame(minHeight: 38)
+                .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(indices.isEmpty)
+            .accessibilityLabel(summary)
+            .accessibilityValue(indices.isEmpty ? "" : (expanded ? "已展开" : "已收起"))
+            .accessibilityIdentifier("ledger-agent-process")
+            if expanded, !indices.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(indices, id: \.self) { index in
+                        Group {
+                            if let call = steps[index].call {
+                                LedgerAgentToolRow(call: call, isRunning: running.contains(index))
+                            } else {
+                                LedgerAgentThinkingBlock(step: steps[index], isLive: thinking.contains(index))
+                            }
+                        }
+                        .transition(.opacity.combined(with: .offset(y: 6)))
+                    }
+                }
+                .padding(.leading, 12)
+                .overlay(alignment: .leading) { BalancedPalette.ruleStrong.frame(width: 1) }
+                .padding(.leading, 8)
+                .ledgerAnimation(LedgerMotion.disclose, value: indices.count)
+            }
+        }
+    }
+}
+
+/// One reasoning block in an opened process line. Collapsed, it says how
+/// long the model thought, or that it still is; expanded, the whole text.
 struct LedgerAgentThinkingBlock: View {
     let step: LedgerAgentStepRecord
     var isLive = false
@@ -165,6 +233,7 @@ struct LedgerAgentThinkingBlock: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, 12)
                     .overlay(alignment: .leading) { BalancedPalette.ruleStrong.frame(width: 1) }
+                    .padding(.bottom, 6)
             }
         }
     }
@@ -176,136 +245,97 @@ struct LedgerAgentThinkingBlock: View {
     }
 }
 
-/// A run of tool calls under one summary line, collapsed until tapped so a
-/// long run of reads does not push the reply down the page; while collapsed,
-/// the call still running shows in the live footer rather than under the
-/// line, so the group does not grow and shrink with each call. Live and
-/// saved groups both start collapsed, so a group opened during the turn
-/// closes again when the saved answer replaces the live turn. Each row says whether the call is
-/// running, done or failed, and how long it took; a row expands to what it
-/// was asked and the start of what came back.
-struct LedgerAgentToolTimeline: View {
-    struct Row: Identifiable {
-        let id: Int
-        let call: LedgerAgentToolCall
-        var isRunning = false
-    }
-
-    let rows: [Row]
-    @State private var expanded = false
-    @State private var open: Set<Int> = []
+/// One tool call in an opened process line: whether it is running, done or
+/// failed, how long it took, and the first lines of what came back (the
+/// error when it failed). Tapped, it adds what it was asked and the result
+/// in full, as far as the call kept it.
+struct LedgerAgentToolRow: View {
+    let call: LedgerAgentToolCall
+    var isRunning = false
+    @State private var open = false
     @Environment(\.ledgerAgentFollowPause) private var followPause
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                followPause?.pause()
-                withLedgerAnimation(LedgerMotion.disclose) { expanded.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(Self.summary(rows.map(\.call))).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(BalancedPalette.edge)
-                        .rotationEffect(.degrees(expanded ? 180 : 0))
-                }
-                .frame(minHeight: 32)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(expanded ? "已展开" : "已收起")
-            .accessibilityIdentifier("ledger-agent-tools")
-            if expanded {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(rows) { row in
-                        self.row(row).transition(.opacity.combined(with: .offset(y: 6)))
-                    }
-                }
-                .padding(.leading, 12)
-                .overlay(alignment: .leading) { BalancedPalette.ruleStrong.frame(width: 1) }
-                .ledgerAnimation(LedgerMotion.disclose, value: rows.count)
-            }
-        }
-    }
+    /// Result lines shown before the row is opened.
+    private static let closedLines = 3
 
-    private func row(_ row: Row) -> some View {
-        let call = row.call
-        let details = !row.isRunning && Self.hasDetails(call)
-        let isOpen = details && open.contains(row.id)
-        return VStack(alignment: .leading, spacing: 6) {
+    var body: some View {
+        let details = !isRunning && Self.hasDetails(call)
+        VStack(alignment: .leading, spacing: 4) {
             Button {
                 followPause?.pause()
-                withLedgerAnimation(LedgerMotion.disclose) {
-                    if open.contains(row.id) { open.remove(row.id) } else { open.insert(row.id) }
-                }
+                withLedgerAnimation(LedgerMotion.disclose) { open.toggle() }
             } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    status(row).frame(width: 14)
-                    Text(call.title).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if call.interrupted == true {
-                        Text("已停止").balancedMono(size: 11).foregroundStyle(BalancedPalette.meta)
-                    } else if let duration = Self.duration(call) {
-                        Text(duration).balancedMono(size: 11).foregroundStyle(BalancedPalette.meta)
-                    } else if call.isError {
-                        Text("失败").balancedMono(size: 11).foregroundStyle(BalancedPalette.expense)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        status.frame(width: 14)
+                        Text(call.title).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
+                            .lineLimit(open ? nil : 2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if call.interrupted == true {
+                            Text("已停止").balancedMono(size: 11).foregroundStyle(BalancedPalette.meta)
+                        } else if let duration = Self.duration(call) {
+                            Text(duration).balancedMono(size: 11).foregroundStyle(BalancedPalette.meta)
+                        } else if call.isError {
+                            Text("失败").balancedMono(size: 11).foregroundStyle(BalancedPalette.expense)
+                        }
+                    }
+                    .frame(minHeight: 28)
+                    if !open, !isRunning, let result = Self.result(call) {
+                        Text(result.text).balancedMono(size: 11)
+                            .foregroundStyle(result.isError ? BalancedPalette.expense : BalancedPalette.meta)
+                            .lineLimit(Self.closedLines)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.leading, 22)
                     }
                 }
-                .frame(minHeight: 32)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(!details)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(Self.accessibilityLabel(row))
-            .accessibilityValue(details ? (isOpen ? "已展开" : "已收起") : "")
-            if isOpen { self.details(call) }
+            .accessibilityLabel(Self.accessibilityLabel(call, isRunning: isRunning))
+            .accessibilityValue(details ? (open ? "已展开" : "已收起") : "")
+            .accessibilityIdentifier("ledger-agent-tools")
+            if open, details { self.details }
         }
-        .padding(.vertical, 4)
-        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+        .padding(.vertical, 6)
     }
 
-    @ViewBuilder private func status(_ row: Row) -> some View {
-        if row.isRunning {
+    @ViewBuilder private var status: some View {
+        if isRunning {
             ProgressView().controlSize(.mini).tint(BalancedPalette.meta)
-        } else if row.call.interrupted == true {
+        } else if call.interrupted == true {
             Image(systemName: "minus").font(.system(size: 10, weight: .semibold)).foregroundStyle(BalancedPalette.meta)
-        } else if row.call.isError {
+        } else if call.isError {
             Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(BalancedPalette.expense)
         } else {
             Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(BalancedPalette.meta)
         }
     }
 
-    private func details(_ call: LedgerAgentToolCall) -> some View {
+    private var details: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let source = call.source ?? call.argumentsText {
                 Text(source).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.secondary)
                     .textSelection(.enabled)
             }
-            if call.isError, let error = Self.nonEmpty(call.errorText) {
-                Text(error).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.expense)
-                    .textSelection(.enabled)
-            } else if let preview = Self.nonEmpty(call.preview) {
-                Text(preview).balancedMono(size: 11).foregroundStyle(BalancedPalette.meta)
-                    .lineLimit(8)
+            if let result = Self.result(call) {
+                Text(result.text).balancedMono(size: 11)
+                    .foregroundStyle(result.isError ? BalancedPalette.expense : BalancedPalette.meta)
                     .textSelection(.enabled)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 22)
-        .padding(.bottom, 6)
+        .padding(.bottom, 4)
     }
 
-    /// The group's header, in the words the answer has always used.
-    static func summary(_ calls: [LedgerAgentToolCall]) -> String {
-        let edits = calls.filter(\.editsDraft).count
-        if edits == 0, calls.contains(where: { $0.name == "reconcile_attachment" }) {
-            return String(localized: "读取附件和账本 \(calls.count) 次")
-        }
-        return edits == 0
-            ? String(localized: "读取了账本 \(calls.count) 次")
-            : String(localized: "调用了 \(calls.count) 次工具，改了草稿 \(edits) 处")
+    /// What came back: the error for a failed call, else the start of the
+    /// result.
+    private static func result(_ call: LedgerAgentToolCall) -> (text: String, isError: Bool)? {
+        if call.isError, let error = nonEmpty(call.errorText) { return (text: error, isError: true) }
+        guard let preview = nonEmpty(call.preview) else { return nil }
+        return (text: preview, isError: false)
     }
 
     private static func hasDetails(_ call: LedgerAgentToolCall) -> Bool {
@@ -319,11 +349,11 @@ struct LedgerAgentToolTimeline: View {
         return String(localized: "\(seconds) 秒")
     }
 
-    private static func accessibilityLabel(_ row: Row) -> String {
-        let state = row.isRunning ? String(localized: "进行中")
-            : row.call.interrupted == true ? String(localized: "已停止")
-            : row.call.isError ? String(localized: "失败") : String(localized: "完成")
-        return [row.call.title, state, duration(row.call)].compactMap { $0 }.joined(separator: "，")
+    private static func accessibilityLabel(_ call: LedgerAgentToolCall, isRunning: Bool) -> String {
+        let state = isRunning ? String(localized: "进行中")
+            : call.interrupted == true ? String(localized: "已停止")
+            : call.isError ? String(localized: "失败") : String(localized: "完成")
+        return [call.title, state, duration(call)].compactMap { $0 }.joined(separator: "，")
     }
 
     private static func nonEmpty(_ text: String?) -> String? {

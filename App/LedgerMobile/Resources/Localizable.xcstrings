@@ -901,6 +901,16 @@
         }
       }
     },
+    "%lld 分 %lld 秒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld min %lld s"
+          }
+        }
+      }
+    },
     "%lld 大类配置" : {
       "localizations" : {
         "en" : {
@@ -8470,6 +8480,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld days so far"
+          }
+        }
+      }
+    },
+    "已运行 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ran for %@"
           }
         }
       }

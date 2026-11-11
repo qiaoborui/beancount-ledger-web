@@ -1431,7 +1431,7 @@ private struct LedgerAgentAnswer: View {
             }
             // Replies from older builds have only their tool calls.
             if !message.steps.isEmpty {
-                LedgerAgentStepTimeline(steps: message.steps, onAsk: onAsk)
+                LedgerAgentStepTimeline(steps: message.steps, duration: message.duration, onAsk: onAsk)
             } else if !message.toolCalls.isEmpty {
                 tools
             }
@@ -1587,7 +1587,7 @@ private struct LedgerAgentAnswer: View {
         }
     }
 
-    private var toolsSummary: String { LedgerAgentToolTimeline.summary(message.toolCalls) }
+    private var toolsSummary: String { LedgerAgentProcess.toolSummary(message.toolCalls) }
 
     private var footer: String? {
         guard let duration = message.duration else { return nil }
