@@ -1,12 +1,14 @@
 """Host-independent guards for private-only IPA packaging (stdlib only)."""
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/build-ios-ipa.sh"
+RELEASE_WORKFLOW = ROOT / ".github/workflows/ios-release.yml"
 
 
 class PrivateIPATests(unittest.TestCase):
@@ -32,6 +34,31 @@ class PrivateIPATests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("fresh output directory", result.stderr)
             self.assertEqual(marker.read_text(), "existing user file")
+
+    def test_release_workflow_runs_only_for_release_tags_upstream(self):
+        """Publishing happens on a pushed release tag, never on a PR or a fork."""
+        workflow = RELEASE_WORKFLOW.read_text()
+        self.assertIsNotNone(re.search(r"^  push:\n    tags:\n", workflow, re.M))
+        self.assertIsNone(re.search(r"^    branches:", workflow, re.M))
+        for trigger in ("pull_request", "pull_request_target", "workflow_dispatch",
+                        "workflow_call", "schedule"):
+            self.assertIsNone(re.search(rf"^  {trigger}:", workflow, re.M))
+        self.assertIn("if: github.repository == 'qiaoborui/beancount-ledger-web'", workflow)
+        self.assertIn("--private-local", workflow)
+        self.assertIn("require-tag-match: true", workflow)
+        self.assertIn("release-repo: qiaoborui/beancount-ledger-releases", workflow)
+        self.assertNotIn("contents: write", workflow)
+
+    def test_release_workflow_pins_tools_to_the_workflow_ref(self):
+        """The shared scripts must come from the same ref as the shared workflow."""
+        workflow = RELEASE_WORKFLOW.read_text()
+        uses = re.search(
+            r"^    uses: Ami0307/tethera-releases/\.github/workflows/ios-release\.yml@(\S+)$",
+            workflow, re.M)
+        tools = re.search(r"^      tools-ref: (\S+)$", workflow, re.M)
+        self.assertIsNotNone(uses)
+        self.assertIsNotNone(tools)
+        self.assertEqual(uses.group(1), tools.group(1))
 
     def test_runtime_build_and_signature_order(self):
         script = SCRIPT.read_text()
