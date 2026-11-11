@@ -62,7 +62,8 @@ final class GlobalSearchTests: XCTestCase {
         XCTAssertEqual(LedgerGlobalSearch.search("faceid", transactions: [], accounts: [], documents: []).destinations, [.settings])
         XCTAssertTrue(LedgerGlobalSearch.search("不存在", transactions: [transaction], accounts: [account], documents: [document]).isEmpty)
         XCTAssertTrue(LedgerGlobalSearch.search("  ", transactions: [transaction], accounts: [account], documents: [document]).isEmpty)
-        XCTAssertEqual(LedgerDestination.search.compactSelection(in: [.overview]), .search)
-        XCTAssertFalse(LedgerDestination.compactTabCandidates.contains(.search))
+        XCTAssertEqual(LedgerDestination.search.compactSelection(in: [.overview, .search]), .search)
+        XCTAssertEqual(LedgerDestination.search.compactSelection(in: [.overview]), .settings)
+        XCTAssertTrue(LedgerDestination.compactTabCandidates.contains(.search))
     }
 }

@@ -70,21 +70,35 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
         }
     }
 
+    /// 账本助手 floats beside the tab bar instead of being a tab; search is an
+    /// ordinary tab choice.
     static var compactTabCandidates: [LedgerDestination] {
-        allCases.filter { $0 != .settings && $0 != .search }
+        allCases.filter { $0 != .settings && $0 != .agent }
     }
 
     static func normalizedCompactTabs(_ destinations: [LedgerDestination]) -> [LedgerDestination] {
         var seen = Set<LedgerDestination>()
         let normalized = destinations
-            .filter { $0 != .settings && $0 != .search && seen.insert($0).inserted }
+            .filter { $0 != .settings && $0 != .agent && seen.insert($0).inserted }
             .prefix(compactTabLimit)
         return normalized.isEmpty ? defaultCompactTabs : Array(normalized)
     }
 
-    /// Search has its own trailing tab on compact layouts, so it never routes through 更多.
+    /// A saved tab list from before the assistant floated beside the tab bar puts
+    /// search where 助手 was, so the bar keeps the same number of tabs.
+    static func migratedCompactTabs(_ destinations: [LedgerDestination]) -> [LedgerDestination] {
+        normalizedCompactTabs(destinations.map { $0 == .agent ? .search : $0 })
+    }
+
+    /// The destinations a compact tab selects directly. Where the assistant can't
+    /// run, search keeps its floating button beside the tab bar.
+    static func compactDirectDestinations(_ tabs: [LedgerDestination], agentFloats: Bool) -> [LedgerDestination] {
+        agentFloats || tabs.contains(.search) ? tabs : tabs + [.search]
+    }
+
+    /// Pages that aren't tabs open from 更多.
     func isCompactOverflow(in destinations: [LedgerDestination]) -> Bool {
-        self != .settings && self != .search && !destinations.contains(self)
+        self != .settings && !destinations.contains(self)
     }
 
     func compactSelection(in destinations: [LedgerDestination]) -> LedgerDestination {
