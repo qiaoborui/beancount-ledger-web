@@ -83,6 +83,9 @@ type turnRequestV1 struct {
 	// "model" and "tool"; see turnEventV1.
 	StreamEvents bool   `json:"streamEvents,omitempty"`
 	Message      string `json:"message"`
+	// Onboarding, when set, runs the ledger-less onboarding mode: no ledger
+	// is opened, and the model edits this draft with the onboarding tools.
+	Onboarding *onboardingStateV1 `json:"onboarding,omitempty"`
 }
 
 type customEndpointV1 struct {
@@ -196,6 +199,9 @@ type turnResponseV1 struct {
 	// replaced. Set only with a Transcript, also on a stopped turn.
 	Compacted      bool `json:"compacted,omitempty"`
 	CompactedTurns int  `json:"compactedTurns,omitempty"`
+	// Onboarding is the draft after an onboarding turn, returned with the
+	// transcript it belongs to.
+	Onboarding *onboardingStateV1 `json:"onboarding,omitempty"`
 }
 
 // turnOutcome is what a turn hands back, also when it failed or was stopped
@@ -209,6 +215,7 @@ type turnOutcome struct {
 	ask                *askV1
 	// compactedTurns is how many questions the turn's summary replaced.
 	compactedTurns int
+	onboarding     *onboardingStateV1
 }
 
 // compaction is what the response reports of the turn's summary: only a
@@ -284,7 +291,7 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return encode(turnResponseV1{Version: 1, Cancelled: true, StopReason: string(ai.StopReasonAborted), Reply: out.reply,
 			ToolCalls: out.calls, Steps: out.steps, Usage: out.usage, Edited: out.edited, MemoryUpdated: out.remembered,
-			Transcript: out.transcript, Compacted: compacted, CompactedTurns: compactedTurns, Error: "cancelled"})
+			Transcript: out.transcript, Compacted: compacted, CompactedTurns: compactedTurns, Onboarding: out.onboarding, Error: "cancelled"})
 	}
 	if err != nil {
 		return encode(turnResponseV1{Version: 1, ToolCalls: out.calls, Steps: out.steps, Usage: out.usage, Edited: out.edited,
@@ -292,7 +299,7 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 	}
 	return encode(turnResponseV1{Version: 1, OK: true, Reply: out.reply, ToolCalls: out.calls, Steps: out.steps, Usage: out.usage,
 		Edited: out.edited, MemoryUpdated: out.remembered, Transcript: out.transcript, Ask: out.ask,
-		Compacted: compacted, CompactedTurns: compactedTurns})
+		Compacted: compacted, CompactedTurns: compactedTurns, Onboarding: out.onboarding})
 }
 
 // turnErrorText says why a turn failed in words the user can act on; the
@@ -431,71 +438,90 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	if err != nil {
 		return files, err
 	}
-	session, err := app.OpenLocalAgentSession(request.LocalRequest, request.SensitiveUnlocked)
-	if err != nil {
-		return files, err
-	}
-	specs := app.LocalAgentToolSpecs()
-	tools := make([]agent.AgentTool, 0, len(specs)+14)
-	allowed := make(map[string]bool, len(specs)+12)
-	for _, spec := range specs {
-		tools = append(tools, ledgerTool{spec: spec, session: session})
-		allowed[spec.Name] = true
-	}
 	// ask_user is always offered: a question needs no ledger access.
 	asking := &askTool{}
-	tools = append(tools, asking)
-	allowed[asking.Name()] = true
+	tools := []agent.AgentTool{asking}
+	allowed := map[string]bool{asking.Name(): true}
 	turns := maxTurns
-	if request.ScratchRoot != "" {
-		if files, err = editableScratch(request); err != nil {
-			return nil, err
-		}
-		for _, tool := range files.tools() {
-			tools = append(tools, tool)
-			allowed[tool.Name()] = true
-		}
-		turns = maxEditTurns
-	}
-	attached, err := openAttachments(request.Attachments, request.RuntimeRoot, supportsImages(model) && !assumed)
-	if err != nil {
-		return files, err
-	}
-	systemPrompt := app.LocalAgentSystemPrompt(files != nil)
+	var systemPrompt string
 	var remembered *memoryFile
-	if request.MemoryPath != "" {
-		if remembered, err = openMemory(request.MemoryPath); err != nil {
+	if request.Onboarding != nil {
+		if request.WorkspaceRoot != "" || request.ScratchRoot != "" || request.MemoryPath != "" || len(request.Attachments) > 0 {
+			return files, errors.New("onboarding turns take no ledger, scratch copy, memory or attachments")
+		}
+		drafting, err := newOnboardingSession(request.Onboarding, time.Now())
+		if err != nil {
 			return files, err
 		}
-		*memory = remembered
-		for _, tool := range remembered.tools() {
+		defer func() { out.onboarding = drafting.snapshot() }()
+		for _, tool := range drafting.tools() {
 			tools = append(tools, tool)
 			allowed[tool.Name()] = true
 		}
-	}
-	if attached != nil {
-		for _, tool := range attached.tools(session) {
-			tools = append(tools, tool)
-			allowed[tool.Name()] = true
+		systemPrompt = onboardingSystemPrompt(time.Now())
+		message = drafting.draftNote() + message
+	} else {
+		session, err := app.OpenLocalAgentSession(request.LocalRequest, request.SensitiveUnlocked)
+		if err != nil {
+			return files, err
 		}
-		if files != nil {
-			tool := attached.saveTool(files)
-			tools = append(tools, tool)
-			allowed[tool.Name()] = true
+		// The ledger tools come first, as they always have, so a
+		// conversation's cached prefix survives this build.
+		ledgerTools := []agent.AgentTool{}
+		for _, spec := range app.LocalAgentToolSpecs() {
+			ledgerTools = append(ledgerTools, ledgerTool{spec: spec, session: session})
+			allowed[spec.Name] = true
 		}
-		systemPrompt += attachmentPrompt
-		message = withAttachmentNote(attached, message)
-	}
-	if history := openHistory(request.RuntimeRoot, request.ConversationID); history != nil {
-		for _, tool := range history.tools() {
-			tools = append(tools, tool)
-			allowed[tool.Name()] = true
+		tools = append(ledgerTools, tools...)
+		if request.ScratchRoot != "" {
+			if files, err = editableScratch(request); err != nil {
+				return nil, err
+			}
+			for _, tool := range files.tools() {
+				tools = append(tools, tool)
+				allowed[tool.Name()] = true
+			}
+			turns = maxEditTurns
 		}
-		systemPrompt += savedHistoryPrompt
-	}
-	if remembered != nil {
-		// Last, so the rules and tools before it stay one cacheable prefix.
-		systemPrompt += remembered.prompt()
+		attached, err := openAttachments(request.Attachments, request.RuntimeRoot, supportsImages(model) && !assumed)
+		if err != nil {
+			return files, err
+		}
+		systemPrompt = app.LocalAgentSystemPrompt(files != nil)
+		if request.MemoryPath != "" {
+			if remembered, err = openMemory(request.MemoryPath); err != nil {
+				return files, err
+			}
+			*memory = remembered
+			for _, tool := range remembered.tools() {
+				tools = append(tools, tool)
+				allowed[tool.Name()] = true
+			}
+		}
+		if attached != nil {
+			for _, tool := range attached.tools(session) {
+				tools = append(tools, tool)
+				allowed[tool.Name()] = true
+			}
+			if files != nil {
+				tool := attached.saveTool(files)
+				tools = append(tools, tool)
+				allowed[tool.Name()] = true
+			}
+			systemPrompt += attachmentPrompt
+			message = withAttachmentNote(attached, message)
+		}
+		if history := openHistory(request.RuntimeRoot, request.ConversationID); history != nil {
+			for _, tool := range history.tools() {
+				tools = append(tools, tool)
+				allowed[tool.Name()] = true
+			}
+			systemPrompt += savedHistoryPrompt
+		}
+		if remembered != nil {
+			// Last, so the rules and tools before it stay one cacheable prefix.
+			systemPrompt += remembered.prompt()
+		}
 	}
 	history, replayed, err := priorMessages(request, systemPrompt)
 	if err != nil {

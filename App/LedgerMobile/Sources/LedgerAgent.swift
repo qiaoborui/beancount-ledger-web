@@ -46,6 +46,10 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         case "grep_files": String(localized: "搜索文件")
         case "draft_changes": String(localized: "查看草稿改动")
         case "ask_user": String(localized: "向你提问")
+        case "set_ledger_profile": String(localized: "设置账本")
+        case "upsert_account", "remove_account": String(localized: "整理账户")
+        case "replace_categories", "upsert_category", "remove_category": String(localized: "整理分类")
+        case "present_onboarding_plan": String(localized: "生成开账方案")
         case "list_saved_conversations": String(localized: "查看历史对话")
         case "read_saved_conversation": String(localized: "读取历史对话")
         case "edit_memory": String(localized: "更新记忆")
@@ -58,6 +62,9 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         if name == "search_transactions", let query = argument("query") { return base + " · " + query }
         if ["read_file", "edit_file", "write_file", "delete_file", "save_attachment"].contains(name), let path = argument("path") {
             return base + " · " + path
+        }
+        if ["upsert_account", "remove_account", "upsert_category", "remove_category"].contains(name), let item = argument("name") {
+            return base + " · " + item
         }
         if name == "grep_files", let pattern = argument("pattern") { return base + " · " + pattern }
         if name == "list_files", let pattern = argument("pattern") { return base + " · " + pattern }
@@ -627,6 +634,9 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     /// Asks for the reply, the reasoning and each tool's start and end as
     /// they happen, beside the model and tool steps.
     var streamEvents: Bool? = nil
+    /// The ledger an onboarding conversation is drafting. Such a turn takes
+    /// no ledger: the roots and entrypoint stay empty.
+    var onboarding: LedgerOnboardingState? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {
@@ -657,10 +667,13 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
     var stopReason: String? = nil
     /// The turn summarized older turns of its transcript to fit.
     var compacted = false
+    /// The onboarding draft as the turn left it; only an onboarding turn that
+    /// answered or was stopped has one.
+    var onboarding: LedgerOnboardingState? = nil
 
     private enum CodingKeys: String, CodingKey {
         case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited, transcript, memoryUpdated, ask
-        case steps, usage, stopReason, compacted
+        case steps, usage, stopReason, compacted, onboarding
     }
     init(ok: Bool, reply: String? = nil, toolCalls: [LedgerAgentToolCall] = [], error: String? = nil,
          cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false, transcript: String? = nil,
@@ -690,6 +703,7 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
         usage = try? container.decodeIfPresent(LedgerAgentUsage.self, forKey: .usage)
         stopReason = try container.decodeIfPresent(String.self, forKey: .stopReason)
         compacted = try container.decodeIfPresent(Bool.self, forKey: .compacted) ?? false
+        onboarding = try container.decodeIfPresent(LedgerOnboardingState.self, forKey: .onboarding)
     }
 
     private struct Lossy<Value: Decodable>: Decodable {
