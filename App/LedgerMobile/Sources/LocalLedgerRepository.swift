@@ -24,6 +24,8 @@ actor LocalLedgerRepository: LedgerRepository {
     private let writeValidator: LocalLedgerCatalog.Validator
     private(set) var presentedRevisionID: UUID?
     private var importRevisionIDs: [String: UUID] = [:]
+    /// Revision a post date backfill scan read; apply writes against it.
+    private var postDateBackfillRevisionID: UUID?
     private var importPreviewDates: [String: Date] = [:]
     private let importAuthorizationURL: URL
     private var lastRuntimeMaintenance: Date?
@@ -770,6 +772,28 @@ actor LocalLedgerRepository: LedgerRepository {
         importRevisionIDs[result.importID] = revision
         importPreviewDates[result.importID] = Date()
         persistImportAuthorizations()
+        return result
+    }
+    func postDateBackfill() async throws -> LedgerPostDateBackfill {
+        let (revision, data) = try await readSnapshot("/api/ledger/imports/post-date-backfill", method: "POST",
+            body: .object([:]))
+        let result = try data.decode(LedgerPostDateBackfill.self)
+        presentedRevisionID = revision
+        postDateBackfillRevisionID = revision
+        return result
+    }
+    /// Stages the selected fills for the change preview, like a bill import.
+    func preparePostDateBackfill(fillIDs: [String]) async throws -> PreparedBookkeepingChange {
+        guard let expected = postDateBackfillRevisionID else { throw LocalLedgerError.previewRequired }
+        return try await prepare(draftRevision: UUID(), expected: expected, operations: [
+            ("/api/ledger/imports/post-date-backfill/apply", .object(["fillIds": .array(fillIDs.map { .string($0) })])),
+        ])
+    }
+    func applyPostDateBackfill(fillIDs: [String]) async throws -> LedgerPostDateBackfillApplyResult {
+        guard let expected = postDateBackfillRevisionID else { throw LocalLedgerError.previewRequired }
+        let result: LedgerPostDateBackfillApplyResult = try await mutate("/api/ledger/imports/post-date-backfill/apply",
+            method: "POST", body: .object(["fillIds": .array(fillIDs.map { .string($0) })]), expected: expected)
+        postDateBackfillRevisionID = nil
         return result
     }
     func commitImport(request: LedgerImportCommitRequest) async throws -> LedgerImportCommitResult {
@@ -1579,7 +1603,9 @@ actor LocalLedgerRepository: LedgerRepository {
                 entrypoint: entrypoint, method: method, path: path, query: query, body: body, importFile: importFile))
             return (revision.id, data)
         }
-        if path == "/api/ledger/imports/preview" {
+        // Both generate statements in the import runtime, which retention
+        // cleanup must not sweep mid-run.
+        if path == "/api/ledger/imports/preview" || path == "/api/ledger/imports/post-date-backfill" {
             return try await workspace.withImportPreviewSnapshot(operation)
         }
         return try await workspace.withCurrentSnapshot(operation)

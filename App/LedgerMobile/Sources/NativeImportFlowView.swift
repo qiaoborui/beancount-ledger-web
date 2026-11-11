@@ -17,6 +17,7 @@ struct NativeImportFlowView: View {
     @State private var preview: LedgerImportPreview?
     @State private var reviewedEntries: [LedgerImportEntry] = []
     @State private var includedEntryIDs: Set<String> = []
+    @State private var excludedPostDateFillIDs: Set<String> = []
     @State private var reviewFilter: ImportReviewFilter?
     @State private var bulkTagInput = ""
     @State private var bulkCategory = ""
@@ -92,7 +93,7 @@ struct NativeImportFlowView: View {
         startsWithPreview = true
         _preview = State(initialValue: preview)
         _reviewedEntries = State(initialValue: preview.entries)
-        _includedEntryIDs = State(initialValue: Set(preview.entries.map(\.id)))
+        _includedEntryIDs = State(initialValue: preview.defaultIncludedEntryIDs)
     }
 
     private var selectedEntries: [LedgerImportEntry] {
@@ -108,7 +109,8 @@ struct NativeImportFlowView: View {
     private var hasReviewChanges: Bool {
         guard let preview, commitResult == nil else { return false }
         return reviewedEntries != preview.entries
-            || includedEntryIDs != Set(preview.entries.map(\.id))
+            || includedEntryIDs != preview.defaultIncludedEntryIDs
+            || !excludedPostDateFillIDs.isEmpty
             || !bulkTagInput.isEmpty
             || commitOutcomeNeedsReconciliation
     }
@@ -391,6 +393,7 @@ struct NativeImportFlowView: View {
         preview = draft.preview
         reviewedEntries = draft.reviewedEntries
         includedEntryIDs = draft.includedEntryIDs
+        excludedPostDateFillIDs = draft.excludedPostDateFillIDs
         classificationResults = draft.classificationResults
         classificationOriginals = draft.classificationOriginals
         manuallyReviewedIDs = draft.manuallyReviewedIDs
@@ -420,7 +423,8 @@ struct NativeImportFlowView: View {
             classificationAcceptedFields: classificationAcceptedFields,
             classificationManualReasons: classificationManualReasons,
             classificationEvidence: classificationEvidence,
-            onlyClassificationReview: onlyClassificationReview
+            onlyClassificationReview: onlyClassificationReview,
+            excludedPostDateFillIDs: excludedPostDateFillIDs
         )
         try? importDraftStore.save(draft)
     }
@@ -565,6 +569,7 @@ struct NativeImportFlowView: View {
             preview = nil
             reviewedEntries = []
             includedEntryIDs = []
+            excludedPostDateFillIDs = []
             reviewFilter = nil
             bulkTagInput = ""
             errorMessage = nil
@@ -794,6 +799,7 @@ struct NativeImportFlowView: View {
                 }
             }
             previewSummary(preview)
+            postDateFillSection(preview)
             reviewFilterBar(queue, selected: filter)
             entrySection(filter, ids: queue.ids(for: filter), needsReview: needsReview)
         }
@@ -1263,6 +1269,12 @@ struct NativeImportFlowView: View {
                         Text(completionDetail(result))
                             .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
                             .fixedSize(horizontal: false, vertical: true)
+                        if let fillCount = result.postDateFillCount, fillCount > 0 {
+                            Text("另为 \(fillCount) 笔已有交易补写了记账日。")
+                                .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("import-post-date-fill-count")
+                        }
                     }
                     .keyframeAnimator(initialValue: completionStartsDrawn ? 1.0 : 0, trigger: completionRevealTrigger) { heading, settle in
                         heading.opacity(settle).offset(y: (1 - settle) * 6)
@@ -1513,6 +1525,47 @@ struct NativeImportFlowView: View {
         return preview.dateEnd ?? preview.dateStart ?? String(localized: "日期范围未知")
     }
 
+    /// Fill ids to decline, limited to the preview's own fills; nil when none.
+    private func declinedPostDateFills(_ preview: LedgerImportPreview) -> [String]? {
+        let declined = (preview.postDateFills ?? []).map(\.id).filter { excludedPostDateFillIDs.contains($0) }
+        return declined.isEmpty ? nil : declined
+    }
+
+    private func togglePostDateFill(_ id: String) {
+        if excludedPostDateFillIDs.contains(id) {
+            excludedPostDateFillIDs.remove(id)
+        } else {
+            excludedPostDateFillIDs.insert(id)
+        }
+        persistDraft()
+    }
+
+    /// Bank rows the server matched to existing Alipay/WeChat entries: their post
+    /// date is written onto those entries, so they never appear as new rows.
+    @ViewBuilder
+    private func postDateFillSection(_ preview: LedgerImportPreview) -> some View {
+        let fills = preview.postDateFills ?? []
+        if !fills.isEmpty {
+            let included = fills.filter { !excludedPostDateFillIDs.contains($0.id) }.count
+            Section {
+                ForEach(fills) { fill in
+                    ImportPostDateFillRow(fill: fill, included: !excludedPostDateFillIDs.contains(fill.id)) {
+                        togglePostDateFill(fill.id)
+                    }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 16))
+                }
+            } header: {
+                TerminalSectionLabel(text: String(localized: "补写记账日 \(included) / \(fills.count)"))
+                    .listRowBackground(BalancedPalette.page)
+            } footer: {
+                Text("这些银行行与账本里已有的支付宝/微信分录金额一致，写入时只把记账日补到已有分录上，不新增交易。取消勾选则跳过补写。")
+                    .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityIdentifier("import-post-date-fills")
+        }
+    }
+
     private func toggle(_ id: String) {
         if includedEntryIDs.contains(id) {
             includedEntryIDs.remove(id)
@@ -1595,7 +1648,8 @@ struct NativeImportFlowView: View {
             archivePassword = ""
             preview = updated
             reviewedEntries = updated.entries
-            includedEntryIDs = Set(updated.entries.map(\.id))
+            includedEntryIDs = updated.defaultIncludedEntryIDs
+            excludedPostDateFillIDs = []
             reviewFilter = nil
             bulkTagInput = ""
             commitErrorMessage = nil
@@ -1645,7 +1699,7 @@ struct NativeImportFlowView: View {
         defer { isCommitting = false }
         do {
             let prepared = try await repository.prepareImport(.init(importID: preview.importID,
-                provider: preview.provider, entries: entries))
+                provider: preview.provider, entries: entries, excludedPostDateFills: declinedPostDateFills(preview)))
             guard !Task.isCancelled, session.phase == .ready, !session.privacyShielded,
                   session.currentLocalLedgerDescriptor?.id == repository.descriptor.id, selectedEntries == entries else {
                 await repository.discardPrepared(prepared); return
@@ -1681,7 +1735,8 @@ struct NativeImportFlowView: View {
     private func commit(preview: LedgerImportPreview, entries: [LedgerImportEntry]) async {
         defer { isCommitting = false }
         do {
-            let result = try await session.commitImport(preview: preview, entries: entries)
+            let result = try await session.commitImport(preview: preview, entries: entries,
+                excludedPostDateFills: declinedPostDateFills(preview) ?? [])
             guard !Task.isCancelled else { return }
             commitResult = result
             discardDraft()
@@ -2258,6 +2313,13 @@ private struct ImportEntryReviewRow: View {
                                         .balancedFont(size: 11).foregroundStyle(BalancedPalette.meta).lineLimit(1)
                                 }
                             }
+                            if let hint = entry.duplicateHint {
+                                Text(hint.summary)
+                                    .balancedFont(size: 12).foregroundStyle(BalancedPalette.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.top, 2)
+                                    .accessibilityIdentifier("import-entry-duplicate-hint-\(entry.id)")
+                            }
                             if let attention {
                                 HStack(spacing: 6) {
                                     Circle().stroke(BalancedPalette.ink, lineWidth: 1.5).frame(width: 6, height: 6)
@@ -2315,5 +2377,58 @@ private struct ImportEntryReviewRow: View {
         let fundingAmount = entry.postings.first { $0.account == entry.fundingAccount }.flatMap { Double($0.amount) } ?? 0
         let sign = fundingAmount < 0 ? "−" : fundingAmount > 0 ? "+" : ""
         return sign + MoneyText.format(minorUnits: minorUnits, currency: entry.currency, showsCurrency: false)
+    }
+}
+
+/// One matched bank row: the existing entry it belongs to and the post date
+/// the commit writes onto it. Same flat checkbox as the entry rows.
+struct ImportPostDateFillRow: View {
+    let fill: LedgerImportPostDateFill
+    let included: Bool
+    let onToggle: () -> Void
+
+    private var payeeText: String {
+        let name = fill.payee.isEmpty ? fill.narration : fill.payee
+        return name.isEmpty ? String(localized: "未命名交易") : name
+    }
+
+    private var amountText: String {
+        let unsigned = fill.amount.hasPrefix("-") ? String(fill.amount.dropFirst()) : fill.amount
+        return "\(unsigned) \(fill.currency)"
+    }
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Rectangle().fill(included ? BalancedPalette.ink : Color.clear)
+                    Rectangle().stroke(included ? BalancedPalette.ink : BalancedPalette.edge, lineWidth: 1)
+                }
+                .frame(width: 18, height: 18)
+                .frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(payeeText)
+                        .balancedFont(size: 15, weight: .medium)
+                        .foregroundStyle(included ? BalancedPalette.ink : BalancedPalette.meta)
+                        .lineLimit(1)
+                    Text("\(fill.date) · 银行 \(fill.bankPayee)")
+                        .balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                        .lineLimit(1)
+                    Text("记账日 \(fill.postDate)")
+                        .balancedMono(size: 12).foregroundStyle(BalancedPalette.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(amountText)
+                    .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 15, relativeTo: .body))
+                    .monospacedDigit().foregroundStyle(included ? BalancedPalette.ink : BalancedPalette.meta)
+                    .lineLimit(1).fixedSize()
+            }
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(included ? "跳过为 \(payeeText) 补写记账日" : "为 \(payeeText) 补写记账日")
+        .accessibilityIdentifier("import-post-date-fill-\(fill.id)")
     }
 }

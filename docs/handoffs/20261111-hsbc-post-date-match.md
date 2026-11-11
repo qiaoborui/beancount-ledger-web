@@ -1,8 +1,8 @@
 # 20261111-hsbc-post-date-match
 
-- Status: active
-- Last updated: 2026-11-11 21:20 +08
-- Branch: `codex/hsbc-post-date-match` (based on `main` @ 6ce9359e)
+- Status: active (all three PRs open, awaiting review/merge)
+- Last updated: 2026-11-11 21:45 +08
+- Branches: `codex/hsbc-post-date-match` (based on `main` @ 6ce9359e) -> `codex/hsbc-post-date-ui` -> `codex/hsbc-post-date-backfill`
 
 ## Goal
 
@@ -34,29 +34,46 @@ statement-period reconciliation by post date works.
 - No `post-date-map.json` cache: `post_date_source` in the ledger is the audit
   trail; entries with `post_date` are skipped.
 
-## Done (PR 1, backend)
+## PRs (stacked, plain branches; Graphite not installed)
 
-- `server/internal/app/import_postdate_match.go`: matcher, fill writer, preview
-  decoration, runtime persistence (`postdate-match` import file).
-- Preview (`hsbchk-credit` only): `postDateFills` array, `entries[].duplicateHint`,
-  a warning line with counts. Rebuilt previews carry the same data.
-- Commit: `excludedPostDateFills` (fill ids) lets the client decline fills;
-  response has `postDateFillCount`.
-- Tests: `server/internal/app/import_postdate_match_test.go` (matcher cases,
-  ambiguity, metadata insertion/idempotency, commit, exclusion, rollback, and an
-  end-to-end preview → commit through real DEG generation).
+1. #648 `codex/hsbc-post-date-match` -> `main`: matcher in the HSBC import
+   preview/commit (`import_postdate_match.go`).
+2. #649 `codex/hsbc-post-date-ui` -> PR 1 branch: iOS `NativeImportFlowView` and
+   web `ImportPage` show `postDateFills` (per-fill opt-out, sent as
+   `excludedPostDateFills`, kept in drafts) and `duplicateHint` entries (iOS:
+   start unchecked; web: set aside with restore).
+3. `codex/hsbc-post-date-backfill` -> PR 2 branch: historical backfill.
+   - `POST /api/ledger/imports/post-date-backfill` (read-only scan) and
+     `.../apply` (`{fillIds}`), also allowlisted in the local transport.
+   - Scan regenerates every archived `hsbchk-credit` CSV with the importer,
+     unions rows across overlapping statements (multiplicity kept within one
+     statement), and reuses `unimportedPostDateRows` + `pairPostDateRows`.
+   - Apply is stateless: it rescans and refuses if any selected fill id is no
+     longer produced (ledger or statements changed, or already written).
+   - `possibleDuplicates`: bank-imported entry + Alipay/WeChat/manual entry on
+     the same card within 5 days and 0.50; listed only, never deleted; entries
+     in such pairs are excluded from fills.
+   - `post_date_source` for backfill fills is `hsbchk-credit:<sha256[:12]>` of
+     the archived statement.
+   - UI: web `PostDateBackfillPanel` (shown when an hsbchk-credit document is
+     archived); iOS `PostDateBackfillView` from the import history page; local
+     ledgers write through the change preview (`preparePostDateBackfill`).
 
 ## Remaining
 
-1. PR 2: iOS `NativeImportFlowView` and web `ImportPage` show `postDateFills`
-   (with per-fill opt-out) and highlight `duplicateHint` entries (default
-   unchecked). Until then clients only see the warning line and all fills apply.
-2. PR 3: historical backfill endpoint over archived `*hsbchk-credit*` CSVs under
-   `transactions/*/documents/imports/`, preview then apply.
+1. Merge in order #648 -> #649 -> PR 3, retargeting each base to `main` after
+   the one below it merges.
+2. Release note needed (iOS embeds LedgerCore; new UI).
 3. Optional: statement-period reconciliation by `post_date`.
 
-## Validation
+## Validation (PR 3 head)
 
-- `cd server && go build ./... && go test ./...` — pass on the branch head.
-- Not tested: iOS/web UI (unchanged), GitHub API write mode against the preview
-  environment.
+- `cd server && go build ./... && go test ./...` — pass.
+- `cd web && pnpm run typecheck` — pass; `vitest run` under Node 24: 49 files,
+  283 tests pass. (Node 26 locally fails `hooks/writeReliability.test.tsx`
+  because of its built-in `localStorage`; unrelated, passes on Node 24.)
+- `cd App/LedgerMobile && swift test` — 1037 tests, 0 failures.
+- `xcodebuild -scheme LedgerMobile -destination 'generic/platform=iOS Simulator'`
+  — BUILD SUCCEEDED.
+- Not tested: interactive UI in a simulator/browser; GitHub API storage mode;
+  real private-ledger data (deliberately not touched).

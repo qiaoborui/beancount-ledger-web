@@ -338,18 +338,22 @@ func localHandler(s *Server, method, path string) (gin.HandlerFunc, bool) {
 		if path == "/api/ledger/imports/preview" {
 			return s.importsPreview, false
 		}
+		if path == "/api/ledger/imports/post-date-backfill" {
+			return s.importsPostDateBackfillPreview, false
+		}
 		if path == "/api/ledger/bql-history" {
 			return s.saveBQLHistory, false
 		}
 		return map[string]gin.HandlerFunc{
-			"/api/ledger/append":              s.appendEntry,
-			"/api/ledger/append-batch":        s.appendBatch,
-			"/api/ledger/transactions":        s.reverseTransaction,
-			"/api/ledger/transactions/tags":   s.addTransactionTags,
-			"/api/ledger/accounts":            s.appendAccount,
-			"/api/ledger/accounts/operations": s.applyAccountOperations,
-			"/api/ledger/reconciliation":      s.reconcile,
-			"/api/ledger/imports/commit":      s.importsCommit,
+			"/api/ledger/append":                           s.appendEntry,
+			"/api/ledger/append-batch":                     s.appendBatch,
+			"/api/ledger/transactions":                     s.reverseTransaction,
+			"/api/ledger/transactions/tags":                s.addTransactionTags,
+			"/api/ledger/accounts":                         s.appendAccount,
+			"/api/ledger/accounts/operations":              s.applyAccountOperations,
+			"/api/ledger/reconciliation":                   s.reconcile,
+			"/api/ledger/imports/commit":                   s.importsCommit,
+			"/api/ledger/imports/post-date-backfill/apply": s.importsPostDateBackfillApply,
 		}[path], true
 	}
 	if method == http.MethodPut {

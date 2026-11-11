@@ -7,6 +7,8 @@ import i18n from "@/i18n";
 import { activeApiEndpointRequestUrl, apiEndpointScopedStorageKey } from "@/lib/apiEndpoints";
 import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
+import { PostDateBackfillPanel } from "./PostDateBackfillPanel";
+import { duplicateHintLabel, ImportPostDateMatchPanel, initialImportEntries, restoreImportEntry, type ImportDuplicateHint, type ImportPostDateFill } from "./ImportPostDateMatchPanel";
 import { Alert } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -70,6 +72,7 @@ type ImportEntry = {
   tags?: string[];
   metadata: Record<string, string>;
   postings: ImportPosting[];
+  duplicateHint?: ImportDuplicateHint;
 };
 
 type ImportPreview = {
@@ -90,10 +93,11 @@ type ImportPreview = {
   dateStart: string | null;
   dateEnd: string | null;
   warnings: string[];
+  postDateFills?: ImportPostDateFill[];
   error?: string;
 };
 
-type CommitResult = { ok?: boolean; outputFile?: string; includeFile?: string; documentFile?: string; count?: number; beanText?: string; error?: string };
+type CommitResult = { ok?: boolean; outputFile?: string; includeFile?: string; documentFile?: string; count?: number; postDateFillCount?: number; beanText?: string; error?: string };
 type ImportDocument = { path: string; name: string; year: string; ext: string; provider?: string; dateStart?: string; dateEnd?: string; size: number; modTime: string };
 type ImportDraft = {
   savedAt: number;
@@ -101,6 +105,7 @@ type ImportDraft = {
   alipayFundRounding: boolean;
   preview: ImportPreview;
   entries: ImportEntry[];
+  excludedPostDateFills?: string[];
 };
 type GmailImportStatus = { configured: boolean; connected: boolean; email?: string; label?: string; watchExpiration?: number; lastSyncAt?: string | null; lastError?: string | null; allowedSenders?: string[]; oauthRedirectUrl?: string };
 type GmailPendingImport = { id: string; importId?: string; messageId: string; sender: string; subject: string; receivedAt: string; filename: string; provider?: Provider; candidateCount: number; status: "processing" | "ready" | "failed" | "committing" | "committed" | "dismissed"; error?: string; createdAt: string; updatedAt: string };
@@ -249,6 +254,7 @@ function readImportDraft(): ImportDraft | null {
       alipayFundRounding: Boolean(draft.alipayFundRounding),
       preview: draft.preview,
       entries: draft.entries,
+      excludedPostDateFills: Array.isArray(draft.excludedPostDateFills) ? draft.excludedPostDateFills : [],
     } satisfies ImportDraft;
     if (!scoped) {
       try {
@@ -311,6 +317,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
   const [providerChoices, setProviderChoices] = useState<ProviderChoice[]>(fallbackProviderChoices);
   const [selectedEntryId, setSelectedEntryId] = useState("");
   const [selectedTagEntryIds, setSelectedTagEntryIds] = useState<Set<string>>(new Set());
+  const [excludedFillIds, setExcludedFillIds] = useState<Set<string>>(new Set());
   const [bulkTagInput, setBulkTagInput] = useState("");
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
   const [importDocuments, setImportDocuments] = useState<ImportDocument[]>([]);
@@ -337,6 +344,9 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
   const removedEntryCount = Math.max(0, originalEntryCount - entries.length);
   const selectedEntryIndex = selectedEntry ? entries.findIndex((entry) => entry.id === selectedEntry.id) : -1;
   const reviewTotalAmount = useMemo(() => formatImportTotals(entries), [entries]);
+  const postDateFills = preview?.postDateFills ?? [];
+  const hintedEntries = useMemo(() => (preview?.entries ?? []).filter((entry) => entry.duplicateHint), [preview]);
+  const activeEntryIds = useMemo(() => new Set(entries.map((entry) => entry.id)), [entries]);
   const isRestoredDraft = Boolean(preview) && !file && !hasCommitted;
   const importStage = hasCommitted ? "done" : preview ? "review" : file ? "ready" : "empty";
   const latestImportsByProvider = useMemo(() => latestImportDocumentsByProvider(importDocuments), [importDocuments]);
@@ -354,6 +364,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setAlipayFundRounding(draft.alipayFundRounding);
     setPreview(draft.preview);
     setEntries(draft.entries);
+    setExcludedFillIds(new Set(draft.excludedPostDateFills ?? []));
     setSelectedEntryId(draft.entries[0]?.id ?? "");
     setDraftSavedAt(draft.savedAt);
     draftHydratedRef.current = true;
@@ -399,8 +410,8 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     }
     const savedAt = Date.now();
     setDraftSavedAt(savedAt);
-    writeImportDraft({ savedAt, providerOverride, alipayFundRounding, preview, entries });
-  }, [alipayFundRounding, entries, hasCommitted, preview, providerOverride]);
+    writeImportDraft({ savedAt, providerOverride, alipayFundRounding, preview, entries, excludedPostDateFills: [...excludedFillIds] });
+  }, [alipayFundRounding, entries, excludedFillIds, hasCommitted, preview, providerOverride]);
 
   useEffect(() => {
     if (entries.length === 0) {
@@ -435,6 +446,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setEntries([]);
     setSelectedEntryId("");
     setSelectedTagEntryIds(new Set());
+    setExcludedFillIds(new Set());
     setBulkTagInput("");
     setCommitResult(null);
     setSuccessDialogOpen(false);
@@ -452,6 +464,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setEntries([]);
     setSelectedEntryId("");
     setSelectedTagEntryIds(new Set());
+    setExcludedFillIds(new Set());
     setBulkTagInput("");
     setCommitResult(null);
     setSuccessDialogOpen(false);
@@ -473,6 +486,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setEntries([]);
     setSelectedEntryId("");
     setSelectedTagEntryIds(new Set());
+    setExcludedFillIds(new Set());
     setBulkTagInput("");
     setCommitResult(null);
     setSuccessDialogOpen(false);
@@ -481,8 +495,9 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
       setArchivePassword("");
       const data = await fetchJson<ImportPreview>("/api/ledger/imports/preview", { method: "POST", body: form }, undefined, { kind: "write" });
       setPreview(data);
-      setEntries(data.entries);
-      setSelectedEntryId(data.entries[0]?.id ?? "");
+      const initialEntries = initialImportEntries(data.entries);
+      setEntries(initialEntries);
+      setSelectedEntryId(initialEntries[0]?.id ?? "");
       setDraftSavedAt(Date.now());
       setReviewOpen(true);
     } catch (err) {
@@ -501,7 +516,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
       const data = await fetchJson<CommitResult>("/api/ledger/imports/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ importId: preview.importId, provider: preview.provider, entries, alipayFundRounding }),
+        body: JSON.stringify({ importId: preview.importId, provider: preview.provider, entries, alipayFundRounding, excludedPostDateFills: [...excludedFillIds] }),
       }, undefined, { kind: "write" });
       setCommitResult(data);
       setReviewOpen(false);
@@ -543,6 +558,21 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
     setEntries((current) => {
       const next = current.filter((entry) => entry.id !== id);
       if (selectedEntryId === id) setSelectedEntryId(next[0]?.id ?? "");
+      return next;
+    });
+  }
+
+  function restoreEntry(id: string) {
+    if (!preview) return;
+    setEntries((current) => restoreImportEntry(preview.entries, current, id));
+    setSelectedEntryId(id);
+  }
+
+  function togglePostDateFill(id: string, included: boolean) {
+    setExcludedFillIds((current) => {
+      const next = new Set(current);
+      if (included) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
@@ -671,9 +701,11 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
       if (!data.preview?.importId) throw new Error(i18n.t("importPage.previewNotFound"));
       setFile(null);
       setPreview(data.preview);
-      setEntries(data.preview.entries);
-      setSelectedEntryId(data.preview.entries[0]?.id ?? "");
+      const initialEntries = initialImportEntries(data.preview.entries);
+      setEntries(initialEntries);
+      setSelectedEntryId(initialEntries[0]?.id ?? "");
       setSelectedTagEntryIds(new Set());
+      setExcludedFillIds(new Set());
       setBulkTagInput("");
       setCommitResult(null);
       setSuccessDialogOpen(false);
@@ -1117,6 +1149,17 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                 </Alert>
               ) : null}
 
+              <ImportPostDateMatchPanel
+                fills={postDateFills}
+                excludedFillIds={excludedFillIds}
+                hintedEntries={hintedEntries}
+                activeEntryIds={activeEntryIds}
+                disabled={committing || hasCommitted}
+                onToggleFill={togglePostDateFill}
+                onRemoveEntry={removeEntry}
+                onRestoreEntry={restoreEntry}
+              />
+
               {!hasCommitted && entries.length > 0 ? (
                 <div className="flex min-w-0 flex-col gap-2 border border-line bg-panel p-3 sm:flex-row sm:items-center">
                   <div className="flex shrink-0 items-center gap-2">
@@ -1201,6 +1244,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                                     {entry.source ? <span className="shrink-0 rounded-full border border-brand/35 px-1.5 py-0.5 text-xs text-brand">{entry.source}</span> : null}
                                   </div>
                                   <div className="mt-0.5 truncate text-xs text-stone">{entry.narration || i18n.t("importPage.noTitle")}</div>
+                                  {entry.duplicateHint ? <div className="mt-1 truncate text-xs text-[var(--warning)]">{duplicateHintLabel(entry.duplicateHint)}</div> : null}
                                   {(entry.tags?.length ?? 0) > 0 ? <div className="mt-1 flex min-w-0 flex-wrap gap-1">{entry.tags?.map((tag) => <span key={tag} className="rounded-full bg-tag px-1.5 py-0.5 text-xs text-olive">#{tag}</span>)}</div> : null}
                                 </div>
                                 <div className="text-left md:text-right">
@@ -1315,6 +1359,7 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
                                     <span className="min-w-0 truncate text-sm font-medium text-ink">{entry.payee || i18n.t("importPage.unnamedMerchant")}</span>
                                   </div>
                                   <div className="mt-0.5 truncate text-xs text-stone">{entry.date} · {entry.narration || i18n.t("importPage.noTitle")}</div>
+                                  {entry.duplicateHint ? <div className="mt-0.5 truncate text-xs text-[var(--warning)]">{duplicateHintLabel(entry.duplicateHint)}</div> : null}
                                   {(entry.tags?.length ?? 0) > 0 ? <div className="mt-1 truncate text-xs text-olive">{entry.tags?.map((tag) => `#${tag}`).join(" ")}</div> : null}
                                 </div>
                                 <div className="shrink-0 text-right font-serif text-sm font-medium text-warm tabular-nums">{formatMoney(entry.amount, entry.currency)}</div>
@@ -1355,6 +1400,10 @@ export function ImportPage({ onImported, showToast }: { onImported?: () => void;
           onOpenChange={setSuccessDialogOpen}
           onImportAnother={clearImportState}
         />
+      ) : null}
+
+      {importDocuments.some((document) => document.provider === "hsbchk-credit") ? (
+        <PostDateBackfillPanel showToast={showToast} onWritten={onImported} />
       ) : null}
 
       <ImportHistoryPanel documents={importDocuments} loading={documentsLoading} error={documentsError} providerChoices={providerChoices} onRefresh={() => void loadImportDocuments(true)} />
@@ -1855,6 +1904,7 @@ function ImportSuccessDialog({
   onImportAnother: () => void;
 }) {
   const count = result.count ?? 0;
+  const postDateFillCount = result.postDateFillCount ?? 0;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="gap-0 overflow-hidden border-line bg-panel p-0 sm:max-w-xl">
@@ -1867,6 +1917,7 @@ function ImportSuccessDialog({
               <DialogTitle className="font-serif text-2xl font-medium leading-tight text-ink">{i18n.t("importPage.successTitle")}</DialogTitle>
               <DialogDescription className="text-sm leading-6 text-stone">
                 {count > 0 ? i18n.t("importPage.successDesc", { count }) : i18n.t("importPage.successNoAdditions")}
+                {postDateFillCount > 0 ? ` ${i18n.t("importPage.successPostDateFills", { count: postDateFillCount })}` : null}
               </DialogDescription>
             </DialogHeader>
           </div>
