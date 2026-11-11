@@ -7,7 +7,8 @@ name: iOS release
 # the shared reusable workflow in Ami0307/tethera-releases.
 #
 # The tag must be annotated and carry the release notes:
-#   git tag -a v1.4.0 -F notes.md
+#   git tag -a --cleanup=whitespace v1.4.0 -F notes.md
+# (--cleanup=whitespace keeps "## " headings, which git otherwise strips.)
 # The first line of notes.md is a title and is dropped; the rest are the notes.
 # A line that is exactly `---` ends the part shown in SideStore; the GitHub
 # Release gets all of it.
