@@ -37,17 +37,18 @@ iOS app (the shipped product):
 - `App/LedgerMobile/README.md` is the build and device-install guide,
   `DESIGN.md` is the visual spec, and `FEATURE_PARITY.md` records what the app
   actually implements today.
-- `App/LedgerMobile/project.yml` owns `MARKETING_VERSION` (the release, declared
-  by an annotated `v<X.Y.Z>` tag) and `CURRENT_PROJECT_VERSION` (the binary build
-  number). Feature PRs change neither: the release tag collects a batch of PRs,
-  and `scripts/build-ios-ipa.sh` advances the build number on every package.
-  See the "iOS App Version" section of `AGENTS.md`.
+- An annotated `v<X.Y.Z>` tag is the only declaration of an iOS release:
+  `scripts/ios-release-version.sh` reads the version from the tag on HEAD and
+  derives the build number (`MAJOR*10000 + MINOR*100 + PATCH`). The values in
+  `App/LedgerMobile/project.yml` are for local development and are overridden
+  when packaging. See the "iOS App Version" section of `AGENTS.md`.
 
 Deployment:
 
-- CI is the only workflow. It runs on pull requests, checking only the areas
-  the changed paths map to in `.github/scripts/plan-components.sh`, and checks
-  every area when dispatched by hand.
-- There are no deploy, image-publishing or IPA packaging workflows; deployments
-  and IPA packaging are run by hand outside GitHub Actions.
+- CI runs on pull requests, checking only the areas the changed paths map to
+  in `.github/scripts/plan-components.sh`, and checks every area when
+  dispatched by hand.
+- `ios-release.yml` packages and publishes the iOS app when a release tag is
+  pushed. There are no deploy or image-publishing workflows; deployments are
+  run by hand outside GitHub Actions.
 

@@ -65,7 +65,7 @@ else
       docker/*|scripts/selfhost/*|.env.selfhost.example|.dockerignore)
         mark selfhost ;;
 
-      scripts/build-ios-ipa.sh|scripts/test_ios_private_ipa.py|scripts/publish-sidestore-release.py|scripts/test_sidestore_publish.py)
+      scripts/build-ios-ipa.sh|scripts/ios-release-version.sh|scripts/test_ios_private_ipa.py|scripts/publish-sidestore-release.py|scripts/test_sidestore_publish.py)
         mark release ;;
     esac
   done

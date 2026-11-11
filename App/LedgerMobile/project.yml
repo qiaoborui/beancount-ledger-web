@@ -9,6 +9,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+    # Local development values. Packaging takes the version from the release tag
+    # and derives the build number from it (scripts/ios-release-version.sh).
     CURRENT_PROJECT_VERSION: "61"
     MARKETING_VERSION: "1.4.2"
     TARGETED_DEVICE_FAMILY: "1,2"

@@ -47,63 +47,63 @@ through `LEDGER_ROOT`.
 - `docs/` contains privacy, ledger layout, self-hosting, backend architecture,
   and Ubuntu server deployment documentation.
 - `docker/` contains container/deployment examples.
-- `.github/workflows/ci.yml` is the only workflow. It runs the checks of the
-  areas a pull request touches; see Validation.
+- `.github/workflows/ci.yml` runs the checks of the areas a pull request
+  touches; see Validation. `.github/workflows/ios-release.yml` packages and
+  publishes the iOS app when a release tag is pushed.
 - `.agents/` contains Agent4MD config, durable rules, project knowledge, and
   domain skills.
 
 ## iOS App Version
 
-The iOS app is the shipped product. It carries two independent numbers, and
-they answer different questions:
+The iOS app is the shipped product. A release is declared by one thing only: an
+annotated Git tag `v<MAJOR>.<MINOR>.<PATCH>` on the commit to ship.
 
-- `MARKETING_VERSION` is the **release**. It belongs to a batch of work and is
-  declared by an annotated Git tag `v<MAJOR>.<MINOR>.<PATCH>`; the packaging
-  script reads the highest tag, so one release covers however many PRs it took.
-- `CURRENT_PROJECT_VERSION` is the **binary build number**. It identifies one
-  packaged artifact and advances every time a package is produced, because
-  SideStore and AltStore compare it to decide whether a renewal actually
-  installed something new.
+- The **version** (`CFBundleShortVersionString`) is the tag's version.
+- The **build number** (`CFBundleVersion`) is derived from it as
+  `MAJOR*10000 + MINOR*100 + PATCH` (v1.4.3 → 10403), so a newer release always
+  carries a higher build, which SideStore and AltStore require to offer it as an
+  update. MINOR and PATCH stay below 100.
 
-Both live in `App/LedgerMobile/project.yml` and apply to the app, Widget, and
-Share targets.
+`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in
+`App/LedgerMobile/project.yml` are local development values only. Packaging
+overrides them for the app, Widget, and Share targets and never writes them back.
+Feature, fix, documentation, test, and CI PRs leave them alone, and there are no
+version-bump or "record build" PRs. Merging never releases anything; state in the
+PR body that a release is needed (`需要发版：新增 <capability>`) so it is not
+forgotten.
 
-### What a task does
+### Cutting a release
 
-Feature work **never** changes `MARKETING_VERSION`. A PR that adds one
-capability is not a release; several such PRs land and one release collects
-them. Touching the line per PR only guarantees merge conflicts. Leave both
-numbers alone in feature, fix, documentation, test, and CI PRs, and state in the
-PR body that a release is needed (`需要发版：新增 <capability>`) so the release is
-not forgotten.
+When a batch of merged PRs is ready, tag the `main` commit to ship and push the
+tag:
 
-Cutting a release is its own step, when a batch is ready:
+```bash
+git tag -a v<version> -F notes.md
+git push origin v<version>
+```
 
-1. Refresh `MARKETING_VERSION` in `project.yml` to the version being released
-   (+PATCH by default, whether the batch adds capabilities or only fixes, so
-   releases go 1.4.0 → 1.4.1 → 1.4.2; +MINOR only when the maintainer asks for
-   one to mark a milestone. `1.0.0` was the first publicly distributed build).
-2. `git tag -a v<version> -m "<one-line summary>"` and push the tag.
-3. Package. `scripts/build-ios-ipa.sh` refuses to run without a tag, refuses
-   when the tag and `project.yml` disagree, and advances the build number by one
-   on every package, so no two IPAs share a number.
-4. Commit the build-number bump the packaging script leaves behind.
-5. Publish to the SideStore source:
-   `python3 scripts/publish-sidestore-release.py --public <ipa> --notes <notes.md>`.
-   It uploads the IPA to a `v<version>` release of the public
-   `beancount-ledger-releases` repository and prepends the version to
-   `sidestore/source.json` there. Write the notes in Chinese for users, one
-   line per change with its PR number. Run it with `--dry-run` first.
+- +PATCH by default, whether the batch adds capabilities or only fixes, so
+  releases go 1.4.1 → 1.4.2 → 1.4.3; +MINOR only when the maintainer asks for
+  one to mark a milestone.
+- The tag message carries the release notes. Its first line is a title and is
+  dropped; the rest is written in Chinese for users, one line per change with
+  its PR number. A line that is exactly `---` ends the part shown in SideStore.
+- The push runs `.github/workflows/ios-release.yml`, which packages the IPA on
+  the Mac runner, uploads it to the `v<version>` release of the public
+  `beancount-ledger-releases` repository, and adds it to `sidestore/source.json`
+  there. Pushing a tag publishes; confirm with the maintainer first.
 
-`project.yml` and the tags must never disagree: the build stops rather than ship
-a version nobody declared.
+Manual fallback: from a checkout of the tag, run
+`bash scripts/build-ios-ipa.sh --private-local <new-dir>` and then
+`python3 scripts/publish-sidestore-release.py --public <ipa> --notes <notes.md>`,
+with `--dry-run` first. `build-ios-ipa.sh` refuses a commit without a release tag
+or with a tag that is not the newest one.
 
 Other rules:
 
-- Never reuse or lower a build number, and never move a tag to a different
-  commit. Retracting a release means a new tag, not an edited one.
-- Tags are compared as version numbers, not by commit date, so re-tagging an
-  older commit cannot move the shipped version backwards.
+- Never move or delete a tag. A broken release is fixed by a new, higher tag.
+- Tags are compared as version numbers, not by commit date, so tagging an older
+  commit cannot move the shipped version backwards.
 - `FEATURE_PARITY.md` next to the Xcode project records what the app actually
   implements. Update it in the same change that ships or removes a capability.
   Do not list planned work as if it were available.
@@ -118,10 +118,9 @@ Other rules:
 - After completing feature work, make sure a pull request exists. After opening
   or updating a PR, check the PR status, mergeability, and conflict state; if
   conflicts are reported, resolve them before handing the work back.
-- The only workflow is `ci.yml`. There are no deployment, image-publishing or
-  IPA packaging workflows; merging to `main` builds and deploys nothing, and
-  IPAs are packaged locally with `scripts/build-ios-ipa.sh`. Do not add other
-  workflows back without an explicit request.
+- Merging to `main` builds and deploys nothing. The only workflows are `ci.yml`
+  and `ios-release.yml`, which runs only for a pushed release tag. Do not add
+  deployment or image-publishing workflows back without an explicit request.
 - When several dependent features must land serially, use Graphite stacked PRs
   instead of mixing the work into one large branch.
 - Avoid starting the local dev server by default. Prefer static checks, tests,

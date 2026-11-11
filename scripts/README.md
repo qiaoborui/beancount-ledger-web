@@ -147,13 +147,14 @@ SideStore 源。源在单独的公开仓库
 https://raw.githubusercontent.com/qiaoborui/beancount-ledger-releases/main/sidestore/source.json
 ```
 
-发版顺序见 `AGENTS.md` 的 iOS App Version 一节；打包并提交构建号之后：
+正常发版只需推送标签，`ios-release.yml` 会打包并发布，见 `AGENTS.md` 的 iOS App Version 一节。
+CI 不可用时，从标签所在提交用 `build-ios-ipa.sh` 打包，再手动发布：
 
 ```bash
 python3 scripts/publish-sidestore-release.py --public \
-  dist/0.5.0-55/LedgerMobile-0.5.0-55-SideStore.ipa --notes /tmp/notes.md --dry-run
+  dist/1.4.3-10403/LedgerMobile-1.4.3-10403-SideStore.ipa --notes /tmp/notes.md --dry-run
 python3 scripts/publish-sidestore-release.py --public \
-  dist/0.5.0-55/LedgerMobile-0.5.0-55-SideStore.ipa --notes /tmp/notes.md
+  dist/1.4.3-10403/LedgerMobile-1.4.3-10403-SideStore.ipa --notes /tmp/notes.md
 ```
 
 - 必须加 `--public`：发布后 IPA 任何人都能下载，而

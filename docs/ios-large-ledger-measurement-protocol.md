@@ -130,9 +130,9 @@ cat /tmp/blw-ipa-<label>/build-info.txt
 
 `build-ios-ipa.sh` 的既有规则照旧适用，协议不改变它们：
 
-- 需要精确的 `vMAJOR.MINOR.PATCH` 标签，且标签版本与 `App/LedgerMobile/project.yml` 的
-  `MARKETING_VERSION` 一致，否则直接失败。测量用的包同样要走发版流程，不要绕过。
-- 每次打包 `CURRENT_PROJECT_VERSION` +1；**不要复用或调低 build 号**。
+- HEAD 上必须有精确的 `vMAJOR.MINOR.PATCH` 标签，且是最新的发版标签，否则直接失败。
+  版本号取自标签，build 号由版本推出（`MAJOR*10000 + MINOR*100 + PATCH`），
+  `project.yml` 里的值只用于本地开发。测量用的包同样要走发版流程，不要绕过。
 - 记录 `build-info.txt` 里的 `Source:` 提交、`Xcode` 版本、`iPhoneOS SDK` 版本，以及
   IPA 的 sha256。这三行是这次测量的“构建条件”。
 - 包是 ad-hoc 签名的，用 SideStore / iLoader / AltStore 重签安装。

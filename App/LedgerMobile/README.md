@@ -340,8 +340,11 @@ Keep the embedded Python framework and standard-library extension frameworks
 when packaging or re-signing; they must receive valid signatures with the app.
 ### Private packaging
 
-There is no Actions workflow for packaging; build the IPA on the Mac. The script
-builds the embedded Go and Beancount frameworks, archives the app, and signs
+Releases are packaged by `.github/workflows/ios-release.yml` when a release tag
+is pushed (see the iOS App Version section of `AGENTS.md`); the same script
+also runs on the Mac by hand. HEAD must carry the newest `v<X.Y.Z>` tag: the app
+gets that version and the build number `MAJOR*10000 + MINOR*100 + PATCH`,
+overriding the development values in `project.yml`. The script builds the embedded Go and Beancount frameworks, archives the app, and signs
 Python and all standard-library extension frameworks before signing the app and
 its Widget/Share extensions. The output directory also receives a SHA-256
 checksum and `build-info.txt` with the source commit, app version and actual
