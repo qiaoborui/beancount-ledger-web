@@ -58,6 +58,35 @@ final class LedgerOnboardingConversationTests: XCTestCase {
         XCTAssertFalse(debtOnly.canCreate)
     }
 
+    func testTheStepFollowsTheDraftAndSkipsWhatWasAnsweredAhead() throws {
+        var state = LedgerOnboardingState()
+        XCTAssertEqual(state.currentStep, .funds)
+
+        let card = LedgerOnboardingDraft.Account(kind: "bank_card", name: "招行", account: "Assets:Bank:CMB")
+        state.draft.accounts = [card]
+        XCTAssertEqual(state.currentStep, .debts, "amounts owed come next, even when there are none yet")
+
+        // Owing nothing: the categories mark the debts step as passed.
+        state.draft.incomeCategories = [.init(name: "工资", account: "Income:Salary")]
+        XCTAssertTrue(state.isDone(.debts))
+        XCTAssertEqual(state.currentStep, .expenses)
+
+        state.draft.expenseCategories = [.init(name: "餐饮", account: "Expenses:Food")]
+        XCTAssertEqual(state.currentStep, .review)
+        XCTAssertFalse(state.isDone(.review), "only a presented plan finishes the review")
+        state.ready = true
+        XCTAssertTrue(LedgerOnboardingStep.allCases.allSatisfy(state.isDone))
+        XCTAssertEqual(state.currentStep, .review)
+
+        // A user who opens with a credit card still starts at the accounts.
+        var ahead = LedgerOnboardingState()
+        ahead.draft.accounts = [.init(kind: "credit_card", name: "信用卡", account: "Liabilities:CreditCard:CMB", openingBalance: "800")]
+        XCTAssertTrue(ahead.isDone(.debts))
+        XCTAssertEqual(ahead.currentStep, .funds)
+        ahead.draft.accounts.append(card)
+        XCTAssertEqual(ahead.currentStep, .income)
+    }
+
     @MainActor
     func testTurnsCarryTheDraftWithoutALedgerAndKeepTheTranscript() async throws {
         let recorder = Recorder([
