@@ -162,6 +162,7 @@ struct LedgerOnboardingAgentView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("ai-onboarding-choice")
+                .disabled(creating)
             }
             HStack(spacing: 10) {
                 Text(ask.allowsMultiple ? String(localized: "可多选；也可以直接在下面输入") : String(localized: "也可以直接在下面输入"))
@@ -171,7 +172,7 @@ struct LedgerOnboardingAgentView: View {
                     Button("发送") { send(ask.answer(picked)) }
                         .buttonStyle(.balanced(.primary))
                         .fixedSize()
-                        .disabled(picked.isEmpty)
+                        .disabled(picked.isEmpty || creating)
                 }
             }
             .padding(.horizontal, 14)
@@ -326,9 +327,10 @@ struct LedgerOnboardingAgentView: View {
     }
 
     private func send(_ text: String) {
-        guard !conversation.isRunning, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !conversation.isRunning, !creating, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         conversation.send(text)
-        draft = ""
+        // A tapped choice leaves whatever the user was typing in place.
+        if text == draft { draft = "" }
     }
 
     private func create() {

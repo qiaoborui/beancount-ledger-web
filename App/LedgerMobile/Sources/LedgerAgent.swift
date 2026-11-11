@@ -637,6 +637,9 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     /// The ledger an onboarding conversation is drafting. Such a turn takes
     /// no ledger: the roots and entrypoint stay empty.
     var onboarding: LedgerOnboardingState? = nil
+    /// The device's calendar day, yyyy-MM-dd: Go on iOS keeps time in UTC,
+    /// so an onboarding turn takes "today" from here.
+    var today: String? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {

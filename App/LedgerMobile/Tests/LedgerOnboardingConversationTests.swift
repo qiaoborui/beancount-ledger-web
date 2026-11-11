@@ -89,6 +89,7 @@ final class LedgerOnboardingConversationTests: XCTestCase {
             XCTAssertNil(request["scratchRoot"])
             XCTAssertNil(request["memoryPath"])
             XCTAssertNotNil(request["onboarding"] as? [String: Any])
+            XCTAssertEqual(request["today"] as? String, LedgerOnboardingConversation.localDay())
         }
     }
 
@@ -115,6 +116,32 @@ final class LedgerOnboardingConversationTests: XCTestCase {
         let requests = await Self.requests(recorder)
         XCTAssertEqual(requests.map { $0["message"] as? String }, [LedgerOnboardingConversation.opening, "再加一张卡", "再加一张卡"])
         XCTAssertEqual(requests[2]["transcript"] as? String, "[1]")
+    }
+
+    @MainActor
+    func testANewMessageAfterAFailureCarriesTheUnansweredQuestion() async throws {
+        let recorder = Recorder([
+            #"{"ok":true,"reply":"好","toolCalls":[],"transcript":"[1]","onboarding":"# + Self.readyState + "}",
+            #"{"ok":false,"toolCalls":[],"error":"network timeout"}"#,
+            #"{"ok":true,"reply":"都记下了","toolCalls":[],"transcript":"[2]","onboarding":"# + Self.readyState + "}",
+        ])
+        let conversation = conversation(recorder)
+        conversation.start()
+        try await waitUntilIdle(conversation)
+        conversation.send("再加一张卡")
+        try await waitUntilIdle(conversation)
+        XCTAssertNotNil(conversation.error)
+        conversation.send("余额 500")
+        try await waitUntilIdle(conversation)
+        XCTAssertNil(conversation.error)
+        XCTAssertEqual(conversation.messages.filter { $0.role == .user }.map(\.text), ["再加一张卡", "余额 500"])
+        let requests = await Self.requests(recorder)
+        XCTAssertEqual(requests.last?["message"] as? String, "再加一张卡\n余额 500")
+    }
+
+    func testLocalDayUsesTheDeviceCalendarDay() {
+        let day = LedgerOnboardingConversation.localDay(Date(timeIntervalSince1970: 0))
+        XCTAssertNotNil(day.range(of: "^19(69-12-31|70-01-01)$", options: .regularExpression))
     }
 
     @MainActor
@@ -149,5 +176,42 @@ final class LedgerOnboardingConversationTests: XCTestCase {
             _ = try await catalog.createCustom(name: "坏日期", openingDate: "11/01")
             XCTFail("an invalid opening date was accepted")
         } catch {}
+        do {
+            _ = try await catalog.createCustom(name: "太早", openingDate: "1969-12-31")
+            XCTFail("an opening date before 1970 was accepted")
+        } catch {}
+        do {
+            _ = try await catalog.createCustom(name: "坏币种", currency: "RMB.")
+            XCTFail("a currency ending in punctuation was accepted")
+        } catch {}
+    }
+
+    /// A live onboarding produced an HKD ledger with a CNY card; spending
+    /// from that card must not hit the categories' currency constraint.
+    func testCategoriesTakeEveryCurrencyTheLedgerHolds() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("OnboardingAI-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        final class NoEngine: LocalLedgerEngine {
+            func dispatch(_ request: LocalLedgerEngineRequest) async throws -> Data { Data("{}".utf8) }
+        }
+        let catalog = LocalLedgerCatalog(rootDirectory: root, engine: NoEngine(), validator: { _, _ in })
+        let mixed = try await catalog.createCustom(name: "港币账本", currency: "HKD", accounts: [
+            OnboardingAccountSelection(name: "汇丰", account: "Assets:Bank:HSBC", currency: "HKD"),
+            OnboardingAccountSelection(name: "招行人民币卡", account: "Assets:Bank:CMB", currency: "CNY"),
+        ], categories: [
+            OnboardingCategorySelection(name: "工资", account: "Income:Salary", currency: "HKD"),
+            OnboardingCategorySelection(name: "餐饮", account: "Expenses:Food", currency: "HKD"),
+        ])
+        let mixedText = try await catalog.repository(for: mixed).readFile(path: "main.bean").text
+        XCTAssertTrue(mixedText.contains("open Expenses:Food HKD,CNY\n"))
+        XCTAssertTrue(mixedText.contains("open Income:Salary HKD,CNY\n"))
+        XCTAssertTrue(mixedText.contains("open Assets:Bank:CMB CNY\n"))
+
+        let single = try await catalog.createCustom(name: "人民币账本", categories: [
+            OnboardingCategorySelection(name: "餐饮", account: "Expenses:Food", currency: "CNY"),
+        ])
+        let singleText = try await catalog.repository(for: single).readFile(path: "main.bean").text
+        XCTAssertTrue(singleText.contains("open Expenses:Food CNY\n"))
     }
 }

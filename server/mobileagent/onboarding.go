@@ -78,8 +78,9 @@ var onboardingKinds = map[string]string{
 var onboardingKindOrder = []string{"cash", "bank_card", "digital_wallet", "savings", "investment", "credit_card", "consumer_loan", "other_debt"}
 
 var (
-	onboardingSegment  = regexp.MustCompile(`^[A-Z0-9][A-Za-z0-9-]*$`)
-	onboardingCurrency = regexp.MustCompile(`^[A-Z][A-Z0-9._-]{0,23}$`)
+	onboardingSegment = regexp.MustCompile(`^[A-Z0-9][A-Za-z0-9-]*$`)
+	// Beancount currencies end in a letter or digit.
+	onboardingCurrency = regexp.MustCompile(`^[A-Z]([A-Z0-9._-]{0,22}[A-Z0-9])?$`)
 	onboardingAmount   = regexp.MustCompile(`^[0-9]{1,13}(\.[0-9]{1,2})?$`)
 )
 
@@ -221,15 +222,29 @@ func validateOnboardingPath(path, root string) error {
 	return nil
 }
 
+// validateOnboardingDate compares calendar dates. The ledger opens its
+// accounts on 1970-01-01, so opening balances cannot come earlier.
 func validateOnboardingDate(value string, today time.Time) error {
-	date, err := time.Parse(time.DateOnly, value)
-	if err != nil {
+	if _, err := time.Parse(time.DateOnly, value); err != nil {
 		return fmt.Errorf("startDate %q must be YYYY-MM-DD", value)
 	}
-	if date.After(today) {
+	if value > today.Format(time.DateOnly) {
 		return fmt.Errorf("startDate %s is in the future", value)
 	}
+	if value < "1970-01-01" {
+		return fmt.Errorf("startDate %s is before 1970-01-01", value)
+	}
 	return nil
+}
+
+// onboardingDay is the user's calendar day: the date the shell sends, since
+// Go on iOS keeps time in UTC, or else the local date here.
+func onboardingDay(local string) time.Time {
+	if day, err := time.Parse(time.DateOnly, local); err == nil {
+		return day
+	}
+	now := time.Now()
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 // cleanAmount accepts what a model is likely to send for an amount: a
@@ -383,7 +398,7 @@ func (s *onboardingSession) tools() []agent.AgentTool {
 				"kind":           map[string]any{"type": "string", "enum": kinds},
 				"name":           map[string]any{"type": "string", "description": "给用户看的中文名称，如 招商银行卡、支付宝余额；同名即更新"},
 				"account":        map[string]any{"type": "string", "description": "kind 对应根路径下的英文路径，如 Assets:Bank:CMB、Liabilities:CreditCard:CMB"},
-				"currency":       map[string]any{"type": "string", "description": "账户币种；与账本本位币相同时不传"},
+				"currency":       map[string]any{"type": "string", "description": "账户币种；与账本本位币相同时可以不传"},
 				"openingBalance": map[string]any{"type": "string", "description": "现在的余额（待还款项填现在欠多少），不带符号的数字；用户没说就不传"},
 			},
 			run: func(params json.RawMessage) (string, error) {
@@ -401,9 +416,6 @@ func (s *onboardingSession) tools() []agent.AgentTool {
 				item := onboardingAccountV1{Kind: input.Kind, Name: strings.TrimSpace(input.Name), Account: strings.TrimSpace(input.Account),
 					Currency: strings.ToUpper(strings.TrimSpace(input.Currency)), OpeningBalance: balance}
 				return s.change(func(draft *onboardingDraftV1) error {
-					if item.Currency == draft.Currency {
-						item.Currency = ""
-					}
 					for index, current := range draft.Accounts {
 						if current.Name == item.Name {
 							draft.Accounts[index] = item
@@ -485,6 +497,9 @@ func (s *onboardingSession) tools() []agent.AgentTool {
 				var input struct{ Kind, Name string }
 				if err := json.Unmarshal(params, &input); err != nil {
 					return "", err
+				}
+				if input.Kind != "income" && input.Kind != "expense" {
+					return "", errors.New("kind must be income or expense")
 				}
 				return s.change(func(draft *onboardingDraftV1) error {
 					list := categories(input.Kind, draft)

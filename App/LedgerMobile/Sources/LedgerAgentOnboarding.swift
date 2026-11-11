@@ -169,7 +169,8 @@ final class LedgerOnboardingConversation: ObservableObject {
         let question = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty, !isRunning else { return }
         messages.append(Message(role: .user, text: question))
-        run(question)
+        // A question the model never answered goes along with the next one.
+        run(failedQuestion.map { "\($0)\n\(question)" } ?? question)
     }
 
     func retry() {
@@ -255,6 +256,15 @@ final class LedgerOnboardingConversation: ObservableObject {
         task = nil
     }
 
+    nonisolated static func localDay(_ date: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
     /// One onboarding turn through the native loop, stopped with the task.
     nonisolated static func turn(message: String, state: LedgerOnboardingState, transcript: String?,
                                  conversationID: UUID, credentials: Credentials, runner: LedgerAgentRunner,
@@ -265,7 +275,7 @@ final class LedgerOnboardingConversation: ObservableObject {
             modelHandle: nil, sensitiveUnlocked: false, provider: choice.provider, model: choice.model,
             apiKey: credentials.apiKey, custom: choice.isCustom ? choice.custom : nil,
             thinking: credentials.thinking?.rawValue, history: [], message: message, transcript: transcript,
-            conversationId: conversationID.uuidString, streamEvents: true, onboarding: state)
+            conversationId: conversationID.uuidString, streamEvents: true, onboarding: state, today: localDay())
         let encoded = try JSONEncoder().encode(request)
         LedgerAgentSteps.observe(turnID, onStep)
         defer { LedgerAgentSteps.stop(turnID) }

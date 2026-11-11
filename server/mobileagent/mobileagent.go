@@ -86,6 +86,8 @@ type turnRequestV1 struct {
 	// Onboarding, when set, runs the ledger-less onboarding mode: no ledger
 	// is opened, and the model edits this draft with the onboarding tools.
 	Onboarding *onboardingStateV1 `json:"onboarding,omitempty"`
+	// Today is the user's local date, YYYY-MM-DD, for an onboarding turn.
+	Today string `json:"today,omitempty"`
 }
 
 type customEndpointV1 struct {
@@ -449,7 +451,8 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		if request.WorkspaceRoot != "" || request.ScratchRoot != "" || request.MemoryPath != "" || len(request.Attachments) > 0 {
 			return files, errors.New("onboarding turns take no ledger, scratch copy, memory or attachments")
 		}
-		drafting, err := newOnboardingSession(request.Onboarding, time.Now())
+		today := onboardingDay(request.Today)
+		drafting, err := newOnboardingSession(request.Onboarding, today)
 		if err != nil {
 			return files, err
 		}
@@ -458,7 +461,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 			tools = append(tools, tool)
 			allowed[tool.Name()] = true
 		}
-		systemPrompt = onboardingSystemPrompt(time.Now())
+		systemPrompt = onboardingSystemPrompt(today)
 		message = drafting.draftNote() + message
 	} else {
 		session, err := app.OpenLocalAgentSession(request.LocalRequest, request.SensitiveUnlocked)

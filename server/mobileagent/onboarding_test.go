@@ -52,7 +52,7 @@ func TestOnboardingTurnBuildsTheDraftWithoutALedger(t *testing.T) {
 	}
 	draft := response.Onboarding.Draft
 	if len(draft.Accounts) != 2 || draft.Accounts[0].OpeningBalance != "12345.6" || draft.Accounts[1].OpeningBalance != "800" ||
-		draft.Accounts[1].Currency != "" || len(draft.IncomeCategories) != 1 || len(draft.ExpenseCategories) != 2 {
+		draft.Accounts[1].Currency != "CNY" || len(draft.IncomeCategories) != 1 || len(draft.ExpenseCategories) != 2 {
 		t.Fatalf("draft = %+v", draft)
 	}
 	for _, call := range response.ToolCalls {
@@ -126,6 +126,8 @@ func TestOnboardingDraftValidation(t *testing.T) {
 		"three decimals": func(d *onboardingDraftV1) { d.Accounts[0].OpeningBalance = "1.005" },
 		"future start":   func(d *onboardingDraftV1) { d.StartDate = "2026-12-01" },
 		"bad currency":   func(d *onboardingDraftV1) { d.Currency = "rmb" },
+		"trailing dot":   func(d *onboardingDraftV1) { d.Currency = "RMB." },
+		"before 1970":    func(d *onboardingDraftV1) { d.StartDate = "1969-12-31" },
 		"duplicate path": func(d *onboardingDraftV1) {
 			d.Accounts = append(d.Accounts, onboardingAccountV1{Kind: "digital_wallet", Name: "余额宝", Account: "Assets:Wallet:Alipay"})
 		},
@@ -150,6 +152,62 @@ func TestOnboardingDraftValidation(t *testing.T) {
 	debtOnly.ExpenseCategories = []onboardingCategoryV1{{Name: "餐饮", Account: "Expenses:Food"}}
 	if debtOnly.isReady() {
 		t.Fatal("a draft with only a credit card is ready")
+	}
+}
+
+func TestOnboardingDayComesFromTheShell(t *testing.T) {
+	// Go on iOS runs in UTC, so the device's own date decides what is future.
+	today := onboardingDay("2026-11-12")
+	draft := defaultOnboardingDraft()
+	draft.StartDate = "2026-11-12"
+	if err := draft.validate(today); err != nil {
+		t.Fatalf("the device's today was refused: %v", err)
+	}
+	if err := draft.validate(onboardingToday); err == nil {
+		t.Fatal("a date after today was accepted")
+	}
+	if fallback := onboardingDay("not a date"); fallback.Format(time.DateOnly) != time.Now().Format(time.DateOnly) {
+		t.Fatalf("fallback day = %s", fallback)
+	}
+}
+
+func onboardingRun(t *testing.T, session *onboardingSession, name string, params map[string]any) error {
+	t.Helper()
+	encoded, _ := json.Marshal(params)
+	for _, tool := range session.tools() {
+		if tool, ok := tool.(onboardingTool); ok && tool.name == name {
+			_, err := tool.run(encoded)
+			return err
+		}
+	}
+	t.Fatalf("no tool %s", name)
+	return nil
+}
+
+func TestOnboardingToolsKeepExplicitCurrencyAndCheckCategoryKind(t *testing.T) {
+	session, err := newOnboardingSession(nil, onboardingToday)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := onboardingRun(t, session, "upsert_account", map[string]any{"kind": "bank_card", "name": "招行卡", "account": "Assets:Bank:CMB", "currency": "cny"}); err != nil {
+		t.Fatal(err)
+	}
+	// The card stays in CNY after the ledger moves to HKD.
+	if err := onboardingRun(t, session, "set_ledger_profile", map[string]any{"currency": "HKD"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := session.snapshot().Draft.Accounts[0].Currency; got != "CNY" {
+		t.Fatalf("explicit currency became %q", got)
+	}
+	if err := onboardingRun(t, session, "upsert_category", map[string]any{"kind": "expense", "name": "餐饮", "account": "Expenses:Food"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := onboardingRun(t, session, "remove_category", map[string]any{"kind": "spending", "name": "餐饮"}); err == nil ||
+		!strings.Contains(err.Error(), "income or expense") {
+		t.Fatalf("a bad kind was accepted: %v", err)
+	}
+	if len(session.snapshot().Draft.ExpenseCategories) != 1 {
+		t.Fatal("a refused removal changed the draft")
 	}
 }
 
