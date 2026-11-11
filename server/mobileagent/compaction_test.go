@@ -273,9 +273,11 @@ func TestCompactionThresholdFromBytesWithoutUsage(t *testing.T) {
 	if estimate := contextEstimate(conversation(8, usageAt(0.8), 3000, 1)); estimate != int(testContextWindow*0.8) {
 		t.Fatalf("estimate from usage = %d", estimate)
 	}
-	if contextWindow(&ai.Model{}, false) != assumedContextWindow ||
-		contextWindow(&ai.Model{Capabilities: ai.ModelCapabilities{ContextWindow: 1_000_000}}, true) != assumedContextWindow ||
-		contextWindow(&ai.Model{Capabilities: ai.ModelCapabilities{ContextWindow: 1_000_000}}, false) != 1_000_000 {
+	if contextWindow(&ai.Model{}, false, 0) != assumedContextWindow ||
+		contextWindow(&ai.Model{Capabilities: ai.ModelCapabilities{ContextWindow: 1_000_000}}, true, 0) != assumedContextWindow ||
+		contextWindow(&ai.Model{Capabilities: ai.ModelCapabilities{ContextWindow: 1_000_000}}, true, 400_000) != 400_000 ||
+		contextWindow(&ai.Model{Capabilities: ai.ModelCapabilities{ContextWindow: 200_000}}, false, 1_000_000) != 1_000_000 ||
+		contextWindow(&ai.Model{Capabilities: ai.ModelCapabilities{ContextWindow: 1_000_000}}, false, 0) != 1_000_000 {
 		t.Fatal("context window is not the model's, or the assumed one")
 	}
 

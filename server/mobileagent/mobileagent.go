@@ -57,6 +57,10 @@ type turnRequestV1 struct {
 	// Custom describes the endpoint when Provider is "custom": any server
 	// that speaks one of the supported wire protocols.
 	Custom *customEndpointV1 `json:"custom,omitempty"`
+	// ContextWindow is the model's context in tokens as the provider's model
+	// list gave it. Zero keeps the catalog's window, or for a model nobody
+	// describes a common one.
+	ContextWindow int `json:"contextWindow,omitempty"`
 	// Thinking is the reasoning effort: off, minimal, low, medium, high,
 	// xhigh or max. It is clamped to the nearest level the model supports;
 	// empty means off.
@@ -436,6 +440,15 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	if err != nil {
 		return files, err
 	}
+	if request.ContextWindow < 0 {
+		return files, errors.New("contextWindow must not be negative")
+	}
+	if request.ContextWindow > 0 {
+		// A copy: the catalog's model is shared by every turn.
+		listed := *model
+		listed.Capabilities.ContextWindow = request.ContextWindow
+		model = &listed
+	}
 	thinking, err := thinkingLevel(model, request.Thinking, assumed)
 	if err != nil {
 		return files, err
@@ -534,7 +547,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	var summaryUsage ai.Usage
 	if replayed {
 		// A stop during the summary leaves the previous transcript as it was.
-		summarizer := compactor{network: network, model: model, assumed: assumed, key: key, feed: feed,
+		summarizer := compactor{network: network, model: model, assumed: assumed, listed: request.ContextWindow, key: key, feed: feed,
 			spend: func(usage ai.Usage) { summaryUsage = usage }}
 		if history, out.compactedTurns, err = summarizer.compact(ctx, history); err != nil {
 			return files, err

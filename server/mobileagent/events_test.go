@@ -324,6 +324,46 @@ func TestUsageReportsTheModelsContextWindow(t *testing.T) {
 	}
 }
 
+// A window from the provider's list replaces the model's for the turn, also
+// for a model nobody describes, and leaves the shared catalog model as it was.
+func TestUsageReportsTheListedContextWindow(t *testing.T) {
+	models := ai.GetBuiltinModels("anthropic")
+	if len(models) == 0 {
+		t.Skip("no built-in Anthropic model")
+	}
+	builtin := models[0]
+	catalogWindow := builtin.Capabilities.ContextWindow
+	previousStream, previousResolve := streamFn, resolveModel
+	streamFn = func(ctx context.Context, _ *ai.Model, transcript ai.TranscriptContext, options ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
+		provider := ai.NewFauxProvider(ai.FauxConfig{})
+		provider.SetResponses([]ai.FauxResponseStep{ai.FauxStaticStep(ai.FauxResponse{Content: []ai.FauxContentBlock{ai.FauxText("你好")}})})
+		return provider.Stream(ctx, transcript, options)
+	}
+	resolveModel = func(string, string) *ai.Model { return builtin }
+	t.Cleanup(func() { streamFn, resolveModel = previousStream, previousResolve })
+	response := runTurnFor(t, map[string]any{"version": 1, "workspaceRoot": committedWorkspace(t),
+		"provider": "anthropic", "model": builtin.ID, "apiKey": "test", "message": "hi", "contextWindow": 1_000_000})
+	if !response.OK || response.Usage == nil || response.Usage.ContextWindow != 1_000_000 {
+		t.Fatalf("turn = %+v", response)
+	}
+	if builtin.Capabilities.ContextWindow != catalogWindow {
+		t.Fatalf("catalog model changed to %d", builtin.Capabilities.ContextWindow)
+	}
+
+	resolveModel = func(string, string) *ai.Model { return nil }
+	response = runTurnFor(t, map[string]any{"version": 1, "workspaceRoot": committedWorkspace(t),
+		"provider": "anthropic", "model": "claude-next-9", "apiKey": "test", "message": "hi", "contextWindow": 400_000})
+	if !response.OK || response.Usage == nil || response.Usage.ContextWindow != 400_000 {
+		t.Fatalf("assumed turn = %+v", response)
+	}
+
+	response = runTurnFor(t, map[string]any{"version": 1, "workspaceRoot": committedWorkspace(t),
+		"provider": "anthropic", "model": builtin.ID, "apiKey": "test", "message": "hi", "contextWindow": -1})
+	if response.OK {
+		t.Fatalf("negative window accepted: %+v", response)
+	}
+}
+
 // A call refused before it runs still reports the arguments the model gave,
 // in its step and its tool_start, as its toolCalls entry does.
 func TestRefusedCallKeepsItsArguments(t *testing.T) {

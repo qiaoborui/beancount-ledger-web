@@ -44,6 +44,13 @@ final class LedgerAgentSettings: ObservableObject {
     private let autoWritesKey = "ledger.agent.auto-write"
     private let usesMemoryKey = "ledger.agent.memory"
     private let assistsKey = "ledger.agent.assists"
+    /// Each model's context window from the provider's list, by `identity`,
+    /// so a turn after relaunch knows it without fetching the list again.
+    private let contextWindowsKey = "ledger.agent.context-windows"
+    private var contextWindows: [String: Int]
+    /// Lists fetched quietly this launch for a window, by `listKey`; each is
+    /// tried once whatever its result.
+    private var quietlyListed: Set<String> = []
     private let keyStore: (String) -> ClassificationKeyStore
     private let lister: LedgerAgentModelLister
 
@@ -53,6 +60,7 @@ final class LedgerAgentSettings: ObservableObject {
         var choice: LedgerAgentModelChoice
         var title: String
         var thinkingLevels: [String]? = nil
+        var contextWindow: Int? = nil
         var id: String { LedgerAgentSettings.identity(choice) }
 
         var thinking: [LedgerAgentThinking]? {
@@ -78,7 +86,47 @@ final class LedgerAgentSettings: ObservableObject {
         autoWrites = defaults.bool(forKey: autoWritesKey)
         usesMemory = defaults.object(forKey: usesMemoryKey) as? Bool ?? true
         assists = defaults.object(forKey: assistsKey) as? Bool ?? true
+        contextWindows = defaults.dictionary(forKey: contextWindowsKey) as? [String: Int] ?? [:]
         hasKey = (try? keyStore(choice.provider).load()) != nil
+    }
+
+    /// The model's context window as its provider's list gave it, nil when
+    /// no list said. The native side then uses its catalog's window, or for a
+    /// model it does not know a common one.
+    func contextWindow(for choice: LedgerAgentModelChoice) -> Int? {
+        let id = Self.identity(choice)
+        if let window = listed[Self.listKey(choice)]?.first(where: { $0.id == choice.model })?.contextWindow, window > 0 {
+            return window
+        }
+        if let window = contextWindows[id], window > 0 { return window }
+        if let window = favorites.first(where: { $0.id == id })?.contextWindow, window > 0 { return window }
+        return nil
+    }
+
+    /// Fetches the current provider's list once per launch when nothing
+    /// says the current model's window yet. Failures are not shown: the
+    /// turn still runs with the native side's window.
+    func learnContextWindow() async {
+        let choice = choice
+        guard contextWindow(for: choice) == nil, choice.isComplete, !listing,
+              let key = try? apiKey(), quietlyListed.insert(Self.listKey(choice)).inserted,
+              let models = try? await lister.models(for: choice, apiKey: key) else { return }
+        listed[Self.listKey(choice)] = models
+        remember(models, for: choice)
+    }
+
+    /// Keeps the windows of a fetched list for the next launch.
+    private func remember(_ models: [LedgerAgentListedModel], for choice: LedgerAgentModelChoice) {
+        var changed = false
+        for model in models {
+            guard let window = model.contextWindow, window > 0 else { continue }
+            let id = Self.identity(.init(provider: choice.provider, model: model.id, custom: choice.isCustom ? choice.custom : nil))
+            if contextWindows[id] != window {
+                contextWindows[id] = window
+                changed = true
+            }
+        }
+        if changed { defaults.set(contextWindows, forKey: contextWindowsKey) }
     }
 
     /// The levels the current model accepts, least to most.
@@ -173,7 +221,8 @@ final class LedgerAgentSettings: ObservableObject {
                 return
             }
             let levels = levels ?? thinkingLevels(for: target)
-            favorites.append(.init(choice: target, title: title ?? self.title(for: target), thinkingLevels: levels.map(\.rawValue)))
+            favorites.append(.init(choice: target, title: title ?? self.title(for: target), thinkingLevels: levels.map(\.rawValue),
+                                   contextWindow: contextWindow(for: target)))
         }
         storeFavorites()
     }
@@ -231,6 +280,7 @@ final class LedgerAgentSettings: ObservableObject {
         do {
             let models = try await lister.models(for: choice, apiKey: key)
             listed[Self.listKey(choice)] = models
+            remember(models, for: choice)
         } catch {
             listError = error.localizedDescription
         }
