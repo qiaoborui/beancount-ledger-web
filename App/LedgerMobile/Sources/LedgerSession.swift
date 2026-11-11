@@ -327,6 +327,12 @@ final class LedgerSession: ObservableObject {
     @Published private(set) var isLocalTransactionSummaryLoading = false
     @Published private(set) var localTransactionSummaryError: String?
     private var transactionSummaryTask: Task<Void, Never>?
+    /// Finished full-range summaries, newest first and one per ledger, range and
+    /// filter, so a list that was already counted (or warmed after load) opens
+    /// with its counts. Rows are dropped; only counts and facets are kept.
+    @Published private var localTransactionSummaryCache: [CachedTransactionSummary] = []
+    private var transactionSummaryPrefetch: (ledgerID: UUID, revisionID: UUID, range: LedgerDateRange, task: Task<Void, Never>)?
+    private static let transactionSummaryCacheLimit = 8
     private var transactionWindowFilter = LedgerTransactionFilter()
     private var transactionWindowLimits = LocalTransactionWindow.Limits()
     /// Window generation of a first-window read still in flight, so a second
@@ -487,6 +493,16 @@ final class LedgerSession: ObservableObject {
         let presentation: LocalPresentation
         let revisionID: UUID
         let range: LedgerDateRange
+        /// A read that serves no particular list survives window resets; it is
+        /// still bound to the request, ledger, revision, range and privacy state.
+        var windowScoped = true
+    }
+    private struct CachedTransactionSummary {
+        let ledgerID: UUID
+        let revisionID: UUID
+        let range: LedgerDateRange
+        let filter: LedgerTransactionFilter
+        let result: LocalTransactionScan.Result
     }
     private var localResumeTask: Task<Void, Never>?
     private var localResumeID: UUID?
@@ -3995,6 +4011,7 @@ final class LedgerSession: ObservableObject {
                 guard generation == self.requestGeneration, epoch == self.sessionEpoch,
                       expectedLocation == self.location, self.phase == .ready else { return }
                 self.prefetchAnalysis()
+                self.prefetchLocalTransactionSummary()
                 self.scheduleLocalWidgetPublish(.init(ledger: payload, contextURL: contextURL,
                     valuationCurrency: payload.valuationCurrency, generation: generation,
                     localRevisionID: presentationRevision))
@@ -4022,6 +4039,7 @@ final class LedgerSession: ObservableObject {
                 )
             }
             prefetchAnalysis()
+            prefetchLocalTransactionSummary()
         }
     }
 
@@ -4582,7 +4600,7 @@ final class LedgerSession: ObservableObject {
     /// monthly refresh; revision-verified native rows, not those overlays, own reads.
     private func validateLocalRead(_ context: LocalReadContext) throws {
         try Task.checkCancellation()
-        guard context.generation == transactionWindowGeneration,
+        guard !context.windowScoped || context.generation == transactionWindowGeneration,
               context.request == requestGeneration, context.epoch == sessionEpoch,
               location == .local(context.presentation.ledgerID),
               localPresentation == context.presentation, selectedRange == context.range,
@@ -4627,6 +4645,9 @@ final class LedgerSession: ObservableObject {
         transactionWindowFilter = filter
         transactionWindowLimits = limits
         guard let context = try? localReadContext(), let repository = localRepository else { return }
+        if localTransactionSummary == nil, let cached = cachedLocalTransactionSummary(context: context, filter: filter) {
+            localTransactionSummary = cached
+        }
         firstWindowGeneration = context.generation
         await runLocalTransactionWindow(context: context, repository: repository, filter: filter, limits: limits)
         if firstWindowGeneration == context.generation { firstWindowGeneration = nil }
@@ -4667,6 +4688,16 @@ final class LedgerSession: ObservableObject {
               let context = transactionWindowContext, let repository = localRepository,
               (try? validateLocalRead(context)) != nil else { return }
         let filter = transactionWindowFilter
+        if let cached = cachedLocalTransactionSummary(context: context, filter: filter) {
+            localTransactionSummary = cached
+            return
+        }
+        // The warm-up after load is already counting this exact list: wait for it
+        // rather than scanning the range a second time.
+        let prefetch = transactionSummaryPrefetch.flatMap {
+            filter == LedgerTransactionFilter() && $0.ledgerID == context.presentation.ledgerID
+                && $0.revisionID == context.revisionID && $0.range == context.range ? $0.task : nil
+        }
         isLocalTransactionSummaryLoading = true
         localTransactionSummaryError = nil
         let task = Task { @MainActor [self] in
@@ -4677,6 +4708,14 @@ final class LedgerSession: ObservableObject {
                 }
             }
             do {
+                if let prefetch {
+                    await prefetch.value
+                    try validateLocalRead(context)
+                    if let cached = cachedLocalTransactionSummary(context: context, filter: filter) {
+                        localTransactionSummary = cached
+                        return
+                    }
+                }
                 try validateLocalRead(context)
                 let result = try await repository.scanTransactions(start: context.range.start,
                     end: context.range.queryEndExclusive, filter: filter,
@@ -4688,6 +4727,7 @@ final class LedgerSession: ObservableObject {
                     throw LocalLedgerWorkspace.WorkspaceError.staleRevision
                 }
                 localTransactionSummary = result
+                cacheLocalTransactionSummary(result, context: context, filter: filter)
             } catch {
                 guard context.generation == transactionWindowGeneration else { return }
                 if localTransactionSummary == nil, !(error is CancellationError) && !Task.isCancelled {
@@ -4698,6 +4738,69 @@ final class LedgerSession: ObservableObject {
         transactionSummaryTask = task
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
     }
+
+    /// Counts the unfiltered list for the selected range at low priority after the
+    /// ledger loads, so the transactions page opens with its count and tab counts
+    /// instead of counting in front of the user.
+    private func prefetchLocalTransactionSummary() {
+        transactionSummaryPrefetch?.task.cancel()
+        transactionSummaryPrefetch = nil
+        guard Self.prefetchesLocalTransactionSummary, isLocal, let repository = localRepository, var context = try? localReadContext() else { return }
+        context.windowScoped = false
+        let filter = LedgerTransactionFilter()
+        guard cachedLocalTransactionSummary(context: context, filter: filter) == nil else { return }
+        let task = Task(priority: .utility) { @MainActor [weak self] in
+            await Task.yield()
+            guard let self else { return }
+            do {
+                try self.validateLocalRead(context)
+                let result = try await repository.scanTransactions(start: context.range.start,
+                    end: context.range.queryEndExclusive, filter: filter,
+                    expectedRevisionID: context.revisionID, limits: .init(maxVisibleCount: 0))
+                try self.validateLocalRead(context)
+                let revision = try await repository.workspace.currentRevision()
+                try self.validateLocalRead(context)
+                guard revision?.id == context.revisionID else { return }
+                self.cacheLocalTransactionSummary(result, context: context, filter: filter)
+            } catch {}
+        }
+        transactionSummaryPrefetch = (context.presentation.ledgerID, context.revisionID, context.range, task)
+    }
+
+    private func cachedLocalTransactionSummary(context: LocalReadContext,
+                                               filter: LedgerTransactionFilter) -> LocalTransactionScan.Result? {
+        localTransactionSummaryCache.first {
+            $0.ledgerID == context.presentation.ledgerID && $0.revisionID == context.revisionID
+                && $0.range == context.range && $0.filter == filter
+        }?.result
+    }
+
+    private func cacheLocalTransactionSummary(_ result: LocalTransactionScan.Result, context: LocalReadContext,
+                                              filter: LedgerTransactionFilter) {
+        let entry = CachedTransactionSummary(ledgerID: context.presentation.ledgerID,
+            revisionID: context.revisionID, range: context.range, filter: filter, result: result.withoutVisibleRows)
+        var cache = localTransactionSummaryCache.filter {
+            !($0.ledgerID == entry.ledgerID && $0.range == entry.range && $0.filter == entry.filter)
+        }
+        cache.insert(entry, at: 0)
+        localTransactionSummaryCache = Array(cache.prefix(Self.transactionSummaryCacheLimit))
+    }
+
+    /// Every tab's count for the list's filter, from the newest summary of this
+    /// ledger and range. The scan counts tabs without the kind filter, so any
+    /// tab's summary serves all of them. While a save is being re-counted it may
+    /// describe the previous revision, like the rows kept on screen meanwhile.
+    func localTransactionKindCountsHint(for filter: LedgerTransactionFilter) -> LocalTransactionScan.KindCounts? {
+        guard isLocal, phase == .ready, !privacyShielded, let presentation = localPresentation else { return nil }
+        let matches = localTransactionSummaryCache.filter {
+            $0.ledgerID == presentation.ledgerID && $0.range == selectedRange
+                && $0.filter.kindAgnostic == filter.kindAgnostic
+        }
+        return (matches.first { $0.revisionID == presentation.revisionID } ?? matches.first)?.result.kindCounts
+    }
+
+    /// Off only in tests that count page reads or assert an uncounted list.
+    static var prefetchesLocalTransactionSummary = true
 
     /// Rows kept on screen for the scrolling list, so a long scroll cannot grow the
     /// accumulator without bound. Internal so tests can exercise the cap cheaply.
@@ -4781,6 +4884,7 @@ final class LedgerSession: ObservableObject {
                 localTransactionWindow = window // complete summary exists only at EOF
                 if let summary = window.summary {
                     localTransactionSummary = summary
+                    cacheLocalTransactionSummary(summary, context: context, filter: transactionWindowFilter)
                     localTransactionSummaryError = nil
                     transactionSummaryTask?.cancel()
                     transactionSummaryTask = nil
@@ -5770,5 +5874,23 @@ extension LedgerTransaction {
             raiseOnUnderflow: false,
             raiseOnDivideByZero: false
         )).intValue
+    }
+}
+
+private extension LedgerTransactionFilter {
+    var kindAgnostic: LedgerTransactionFilter {
+        var filter = self
+        filter.kind = .all
+        return filter
+    }
+}
+
+private extension LocalTransactionScan.Result {
+    /// The counts and facets without the visible prefix, for keeping in memory.
+    var withoutVisibleRows: Self {
+        Self(revision: revision, fullRangeCount: fullRangeCount, matchedCount: matchedCount,
+             visibleTransactions: [], visibleAccountedBytes: 0, stateAccountedBytes: stateAccountedBytes,
+             availableAccounts: availableAccounts, availableTags: availableTags, days: days,
+             kindCounts: kindCounts, categories: categories)
     }
 }

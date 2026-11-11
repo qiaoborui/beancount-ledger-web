@@ -169,6 +169,17 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         }
     }
 
+    override func setUp() async throws {
+        try await super.setUp()
+        // These tests count page reads and assert lists nobody has counted yet.
+        LedgerSession.prefetchesLocalTransactionSummary = false
+    }
+
+    override func tearDown() async throws {
+        LedgerSession.prefetchesLocalTransactionSummary = true
+        try await super.tearDown()
+    }
+
     private func fixture() async throws -> (LedgerSession, Engine, LocalLedgerRepository) {
         let suite = "window-session-tests-" + UUID().uuidString
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
@@ -491,6 +502,48 @@ final class LocalTransactionWindowSessionTests: XCTestCase {
         XCTAssertNil(session.localTransactionSummaryError)
         session.resetLocalTransactionWindow()
         XCTAssertNil(session.localTransactionSummary)
+    }
+
+    func testLoadWarmsTheUnfilteredSummarySoTheListOpensCounted() async throws {
+        LedgerSession.prefetchesLocalTransactionSummary = true
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        for _ in 0..<300 where session.localTransactionKindCountsHint(for: .init()) == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        // Counted before the page asked, for every tab.
+        XCTAssertEqual(session.localTransactionKindCountsHint(for: .init(kind: .expense))?.all, 3)
+        // One row per window never reaches EOF, so the count can only come from the warm-up.
+        await session.loadLocalTransactionWindow(limits: .init(maxRows: 1))
+        XCTAssertEqual(session.localTransactionSummary?.matchedCount, 3)
+        XCTAssertEqual(session.localTransactionSummary?.visibleTransactions.count, 0)
+        let requests = await engine.pageRequests.count
+        await session.loadLocalTransactionSummary()
+        let afterSummary = await engine.pageRequests.count
+        XCTAssertEqual(afterSummary, requests, "a counted list is not scanned again")
+        session.resetLocalTransactionWindow()
+        XCTAssertNil(session.localTransactionSummary)
+        await session.updateActivity(isActive: false, isBackground: true)
+        XCTAssertNil(session.localTransactionKindCountsHint(for: .init()), "hidden while shielded")
+    }
+
+    func testReturningToACountedFilterShowsItsSummaryWithoutRescanning() async throws {
+        let (session, engine, _) = try await fixture()
+        defer { session.chooseLedger() }
+        let limits = LocalTransactionWindow.Limits(maxRows: 1)
+        await session.loadLocalTransactionWindow(limits: limits)
+        XCTAssertNil(session.localTransactionKindCountsHint(for: .init()))
+        await session.loadLocalTransactionSummary()
+        await session.loadLocalTransactionWindow(filter: .init(kind: .income), limits: limits)
+        // Tabs are counted without the kind filter, so another tab's summary fills them.
+        XCTAssertEqual(session.localTransactionKindCountsHint(for: .init(kind: .income))?.expense, 3)
+        XCTAssertNil(session.localTransactionKindCountsHint(for: .init(query: "Needle")))
+        await session.loadLocalTransactionWindow(limits: limits)
+        XCTAssertEqual(session.localTransactionSummary?.matchedCount, 3)
+        let requests = await engine.pageRequests.count
+        await session.loadLocalTransactionSummary()
+        let afterSummary = await engine.pageRequests.count
+        XCTAssertEqual(afterSummary, requests)
     }
 
     func testReturningToTransactionsReusesPublishedWindowUntilFilterChanges() async throws {

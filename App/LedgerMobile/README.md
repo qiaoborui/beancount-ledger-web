@@ -102,7 +102,13 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
   global date range, active page, and existing search filters stay unchanged.
   The calendar uses four intensity levels, outlines today,
   and shows daily amounts in the large family. It reuses the existing reduced
-  widget snapshot and local repository.
+  widget snapshot and local repository. Like the overview, it shows a refresh
+  prompt once the device date leaves the cached month, instead of drawing last
+  month as the current one.
+- Add a small and medium 记一笔 widget with buttons for the entry form and
+  一句话记账 (plus the assistant in medium), and today's spending from the
+  cached month's daily series. The buttons stay available on a locked device,
+  because the app unlocks before opening the form; the figures are masked.
 - Add a medium 30-day spending trend and a separate 12-week heatmap. Both use
   the existing daily positive-expense series (before refunds); the trend labels
   this explicitly. Weekly/monthly/yearly overview totals retain the report's

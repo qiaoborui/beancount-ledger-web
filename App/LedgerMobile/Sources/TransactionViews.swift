@@ -727,7 +727,8 @@ struct TransactionsView: View {
         guard session.isLocal else { return balancedKindCounts(for: kindAgnosticDisplayedTransactions) }
         // The local window is read with the kind filter applied, so its rows
         // cannot produce counts for the other tabs either.
-        guard let counts = session.localTransactionSummary?.kindCounts else { return nil }
+        guard let counts = session.localTransactionSummary?.kindCounts
+                ?? session.localTransactionKindCountsHint(for: filters) else { return nil }
         return Dictionary(uniqueKeysWithValues: TransactionKindFilter.allCases.map { ($0, counts[$0]) })
     }
 
@@ -945,7 +946,9 @@ struct TransactionsView: View {
         // A remote list's displayed rows already are the filtered rows; a local
         // list never shows the remote footer. Filtering again per body was waste.
         let filtered = session.isLocal ? [] : displayed
-        let count: Int? = session.isLocal ? session.localTransactionSummary?.matchedCount : displayed.count
+        let count: Int? = session.isLocal
+            ? session.localTransactionSummary?.matchedCount ?? session.localTransactionKindCountsHint(for: filters)?[filters.kind]
+            : displayed.count
         let grouped = Dictionary(grouping: displayed, by: \.date)
             .map { (date: $0.key, transactions: $0.value) }
             .sorted { $0.date > $1.date }

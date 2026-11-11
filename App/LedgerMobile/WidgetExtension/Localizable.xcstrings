@@ -15,26 +15,6 @@
       },
       "shouldTranslate" : false
     },
-    "%@ %@ · 前30天" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ %@ · prior 30 days"
-          }
-        }
-      }
-    },
-    "%@ %@ · 同比" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ %@ · YoY"
-          }
-        }
-      }
-    },
     "%@ · %@" : {
       "localizations" : {
         "en" : {
@@ -55,53 +35,12 @@
         }
       }
     },
-    "%@ 更新" : {
+    "%@ · 前30天" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Updated %@"
-          }
-        }
-      }
-    },
-    "%@ 起" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "From %@"
-          }
-        }
-      }
-    },
-    "%@–%@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@–%2$@"
-          }
-        }
-      },
-      "shouldTranslate" : false
-    },
-    "%@年" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@"
-          }
-        }
-      }
-    },
-    "%@检查" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Checked %@"
+            "value" : "%@ · prior 30 days"
           }
         }
       }
@@ -146,37 +85,28 @@
         }
       }
     },
-    "%lld" : {
-      "shouldTranslate" : false
-    },
-    "%lld 笔 · 分类占比 →" : {
+    "%lld 天前" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld txns · by category →"
+            "value" : "%lldd ago"
           }
         }
       }
     },
-    "%lld 笔支出" : {
+    "%lld 笔 · 日均 %@" : {
       "localizations" : {
         "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld expense"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld expenses"
-                }
-              }
-            }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld txns · %2$@ daily avg"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld 笔 · 日均 %2$@"
           }
         }
       }
@@ -225,16 +155,6 @@
         }
       }
     },
-    "%lld天" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lldd"
-          }
-        }
-      }
-    },
     "%lld天有消费" : {
       "localizations" : {
         "en" : {
@@ -244,29 +164,6 @@
           }
         }
       }
-    },
-    "%lld笔 · %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld txns · %@"
-          }
-        }
-      }
-    },
-    "/日" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "/day"
-          }
-        }
-      }
-    },
-    "0" : {
-      "shouldTranslate" : false
     },
     "2026年8月" : {
       "localizations" : {
@@ -278,9 +175,6 @@
         }
       }
     },
-    ">200" : {
-      "shouldTranslate" : false
-    },
     "Ledger 账户" : {
       "localizations" : {
         "en" : {
@@ -290,9 +184,6 @@
           }
         }
       }
-    },
-    "≤50" : {
-      "shouldTranslate" : false
     },
     "一句话" : {
       "localizations" : {
@@ -310,6 +201,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Record in a sentence"
+          }
+        }
+      }
+    },
+    "一键记一笔或一句话记账，并查看今天的支出。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add an entry or record in one sentence with a tap, and see today's spending."
           }
         }
       }
@@ -334,12 +235,22 @@
         }
       }
     },
-    "估值 %@" : {
+    "今天" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Value %@"
+            "value" : "Today"
+          }
+        }
+      }
+    },
+    "今天支出" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spent today"
           }
         }
       }
@@ -354,22 +265,22 @@
         }
       }
     },
-    "内容已隐藏" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Content hidden"
-          }
-        }
-      }
-    },
     "写入中" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Writing…"
+          }
+        }
+      }
+    },
+    "净值" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Net worth"
           }
         }
       }
@@ -384,16 +295,6 @@
         }
       }
     },
-    "刚刚检查" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Just checked"
-          }
-        }
-      }
-    },
     "另有%lld个渠道" : {
       "localizations" : {
         "en" : {
@@ -404,12 +305,12 @@
         }
       }
     },
-    "只读财务小组件" : {
+    "同比 %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Read-only finance widgets"
+            "value" : "YoY %@"
           }
         }
       }
@@ -430,6 +331,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "See this week's, month's, or year's spending on the Lock Screen."
+          }
+        }
+      }
+    },
+    "多" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More"
           }
         }
       }
@@ -524,6 +435,16 @@
         }
       }
     },
+    "少" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Less"
+          }
+        }
+      }
+    },
     "尚未更新" : {
       "localizations" : {
         "en" : {
@@ -554,26 +475,6 @@
         }
       }
     },
-    "已归档区间" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Archived range"
-          }
-        }
-      }
-    },
-    "已隐藏" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hidden"
-          }
-        }
-      }
-    },
     "年" : {
       "localizations" : {
         "en" : {
@@ -590,16 +491,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Awaiting approval"
-          }
-        }
-      }
-    },
-    "待还余额" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Balance due"
           }
         }
       }
@@ -634,16 +525,6 @@
         }
       }
     },
-    "打开 Ledger 并刷新一次" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open Ledger and refresh once"
-          }
-        }
-      }
-    },
     "打开 Ledger 的记账表单。" : {
       "localizations" : {
         "en" : {
@@ -660,16 +541,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Open the ledger assistant in Ledger."
-          }
-        }
-      }
-    },
-    "打开账本查看" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open the ledger to view"
           }
         }
       }
@@ -694,16 +565,6 @@
         }
       }
     },
-    "招商银行" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "China Merchants Bank"
-          }
-        }
-      }
-    },
     "招行信用卡" : {
       "localizations" : {
         "en" : {
@@ -714,7 +575,7 @@
         }
       }
     },
-    "按周、月或年查看消费、同比与主要分类。" : {
+    "按周、月或年查看支出、同比与主要分类。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -800,16 +661,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Expense"
-          }
-        }
-      }
-    },
-    "支出概览" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Spending overview"
           }
         }
       }
@@ -954,6 +805,16 @@
         }
       }
     },
+    "更新于 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Updated %@"
+          }
+        }
+      }
+    },
     "最近 12 周的消费强度，轻点色块查看当天流水。" : {
       "localizations" : {
         "en" : {
@@ -984,12 +845,18 @@
         }
       }
     },
-    "最高 %@ " : {
+    "最高 %@ %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Peak %@ "
+            "value" : "Peak %1$@ %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "最高 %1$@ %2$@"
           }
         }
       }
@@ -1144,16 +1011,6 @@
         }
       }
     },
-    "汇丰银行" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HSBC"
-          }
-        }
-      }
-    },
     "汇丰香港信用卡" : {
       "localizations" : {
         "en" : {
@@ -1214,16 +1071,6 @@
         }
       }
     },
-    "渠道" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Channel"
-          }
-        }
-      }
-    },
     "现金资产" : {
       "localizations" : {
         "en" : {
@@ -1244,72 +1091,12 @@
         }
       }
     },
-    "等待导入记录" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Waiting for import history"
-          }
-        }
-      }
-    },
-    "等待消费数据" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Waiting for spending data"
-          }
-        }
-      }
-    },
-    "等待消费日历" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Waiting for spending calendar"
-          }
-        }
-      }
-    },
-    "等待消费热力图" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Waiting for spending heatmap"
-          }
-        }
-      }
-    },
-    "等待消费趋势" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Waiting for spending trend"
-          }
-        }
-      }
-    },
     "等待状态确认" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Waiting for status"
-          }
-        }
-      }
-    },
-    "等待账户数据" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Waiting for account data"
           }
         }
       }
@@ -1344,32 +1131,12 @@
         }
       }
     },
-    "色阶表示金额高低" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Shading shows the amount"
-          }
-        }
-      }
-    },
     "覆盖日期指账单截止日，不代表同步状态。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Coverage date is the statement end date, not sync status."
-          }
-        }
-      }
-    },
-    "覆盖至" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Covers through"
           }
         }
       }
@@ -1400,16 +1167,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Loans & debt"
-          }
-        }
-      }
-    },
-    "账单覆盖" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Statement coverage"
           }
         }
       }
@@ -1464,32 +1221,12 @@
         }
       }
     },
-    "资产余额" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Asset balance"
-          }
-        }
-      }
-    },
     "资产分析" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Asset analysis"
-          }
-        }
-      }
-    },
-    "距今" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ago"
           }
         }
       }
@@ -1630,6 +1367,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ask the ledger assistant"
+          }
+        }
+      }
+    },
+    "颜色越深支出越多" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Darker means more spending"
           }
         }
       }

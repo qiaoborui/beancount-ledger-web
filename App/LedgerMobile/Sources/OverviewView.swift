@@ -12,7 +12,7 @@ struct OverviewView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let error = session.errorMessage { StatusBanner(message: error, onDismiss: session.dismissError).padding(.horizontal, 20).padding(.bottom, 16) }
                 if let ledger = session.ledger {
-                    retentionHero(ledger); cashflow(ledger)
+                    retentionHero(ledger); cashflow(ledger); periodStats(ledger)
                     // An older server sends no trend; the module stays out rather than claim an empty ledger.
                     if !ledger.monthlyExpenseTrend.isEmpty {
                         OverviewSpendingTrend(points: ledger.monthlyExpenseTrend, currency: ledger.summary.currency)
@@ -22,7 +22,6 @@ struct OverviewView: View {
                         : spendingCategories(from: ledger.transactions, prices: ledger.prices,
                                              currency: ledger.summary.currency, accountLabels: labels)
                     spending(breakdown)
-                    recentTransactions(ledger, accountLabels: labels)
                 } else { EmptyLedgerState(icon: "chart.line.uptrend.xyaxis", title: String(localized: "暂无财务数据"), detail: String(localized: "下拉刷新重新读取账本。")).padding(.horizontal, 20) }
             }.padding(.bottom, 24).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
         }
@@ -108,6 +107,106 @@ struct OverviewView: View {
             EmptyView()
         }
         .overlay(alignment: .top) { insetRule }
+    }
+
+    /// 本期指标: six figures drawn from data the page already holds (bootstrap
+    /// summary, comparisons, net-worth windows, the category aggregate), so the
+    /// grid appears with the page and never shows a loading state of its own.
+    private func periodStats(_ ledger: LedgerBootstrap) -> some View {
+        let range = session.selectedRange, currency = ledger.summary.currency
+        let transactionStats = session.overviewTransactionStats
+        let stats = OverviewPeriodStats(start: range.start, end: range.end, today: LedgerDateRange.today(now: session.now),
+            summary: ledger.summary, comparisons: ledger.comparisons, netWorthWindows: ledger.netWorthWindows,
+            transactionCount: transactionStats?.transactionCount)
+        let baseline = stats.isInProgress ? String(localized: "比上月同期") : String(localized: "比上月")
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHead(String(localized: "本期指标")) { EmptyView() }
+            statRow {
+                statTile(String(localized: "日均支出"),
+                         value: stats.dailyExpense.map { amount($0, currency: currency, size: 18, weight: .medium) } ?? dash,
+                         caption: stats.elapsedDays.map { stats.isInProgress ? String(localized: "已过 \($0) 天") : String(localized: "共 \($0) 天") }
+                            ?? String(localized: "期间未开始"))
+            } trailing: {
+                statTile(String(localized: "记账笔数"),
+                         value: stats.transactionCount.map { Text(String(localized: "\($0) 笔")).font(statFont).foregroundColor(BalancedPalette.ink) } ?? dash,
+                         caption: {
+                            guard let count = stats.transactionCount, let days = stats.elapsedDays, days > 0 else { return String(localized: "本期交易") }
+                            return String(localized: "日均 \(String(format: "%.1f", Double(count) / Double(days))) 笔")
+                         }())
+            }
+            statRow {
+                comparisonTile(String(localized: "支出环比"), stats.expenseMonthOverMonth, baseline: baseline,
+                               currency: currency, details: ledger.comparisons.map { (String(localized: "支出"), $0.expense) })
+            } trailing: {
+                comparisonTile(String(localized: "收入环比"), stats.incomeMonthOverMonth, baseline: baseline,
+                               currency: currency, details: ledger.comparisons.map { (String(localized: "收入"), $0.income) })
+            }
+            statRow {
+                let highest = transactionStats?.highestExpense
+                statTile(String(localized: "最大一笔"),
+                         value: highest.map { amount($0.minorUnits, currency: currency, size: 18, weight: .medium) } ?? dash,
+                         caption: highest?.title ?? String(localized: "本期暂无支出"))
+            } trailing: {
+                statTile(String(localized: "净资产"),
+                         value: stats.netWorth.map { amount(abs($0), currency: currency, prefix: $0 < 0 ? "−" : "", size: 18, weight: .medium) } ?? dash,
+                         caption: stats.netWorthMonthChange.map { change in
+                            guard session.amountsVisible else { return String(localized: "较上月末 ••••") }
+                            let sign = change > 0 ? "+" : change < 0 ? "−" : ""
+                            return String(localized: "较上月末 \(sign + MoneyText.format(minorUnits: abs(change), currency: currency, showsCurrency: false))")
+                         } ?? String(localized: "暂无上月末数据"))
+            }
+        }
+    }
+
+    private var statFont: Font { .custom(BalancedWeight.medium.sansPostscriptName, size: 18, relativeTo: .title3) }
+    private var dash: Text { Text("—").font(statFont).foregroundColor(BalancedPalette.meta) }
+
+    private func statRow(@ViewBuilder leading: () -> some View, @ViewBuilder trailing: () -> some View) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            leading().frame(maxWidth: .infinity, alignment: .leading)
+            trailing().frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 20).padding(.vertical, 12)
+        .overlay(alignment: .top) { insetRule }
+    }
+
+    private func statTile(_ title: String, value: Text, caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+            value.monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+            Text(caption).balancedFont(size: 12).monospacedDigit().foregroundStyle(BalancedPalette.meta).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// A change in percent over the delta in money. Opens the 比较口径 sheet,
+    /// which spells out both ranges and the year-over-year figure.
+    @ViewBuilder
+    private func comparisonTile(_ title: String, _ comparison: LedgerPeriodComparison?, baseline: String,
+                                currency: String, details: (String, LedgerMetricPeriodComparisons)?) -> some View {
+        let value: Text = {
+            guard let comparison else { return dash }
+            guard session.amountsVisible else { return Text("••••").font(statFont).foregroundColor(BalancedPalette.ink) }
+            guard let percentage = comparison.percentage else { return Text(String(localized: "基期为零")).font(statFont).foregroundColor(BalancedPalette.meta) }
+            return Text(String(format: "%+.1f%%", percentage * 100)).font(statFont).foregroundColor(BalancedPalette.ink)
+        }()
+        let caption: String = {
+            guard let comparison, let delta = comparison.delta else { return String(localized: "暂无可比数据") }
+            guard session.amountsVisible else { return baseline }
+            let sign = delta > 0 ? "+" : delta < 0 ? "−" : ""
+            return baseline + " " + sign + MoneyText.format(minorUnits: abs(delta), currency: currency, showsCurrency: false)
+        }()
+        let tile = statTile(title, value: value, caption: caption)
+        if let details, comparison != nil {
+            Button {
+                comparisonDetails = OverviewComparisonDetails(title: details.0, comparisons: details.1, currency: currency)
+            } label: { tile.contentShape(Rectangle()) }
+            .buttonStyle(.plain)
+            .accessibilityHint(Text("查看比较口径"))
+        } else {
+            tile
+        }
     }
 
     private func settle<Rows: View, Total: View>(title: String, aside: String, @ViewBuilder rows: () -> Rows, @ViewBuilder total: () -> Total) -> some View {
@@ -214,52 +313,6 @@ struct OverviewView: View {
         }.padding(.horizontal, 20)
     }
 
-    private func recentTransactions(_ ledger: LedgerBootstrap, accountLabels: [String: String]) -> some View {
-        let recent = Array(ledger.transactions.prefix(3))
-        let days = recent.reduce(into: [(String, [LedgerTransaction])]()) { groups, tx in
-            if groups.last?.0 == tx.date { groups[groups.count - 1].1.append(tx) } else { groups.append((tx.date, [tx])) }
-        }
-        return VStack(alignment: .leading, spacing: 0) {
-            sectionHead(String(localized: "最近流水")) {
-                if !ledger.transactions.isEmpty {
-                    Button { session.primaryDestinationID = LedgerDestination.transactions.rawValue } label: {
-                        Text("全部 \(ledger.transactions.count) 笔").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
-                            .padding(.bottom, 1).overlay(alignment: .bottom) { BalancedPalette.ruleStrong.frame(height: 1) }
-                            .frame(minHeight: 44).contentShape(Rectangle())
-                    }.buttonStyle(.plain).padding(.vertical, -16)
-                }
-            }
-            if recent.isEmpty {
-                Text("所选范围暂无流水").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).padding(EdgeInsets(top: 4, leading: 20, bottom: 12, trailing: 20))
-            } else {
-                ForEach(days, id: \.0) { day in
-                    daySeparator(day.0)
-                    ForEach(Array(day.1.enumerated()), id: \.element.id) { index, tx in
-                        NavigationLink { TransactionDetailView(transaction: tx) } label: {
-                            BalancedTransactionRow(transaction: tx, accountLabels: accountLabels, accountCurrency: ledger.summary.currency, showsRule: index < day.1.count - 1)
-                        }.buttonStyle(.plain).ledgerTransactionActions(tx)
-                    }
-                }
-            }
-        }
-    }
-
-    private func daySeparator(_ raw: String) -> some View {
-        let parts = Self.dayLabel(raw)
-        return HStack(spacing: 10) {
-            (Text(parts.date).font(.custom(BalancedWeight.semibold.sansPostscriptName, size: 12.5, relativeTo: .caption)).foregroundColor(BalancedPalette.secondary)
-             + Text(" " + parts.weekday).font(.custom(BalancedWeight.regular.sansPostscriptName, size: 12.5, relativeTo: .caption)).foregroundColor(BalancedPalette.meta))
-                .monospacedDigit()
-            BalancedPalette.rule.frame(height: 1)
-        }.padding(EdgeInsets(top: 20, leading: 20, bottom: 6, trailing: 20))
-    }
-
-    private static func dayLabel(_ raw: String) -> (date: String, weekday: String) {
-        guard let date = LedgerDateRange.parse(raw) else { return (raw, "") }
-        let c = LedgerDateRange.calendar.dateComponents([.month, .day, .weekday], from: date)
-        guard let month = c.month, let day = c.day, let weekday = c.weekday else { return (raw, "") }
-        return (String(format: "%02d/%02d", month, day), LedgerDateLabel.weekday(number: weekday))
-    }
     private func comparisonSection(_ title: String, value: LedgerPeriodComparison, currency: String) -> some View { Section(title) { Text("对比 \(value.baselineRange.start) 至 \(value.baselineRange.end)"); if let v = value.current { LabeledContent("本期") { BalancedAmount(minorUnits: v, currency: currency) } }; if let v = value.baseline { LabeledContent("基期") { BalancedAmount(minorUnits: v, currency: currency) } }; if let v = value.delta { LabeledContent("变化金额") { BalancedAmount(minorUnits: v, currency: currency, prefix: v > 0 ? "+" : "") } }; LabeledContent("变化率", value: changeText(value)) } }
     private func changeText(_ c: LedgerPeriodComparison?) -> String { guard session.amountsVisible else { return "••••" }; guard let c, c.delta != nil else { return String(localized: "暂无数据") }; guard let p = c.percentage else { return String(localized: "基期为零") }; return String(format: "%+.1f%%", p * 100) }
 
@@ -643,42 +696,6 @@ private struct OverviewCategorySpending: Identifiable {
     let totalMinorUnits: Int
     let count: Int
     let percentage: Double
-}
-
-/// `.txn` from design batch 1: payee 15.5/500 over the note, amount 15.5/500 over
-/// the category. Income is the only direction drawn in colour; expense and
-/// transfers stay ink and carry their meaning in the sign.
-private struct BalancedTransactionRow: View {
-    @EnvironmentObject private var session: LedgerSession
-    let transaction: LedgerTransaction
-    let accountLabels: [String: String]
-    let accountCurrency: String
-    var showsRule = true
-    var body: some View {
-        let p = TransactionPresentation(transaction: transaction)
-        let visual = TransactionVisualCategory.resolve(transaction: transaction, presentation: p, accountLabels: accountLabels)
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(p.title).balancedFont(size: 15.5, weight: .text).tracking(-0.08).foregroundStyle(BalancedPalette.ink).lineLimit(1)
-                Text(p.subtitle).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta).lineLimit(1)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(amountText(p)).font(.custom(BalancedWeight.medium.sansPostscriptName, size: 15.5, relativeTo: .body)).monospacedDigit()
-                    .foregroundStyle(p.kind == .income ? BalancedPalette.income : BalancedPalette.ink).lineLimit(1).minimumScaleFactor(0.6)
-                Text(p.kind == .transfer ? String(localized: "转账") : visual.categoryLabel).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).lineLimit(1)
-            }.frame(minWidth: 104, alignment: .trailing)
-        }
-        .padding(.horizontal, 20).padding(.vertical, 12).frame(minHeight: 56)
-        .overlay(alignment: .bottom) { if showsRule { BalancedPalette.rule.frame(height: 1).padding(.horizontal, 20) } }
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-    }
-
-    private func amountText(_ p: TransactionPresentation) -> String {
-        guard session.amountsVisible else { return "••••••" }
-        let sign = p.kind == .expense ? "−" : p.kind == .income ? "+" : ""
-        return sign + MoneyText.format(minorUnits: abs(p.minorUnits), currency: p.currency, showsCurrency: p.currency != accountCurrency)
-    }
 }
 
 private struct OverviewComparisonDetails: Identifiable { var id: String { title }; let title: String; let comparisons: LedgerMetricPeriodComparisons; let currency: String }

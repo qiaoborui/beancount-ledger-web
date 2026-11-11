@@ -2,30 +2,18 @@ import SwiftUI
 import UIKit
 import WidgetKit
 
+/// Balanced tokens (Sources/BalancedDesignSystem.swift), restated here because
+/// the extension does not compile the app's design system. There is no accent:
+/// ink carries emphasis, and `expense` marks only the chart line, today and heat.
 enum LedgerWidgetColors {
-    static let canvas = Color.dynamic(light: 0xF5F6F4, dark: 0x181D21)
-    static let panel = Color.dynamic(light: 0xF5F6F4, dark: 0x181D21)
-    static let raised = Color.dynamic(light: 0xE9EDE8, dark: 0x222A30)
-    static let tag = Color.dynamic(light: 0xEAEEF4, dark: 0x1E2430)
-    static let ink = Color.dynamic(light: 0x202B2E, dark: 0xE1E7E6)
-    static let secondary = Color.dynamic(light: 0x536266, dark: 0xA2AFAF)
-    static let line = Color.dynamic(light: 0xCBD3CF, dark: 0x354047)
-    static let cobalt = Color.dynamic(light: 0x202B2E, dark: 0xE1E7E6)
-    static let chartLine = Color.dynamic(light: 0x855300, dark: 0xE5B55F)
-    static let accent = chartLine
-    static let heat1 = Color.dynamic(light: 0xD9D5C8, dark: 0x383A35)
-    static let heat2 = Color.dynamic(light: 0xB9A47D, dark: 0x6A5B40)
-    static let heat3 = Color.dynamic(light: 0x967037, dark: 0xAA8248)
-    static let heat4 = Color.dynamic(light: 0x714500, dark: 0xE5B55F)
-    static let heatInk = Color.dynamic(light: 0xFFFFFF, dark: 0x202B2E)
-    static let expense = Color.dynamic(light: 0xC0392B, dark: 0xF87171)
-    static let expenseSoft = Color.dynamic(light: 0xFEE2E2, dark: 0x381E1E)
-    static let success = Color.dynamic(light: 0x15803D, dark: 0x4ADE80)
-    static let successSoft = Color.dynamic(light: 0xDCFCE7, dark: 0x142B1A)
-    static let gold = Color.dynamic(light: 0xB45309, dark: 0xFBBF24)
-    static let goldSoft = Color.dynamic(light: 0xFEF3C7, dark: 0x332508)
-    static let purple = Color.dynamic(light: 0x6D28D9, dark: 0xA78BFA)
-    static let onBrand = Color.white
+    static let page = Color.dynamic(light: 0xFBFAF8, dark: 0x121110)
+    static let sunken = Color.dynamic(light: 0xF1EFE9, dark: 0x1B1918)
+    static let ink = Color.dynamic(light: 0x14100C, dark: 0xF6F3EE)
+    static let secondary = Color.dynamic(light: 0x453E36, dark: 0xC4BCB0)
+    static let meta = Color.dynamic(light: 0x6F675A, dark: 0x9A9086)
+    static let rule = Color.dynamic(light: 0xE2DED4, dark: 0x2B2825)
+    static let ruleStrong = Color.dynamic(light: 0xC8C2B4, dark: 0x423C36)
+    static let expense = Color.dynamic(light: 0x96401F, dark: 0xCF7A52)
 }
 
 private extension Color {
@@ -47,195 +35,99 @@ private extension UIColor {
     }
 }
 
-struct LedgerWidgetBrandMark: View {
-    var systemName: String = "waveform.path.ecg"
-    var tint: Color = LedgerWidgetColors.cobalt
+/// The palette as the current rendering mode can show it. Tinted and clear
+/// Home Screens (`.accented`, `.vibrant`) keep only each view's opacity, so
+/// hierarchy has to come from `.primary`/`.secondary` and alpha, never hue.
+struct LedgerWidgetTone {
+    let mode: WidgetRenderingMode
+    init(_ mode: WidgetRenderingMode) { self.mode = mode }
 
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-                .fill(LedgerWidgetColors.raised)
-            Image(systemName: systemName)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(LedgerWidgetColors.ink)
-        }
-        .frame(width: 24, height: 24)
-        .overlay {
-            RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-                .strokeBorder(LedgerWidgetColors.line.opacity(0.8), lineWidth: 0.5)
-        }
-    }
+    var isFullColor: Bool { mode == .fullColor }
+    var ink: Color { isFullColor ? LedgerWidgetColors.ink : .primary }
+    var secondary: Color { isFullColor ? LedgerWidgetColors.secondary : .secondary }
+    var meta: Color { isFullColor ? LedgerWidgetColors.meta : .secondary }
+    var rule: Color { isFullColor ? LedgerWidgetColors.rule : Color.primary.opacity(0.2) }
+    var ruleStrong: Color { isFullColor ? LedgerWidgetColors.ruleStrong : Color.primary.opacity(0.3) }
+    var expense: Color { isFullColor ? LedgerWidgetColors.expense : .primary }
+}
+
+/// IBM Plex Sans, bundled through the extension's UIAppFonts. `Font.custom`
+/// falls back to the system face if registration fails. Sizes stay fixed, as
+/// widgets do not follow Dynamic Type.
+enum LedgerWidgetFont {
+    /// Weight 450, the workhorse for labels and secondary figures.
+    static func text(_ size: CGFloat) -> Font { .custom("IBMPlexSans-Text", fixedSize: size) }
+    static func medium(_ size: CGFloat) -> Font { .custom("IBMPlexSans-Medm", fixedSize: size) }
 }
 
 struct LedgerWidgetHeader: View {
+    @Environment(\.widgetRenderingMode) private var renderingMode
     let title: String
     let detail: String
-    var systemName: String = "waveform.path.ecg"
-    var tint: Color = LedgerWidgetColors.cobalt
-    var badgeText: String? = nil
 
     var body: some View {
+        let tone = LedgerWidgetTone(renderingMode)
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(title).font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(LedgerWidgetColors.ink).lineLimit(1)
+            Text(title).font(LedgerWidgetFont.medium(12))
+                .foregroundStyle(tone.ink).lineLimit(1)
             Spacer(minLength: 0)
-            Text(detail).font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(LedgerWidgetColors.secondary).lineLimit(1)
+            Text(detail).font(LedgerWidgetFont.text(10))
+                .foregroundStyle(tone.meta).lineLimit(1)
         }
     }
 }
 
-extension View {
-    func widgetSubcard(cornerRadius: CGFloat = 10, padding: CGFloat = 8) -> some View {
-        self
-            .padding(padding)
-            .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(LedgerWidgetColors.raised.opacity(0.65))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .strokeBorder(LedgerWidgetColors.line.opacity(0.6), lineWidth: 0.5)
-                    }
-            }
-    }
-}
-
-enum LedgerWidgetVisualHelper {
-    struct CategoryStyle {
-        let icon: String
-        let color: Color
-    }
-
-    static func category(for accountOrLabel: String) -> CategoryStyle {
-        let lower = accountOrLabel.lowercased()
-        if lower.contains("food") || lower.contains("dining") || lower.contains("meal")
-            || lower.contains("餐饮") || lower.contains("美食") || lower.contains("外卖")
-            || lower.contains("买菜") || lower.contains("咖啡") {
-            return CategoryStyle(icon: "fork.knife", color: LedgerWidgetColors.ink)
-        }
-        if lower.contains("transport") || lower.contains("travel") || lower.contains("taxi")
-            || lower.contains("交通") || lower.contains("出行") || lower.contains("打车")
-            || lower.contains("加油") || lower.contains("停车") {
-            return CategoryStyle(icon: "car.fill", color: LedgerWidgetColors.ink)
-        }
-        if lower.contains("housing") || lower.contains("rent") || lower.contains("utilities")
-            || lower.contains("居住") || lower.contains("房租") || lower.contains("物业")
-            || lower.contains("水电气") {
-            return CategoryStyle(icon: "house.fill", color: LedgerWidgetColors.ink)
-        }
-        if lower.contains("shopping") || lower.contains("clothing") || lower.contains("daily")
-            || lower.contains("购物") || lower.contains("服饰") || lower.contains("日用")
-            || lower.contains("超市") || lower.contains("杂货") {
-            return CategoryStyle(icon: "bag.fill", color: LedgerWidgetColors.ink)
-        }
-        if lower.contains("entertainment") || lower.contains("game") || lower.contains("movie")
-            || lower.contains("娱乐") || lower.contains("游戏") || lower.contains("电影")
-            || lower.contains("演出") || lower.contains("会员") {
-            return CategoryStyle(icon: "popcorn.fill", color: LedgerWidgetColors.ink)
-        }
-        if lower.contains("book") || lower.contains("education") || lower.contains("study")
-            || lower.contains("图书") || lower.contains("学习") || lower.contains("教育")
-            || lower.contains("学费") {
-            return CategoryStyle(icon: "book.fill", color: LedgerWidgetColors.ink)
-        }
-        if lower.contains("digital") || lower.contains("communication") || lower.contains("telecom")
-            || lower.contains("数码") || lower.contains("通信") || lower.contains("话费") {
-            return CategoryStyle(icon: "antenna.radiowaves.left.and.right", color: LedgerWidgetColors.ink)
-        }
-        if lower.contains("health") || lower.contains("medical")
-            || lower.contains("医疗") || lower.contains("健康") || lower.contains("药品") {
-            return CategoryStyle(icon: "heart.fill", color: LedgerWidgetColors.ink)
-        }
-        if lower.contains("salary") || lower.contains("wage") || lower.contains("bonus")
-            || lower.contains("工资") || lower.contains("收入") {
-            return CategoryStyle(icon: "banknote.fill", color: LedgerWidgetColors.ink)
-        }
-        return CategoryStyle(icon: "tag.fill", color: LedgerWidgetColors.ink)
-    }
-
-    struct AccountStyle {
-        let icon: String
-        let tint: Color
-        let groupLabel: String
-    }
-
-    static func account(for account: LedgerWidgetAccountSnapshot) -> AccountStyle {
-        let name = "\(account.account) \(account.label) \(account.group)".lowercased()
-        if account.isLiability || name.contains("credit") || name.contains("信用卡") {
-            return AccountStyle(icon: "creditcard.fill", tint: LedgerWidgetColors.ink, groupLabel: String(localized: "信用卡"))
-        }
-        if name.contains("cash") || name.contains("现金") {
-            return AccountStyle(icon: "banknote.fill", tint: LedgerWidgetColors.ink, groupLabel: String(localized: "现金资产"))
-        }
-        if name.contains("invest") || name.contains("fund") || name.contains("stock") || name.contains("理财") || name.contains("基金") || name.contains("证券") {
-            return AccountStyle(icon: "chart.line.uptrend.xyaxis", tint: LedgerWidgetColors.ink, groupLabel: String(localized: "投资理财"))
-        }
-        if name.contains("loan") || name.contains("mortgage") || name.contains("借款") || name.contains("房贷") {
-            return AccountStyle(icon: "arrow.up.right.circle.fill", tint: LedgerWidgetColors.ink, groupLabel: String(localized: "负债借贷"))
-        }
-        return AccountStyle(icon: "building.columns.fill", tint: LedgerWidgetColors.ink, groupLabel: String(localized: "日常银行"))
-    }
-
-    struct ImportStyle {
-        let icon: String
-        let tint: Color
-        let displayName: String
-    }
-
-    static func importChannel(for item: LedgerWidgetImportSnapshot) -> ImportStyle {
-        let lower = "\(item.provider) \(item.label)".lowercased()
-        if lower.contains("alipay") || lower.contains("支付宝") {
-            return ImportStyle(icon: "qrcode", tint: LedgerWidgetColors.ink, displayName: String(localized: "支付宝"))
-        }
-        if lower.contains("wechat") || lower.contains("微信") {
-            return ImportStyle(icon: "bubble.left.and.bubble.right.fill", tint: LedgerWidgetColors.ink, displayName: String(localized: "微信支付"))
-        }
-        if lower.contains("cmb") || lower.contains("招行") || lower.contains("招商") {
-            return ImportStyle(icon: "creditcard.fill", tint: LedgerWidgetColors.ink, displayName: String(localized: "招商银行"))
-        }
-        if lower.contains("hsbc") || lower.contains("汇丰") {
-            return ImportStyle(icon: "hexagon.fill", tint: LedgerWidgetColors.ink, displayName: String(localized: "汇丰银行"))
-        }
-        if lower.contains("icbc") || lower.contains("工行") || lower.contains("boc") || lower.contains("中行") || lower.contains("ccb") || lower.contains("建行") || lower.contains("bank") || lower.contains("银行") {
-            return ImportStyle(icon: "building.columns.fill", tint: LedgerWidgetColors.ink, displayName: item.label)
-        }
-        return ImportStyle(icon: "doc.text.fill", tint: LedgerWidgetColors.ink, displayName: item.label)
-    }
-}
-
+/// Shared by the "no data" and stale-period states. The parent widget owns the
+/// container background.
 struct LedgerWidgetUnavailableView: View {
+    enum Reason {
+        case refresh
+        case message(String, detail: String)
+    }
+
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    /// The widget's name, shown beside the brand so a blank tile stays identifiable.
     let title: String
-    let detail: String
-    var symbol = "arrow.clockwise"
+    var reason: Reason = .refresh
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            LedgerWidgetHeader(title: "Ledger", detail: String(localized: "只读财务小组件"))
+        let tone = LedgerWidgetTone(renderingMode)
+        VStack(alignment: .leading, spacing: 4) {
+            LedgerWidgetHeader(title: "Ledger", detail: title)
             Spacer(minLength: 0)
-            Image(systemName: symbol)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(LedgerWidgetColors.cobalt)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(LedgerWidgetColors.ink)
-                Text(detail)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(LedgerWidgetColors.secondary)
+            Text(line).font(LedgerWidgetFont.text(12)).foregroundStyle(tone.ink)
+                .lineLimit(2)
+            if let detail {
+                Text(detail).font(LedgerWidgetFont.text(10)).foregroundStyle(tone.meta)
                     .lineLimit(2)
             }
         }
-        .containerBackground(for: .widget) { LedgerWidgetColors.panel }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .unredacted()
+    }
+
+    private var line: String {
+        switch reason {
+        case .refresh: String(localized: "打开 Ledger 刷新")
+        case let .message(text, _): text
+        }
+    }
+
+    private var detail: String? {
+        if case let .message(_, detail) = reason { return detail }
+        return nil
     }
 }
 
 enum LedgerWidgetText {
-    static func percentage(_ value: Double) -> String {
+    /// "+12%" or "-8%": the sign carries direction, so no arrow is needed.
+    static func signedPercentage(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.locale = LedgerLocale.current
         formatter.numberStyle = .percent
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 1
+        formatter.positivePrefix = "+" + (formatter.positivePrefix ?? "")
         return formatter.string(from: NSNumber(value: value)) ?? "--"
     }
 
@@ -243,15 +135,7 @@ enum LedgerWidgetText {
         let formatter = DateFormatter()
         formatter.locale = LedgerLocale.current
         formatter.dateFormat = Calendar.current.isDate(date, inSameDayAs: now) ? "HH:mm" : "MM/dd HH:mm"
-        return String(localized: "\(formatter.string(from: date)) 更新")
-    }
-
-    static func checked(_ date: Date, now: Date = Date()) -> String {
-        guard date < now.addingTimeInterval(-60) else { return String(localized: "刚刚检查") }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.locale = LedgerLocale.current
-        formatter.unitsStyle = .abbreviated
-        return String(localized: "\(formatter.localizedString(for: date, relativeTo: now))检查")
+        return String(localized: "更新于 \(formatter.string(from: date))")
     }
 }
 
@@ -328,7 +212,8 @@ extension LedgerWidgetSnapshot {
         ],
         importsUpdatedAt: Date()
         )
-        let today = LedgerWidgetDates.day(Date())
+        // The local day, so the preview covers the period the widgets gate on.
+        let today = LedgerWidgetDates.localDay(Date())
         let week = LedgerWidgetDates.weekStart(today)
         let start = LedgerWidgetDates.adding(-77, to: week)
         let end = LedgerWidgetDates.adding(1, to: today)
@@ -363,47 +248,108 @@ extension LedgerWidgetSnapshot {
     }()
 }
 
-// Shared typography and explicit privacy states for the terminal widget family.
+/// A figure: the currency symbol at 0.6x in meta, then the number in ink with
+/// tabular digits. Two Texts in one baseline-aligned stack (Text + Text is
+/// deprecated), redacted together. Callers always state the size: 27 for the
+/// hero figure, 15 or 23 for secondary ones.
 struct LedgerWidgetAmount: View {
+    @Environment(\.widgetRenderingMode) private var renderingMode
     let amount: Int
     let currency: String
-    var size: CGFloat = 23
+    let size: CGFloat
+
     var body: some View {
-        Text(MoneyText.format(minorUnits: amount, currency: currency))
-            .font(.system(size: size, weight: .semibold, design: .monospaced))
-            .monospacedDigit().foregroundStyle(LedgerWidgetColors.ink)
-            .lineLimit(1).minimumScaleFactor(0.4).allowsTightening(true)
-            .privacySensitive()
+        let tone = LedgerWidgetTone(renderingMode)
+        let code = currency.isEmpty ? "CNY" : currency
+        HStack(alignment: .firstTextBaseline, spacing: 1) {
+            if amount < 0 {
+                Text(verbatim: "-").font(LedgerWidgetFont.medium(size)).foregroundStyle(tone.ink)
+            }
+            Text(verbatim: MoneyText.currencySymbol(for: code).trimmingCharacters(in: .whitespaces))
+                .font(LedgerWidgetFont.text(size * 0.6)).foregroundStyle(tone.meta)
+                .fixedSize()
+            Text(verbatim: MoneyText.format(minorUnits: MoneyText.magnitude(amount), currency: code, showsCurrency: false))
+                .font(LedgerWidgetFont.medium(size)).monospacedDigit().tracking(-0.01 * size)
+                .foregroundStyle(tone.ink)
+                .minimumScaleFactor(0.4).allowsTightening(true)
+        }
+        .lineLimit(1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(MoneyText.format(minorUnits: amount, currency: code))
+        .privacySensitive()
     }
 }
 
+/// Bottom line in meta: an optional label, then when the data was published.
 struct LedgerWidgetFooter: View {
-    let label: String
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    var label: String? = nil
     let date: Date?
     let now: Date
+
     var body: some View {
         HStack(spacing: 4) {
-            Text(label).lineLimit(1)
+            if let label { Text(label).lineLimit(1) }
             Spacer(minLength: 0)
             Text(date.map { LedgerWidgetText.updated($0, now: now) } ?? String(localized: "尚未更新")).lineLimit(1)
         }
-        .font(.system(size: 9)).foregroundStyle(LedgerWidgetColors.secondary)
+        .font(LedgerWidgetFont.text(10)).monospacedDigit()
+        .foregroundStyle(LedgerWidgetTone(renderingMode).meta)
     }
 }
 
-struct LedgerWidgetPrivacyView: View {
-    var title: String = "Ledger"
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.system(size: 12, weight: .semibold))
-            Spacer(minLength: 0)
-            Image(systemName: "lock.fill").font(.system(size: 15))
-            Text("内容已隐藏").font(.system(size: 12, weight: .medium))
-            Text("打开账本查看").font(.system(size: 10))
-                .foregroundStyle(LedgerWidgetColors.secondary)
-            Spacer(minLength: 0)
-        }.frame(maxWidth: .infinity, alignment: .leading)
-            .foregroundStyle(LedgerWidgetColors.ink).unredacted()
+/// The filled call to action. In full colour it is ink with page-coloured
+/// content; a tinted or clear Home Screen would flatten fill and label into
+/// one tint, so there it becomes a 1pt outline and the content stays primary.
+struct LedgerWidgetPrimaryButtonStyle: ViewModifier {
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    var shape: AnyShape = AnyShape(Capsule(style: .continuous))
+
+    func body(content: Content) -> some View {
+        if renderingMode == .fullColor {
+            content
+                .foregroundStyle(LedgerWidgetColors.page)
+                .background(shape.fill(LedgerWidgetColors.ink))
+                .contentShape(shape)
+        } else {
+            content
+                .foregroundStyle(Color.primary)
+                .widgetAccentable()
+                .overlay(shape.stroke(Color.primary, lineWidth: 1).widgetAccentable())
+                .contentShape(shape)
+        }
+    }
+}
+
+/// A secondary button: page on the sunken widget background in full colour;
+/// in the other modes a faint wash and a hairline, so the shape survives tinting.
+struct LedgerWidgetTileStyle: ViewModifier {
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    var shape: AnyShape = AnyShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+    func body(content: Content) -> some View {
+        let tone = LedgerWidgetTone(renderingMode)
+        content
+            .foregroundStyle(tone.ink)
+            .background {
+                if tone.isFullColor {
+                    shape.fill(LedgerWidgetColors.page)
+                } else {
+                    shape.fill(Color.primary.opacity(0.08))
+                        .overlay(shape.stroke(tone.ruleStrong, lineWidth: 0.5))
+                }
+            }
+            .contentShape(shape)
+    }
+}
+
+extension View {
+    func ledgerWidgetPrimaryButton(_ shape: some Shape = Capsule(style: .continuous)) -> some View {
+        modifier(LedgerWidgetPrimaryButtonStyle(shape: AnyShape(shape)))
+    }
+
+    func ledgerWidgetTile(_ shape: some Shape = RoundedRectangle(cornerRadius: 14, style: .continuous)) -> some View {
+        modifier(LedgerWidgetTileStyle(shape: AnyShape(shape)))
     }
 }
 
@@ -416,10 +362,22 @@ enum LedgerWidgetHeat {
         if amount <= 20_000 { return 3 }
         return 4
     }
-    static func color(_ amount: Int) -> Color {
-        let level = level(amount)
-        return [LedgerWidgetColors.raised, LedgerWidgetColors.heat1, LedgerWidgetColors.heat2, LedgerWidgetColors.heat3, LedgerWidgetColors.heat4][level]
+
+    /// Full colour ramps the expense hue over a `rule` floor; the tinted modes
+    /// ramp primary opacity, the only channel they keep.
+    static func color(level: Int, mode: WidgetRenderingMode = .fullColor) -> Color {
+        let level = min(max(level, 0), 4)
+        if mode == .fullColor {
+            return level == 0 ? LedgerWidgetColors.rule
+                : LedgerWidgetColors.expense.opacity([0.25, 0.45, 0.7, 1.0][level - 1])
+        }
+        return Color.primary.opacity([0.12, 0.3, 0.5, 0.75, 1.0][level])
     }
+
+    static func color(_ amount: Int, mode: WidgetRenderingMode = .fullColor) -> Color {
+        color(level: level(amount), mode: mode)
+    }
+
     static func shortDate(_ raw: String) -> String {
         String(raw.suffix(5)).replacingOccurrences(of: "-", with: "/")
     }
