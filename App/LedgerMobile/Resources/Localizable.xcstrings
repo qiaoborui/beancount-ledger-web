@@ -331,6 +331,16 @@
         }
       }
     },
+    "%@ · %@:%lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · %@:%lld"
+          }
+        }
+      }
+    },
     "%@ · %lld 条候选交易" : {
       "localizations" : {
         "en" : {
@@ -417,6 +427,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ · Remote"
+          }
+        }
+      }
+    },
+    "%@ · 银行 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · bank %@"
           }
         }
       }
@@ -2304,6 +2324,16 @@
         }
       }
     },
+    "为 %@ 补写记账日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill the post date for %@"
+          }
+        }
+      }
+    },
     "为交易添加标签（如 #2026-日本旅行、#装修、#搬家），即可在这里生成独立项目核算与报表。" : {
       "localizations" : {
         "en" : {
@@ -3110,6 +3140,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Transferred 3,000 yuan from my ICBC debit card to pay off my CMB credit card."
+          }
+        }
+      }
+    },
+    "从已归档的汇丰账单为支付宝/微信分录补上记账日，并检查重复记账。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill post dates on Alipay and WeChat entries from archived HSBC statements, and check for double bookings."
           }
         }
       }
@@ -5826,6 +5866,16 @@
         }
       }
     },
+    "另为 %lld 笔已有交易补写了记账日。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Also filled post dates on %lld existing transactions."
+          }
+        }
+      }
+    },
     "只检查导入归档，不会再次提交" : {
       "localizations" : {
         "en" : {
@@ -5906,6 +5956,26 @@
         }
       }
     },
+    "可能与 %@ 是同一笔（有多条同金额候选，未自动匹配）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "May be the same purchase as %@ (several equal candidates, not matched automatically)"
+          }
+        }
+      }
+    },
+    "可能与%@的 %@ 是同一笔（金额略有差异）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "May be the same purchase as %2$@ from %1$@ (amount differs slightly)"
+          }
+        }
+      }
+    },
     "可视化配置微信、支付宝、银行卡与日常分类" : {
       "localizations" : {
         "en" : {
@@ -5974,6 +6044,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Total"
+          }
+        }
+      }
+    },
+    "同一张卡上，银行导入的分录与支付宝/微信/手记分录金额接近、日期相近，可能记了两次。请核对后手动删除多余的一条，这里不会自动删除。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On the same card, a bank-imported entry and an Alipay, WeChat or manual entry have close amounts and dates and may be the same purchase. Check them and delete the extra one yourself; nothing is deleted here."
           }
         }
       }
@@ -7880,6 +7960,16 @@
         }
       }
     },
+    "已为 %lld 笔分录补写记账日。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filled post dates on %lld entries."
+          }
+        }
+      }
+    },
     "已保存 · 正在更新" : {
       "localizations" : {
         "en" : {
@@ -8260,6 +8350,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Already have .bean files? Take them over directly"
+          }
+        }
+      }
+    },
+    "已有分录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "an existing entry"
           }
         }
       }
@@ -9954,6 +10054,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Paying/receiving account"
+          }
+        }
+      }
+    },
+    "扫描 %lld 份账单、%lld 条银行记录；账本里还有 %lld 笔卡片分录缺少记账日。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scanned %1$lld statements and %2$lld bank rows; %3$lld card entries still lack a post date."
           }
         }
       }
@@ -12818,6 +12928,16 @@
         }
       }
     },
+    "服务器暂不支持补写记账日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server does not support filling post dates yet"
+          }
+        }
+      }
+    },
     "服务器暂不支持账单导入" : {
       "localizations" : {
         "en" : {
@@ -14638,6 +14758,16 @@
         }
       }
     },
+    "正在扫描已归档的汇丰账单…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scanning archived HSBC statements…"
+          }
+        }
+      }
+    },
     "正在搜索…" : {
       "localizations" : {
         "en" : {
@@ -14834,6 +14964,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Counting selection"
+          }
+        }
+      }
+    },
+    "正在补写…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filling…"
           }
         }
       }
@@ -15374,6 +15514,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No matching accounts"
+          }
+        }
+      }
+    },
+    "没有可补写的记账日，也没有发现疑似重复。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No post dates to fill and no possible duplicates found."
           }
         }
       }
@@ -16114,6 +16264,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Saved"
+          }
+        }
+      }
+    },
+    "疑似重复记账 %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Possible double bookings %lld"
           }
         }
       }
@@ -17508,6 +17668,36 @@
         }
       }
     },
+    "补写 %lld 笔记账日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill %lld post dates"
+          }
+        }
+      }
+    },
+    "补写汇丰记账日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill HSBC post dates"
+          }
+        }
+      }
+    },
+    "补写记账日 %lld / %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill post dates %lld / %lld"
+          }
+        }
+      }
+    },
     "补商户" : {
       "localizations" : {
         "en" : {
@@ -17684,6 +17874,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Entries saved"
+          }
+        }
+      }
+    },
+    "记账日 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Post date %@"
           }
         }
       }
@@ -19668,6 +19868,16 @@
         }
       }
     },
+    "跳过为 %@ 补写记账日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skip filling the post date for %@"
+          }
+        }
+      }
+    },
     "跳过，手动开账" : {
       "localizations" : {
         "en" : {
@@ -20168,6 +20378,16 @@
         }
       }
     },
+    "这些已有分录与汇丰账单里的同一笔金额一致、日期相近，补写后可以按结单账期对账。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These entries match a purchase on an HSBC statement by amount and date. Filling the post date lets you reconcile by statement period."
+          }
+        }
+      }
+    },
     "这些文件在本机和远端均有修改：%@。两边内容已保留，请处理冲突后再同步。" : {
       "localizations" : {
         "en" : {
@@ -20184,6 +20404,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "These transactions are already recorded; only the category or payee is missing. Filling them in doesn't change amounts."
+          }
+        }
+      }
+    },
+    "这些银行行与账本里已有的支付宝/微信分录金额一致，写入时只把记账日补到已有分录上，不新增交易。取消勾选则跳过补写。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These bank rows match existing Alipay/WeChat entries exactly. Saving writes the post date onto those entries instead of adding transactions. Uncheck one to skip it."
           }
         }
       }
@@ -21208,6 +21438,16 @@
         }
       }
     },
+    "金额略有差异或有多条同金额候选，没有自动补写。确认是同一笔后，请在交易详情里修改金额并补上记账日。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The amount differs slightly or several entries share the amount, so nothing was filled. If it is the same purchase, edit the amount and add the post date in the transaction details."
+          }
+        }
+      }
+    },
     "金额：%@%@" : {
       "localizations" : {
         "en" : {
@@ -21334,6 +21574,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hide amounts"
+          }
+        }
+      }
+    },
+    "需要人工确认 %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Needs review %lld"
           }
         }
       }

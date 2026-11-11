@@ -88,6 +88,8 @@ type ImportCommitRequest struct {
 	ImportID string        `json:"importId"`
 	Provider string        `json:"provider"`
 	Entries  []ImportEntry `json:"entries"`
+	// ExcludedPostDateFills lists preview postDateFills ids the user declined.
+	ExcludedPostDateFills []string `json:"excludedPostDateFills,omitempty"`
 }
 
 var (

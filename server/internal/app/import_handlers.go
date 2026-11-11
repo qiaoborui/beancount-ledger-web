@@ -120,7 +120,7 @@ func (s *Server) importsCommit(c *gin.Context) {
 		errorJSON(c, http.StatusConflict, err)
 		return
 	}
-	result, err := s.commitImport(c.Request.Context(), input.ImportID, input.Provider, input.Entries)
+	result, err := s.commitImportWithOptions(c.Request.Context(), input.ImportID, input.Provider, input.Entries, input.ExcludedPostDateFills)
 	if err != nil {
 		if claimedPending {
 			if statusErr := s.updateGmailPendingStatus(c.Request.Context(), input.ImportID, "ready", err.Error()); statusErr != nil {
@@ -134,6 +134,48 @@ func (s *Server) importsCommit(c *gin.Context) {
 		if err := s.updateGmailPendingStatus(c.Request.Context(), input.ImportID, "committed", ""); err != nil {
 			result["gmailPendingStatusWarning"] = fmt.Sprintf("账本已写入，但自动账单状态同步暂时失败；服务器会自动核对：%v", err)
 		}
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) importsPostDateBackfillPreview(c *gin.Context) {
+	if !s.limiter.Check(c, "imports.postDateBackfill", 10, time.Minute) {
+		return
+	}
+	if !requireAuth(c) {
+		return
+	}
+	if err := ensureLedgerReady(s.cfg); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	result, err := s.buildPostDateBackfill(c.Request.Context())
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) importsPostDateBackfillApply(c *gin.Context) {
+	if !s.limiter.Check(c, "imports.postDateBackfillApply", 10, time.Minute) {
+		return
+	}
+	if !requireAuth(c) {
+		return
+	}
+	var input PostDateBackfillApplyRequest
+	if !bindJSON(c, &input) {
+		return
+	}
+	if err := ensureLedgerReady(s.cfg); err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
+	}
+	result, err := s.applyPostDateBackfill(c.Request.Context(), input.FillIDs)
+	if err != nil {
+		errorJSON(c, http.StatusBadRequest, err)
+		return
 	}
 	c.JSON(http.StatusOK, result)
 }

@@ -2465,19 +2465,33 @@ final class LedgerSession: ObservableObject {
 
     func commitImport(
         preview: LedgerImportPreview,
-        entries: [LedgerImportEntry]
+        entries: [LedgerImportEntry],
+        excludedPostDateFills: [String] = []
     ) async throws -> LedgerImportCommitResult {
         let result = try await performSensitiveRequest { repository in
             try await repository.commitImport(
                 request: LedgerImportCommitRequest(
                     importID: preview.importID,
                     provider: preview.provider,
-                    entries: entries
+                    entries: entries,
+                    excludedPostDateFills: excludedPostDateFills.isEmpty ? nil : excludedPostDateFills
                 )
             )
         }
         triggerIslandNotice(LedgerIslandNotice.fromImport(count: entries.count, provider: preview.provider))
         return result
+    }
+
+    func postDateBackfill() async throws -> LedgerPostDateBackfill {
+        try await performSensitiveRequest { repository in
+            try await repository.postDateBackfill()
+        }
+    }
+
+    func applyPostDateBackfill(fillIDs: [String]) async throws -> LedgerPostDateBackfillApplyResult {
+        try await performSensitiveRequest { repository in
+            try await repository.applyPostDateBackfill(fillIDs: fillIDs)
+        }
     }
 
     func updateTransaction(

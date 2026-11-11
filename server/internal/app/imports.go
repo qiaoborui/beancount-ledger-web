@@ -20,26 +20,27 @@ import (
 )
 
 type ImportEntry struct {
-	ID              string            `json:"id"`
-	Date            string            `json:"date"`
-	Flag            string            `json:"flag"`
-	Payee           string            `json:"payee"`
-	Narration       string            `json:"narration"`
-	Source          string            `json:"source,omitempty"`
-	OrderID         string            `json:"orderId,omitempty"`
-	MerchantID      string            `json:"merchantId,omitempty"`
-	PayTime         string            `json:"payTime,omitempty"`
-	Method          string            `json:"method,omitempty"`
-	TxType          string            `json:"txType,omitempty"`
-	Status          string            `json:"status,omitempty"`
-	Type            string            `json:"type,omitempty"`
-	CategoryAccount string            `json:"categoryAccount"`
-	FundingAccount  string            `json:"fundingAccount"`
-	Amount          float64           `json:"amount"`
-	Currency        string            `json:"currency"`
-	Tags            []string          `json:"tags,omitempty"`
-	Metadata        map[string]string `json:"metadata"`
-	Postings        []EntryPosting    `json:"postings"`
+	ID              string               `json:"id"`
+	Date            string               `json:"date"`
+	Flag            string               `json:"flag"`
+	Payee           string               `json:"payee"`
+	Narration       string               `json:"narration"`
+	Source          string               `json:"source,omitempty"`
+	OrderID         string               `json:"orderId,omitempty"`
+	MerchantID      string               `json:"merchantId,omitempty"`
+	PayTime         string               `json:"payTime,omitempty"`
+	Method          string               `json:"method,omitempty"`
+	TxType          string               `json:"txType,omitempty"`
+	Status          string               `json:"status,omitempty"`
+	Type            string               `json:"type,omitempty"`
+	CategoryAccount string               `json:"categoryAccount"`
+	FundingAccount  string               `json:"fundingAccount"`
+	Amount          float64              `json:"amount"`
+	Currency        string               `json:"currency"`
+	Tags            []string             `json:"tags,omitempty"`
+	Metadata        map[string]string    `json:"metadata"`
+	Postings        []EntryPosting       `json:"postings"`
+	DuplicateHint   *ImportDuplicateHint `json:"duplicateHint,omitempty"`
 }
 
 type importProviderConfig struct {
@@ -224,6 +225,28 @@ func (s *Server) createImportPreviewFromUploadsWithID(ctx context.Context, impor
 	prepared.Warnings = append(prepared.Warnings, sourceWarnings...)
 	generatedBean := transactionOnlyBeanText(string(rawGeneratedBean))
 	generatedSummary := parseBeanSummary(generatedBean)
+	dedupInputBean, dedupInputFile := generatedBean, generatedFile
+	postDateMatch := postDateMatchResult{}
+	if upload.Provider == "hsbchk-credit" && generatedSummary.CandidateCount > 0 {
+		snapshot, err := s.ledgerSnapshotLite(ctx)
+		if err != nil {
+			return nil, err
+		}
+		postDateMatch, err = matchImportPostDates(snapshot.Transactions, generatedBean)
+		if err != nil {
+			return nil, err
+		}
+		if len(postDateMatch.Fills) > 0 {
+			dedupInputBean = strings.Join(postDateMatch.Kept, "\n\n")
+			dedupInputFile = previewPath(s.cfg, importID, upload.Provider+"-preview-unmatched.bean")
+			if err := os.WriteFile(dedupInputFile, []byte(dedupInputBean+"\n"), 0o600); err != nil {
+				return nil, err
+			}
+		}
+		if err := s.savePostDateMatch(ctx, importID, postDateMatch); err != nil {
+			return nil, err
+		}
+	}
 	dedupReport := ""
 	_, filteredForDedup := importer.RowCounts(prepared, sourceAnalysis, generatedSummary)
 	if generatedSummary.CandidateCount == 0 && prepared.RawRowCount > 0 && filteredForDedup == 0 {
@@ -231,21 +254,26 @@ func (s *Server) createImportPreviewFromUploadsWithID(ctx context.Context, impor
 		if err := os.WriteFile(dedupedFile, []byte(""), 0o600); err != nil {
 			return nil, err
 		}
+	} else if len(postDateMatch.Fills) > 0 && len(postDateMatch.Kept) == 0 {
+		dedupReport = "所有交易都已匹配到已有分录，只补写记账日。"
+		if err := os.WriteFile(dedupedFile, []byte(""), 0o600); err != nil {
+			return nil, err
+		}
 	} else if githubAPIEnabled(s.cfg) || s.cfg.localTransport {
-		dedupedBean, skipped, err := s.dedupGeneratedBeanWithReadModel(ctx, generatedBean, upload.StatementHash)
+		dedupedBean, skipped, err := s.dedupGeneratedBeanWithReadModel(ctx, dedupInputBean, upload.StatementHash)
 		if err != nil {
 			return nil, err
 		}
-		dedupReport = fmt.Sprintf("账本快照去重：生成 %d 条，跳过 %d 条已存在，待写入 %d 条。", generatedSummary.CandidateCount, skipped, generatedSummary.CandidateCount-skipped)
+		dedupReport = fmt.Sprintf("账本快照去重：生成 %d 条，跳过 %d 条已存在，待写入 %d 条。", generatedSummary.CandidateCount, skipped+len(postDateMatch.Fills), generatedSummary.CandidateCount-skipped-len(postDateMatch.Fills))
 		if err := os.WriteFile(dedupedFile, []byte(dedupedBean), 0o600); err != nil {
 			return nil, err
 		}
 	} else {
-		dedupReport, err = s.runDedup(importer, generatedFile, "", alipayFundRounding, true)
+		dedupReport, err = s.runDedup(importer, dedupInputFile, "", alipayFundRounding, true)
 		if err != nil {
 			return nil, err
 		}
-		if err := s.runDedupToFile(importer, generatedFile, dedupedFile, alipayFundRounding); err != nil {
+		if err := s.runDedupToFile(importer, dedupInputFile, dedupedFile, alipayFundRounding); err != nil {
 			return nil, err
 		}
 	}
@@ -267,8 +295,9 @@ func (s *Server) createImportPreviewFromUploadsWithID(ctx context.Context, impor
 		return nil, err
 	}
 	importer.DecorateEntries(upload, entries)
+	decoratePostDateHints(entries, postDateMatch.Hints)
 	summary := parseBeanSummary(dedupedBean)
-	skippedDuplicateCount := generatedSummary.CandidateCount - summary.CandidateCount
+	skippedDuplicateCount := generatedSummary.CandidateCount - summary.CandidateCount - len(postDateMatch.Fills)
 	if skippedDuplicateCount < 0 {
 		skippedDuplicateCount = 0
 	}
@@ -277,8 +306,11 @@ func (s *Server) createImportPreviewFromUploadsWithID(ctx context.Context, impor
 	if githubAPIEnabled(s.cfg) {
 		warnings = append(warnings, "GitHub API 写入模式使用 Postgres 读模型做预览去重；提交后等待本地 worker 索引更新。")
 	}
-	if summary.CandidateCount == 0 {
+	if summary.CandidateCount == 0 && len(postDateMatch.Fills) == 0 {
 		warnings = append(warnings, "去重后没有发现可写入的新交易。")
+	}
+	if warning := postDateMatchWarning(postDateMatch); warning != "" {
+		warnings = append(warnings, warning)
 	}
 	if !strings.Contains(generatedBean, "orderId") {
 		warnings = append(warnings, "生成结果中没有发现 orderId，将只能使用 fallback 去重。")
@@ -320,6 +352,7 @@ func (s *Server) createImportPreviewFromUploadsWithID(ctx context.Context, impor
 		"dateStart":             nullableString(dateStart),
 		"dateEnd":               nullableString(dateEnd),
 		"warnings":              warnings,
+		"postDateFills":         postDateFillsOrEmpty(postDateMatch.Fills),
 	}
 	if err := s.writeImportPreview(ctx, importID, result); err != nil {
 		return nil, err
@@ -471,6 +504,10 @@ func importDuplicateFundingAccount(account string) bool {
 }
 
 func (s *Server) commitImport(ctx context.Context, importID, provider string, entries []ImportEntry) (ginH, error) {
+	return s.commitImportWithOptions(ctx, importID, provider, entries, nil)
+}
+
+func (s *Server) commitImportWithOptions(ctx context.Context, importID, provider string, entries []ImportEntry, excludedPostDateFills []string) (ginH, error) {
 	if _, err := s.ensureImportRequirements(provider); err != nil {
 		return nil, err
 	}
@@ -495,6 +532,11 @@ func (s *Server) commitImport(ctx context.Context, importID, provider string, en
 	if meta.ExpectedEntryCount != nil && len(entries) > *meta.ExpectedEntryCount {
 		return nil, fmt.Errorf("待写入交易数量超过预览数量：预览 %d 条，提交 %d 条，请重新生成预览", *meta.ExpectedEntryCount, len(entries))
 	}
+	postDateMatch, err := s.loadPostDateMatch(ctx, importID)
+	if err != nil {
+		return nil, err
+	}
+	fills := selectPostDateFills(postDateMatch.Fills, excludedPostDateFills)
 	beanText := ""
 	summary := beanSummary{DateStart: meta.DateStart, DateEnd: meta.DateEnd}
 	if len(entries) > 0 {
@@ -531,11 +573,11 @@ func (s *Server) commitImport(ctx context.Context, importID, provider string, en
 	if meta.DocumentFile != "" {
 		sourceDocumentFile = meta.DocumentFile
 	}
-	written, err := s.writeImportedBeanFile(outputFile, monthFile, beanText, provider, summary.DateStart, summary.DateEnd, sourceDocumentFile, documentFile, documentAccount, importID)
+	written, err := s.writeImportedBeanFileWithPostDates(outputFile, monthFile, beanText, provider, summary.DateStart, summary.DateEnd, sourceDocumentFile, documentFile, documentAccount, importID, fills, meta.StatementHash)
 	if err != nil {
 		return nil, err
 	}
-	result := ginH{"ok": true, "outputFile": written.OutputFile, "includeFile": written.MonthFile, "documentFile": written.DocumentFile, "count": summary.CandidateCount, "beanText": beanText, "readModelPending": ledgerReadModelEnabled(s.cfg)}
+	result := ginH{"ok": true, "outputFile": written.OutputFile, "includeFile": written.MonthFile, "documentFile": written.DocumentFile, "count": summary.CandidateCount, "postDateFillCount": len(fills), "beanText": beanText, "readModelPending": ledgerReadModelEnabled(s.cfg)}
 	if written.GitSHA != "" {
 		result["indexGitSHA"] = written.GitSHA
 	}
@@ -1080,6 +1122,10 @@ type writtenImportFiles struct {
 }
 
 func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount, importID string) (writtenImportFiles, error) {
+	return s.writeImportedBeanFileWithPostDates(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount, importID, nil, "")
+}
+
+func (s *Server) writeImportedBeanFileWithPostDates(outputFile, monthFile, beanText, provider, start, end, sourceFile, documentFile, documentAccount, importID string, fills []importPostDateFill, statementHash string) (writtenImportFiles, error) {
 	written := writtenImportFiles{MonthFile: monthFile}
 	gitSHA, err := s.writer.RunTransactionWithSourceResult(ledgerWriteSourceImportCommit, func(tx *LedgerWriteTransaction) error {
 		prefetchFiles := []string{mainBeanPath(s.cfg), monthFile, outputFile}
@@ -1099,6 +1145,9 @@ func (s *Server) writeImportedBeanFile(outputFile, monthFile, beanText, provider
 			return nil
 		} else if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
 			return readErr
+		}
+		if err := applyPostDateFills(tx, s.cfg, fills, statementHash); err != nil {
+			return err
 		}
 		outputFile, err = tx.UniquePath(outputFile)
 		if err != nil {

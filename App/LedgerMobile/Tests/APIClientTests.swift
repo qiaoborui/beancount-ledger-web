@@ -435,6 +435,40 @@ final class APIClientTests: XCTestCase {
         )
     }
 
+    func testPostDateBackfillScansThenAppliesSelectedFills() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            if request.url?.path == "/api/ledger/imports/post-date-backfill" {
+                return Self.response(for: request, body: #"""
+                {"documents":2,"bankRows":3,"missingPostDate":3,"warnings":[],
+                 "fills":[{"id":"fill-1","date":"2026-05-10","payee":"茶庄","narration":"会员",
+                   "account":"Liabilities:HK:HSBC:CreditCard","amount":"-7.50","currency":"CNY",
+                   "postDate":"11/05/2026","bankDate":"2026-05-10","bankPayee":"TEA SHOP","source":"hsbchk-credit:abc",
+                   "target":{"file":"transactions/2026/05.bean","line":12}}],
+                 "reviews":[{"bankDate":"2026-05-13","postDate":"15/05/2026","bankPayee":"ELEME","amount":"-33.33",
+                   "currency":"CNY","hint":{"reason":"amount-differs","date":"2026-05-13","payee":"河南早点",
+                   "narration":"外卖","amount":"-33.48","currency":"CNY","source":"支付宝"}}],
+                 "possibleDuplicates":[{"amountDiff":"0.00",
+                   "bank":{"date":"2026-05-16","payee":"STARBUCKS","narration":"","amount":"-9.90","currency":"CNY",
+                     "postDate":"17/05/2026","source":"HSBC HK","file":"transactions/2026/05.bean","line":20},
+                   "existing":{"date":"2026-05-16","payee":"星巴克","narration":"咖啡","amount":"-9.90","currency":"CNY",
+                     "source":"微信支付","file":"transactions/2026/05.bean","line":28}}]}
+                """#)
+            }
+            XCTAssertEqual(request.url?.path, "/api/ledger/imports/post-date-backfill/apply")
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: try Self.bodyData(from: request)) as? [String: Any])
+            XCTAssertEqual(json["fillIds"] as? [String], ["fill-1"])
+            return Self.response(for: request, body: #"{"ok":true,"count":1,"readModelPending":false}"#)
+        }
+        let baseURL = URL(string: "https://ledger.example.com")!
+        let scan = try await makeClient().postDateBackfill(baseURL: baseURL)
+        XCTAssertEqual(scan.fills.map(\.postDate), ["11/05/2026"])
+        XCTAssertEqual(scan.reviews.first?.hint.payee, "河南早点")
+        XCTAssertEqual(scan.possibleDuplicates.first?.existing.line, 28)
+        let applied = try await makeClient().applyPostDateBackfill(baseURL: baseURL, fillIDs: scan.fills.map(\.id))
+        XCTAssertEqual(applied.count, 1)
+    }
+
     func testImportCommitSendsPreviewIdentityAndSelectedEntriesAsJSON() async throws {
         let entry = Self.importEntry
         MockURLProtocol.requestHandler = { request in
