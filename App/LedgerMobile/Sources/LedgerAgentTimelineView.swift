@@ -53,6 +53,8 @@ struct LedgerAgentLiveTimeline: View {
     /// no slide or layout animation for the page's jump to the bottom to
     /// race; read back, it comes in as it always has.
     var following = false
+    /// The tallest the streamed reply has been this turn.
+    @State private var replyHeight: CGFloat = 0
 
     /// A stream quiet this long gets the hint to stop and send again.
     static let slowAfter: TimeInterval = 45
@@ -74,9 +76,24 @@ struct LedgerAgentLiveTimeline: View {
                 }
                 activityLine
             }
-            ForEach(texts, id: \.self) { index in
-                LedgerAgentStreamingReply(text: turn.steps[index].text, streaming: index == turn.steps.indices.last)
-                    .transition(following ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .offset(y: 6)))
+            if !texts.isEmpty {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(texts, id: \.self) { index in
+                        LedgerAgentStreamingReply(text: turn.steps[index].text, streaming: index == turn.steps.indices.last)
+                            .transition(following ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .offset(y: 6)))
+                    }
+                }
+                // Streamed text only grows, but its Markdown does not: `**`
+                // and a backtick read as characters until they close, and
+                // table rows as prose until the rule under the header
+                // arrives, so the reply can come out a few points shorter.
+                // The page at the bottom would drop by that much and be
+                // pushed back up on the next delta; the reply keeps the
+                // tallest height it reached instead.
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    if height > replyHeight { replyHeight = height }
+                }
+                .frame(minHeight: replyHeight, alignment: .top)
             }
             if turn.compacting {
                 Text("正在压缩较早的对话…").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
