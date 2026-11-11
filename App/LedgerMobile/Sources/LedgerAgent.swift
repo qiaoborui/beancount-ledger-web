@@ -234,6 +234,10 @@ struct LedgerAgentLiveTurn: Equatable, Sendable {
     private(set) var compacted = false
     /// The reasoning block still streaming, by index into `steps`.
     private var openThinking: Int?
+    /// What the turn is doing, for the one line under the live timeline: the
+    /// reasoning streaming, or the call running. Between them it keeps the
+    /// last one, so the line never blanks; nil until either has happened.
+    private(set) var activity: LedgerAgentLiveActivity?
 
     /// The reply so far: the text of the latest model message that wrote
     /// any, which is what a stop keeps.
@@ -253,6 +257,7 @@ struct LedgerAgentLiveTurn: Equatable, Sendable {
     }
 
     mutating func apply(_ event: LedgerAgentLiveEvent) {
+        defer { if let current = currentActivity { activity = current } }
         switch event {
         case let .thinkingDelta(text):
             if let open = openThinking {
@@ -308,6 +313,51 @@ struct LedgerAgentLiveTurn: Equatable, Sendable {
     private func index(of call: LedgerAgentToolCall) -> Int? {
         guard let id = call.callId, !id.isEmpty else { return nil }
         return steps.lastIndex { $0.call?.callId == id }
+    }
+
+    /// What is under way right now; nil between steps. Reasoning that is
+    /// still open came after every call started, since a call ends it.
+    private var currentActivity: LedgerAgentLiveActivity? {
+        if let open = openThinking, steps.indices.contains(open) {
+            return .thinking(line: Self.lastLine(steps[open].text))
+        }
+        if let latest = running.max(), steps.indices.contains(latest), let call = steps[latest].call {
+            return .tool(title: call.title, others: running.count - 1)
+        }
+        return nil
+    }
+
+    /// The last line of `text` with anything on it, trimmed; found from the
+    /// end, since it runs on every reasoning delta.
+    static func lastLine(_ text: String) -> String? {
+        var end = text.endIndex
+        repeat {
+            let start = text[..<end].lastIndex(where: \.isNewline).map { text.index(after: $0) } ?? text.startIndex
+            let line = text[start..<end].trimmingCharacters(in: .whitespaces)
+            if !line.isEmpty { return line }
+            // Step back over the line break in front of this line.
+            end = start > text.startIndex ? text.index(before: start) : start
+        } while end > text.startIndex
+        return nil
+    }
+}
+
+/// What a running turn is doing, as the live timeline's footer says it.
+enum LedgerAgentLiveActivity: Equatable, Sendable {
+    /// The latest call started and still running, with how many others run
+    /// beside it.
+    case tool(title: String, others: Int)
+    /// The reasoning streaming, by its last line; nil before it has one or
+    /// when it streams none.
+    case thinking(line: String?)
+
+    var text: String {
+        switch self {
+        case .tool(let title, 0): return title
+        case let .tool(title, others): return String(localized: "\(title) 等 \(others + 1) 个调用")
+        case let .thinking(line?): return String(localized: "正在思考：\(line)")
+        case .thinking(nil): return String(localized: "正在思考…")
+        }
     }
 }
 

@@ -41,12 +41,19 @@ struct LedgerAgentStepTimeline: View {
 }
 
 /// The running turn as it streams in. The reply grows at the bottom; rows
-/// and blocks appear as the model reaches them.
+/// and blocks appear as the model reaches them. Above the footer the page
+/// only ever grows while the turn runs: groups and reasoning blocks keep to
+/// their one summary line, and what is under way right now is the footer's
+/// one line, so the page following the reply never sees it shrink.
 struct LedgerAgentLiveTimeline: View {
     let turn: LedgerAgentLiveTurn
     let since: Date
     /// When the stream last sent anything.
     let quietSince: Date
+    /// The page is following the reply. New blocks then land in place, with
+    /// no slide or layout animation for the page's jump to the bottom to
+    /// race; read back, they come in as they always have.
+    var following = false
 
     /// A stream quiet this long gets the hint to stop and send again.
     static let slowAfter: TimeInterval = 45
@@ -69,7 +76,7 @@ struct LedgerAgentLiveTimeline: View {
                         LedgerAgentStreamingReply(text: turn.steps[index].text, streaming: index == turn.steps.indices.last)
                     }
                 }
-                .transition(.opacity.combined(with: .offset(y: 6)))
+                .transition(following ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .offset(y: 6)))
             }
             if turn.compacting {
                 Text("正在压缩较早的对话…").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
@@ -77,13 +84,16 @@ struct LedgerAgentLiveTimeline: View {
             }
             footer
         }
-        .ledgerAnimation(LedgerMotion.disclose, value: items.count)
+        // Following, the value stands still, so a new block is not animated.
+        .ledgerAnimation(LedgerMotion.disclose, value: following ? -1 : items.count)
         .accessibilityIdentifier("ledger-agent-live")
     }
 
     /// How long the turn has run, under whatever it is doing, with the same
     /// hints as before the stream began: the page can be left, and a stream
-    /// gone quiet can be stopped and sent again.
+    /// gone quiet can be stopped and sent again. The call running or the
+    /// reasoning's last line sits beside the seconds, one line always held,
+    /// and keeps the last of them between steps.
     private var footer: some View {
         TimelineView(.periodic(from: since, by: 1)) { context in
             let hint = context.date.timeIntervalSince(quietSince) >= Self.slowAfter
@@ -94,19 +104,27 @@ struct LedgerAgentLiveTimeline: View {
                     ProgressView().controlSize(.mini).tint(BalancedPalette.meta)
                     Text("\(max(Int(context.date.timeIntervalSince(since).rounded(.down)), 0)) 秒")
                         .balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                        .fixedSize()
+                    // Held with a space before there is anything to say.
+                    Text(activity ?? " ").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        .lineLimit(1).truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Text(hint).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("正在回答")
-            .accessibilityValue(hint)
+            .accessibilityValue([activity, hint].compactMap { $0 }.joined(separator: "，"))
         }
         .accessibilityIdentifier("ledger-agent-running")
     }
+
+    private var activity: String? { turn.activity?.text }
 }
 
-/// One reasoning block. Collapsed, it says how long the model thought, or,
-/// while it still is, shows the line it is on; expanded, the whole text.
+/// One reasoning block. Collapsed, it says how long the model thought, or
+/// that it still is (the line it is on shows in the live footer, so the
+/// block keeps one height); expanded, the whole text.
 struct LedgerAgentThinkingBlock: View {
     let step: LedgerAgentStepRecord
     var isLive = false
@@ -139,10 +157,6 @@ struct LedgerAgentThinkingBlock: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, 12)
                     .overlay(alignment: .leading) { BalancedPalette.ruleStrong.frame(width: 1) }
-            } else if isLive, let line = lastLine {
-                Text(line).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-                    .lineLimit(1).truncationMode(.head)
-                    .accessibilityHidden(true)
             }
         }
     }
@@ -152,16 +166,12 @@ struct LedgerAgentThinkingBlock: View {
         guard let milliseconds = step.durationMs, milliseconds > 0 else { return String(localized: "思考过程") }
         return String(localized: "思考了 \(max(Int((Double(milliseconds) / 1000).rounded()), 1)) 秒")
     }
-
-    private var lastLine: String? {
-        step.text.split(whereSeparator: \.isNewline).last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-    }
 }
 
 /// A run of tool calls under one summary line, collapsed until tapped so a
 /// long run of reads does not push the reply down the page; while collapsed,
-/// the call still running shows under it. Live and saved groups both start
+/// the call still running shows in the live footer rather than under the
+/// line, so the group does not grow and shrink with each call. Live and saved groups both start
 /// collapsed, so a group opened during the turn closes again when the saved
 /// answer replaces the live turn. Each row says whether the call is
 /// running, done or failed, and how long it took; a row expands to what it
@@ -205,15 +215,6 @@ struct LedgerAgentToolTimeline: View {
                 .padding(.leading, 12)
                 .overlay(alignment: .leading) { BalancedPalette.ruleStrong.frame(width: 1) }
                 .ledgerAnimation(LedgerMotion.disclose, value: rows.count)
-            } else if let current = rows.last(where: \.isRunning) {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.mini).tint(BalancedPalette.meta)
-                    Text(current.call.title).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-                        .lineLimit(1)
-                }
-                .padding(.leading, 12)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(Self.accessibilityLabel(current))
             }
         }
     }

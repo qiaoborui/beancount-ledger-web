@@ -355,7 +355,8 @@ private struct LedgerAgentChatScreen: View {
                         // that (preparing, or a core that does not stream) the
                         // step line with its elapsed and slow hints.
                         if let live = conversation.live, !live.isEmpty || live.compacting {
-                            LedgerAgentLiveTimeline(turn: live, since: since, quietSince: conversation.stepSince ?? since)
+                            LedgerAgentLiveTimeline(turn: live, since: since, quietSince: conversation.stepSince ?? since,
+                                                    following: following)
                         } else {
                             LedgerAgentRunning(step: conversation.step, steps: conversation.stepCount,
                                                since: since, stepSince: conversation.stepSince ?? since)
