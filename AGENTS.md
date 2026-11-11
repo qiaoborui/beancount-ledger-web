@@ -264,9 +264,11 @@ A manual run checks every area. `Gate` is the required status check: it
 passes only when every planned job succeeded and every other job was skipped.
 When a new directory needs CI, add it to the planner and its test in the same
 change. The iOS job runs on the self-hosted Mac runner and selects its Xcode through
-`.github/scripts/select-xcode.sh`; it needs no Xcode project because
-`swift test` in `App/LedgerMobile` covers the portable core, while app-host
-tests (SwiftUI rendering, bundled resources) stay in the Xcode scheme.
+`.github/scripts/select-xcode.sh`. `swift test` in `App/LedgerMobile` covers
+the portable core, but Package.swift leaves out the app's UI layer, widgets and
+share extension, so the job also runs `.github/scripts/ios-app-check.sh`: it
+builds the full Xcode scheme for a simulator and runs the unit test targets.
+The UI test target is built but not run, because it is flaky under load.
 
 When an integration-level behavior depends on hosted infrastructure, GitHub API
 ledger storage, the Postgres read model, or hosted runtime configuration, prefer
