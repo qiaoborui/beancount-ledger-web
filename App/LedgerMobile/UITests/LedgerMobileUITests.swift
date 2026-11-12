@@ -538,7 +538,7 @@ final class LedgerMobileUITests: XCTestCase {
         for _ in 0..<4 where !longAccount.exists { accountsList.swipeUp() }
         XCTAssertTrue(longAccount.waitForExistence(timeout: 3))
 
-        // An opened group stays open across filter changes.
+        // The 理财 header is still on screen after the filter changes.
         XCTAssertTrue(wealthGroup.exists)
         XCTAssertTrue(longAccount.exists)
         capture("05-accounts")
