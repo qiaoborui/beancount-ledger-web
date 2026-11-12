@@ -111,7 +111,9 @@ private struct LedgerAgentChatScreen: View {
         }
         // The context meter and compaction need the model's window, which only
         // the provider's list gives for most models; read it once, quietly.
-        .task(id: LedgerAgentSettings.identity(settings.choice)) { await settings.learnContextWindow() }
+        // Keyed on the saved key too: a key saved after the endpoint and model
+        // were filled in must still start the read.
+        .task(id: settings.contextWindowTaskID) { await settings.learnContextWindow() }
         .sheet(isPresented: $memoryPresented) {
             NavigationStack { LedgerAgentMemoryView() }
                 .ledgerPrivacyProtectedSheet()
@@ -1271,7 +1273,7 @@ private struct LedgerAgentChatScreen: View {
             return nil
         }
         let choice = settings.choice, thinking = settings.effectiveThinking, usesMemory = settings.usesMemory
-        let contextWindow = settings.contextWindow(for: choice)
+        let contextWindow = settings.contextWindow(for: choice), maxOutputTokens = settings.maxOutputTokens(for: choice)
         let conversation = conversation, conversationID = conversation.id
         let location = repository.workspace.agentAttachmentLocation(id: conversationID)
         conversation.editor = .live(repository)
@@ -1290,7 +1292,8 @@ private struct LedgerAgentChatScreen: View {
                                               apiKey: key, sensitiveUnlocked: true, thinking: thinking,
                                               draft: draftRoot, transcript: transcript,
                                               conversationID: conversationID, attachments: attachments,
-                                              usesMemory: usesMemory, contextWindow: contextWindow, onStep: report)
+                                              usesMemory: usesMemory, contextWindow: contextWindow,
+                                              maxOutputTokens: maxOutputTokens, onStep: report)
         }
     }
 

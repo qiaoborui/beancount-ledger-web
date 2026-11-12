@@ -371,6 +371,57 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(listed.contextWindow, 262_144)
         let older = try JSONDecoder().decode(LedgerAgentListedModel.self, from: Data(#"{"id":"a","title":"A","known":false}"#.utf8))
         XCTAssertNil(older.contextWindow)
+        XCTAssertNil(older.maxOutputTokens)
+        XCTAssertNil(object["maxOutputTokens"], "no listed reply limit keeps the native one")
+        request.maxOutputTokens = 65_536
+        let limited = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        XCTAssertEqual(limited["maxOutputTokens"] as? Int, 65_536)
+    }
+
+    /// A gateway behind a custom endpoint names its models provider/model and
+    /// lists each one's window and reply limit (issue #663). The choice finds
+    /// them, also after a relaunch, and only for that endpoint.
+    @MainActor
+    func testCustomEndpointListGivesTheWindowOfASlashedModelID() async throws {
+        let suite = "LedgerAgentTests-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let keys: (String) -> ClassificationKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
+        let calls = SentRequest()
+        let lister = LedgerAgentModelLister(run: { request in
+            calls.data = request
+            return Data(#"{"version":1,"ok":true,"models":[{"id":"antigravity/gemini-3.8-flash-tiered","title":"antigravity/gemini-3.8-flash-tiered","thinkingLevels":["off","minimal","low","medium","high"],"known":false,"contextWindow":1048576,"maxOutputTokens":65536},{"id":"auto/deepseek-flash","title":"auto/deepseek-flash","thinkingLevels":["off","minimal","low","medium","high"],"known":false}]}"#.utf8)
+        })
+        let settings = LedgerAgentSettings(defaults: defaults, catalog: .fallback, keyStore: keys, lister: lister)
+        settings.select(provider: "custom")
+        settings.setCustom(api: .openAICompletions, baseURL: "https://gw.example.com/v1")
+        settings.select(model: "antigravity/gemini-3.8-flash-tiered")
+        let gemini = settings.choice
+        XCTAssertTrue(gemini.isCustom)
+        XCTAssertNil(settings.contextWindow(for: gemini))
+        XCTAssertNil(settings.maxOutputTokens(for: gemini))
+        // Without a key the read waits; saving one changes what starts it.
+        XCTAssertEqual(settings.contextWindowTaskID, LedgerAgentSettings.identity(gemini))
+
+        await settings.refreshModels(apiKey: "sk-test")
+        XCTAssertNil(settings.listError)
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(calls.data)) as? [String: Any])
+        XCTAssertEqual(request["provider"] as? String, "custom")
+        XCTAssertEqual((request["custom"] as? [String: Any])?["baseURL"] as? String, "https://gw.example.com/v1")
+        XCTAssertEqual(settings.contextWindow(for: gemini), 1_048_576)
+        XCTAssertEqual(settings.maxOutputTokens(for: gemini), 65_536)
+        let auto = LedgerAgentModelChoice(provider: "custom", model: "auto/deepseek-flash", custom: gemini.custom)
+        XCTAssertNil(settings.contextWindow(for: auto), "a model the list gives no window keeps the native 128k")
+        XCTAssertNil(settings.maxOutputTokens(for: auto))
+        let elsewhere = LedgerAgentModelChoice(provider: "custom", model: gemini.model,
+            custom: .init(api: .openAICompletions, baseURL: "https://other.example.com/v1"))
+        XCTAssertNil(settings.contextWindow(for: elsewhere), "another endpoint's list says nothing about this one")
+
+        let reopened = LedgerAgentSettings(defaults: defaults, catalog: .fallback, keyStore: keys, lister: lister)
+        XCTAssertNil(reopened.listedModels)
+        XCTAssertEqual(reopened.contextWindow(for: gemini), 1_048_576)
+        XCTAssertEqual(reopened.maxOutputTokens(for: gemini), 65_536)
+        XCTAssertNil(reopened.contextWindow(for: auto))
     }
 
     func testCrashReportShowsOnce() throws {
