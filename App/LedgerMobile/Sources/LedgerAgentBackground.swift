@@ -422,10 +422,11 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
     }
 }
 
-/// Local notifications for turns that end off screen. The delegate is set at
-/// launch so a tap that cold-starts the app still opens the Agent screen.
+/// Local notifications for turns that end off screen. Taps arrive through
+/// `LedgerNotificationDelegate`, set at launch so a tap that cold-starts the
+/// app still opens the Agent screen.
 @MainActor
-final class LedgerAgentNotifications: NSObject, UNUserNotificationCenterDelegate {
+final class LedgerAgentNotifications {
     static let shared = LedgerAgentNotifications()
     nonisolated static let thread = "ledger-agent"
 
@@ -463,21 +464,9 @@ final class LedgerAgentNotifications: NSObject, UNUserNotificationCenterDelegate
         }
     }
 
-    private func route() {
+    /// A tap on one of this thread's notifications.
+    func route() {
         if let open { open() } else { pendingOpen = true }
-    }
-
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                            didReceive response: UNNotificationResponse) async {
-        guard response.notification.request.content.threadIdentifier == Self.thread else { return }
-        await MainActor.run { self.route() }
-    }
-
-    /// In the app but away from the Agent screen, the banner still shows.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                            willPresent notification: UNNotification) async
-        -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
     }
 }
 #endif
