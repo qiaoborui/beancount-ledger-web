@@ -286,7 +286,7 @@ final class LedgerMobileUITests: XCTestCase {
         capture("glass-import-action-surface")
     }
 
-    func testAccountGroupsAreAlwaysExpandedAndSupportSearch() throws {
+    func testAccountGroupsStartCollapsedAndSupportSearch() throws {
         app = XCUIApplication()
         app.launchArguments = ["--safe-preview"]
         app.launch()
@@ -295,12 +295,16 @@ final class LedgerMobileUITests: XCTestCase {
         let daily = app.staticTexts["日常账户"]
         XCTAssertFalse(app.segmentedControls["account-category-picker"].exists)
         XCTAssertFalse(app.buttons["account-filter-assets"].exists)
-        // Group cards are always expanded; there is no bulk expand/collapse control.
+        // Group cards start collapsed; tapping a header opens its accounts.
+        // There is no bulk expand/collapse control.
         let cashGroup = app.descendants(matching: .any)["account-group-cash"].firstMatch
         XCTAssertTrue(cashGroup.waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["account-groups-toggle-all"].exists)
+        XCTAssertFalse(daily.exists)
+        capture("accounts-default-collapsed")
+        cashGroup.tap()
         XCTAssertTrue(daily.waitForExistence(timeout: 3))
-        capture("accounts-default-expanded")
+        capture("accounts-group-expanded")
 
         let search = revealSearch("账户名称或路径")
         search.tap()
@@ -518,6 +522,10 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "选择时间范围")).firstMatch.exists)
         let longAccount = app.staticTexts["家庭长期储备与教育基金（含海外留学与应急资金）"]
         let accountsList = app.collectionViews["accounts-list"]
+        // Group cards start collapsed: open 理财 before looking for its account.
+        let wealthGroup = app.descendants(matching: .any)["account-group-wealth"].firstMatch
+        for _ in 0..<4 where !wealthGroup.isHittable { accountsList.swipeUp() }
+        wealthGroup.tap()
         for _ in 0..<4 where !longAccount.exists { accountsList.swipeUp() }
         XCTAssertTrue(longAccount.waitForExistence(timeout: 3))
 
@@ -530,8 +538,7 @@ final class LedgerMobileUITests: XCTestCase {
         for _ in 0..<4 where !longAccount.exists { accountsList.swipeUp() }
         XCTAssertTrue(longAccount.waitForExistence(timeout: 3))
 
-        // Group cards are always expanded: the header is static and the account stays visible.
-        let wealthGroup = app.descendants(matching: .any)["account-group-wealth"].firstMatch
+        // An opened group stays open across filter changes.
         XCTAssertTrue(wealthGroup.exists)
         XCTAssertTrue(longAccount.exists)
         capture("05-accounts")

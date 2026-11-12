@@ -8294,6 +8294,16 @@
         }
       }
     },
+    "已展开" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expanded"
+          }
+        }
+      }
+    },
     "已归档 %lld 个渠道 · %lld 个渠道暂无记录" : {
       "localizations" : {
         "en" : {
@@ -8360,6 +8370,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Image copied to the clipboard"
+          }
+        }
+      }
+    },
+    "已收起" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collapsed"
           }
         }
       }

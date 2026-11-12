@@ -44,6 +44,7 @@ struct AccountsView: View {
     @State private var showingReconciliationView = false
     @State private var showingAddAccount = false
     @State private var selectedAccountForReconciliation: AccountBalanceRow? = nil
+    @ObservedObject private var groupExpansion = AccountGroupExpansion.shared
     var isRoot = true
 
     /// Outer margin of a group card, and the inner padding of its content.
@@ -122,7 +123,14 @@ struct AccountsView: View {
                             : allSections.filter { filter.matches(section: $0) }.reduce(0) { $0 + $1.rows.count }
                         Button {
                             LedgerFeedback.selection()
-                            withLedgerAnimation(LedgerMotion.segment) { selectedFilter = filter }
+                            withLedgerAnimation(LedgerMotion.segment) {
+                                selectedFilter = filter
+                                // Picking one category means looking at its accounts:
+                                // open the groups it shows. 全部 leaves them as they are.
+                                if filter != .all {
+                                    groupExpansion.expand(allSections.filter { filter.matches(section: $0) }.map(\.id))
+                                }
+                            }
                         } label: {
                             VStack(spacing: 7) {
                                 HStack(spacing: 4) {
@@ -261,14 +269,23 @@ struct AccountsView: View {
         return String(localized: "占资产") + " " + String(format: "%.1f%%", Double(total) / Double(assets) * 100)
     }
 
-    /// A group card: the header row, then one List row per account.
+    /// A group card: the header row, then, once expanded, one List row per
+    /// account. Collapsed, the header is the whole card, so it rounds both ends.
     @ViewBuilder
     private func groupCard(_ section: AccountBalanceSection, assets: Int) -> some View {
-        groupHeader(section, assets: assets)
+        let expanded = groupExpansion.isExpanded(section.id)
+        groupHeader(section, assets: assets, expanded: expanded)
             .listRowInsets(EdgeInsets(top: Self.cardGap, leading: Self.cardMargin + Self.cardPadding,
                                       bottom: 0, trailing: Self.cardMargin + Self.cardPadding))
-            .listRowBackground(cardBackground(top: true, bottom: false, topGap: Self.cardGap))
+            .listRowBackground(cardBackground(top: true, bottom: !expanded, topGap: Self.cardGap))
             .listRowSeparator(.hidden)
+        if expanded {
+            accountRows(section)
+        }
+    }
+
+    @ViewBuilder
+    private func accountRows(_ section: AccountBalanceSection) -> some View {
         ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, row in
             let isLast = index == section.rows.count - 1
             NavigationLink(destination: AccountDetailView(account: row.account, currency: row.nativeCurrency)) {
@@ -301,10 +318,21 @@ struct AccountsView: View {
         }
     }
 
-    private func groupHeader(_ section: AccountBalanceSection, assets: Int) -> some View {
+    private func groupHeader(_ section: AccountBalanceSection, assets: Int, expanded: Bool) -> some View {
         let total = groupTotal(section)
         let share = assetShareText(total, assets: assets)
-        return HStack(alignment: .center, spacing: 12) {
+        return Button {
+            withLedgerAnimation(LedgerMotion.disclose) { groupExpansion.toggle(section.id) }
+        } label: {
+            groupHeaderLabel(section, total: total, share: share, expanded: expanded)
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(expanded ? Text("已展开") : Text("已收起"))
+        .accessibilityIdentifier("account-group-\(section.id)")
+    }
+
+    private func groupHeaderLabel(_ section: AccountBalanceSection, total: Int, share: String?, expanded: Bool) -> some View {
+        HStack(alignment: .center, spacing: 12) {
             Text(section.title)
                 .balancedFont(size: 17, weight: .medium)
                 .foregroundStyle(BalancedPalette.ink)
@@ -325,10 +353,15 @@ struct AccountsView: View {
                         .lineLimit(1)
                 }
             }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(BalancedPalette.edge)
+                .rotationEffect(.degrees(expanded ? 90 : 0))
+                .accessibilityHidden(true)
         }
         .frame(minHeight: 56)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("account-group-\(section.id)")
     }
 
     private func cardBackground(top: Bool, bottom: Bool, topGap: CGFloat = 0) -> some View {
@@ -343,6 +376,26 @@ struct AccountsView: View {
         .fill(AccountCardPalette.background)
         .padding(.horizontal, Self.cardMargin)
         .padding(.top, topGap)
+    }
+}
+
+/// Which account group cards are open. Every group starts collapsed, and the
+/// choice lasts while the app runs: it lives outside the view, so leaving the
+/// page (a tab switch, an iPad sidebar change) does not close the cards again.
+/// It is not saved across launches.
+@MainActor
+final class AccountGroupExpansion: ObservableObject {
+    static let shared = AccountGroupExpansion()
+    @Published private(set) var expandedIDs: Set<String> = []
+
+    func isExpanded(_ id: String) -> Bool { expandedIDs.contains(id) }
+
+    func toggle(_ id: String) {
+        if expandedIDs.contains(id) { expandedIDs.remove(id) } else { expandedIDs.insert(id) }
+    }
+
+    func expand(_ ids: [String]) {
+        expandedIDs.formUnion(ids)
     }
 }
 
