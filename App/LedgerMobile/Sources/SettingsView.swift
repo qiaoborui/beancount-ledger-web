@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var session: LedgerSession
+    @ObservedObject private var reminders = LedgerLocalReminders.shared
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var compactTabConfigurationPresented = false
     @State private var overviewSectionsPresented = false
@@ -136,6 +137,23 @@ struct SettingsView: View {
                     } header: { TerminalSectionLabel(text: String(localized: "AI 与智能记账")).listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
                 }
+                Section {
+                    SettingsNavRow(title: String(localized: "记账提醒"), value: reminders.settings.bookkeepingSummary) {
+                        LedgerRemindersSettingsView()
+                    }
+                    .accessibilityIdentifier("settings-bookkeeping-reminder")
+                    SettingsNavRow(title: String(localized: "导入账单提醒"), value: reminders.settings.importSummary) {
+                        LedgerRemindersSettingsView()
+                    }
+                    .accessibilityIdentifier("settings-import-reminder")
+                    if reminders.permission == .denied, reminders.settings.anyEnabled {
+                        Text("通知已关闭，去系统设置打开")
+                            .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.expense)
+                            .listRowBackground(BalancedPalette.page)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 0, trailing: 20))
+                    }
+                } header: { TerminalSectionLabel(text: String(localized: "提醒")).listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
                 Section {
                     SettingsRow(title: String(localized: "名称"), value: session.localLedgerName, showsChevron: false) {
                         editingCurrentLedger = true
