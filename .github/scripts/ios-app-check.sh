@@ -15,8 +15,9 @@
 #             of them time out on a loaded machine, so CI runs them only when a
 #             manual run asks for them. UI_TESTS_ONLY narrows the run to the
 #             classes or Class/testMethod entries it lists (space or comma
-#             separated, no target prefix); empty runs every UI test except the
-#             screenshot generators.
+#             separated, no target prefix), and `smoke` stands for the release
+#             smoke set below; empty runs every UI test except the screenshot
+#             generators.
 set -euo pipefail
 
 mode="${1:-}"
@@ -47,9 +48,19 @@ case "$mode" in
     only_input="${UI_TESTS_ONLY:-}"
     read -r -a requested <<< "${only_input//,/ }"
     for item in ${requested[@]+"${requested[@]}"}; do
+      # The release smoke set: launch, tab switching, the accounts and 更多 pages,
+      # and a local ledger restarting without placeholder cards.
+      if [[ "$item" == smoke ]]; then
+        only_tests+=(
+          "$test_target/TerminalOverviewUITests/testFlatNavigationKeepsSearchAndOverviewReachable"
+          "$test_target/TerminalAccountsMoreUITests/testAccessibilityKeepsAccountFiltersAndMoreReachable"
+          "$test_target/LocalLedgerUITests/testLocalRestartDoesNotShowPassiveLoadingCards"
+        )
+        continue
+      fi
       # Class or Class/testMethod: letters, digits, `_` and at most one `/`.
       if [[ ! "$item" =~ ^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)?$ ]]; then
-        echo "::error::invalid UI_TESTS_ONLY entry: $item (expected Class or Class/testMethod)" >&2
+        echo "::error::invalid UI_TESTS_ONLY entry: $item (expected Class, Class/testMethod or smoke)" >&2
         exit 2
       fi
       only_tests+=("$test_target/$item")

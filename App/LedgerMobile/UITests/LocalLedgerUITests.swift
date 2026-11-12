@@ -532,12 +532,12 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(payee.waitForExistence(timeout: 5))
         payee.tap()
         payee.typeText("Offline coffee")
-        let amount = app.textFields["transaction-edit-posting-amount-0"]
-        amount.tap()
-        amount.typeText("12.34")
+        // The amount rows start at 0.00, so this replaces rather than appends.
+        replaceActionText(app.textFields["transaction-edit-posting-amount-0"], with: "12.34", in: app)
+        replaceActionText(app.textFields["transaction-edit-posting-amount-1"], with: "-12.34", in: app)
         app.buttons["transaction-edit-save"].tap()
-        XCTAssertTrue(app.buttons["bookkeeping-confirm-save"].waitForExistence(timeout: 30))
-        XCTAssertTrue(app.staticTexts["完整账本校验通过"].exists)
+        XCTAssertTrue(app.buttons["bookkeeping-confirm-save"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["完整账本校验通过"].exists, app.debugDescription)
         app.buttons["bookkeeping-confirm-save"].tap()
         XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Offline coffee"].firstMatch.waitForExistence(timeout: 10))

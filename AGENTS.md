@@ -280,7 +280,16 @@ the LedgerMobile scheme for a simulator and runs `LedgerMobileTests`, and iOS
 widgets builds the LedgerWidgets scheme and runs `LedgerWidgetsTests`. The UI
 tests are flaky under load, so pull requests only compile them; run them by
 starting CI manually with `ui_tests` checked
-(`gh workflow run ci.yml --ref <branch> -f ui_tests=true`).
+(`gh workflow run ci.yml --ref <branch> -f ui_tests=true`). A full run skips
+`BalancedScreenshotTests` and `BalancedStreamAScreenshotTests`, which capture
+App Store screenshots instead of checking behaviour. `ui_tests_only` narrows a
+run to the classes or `Class/testMethod` entries it lists, separated by spaces
+or commas and without the target prefix; the name `smoke` expands to the
+pre-release set defined in `.github/scripts/ios-app-check.sh` (the overview's
+tab and search navigation, the accounts and 更多 pages at accessibility sizes,
+and a local ledger restarting without placeholder cards). Before a release, run
+`gh workflow run ci.yml --ref main -f ui_tests=true -f ui_tests_only="smoke"`,
+adding the UI tests of each PR in the batch to that list when there are any.
 
 When an integration-level behavior depends on hosted infrastructure, GitHub API
 ledger storage, the Postgres read model, or hosted runtime configuration, prefer

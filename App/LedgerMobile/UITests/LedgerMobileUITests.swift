@@ -365,8 +365,9 @@ final class LedgerMobileUITests: XCTestCase {
         let category = app.staticTexts["transaction-category-88"]
         XCTAssertTrue(category.waitForExistence(timeout: 3))
         XCTAssertEqual(category.label, "图书")
+        // A plain two-line row (63pt at the default size), not a card.
         XCTAssertLessThanOrEqual(app.buttons["transaction-row-88"].frame.height, 80)
-        XCTAssertGreaterThanOrEqual(app.buttons["transaction-row-88"].frame.height, 64)
+        XCTAssertGreaterThanOrEqual(app.buttons["transaction-row-88"].frame.height, 60)
         XCTAssertEqual(app.staticTexts["流水"].frame.midY, titleMidY, accuracy: 2)
         XCTAssertTrue(app.buttons["transaction-row-52"].isHittable)
         capture("compact-flat-transactions")
@@ -471,8 +472,14 @@ final class LedgerMobileUITests: XCTestCase {
         for _ in 0..<3 where !monthOverMonth.exists { overview.swipeUp() }
         XCTAssertTrue(monthOverMonth.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(yearOverYear.exists)
-        XCTAssertFalse(app.staticTexts["总资产"].exists)
-        for _ in 0..<3 { overview.swipeDown() }
+        // 总资产 is no longer the page's headline: it heads 资产与负债, below 本期指标.
+        let periodStats = app.staticTexts["本期指标"]
+        XCTAssertTrue(periodStats.exists, app.debugDescription)
+        let totalAssets = app.staticTexts["总资产"]
+        for _ in 0..<4 where !totalAssets.exists { overview.swipeUp() }
+        XCTAssertTrue(totalAssets.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertGreaterThan(totalAssets.frame.minY, periodStats.frame.minY)
+        for _ in 0..<4 { overview.swipeDown() }
         capture("01-overview")
 
         if isPad {
@@ -749,12 +756,22 @@ final class LedgerMobileUITests: XCTestCase {
         let reorderButtons = app.buttons.matching(NSPredicate(
             format: "label BEGINSWITH %@ OR label CONTAINS %@ OR label CONTAINS %@", "Reorder", "重新排列", "重新排序"))
         XCTAssertEqual(reorderButtons.count, 2, app.debugDescription)
-        let accountsReorder = reorderButtons.element(boundBy: 1)
-        let transactionsReorder = reorderButtons.element(boundBy: 0)
-        waitUntilHittable(accountsReorder)
-        waitUntilHittable(transactionsReorder)
-        accountsReorder.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 1.0, thenDragTo: transactionsReorder.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.05)))
+        for handle in reorderButtons.allElementsBoundByIndex { waitUntilHittable(handle) }
+        // After 概览 is removed the bar keeps the default order: 流水, then 账户.
+        let accountsRow = app.buttons["compact-tab-remove-accounts"]
+        let transactionsRow = app.buttons["compact-tab-remove-transactions"]
+        XCTAssertLessThan(transactionsRow.frame.minY, accountsRow.frame.minY, app.debugDescription)
+        // Drag 账户's control above 流水's. The query's element order is not the
+        // layout order, so pair the controls with their rows by centre line, and
+        // retry because the list only follows once the long press lifted the row.
+        for _ in 0..<3 where accountsRow.frame.minY > transactionsRow.frame.minY {
+            let handles = reorderButtons.allElementsBoundByIndex.sorted { $0.frame.midY < $1.frame.midY }
+            handles[1].press(forDuration: 1.0,
+                             thenDragTo: handles[0],
+                             withVelocity: .slow,
+                             thenHoldForDuration: 0.5)
+        }
+        XCTAssertLessThan(accountsRow.frame.minY, transactionsRow.frame.minY, app.debugDescription)
         capture("compact-tabs-03-reordered")
 
         let addAssets = app.buttons["compact-tab-add-assets"]
@@ -1152,7 +1169,10 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["新城市书房"].waitForExistence(timeout: 3))
         let editCompleteElapsed = Date().timeIntervalSince(editStartedAt)
         XCTAssertGreaterThanOrEqual(editCompleteElapsed, 0.9)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "#travel")).firstMatch.exists)
+        // Tags are buttons labelled "#travel" in the detail sheet, and images in
+        // the list rows, so match any element by label.
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "#travel")).firstMatch.exists,
+                      app.debugDescription)
         app.navigationBars["交易详情"].buttons.firstMatch.tap()
 
         app.buttons["transaction-actions"].tap()
@@ -1164,7 +1184,7 @@ final class LedgerMobileUITests: XCTestCase {
         replaceText(in: app.textFields["transaction-bulk-tag-input"], with: "reviewed")
         let tagStartedAt = Date()
         app.buttons["transaction-bulk-tag-apply"].tap()
-        XCTAssertTrue(app.staticTexts["正在验证标签"].waitForExistence(timeout: 0.5))
+        XCTAssertTrue(app.buttons["正在验证标签"].waitForExistence(timeout: 0.5), app.debugDescription)
         let tagFeedbackElapsed = Date().timeIntervalSince(tagStartedAt)
         XCTAssertFalse(app.buttons["transaction-bulk-tag-apply"].isEnabled)
         XCTAssertTrue(app.staticTexts["已验证，并为 1 条交易添加标签。"].waitForExistence(timeout: 4))
@@ -1172,7 +1192,8 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(tagCompleteElapsed, 0.9)
         XCTAssertTrue(app.buttons["transaction-actions"].waitForExistence(timeout: 3))
         app.buttons["transaction-row-88"].tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "#reviewed")).firstMatch.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "#reviewed")).firstMatch.waitForExistence(timeout: 3),
+                      app.debugDescription)
         let timing = XCTAttachment(
             string: String(
                 format: "edit-feedback=%.0fms edit-complete=%.0fms bulk-tag-feedback=%.0fms bulk-tag-complete=%.0fms",
@@ -1212,7 +1233,10 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertLessThanOrEqual(selection.frame.maxX, amount.frame.minX)
         let selectedRow = app.buttons["transaction-select-row-88"]
         selectedRow.tap()
-        XCTAssertTrue(selectedRow.label.contains("已选择"))
+        // The row announces its state as a value and the selected trait, not in
+        // its label, the way VoiceOver reads it.
+        XCTAssertEqual(selectedRow.value as? String, "已选择")
+        XCTAssertTrue(selectedRow.isSelected)
         capture("transaction-selected-row-highlight")
     }
 

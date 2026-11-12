@@ -9,16 +9,15 @@ final class TerminalAccountsMoreUITests: XCTestCase {
         assertHeader(app)
         capture("terminal-accounts")
         app.buttons["账户操作"].tap()
-        // The menu reports its item hittable while the popover is still
-        // animating, and that tap is dropped with the menu left open.
+        // The popover's pointer covers the first item's upper half, so a tap on its
+        // centre is swallowed and only closes the menu. Aim at its lower edge.
         let add = app.buttons["accounts-add-button"]
-        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: add)
-        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed, app.debugDescription)
         let created = app.navigationBars["新建账户"]
-        for _ in 0..<3 {
-            add.tap()
-            if created.waitForExistence(timeout: 2) { break }
-            if !add.exists { break }
+        for _ in 0..<3 where !created.exists {
+            if !add.exists { app.buttons["账户操作"].tap() }
+            guard add.waitForExistence(timeout: 5) else { continue }
+            add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).tap()
+            _ = created.waitForExistence(timeout: 3)
         }
         XCTAssertTrue(created.waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["取消"].tap()
