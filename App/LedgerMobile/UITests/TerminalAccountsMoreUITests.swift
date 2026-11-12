@@ -9,7 +9,11 @@ final class TerminalAccountsMoreUITests: XCTestCase {
         assertHeader(app)
         capture("terminal-accounts")
         app.buttons["账户操作"].tap()
-        app.buttons["accounts-add-button"].tap()
+        // The menu animates in; a tap before it settles leaves it open.
+        let add = app.buttons["accounts-add-button"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: add)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed, app.debugDescription)
+        add.tap()
         XCTAssertTrue(app.navigationBars["新建账户"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["取消"].tap()
         // Group cards start collapsed: open the first one to reach an account.
@@ -28,15 +32,15 @@ final class TerminalAccountsMoreUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["金额已隐藏"].firstMatch.exists)
         capture("terminal-accounts-private")
         app.buttons["显示金额"].tap()
-        app.tabBars.buttons["更多"].tap()
+        app.compactTab("更多").tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5))
         assertNoDateHeader(app)
         capture("terminal-more")
         app.buttons["more-analysis-assets"].tap()
-        XCTAssertTrue(app.staticTexts["01 / 净资产历史"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["净值走势"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["返回上一页"].tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5))
-        app.tabBars.buttons["搜索"].tap()
+        app.compactTab("搜索").tap()
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 
