@@ -9,14 +9,12 @@ final class TerminalAccountsMoreUITests: XCTestCase {
         assertHeader(app)
         capture("terminal-accounts")
         app.buttons["账户操作"].tap()
-        // The popover's pointer covers the first item's upper half, so a tap on its
-        // centre is swallowed and only closes the menu. Aim at its lower edge.
         let add = app.buttons["accounts-add-button"]
         let created = app.navigationBars["新建账户"]
         for _ in 0..<3 where !created.exists {
             if !add.exists { app.buttons["账户操作"].tap() }
             guard add.waitForExistence(timeout: 5) else { continue }
-            add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).tap()
+            add.tapMenuItem()
             _ = created.waitForExistence(timeout: 3)
         }
         XCTAssertTrue(created.waitForExistence(timeout: 5), app.debugDescription)
