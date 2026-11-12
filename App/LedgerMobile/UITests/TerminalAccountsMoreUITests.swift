@@ -9,12 +9,18 @@ final class TerminalAccountsMoreUITests: XCTestCase {
         assertHeader(app)
         capture("terminal-accounts")
         app.buttons["账户操作"].tap()
-        // The menu animates in; a tap before it settles leaves it open.
+        // The menu reports its item hittable while the popover is still
+        // animating, and that tap is dropped with the menu left open.
         let add = app.buttons["accounts-add-button"]
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: add)
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed, app.debugDescription)
-        add.tap()
-        XCTAssertTrue(app.navigationBars["新建账户"].waitForExistence(timeout: 5), app.debugDescription)
+        let created = app.navigationBars["新建账户"]
+        for _ in 0..<3 {
+            add.tap()
+            if created.waitForExistence(timeout: 2) { break }
+            if !add.exists { break }
+        }
+        XCTAssertTrue(created.waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["取消"].tap()
         // Group cards start collapsed: open the first one to reach an account.
         let group = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'account-group-'")).firstMatch
