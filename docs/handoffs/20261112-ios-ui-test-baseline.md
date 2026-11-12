@@ -1,8 +1,8 @@
 # iOS UI 测试基线修复（PR #674，issue #673）
 
 - **任务 ID**：`20261112-ios-ui-test-baseline`
-- **状态**：active（代码完成、本机全绿已验证；待推送 + 全量复跑确认）
-- **最后更新**：2026-11-12 22:40 +0800
+- **状态**：completed（本机全量 54 绿 + 截图类 24 绿；已推送，CI Gate 绿，PR 可合并）
+- **最后更新**：2026-11-12 23:55 +0800
 - **分支**：`codex/issue-673-fix-ui-tests`
 - **PR**：https://github.com/qiaoborui/beancount-ledger-web/pull/674
 
@@ -26,17 +26,15 @@
 
 ## 验证（本机 iPhone 18 Pro / iOS 27.2，Xcode 27.2）
 
-- 全量不含截图类：54 个（最近一次 53 绿 1 挂，唯一失败是 deep link 等待太短，已把等待放宽到 20s 并单独复跑通过；已启动最终全量确认）
+- 全量不含截图类：**54 绿**（最终确认跑，`/private/tmp/blw-673-full3.out`）
 - 截图类两个类：24 绿
 - `bash -n .github/scripts/ios-app-check.sh`、`python3 .github/scripts/test_plan_components.py`（9 OK）
 
-## 剩余步骤
+## 剩余步骤（可选，不阻塞合并）
 
-1. 等最终全量跑完，确认 54 绿。
-2. `git push origin HEAD:codex/issue-673-fix-ui-tests`。
-3. 用 PR 正文模板（含 34 个失败的处理表、App 改动、未修的 App bug、验证命令）更新 PR 描述。
-4. （可选）给「更多页溢出跳转被丢弃」开一个 follow-up issue。
-5. （可选）在 self-hosted runner 上手动触发一次 `gh workflow run ci.yml --ref <branch> -f ui_tests=true` 作为最终门槛。
+1. 给「更多页溢出跳转被丢弃」开 follow-up issue（PR 正文已有复现步骤）。
+2. 在 self-hosted runner 上手动触发一次 `gh workflow run ci.yml --ref <branch> -f ui_tests=true` 作为额外门槛；本机已经等价跑过全量。
+3. 合并后如需发版，注意本轮 App 侧改动的发版说明（见下）。
 
 ## 风险与注意
 
