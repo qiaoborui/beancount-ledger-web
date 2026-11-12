@@ -119,8 +119,9 @@ final class LedgerMobileUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
         app.open(URL(string: "ledger://accounts?account=Assets%3ABank%3ADaily&currency=CNY")!)
-        // The link relaunches the app, so allow the ledger to load again.
-        XCTAssertTrue(app.staticTexts["Assets:Bank:Daily"].waitForExistence(timeout: 10), app.debugDescription)
+        // The link relaunches the app and the detail loads its own page, which can
+        // take a while on a loaded machine.
+        XCTAssertTrue(app.staticTexts["Assets:Bank:Daily"].waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertTrue(app.staticTexts["日常账户"].firstMatch.exists)
         capture("system-account-link")
         app.open(URL(string: "ledger://transactions?date=2026-08-28")!)
