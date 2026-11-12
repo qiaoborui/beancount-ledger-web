@@ -716,7 +716,7 @@ struct TransactionShareSheet: View {
 /// Owns the rendered receipt's private temp directory, one per sheet. It lives
 /// in the sheet's state, so it is released when the sheet ends, not when a
 /// system share controller merely hides the sheet while still reading the file.
-private final class ShareImageDirectory {
+final class ShareImageDirectory {
     private var directory: URL?
 
     func write(_ data: Data, fileName: String) throws -> URL {

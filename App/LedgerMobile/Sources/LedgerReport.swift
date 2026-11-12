@@ -537,7 +537,7 @@ struct LedgerReportData: Equatable, Sendable {
 
 /// What the exported receipt leaves out. `amountsAllowed` is false while the
 /// app hides amounts or the ledger is locked; then only shares can be printed.
-struct LedgerReportReceiptOptions: Equatable, Sendable {
+struct LedgerReportReceiptOptions: Equatable, Hashable, Sendable {
     var hidesIncome = true
     var hidesNet = false
     var sharesOnly = false

@@ -28,10 +28,18 @@ struct MoreView: View {
                     MoreDestinationButton(destination: destination, detail: destination.title)
                 }} header: { TerminalSectionLabel(text: String(localized: "账本")) }
             }
-            Section { ForEach(LedgerAnalysisKind.allCases, id: \.self) { kind in
-                MoreDestinationButton(destination: destination(for: kind), detail: kind.detail,
-                    accessibilityIdentifier: "more-analysis-\(kind.rawValue)")
-            }} header: { TerminalSectionLabel(text: String(localized: "财务分析")) }
+            Section {
+                ForEach(LedgerAnalysisKind.allCases, id: \.self) { kind in
+                    MoreDestinationButton(destination: destination(for: kind), detail: kind.detail,
+                        accessibilityIdentifier: "more-analysis-\(kind.rawValue)")
+                }
+                // Reports read the on-device ledger only.
+                if session.isLocal {
+                    NavigationLink { LedgerReportView() } label: {
+                        MoreNavigationRow(index: "04", icon: "doc.text", title: String(localized: "周报 / 月报"), detail: String(localized: "按周、按月的收支小结与小票"))
+                    }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).listRowSeparator(.hidden).navigationLinkIndicatorVisibility(.hidden).accessibilityIdentifier("more-reports")
+                }
+            } header: { TerminalSectionLabel(text: String(localized: "财务分析")) }
             Section {
                 // Search floats beside the tab bar where 账本助手 can't take that
                 // button, and is a tab when chosen; otherwise it opens from here.
