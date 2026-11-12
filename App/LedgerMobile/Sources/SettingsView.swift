@@ -6,6 +6,8 @@ struct SettingsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var compactTabConfigurationPresented = false
     @State private var overviewSectionsPresented = false
+    /// Re-read on appear: the report settings screen saves to UserDefaults.
+    @State private var reportSettings = LedgerReportSettings.load()
     @State private var editingCurrentLedger = false
     @State private var confirmingDeleteCurrent = false
     @State private var showingLockIntervalPicker = false
@@ -146,7 +148,13 @@ struct SettingsView: View {
                         LedgerRemindersSettingsView()
                     }
                     .accessibilityIdentifier("settings-import-reminder")
-                    if reminders.permission == .denied, reminders.settings.anyEnabled {
+                    if session.isLocal {
+                        SettingsNavRow(title: String(localized: "周报 / 月报"), value: reportSettings.summary) {
+                            LedgerReportSettingsView(showsDone: false)
+                        }
+                        .accessibilityIdentifier("settings-reports")
+                    }
+                    if reminders.permission == .denied, reminders.settings.anyEnabled || (session.isLocal && reportSettings.anyEnabled) {
                         Text("通知已关闭，去系统设置打开")
                             .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.expense)
                             .listRowBackground(BalancedPalette.page)
@@ -248,6 +256,7 @@ struct SettingsView: View {
         .listStyle(.plain)
         .listSectionSeparator(.hidden, edges: .top)
         .ledgerNavigation(String(localized: "设置"), isRoot: isRoot)
+        .onAppear { reportSettings = LedgerReportSettings.load() }
         .sheet(isPresented: $overviewSectionsPresented) {
             OverviewSectionConfigurationView(initialSections: session.overviewSections) { sections in
                 session.setOverviewSections(sections)

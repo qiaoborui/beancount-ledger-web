@@ -500,6 +500,13 @@ private struct MainTabView: View {
         )
     }
 
+    private var reportBinding: Binding<LedgerReportRequest?> {
+        Binding(
+            get: { session.agentSheetOnScreen || session.quickEntry != nil ? nil : session.reportRequest },
+            set: { if $0 == nil { session.reportRequest = nil } }
+        )
+    }
+
     private var agentSheetBinding: Binding<Bool> {
         Binding(
             get: { session.agentPresented && agentFloats && horizontalSizeClass != .regular },
@@ -552,6 +559,13 @@ private struct MainTabView: View {
         }
         .fullScreenCover(item: quickEntryBinding(.sentence)) { _ in
             NaturalLanguageBookkeepingView(onSaved: { session.quickEntry = nil })
+        }
+        // 周报 / 月报 from a report notification or a ledger://report link.
+        .sheet(item: reportBinding) { request in
+            NavigationStack {
+                LedgerReportView(initialTarget: request.target, onClose: { session.reportRequest = nil })
+            }
+            .ledgerPrivacyProtectedSheet()
         }
         // 账本助手 covers the whole screen, without the tab bar, so its composer
         // sits at the bottom of the screen. A cover rather than a sheet: a

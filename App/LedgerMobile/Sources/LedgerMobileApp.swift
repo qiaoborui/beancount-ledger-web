@@ -43,6 +43,8 @@ struct LedgerMobileApp: App {
             session?.openWidgetURL(url)
         }
         LedgerLocalReminders.shared.attach(session)
+        // 周报 / 月报 and the 导入账单 reminder before each report.
+        LedgerReportReminders.install()
         #endif
     }
 
