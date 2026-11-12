@@ -163,7 +163,7 @@ struct GlobalSearchView: View {
                     if !results.accounts.isEmpty {
                         Section {
                             ForEach(results.accounts, id: \.account) { account in
-                                NavigationLink { AccountDetailView(account: account.account, currency: account.currency).toolbar(.visible, for: .navigationBar).onAppear(perform: recordResultOpen) } label: {
+                                NavigationLink { AccountDetailView(account: account.account, currency: detailCurrency(for: account)).toolbar(.visible, for: .navigationBar).onAppear(perform: recordResultOpen) } label: {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(account.label).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
                                         Text(account.account).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
@@ -468,6 +468,15 @@ struct GlobalSearchView: View {
     }
 
     private func recordResultOpen() { session.recordGlobalSearch(query) }
+
+    /// An account opened without a constraint currency has an empty
+    /// `currency`; show the one it holds, as an account link does.
+    private func detailCurrency(for account: LedgerAccount) -> String {
+        if case let .resolved(target)? = session.ledger?.resolveExternalAccount(account.account, currency: account.currency) {
+            return target.currency
+        }
+        return account.currency
+    }
 
     private func searchSectionHeader(_ text: String, aside: String? = nil) -> some View {
         BalancedSectionLabel(text: text, aside: aside).textCase(nil)

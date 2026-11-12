@@ -9218,6 +9218,16 @@
         }
       }
     },
+    "当前账本中找不到账户 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "There's no account %@ in the current ledger"
+          }
+        }
+      }
+    },
     "当前账本中找不到这个账户" : {
       "localizations" : {
         "en" : {
@@ -11694,6 +11704,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Can’t name the backup file"
+          }
+        }
+      }
+    },
+    "无法确定账户 %@ 的币种" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't tell which currency to show for %@"
           }
         }
       }

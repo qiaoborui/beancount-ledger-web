@@ -3651,9 +3651,16 @@ final class LedgerSession: ObservableObject {
         case let .page(destination):
             if destination == .agent { agentPresented = true }
         case let .account(path, currency):
-            if let account = ledger?.accounts.first(where: { $0.account == path }) {
-                externalAccount = LedgerExternalAccount(account: path, currency: currency.isEmpty ? account.currency : currency)
-            } else {
+            switch ledger?.resolveExternalAccount(path, currency: currency) {
+            case let .resolved(target):
+                externalAccount = LedgerExternalAccount(account: target.account, currency: target.currency)
+            case let .missingCurrency(account):
+                errorMessage = ledger?.sensitiveUnlocked == false
+                    ? String(localized: "账本敏感数据已锁定")
+                    : String(localized: "无法确定账户 \(account) 的币种")
+            case let .missingAccount(account):
+                errorMessage = String(localized: "当前账本中找不到账户 \(account)")
+            case nil:
                 errorMessage = String(localized: "当前账本中找不到这个账户")
             }
         case let .transactions(day):

@@ -111,3 +111,58 @@ struct LedgerExternalAccount: Identifiable, Hashable, Sendable {
     let currency: String
 }
 
+
+/// What a `ledger://accounts?account=…` link names in the loaded ledger.
+enum LedgerExternalAccountResolution: Equatable, Sendable {
+    case resolved(LedgerExternalAccountTarget)
+    /// The ledger has no such account, e.g. one the assistant made up.
+    case missingAccount(String)
+    /// The account exists but nothing loaded says which currency to show.
+    case missingCurrency(String)
+}
+
+struct LedgerExternalAccountTarget: Equatable, Sendable {
+    let account: String
+    let currency: String
+}
+
+extension LedgerBootstrap {
+    /// Resolves an account link to the account and currency its detail page
+    /// reads. A link from the assistant often carries no `currency`, and an
+    /// account opened without a constraint currency (`open Expenses:Food`)
+    /// has an empty `currency`, so this falls back the way the server's
+    /// account detail does: the link's currency, then the open currency, then
+    /// the currencies the account holds — the same balance rows the account
+    /// list opens its detail page with.
+    func resolveExternalAccount(_ path: String, currency requested: String) -> LedgerExternalAccountResolution {
+        let name = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        var match = accounts.first(where: { $0.account == path }) ?? accounts.first(where: { $0.account == name })
+        if match == nil {
+            // A model sometimes changes the case of a name; accept that only
+            // when it names one account.
+            let folded = accounts.filter { $0.account.caseInsensitiveCompare(name) == .orderedSame }
+            if folded.count == 1 { match = folded[0] }
+        }
+        guard let account = match else { return .missingAccount(name) }
+        let requested = requested.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !requested.isEmpty { return .resolved(.init(account: account.account, currency: requested)) }
+        if !account.currency.isEmpty { return .resolved(.init(account: account.account, currency: account.currency)) }
+        var held: [String] = []
+        for balance in accountBalances where balance.account == account.account && !balance.currency.isEmpty {
+            if !held.contains(balance.currency) { held.append(balance.currency) }
+        }
+        if held.isEmpty {
+            for transaction in transactions {
+                for posting in transaction.postings where posting.account == account.account {
+                    if let currency = posting.currency, !currency.isEmpty, !held.contains(currency) { held.append(currency) }
+                }
+            }
+        }
+        // Several currencies: the one amounts are valued in, else the first
+        // row the account list shows for this account.
+        guard let currency = held.first(where: { $0 == valuationCurrency }) ?? held.first else {
+            return .missingCurrency(account.account)
+        }
+        return .resolved(.init(account: account.account, currency: currency))
+    }
+}

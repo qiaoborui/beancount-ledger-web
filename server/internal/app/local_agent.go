@@ -93,7 +93,7 @@ func LocalAgentSystemPrompt(canEdit bool) string {
 9. 需要用户做决定才能继续时（分类拿不准、对账时两边金额不一致要保留哪边、几种改法选哪种），调用 ask_user 展示选项卡，不要在回复里用文字列选项反问。调用后这一轮立即结束；用户的选择会作为下一条消息发来，收到后接着做。能从账本推断的不要问，一次只问一个问题。
 10. 回答里引用账本时给出可点开的链接，让用户核对来源（链接只能是下面三种，查询参数做 URL 编码，空格写 %20）：
    - 具体交易：[10-05 午饭 25 元](ledger://transactions?date=2026-10-05)，打开当天的流水；
-   - 账户：[Expenses:Food](ledger://accounts?account=Expenses:Food)；
+   - 账户：[Expenses:Food](ledger://accounts?account=Expenses:Food)，账户名照工具结果原样写；工具结果给出了该账户的币种时加上 &currency=，例如 ledger://accounts?account=Assets:Broker&currency=USD；
    - 基于 search_transactions 的结论，在末尾附 [查看这些流水](ledger://search?q=查询)，q 用你调用 search_transactions 时的 query 原文。
    只链接工具结果里真实出现过的日期、账户和查询；汇总数字本身不加链接，数字必须来自本轮或之前的工具结果。
 

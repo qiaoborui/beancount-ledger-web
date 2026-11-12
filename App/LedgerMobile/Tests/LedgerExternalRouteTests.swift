@@ -184,6 +184,66 @@ final class LedgerExternalRouteTests: XCTestCase {
         XCTAssertNil(session.gmailOAuthResult)
     }
 
+    func testAccountLinkWithoutCurrencyResolvesTheCurrencyTheAccountHolds() {
+        let ledger = accountLinkLedger()
+        // The assistant's links carry no currency; `open Expenses:Food` has none either.
+        XCTAssertEqual(ledger.resolveExternalAccount("Expenses:Food", currency: ""),
+                       .resolved(.init(account: "Expenses:Food", currency: "CNY")))
+        // The open currency wins when there is one.
+        XCTAssertEqual(ledger.resolveExternalAccount("Assets:Bank", currency: ""),
+                       .resolved(.init(account: "Assets:Bank", currency: "HKD")))
+        // Several held currencies: the valuation currency, else the account list's first row.
+        XCTAssertEqual(ledger.resolveExternalAccount("Assets:Broker", currency: ""),
+                       .resolved(.init(account: "Assets:Broker", currency: "CNY")))
+        XCTAssertEqual(ledger.resolveExternalAccount("Assets:Wallet", currency: ""),
+                       .resolved(.init(account: "Assets:Wallet", currency: "EUR")))
+        // Nothing in the balances: the loaded postings.
+        XCTAssertEqual(ledger.resolveExternalAccount("Expenses:Travel", currency: ""),
+                       .resolved(.init(account: "Expenses:Travel", currency: "JPY")))
+        XCTAssertEqual(ledger.resolveExternalAccount("Expenses:Unused", currency: ""), .missingCurrency("Expenses:Unused"))
+    }
+
+    func testAccountLinkKeepsAnExplicitCurrencyAndNamesAMissingAccount() {
+        let ledger = accountLinkLedger()
+        XCTAssertEqual(ledger.resolveExternalAccount("Assets:Broker", currency: "USD"),
+                       .resolved(.init(account: "Assets:Broker", currency: "USD")))
+        XCTAssertEqual(ledger.resolveExternalAccount("Expenses:Food", currency: "CNY"),
+                       .resolved(.init(account: "Expenses:Food", currency: "CNY")))
+        // A changed case or stray spaces still name the one account.
+        XCTAssertEqual(ledger.resolveExternalAccount(" expenses:food ", currency: ""),
+                       .resolved(.init(account: "Expenses:Food", currency: "CNY")))
+        // A parent of a real account is not that account.
+        XCTAssertEqual(ledger.resolveExternalAccount("Expenses", currency: ""), .missingAccount("Expenses"))
+        XCTAssertEqual(ledger.resolveExternalAccount("Expenses:Madeup", currency: ""), .missingAccount("Expenses:Madeup"))
+    }
+
+    private func accountLinkLedger() -> LedgerBootstrap {
+        func account(_ name: String, _ currency: String = "") -> LedgerAccount {
+            LedgerAccount(account: name, openDate: "2026-01-01", closeDate: nil, currency: currency,
+                          alias: nil, label: name, group: "", active: true)
+        }
+        func balance(_ name: String, _ currency: String, _ amount: Int) -> AccountBalance {
+            AccountBalance(account: name, currency: currency, amount: amount, valuationCurrency: "CNY",
+                           valuation: amount, valuationMissing: false)
+        }
+        let travel = LedgerTransaction(date: "2026-01-02", payee: "Synthetic", narration: "Trip",
+            postings: [.init(account: "Expenses:Travel", amount: 1_000, currency: "JPY"),
+                       .init(account: "Assets:Wallet", amount: -1_000, currency: "JPY")],
+            source: .init(file: "main.bean", line: 5, hash: "synthetic"))
+        return LedgerBootstrap(
+            start: "2026-01-01", end: "2026-02-01",
+            summary: LedgerSummary(currency: "CNY", income: 0, expense: 0, net: 0),
+            accountBalances: [
+                balance("Assets:Bank", "HKD", 100), balance("Assets:Broker", "CNY", 300), balance("Assets:Broker", "USD", 200),
+                balance("Assets:Wallet", "EUR", 10), balance("Assets:Wallet", "GBP", 20), balance("Expenses:Food", "CNY", 500),
+            ],
+            transactions: [travel],
+            accounts: [account("Assets:Bank", "HKD"), account("Assets:Broker"), account("Assets:Wallet"),
+                       account("Expenses:Food"), account("Expenses:Travel"), account("Expenses:Unused")],
+            valuationCurrency: "CNY",
+            sensitiveUnlocked: true)
+    }
+
     private func parse(_ raw: String) throws -> LedgerExternalRoute? {
         LedgerExternalRoute.parse(try XCTUnwrap(URL(string: raw)))
     }
