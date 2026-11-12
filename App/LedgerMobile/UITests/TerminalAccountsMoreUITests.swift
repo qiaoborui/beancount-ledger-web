@@ -17,9 +17,9 @@ final class TerminalAccountsMoreUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["新建账户"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["取消"].tap()
         // Group cards start collapsed: open the first one to reach an account.
-        let group = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'account-group-'")).firstMatch
+        let group = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'account-group-'")).firstMatch
         XCTAssertTrue(group.waitForExistence(timeout: 5), app.debugDescription)
-        let account = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'account-link-'")).firstMatch
+        let account = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'account-link-'")).firstMatch
         XCTAssertFalse(account.exists)
         group.tap()
         XCTAssertTrue(account.waitForExistence(timeout: 5), app.debugDescription)
