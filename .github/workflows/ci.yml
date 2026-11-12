@@ -9,6 +9,13 @@ on:
         description: Also run the iOS UI tests (slow, and flaky on a loaded machine)
         type: boolean
         default: false
+      ui_tests_only:
+        description: >-
+          With ui_tests, run only these UI tests: Class or Class/testMethod,
+          separated by spaces or commas (empty runs them all, minus the
+          screenshot classes)
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -235,6 +242,8 @@ jobs:
         with:
           persist-credentials: false
       - name: Build the app scheme and run its UI tests
+        env:
+          UI_TESTS_ONLY: ${{ inputs.ui_tests_only }}
         run: bash .github/scripts/ios-app-check.sh ui-tests
 
   ios_runtime:

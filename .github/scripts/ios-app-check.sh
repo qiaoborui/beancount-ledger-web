@@ -13,11 +13,15 @@
 #             neither LedgerCore nor the Beancount runtime, so it is quick
 #   ui-tests  build the LedgerMobile scheme and run LedgerMobileUITests; several
 #             of them time out on a loaded machine, so CI runs them only when a
-#             manual run asks for them
+#             manual run asks for them. UI_TESTS_ONLY narrows the run to the
+#             classes or Class/testMethod entries it lists (space or comma
+#             separated, no target prefix); empty runs every UI test except the
+#             screenshot generators.
 set -euo pipefail
 
 mode="${1:-}"
 skipped_tests=()
+only_tests=()
 case "$mode" in
   app)
     scheme=LedgerMobile
@@ -40,6 +44,24 @@ case "$mode" in
     scheme=LedgerMobile
     test_target=LedgerMobileUITests
     needs_frameworks=true
+    only_input="${UI_TESTS_ONLY:-}"
+    read -r -a requested <<< "${only_input//,/ }"
+    for item in ${requested[@]+"${requested[@]}"}; do
+      # Class or Class/testMethod: letters, digits, `_` and at most one `/`.
+      if [[ ! "$item" =~ ^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)?$ ]]; then
+        echo "::error::invalid UI_TESTS_ONLY entry: $item (expected Class or Class/testMethod)" >&2
+        exit 2
+      fi
+      only_tests+=("$test_target/$item")
+    done
+    if [[ ${#only_tests[@]} -eq 0 ]]; then
+      # They generate App Store screenshots rather than check behaviour; name
+      # them in UI_TESTS_ONLY to run them.
+      skipped_tests=(
+        LedgerMobileUITests/BalancedScreenshotTests
+        LedgerMobileUITests/BalancedStreamAScreenshotTests
+      )
+    fi
     ;;
   *)
     echo "usage: $0 app|widgets|ui-tests" >&2
@@ -98,12 +120,23 @@ echo "::group::Build the $scheme scheme and its test bundles"
 xcodebuild build-for-testing -quiet "${common[@]}"
 echo "::endgroup::"
 
+only_args=()
+for test in ${only_tests[@]+"${only_tests[@]}"}; do
+  only_args+=("-only-testing:$test")
+done
+if [[ ${#only_args[@]} -eq 0 ]]; then
+  only_args=("-only-testing:$test_target")
+fi
+echo "Selected: ${only_args[*]}"
+if [[ ${#skipped_tests[@]} -gt 0 ]]; then
+  echo "Skipped: ${skipped_tests[*]}"
+fi
 skip_args=()
 for test in ${skipped_tests[@]+"${skipped_tests[@]}"}; do
   skip_args+=("-skip-testing:$test")
 done
 xcodebuild test-without-building "${common[@]}" \
-  "-only-testing:$test_target" \
+  "${only_args[@]}" \
   ${skip_args[@]+"${skip_args[@]}"} \
   -resultBundlePath "$derived_data/Tests.xcresult" \
   | grep -E --line-buffered '(error|failed|passed|Executed|TEST (SUCCEEDED|FAILED)|\*\* )' \
