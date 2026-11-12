@@ -385,11 +385,11 @@ private struct ReportChangeText: View {
         if let ratio {
             let arrow = ratio > 0 ? "↑" : ratio < 0 ? "↓" : "→"
             let good = lowerIsBetter ? ratio < 0 : ratio > 0
-            Text("\(arrow)\(Int((abs(ratio) * 100).rounded()))%")
+            Text(verbatim: "\(arrow)\(Int((abs(ratio) * 100).rounded()))%")
                 .balancedFont(size: 12, weight: .medium)
                 .foregroundStyle(ratio == 0 ? BalancedPalette.meta : good ? BalancedPalette.income : BalancedPalette.expense)
         } else {
-            Text("—").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+            Text(verbatim: "—").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
         }
     }
 }
@@ -449,7 +449,7 @@ private struct ReportCategories: View {
                         HStack {
                             Text(slice.label).balancedFont(size: 13).foregroundStyle(BalancedPalette.ink).lineLimit(1)
                             Spacer()
-                            Text("\(Int((slice.share * 100).rounded()))%")
+                            Text(verbatim: "\(Int((slice.share * 100).rounded()))%")
                                 .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                             BalancedKeyTotalText.value(minorUnits: slice.amount, currency: data.currency, color: BalancedPalette.ink,
                                 amountsVisible: session.amountsVisible, size: 13, currencyScale: 0.78)
@@ -584,6 +584,8 @@ private struct LedgerReportCustomRangeSheet: View {
 
 struct LedgerReportSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    /// False when pushed from 设置, where the back button closes it.
+    var showsDone = true
     @State private var settings = LedgerReportSettings.load()
 
     private static let weekdays = [2, 3, 4, 5, 6, 7, 1]
@@ -676,8 +678,10 @@ struct LedgerReportSettingsView: View {
         .terminalNativeChrome()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { EditButton() }
-            ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
+            ToolbarItem(placement: .primaryAction) { EditButton() }
+            if showsDone {
+                ToolbarItem(placement: .cancellationAction) { Button("完成") { dismiss() } }
+            }
         }
         .onChange(of: settings) { _, value in
             var next = value

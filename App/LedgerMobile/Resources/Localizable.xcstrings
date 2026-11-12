@@ -697,6 +697,16 @@
       },
       "shouldTranslate" : false
     },
+    "%lld / %lld 天" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld / %lld days"
+          }
+        }
+      }
+    },
     "%lld / %lld 笔" : {
       "localizations" : {
         "en" : {
@@ -949,6 +959,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "%lld 天里有 %lld 天有记录，%lld 天空白" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entries on %2$lld of %1$lld days, %3$lld blank"
           }
         }
       }
@@ -1236,6 +1256,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Q%2$lld %1$lld"
+          }
+        }
+      }
+    },
+    "* * * 谢谢惠顾 * * *" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "* * * Thank you * * *"
           }
         }
       }
@@ -1789,6 +1819,36 @@
         }
       }
     },
+    "Ledger 周报" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ledger Weekly Report"
+          }
+        }
+      }
+    },
+    "Ledger 收支报告" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ledger Report"
+          }
+        }
+      }
+    },
+    "Ledger 月报" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ledger Monthly Report"
+          }
+        }
+      }
+    },
     "LedgerIsland.compactCount" : {
       "comment" : "Compact Dynamic Island pill beside the camera; keep the unit very short.",
       "localizations" : {
@@ -1974,6 +2034,16 @@
         }
       }
     },
+    "「金额改为占比」只显示分类百分比，图片里不含任何金额。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“Shares instead of amounts” shows only category percentages; the image contains no amounts."
+          }
+        }
+      }
+    },
     "【Ledger 流水明细】" : {
       "localizations" : {
         "en" : {
@@ -2024,6 +2094,16 @@
         }
       }
     },
+    "一周开始于" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Week starts on"
+          }
+        }
+      }
+    },
     "一次最多为 %lld 笔交易添加标签。" : {
       "localizations" : {
         "en" : {
@@ -2054,6 +2134,16 @@
         }
       }
     },
+    "上一期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Previous period"
+          }
+        }
+      }
+    },
     "上一步" : {
       "localizations" : {
         "en" : {
@@ -2070,6 +2160,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Previous"
+          }
+        }
+      }
+    },
+    "上个月的月报好了" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last month's report is ready"
+          }
+        }
+      }
+    },
+    "上周的周报好了" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last week's report is ready"
           }
         }
       }
@@ -2115,6 +2225,16 @@
       }
     },
     "下一周期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next period"
+          }
+        }
+      }
+    },
+    "下一期" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3044,6 +3164,16 @@
         }
       }
     },
+    "仅支持本机账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On-device ledgers only"
+          }
+        }
+      }
+    },
     "仅本机" : {
       "localizations" : {
         "en" : {
@@ -3280,6 +3410,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Account must be an asset or liability account: %@"
+          }
+        }
+      }
+    },
+    "以后再说" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not now"
           }
         }
       }
@@ -4924,6 +5064,16 @@
         }
       }
     },
+    "出报告" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report on"
+          }
+        }
+      }
+    },
     "出报告前，把微信 / 支付宝账单导进来吧。" : {
       "localizations" : {
         "en" : {
@@ -5624,6 +5774,16 @@
         }
       }
     },
+    "包含的板块" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sections to include"
+          }
+        }
+      }
+    },
     "包含重复路径 %@" : {
       "localizations" : {
         "en" : {
@@ -5820,6 +5980,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Turn them on in Settings to get reminders."
+          }
+        }
+      }
+    },
+    "去补记" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add entries"
           }
         }
       }
@@ -6518,6 +6688,56 @@
         }
       }
     },
+    "周报" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weekly"
+          }
+        }
+      }
+    },
+    "周报 / 月报" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weekly / Monthly Reports"
+          }
+        }
+      }
+    },
+    "周报 / 月报仅支持本机账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weekly and monthly reports work with on-device ledgers only"
+          }
+        }
+      }
+    },
+    "周报 / 月报在本机账本上计算，远程账本暂不提供。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reports are computed from the on-device ledger and aren't available for remote ledgers."
+          }
+        }
+      }
+    },
+    "周报 · 月报" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weekly · Monthly"
+          }
+        }
+      }
+    },
     "周日" : {
       "localizations" : {
         "en" : {
@@ -6744,6 +6964,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Records a transaction in your on-device Ledger without opening the app. Entries are flagged for review (!) and appear in Inbox. Turn on “Shortcuts Recording” for a ledger in Ledger Settings first."
+          }
+        }
+      }
+    },
+    "在每期报告的前一天 20:00 提醒导入微信 / 支付宝账单，和你单独设置的导入提醒合并，不会同时来两条。通知里不显示金额。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "At 20:00 the day before each report, you're reminded to import WeChat / Alipay bills. This merges with your own import reminder so you never get both. Notifications never show amounts."
           }
         }
       }
@@ -7538,6 +7768,16 @@
         }
       }
     },
+    "对比 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compared with %@"
+          }
+        }
+      }
+    },
     "对比 %@ 至 %@" : {
       "localizations" : {
         "en" : {
@@ -7774,6 +8014,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Export Full Text File"
+          }
+        }
+      }
+    },
+    "导出小票" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export Receipt"
           }
         }
       }
@@ -8876,6 +9126,16 @@
         }
       }
     },
+    "帮我总结一下 %@ 的收支，有什么值得注意的" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Summarize my income and spending for %@. Anything worth noting?"
+          }
+        }
+      }
+    },
     "常用分类" : {
       "localizations" : {
         "en" : {
@@ -9084,6 +9344,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Turn on posting split"
+          }
+        }
+      }
+    },
+    "开启周报" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn On Weekly Report"
           }
         }
       }
@@ -10448,6 +10718,56 @@
         }
       }
     },
+    "报告前提醒导入账单" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remind to import bills before reports"
+          }
+        }
+      }
+    },
+    "报告板块" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report sections"
+          }
+        }
+      }
+    },
+    "报告范围是上一个完整的自然周。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Covers the last full calendar week."
+          }
+        }
+      }
+    },
+    "报告范围是上一个完整的自然月。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Covers the last full calendar month."
+          }
+        }
+      }
+    },
+    "报告设置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report Settings"
+          }
+        }
+      }
+    },
     "报销返还" : {
       "localizations" : {
         "en" : {
@@ -10644,6 +10964,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "By category"
+          }
+        }
+      }
+    },
+    "按周、按月的收支小结与小票" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weekly and monthly summaries and receipts"
           }
         }
       }
@@ -11194,6 +11524,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spending trend"
+          }
+        }
+      }
+    },
+    "支出较上期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spending vs. previous"
           }
         }
       }
@@ -12758,6 +13098,16 @@
         }
       }
     },
+    "最大几笔" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Largest expenses"
+          }
+        }
+      }
+    },
     "最新" : {
       "localizations" : {
         "en" : {
@@ -12928,12 +13278,32 @@
         }
       }
     },
+    "月报" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monthly"
+          }
+        }
+      }
+    },
     "月末" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "month-end"
+          }
+        }
+      }
+    },
+    "月末最后一天" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last day of the month"
           }
         }
       }
@@ -12954,6 +13324,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ordered category axis"
+          }
+        }
+      }
+    },
+    "有记录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recorded"
           }
         }
       }
@@ -13928,6 +14308,16 @@
         }
       }
     },
+    "本期交易较多，最大几笔和记账情况只统计了前 10,000 笔。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This period has many transactions; largest expenses and recording only cover the first 10,000."
+          }
+        }
+      }
+    },
     "本期各分类支出占比" : {
       "localizations" : {
         "en" : {
@@ -13974,6 +14364,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No spending yet"
+          }
+        }
+      }
+    },
+    "本期没有%@支出" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No %@ spending this period"
+          }
+        }
+      }
+    },
+    "本期没有支出" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No spending this period"
           }
         }
       }
@@ -15598,12 +16008,32 @@
         }
       }
     },
+    "每周一 09:00 提醒你看上周的收支，前一天晚上提醒导入账单。可以在报告设置里改时间。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every Monday at 09:00 you'll get last week's report, with a reminder to import bills the evening before. You can change the time in Report Settings."
+          }
+        }
+      }
+    },
     "每周收支" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Weekly income & expenses"
+          }
+        }
+      }
+    },
+    "每周自动出一份周报？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Get a weekly report automatically?"
           }
         }
       }
@@ -15658,6 +16088,26 @@
         }
       }
     },
+    "每日支出" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daily spending"
+          }
+        }
+      }
+    },
+    "每日支出柱状图" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daily spending bar chart"
+          }
+        }
+      }
+    },
     "每日支出节奏" : {
       "localizations" : {
         "en" : {
@@ -15694,6 +16144,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Monthly at %@"
+          }
+        }
+      }
+    },
+    "每月 %lld 号" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Day %lld of each month"
           }
         }
       }
@@ -16308,6 +16768,26 @@
         }
       }
     },
+    "点右上角「编辑」可以拖动排序。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap Edit to drag sections into order."
+          }
+        }
+      }
+    },
+    "点开看看收支情况。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to see how your income and spending went."
+          }
+        }
+      }
+    },
     "热门商户" : {
       "localizations" : {
         "en" : {
@@ -16494,6 +16974,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Investment returns"
+          }
+        }
+      }
+    },
+    "生成于 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Generated %@"
           }
         }
       }
@@ -17058,6 +17548,16 @@
         }
       }
     },
+    "空白" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blank"
+          }
+        }
+      }
+    },
     "空账户期间余额不一致" : {
       "localizations" : {
         "en" : {
@@ -17154,6 +17654,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Posting %lld has an invalid amount"
+          }
+        }
+      }
+    },
+    "第 %lld 笔" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No. %lld"
           }
         }
       }
@@ -17878,6 +18388,16 @@
         }
       }
     },
+    "自定义报告" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom Report"
+          }
+        }
+      }
+    },
     "自定义机构名称" : {
       "localizations" : {
         "en" : {
@@ -18168,6 +18688,16 @@
         }
       }
     },
+    "解锁账本后查看报告" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlock the ledger to view the report"
+          }
+        }
+      }
+    },
     "解锁这台设备上的本地账本" : {
       "localizations" : {
         "en" : {
@@ -18264,6 +18794,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Entries saved"
+          }
+        }
+      }
+    },
+    "记账情况" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recording"
           }
         }
       }
@@ -20428,6 +20968,16 @@
         }
       }
     },
+    "较上期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "vs. previous"
+          }
+        }
+      }
+    },
     "输入 Ledger 服务器的 HTTPS 地址。验证连接后即可登录。" : {
       "localizations" : {
         "en" : {
@@ -21888,12 +22438,32 @@
         }
       }
     },
+    "金额已隐藏或账本未解锁，只能导出不含金额的占比版本。显示金额后可导出完整版本。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amounts are hidden or the ledger is locked, so only the share version without amounts can be exported. Show amounts to export the full version."
+          }
+        }
+      }
+    },
     "金额必须大于 0。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "The amount must be greater than 0."
+          }
+        }
+      }
+    },
+    "金额改为占比" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shares instead of amounts"
           }
         }
       }
@@ -21988,6 +22558,16 @@
         }
       }
     },
+    "问账本助手：总结这一期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask the assistant to summarize this period"
+          }
+        }
+      }
+    },
     "附件变更" : {
       "localizations" : {
         "en" : {
@@ -22004,6 +22584,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Limit dates"
+          }
+        }
+      }
+    },
+    "隐私" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Privacy"
           }
         }
       }
@@ -22034,6 +22624,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hide %@"
+          }
+        }
+      }
+    },
+    "隐藏交易明细" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide transaction details"
+          }
+        }
+      }
+    },
+    "隐藏收入" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide income"
+          }
+        }
+      }
+    },
+    "隐藏结余" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide net"
           }
         }
       }

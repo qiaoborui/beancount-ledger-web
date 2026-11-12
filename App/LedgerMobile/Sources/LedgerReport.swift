@@ -303,6 +303,16 @@ struct LedgerReportSettings: Codable, Equatable, Sendable {
 
     var anyEnabled: Bool { weekly.isEnabled || monthly.isEnabled }
 
+    /// 「周报 · 月报」, 「周报」 or 「关闭」 for the settings row.
+    var summary: String {
+        switch (weekly.isEnabled, monthly.isEnabled) {
+        case (true, true): String(localized: "周报 · 月报")
+        case (true, false): String(localized: "周报")
+        case (false, true): String(localized: "月报")
+        case (false, false): String(localized: "关闭")
+        }
+    }
+
     var visibleSections: [LedgerReportSection] {
         LedgerReportSectionPreference.normalized(sections).filter(\.isVisible).map(\.section)
     }

@@ -146,6 +146,12 @@ struct SettingsView: View {
                         LedgerRemindersSettingsView()
                     }
                     .accessibilityIdentifier("settings-import-reminder")
+                    if session.isLocal {
+                        SettingsNavRow(title: String(localized: "周报 / 月报"), value: LedgerReportSettings.load().summary) {
+                            LedgerReportSettingsView(showsDone: false)
+                        }
+                        .accessibilityIdentifier("settings-reports")
+                    }
                     if reminders.permission == .denied, reminders.settings.anyEnabled {
                         Text("通知已关闭，去系统设置打开")
                             .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.expense)
