@@ -586,3 +586,37 @@ func TestTruncateKeepsTheSummaryAndItsAnswer(t *testing.T) {
 		t.Fatalf("keep 1 = %+v", kept)
 	}
 }
+
+// A custom endpoint whose list gave a 1M window is not compacted at 200k
+// tokens, which is past 75% of the common 128k it gets without one.
+func TestCustomEndpointCompactsAgainstTheListedWindow(t *testing.T) {
+	summaries := 0
+	previousStream := streamFn
+	streamFn = func(ctx context.Context, _ *ai.Model, transcript ai.TranscriptContext, options ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
+		reply := ai.FauxResponse{Content: []ai.FauxContentBlock{ai.FauxText("好的")}, StopReason: "stop"}
+		if len(offeredTools(transcript)) == 0 {
+			summaries++
+			reply = summaryText()
+		}
+		provider := ai.NewFauxProvider(ai.FauxConfig{})
+		provider.SetResponses([]ai.FauxResponseStep{ai.FauxStaticStep(reply)})
+		return provider.Stream(ctx, transcript, options)
+	}
+	t.Cleanup(func() { streamFn = previousStream })
+	transcript := encoded(t, conversation(8, &ai.Usage{Input: 199_000, Output: 1000}, 0))
+	turn := func(window int) turnResponseV1 {
+		request := map[string]any{"version": 1, "workspaceRoot": committedWorkspace(t), "provider": "custom",
+			"model": "antigravity/gemini-3.8-flash-tiered", "apiKey": "test", "message": "新问题", "transcript": transcript,
+			"custom": map[string]string{"api": "openai-completions", "baseURL": "https://gateway.example/v1"}}
+		if window > 0 {
+			request["contextWindow"] = window
+		}
+		return runTurnFor(t, request)
+	}
+	if response := turn(1_048_576); !response.OK || response.Compacted || summaries != 0 {
+		t.Fatalf("1M window: %+v, %d summaries", response, summaries)
+	}
+	if response := turn(0); !response.OK || !response.Compacted || summaries != 1 {
+		t.Fatalf("assumed window: %+v, %d summaries", response, summaries)
+	}
+}

@@ -34,6 +34,9 @@ type listedModelV1 struct {
 	// ContextWindow is the model's context in tokens, as the provider's list
 	// gives it, else the catalog's; absent when neither says.
 	ContextWindow int `json:"contextWindow,omitempty"`
+	// MaxOutputTokens is the most the model may write in one reply, as the
+	// provider's list gives it; absent when the list does not say.
+	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
 }
 
 type listResponseV1 struct {
@@ -201,50 +204,69 @@ func firstLimit(limits ...tokenLimit) int {
 	return 0
 }
 
+// listEntry is one data[] entry of the OpenAI, Anthropic and OpenRouter
+// shapes. The context window is Anthropic's max_input_tokens, OpenRouter's
+// context_length or top_provider.context_length, or one of the names
+// OpenAI-compatible servers use (context_window, max_context_length, vLLM's
+// max_model_len); the reply limit is max_output_tokens,
+// max_completion_tokens or OpenRouter's top_provider.max_completion_tokens.
+type listEntry struct {
+	ID                  string     `json:"id"`
+	DisplayName         string     `json:"display_name"`
+	Name                string     `json:"name"`
+	SupportedParameters []string   `json:"supported_parameters"`
+	MaxInputTokens      tokenLimit `json:"max_input_tokens"`
+	ContextLength       tokenLimit `json:"context_length"`
+	TopProvider         *struct {
+		ContextLength       tokenLimit `json:"context_length"`
+		MaxCompletionTokens tokenLimit `json:"max_completion_tokens"`
+	} `json:"top_provider"`
+	ContextWindow       tokenLimit `json:"context_window"`
+	MaxContextLength    tokenLimit `json:"max_context_length"`
+	MaxModelLen         tokenLimit `json:"max_model_len"`
+	MaxOutputTokens     tokenLimit `json:"max_output_tokens"`
+	MaxCompletionTokens tokenLimit `json:"max_completion_tokens"`
+}
+
+// geminiEntry is one models[] entry of Gemini's shape.
+type geminiEntry struct {
+	Name                       string     `json:"name"`
+	DisplayName                string     `json:"displayName"`
+	SupportedGenerationMethods []string   `json:"supportedGenerationMethods"`
+	InputTokenLimit            tokenLimit `json:"inputTokenLimit"`
+	OutputTokenLimit           tokenLimit `json:"outputTokenLimit"`
+}
+
 // parseModelList reads the OpenAI shape (data[].id), Anthropic's
 // (data[].display_name), OpenRouter's (data[].name, supported_parameters)
-// and Gemini's (models[].name "models/…"). The context window is
-// Anthropic's max_input_tokens, OpenRouter's context_length or
-// top_provider.context_length, Gemini's inputTokenLimit, or one of the
-// names OpenAI-compatible servers use (context_window, max_context_length,
-// vLLM's max_model_len).
+// and Gemini's (models[].name "models/…"); see listEntry and geminiEntry for
+// the limits. Each entry is read on its own, so one a gateway shapes oddly is
+// skipped instead of failing the whole list.
 func parseModelList(provider string, body []byte) ([]listedModelV1, error) {
 	var payload struct {
-		Data []struct {
-			ID                  string     `json:"id"`
-			DisplayName         string     `json:"display_name"`
-			Name                string     `json:"name"`
-			SupportedParameters []string   `json:"supported_parameters"`
-			MaxInputTokens      tokenLimit `json:"max_input_tokens"`
-			ContextLength       tokenLimit `json:"context_length"`
-			TopProvider         *struct {
-				ContextLength tokenLimit `json:"context_length"`
-			} `json:"top_provider"`
-			ContextWindow    tokenLimit `json:"context_window"`
-			MaxContextLength tokenLimit `json:"max_context_length"`
-			MaxModelLen      tokenLimit `json:"max_model_len"`
-		} `json:"data"`
-		Models []struct {
-			Name                       string     `json:"name"`
-			DisplayName                string     `json:"displayName"`
-			SupportedGenerationMethods []string   `json:"supportedGenerationMethods"`
-			InputTokenLimit            tokenLimit `json:"inputTokenLimit"`
-		} `json:"models"`
+		Data   []json.RawMessage `json:"data"`
+		Models []json.RawMessage `json:"models"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("model list is not JSON: %w", err)
 	}
 	models := []listedModelV1{}
 	seen := map[string]bool{}
-	add := func(id, title string, window int) {
+	add := func(id, title string, window, output int) {
 		id = strings.TrimSpace(id)
 		if id == "" || seen[id] || !looksLikeChat(id) {
 			return
 		}
 		seen[id] = true
-		models = append(models, describeListed(provider, id, strings.TrimSpace(title), window))
+		listed := describeListed(provider, id, strings.TrimSpace(title), window)
+		listed.MaxOutputTokens = output
+		models = append(models, listed)
 	}
-	for _, entry := range payload.Data {
+	for _, raw := range payload.Data {
+		var entry listEntry
+		if json.Unmarshal(raw, &entry) != nil {
+			continue
+		}
 		// OpenRouter says which models call tools; the Agent needs them.
 		if entry.SupportedParameters != nil && !slices.Contains(entry.SupportedParameters, "tools") {
 			continue
@@ -253,18 +275,24 @@ func parseModelList(provider string, body []byte) ([]listedModelV1, error) {
 		if title == "" {
 			title = entry.Name
 		}
-		var topProvider tokenLimit
+		var topContext, topOutput tokenLimit
 		if entry.TopProvider != nil {
-			topProvider = entry.TopProvider.ContextLength
+			topContext, topOutput = entry.TopProvider.ContextLength, entry.TopProvider.MaxCompletionTokens
 		}
-		add(entry.ID, title, firstLimit(entry.MaxInputTokens, entry.ContextLength, topProvider,
-			entry.ContextWindow, entry.MaxContextLength, entry.MaxModelLen))
+		add(entry.ID, title, firstLimit(entry.MaxInputTokens, entry.ContextLength, topContext,
+			entry.ContextWindow, entry.MaxContextLength, entry.MaxModelLen),
+			firstLimit(entry.MaxOutputTokens, entry.MaxCompletionTokens, topOutput))
 	}
-	for _, entry := range payload.Models {
+	for _, raw := range payload.Models {
+		var entry geminiEntry
+		if json.Unmarshal(raw, &entry) != nil {
+			continue
+		}
 		if entry.SupportedGenerationMethods != nil && !slices.Contains(entry.SupportedGenerationMethods, "generateContent") {
 			continue
 		}
-		add(strings.TrimPrefix(entry.Name, "models/"), entry.DisplayName, firstLimit(entry.InputTokenLimit))
+		add(strings.TrimPrefix(entry.Name, "models/"), entry.DisplayName, firstLimit(entry.InputTokenLimit),
+			firstLimit(entry.OutputTokenLimit))
 	}
 	return models, nil
 }

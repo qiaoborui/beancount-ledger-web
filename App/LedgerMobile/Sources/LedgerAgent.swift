@@ -684,6 +684,9 @@ struct LedgerAgentListedModel: Codable, Identifiable, Hashable, Sendable {
     /// Its context in tokens, from the provider's list or else the catalog;
     /// nil when neither says.
     var contextWindow: Int? = nil
+    /// The most it may write in one reply, from the provider's list; nil
+    /// when the list does not say.
+    var maxOutputTokens: Int? = nil
 
     var thinking: [LedgerAgentThinking] {
         let levels = (thinkingLevels ?? []).compactMap(LedgerAgentThinking.init(rawValue:))
@@ -770,6 +773,10 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     /// The model's context in tokens as the provider's list gave it; nil
     /// keeps the native catalog's window, or a common one.
     var contextWindow: Int? = nil
+    /// The model's reply limit as the provider's list gave it. The native side
+    /// applies it only to a model its catalog does not describe, a custom
+    /// endpoint's included; nil keeps the common limit.
+    var maxOutputTokens: Int? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {

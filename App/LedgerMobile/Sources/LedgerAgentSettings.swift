@@ -48,9 +48,15 @@ final class LedgerAgentSettings: ObservableObject {
     /// so a turn after relaunch knows it without fetching the list again.
     private let contextWindowsKey = "ledger.agent.context-windows"
     private var contextWindows: [String: Int]
+    /// Each model's reply limit from the provider's list, by `identity`.
+    private let maxOutputTokensKey = "ledger.agent.max-output-tokens"
+    private var maxOutputs: [String: Int]
     /// Lists fetched quietly this launch for a window, by `listKey`; each is
-    /// tried once whatever its result.
+    /// tried once whatever its result, until a key is saved.
     private var quietlyListed: Set<String> = []
+    /// Counts keys saved this launch, so replacing a key starts the quiet
+    /// read again as well as saving the first one.
+    @Published private var keyGeneration = 0
     private let keyStore: (String) -> ClassificationKeyStore
     private let lister: LedgerAgentModelLister
 
@@ -87,6 +93,7 @@ final class LedgerAgentSettings: ObservableObject {
         usesMemory = defaults.object(forKey: usesMemoryKey) as? Bool ?? true
         assists = defaults.object(forKey: assistsKey) as? Bool ?? true
         contextWindows = defaults.dictionary(forKey: contextWindowsKey) as? [String: Int] ?? [:]
+        maxOutputs = defaults.dictionary(forKey: maxOutputTokensKey) as? [String: Int] ?? [:]
         hasKey = (try? keyStore(choice.provider).load()) != nil
     }
 
@@ -103,9 +110,24 @@ final class LedgerAgentSettings: ObservableObject {
         return nil
     }
 
-    /// Fetches the current provider's list once per launch when nothing
-    /// says the current model's window yet. Failures are not shown: the
-    /// turn still runs with the native side's window.
+    /// The model's reply limit as its provider's list gave it, nil when no
+    /// list said; the native side then keeps its own.
+    func maxOutputTokens(for choice: LedgerAgentModelChoice) -> Int? {
+        if let limit = listed[Self.listKey(choice)]?.first(where: { $0.id == choice.model })?.maxOutputTokens, limit > 0 {
+            return limit
+        }
+        if let limit = maxOutputs[Self.identity(choice)], limit > 0 { return limit }
+        return nil
+    }
+
+    /// What starts `learnContextWindow` again when it changes: the model and
+    /// endpoint, and whether a key is saved, since the read needs one.
+    var contextWindowTaskID: String { Self.identity(choice) + (hasKey ? "\u{1F}key\(keyGeneration)" : "") }
+
+    /// Fetches the current provider's list once per launch, and again after
+    /// a key is saved, when nothing says the current model's window yet.
+    /// Failures are not shown: the turn still runs with the native side's
+    /// window.
     func learnContextWindow() async {
         let choice = choice
         guard contextWindow(for: choice) == nil, choice.isComplete, !listing,
@@ -115,18 +137,22 @@ final class LedgerAgentSettings: ObservableObject {
         remember(models, for: choice)
     }
 
-    /// Keeps the windows of a fetched list for the next launch.
+    /// Keeps the windows and reply limits of a fetched list for the next launch.
     private func remember(_ models: [LedgerAgentListedModel], for choice: LedgerAgentModelChoice) {
-        var changed = false
+        var windowsChanged = false, outputsChanged = false
         for model in models {
-            guard let window = model.contextWindow, window > 0 else { continue }
             let id = Self.identity(.init(provider: choice.provider, model: model.id, custom: choice.isCustom ? choice.custom : nil))
-            if contextWindows[id] != window {
+            if let window = model.contextWindow, window > 0, contextWindows[id] != window {
                 contextWindows[id] = window
-                changed = true
+                windowsChanged = true
+            }
+            if let limit = model.maxOutputTokens, limit > 0, maxOutputs[id] != limit {
+                maxOutputs[id] = limit
+                outputsChanged = true
             }
         }
-        if changed { defaults.set(contextWindows, forKey: contextWindowsKey) }
+        if windowsChanged { defaults.set(contextWindows, forKey: contextWindowsKey) }
+        if outputsChanged { defaults.set(maxOutputs, forKey: maxOutputTokensKey) }
     }
 
     /// The levels the current model accepts, least to most.
@@ -334,6 +360,9 @@ final class LedgerAgentSettings: ObservableObject {
         }
         try keyStore(choice.provider).save(key)
         hasKey = true
+        // A list that failed with no key or an older one may answer now.
+        quietlyListed.removeAll()
+        keyGeneration += 1
     }
 
     func removeKey() throws {
