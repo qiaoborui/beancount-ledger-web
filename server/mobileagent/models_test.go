@@ -249,7 +249,7 @@ func TestListModelsReadsEachProvidersReplyLimit(t *testing.T) {
 		t.Fatalf("gemini = %v", got)
 	}
 	if got := outputs("custom", `{"data":[{"id":"c","max_completion_tokens":16384},{"id":"d","max_output_tokens":"lots"}]}`,
-		map[string]string{"api": "openai-completions"}); got["c"] != 16384 || got["d"] != 0 {
+		map[string]string{"api": "openai-completions"}); got["c"] != 16384 || got["d"] != 0 || len(got) != 2 {
 		t.Fatalf("custom = %v", got)
 	}
 }

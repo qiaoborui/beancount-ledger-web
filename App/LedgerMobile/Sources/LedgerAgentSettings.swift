@@ -54,6 +54,9 @@ final class LedgerAgentSettings: ObservableObject {
     /// Lists fetched quietly this launch for a window, by `listKey`; each is
     /// tried once whatever its result, until a key is saved.
     private var quietlyListed: Set<String> = []
+    /// Counts keys saved this launch, so replacing a key starts the quiet
+    /// read again as well as saving the first one.
+    @Published private var keyGeneration = 0
     private let keyStore: (String) -> ClassificationKeyStore
     private let lister: LedgerAgentModelLister
 
@@ -119,7 +122,7 @@ final class LedgerAgentSettings: ObservableObject {
 
     /// What starts `learnContextWindow` again when it changes: the model and
     /// endpoint, and whether a key is saved, since the read needs one.
-    var contextWindowTaskID: String { Self.identity(choice) + (hasKey ? "\u{1F}key" : "") }
+    var contextWindowTaskID: String { Self.identity(choice) + (hasKey ? "\u{1F}key\(keyGeneration)" : "") }
 
     /// Fetches the current provider's list once per launch, and again after
     /// a key is saved, when nothing says the current model's window yet.
@@ -359,6 +362,7 @@ final class LedgerAgentSettings: ObservableObject {
         hasKey = true
         // A list that failed with no key or an older one may answer now.
         quietlyListed.removeAll()
+        keyGeneration += 1
     }
 
     func removeKey() throws {
