@@ -117,6 +117,14 @@ print(best[1])
 ')"
 echo "Simulator: $simulator"
 
+if [[ "$mode" == ui-tests ]]; then
+  # The app keeps its layout preferences (compact tab bar, hidden amounts,
+  # overview sections) in UserDefaults, and the simulator outlives the job: a
+  # run that customised the bar leaves every later run starting from a bar the
+  # tests do not expect, and the failures cascade. Begin from a clean install.
+  xcrun simctl uninstall "$simulator" com.qiaoborui.ledger.mobile 2>/dev/null || true
+fi
+
 derived_data="$(mktemp -d "${TMPDIR:-/tmp}/ledger-ios-app.XXXXXX")"
 trap 'rm -rf "$derived_data"' EXIT
 common=(
@@ -146,13 +154,21 @@ skip_args=()
 for test in ${skipped_tests[@]+"${skipped_tests[@]}"}; do
   skip_args+=("-skip-testing:$test")
 done
+test_log="$derived_data/test.log"
 xcodebuild test-without-building "${common[@]}" \
   "${only_args[@]}" \
   ${skip_args[@]+"${skip_args[@]}"} \
-  -resultBundlePath "$derived_data/Tests.xcresult" \
-  | grep -E --line-buffered '(error|failed|passed|Executed|TEST (SUCCEEDED|FAILED)|\*\* )' \
-  || true
-# grep hides the full log, so take the verdict from the result bundle.
+  -resultBundlePath "$derived_data/Tests.xcresult" > "$test_log" 2>&1 || true
+grep -E '(error|failed|passed|Executed|TEST (SUCCEEDED|FAILED)|\*\* )' "$test_log" || true
+# The step-by-step lines around a failure are what make it diagnosable, and
+# grep above drops them: print them for every failing test.
+awk '/error: -\[/ { start = NR } { line[NR] = $0 }
+     END { for (i = 1; i <= NR; i++) if (line[i] ~ /error: -\[/) {
+             print "::group::context for " line[i]
+             for (j = (i > 40 ? i - 40 : 1); j <= i; j++) print line[j]
+             print "::endgroup::"
+           } }' "$test_log" || true
+# The grep hides the full log, so take the verdict from the result bundle.
 xcrun xcresulttool get test-results summary --path "$derived_data/Tests.xcresult" \
   | python3 -c '
 import json, sys

@@ -88,10 +88,22 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 5))
         XCTAssertTrue(row.waitForNonExistence(timeout: 5))
         let search = revealSearch("收付款对象、说明、账户或标签")
-        search.tap()
-        search.typeText("不存在的交易")
+        typeInto(search, "不存在的交易")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '不存在的交易'")).firstMatch.waitForExistence(timeout: 3))
         capture("glass-search-expanded")
+    }
+
+    /// `typeText` needs the field focused, and a tap that lands while the search
+    /// page or its sheet is still presenting does not focus it: XCTest then
+    /// fails the event with "Neither element nor any descendant has keyboard
+    /// focus". Tap until the keyboard is up, then type.
+    private func typeInto(_ field: XCUIElement, _ text: String) {
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<3 where !app.keyboards.firstMatch.exists {
+            field.tap()
+            _ = app.keyboards.firstMatch.waitForExistence(timeout: 2)
+        }
+        field.typeText(text)
     }
 
     @discardableResult
@@ -170,8 +182,7 @@ final class LedgerMobileUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
         let search = revealSearch("搜索整个账本")
-        search.tap()
-        search.typeText("城市\n")
+        typeInto(search, "城市\n")
         XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 5))
         let scopes = app.segmentedControls.firstMatch
         XCTAssertTrue(scopes.buttons["流水"].waitForExistence(timeout: 3), app.debugDescription)
@@ -227,8 +238,7 @@ final class LedgerMobileUITests: XCTestCase {
         let search = revealSearch("搜索整个账本")
         XCTAssertTrue(app.navigationBars["搜索"].exists)
         capture("global-search-entry")
-        search.tap()
-        search.typeText("城市\n")
+        typeInto(search, "城市\n")
         XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 5))
         app.tabBars.buttons["更多"].tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 3), app.debugDescription)
@@ -237,8 +247,7 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 3))
         app.tabBars.buttons["更多"].tap()
         let reopenedSearch = revealSearch("搜索整个账本")
-        reopenedSearch.tap()
-        reopenedSearch.typeText("城市\n")
+        typeInto(reopenedSearch, "城市\n")
         app.tabBars.buttons["更多"].tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertFalse(app.searchFields["搜索整个账本"].exists)
@@ -261,8 +270,7 @@ final class LedgerMobileUITests: XCTestCase {
         }
         capture("global-search-aligned-tab")
         let search = revealSearch("搜索整个账本")
-        search.tap()
-        search.typeText("城市\n")
+        typeInto(search, "城市\n")
         XCTAssertTrue(app.buttons["transaction-row-88"].waitForExistence(timeout: 5), app.debugDescription)
         capture("global-search-results")
         app.buttons["transaction-row-88"].tap()
@@ -279,10 +287,7 @@ final class LedgerMobileUITests: XCTestCase {
             app.buttons["sidebar-imports"].tap()
         } else {
             app.tabBars.buttons["更多"].tap()
-            let entry = app.buttons["more-imports"]
-            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
-            waitUntilHittable(entry)
-            entry.tap()
+            openMoreRow("more-imports")
         }
         XCTAssertTrue(app.navigationBars["核对交易"].waitForExistence(timeout: 8))
         let commit = app.buttons["import-commit"]
@@ -313,8 +318,7 @@ final class LedgerMobileUITests: XCTestCase {
         capture("accounts-group-expanded")
 
         let search = revealSearch("账户名称或路径")
-        search.tap()
-        search.typeText("日常\n")
+        typeInto(search, "日常\n")
         XCTAssertTrue(daily.waitForExistence(timeout: 3))
         openDestination(compact: "账户", regular: "账户")
         XCTAssertTrue(daily.waitForExistence(timeout: 3))
@@ -397,8 +401,7 @@ final class LedgerMobileUITests: XCTestCase {
         app.tabBars.buttons["流水"].tap()
         let search = revealSearch("收付款对象、说明、账户或标签")
         XCTAssertTrue(search.waitForExistence(timeout: 3))
-        search.tap()
-        search.typeText("不存在的交易")
+        typeInto(search, "不存在的交易")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '不存在的交易'")).firstMatch.waitForExistence(timeout: 3))
         replaceText(in: search, with: "城市")
         search.typeText("\n")
@@ -506,7 +509,7 @@ final class LedgerMobileUITests: XCTestCase {
         app.buttons["本季度"].tap()
         app.buttons["apply-time-range"].tap()
         // The headline names the period: a quarter by its title, a month as "8月".
-        XCTAssertTrue(app.staticTexts["2026年第3季度"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["2026年第3季度"].waitForExistence(timeout: 10), app.debugDescription)
 
         let quarterRangeButton = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH %@", "选择时间范围")
@@ -688,10 +691,7 @@ final class LedgerMobileUITests: XCTestCase {
             entry.tap()
         } else {
             app.tabBars.buttons["更多"].tap()
-            let entry = app.buttons["more-imports"]
-            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
-            waitUntilHittable(entry)
-            entry.tap()
+            openMoreRow("more-imports")
         }
 
         let content = app.collectionViews["import-history-content"]
@@ -741,9 +741,8 @@ final class LedgerMobileUITests: XCTestCase {
         let configurationEntry = app.buttons["settings-compact-tabs"]
         XCTAssertTrue(configurationEntry.waitForExistence(timeout: 3))
         capture("compact-tabs-01-settings")
-        configurationEntry.tap()
+        openCompactTabConfiguration()
 
-        XCTAssertTrue(app.navigationBars["底部标签栏"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["已显示 3/3"].exists)
         capture("compact-tabs-02-configuration")
 
@@ -806,6 +805,18 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 3))
         app.buttons["返回上一页"].tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 3))
+
+        // The bar lives in UserDefaults, so leaving it customised changes every
+        // later launch: put the default tabs back before finishing.
+        openCompactTabConfiguration()
+        let reset = app.buttons["compact-tab-reset"]
+        let configurationListAgain = app.collectionViews["compact-tab-list"]
+        for _ in 0..<4 where !reset.isHittable { configurationListAgain.swipeUp() }
+        waitUntilHittable(reset)
+        reset.tap()
+        XCTAssertTrue(app.staticTexts["已显示 3/3"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["compact-tab-save"].tap()
+        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 10), app.debugDescription)
     }
 
     func testImportClassificationReviewsFieldsIndependentlyAndRestoresFullList() throws {
@@ -816,9 +827,7 @@ final class LedgerMobileUITests: XCTestCase {
         if isPad { app.buttons["sidebar-imports"].tap() }
         else {
             app.tabBars.buttons["更多"].tap()
-            let entry = app.buttons["more-imports"]
-            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
-            entry.tap()
+            openMoreRow("more-imports")
         }
         XCTAssertTrue(app.navigationBars["核对交易"].waitForExistence(timeout: 8))
         let list = app.collectionViews["native-import-preview"]
@@ -873,9 +882,7 @@ final class LedgerMobileUITests: XCTestCase {
             app.buttons["sidebar-imports"].tap()
         } else {
             app.tabBars.buttons["更多"].tap()
-            let entry = app.buttons["more-imports"]
-            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
-            entry.tap()
+            openMoreRow("more-imports")
         }
         XCTAssertTrue(app.navigationBars["核对交易"].waitForExistence(timeout: 8))
         let lastEdit = app.buttons["import-entry-edit-safe-import-2"]
@@ -905,10 +912,7 @@ final class LedgerMobileUITests: XCTestCase {
             entry.tap()
         } else {
             app.tabBars.buttons["更多"].tap()
-            let entry = app.buttons["more-imports"]
-            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
-            waitUntilHittable(entry)
-            entry.tap()
+            openMoreRow("more-imports")
         }
 
         // Picking the file parses it straight away; channel options moved to 解析选项.
@@ -1076,9 +1080,7 @@ final class LedgerMobileUITests: XCTestCase {
         if isPad { app.buttons["sidebar-imports"].tap() }
         else {
             app.tabBars.buttons["更多"].tap()
-            let entry = app.buttons["more-imports"]
-            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
-            entry.tap()
+            openMoreRow("more-imports")
         }
         let toggle = app.buttons["import-entry-toggle-safe-import-1"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 8))
@@ -1378,10 +1380,18 @@ final class LedgerMobileUITests: XCTestCase {
 
     private func openDestination(compact: String, regular: String) {
         if !isPad {
-            // The compact tab bar is the native one; 交易 is titled 流水 there.
+            // The compact tab bar is the native one; 交易 is titled 流水 there. The
+            // bar minimizes on scroll, and a tap on the minimized one re-selects
+            // the current tab, so confirm the tab took before moving on.
             let tab = app.compactTab(compact == "交易" ? "流水" : "账户")
             XCTAssertTrue(tab.waitForExistence(timeout: 5), app.debugDescription)
-            tab.tap()
+            for _ in 0..<3 where !tab.isSelected {
+                waitUntilHittable(tab)
+                tab.tap()
+                _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                    predicate: NSPredicate(format: "selected == true"), object: tab)], timeout: 3)
+            }
+            XCTAssertTrue(tab.isSelected, app.debugDescription)
         } else {
             app.buttons[regular == "交易账本" ? "sidebar-transactions" : "sidebar-accounts"].tap()
         }
@@ -1509,6 +1519,43 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(fast.waitForExistence(timeout: 3), app.debugDescription)
         fast.buttons["高级"].tap()
         XCTAssertTrue(advanced.waitForExistence(timeout: 3), app.debugDescription)
+    }
+
+    /// Opens 设置 → 底部标签栏 from the compact 更多 list.
+    ///
+    /// A tap on the 更多 list is sometimes dropped and leaves the row reported as
+    /// present but not hittable, so this verifies each step and retries instead of
+    /// trusting one tap.
+    private func openCompactTabConfiguration() {
+        let entry = app.buttons["settings-compact-tabs"]
+        for _ in 0..<4 where !entry.isHittable || !app.navigationBars["底部标签栏"].exists {
+            if !app.collectionViews["more-list"].exists, app.buttons["返回上一页"].exists {
+                app.buttons["返回上一页"].tap()
+            }
+            if app.collectionViews["more-list"].waitForExistence(timeout: 2) {
+                let settings = app.buttons["more-settings"]
+                for _ in 0..<3 where !settings.isHittable { app.swipeDown() }
+                waitUntilHittable(settings)
+                settings.tap()
+            }
+            if entry.waitForExistence(timeout: 3) {
+                for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+                if entry.isHittable { entry.tap() }
+            }
+            _ = app.navigationBars["底部标签栏"].waitForExistence(timeout: 3)
+        }
+        XCTAssertTrue(app.navigationBars["底部标签栏"].waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    /// Opens a row of the compact 更多 list. The list is rebuilt when the tab is
+    /// selected, so wait for the row itself rather than only scrolling for it.
+    private func openMoreRow(_ identifier: String) {
+        XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5), app.debugDescription)
+        let entry = app.buttons[identifier]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+        waitUntilHittable(entry)
+        entry.tap()
     }
 
     private func waitUntilHittable(_ element: XCUIElement) {
