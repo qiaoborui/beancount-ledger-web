@@ -381,7 +381,23 @@ enum LedgerReportSchedule {
                 }
             }
         }
-        return LedgerReminderContribution(occurrences: occurrences, importReminderDates: imports)
+        return LedgerReminderContribution(occurrences: combiningSameMinute(occurrences), importReminderDates: imports)
+    }
+
+    /// The planner keeps one reminder per minute, so a weekly and a monthly
+    /// report on the same minute become one notification that opens the
+    /// monthly report and names both.
+    static func combiningSameMinute(_ occurrences: [LedgerReminderOccurrence]) -> [LedgerReminderOccurrence] {
+        var byMinute: [Int: LedgerReminderOccurrence] = [:]
+        for occurrence in occurrences {
+            let minute = Int(occurrence.fireDate.timeIntervalSince1970 / 60)
+            guard let existing = byMinute[minute] else { byMinute[minute] = occurrence; continue }
+            let monthly = existing.tag == LedgerReportPeriodKind.month.rawValue ? existing : occurrence
+            byMinute[minute] = LedgerReminderOccurrence(kind: .report, fireDate: monthly.fireDate,
+                title: String(localized: "周报和月报都好了"), body: monthly.body,
+                categoryIdentifier: monthly.categoryIdentifier, url: monthly.url, tag: "week-month")
+        }
+        return byMinute.values.sorted { $0.fireDate < $1.fireDate }
     }
 
     /// 「上周的周报好了」 with no amount: the notification is scheduled ahead

@@ -25,7 +25,7 @@ struct LedgerReportView: View {
     @State private var errorMessage: String?
     @State private var customPresented = false
     @State private var settingsPresented = false
-    @State private var exportPresented = false
+    @State private var exportSnapshot: ReportExportSnapshot?
     @State private var offerWeekly = false
 
     private var reportCalendar: LedgerReportCalendar { settings.reportCalendar() }
@@ -72,12 +72,12 @@ struct LedgerReportView: View {
             .sheet(isPresented: $settingsPresented, onDismiss: { settings = LedgerReportSettings.load() }) {
                 NavigationStack { LedgerReportSettingsView() }
             }
-            .sheet(isPresented: $exportPresented) {
-                if let data, loadedKey == key {
-                    LedgerReportReceiptSheet(data: data, periodLabel: reportCalendar.label(data.period),
-                        sections: settings.visibleSections.filter(\.appearsOnReceipt))
-                        .ledgerPrivacyProtectedSheet()
-                }
+            // A snapshot taken on open, so a reload behind the sheet (a sync, an
+            // import) doesn't empty it. The sheet checks the lock itself.
+            .sheet(item: $exportSnapshot) { snapshot in
+                LedgerReportReceiptSheet(data: snapshot.data, periodLabel: snapshot.periodLabel,
+                    sections: snapshot.sections)
+                    .ledgerPrivacyProtectedSheet()
             }
             .alert("每周自动出一份周报？", isPresented: $offerWeekly) {
                 Button("开启周报") { updateSettings { $0.weekly.isEnabled = true; $0.hasOfferedWeekly = true } }
@@ -89,7 +89,11 @@ struct LedgerReportView: View {
 
     private var actions: some View {
         HStack(spacing: 4) {
-            Button { exportPresented = true } label: {
+            Button {
+                guard let data, loadedKey == key else { return }
+                exportSnapshot = ReportExportSnapshot(data: data, periodLabel: reportCalendar.label(data.period),
+                    sections: settings.visibleSections.filter(\.appearsOnReceipt))
+            } label: {
                 Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
             }
             .disabled(data == nil || loadedKey != key)
@@ -342,6 +346,13 @@ struct LedgerReportView: View {
     }
 }
 
+private struct ReportExportSnapshot: Identifiable {
+    let id = UUID()
+    let data: LedgerReportData
+    let periodLabel: String
+    let sections: [LedgerReportSection]
+}
+
 private struct ReportLoadKey: Hashable {
     let period: LedgerReportPeriod
     let firstWeekday: Int
@@ -562,7 +573,8 @@ private struct LedgerReportCustomRangeSheet: View {
         NavigationStack {
             Form {
                 DatePicker("开始", selection: $start, in: ...Date(), displayedComponents: .date)
-                DatePicker("结束", selection: $end, in: start...max(start, Date()), displayedComponents: .date)
+                // At most about ten years, like a ledger://report link.
+                DatePicker("结束", selection: $end, in: start...min(max(start, Date()), start.addingTimeInterval(3_650 * 86_400)), displayedComponents: .date)
             }
             .navigationTitle("自定义报告")
             .terminalNativeChrome()
@@ -571,7 +583,8 @@ private struct LedgerReportCustomRangeSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") {
-                        if let period = calendar.custom(calendar.text(start), calendar.text(end)) { onApply(period) }
+                        let latest = start.addingTimeInterval(3_650 * 86_400)
+                        if let period = calendar.custom(calendar.text(start), calendar.text(min(end, latest))) { onApply(period) }
                         dismiss()
                     }
                 }
@@ -791,6 +804,8 @@ struct LedgerReportReceiptSheet: View {
 
     private var receipt: LedgerReportReceipt {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return LedgerReportReceipt.build(data, options: options, periodLabel: periodLabel,
             dayLabel: { String($0.suffix(5)) }, generatedAt: formatter.string(from: Date()),
@@ -864,7 +879,6 @@ struct LedgerReportReceiptSheet: View {
             .onChange(of: session.privacyShielded) { _, shielded in
                 if shielded { discard() }
             }
-            .onDisappear { discard() }
         }
     }
 

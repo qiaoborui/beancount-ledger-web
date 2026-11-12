@@ -130,6 +130,20 @@ final class LedgerReportTests: XCTestCase {
         XCTAssertEqual(occurrence.url, URL(string: "ledger://report?period=month&start=2027-01-01"))
     }
 
+    func testWeeklyAndMonthlyOnTheSameMinuteBecomeOneNotification() {
+        // 2027-03-01 is a Monday: both reports at 09:00.
+        let contribution = LedgerReportSchedule.contribution(settings: settings(monthly: true),
+            now: date(2027, 2, 27, 10), calendar: calendar)
+        let atNine = contribution.occurrences.filter { $0.fireDate == date(2027, 3, 1, 9) }
+        XCTAssertEqual(atNine.count, 1)
+        XCTAssertEqual(atNine.first?.url, URL(string: "ledger://report?period=month&start=2027-02-01"))
+        let plan = LedgerReminderPlanner.plan(settings: LedgerReminderSettings(), now: date(2027, 2, 27, 10),
+            calendar: calendar, recordedToday: false, contributions: [contribution])
+        XCTAssertEqual(plan.filter { $0.kind == .report && $0.fireDate == date(2027, 3, 1, 9) }.count, 1)
+        // Another week's report stays on its own.
+        XCTAssertTrue(contribution.occurrences.contains { $0.fireDate == date(2027, 3, 8, 9) && $0.tag == "week" })
+    }
+
     func testMonthlyReportOnAChosenDay() {
         let dates = LedgerReportSchedule.reportDates(.month, settings: settings(weekly: false, monthly: true, monthDay: .day(15)),
             after: date(2026, 11, 15, 9), count: 2, calendar: calendar)

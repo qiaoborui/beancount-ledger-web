@@ -6738,6 +6738,16 @@
         }
       }
     },
+    "周报和月报都好了" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your weekly and monthly reports are ready"
+          }
+        }
+      }
+    },
     "周日" : {
       "localizations" : {
         "en" : {
