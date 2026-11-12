@@ -189,8 +189,8 @@ final class LocalLedgerBackgroundSyncService {
 final class LedgerBackgroundAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         LocalLedgerBackgroundSyncService.shared.register()
-        // Before launch ends, so a tap on an Agent notification that started the app is delivered.
-        UNUserNotificationCenter.current().delegate = LedgerAgentNotifications.shared
+        // Before launch ends, so a tap on a notification that started the app is delivered.
+        LedgerNotificationDelegate.install()
         // The Go heap shares this process's jetsam budget with Python, the
         // canonical stream buffers and Swift, so cap it from the memory that is
         // actually available before the first ledger is registered.

@@ -33,6 +33,11 @@ struct LedgerMobileApp: App {
             LedgerAgentSessions.shared.showBackground()
             session?.openWidgetURL(URL(string: "ledger://agent")!)
         }
+        // 记账提醒 and 导入账单提醒 open their pages like a widget link.
+        LedgerLocalReminders.shared.open = { [weak session] url in
+            session?.openWidgetURL(url)
+        }
+        LedgerLocalReminders.shared.attach(session)
         #endif
     }
 
@@ -65,6 +70,9 @@ struct LedgerMobileApp: App {
                             await session.automaticallyUnlockIfNeeded()
                         }
                         if phase == .active {
+                            #if os(iOS)
+                            LedgerLocalReminders.shared.reschedule()
+                            #endif
                             await session.runAutomaticLedgerBackupIfDue()
                         }
                         #if os(iOS)
@@ -79,7 +87,17 @@ struct LedgerMobileApp: App {
                     if phase == .ready, scenePhase == .active {
                         Task { await session.runAutomaticLedgerBackupIfDue() }
                     }
+                    #if os(iOS)
+                    // 智能跳过 can only read the ledger once it is unlocked.
+                    if phase == .ready { LedgerLocalReminders.shared.reschedule() }
+                    #endif
                 }
+                #if os(iOS)
+                // A write, an import, a sync or another ledger.
+                .onChange(of: session.presentedLocalRevisionID) { _, _ in
+                    LedgerLocalReminders.shared.reschedule()
+                }
+                #endif
                 .onOpenURL { url in
                     if url.isFileURL {
                         Task { await session.receiveSharedFile(url) }
