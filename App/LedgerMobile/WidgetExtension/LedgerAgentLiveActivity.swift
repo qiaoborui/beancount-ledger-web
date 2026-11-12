@@ -15,7 +15,7 @@ struct LedgerAgentLiveActivity: Widget {
             LedgerGlassCard {
                 LedgerLockBody(
                     header: String(localized: "账本助手"),
-                    symbol: symbol(phase), color: color(phase),
+                    glyph: glyph(phase), color: color(phase),
                     title: title(phase), detail: context.state.detail, detailLines: 2
                 ) {
                     trailing(context)
@@ -30,7 +30,7 @@ struct LedgerAgentLiveActivity: Widget {
         } dynamicIsland: { context in
             let phase = context.state.phase
             return DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) { LedgerGlassBadge(symbol: symbol(phase), color: color(phase), size: 24, symbolSize: 12) }
+                DynamicIslandExpandedRegion(.leading) { LedgerGlassBadge(glyph: glyph(phase), color: color(phase), size: 24, symbolSize: 12) }
                 DynamicIslandExpandedRegion(.trailing) { trailing(context) }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 3) {
@@ -46,7 +46,11 @@ struct LedgerAgentLiveActivity: Widget {
                     .padding(.top, 4)
                 }
             } compactLeading: {
-                Image(systemName: symbol(phase)).font(.system(size: 13, weight: .semibold)).foregroundStyle(color(phase))
+                if phase == .running {
+                    LedgerMark(accent: color(phase)).frame(width: 14, height: 14)
+                } else {
+                    Image(systemName: symbol(phase)).font(.system(size: 13, weight: .semibold)).foregroundStyle(color(phase))
+                }
             } compactTrailing: {
                 if phase == .running {
                     Text(context.attributes.startedAt, style: .timer)
@@ -57,7 +61,11 @@ struct LedgerAgentLiveActivity: Widget {
                     Image(systemName: "checkmark").foregroundStyle(color(phase)).opacity(phase == .answered ? 1 : 0)
                 }
             } minimal: {
-                Image(systemName: symbol(phase)).foregroundStyle(color(phase))
+                if phase == .running {
+                    LedgerMark(accent: color(phase)).frame(width: 15, height: 15)
+                } else {
+                    Image(systemName: symbol(phase)).foregroundStyle(color(phase))
+                }
             }
             .widgetURL(URL(string: "ledger://agent"))
             .keylineTint(color(phase))
@@ -78,7 +86,7 @@ struct LedgerAgentLiveActivity: Widget {
     }
 
     private func mark(_ phase: Phase) -> some View {
-        LedgerGlassBadge(symbol: symbol(phase), color: color(phase))
+        LedgerGlassBadge(glyph: glyph(phase), color: color(phase))
     }
 
     private func title(_ phase: Phase) -> String {
@@ -89,6 +97,11 @@ struct LedgerAgentLiveActivity: Widget {
         case .failed: String(localized: "账本助手没能完成")
         case .interrupted: String(localized: "账本助手被中断")
         }
+    }
+
+    /// Running shows the app's mark; how a turn ended keeps its symbol.
+    private func glyph(_ phase: Phase) -> LedgerGlyph {
+        phase == .running ? .mark : .symbol(symbol(phase))
     }
 
     private func symbol(_ phase: Phase) -> String {
