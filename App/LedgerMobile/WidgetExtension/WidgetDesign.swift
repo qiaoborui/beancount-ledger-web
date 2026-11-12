@@ -394,6 +394,8 @@ enum LedgerGlass {
     static let warning = Color(red: 0xFB / 255, green: 0xBF / 255, blue: 0x24 / 255)
     static let failure = Color(red: 0xF8 / 255, green: 0x71 / 255, blue: 0x71 / 255)
     static let opaqueFill = Color(red: 0x1E / 255, green: 0x24 / 255, blue: 0x29 / 255)
+    /// The mark's ink in dark appearance (ledger-mark.svg).
+    static let markInk = Color(red: 0xE1 / 255, green: 0xE7 / 255, blue: 0xE6 / 255)
 }
 
 /// Lock-screen card: clear glass on iOS 26, ultra-thin material before it, an
@@ -464,13 +466,35 @@ struct LedgerGlassCard<Content: View>: View {
 /// a 56pt glass tile, title, detail and a trailing capsule; optional footer.
 struct LedgerLockBody<Trailing: View, Footer: View>: View {
     let header: String
-    let symbol: String
+    let glyph: LedgerGlyph
     let color: Color
     let title: String
     let detail: String
-    var detailLines: Int = 1
-    @ViewBuilder var trailing: Trailing
-    @ViewBuilder var footer: Footer
+    let detailLines: Int
+    let trailing: Trailing
+    let footer: Footer
+
+    init(
+        header: String, symbol: String, color: Color, title: String, detail: String, detailLines: Int = 1,
+        @ViewBuilder trailing: () -> Trailing, @ViewBuilder footer: () -> Footer
+    ) {
+        self.init(header: header, glyph: .symbol(symbol), color: color, title: title, detail: detail,
+                  detailLines: detailLines, trailing: trailing, footer: footer)
+    }
+
+    init(
+        header: String, glyph: LedgerGlyph, color: Color, title: String, detail: String, detailLines: Int = 1,
+        @ViewBuilder trailing: () -> Trailing, @ViewBuilder footer: () -> Footer
+    ) {
+        self.header = header
+        self.glyph = glyph
+        self.color = color
+        self.title = title
+        self.detail = detail
+        self.detailLines = detailLines
+        self.trailing = trailing()
+        self.footer = footer()
+    }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -486,9 +510,7 @@ struct LedgerLockBody<Trailing: View, Footer: View>: View {
                     .frame(width: 24, height: 24)
             }
             HStack(spacing: 14) {
-                Image(systemName: symbol)
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(color)
+                LedgerGlyphImage(glyph: glyph, color: color, size: 22, weight: .medium)
                     .frame(width: 48, height: 48)
                     .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.16)))
                     .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.30), lineWidth: 0.75))
@@ -514,19 +536,103 @@ struct LedgerLockBody<Trailing: View, Footer: View>: View {
 }
 
 struct LedgerGlassBadge: View {
-    let symbol: String
+    let glyph: LedgerGlyph
     let color: Color
-    var size: CGFloat = 38
-    var symbolSize: CGFloat = 17
+    let size: CGFloat
+    let symbolSize: CGFloat
+
+    init(symbol: String, color: Color, size: CGFloat = 38, symbolSize: CGFloat = 17) {
+        self.init(glyph: .symbol(symbol), color: color, size: size, symbolSize: symbolSize)
+    }
+
+    init(glyph: LedgerGlyph, color: Color, size: CGFloat = 38, symbolSize: CGFloat = 17) {
+        self.glyph = glyph
+        self.color = color
+        self.size = size
+        self.symbolSize = symbolSize
+    }
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: symbolSize, weight: .semibold))
-            .foregroundStyle(color)
+        LedgerGlyphImage(glyph: glyph, color: color, size: symbolSize)
             .frame(width: size, height: size)
             .background(Circle().fill(Color.white.opacity(0.16)))
             .overlay(Circle().strokeBorder(Color.white.opacity(0.30), lineWidth: 0.5))
             .accessibilityHidden(true)
+    }
+}
+
+/// What a glass tile or badge shows: an SF Symbol, or the app's mark.
+enum LedgerGlyph: Equatable {
+    case symbol(String)
+    case mark
+}
+
+/// A glyph at a symbol's point size. The mark is drawn that many points
+/// square, about the footprint of a symbol at that size.
+struct LedgerGlyphImage: View {
+    let glyph: LedgerGlyph
+    let color: Color
+    let size: CGFloat
+    var weight: Font.Weight = .semibold
+
+    var body: some View {
+        switch glyph {
+        case .symbol(let name):
+            Image(systemName: name)
+                .font(.system(size: size, weight: weight))
+                .foregroundStyle(color)
+        case .mark:
+            LedgerMark(accent: color)
+                .frame(width: size, height: size)
+        }
+    }
+}
+
+/// The app's mark, Supporting/AppIcon/ledger-mark.svg: a page with an L cut
+/// out of it and an accent corner fold. Drawn as shapes, so it stays crisp at
+/// Dynamic Island sizes without an asset catalog in the extension. The ink is
+/// the mark's dark-appearance colour, as Live Activities sit on black or glass.
+struct LedgerMark: View {
+    var ink: Color = LedgerGlass.markInk
+    var accent: Color = LedgerGlass.gold
+
+    var body: some View {
+        ZStack {
+            LedgerMarkShape(part: .page).fill(ink, style: FillStyle(eoFill: true))
+            LedgerMarkShape(part: .fold).fill(accent)
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .accessibilityHidden(true)
+    }
+}
+
+/// One path of the mark. The svg's 64-unit view box has the mark in its
+/// 40-unit middle (12...52); that square is fitted to the rect, centred.
+struct LedgerMarkShape: Shape {
+    enum Part { case page, fold }
+    let part: Part
+
+    func path(in rect: CGRect) -> Path {
+        let scale = min(rect.width, rect.height) / 40
+        let originX = rect.midX - 20 * scale
+        let originY = rect.midY - 20 * scale
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: originX + (x - 12) * scale, y: originY + (y - 12) * scale)
+        }
+        var path = Path()
+        switch part {
+        case .page:
+            // M12 12H36V28H52V52H12Z, less the L: M22 22H28V40H42V46H22Z.
+            path.addLines([point(12, 12), point(36, 12), point(36, 28), point(52, 28), point(52, 52), point(12, 52)])
+            path.closeSubpath()
+            path.addLines([point(22, 22), point(28, 22), point(28, 40), point(42, 40), point(42, 46), point(22, 46)])
+            path.closeSubpath()
+        case .fold:
+            // M40 12L52 24H40Z
+            path.addLines([point(40, 12), point(52, 24), point(40, 24)])
+            path.closeSubpath()
+        }
+        return path
     }
 }
 
