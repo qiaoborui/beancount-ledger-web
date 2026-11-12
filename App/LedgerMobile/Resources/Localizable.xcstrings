@@ -911,6 +911,16 @@
         }
       }
     },
+    "%lld 号" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Day %lld"
+          }
+        }
+      }
+    },
     "%lld 大类配置" : {
       "localizations" : {
         "en" : {
@@ -3084,6 +3094,26 @@
         }
       }
     },
+    "今天已经有记录（记的或导入的）就不再提醒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No reminder once today has entries, recorded or imported"
+          }
+        }
+      }
+    },
+    "今天的账记了吗？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Did you log today's spending?"
+          }
+        }
+      }
+    },
     "今年" : {
       "localizations" : {
         "en" : {
@@ -4894,6 +4924,16 @@
         }
       }
     },
+    "出报告前，把微信 / 支付宝账单导进来吧。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import your WeChat / Alipay bills before the report."
+          }
+        }
+      }
+    },
     "出租网约" : {
       "localizations" : {
         "en" : {
@@ -5414,6 +5454,26 @@
         }
       }
     },
+    "到点提醒「今天的账记了吗？」，可以直接点「记一笔」或「一句话记账」。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asks “Did you log today's spending?” with buttons for “Add an entry” and “Record in a sentence”."
+          }
+        }
+      }
+    },
+    "到点提醒把微信 / 支付宝账单导进来，点「导入账单」直接打开导入页。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reminds you to import WeChat / Alipay bills; “Import bills” opens the import page."
+          }
+        }
+      }
+    },
     "刷新对账状态" : {
       "localizations" : {
         "en" : {
@@ -5750,6 +5810,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Target"
+          }
+        }
+      }
+    },
+    "去系统设置打开，提醒才会出现。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn them on in Settings to get reminders."
           }
         }
       }
@@ -6384,6 +6454,76 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tell the ledger assistant which cards and wallets you use and where your money comes from and goes. It sets up accounts, categories and opening balances. Nothing is created until you confirm, and data stays on this device."
+          }
+        }
+      }
+    },
+    "周一" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mon"
+          }
+        }
+      }
+    },
+    "周三" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wed"
+          }
+        }
+      }
+    },
+    "周二" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tue"
+          }
+        }
+      }
+    },
+    "周五" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fri"
+          }
+        }
+      }
+    },
+    "周六" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sat"
+          }
+        }
+      }
+    },
+    "周四" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thu"
+          }
+        }
+      }
+    },
+    "周日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sun"
           }
         }
       }
@@ -7578,6 +7718,16 @@
         }
       }
     },
+    "导入账单提醒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bill import reminder"
+          }
+        }
+      }
+    },
     "导入账单时自动判断；自然语言草稿中点击「补充账户建议」时，Jev 根据支付信息和相关历史判断分类和付款或收款账户。结果填入预览，经你确认后在本机校验并保存。" : {
       "localizations" : {
         "en" : {
@@ -7886,6 +8036,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Expand a transaction to select it for tagging, or select all. Tag changes are saved after you review and confirm."
+          }
+        }
+      }
+    },
+    "工作日" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weekdays"
           }
         }
       }
@@ -10248,6 +10408,26 @@
         }
       }
     },
+    "把上个月的微信 / 支付宝账单导进来吧。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Time to import last month's WeChat / Alipay bills."
+          }
+        }
+      }
+    },
+    "把上周的微信 / 支付宝账单导进来吧。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Time to import last week's WeChat / Alipay bills."
+          }
+        }
+      }
+    },
     "投资" : {
       "localizations" : {
         "en" : {
@@ -10644,6 +10824,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Description: %@"
+          }
+        }
+      }
+    },
+    "提醒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reminders"
           }
         }
       }
@@ -12018,6 +12208,16 @@
         }
       }
     },
+    "时间" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Time"
+          }
+        }
+      }
+    },
     "时间范围" : {
       "localizations" : {
         "en" : {
@@ -12064,6 +12264,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Date: %@ (%lld transactions)"
+          }
+        }
+      }
+    },
+    "星期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Day of week"
           }
         }
       }
@@ -12204,6 +12414,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Smart statement import"
+          }
+        }
+      }
+    },
+    "智能跳过" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Smart skip"
           }
         }
       }
@@ -13364,6 +13584,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No payee"
+          }
+        }
+      }
+    },
+    "未开启" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off"
           }
         }
       }
@@ -15388,12 +15618,42 @@
         }
       }
     },
+    "每周" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weekly"
+          }
+        }
+      }
+    },
+    "每周 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weekly at %@"
+          }
+        }
+      }
+    },
     "每周收支" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Weekly income & expenses"
+          }
+        }
+      }
+    },
+    "每天" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every day"
           }
         }
       }
@@ -15454,6 +15714,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Daily income & expenses"
+          }
+        }
+      }
+    },
+    "每月" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monthly"
+          }
+        }
+      }
+    },
+    "每月 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monthly at %@"
           }
         }
       }
@@ -17668,12 +17948,32 @@
         }
       }
     },
+    "至少选一天，提醒才会出现。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick at least one day to get reminders."
+          }
+        }
+      }
+    },
     "节日馈赠" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Holiday gifts"
+          }
+        }
+      }
+    },
+    "花一分钟，把今天的收支记下来。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Take a minute to record today's income and spending."
           }
         }
       }
@@ -18008,6 +18308,16 @@
         }
       }
     },
+    "记账提醒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bookkeeping reminder"
+          }
+        }
+      }
+    },
     "记账日 %@" : {
       "localizations" : {
         "en" : {
@@ -18214,6 +18524,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "This sync folder belongs to a ledger whose entry file is %@"
+          }
+        }
+      }
+    },
+    "该导入账单了" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Time to import bills"
           }
         }
       }
@@ -21158,6 +21478,26 @@
         }
       }
     },
+    "通知已关闭" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notifications are off"
+          }
+        }
+      }
+    },
+    "通知已关闭，去系统设置打开" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notifications are off. Turn them on in Settings"
+          }
+        }
+      }
+    },
     "通行密钥域名不匹配：需要 %@，收到 %@" : {
       "localizations" : {
         "en" : {
@@ -21314,6 +21654,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rename query"
+          }
+        }
+      }
+    },
+    "重复" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Repeat"
           }
         }
       }
@@ -21844,6 +22194,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Projected about %@ for the month"
+          }
+        }
+      }
+    },
+    "频率" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frequency"
           }
         }
       }

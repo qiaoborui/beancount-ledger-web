@@ -289,6 +289,7 @@ final class LedgerSession: ObservableObject {
     private var localPresentation: LocalPresentation? {
         didSet {
             guard localPresentation != oldValue else { return }
+            presentedLocalRevisionID = localPresentation?.revisionID
             // A newer revision of the same ledger re-reads the same list, so the
             // rows stay until its first window replaces them. Another ledger, or
             // none, owns different rows.
@@ -1242,6 +1243,23 @@ final class LedgerSession: ObservableObject {
     var localRepository: LocalLedgerRepository? {
         guard isLocal else { return nil }
         return (try? activeRepository) as? LocalLedgerRepository
+    }
+
+    /// The local ledger revision on screen; nil for a remote or closed ledger.
+    /// It moves after every write, import and sync, so local reminders
+    /// reschedule when it does.
+    @Published private(set) var presentedLocalRevisionID: UUID?
+
+    /// Whether the open local ledger has a transaction dated `day`
+    /// (yyyy-MM-dd), entered in the app or imported. nil when it cannot tell:
+    /// a remote or locked ledger, or a read that failed. The read does not
+    /// change which revision writes are checked against.
+    func localHasTransactions(on day: String) async -> Bool? {
+        guard phase == .ready, let repository = localRepository,
+              let revisionID = try? await repository.workspace.currentRevision()?.id,
+              let page = try? await repository.candidatePage(start: day, end: LedgerWidgetDates.adding(1, to: day),
+                  limit: 1, expectedRevisionID: revisionID) else { return nil }
+        return !page.transactions.isEmpty
     }
 
     var localGitConfiguration: LocalGitConfiguration? {
