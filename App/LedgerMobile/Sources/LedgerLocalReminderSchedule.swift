@@ -208,8 +208,8 @@ enum LedgerReminderNotification {
 enum LedgerReminderPlanner {
     /// Leaves room under iOS's 64 for anything else the app schedules.
     static let maximumPending = 48
-    /// 记账提醒 are scheduled day by day this far ahead. Every foreground visit
-    /// and background sync extends it.
+    /// 记账提醒 are scheduled day by day this far ahead. Every foreground visit,
+    /// ledger write and background sync extends it.
     static let bookkeepingHorizonDays = 14
     /// How many upcoming 导入账单 occurrences are kept pending.
     static let importOccurrenceCount = 3
@@ -360,5 +360,45 @@ enum LedgerReminderPlanner {
 
     static func limited(_ occurrences: [LedgerReminderOccurrence]) -> [LedgerReminderOccurrence] {
         Array(occurrences.sorted { $0.fireDate < $1.fireDate }.prefix(maximumPending))
+    }
+}
+
+// Decoding tolerates missing fields, so settings saved by an older build keep
+// their values when a field is added instead of resetting every reminder.
+extension LedgerBookkeepingReminderSettings {
+    private enum CodingKeys: String, CodingKey { case isEnabled, time, repeats, skipsRecordedDays }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let fallback = Self()
+        self.init(isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? fallback.isEnabled,
+                  time: try container.decodeIfPresent(LedgerReminderTime.self, forKey: .time) ?? fallback.time,
+                  repeats: try container.decodeIfPresent(LedgerReminderRepeat.self, forKey: .repeats) ?? fallback.repeats,
+                  skipsRecordedDays: try container.decodeIfPresent(Bool.self, forKey: .skipsRecordedDays)
+                      ?? fallback.skipsRecordedDays)
+    }
+}
+
+extension LedgerImportReminderSettings {
+    private enum CodingKeys: String, CodingKey { case isEnabled, cadence, time }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let fallback = Self()
+        self.init(isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? fallback.isEnabled,
+                  cadence: try container.decodeIfPresent(LedgerImportReminderCadence.self, forKey: .cadence) ?? fallback.cadence,
+                  time: try container.decodeIfPresent(LedgerReminderTime.self, forKey: .time) ?? fallback.time)
+    }
+}
+
+extension LedgerReminderSettings {
+    private enum CodingKeys: String, CodingKey { case bookkeeping, imports }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(bookkeeping: try container.decodeIfPresent(LedgerBookkeepingReminderSettings.self, forKey: .bookkeeping)
+                      ?? LedgerBookkeepingReminderSettings(),
+                  imports: try container.decodeIfPresent(LedgerImportReminderSettings.self, forKey: .imports)
+                      ?? LedgerImportReminderSettings())
     }
 }
