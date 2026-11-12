@@ -60,6 +60,7 @@ final class LedgerLocalReminders: ObservableObject {
     private var running: Task<Void, Never>?
     private var rerun = false
     private let defaults: UserDefaults
+    private static let lastRecordedDayKey = "ledger.reminders.last-recorded-day"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -190,7 +191,16 @@ final class LedgerLocalReminders: ObservableObject {
         let current = settings
         var recordedToday = false
         if current.bookkeeping.isEnabled, current.bookkeeping.skipsRecordedDays {
-            recordedToday = await session.localHasTransactions(on: LedgerDateRange.today(now: now)) ?? false
+            let today = LedgerDateRange.today(now: now)
+            // A locked ledger cannot be read: fall back to the last day a read
+            // found recorded, so a reschedule before unlocking does not bring
+            // back a reminder that was already skipped.
+            if let found = await session.localHasTransactions(on: today) {
+                recordedToday = found
+                if found { defaults.set(today, forKey: Self.lastRecordedDayKey) }
+            } else {
+                recordedToday = defaults.string(forKey: Self.lastRecordedDayKey) == today
+            }
         }
         let context = LedgerReminderContext(now: now, calendar: calendar, settings: current, session: session)
         var contributions: [LedgerReminderContribution] = []

@@ -92,9 +92,9 @@ final class LedgerLocalReminderScheduleTests: XCTestCase {
             after: date(2028, 2, 1), count: 1, calendar: calendar)
         XCTAssertEqual(leap, [date(2028, 2, 29, 9)])
 
-        let laterToday = LedgerReminderPlanner.monthlyDates(day: .day(12), time: .init(hour: 9, minute: 0),
+        let passedToday = LedgerReminderPlanner.monthlyDates(day: .day(12), time: .init(hour: 9, minute: 0),
             after: date(2026, 11, 12, 10), count: 1, calendar: calendar)
-        XCTAssertEqual(laterToday, [date(2026, 12, 12, 9)])
+        XCTAssertEqual(passedToday, [date(2026, 12, 12, 9)])
 
         XCTAssertEqual(LedgerReminderMonthDay.day(31).resolved(daysInMonth: 31), 28)
     }
@@ -177,5 +177,14 @@ final class LedgerLocalReminderScheduleTests: XCTestCase {
         settings.imports = .init(isEnabled: true, cadence: .monthly(.last), time: .init(hour: 8, minute: 5))
         settings.save(to: defaults)
         XCTAssertEqual(LedgerReminderSettings.load(from: defaults), settings)
+
+        // A field missing from an older save keeps its default; the rest survive.
+        defaults.set(Data(#"{"bookkeeping":{"isEnabled":true,"time":{"hour":7,"minute":15}}}"#.utf8),
+                     forKey: LedgerReminderSettings.defaultsKey)
+        let old = LedgerReminderSettings.load(from: defaults)
+        XCTAssertTrue(old.bookkeeping.isEnabled)
+        XCTAssertEqual(old.bookkeeping.time, LedgerReminderTime(hour: 7, minute: 15))
+        XCTAssertTrue(old.bookkeeping.skipsRecordedDays)
+        XCTAssertEqual(old.imports, LedgerImportReminderSettings())
     }
 }

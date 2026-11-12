@@ -20,7 +20,12 @@ struct LedgerMobileApp: App {
         let session = LedgerSession.appSession()
         _session = StateObject(wrappedValue: session)
         LocalLedgerBackgroundSyncService.shared.configure { [weak session] in
-            await session?.performBackgroundLocalSync() ?? false
+            let synced = await session?.performBackgroundLocalSync() ?? false
+            #if os(iOS)
+            // Extends the reminders' two-week horizon without a visit.
+            LedgerLocalReminders.shared.reschedule()
+            #endif
+            return synced
         }
         LedgerShortcutRecordingHost.shared.configure { [weak session] id, catalog in
             await session?.shortcutRecordCommitted(ledgerID: id, catalog: catalog)
