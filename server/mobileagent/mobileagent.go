@@ -61,6 +61,10 @@ type turnRequestV1 struct {
 	// list gave it. Zero keeps the catalog's window, or for a model nobody
 	// describes a common one.
 	ContextWindow int `json:"contextWindow,omitempty"`
+	// MaxOutputTokens is the reply limit the provider's model list gave. It
+	// replaces the common limit of a model nobody describes, a custom
+	// endpoint's included; a catalog model keeps its own. Zero keeps it.
+	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
 	// Thinking is the reasoning effort: off, minimal, low, medium, high,
 	// xhigh or max. It is clamped to the nearest level the model supports;
 	// empty means off.
@@ -120,6 +124,35 @@ func thinkingLevel(model *ai.Model, requested string, assumed bool) (ai.ModelThi
 	return ai.ClampThinkingLevel(model, level), nil
 }
 
+// withListedLimits applies the limits the provider's model list gave: the
+// context window always, and the reply limit only to a model nobody
+// describes, whose own is a common guess; that one never exceeds the
+// window. It returns a copy, since the catalog's model is shared by every
+// turn.
+func withListedLimits(model *ai.Model, assumed bool, contextWindow, maxOutputTokens int) (*ai.Model, error) {
+	if contextWindow < 0 {
+		return nil, errors.New("contextWindow must not be negative")
+	}
+	if maxOutputTokens < 0 {
+		return nil, errors.New("maxOutputTokens must not be negative")
+	}
+	output := assumed && maxOutputTokens > 0
+	if contextWindow == 0 && !output {
+		return model, nil
+	}
+	listed := *model
+	if contextWindow > 0 {
+		listed.Capabilities.ContextWindow = contextWindow
+	}
+	if output {
+		listed.Capabilities.MaxOutputTokens = maxOutputTokens
+		if window := listed.Capabilities.ContextWindow; window > 0 && maxOutputTokens > window {
+			listed.Capabilities.MaxOutputTokens = window
+		}
+	}
+	return &listed, nil
+}
+
 // customProvider is the catalog id of a user-supplied endpoint.
 const customProvider = "custom"
 
@@ -147,7 +180,7 @@ func customModel(id string, endpoint *customEndpointV1) (*ai.Model, error) {
 	}
 	return &ai.Model{ID: id, DisplayName: id,
 		ProviderMeta: ai.ProviderMetadata{ProviderID: customProvider, API: ai.API(endpoint.API), BaseURL: baseURL},
-		Capabilities: ai.ModelCapabilities{SupportsToolUse: true, ContextWindow: 128000, MaxOutputTokens: 8192}}, nil
+		Capabilities: ai.ModelCapabilities{SupportsToolUse: true, ContextWindow: assumedContextWindow, MaxOutputTokens: 8192}}, nil
 }
 
 type historyMessageV1 struct {
@@ -440,14 +473,8 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	if err != nil {
 		return files, err
 	}
-	if request.ContextWindow < 0 {
-		return files, errors.New("contextWindow must not be negative")
-	}
-	if request.ContextWindow > 0 {
-		// A copy: the catalog's model is shared by every turn.
-		listed := *model
-		listed.Capabilities.ContextWindow = request.ContextWindow
-		model = &listed
+	if model, err = withListedLimits(model, assumed, request.ContextWindow, request.MaxOutputTokens); err != nil {
+		return files, err
 	}
 	thinking, err := thinkingLevel(model, request.Thinking, assumed)
 	if err != nil {

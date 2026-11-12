@@ -190,3 +190,81 @@ func TestListedCatalogModelFallsBackToTheCatalogWindow(t *testing.T) {
 		t.Fatalf("response = %+v, catalog window %d", response, builtin.Capabilities.ContextWindow)
 	}
 }
+
+// gatewayModelList is the shape of an OpenAI-compatible gateway that names
+// its models provider/model and says each one's limits (issue #663).
+const gatewayModelList = `{"object":"list","data":[` +
+	`{"id":"antigravity/gemini-3.8-flash-tiered","object":"model","owned_by":"antigravity","context_length":1048576,` +
+	`"context_window":1048576,"max_input_tokens":1048576,"max_output_tokens":65536,"reasoning_levels":["low","medium","high"],` +
+	`"supported_parameters":["tools","tool_choice","reasoning"]},` +
+	`{"id":"auto/deepseek-flash","object":"model"}]}`
+
+func TestListModelsReadsAGatewaysLimits(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(gatewayModelList)) }))
+	defer server.Close()
+	response := listFor(t, map[string]any{"version": 1, "provider": "custom", "apiKey": "k",
+		"custom": map[string]string{"api": "openai-completions", "baseURL": server.URL + "/v1"}})
+	if !response.OK || len(response.Models) != 2 {
+		t.Fatalf("response = %+v", response)
+	}
+	gemini, auto := response.Models[0], response.Models[1]
+	if gemini.ID != "antigravity/gemini-3.8-flash-tiered" || gemini.ContextWindow != 1_048_576 || gemini.MaxOutputTokens != 65_536 || gemini.Known {
+		t.Fatalf("gemini = %+v", gemini)
+	}
+	if auto.ID != "auto/deepseek-flash" || auto.ContextWindow != 0 || auto.MaxOutputTokens != 0 {
+		t.Fatalf("a model without limits = %+v", auto)
+	}
+	raw, _ := json.Marshal(gemini)
+	var wire map[string]any
+	if json.Unmarshal(raw, &wire) != nil || wire["contextWindow"] != float64(1_048_576) || wire["maxOutputTokens"] != float64(65_536) {
+		t.Fatalf("wire = %s", raw)
+	}
+}
+
+func TestListModelsReadsEachProvidersReplyLimit(t *testing.T) {
+	outputs := func(provider, body string, custom map[string]string) map[string]int {
+		request := map[string]any{"version": 1, "provider": provider, "apiKey": "k"}
+		if custom != nil {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) }))
+			t.Cleanup(server.Close)
+			custom["baseURL"] = server.URL + "/v1"
+			request["custom"] = custom
+		} else {
+			serveList(t, provider, body)
+		}
+		response := listFor(t, request)
+		if !response.OK {
+			t.Fatalf("%s: %+v", provider, response)
+		}
+		got := map[string]int{}
+		for _, model := range response.Models {
+			got[model.ID] = model.MaxOutputTokens
+		}
+		return got
+	}
+	if got := outputs("openrouter", `{"data":[{"id":"a/x","supported_parameters":["tools"],"top_provider":{"context_length":262144,"max_completion_tokens":32768}}]}`, nil); got["a/x"] != 32768 {
+		t.Fatalf("openrouter = %v", got)
+	}
+	if got := outputs("google", `{"models":[{"name":"models/gemini-next","supportedGenerationMethods":["generateContent"],"inputTokenLimit":1048576,"outputTokenLimit":65536}]}`, nil); got["gemini-next"] != 65536 {
+		t.Fatalf("gemini = %v", got)
+	}
+	if got := outputs("custom", `{"data":[{"id":"c","max_completion_tokens":16384},{"id":"d","max_output_tokens":"lots"}]}`,
+		map[string]string{"api": "openai-completions"}); got["c"] != 16384 || got["d"] != 0 {
+		t.Fatalf("custom = %v", got)
+	}
+}
+
+// One entry a gateway shapes oddly is skipped; the rest of the list, and
+// their windows, still arrive.
+func TestListModelsSkipsAnEntryItCannotRead(t *testing.T) {
+	got := listedWindows(t, "custom", `{"data":[{"id":"bad","top_provider":"none"},{"id":7},"text",`+
+		`{"id":"good/model","context_length":1048576},{"id":"named","name":{"en":"x"}}]}`,
+		map[string]string{"api": "openai-completions"})
+	if len(got) != 1 || got["good/model"] != 1_048_576 {
+		t.Fatalf("custom = %v", got)
+	}
+	got = listedWindows(t, "google", `{"models":[{"name":3},{"name":"models/gemini-next","inputTokenLimit":1048576}]}`, nil)
+	if len(got) != 1 || got["gemini-next"] != 1_048_576 {
+		t.Fatalf("gemini = %v", got)
+	}
+}

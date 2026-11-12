@@ -418,3 +418,62 @@ func TestStoppedMessageKeepsTheContextTokens(t *testing.T) {
 		t.Fatalf("usage = %+v", usage)
 	}
 }
+
+// A custom endpoint's model takes the window and reply limit its list gave
+// (issue #663); without them it keeps the common ones, and a catalog model
+// keeps its own reply limit.
+func TestCustomEndpointUsesTheListedLimits(t *testing.T) {
+	var seen ai.ModelCapabilities
+	previousStream := streamFn
+	streamFn = func(ctx context.Context, model *ai.Model, transcript ai.TranscriptContext, options ai.StreamOptions) (*ai.AssistantMessageEventStream, error) {
+		seen = model.Capabilities
+		provider := ai.NewFauxProvider(ai.FauxConfig{})
+		provider.SetResponses([]ai.FauxResponseStep{ai.FauxStaticStep(ai.FauxResponse{Content: []ai.FauxContentBlock{ai.FauxText("你好")}})})
+		return provider.Stream(ctx, transcript, options)
+	}
+	t.Cleanup(func() { streamFn = previousStream })
+	custom := map[string]string{"api": "openai-completions", "baseURL": "https://gateway.example/v1"}
+	turn := func(extra map[string]any) turnResponseV1 {
+		request := map[string]any{"version": 1, "workspaceRoot": committedWorkspace(t), "provider": "custom",
+			"model": "antigravity/gemini-3.8-flash-tiered", "custom": custom, "apiKey": "test", "message": "hi"}
+		for key, value := range extra {
+			request[key] = value
+		}
+		return runTurnFor(t, request)
+	}
+
+	response := turn(map[string]any{"contextWindow": 1_048_576, "maxOutputTokens": 65_536})
+	if !response.OK || response.Usage == nil || response.Usage.ContextWindow != 1_048_576 {
+		t.Fatalf("listed turn = %+v", response)
+	}
+	if seen.ContextWindow != 1_048_576 || seen.MaxOutputTokens != 65_536 {
+		t.Fatalf("model capabilities = %+v", seen)
+	}
+
+	response = turn(nil)
+	if !response.OK || response.Usage == nil || response.Usage.ContextWindow != assumedContextWindow || seen.MaxOutputTokens != 8192 {
+		t.Fatalf("unlisted turn = %+v, capabilities %+v", response, seen)
+	}
+
+	// A reply limit beyond the window is cut to it.
+	if response = turn(map[string]any{"contextWindow": 32_768, "maxOutputTokens": 65_536}); !response.OK || seen.MaxOutputTokens != 32_768 {
+		t.Fatalf("clamped turn = %+v, capabilities %+v", response, seen)
+	}
+	if response = turn(map[string]any{"maxOutputTokens": -1}); response.OK {
+		t.Fatalf("negative reply limit accepted: %+v", response)
+	}
+
+	models := ai.GetBuiltinModels("anthropic")
+	if len(models) == 0 {
+		return
+	}
+	builtin := models[0]
+	previousResolve := resolveModel
+	resolveModel = func(string, string) *ai.Model { return builtin }
+	t.Cleanup(func() { resolveModel = previousResolve })
+	response = runTurnFor(t, map[string]any{"version": 1, "workspaceRoot": committedWorkspace(t),
+		"provider": "anthropic", "model": builtin.ID, "apiKey": "test", "message": "hi", "maxOutputTokens": 1})
+	if !response.OK || seen.MaxOutputTokens != builtin.Capabilities.MaxOutputTokens || seen.ContextWindow != builtin.Capabilities.ContextWindow {
+		t.Fatalf("catalog turn = %+v, capabilities %+v, catalog %+v", response, seen, builtin.Capabilities)
+	}
+}
