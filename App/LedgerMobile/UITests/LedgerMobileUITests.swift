@@ -602,6 +602,14 @@ final class LedgerMobileUITests: XCTestCase {
                 captureName: "11-investments"
             )
 
+            // 更多 pushes its overflow destinations through one navigation item, and
+            // after it pops the next push is dropped until the page is rebuilt; also
+            // give 查询 the list before the valuation-currency reload lands.
+            reopenMore()
+            openBQLWorkbench()
+            exerciseBQL(capturePrefix: "13")
+
+            reopenMore()
             let currencyEntry = app.buttons["more-currencies"]
             for _ in 0..<3 where !currencyEntry.isHittable {
                 app.swipeUp()
@@ -609,14 +617,6 @@ final class LedgerMobileUITests: XCTestCase {
             waitUntilHittable(currencyEntry)
             currencyEntry.tap()
             exerciseCurrencies(capturePrefix: "12")
-
-            let queryEntry = app.buttons["more-query"]
-            for _ in 0..<3 where !queryEntry.isHittable {
-                app.swipeUp()
-            }
-            waitUntilHittable(queryEntry)
-            queryEntry.tap()
-            exerciseBQL(capturePrefix: "13")
 
             let settingsEntry = app.buttons["more-settings"]
             for _ in 0..<3 where !settingsEntry.isHittable {
@@ -1289,13 +1289,10 @@ final class LedgerMobileUITests: XCTestCase {
             app.buttons["sidebar-query"].tap()
         } else {
             app.buttons["返回上一页"].tap()
-            let entry = app.buttons["more-query"]
-            for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
-            waitUntilHittable(entry)
-            entry.tap()
+            openBQLWorkbench()
         }
         let workbench = app.scrollViews["bql-workbench"]
-        XCTAssertTrue(workbench.waitForExistence(timeout: 4))
+        XCTAssertTrue(workbench.waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["bql-run-all"].tap()
         let result = app.descendants(matching: .any)["bql-result-1"]
         for _ in 0..<5 where !result.exists { workbench.swipeUp() }
@@ -1421,8 +1418,39 @@ final class LedgerMobileUITests: XCTestCase {
         waitUntilHittable(app.buttons["more-analysis-assets"])
     }
 
+    /// Re-enters 更多 from another tab.
+    ///
+    /// The page routes every overflow destination through one navigation item
+    /// (`.navigationDestination(item: $overflowDestination)`), and after one of
+    /// them pops the next push is dropped until the page is rebuilt. Switching
+    /// tabs rebuilds it; see the PR for the app-side bug this works around.
+    private func reopenMore() {
+        guard !isPad else { return }
+        app.compactTab("概览").tap()
+        app.compactTab("更多").tap()
+        XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    /// Opens 查询 from the compact 更多 list. The row is the last one, so the
+    /// floating tab bar reaches over its lower half, and the pop back from the
+    /// previous page can still swallow a tap: aim at the top of the row and retry
+    /// until the workbench is on screen.
+    private func openBQLWorkbench() {
+        let entry = app.buttons["more-query"]
+        for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+        waitUntilHittable(entry)
+        let workbench = app.scrollViews["bql-workbench"]
+        for _ in 0..<3 where !workbench.exists {
+            guard entry.exists else { break }
+            entry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()
+            _ = workbench.waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(workbench.waitForExistence(timeout: 10), app.debugDescription)
+    }
+
     private func exerciseBQL(capturePrefix: String) {
-        XCTAssertTrue(app.scrollViews["bql-workbench"].waitForExistence(timeout: 3))
+        // The workbench is a page push from 更多; allow the list to settle under load.
+        XCTAssertTrue(app.scrollViews["bql-workbench"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.textViews["bql-editor"].exists)
         XCTAssertTrue(app.buttons["bql-run-all"].exists)
         capture("\(capturePrefix)-bql-editor")
