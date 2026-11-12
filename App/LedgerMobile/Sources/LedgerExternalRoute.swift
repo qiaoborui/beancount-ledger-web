@@ -11,6 +11,8 @@ enum LedgerExternalRoute: Equatable, Sendable {
     case record
     /// 用一句话记账, the natural-language entry, from a widget or quick action.
     case sentence
+    /// 周报 / 月报, over the current tab: one period, or the latest when nil.
+    case report(LedgerReportRouteTarget?)
 
     var destination: LedgerDestination {
         switch self {
@@ -20,7 +22,14 @@ enum LedgerExternalRoute: Equatable, Sendable {
         case .search: .search
         case .agent: .agent
         case .record, .sentence: .transactions
+        case .report: .overview
         }
+    }
+
+    /// The report opens as a sheet over whichever tab is showing.
+    var opensReport: Bool {
+        if case .report = self { return true }
+        return false
     }
 
     /// 账本助手 is a full-screen cover over the current tab rather than a tab of its own.
@@ -73,6 +82,21 @@ enum LedgerExternalRoute: Equatable, Sendable {
         case "search":
             guard Set(query.keys).isSubset(of: ["q"]), (query["q"] ?? "").count <= 500 else { return nil }
             return .search(query["q"] ?? "")
+        case "report":
+            guard !query.isEmpty else { return .report(nil) }
+            guard let kind = query["period"].flatMap(LedgerReportPeriodKind.init(rawValue:)),
+                  let start = query["start"], let startDate = date(start) else { return nil }
+            switch kind {
+            case .week, .month:
+                guard Set(query.keys) == ["period", "start"] else { return nil }
+                return .report(LedgerReportRouteTarget(kind: kind, start: start))
+            case .custom:
+                // At most about ten years, so the page never walks an unbounded range.
+                guard Set(query.keys) == ["period", "start", "end"], let end = query["end"],
+                      let endDate = date(end), startDate <= endDate,
+                      endDate.timeIntervalSince(startDate) <= 3_660 * 86_400 else { return nil }
+                return .report(LedgerReportRouteTarget(kind: .custom, start: start, end: end))
+            }
         default: return nil
         }
     }
@@ -98,6 +122,13 @@ struct LedgerQuickEntryRequest: Identifiable, Equatable, Sendable {
     enum Kind: Equatable, Sendable { case record, sentence }
     let id = UUID()
     let kind: Kind
+}
+
+/// A request to show 周报 / 月报 over the current tab, from a notification,
+/// a link or 更多. `target` is nil for the latest weekly report.
+struct LedgerReportRequest: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let target: LedgerReportRouteTarget?
 }
 
 struct LedgerExternalRouteRequest: Identifiable, Equatable, Sendable {

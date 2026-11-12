@@ -3607,6 +3607,8 @@ final class LedgerSession: ObservableObject {
     /// An entry form a widget or home screen quick action asked for, shown
     /// over whichever page is open once the ledger is ready.
     @Published var quickEntry: LedgerQuickEntryRequest?
+    /// 周报 / 月报 a notification or link asked for, shown over the current tab.
+    @Published var reportRequest: LedgerReportRequest?
     func takePendingAgentQuestion() -> String? {
         defer { pendingAgentQuestion = nil }
         return pendingAgentQuestion?.text
@@ -3665,6 +3667,13 @@ final class LedgerSession: ObservableObject {
         case let .agent(question):
             pendingAgentQuestion = LedgerAgentPendingQuestion(text: question)
             agentPresented = true
+        case let .report(target):
+            // Reports read the on-device ledger only.
+            if isLocal {
+                reportRequest = LedgerReportRequest(target: target)
+            } else {
+                errorMessage = String(localized: "周报 / 月报仅支持本机账本")
+            }
         case .record, .sentence:
             // Both entry forms write through the local repository only.
             if isLocal {
@@ -3688,6 +3697,12 @@ final class LedgerSession: ObservableObject {
             return
         }
         agentPresented = false
+        // 周报 / 月报 is a sheet over the current tab, so the tab stays.
+        if let route, route.opensReport {
+            pendingWidgetExpenseDay = nil
+            pendingExternalRoute = LedgerExternalRouteRequest(route: route)
+            return
+        }
         if url.host?.lowercased() == "transactions",
            let day = LedgerWidgetLink.expenseDay(from: url) {
             pendingExternalRoute = nil
