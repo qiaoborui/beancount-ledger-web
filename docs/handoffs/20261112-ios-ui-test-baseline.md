@@ -1,8 +1,8 @@
 # iOS UI 测试基线修复（PR #674，issue #673）
 
 - **任务 ID**：`20261112-ios-ui-test-baseline`
-- **状态**：completed（本机全量 54 绿 + 截图类 24 绿；已推送，CI Gate 绿，PR 可合并）
-- **最后更新**：2026-11-12 23:55 +0800
+- **状态**：completed（本机全量 54 绿 + 截图类 24 绿 + self-hosted runner 全量 54 绿；PR 可合并）
+- **最后更新**：2026-11-13 03:40 +0800
 - **分支**：`codex/issue-673-fix-ui-tests`
 - **PR**：https://github.com/qiaoborui/beancount-ledger-web/pull/674
 
@@ -26,9 +26,19 @@
 
 ## 验证（本机 iPhone 18 Pro / iOS 27.2，Xcode 27.2）
 
-- 全量不含截图类：**54 绿**（最终确认跑，`/private/tmp/blw-673-full3.out`）
+- 本机全量不含截图类：**54 绿**
+- self-hosted runner（`gh workflow run ci.yml --ref <branch> -f ui_tests=true`，run 43277430088）：**54 绿**，`Gate` 绿
 - 截图类两个类：24 绿
 - `bash -n .github/scripts/ios-app-check.sh`、`python3 .github/scripts/test_plan_components.py`（9 OK）
+
+## 远端 CI 上的额外修复（远端第一次跑 21/54，第二次 53/54）
+
+runner 的模拟器是复用的，App 把底栏配置存在 UserDefaults 里：上一次跑留下的自定义底栏会让下一次跑少「概览」tab，`testCompactTabBar...` 失败时又继续留下自定义底栏，于是整串测试崩。修法：
+
+- `ios-app-check.sh ui-tests` 跑前 uninstall App，每次从默认布局开始；
+- 底栏配置测试在**开始时**归一化到默认 tab（结束时恢复要再走一遍「更多 → 设置」，会撞上本文记录的 App bug，所以放在开始处）；
+- `openDestination` 确认 tab 真被选中并重试；`typeInto` 等键盘起来再输入；`openMoreRow` 先等行出现；
+- UI test job 保留 xcodebuild 全量日志并在失败时打印失败点前 40 行步骤。
 
 ## 剩余步骤（可选，不阻塞合并）
 
