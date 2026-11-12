@@ -741,9 +741,25 @@ final class LedgerMobileUITests: XCTestCase {
         let configurationEntry = app.buttons["settings-compact-tabs"]
         XCTAssertTrue(configurationEntry.waitForExistence(timeout: 3))
         capture("compact-tabs-01-settings")
-        openCompactTabConfiguration()
+        configurationEntry.tap()
 
+        XCTAssertTrue(app.navigationBars["底部标签栏"].waitForExistence(timeout: 5))
+        // A previous session may have left a customised bar in UserDefaults: start
+        // from the default tabs, which is also what the rest of the suite expects.
+        if !app.buttons["compact-tab-remove-overview"].exists {
+            let reset = app.buttons["compact-tab-reset"]
+            let staleList = app.collectionViews["compact-tab-list"]
+            for _ in 0..<4 where !reset.isHittable { staleList.swipeUp() }
+            waitUntilHittable(reset)
+            reset.tap()
+            app.buttons["compact-tab-save"].tap()
+            let configurationEntryAgain = app.buttons["settings-compact-tabs"]
+            waitUntilHittable(configurationEntryAgain)
+            configurationEntryAgain.tap()
+            XCTAssertTrue(app.navigationBars["底部标签栏"].waitForExistence(timeout: 5))
+        }
         XCTAssertTrue(app.staticTexts["已显示 3/3"].exists)
+        XCTAssertTrue(app.buttons["compact-tab-remove-overview"].exists)
         capture("compact-tabs-02-configuration")
 
         let configurationList = app.collectionViews["compact-tab-list"]
@@ -806,17 +822,6 @@ final class LedgerMobileUITests: XCTestCase {
         app.buttons["返回上一页"].tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 3))
 
-        // The bar lives in UserDefaults, so leaving it customised changes every
-        // later launch: put the default tabs back before finishing.
-        openCompactTabConfiguration()
-        let reset = app.buttons["compact-tab-reset"]
-        let configurationListAgain = app.collectionViews["compact-tab-list"]
-        for _ in 0..<4 where !reset.isHittable { configurationListAgain.swipeUp() }
-        waitUntilHittable(reset)
-        reset.tap()
-        XCTAssertTrue(app.staticTexts["已显示 3/3"].waitForExistence(timeout: 5), app.debugDescription)
-        app.buttons["compact-tab-save"].tap()
-        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 10), app.debugDescription)
     }
 
     func testImportClassificationReviewsFieldsIndependentlyAndRestoresFullList() throws {
@@ -1437,7 +1442,10 @@ final class LedgerMobileUITests: XCTestCase {
     /// tabs rebuilds it; see the PR for the app-side bug this works around.
     private func reopenMore() {
         guard !isPad else { return }
-        app.compactTab("概览").tap()
+        // 概览 is a tab only while the bar keeps its default tabs; the tab-bar test
+        // leaves its own set behind, so fall back to another tab.
+        let other = app.tabBars.buttons["概览"].exists ? "概览" : "账户"
+        app.compactTab(other).tap()
         app.compactTab("更多").tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5), app.debugDescription)
     }
@@ -1519,32 +1527,6 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(fast.waitForExistence(timeout: 3), app.debugDescription)
         fast.buttons["高级"].tap()
         XCTAssertTrue(advanced.waitForExistence(timeout: 3), app.debugDescription)
-    }
-
-    /// Opens 设置 → 底部标签栏 from the compact 更多 list.
-    ///
-    /// A tap on the 更多 list is sometimes dropped and leaves the row reported as
-    /// present but not hittable, so this verifies each step and retries instead of
-    /// trusting one tap.
-    private func openCompactTabConfiguration() {
-        let entry = app.buttons["settings-compact-tabs"]
-        for _ in 0..<4 where !entry.isHittable || !app.navigationBars["底部标签栏"].exists {
-            if !app.collectionViews["more-list"].exists, app.buttons["返回上一页"].exists {
-                app.buttons["返回上一页"].tap()
-            }
-            if app.collectionViews["more-list"].waitForExistence(timeout: 2) {
-                let settings = app.buttons["more-settings"]
-                for _ in 0..<3 where !settings.isHittable { app.swipeDown() }
-                waitUntilHittable(settings)
-                settings.tap()
-            }
-            if entry.waitForExistence(timeout: 3) {
-                for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
-                if entry.isHittable { entry.tap() }
-            }
-            _ = app.navigationBars["底部标签栏"].waitForExistence(timeout: 3)
-        }
-        XCTAssertTrue(app.navigationBars["底部标签栏"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
     /// Opens a row of the compact 更多 list. The list is rebuilt when the tab is
