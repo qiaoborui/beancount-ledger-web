@@ -207,6 +207,7 @@ final class LedgerAgentAssistTests: XCTestCase {
         XCTAssertNil(conversation.generatedTitle)
     }
 
+    @MainActor
     private func waitForTitleCalls(_ calls: TitleCalls, atLeast expected: Int) async throws {
         for _ in 0..<400 {
             if await calls.count >= expected { return }
