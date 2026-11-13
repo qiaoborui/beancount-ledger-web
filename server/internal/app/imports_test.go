@@ -2697,3 +2697,29 @@ func (s fakeLedgerReadPorts) IncomeStatement(string, string, bool, ...string) (I
 func (s fakeLedgerReadPorts) BQL(context.Context, string, string) (BQLResult, error) {
 	return BQLResult{}, errors.New("unused fake ledger read service method")
 }
+
+func TestImportDocumentRelPathNamesTheArchiveForTheImportPage(t *testing.T) {
+	if got, want := ImportDocumentRelPath("2026-11-01", "2026-11-13", "alipay", "支付宝交易明细.csv", "abc123abc123"),
+		"transactions/2026/documents/imports/2026-11-01_2026-11-13-alipay-abc123abc123.csv"; got != want {
+		t.Fatalf("archive path = %q, want %q", got, want)
+	}
+	// An account statement's extension is kept, and a wechat statement with no
+	// extension falls back to the provider's usual format.
+	if got, want := ImportDocumentRelPath("2026-11-12", "2026-11-13", "hsbchk-credit", "2026-11-12_2026-11-13-hsbc-credit-card.csv", ""),
+		"transactions/2026/documents/imports/2026-11-12_2026-11-13-hsbchk-credit.csv"; got != want {
+		t.Fatalf("csv archive path = %q, want %q", got, want)
+	}
+	if got, want := ImportDocumentRelPath("2026-11-05", "2026-11-07", "wechat", "微信支付账单", ""),
+		"transactions/2026/documents/imports/2026-11-05_2026-11-07-wechat.xlsx"; got != want {
+		t.Fatalf("wechat archive path = %q, want %q", got, want)
+	}
+	if got := ImportDocumentRelPath("2026", "2026-11-13", "alipay", "a.csv", ""); got != "" {
+		t.Fatalf("a start date without a year named %q", got)
+	}
+	// The page parses the channel and coverage back out of that name.
+	doc := importDocumentInfo("transactions/2026/documents/imports/2026-11-01_2026-11-13-alipay-abc123abc123.csv",
+		"2026", "2026-11-01_2026-11-13-alipay-abc123abc123.csv", 10, time.Now())
+	if doc.Provider != "alipay" || doc.DateStart != "2026-11-01" || doc.DateEnd != "2026-11-13" {
+		t.Fatalf("the import page reads %+v", doc)
+	}
+}

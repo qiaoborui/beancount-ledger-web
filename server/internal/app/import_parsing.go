@@ -503,7 +503,23 @@ func importOutputPath(cfg Config, dateStart, dateEnd, provider, suffix string) s
 }
 
 func importDocumentPath(cfg Config, dateStart, dateEnd, provider, originalFilename, suffix string) string {
-	safeSuffix := safeSuffix(suffix)
+	rel := ImportDocumentRelPath(dateStart, dateEnd, provider, originalFilename, suffix)
+	if rel == "" {
+		return filepath.Join(transactionsDir(cfg), "invalid")
+	}
+	return filepath.Join(cfg.LedgerRoot, filepath.FromSlash(rel))
+}
+
+// ImportDocumentRelPath is where an imported statement's original is archived,
+// relative to the ledger root: transactions/<year>/documents/imports/
+// <start>_<end>-<provider>[-<suffix>]<ext>. The 导入 page tells a channel by
+// parsing that name, so the assistant's archive tool writes the same path the
+// import flow does. It returns "" when the start date cannot name a year.
+func ImportDocumentRelPath(dateStart, dateEnd, provider, originalFilename, suffix string) string {
+	if len(dateStart) < 10 {
+		return ""
+	}
+	safe := safeSuffix(suffix)
 	ext := strings.ToLower(filepath.Ext(originalFilename))
 	if ext == "" {
 		switch provider {
@@ -516,11 +532,14 @@ func importDocumentPath(cfg Config, dateStart, dateEnd, provider, originalFilena
 		}
 	}
 	base := fmt.Sprintf("%s_%s-%s", dateStart, dateEnd, provider)
-	if safeSuffix != "" {
-		base += "-" + safeSuffix
+	if safe != "" {
+		base += "-" + safe
 	}
-	return filepath.Join(transactionsDir(cfg), dateStart[:4], "documents", "imports", base+ext)
+	return filepath.ToSlash(filepath.Join("transactions", dateStart[:4], "documents", "imports", base+ext))
 }
+
+// ImportProviderIDs lists the statement providers the import flow recognises.
+func ImportProviderIDs() []string { return importProviderIDs() }
 
 func documentDirective(date, account, outputFile, documentFile string) string {
 	rel, _ := filepath.Rel(filepath.Dir(outputFile), documentFile)

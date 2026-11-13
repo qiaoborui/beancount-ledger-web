@@ -1,6 +1,7 @@
 package mobileagent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -486,6 +487,51 @@ func TestSaveAttachmentIsOfferedOnlyWithADraft(t *testing.T) {
 		has := strings.Contains(strings.Join(offered, ","), "save_attachment")
 		if has != withDraft {
 			t.Fatalf("draft=%v offered=%v", withDraft, offered)
+		}
+	}
+}
+
+func TestArchiveAttachmentFilesTheStatementWhereImportsLook(t *testing.T) {
+	runtime := t.TempDir()
+	original := []byte("交易时间,交易分类,交易对方,商品说明,收/支,金额\n2026-11-01 08:00:00,餐饮,铺子,早餐,支出,9.00\n")
+	path := writeAttachment(t, runtime, "a1-alipay.csv", original)
+	set := mustOpen(t, runtime, attachmentV1{ID: "a1", Name: "支付宝交易明细.csv", Path: path})
+	dir := scratchCopy(t)
+	files, err := openScratch(dir, "main.bean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.close()
+
+	result := asJSON(t, must(set.archiveInto(files, []byte(`{"id":"a1","provider":"alipay","dateStart":"2026-11-01","dateEnd":"2026-11-13"}`))))
+	archived, _ := result["path"].(string)
+	if !strings.HasPrefix(archived, "transactions/2026/documents/imports/2026-11-01_2026-11-13-alipay-") || !strings.HasSuffix(archived, ".csv") {
+		t.Fatalf("archive path: %v", result)
+	}
+	if want := app.ImportDocumentRelPath("2026-11-01", "2026-11-13", "alipay", "支付宝交易明细.csv", strings.TrimSuffix(strings.TrimPrefix(archived, "transactions/2026/documents/imports/2026-11-01_2026-11-13-alipay-"), ".csv")); want != archived {
+		t.Fatalf("the tool wrote %q, the import flow's rule says %q", archived, want)
+	}
+	saved, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(archived)))
+	if err != nil || !bytes.Equal(saved, original) {
+		t.Fatalf("the original bytes were not archived: %v", err)
+	}
+	if !files.wasEdited() {
+		t.Fatal("archiving did not mark the draft edited")
+	}
+
+	// The same bytes always land on the same path, so a repeated archive is a no-op.
+	again := asJSON(t, must(set.archiveInto(files, []byte(`{"id":"a1","provider":"alipay","dateStart":"2026-11-01","dateEnd":"2026-11-13"}`))))
+	if again["path"] != archived || again["existing"] != true {
+		t.Fatalf("repeated archive: %v", again)
+	}
+
+	for name, raw := range map[string]string{
+		"unknown provider": `{"id":"a1","provider":"paypal","dateStart":"2026-11-01","dateEnd":"2026-11-13"}`,
+		"reversed period":  `{"id":"a1","provider":"alipay","dateStart":"2026-11-13","dateEnd":"2026-11-01"}`,
+		"bad date":         `{"id":"a1","provider":"alipay","dateStart":"11/01/2026","dateEnd":"2026-11-13"}`,
+	} {
+		if _, err := set.archiveInto(files, []byte(raw)); err == nil {
+			t.Errorf("archive with %s was allowed", name)
 		}
 	}
 }
