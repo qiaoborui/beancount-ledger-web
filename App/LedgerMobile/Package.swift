@@ -38,6 +38,7 @@ let package = Package(
                 "TerminalDesignSystem.swift",
                 "BalancedDesignSystem.swift",
                 "RootView.swift",
+                "LedgerMarkView.swift",
                 "SafePreviewLedgerAPI.swift",
                 "SettingsView.swift",
                 "TimeRangePicker.swift",
@@ -85,6 +86,7 @@ let package = Package(
                 "LaunchResourceTests.swift",
                 "PerfProbeTests.swift",
                 "TransactionReceiptRenderingTests.swift",
+                "LedgerMarkTests.swift",
             ]
         ),
     ]
