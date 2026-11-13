@@ -1,10 +1,11 @@
 # iOS UI 测试基线修复（PR #674，issue #673）
 
 - **任务 ID**：`20261112-ios-ui-test-baseline`
-- **状态**：completed（本机全量 54 绿 + 截图类 24 绿 + self-hosted runner 全量 54 绿；PR 可合并）
-- **最后更新**：2026-11-13 03:40 +0800
+- **状态**：completed，PR #674 已于 2026-11-13T02:15Z 合并（merge commit `1e33a8a9`）。
+- **最后更新**：2026-11-13 04:30 +0800
 - **分支**：`codex/issue-673-fix-ui-tests`
-- **PR**：https://github.com/qiaoborui/beancount-ledger-web/pull/674
+- **PR**：https://github.com/qiaoborui/beancount-ledger-web/pull/674（已合并）
+- **后续 issue**：#675 更多页溢出跳转在一次 pop 之后会被丢弃（测试里的 `reopenMore()` 是针对它的 workaround）
 
 ## 目标与验收
 
@@ -40,7 +41,13 @@ runner 的模拟器是复用的，App 把底栏配置存在 UserDefaults 里：�
 - `openDestination` 确认 tab 真被选中并重试；`typeInto` 等键盘起来再输入；`openMoreRow` 先等行出现；
 - UI test job 保留 xcodebuild 全量日志并在失败时打印失败点前 40 行步骤。
 
-## 剩余步骤（可选，不阻塞合并）
+## 合并后状态
+
+- `main` 已包含本分支（merge commit `1e33a8a9`）。
+- App 侧改动有一处可见行为变化，发版时写进 notes：`需要发版：修复隐藏金额时分析表格合计行仍显示 100%`。
+- 下一个发版：按 `.agents/skills/ios-release/SKILL.md`，+PATCH 递增（当前 v1.4.10 → v1.4.11），因为合并本身不发版。
+
+## 剩余步骤（可选）
 
 1. 给「更多页溢出跳转被丢弃」开 follow-up issue（PR 正文已有复现步骤）。
 2. 在 self-hosted runner 上手动触发一次 `gh workflow run ci.yml --ref <branch> -f ui_tests=true` 作为额外门槛；本机已经等价跑过全量。
