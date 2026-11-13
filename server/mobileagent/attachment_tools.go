@@ -2,6 +2,8 @@ package mobileagent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,9 +11,12 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/MichaelKinsy/PiG/agent"
 	"github.com/MichaelKinsy/PiG/ai"
+
+	"github.com/borui/beancount-ledger-web/server/internal/app"
 )
 
 // attachmentPrompt is added to the system prompt of a conversation that has
@@ -25,7 +30,8 @@ const attachmentPrompt = `
    - 表格附件传 id、表头行 headerRow（预览里的行号）和列：dateColumn、金额列（amountColumn，或分开的 inColumn/outColumn），有「收/支」列时传 directionColumn，摘要列放 descriptionColumns（商户、备注等，有助于找出金额不一致的条目）。
    - 金额按账户余额变化计：转入为正、支出为负。账单里消费记为正数时（多数信用卡账单）传 amountSign=expense_positive。结果里有 hint 说方向可能反了，就换一个再对一次。
    - PDF 或图片：自己从文字里整理出每笔的日期、金额、摘要，用 rows 参数传入（金额同样按余额变化计，或配合 amountSign），一次最多 600 行。
-11. 回复先给结论：对上多少笔，账单合计、账本合计和差额；再分「账本缺失」「账本多出」「金额不一致」列出条目（日期、金额、摘要，账本条目带上文件和行号）。条目很多时列前几笔并说明总数。用户要补记或修正时，按第 4 条的方式改草稿，不要说已经写入。`
+11. 回复先给结论：对上多少笔，账单合计、账本合计和差额；再分「账本缺失」「账本多出」「金额不一致」列出条目（日期、金额、摘要，账本条目带上文件和行号）。条目很多时列前几笔并说明总数。用户要补记或修正时，按第 4 条的方式改草稿，不要说已经写入。
+12. 账单记进账本后，用 archive_statement 把原件归档：它放进导入页认的 transactions/<年>/documents/imports/，导入页的渠道覆盖日期和归档记录只认这个目录。provider 填渠道 id（archive_statement 的说明里列了全部），dateStart、dateEnd 填账单覆盖的起止日。原件已经用 save_attachment 存到 documents/statements 时，用 move_file 移到归档路径，或重新上传后再归档；别把账单只留在 documents/statements。`
 
 // supportsImages reports a catalog model known to accept image input.
 func supportsImages(model *ai.Model) bool {
@@ -219,4 +225,96 @@ func (a *attachments) saveInto(files *scratch, raw json.RawMessage) (any, error)
 		return nil, err
 	}
 	return map[string]any{"id": item.ID, "path": clean, "bytes": len(data)}, nil
+}
+
+// archiveTool files a statement's original where the 导入 page looks for it.
+// The page recognises a channel by parsing the archive name, so the agent must
+// not choose the path itself: the tool writes the import flow's naming.
+func (a *attachments) archiveTool(files *scratch) agent.AgentTool {
+	return fileTool{name: "archive_statement", title: "归档账单",
+		description: "把用户上传的账单原件归档到导入页认的位置 transactions/<年>/documents/imports/<开始>_<结束>-<渠道>.<扩展名>。导入页的渠道覆盖日期和归档记录只认这个目录；存到 documents/statements 不会更新导入页。provider 用渠道 id：" + strings.Join(app.ImportProviderIDs(), "、") + "；dateStart、dateEnd 是账单覆盖的起止日（YYYY-MM-DD）。和别的改动一样，用户在改动卡片确认后才写入账本。",
+		parameters: objectParameters(map[string]any{
+			"id":        map[string]any{"type": "string", "description": "附件 id，例如 a1"},
+			"provider":  map[string]any{"type": "string", "description": "渠道 id，例如 alipay、wechat、hsbchk-credit"},
+			"dateStart": map[string]any{"type": "string", "description": "账单覆盖的第一天，YYYY-MM-DD"},
+			"dateEnd":   map[string]any{"type": "string", "description": "账单覆盖的最后一天，YYYY-MM-DD"},
+			"overwrite": map[string]any{"type": "boolean", "description": "同名的归档已存在且内容不同时覆盖"},
+		}, []string{"id", "provider", "dateStart", "dateEnd"}),
+		run: func(raw json.RawMessage) (any, error) { return a.archiveInto(files, raw) }}
+}
+
+func (a *attachments) archiveInto(files *scratch, raw json.RawMessage) (any, error) {
+	var input struct {
+		ID        string `json:"id"`
+		Provider  string `json:"provider"`
+		DateStart string `json:"dateStart"`
+		DateEnd   string `json:"dateEnd"`
+		Overwrite bool   `json:"overwrite"`
+	}
+	if err := decodeStrict(raw, &input); err != nil {
+		return nil, err
+	}
+	providers := app.ImportProviderIDs()
+	if !slices.Contains(providers, input.Provider) {
+		return nil, fmt.Errorf("未知渠道 %q；可用：%s", input.Provider, strings.Join(providers, "、"))
+	}
+	start, err := time.Parse("2006-01-02", input.DateStart)
+	if err != nil {
+		return nil, fmt.Errorf("dateStart 要写成 YYYY-MM-DD：%w", err)
+	}
+	end, err := time.Parse("2006-01-02", input.DateEnd)
+	if err != nil {
+		return nil, fmt.Errorf("dateEnd 要写成 YYYY-MM-DD：%w", err)
+	}
+	if end.Before(start) {
+		return nil, errors.New("dateEnd 不能早于 dateStart")
+	}
+	item, err := a.find(input.ID)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(item.Path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maxAttachmentBytes {
+		return nil, errors.New("附件超过 25 MB")
+	}
+	data, err := os.ReadFile(item.Path)
+	if err != nil {
+		return nil, err
+	}
+	originalFilename := item.Name
+	if path.Ext(originalFilename) == "" {
+		originalFilename = item.Path
+	}
+	if path.Ext(originalFilename) == ".bean" {
+		return nil, errors.New("账单原件不能归档成 .bean 文件")
+	}
+	// The suffix makes the name unique without hiding the period or provider the
+	// page parses: the same bytes always land on the same archive path.
+	sum := sha256.Sum256(data)
+	rel := app.ImportDocumentRelPath(input.DateStart, input.DateEnd, input.Provider, originalFilename, hex.EncodeToString(sum[:])[:12])
+	if rel == "" {
+		return nil, errors.New("dateStart 不是有效日期")
+	}
+	if existing, err := files.root.Lstat(rel); err == nil {
+		if !existing.Mode().IsRegular() {
+			return nil, fmt.Errorf("%s 已存在且不是文件", rel)
+		}
+		archived, readErr := files.root.ReadFile(rel)
+		if readErr == nil && slices.Equal(archived, data) {
+			return map[string]any{"id": item.ID, "path": rel, "bytes": len(data), "existing": true}, nil
+		}
+		if !input.Overwrite {
+			return nil, fmt.Errorf("%s 已有内容不同的归档；要覆盖请设 overwrite", rel)
+		}
+	}
+	if err := files.writeLimited(rel, data, maxAttachmentBytes); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"id": item.ID, "path": rel, "bytes": len(data),
+		"provider": input.Provider, "dateStart": input.DateStart, "dateEnd": input.DateEnd,
+	}, nil
 }
