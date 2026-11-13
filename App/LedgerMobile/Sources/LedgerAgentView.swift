@@ -4,13 +4,16 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// 账本助手 — a conversation over the local ledger. The design is
-/// `docs/design/ios-balanced/agent.html`: questions sit in a sunken block on
-/// the right, replies run on the page with a collapsible list of the reads
-/// behind them, and the composer is the glass dock used by the import flow.
-/// The Agent edits a private draft of the ledger; the change card under the
-/// conversation is the only way that draft reaches the ledger. History and
-/// the thinking effort follow `docs/design/ios-balanced/agent-history.html`.
+/// 账本助手 — a conversation over the local ledger. It opens as a chat, not a
+/// page: no heading over the conversation, two round buttons on the bar
+/// (history left, model settings right), a centred mark and one question when
+/// nothing has been asked yet, and a floating capsule dock at the bottom.
+/// The design is `docs/design/ios-balanced/agent.html`: questions sit in a
+/// sunken block on the right, replies run on the page with a collapsible list
+/// of the reads behind them. The Agent edits a private draft of the ledger;
+/// the change card under the conversation is the only way that draft reaches
+/// the ledger. History and the thinking effort follow
+/// `docs/design/ios-balanced/agent-history.html`.
 struct LedgerAgentView: View {
     var isRoot = false
     /// Set when the assistant is a sheet: a close button joins the header.
@@ -103,8 +106,13 @@ private struct LedgerAgentChatScreen: View {
             if settings.isReady { chat } else { LedgerAgentIntro { settingsPresented = true } }
         }
         .background(BalancedPalette.page)
-        .terminalPageChrome(headerTitle, isRoot: isRoot, showsSync: false, actions: AnyView(actions), balanced: true,
-                            titleAction: headerTitleAction)
+        // No heading over a conversation: the bar is two round buttons, the
+        // way the assistant reads as a chat rather than a page. History sits
+        // on the left, model settings on the right; a conversation's name and
+        // its rename live in the history sheet, where the sessions are.
+        .terminalPageChrome(String(localized: "账本助手"), isRoot: isRoot, showsSync: false,
+                            actions: AnyView(actions), balanced: true, showsTitle: false,
+                            leadingActions: settings.isReady ? AnyView(historyButton) : nil)
         .sheet(isPresented: $settingsPresented) {
             NavigationStack { LedgerAgentSettingsView() }
                 .ledgerPrivacyProtectedSheet()
@@ -252,55 +260,49 @@ private struct LedgerAgentChatScreen: View {
         .accessibilityIdentifier("ledger-agent-crash")
     }
 
-    /// The conversation's name once something was asked; 账本助手 before.
-    private var headerTitle: String {
-        guard settings.isReady, !conversation.messages.isEmpty else { return String(localized: "账本助手") }
-        return sessions.title(of: conversation)
-    }
-
-    /// Tapping a named conversation's title renames it.
-    private var headerTitleAction: TerminalTitleAction? {
-        guard settings.isReady, !conversation.messages.isEmpty else { return nil }
-        let id = conversation.id, name = headerTitle
-        return TerminalTitleAction(hint: String(localized: "重命名这段对话")) { renaming = .init(id: id, shown: name) }
-    }
-
-    @State private var renaming: LedgerAgentRenameTarget?
-
-    private var actions: some View {
-        HStack(spacing: 0) {
-            if settings.isReady {
-                Button { historyPresented = true } label: {
-                    Image(systemName: "clock.arrow.circlepath").font(.system(size: 16)).frame(width: 44, height: 44)
-                        .foregroundStyle(BalancedPalette.ink)
+    /// 40pt round glass control, 16pt from the screen edge, as a chat app's
+    /// floating top buttons are; before iOS 26 it is a sunken disc.
+    private func circleButton(_ systemImage: String, label: LocalizedStringKey, identifier: String,
+                              drawsGlass: Bool = true,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage).font(.system(size: 17, weight: .medium))
+                .foregroundStyle(BalancedPalette.ink)
+                .frame(width: 40, height: 40)
+                .background {
+                    if !LedgerGlass.isAvailable { Circle().fill(BalancedPalette.sunken) }
                 }
-                .accessibilityLabel("历史对话")
-                .accessibilityIdentifier("ledger-agent-history")
-                Button { sessions.startNew() } label: {
-                    Image(systemName: "square.and.pencil").font(.system(size: 16)).frame(width: 44, height: 44)
-                        .foregroundStyle(BalancedPalette.ink)
-                }
-                .disabled(conversation.messages.isEmpty && !conversation.isRunning && conversation.pending == nil)
-                .accessibilityLabel("新对话")
-                .accessibilityIdentifier("ledger-agent-new")
-            }
-            Button { settingsPresented = true } label: {
-                Image(systemName: "slider.horizontal.3").font(.system(size: 16)).frame(width: 44, height: 44)
-                    .foregroundStyle(BalancedPalette.ink)
-            }
-            .accessibilityLabel("模型与密钥")
-            .accessibilityIdentifier("ledger-agent-settings")
-            if let onClose {
-                Button(action: onClose) {
-                    Image(systemName: "xmark").font(.system(size: 16)).frame(width: 44, height: 44)
-                        .foregroundStyle(BalancedPalette.ink)
-                }
-                .accessibilityLabel("关闭")
-                .accessibilityIdentifier("ledger-agent-close")
-            }
+                .modifier(LedgerAgentCircleGlass(draws: drawsGlass))
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .ledgerAgentRenameAlert($renaming)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private var historyButton: some View {
+        circleButton("line.3.horizontal", label: "历史对话", identifier: "ledger-agent-history") {
+            historyPresented = true
+        }
+    }
+
+    /// Settings, and the close button when the assistant is a full-screen
+    /// sheet. 新对话 moved into the history sheet: the top bar keeps two
+    /// buttons, and starting over is where the saved conversations are.
+    private var actions: some View {
+        HStack(spacing: 0) {
+            // The bar's trailing cluster already supplies one glass capsule
+            // for its controls, so these are plain buttons inside it.
+            circleButton("slider.horizontal.3", label: "模型与密钥", identifier: "ledger-agent-settings",
+                         drawsGlass: false) {
+                settingsPresented = true
+            }
+            if let onClose {
+                circleButton("xmark", label: "关闭", identifier: "ledger-agent-close", drawsGlass: false,
+                             action: onClose)
+            }
+        }
     }
 
     // MARK: Conversation
@@ -326,6 +328,9 @@ private struct LedgerAgentChatScreen: View {
     /// Before iOS 18, the measures `contentOverflows` is worked out from.
     @State private var contentHeight: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
+    /// The height the conversation rests in, so the empty state can sit in
+    /// the middle of the page rather than at its top.
+    @State private var emptyHeight: CGFloat = 0
 
     private var showsJumpButton: Bool {
         // Not while the page is on its way down to a growing reply.
@@ -402,6 +407,7 @@ private struct LedgerAgentChatScreen: View {
             .onGeometryChange(for: CGFloat.self) { geometry in
                 geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom
             } action: { height in
+                emptyHeight = height
                 if #available(iOS 18.0, *) { return }
                 viewportHeight = height
                 measureFit()
@@ -765,49 +771,58 @@ private struct LedgerAgentChatScreen: View {
     /// A recap is written when the user comes back after this long.
     private static let recapAfterAbsence: TimeInterval = 10 * 60
 
+    /// The page before the first question: a centred mark and one short
+    /// question, the way a chat app opens, then the starters as pills. The
+    /// paragraphs that explained the assistant are now the single line under
+    /// the question; the attach hint lives on the ＋ in the dock.
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("想查什么？").balancedFont(size: 22, weight: .semibold).foregroundStyle(BalancedPalette.ink)
-                .padding(.top, 24)
-            Text("可以查账，也可以让它改账；改动先进草稿，你确认后才写入。").balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
+        VStack(spacing: 8) {
+            LedgerAgentSpark()
+                .frame(width: 36, height: 36)
+                .accessibilityHidden(true)
+            Text("想查什么？").balancedFont(size: 21, weight: .medium)
+                .foregroundStyle(BalancedPalette.secondary)
+                .multilineTextAlignment(.center)
                 .padding(.top, 6)
-            Text("点输入框左边的 ＋ 上传账单（CSV、Excel、PDF 或截图），它会和账本逐笔对账。").balancedFont(size: 13.5)
-                .foregroundStyle(BalancedPalette.meta)
-                .padding(.top, 4)
-            HStack(alignment: .lastTextBaseline) {
-                BalancedSectionLabel(text: String(localized: "试试"))
-                Spacer()
-                if starters.loading {
-                    ProgressView().controlSize(.mini)
-                } else if settings.assists {
-                    Button { refreshStarters(force: true) } label: {
-                        Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(BalancedPalette.meta)
-                            .frame(width: 32, height: 28)
-                            .contentShape(Rectangle())
+            Text("可以查账，也可以上传账单对账；改账先出草稿，你确认后才写入。")
+                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                .multilineTextAlignment(.center).lineSpacing(2)
+                .padding(.top, 2)
+            if settings.assists || !starters.suggestions.isEmpty {
+                HStack(spacing: 4) {
+                    Text("试试").balancedFont(size: 12.5, weight: .medium)
+                        .foregroundStyle(BalancedPalette.meta)
+                    if starters.loading {
+                        ProgressView().controlSize(.mini)
+                    } else if settings.assists {
+                        Button { refreshStarters(force: true) } label: {
+                            Image(systemName: "arrow.clockwise").font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(BalancedPalette.meta)
+                                .frame(width: 32, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("换一批")
+                        .accessibilityIdentifier("ledger-agent-starters-refresh")
+                    }
+                }
+                .padding(.top, 14)
+                ForEach(starters.suggestions, id: \.self) { suggestion in
+                    Button { send(suggestion) } label: {
+                        Text(suggestion)
+                            .balancedFont(size: 14.5).foregroundStyle(BalancedPalette.ink)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 16).padding(.vertical, 9)
+                            .background(Capsule().fill(BalancedPalette.sunken))
+                            .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("换一批")
-                    .accessibilityIdentifier("ledger-agent-starters-refresh")
                 }
-            }
-            .padding(.top, 22)
-            ForEach(starters.suggestions, id: \.self) { suggestion in
-                Button { send(suggestion) } label: {
-                    HStack {
-                        Text(suggestion).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
-                            .multilineTextAlignment(.leading)
-                        Spacer(minLength: 12)
-                        Image(systemName: "arrow.up.left").font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(BalancedPalette.edge)
-                    }
-                    .frame(minHeight: 44)
-                    .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
             }
         }
+        .frame(maxWidth: .infinity, minHeight: max(0, emptyHeight - 52), alignment: .center)
+        .padding(.vertical, 16)
     }
 
     private func failure(_ error: LedgerAgentError, question: String) -> some View {
@@ -846,11 +861,16 @@ private struct LedgerAgentChatScreen: View {
     /// about to get, so it is not read as Return.
     @State private var newlineRequested = false
 
+    /// The floating capsule dock: an attach circle, the field, and a solid
+    /// send circle, 16pt in from either edge. The chips and hints above it
+    /// stay outside the capsule so a tall draft or an attachment never hides
+    /// them, and the whole stack rides the keyboard through `safeAreaInset`.
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(spacing: 8) {
             if sessions.busyElsewhere {
                 Text("另一个对话正在回答，答完后才能在这里提问")
                     .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 6)
             } else {
                 LedgerAgentQuickSwitch(usage: conversation.usage) { settingsPresented = true }
@@ -887,7 +907,7 @@ private struct LedgerAgentChatScreen: View {
                     Button { draft = ghost; composerFocused = true } label: {
                         Image(systemName: "text.insert").font(.system(size: 14, weight: .medium))
                             .foregroundStyle(BalancedPalette.meta)
-                            .frame(width: 32, height: 44)
+                            .frame(width: 32, height: 40)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -898,12 +918,11 @@ private struct LedgerAgentChatScreen: View {
                     if conversation.isRunning { conversation.stop() } else { submit() }
                 } label: {
                     Image(systemName: conversation.isRunning ? "stop.fill" : "arrow.up")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(BalancedPalette.page)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 40, height: 40)
                         .background(Circle().fill(BalancedPalette.ink))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .disabled(!conversation.isRunning && !canSend)
@@ -911,9 +930,12 @@ private struct LedgerAgentChatScreen: View {
                 .accessibilityLabel(conversation.isRunning ? "停止" : "发送")
                 .accessibilityIdentifier("ledger-agent-send")
             }
+            .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+            .modifier(LedgerAgentDock())
         }
-        .padding(EdgeInsets(top: 8, leading: 6, bottom: 8, trailing: 8))
-        .ledgerGlassDock()
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .padding(.top, 4)
         // What was typed in a conversation waits there while the user looks
         // at another one.
         .onAppear { if draft.isEmpty { draft = sessions.unsentText(for: conversation.id) } }
@@ -1051,10 +1073,13 @@ private struct LedgerAgentChatScreen: View {
                 }
             }
         } label: {
-            Image(systemName: "plus").font(.system(size: 17, weight: .medium))
+            Image(systemName: "plus").font(.system(size: 18, weight: .medium))
                 .foregroundStyle(BalancedPalette.ink)
-                .frame(width: 40, height: 44)
-                .contentShape(Rectangle())
+                .frame(width: 40, height: 40)
+                // The dock is the field; this disc is the one thing inside it,
+                // as the attachment circle sits inside the reference's capsule.
+                .background(Circle().fill(BalancedPalette.sunken))
+                .contentShape(Circle())
         }
         .disabled(!conversation.canAttach || attaching || conversation.isRunning)
         .accessibilityLabel("添加附件")
@@ -2512,6 +2537,59 @@ private struct LedgerAgentThinkingPicker: View {
         .font(.subheadline)
         .navigationTitle("思考强度")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Glass for a round bar control. The trailing cluster draws one capsule for
+/// its controls already, so a button inside it passes `false`.
+private struct LedgerAgentCircleGlass: ViewModifier {
+    var draws: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if draws { content.ledgerGlassControl() } else { content }
+    }
+}
+
+/// The composer's floating capsule: glass on iOS 26, the sunken well the
+/// earlier system uses elsewhere. `LedgerGlass.dockRadius` is a rounded
+/// rectangle for the import dock; a chat composer is a capsule, so its corner
+/// stays half its height however tall a multi-line draft makes it.
+private struct LedgerAgentDock: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular, in: Capsule())
+        } else {
+            content
+                .background(Capsule().fill(BalancedPalette.sunken))
+                .overlay(Capsule().stroke(BalancedPalette.rule, lineWidth: 1))
+        }
+    }
+}
+
+/// The empty state's mark: eight spokes around a centre, the assistant's own
+/// glyph. Balanced has no accent colour — chroma means direction — so this is
+/// drawn in the palette's one warm tone and used only as decoration, never as
+/// a control; the app mark itself lives in the widget target and is a page
+/// with an L, not this star.
+private struct LedgerAgentSpark: View {
+    var color: Color = BalancedPalette.expense
+
+    var body: some View {
+        GeometryReader { geometry in
+            let side = min(geometry.size.width, geometry.size.height)
+            ZStack {
+                ForEach(0..<8, id: \.self) { index in
+                    Capsule()
+                        .fill(color)
+                        .frame(width: side * 0.10, height: side * 0.46)
+                        .offset(y: -side * 0.21)
+                        .rotationEffect(.degrees(Double(index) * 45))
+                }
+            }
+            .frame(width: side, height: side)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .accessibilityHidden(true)
     }
 }
 #endif

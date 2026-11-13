@@ -21,6 +21,26 @@ struct LedgerAgentHistoryView: View {
 
     var body: some View {
         List {
+            // The chat page has no 新对话 in its bar any more: starting over
+            // belongs with the sessions it starts over from, at the top of
+            // the list rather than in a second toolbar button.
+            Section {
+                Button {
+                    sessions.startNew()
+                    dismiss()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "square.and.pencil").font(.system(size: 16, weight: .medium))
+                        Text("新对话").balancedFont(size: 15, weight: .medium)
+                        Spacer(minLength: 8)
+                    }
+                    .foregroundStyle(BalancedPalette.ink)
+                    .frame(minHeight: 28)
+                    .contentShape(Rectangle())
+                }
+                .accessibilityLabel("新对话")
+                .accessibilityIdentifier("ledger-agent-new")
+            }
             if sessions.saved.isEmpty {
                 Text("还没有历史对话。问过的问题会按账本存在本机。")
                     .foregroundStyle(BalancedPalette.meta)
@@ -61,13 +81,6 @@ struct LedgerAgentHistoryView: View {
         .privacySensitive()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("完成") { dismiss() } }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    sessions.startNew()
-                    dismiss()
-                } label: { Image(systemName: "square.and.pencil") }
-                .accessibilityLabel("新对话")
-            }
         }
         .confirmationDialog("清空这本账本的全部历史对话？", isPresented: $confirmingClear, titleVisibility: .visible) {
             Button("清空", role: .destructive) { sessions.deleteAll() }
@@ -142,8 +155,9 @@ struct LedgerAgentRenameTarget: Identifiable, Equatable {
 }
 
 extension View {
-    /// The rename alert shared by the header and the history list. Saving an
-    /// empty name gives the conversation back its generated one.
+    /// The rename alert of the history list, which is where a conversation is
+    /// named now that the chat page has no title. Saving an empty name gives
+    /// the conversation back its generated one.
     func ledgerAgentRenameAlert(_ target: Binding<LedgerAgentRenameTarget?>) -> some View {
         modifier(LedgerAgentRenameAlert(target: target))
     }
