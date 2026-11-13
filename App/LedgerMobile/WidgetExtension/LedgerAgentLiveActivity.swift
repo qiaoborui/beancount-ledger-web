@@ -9,6 +9,15 @@ import WidgetKit
 struct LedgerAgentLiveActivity: Widget {
     private typealias Phase = LedgerAgentActivityAttributes.ContentState.Phase
 
+    /// Both compact sides take this width, the same choice
+    /// `LedgerIslandStage.compactWidth` makes for the in-app island: the system
+    /// gives each side of the compact pill its content's width plus a small
+    /// inset, so a 14pt mark beside a wider timer both stretched the pill out
+    /// to the trailing side and left the mark against the camera. The width
+    /// holds the longest `m:ss` timer at the compact font, so an hour of
+    /// running does not change it; a longer `h:mm:ss` timer scales down to fit.
+    private static let compactSide: CGFloat = 32
+
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: LedgerAgentActivityAttributes.self) { context in
             let phase = context.state.phase
@@ -47,7 +56,9 @@ struct LedgerAgentLiveActivity: Widget {
                 }
             } compactLeading: {
                 if phase == .running {
-                    LedgerMark(accent: color(phase)).frame(width: 14, height: 14)
+                    LedgerMark(accent: color(phase))
+                        .frame(width: 14, height: 14)
+                        .frame(width: LedgerAgentLiveActivity.compactSide, height: 14)
                 } else {
                     Image(systemName: symbol(phase)).font(.system(size: 13, weight: .semibold)).foregroundStyle(color(phase))
                 }
@@ -56,7 +67,9 @@ struct LedgerAgentLiveActivity: Widget {
                     Text(context.attributes.startedAt, style: .timer)
                         .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
                         .foregroundStyle(LedgerGlass.text)
-                        .frame(maxWidth: 40)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .frame(width: LedgerAgentLiveActivity.compactSide)
                 } else {
                     Image(systemName: "checkmark").foregroundStyle(color(phase)).opacity(phase == .answered ? 1 : 0)
                 }
