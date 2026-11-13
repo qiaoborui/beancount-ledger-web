@@ -81,50 +81,138 @@ final class LedgerAgentAssistTests: XCTestCase {
     }
 
     @MainActor
-    func testTheFirstAnswerNamesTheConversationOnce() async throws {
-        let record = try XCTUnwrap(
-            LedgerAgentConversation(restoring: try decodedConversation(messages: [("user", "这个月外卖花了多少？"),
-                                                                                ("assistant", "本月餐饮支出合计 1,280.00 元。")]))
-                .saved())
-        let conversation = LedgerAgentConversation(restoring: record)
+    func testShouldNameOnlyAfterTwoAnswersWithTriesLeft() {
+        typealias Name = LedgerAgentConversation
+        XCTAssertFalse(Name.shouldName(answerCount: 1, generatedTitle: nil, isRunning: false, attempts: 0, namedAnswers: nil),
+                       "one answer is still the opening question")
+        XCTAssertTrue(Name.shouldName(answerCount: 2, generatedTitle: nil, isRunning: false, attempts: 0, namedAnswers: nil))
+        XCTAssertFalse(Name.shouldName(answerCount: 2, generatedTitle: "外卖", isRunning: false, attempts: 0, namedAnswers: nil),
+                       "a named conversation is not renamed")
+        XCTAssertFalse(Name.shouldName(answerCount: 2, generatedTitle: nil, isRunning: true, attempts: 0, namedAnswers: nil),
+                       "a running turn is not interrupted")
+        XCTAssertFalse(Name.shouldName(answerCount: 2, generatedTitle: nil, isRunning: false,
+                                       attempts: Name.maximumNamingAttempts, namedAnswers: nil),
+                       "three failed tries are enough")
+        XCTAssertFalse(Name.shouldName(answerCount: 2, generatedTitle: nil, isRunning: false, attempts: 1, namedAnswers: 2),
+                       "the same answers are not asked about twice")
+        XCTAssertTrue(Name.shouldName(answerCount: 3, generatedTitle: nil, isRunning: false, attempts: 1, namedAnswers: 2),
+                      "a later answer retries a failed name")
+    }
+
+    @MainActor
+    func testOneAnswerIsNotNamedYet() async throws {
+        let conversation = LedgerAgentConversation(restoring: try decodedConversation(messages: [
+            ("user", "这个月外卖花了多少？"), ("assistant", "本月餐饮支出合计 1,280.00 元。"),
+        ]))
         let calls = TitleCalls()
-        conversation.nameSession { _ in
-            await calls.record()
+        conversation.nameSession { history in
+            await calls.record(history.map(\.content))
             return "本月外卖支出"
+        }
+        try? await Task.sleep(for: .milliseconds(80))
+        let count = await calls.count
+        XCTAssertEqual(count, 0, "one answer is still the opening question")
+        XCTAssertNil(conversation.generatedTitle)
+    }
+
+    @MainActor
+    func testAConversationIsNamedOnceItHasTwoAnswers() async throws {
+        let conversation = LedgerAgentConversation()
+        for (question, answer) in [("这个月外卖花了多少？", "1,280.00 元"), ("那上周呢？", "320.00 元")] {
+            conversation.send(question) { _, _, _ in .init(ok: true, reply: answer) }
+            try await waitUntilIdle(conversation)
+        }
+        let calls = TitleCalls()
+        conversation.nameSession { history in
+            await calls.record(history.map(\.content))
+            return "外卖支出"
         }
         for _ in 0..<100 where conversation.generatedTitle == nil {
             try? await Task.sleep(for: .milliseconds(10))
         }
-        let firstCount = await calls.count
-        XCTAssertEqual(conversation.generatedTitle, "本月外卖支出")
-        XCTAssertEqual(firstCount, 1)
-        XCTAssertEqual(conversation.saved()?.generatedTitle, "本月外卖支出")
+        XCTAssertEqual(conversation.generatedTitle, "外卖支出")
+        XCTAssertEqual(conversation.saved()?.generatedTitle, "外卖支出")
+        let firstHistory = await calls.lastHistory
+        XCTAssertEqual(firstHistory, ["这个月外卖花了多少？", "1,280.00 元", "那上周呢？", "320.00 元"],
+                       "a name sees both exchanges")
 
-        conversation.nameSession { _ in
-            await calls.record()
+        conversation.nameSession { history in
+            await calls.record(history.map(\.content))
             return "另一个名字"
         }
         try? await Task.sleep(for: .milliseconds(80))
         let afterSecond = await calls.count
         XCTAssertEqual(afterSecond, 1, "a named conversation is not renamed")
-        XCTAssertEqual(conversation.generatedTitle, "本月外卖支出")
+        XCTAssertEqual(conversation.generatedTitle, "外卖支出")
     }
 
     @MainActor
-    func testOnlyTheFirstAnswerNamesAConversation() async throws {
-        let longer = LedgerAgentConversation(restoring: try decodedConversation(messages: [
-            ("user", "这个月外卖花了多少？"), ("assistant", "1,280.00 元"),
-            ("user", "那上周呢？"), ("assistant", "320.00 元"),
-        ]))
+    func testAFailedNameIsRetriedOnALaterAnswer() async throws {
+        let conversation = LedgerAgentConversation()
+        for (question, answer) in [("这个月餐饮多少", "1,820.00 元"), ("上个月呢", "1,640.00 元")] {
+            conversation.send(question) { _, _, _ in .init(ok: true, reply: answer) }
+            try await waitUntilIdle(conversation)
+        }
         let calls = TitleCalls()
-        longer.nameSession { _ in
-            await calls.record()
-            return "外卖"
+        conversation.nameSession { history -> String in
+            await calls.record(history.map(\.content))
+            throw LedgerAgentError.failed("timeout")
+        }
+        try await waitForTitleCalls(calls, atLeast: 1)
+        try? await Task.sleep(for: .milliseconds(80))
+        let failed = await calls.count
+        XCTAssertNil(conversation.generatedTitle, "a failed name stays silent")
+        XCTAssertEqual(failed, 1)
+
+        // The same answers are not asked about again; the next answer is.
+        conversation.nameSession { history -> String in
+            await calls.record(history.map(\.content))
+            return "餐饮支出"
         }
         try? await Task.sleep(for: .milliseconds(80))
-        let count = await calls.count
-        XCTAssertEqual(count, 0)
-        XCTAssertNil(longer.generatedTitle)
+        let sameAnswers = await calls.count
+        XCTAssertEqual(sameAnswers, 1)
+
+        conversation.send("按周画个图") { _, _, _ in .init(ok: true, reply: "图") }
+        try await waitUntilIdle(conversation)
+        conversation.nameSession { history -> String in
+            await calls.record(history.map(\.content))
+            return "餐饮支出"
+        }
+        for _ in 0..<100 where conversation.generatedTitle == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(conversation.generatedTitle, "餐饮支出")
+        let retried = await calls.count
+        XCTAssertEqual(retried, 2)
+        let retriedHistory = await calls.lastHistory
+        XCTAssertEqual(retriedHistory.count, 6, "a retry sees the conversation as it is now")
+    }
+
+    @MainActor
+    func testNamingGivesUpAfterThreeFailedTries() async throws {
+        let conversation = LedgerAgentConversation()
+        let calls = TitleCalls()
+        for (index, answer) in ["a1", "a2", "a3", "a4"].enumerated() {
+            conversation.send("q\(index + 1)") { _, _, _ in .init(ok: true, reply: answer) }
+            try await waitUntilIdle(conversation)
+            conversation.nameSession { _ -> String in
+                await calls.record()
+                throw LedgerAgentError.failed("timeout")
+            }
+            try? await Task.sleep(for: .milliseconds(80))
+        }
+        let tries = await calls.count
+        XCTAssertEqual(tries, LedgerAgentConversation.maximumNamingAttempts, "three tries, then the first question stays")
+        XCTAssertNil(conversation.generatedTitle)
+    }
+
+    private func waitForTitleCalls(_ calls: TitleCalls, atLeast expected: Int) async throws {
+        for _ in 0..<200 {
+            if await calls.count >= expected { return }
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        XCTFail("naming was not asked \(expected) times")
     }
 
     private func decodedConversation(messages: [(String, String)]) throws -> LedgerAgentSavedConversation {
@@ -314,5 +402,10 @@ final class LedgerAgentAssistTests: XCTestCase {
 /// Counts the naming requests a conversation makes, from any thread.
 private actor TitleCalls {
     private(set) var count = 0
-    func record() { count += 1 }
+    private(set) var histories: [[String]] = []
+    var lastHistory: [String] { histories.last ?? [] }
+    func record(_ history: [String] = []) {
+        count += 1
+        histories.append(history)
+    }
 }

@@ -108,6 +108,7 @@ final class LedgerAgentConversationListTests: XCTestCase {
         let sessions = LedgerAgentSessions()
         sessions.bind(ledger: UUID(), storage: MemoryStore().storage)
         try await ask(sessions, "十月吃饭花了多少")
+        try await ask(sessions, "那上周呢")
         let conversation = sessions.current
         sessions.rename(conversation.id, to: "我的名字")
         conversation.nameSession { _ in "模型起的名字" }
@@ -123,6 +124,7 @@ final class LedgerAgentConversationListTests: XCTestCase {
         let sessions = LedgerAgentSessions()
         sessions.bind(ledger: UUID(), storage: MemoryStore().storage)
         try await ask(sessions, "十月吃饭花了多少")
+        try await ask(sessions, "那上周呢")
         let conversation = sessions.current
         sessions.rename(conversation.id, to: "十月吃饭花了多少 ", shown: sessions.title(of: conversation))
         XCTAssertNil(sessions.customTitle(of: conversation.id))

@@ -1350,7 +1350,8 @@ final class LedgerAgentConversation: ObservableObject {
     @Published private(set) var recapping = false
     @Published private(set) var recapError: String?
     /// The name the model gave the conversation, saved with it; nil until the
-    /// first answer is named, or when the user turned assists off.
+    /// conversation has enough answers to be named, or when the user turned
+    /// assists off.
     @Published private(set) var generatedTitle: String?
     /// Reopened from the history, so the screen recaps it on arrival.
     private(set) var restored = false
@@ -1912,12 +1913,39 @@ final class LedgerAgentConversation: ObservableObject {
         }
     }
 
-    /// Names the conversation from its first exchange; the name is saved with
-    /// the conversation and shown in the history list. Only the first answer
-    /// names it, so a later question never renames a conversation the user
-    /// already recognises.
+    /// Answers a conversation needs before the model may name it: one
+    /// exchange is still the question it opened with, two say what it is
+    /// about.
+    static let minimumNamingAnswers = 2
+    /// How often one conversation asks for a name before it keeps its first
+    /// question, so a model that keeps failing is not asked forever.
+    static let maximumNamingAttempts = 3
+    /// How many times this conversation has asked for a name, and the answers
+    /// it saw then; a failed request is retried on a later answer, never on
+    /// the same one again.
+    private var namingAttempts = 0
+    private var namedAnswers: Int?
+
+    /// Whether a naming request should go out now: the conversation has no
+    /// name yet, it is not running a turn, it has at least two answers, it has
+    /// tries left, and it is not the conversation the last request saw.
+    static func shouldName(answerCount: Int, generatedTitle: String?, isRunning: Bool,
+                           attempts: Int, namedAnswers: Int?) -> Bool {
+        guard generatedTitle == nil, !isRunning, attempts < maximumNamingAttempts,
+              answerCount >= minimumNamingAnswers else { return false }
+        return namedAnswers != answerCount
+    }
+
+    /// Names the conversation from its first two exchanges; the name is saved
+    /// with the conversation and shown in the history list. A request that
+    /// fails is retried on the next answer, up to `maximumNamingAttempts`
+    /// tries, and an unnamed conversation keeps its first question as its
+    /// name.
     func nameSession(using write: @escaping Assist<String>) {
-        guard generatedTitle == nil, answerCount == 1, !isRunning else { return }
+        guard Self.shouldName(answerCount: answerCount, generatedTitle: generatedTitle, isRunning: isRunning,
+                              attempts: namingAttempts, namedAnswers: namedAnswers) else { return }
+        namingAttempts += 1
+        namedAnswers = answerCount
         let epoch = epoch, history = visibleHistory
         Task { [weak self] in
             let name = try? await write(history)
@@ -2145,6 +2173,8 @@ final class LedgerAgentConversation: ObservableObject {
         recapping = false
         recapError = nil
         generatedTitle = nil
+        namingAttempts = 0
+        namedAnswers = nil
         epoch += 1
         if let editor {
             let draft = draft, reopening = reopening
