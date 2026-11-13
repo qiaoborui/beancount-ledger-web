@@ -337,6 +337,7 @@ final class LedgerAgentSessions: ObservableObject {
 
     /// After a notification about the conversation in the background, show it.
     func showBackground() {
+        LedgerCrashLog.shared.record("账本助手：显示后台会话")
         guard let background, !background.isRunning else { return }
         show(background)
     }

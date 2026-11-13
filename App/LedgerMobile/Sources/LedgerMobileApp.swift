@@ -13,6 +13,9 @@ struct LedgerMobileApp: App {
     @State private var didStartSession = false
 
     init() {
+        // As early as possible: a crash during launch or the first ledger read
+        // then still has the launch breadcrumb and the version in its report.
+        LedgerCrashLog.shared.install()
         // Opt-in measurement recording must exist before the first ledger work
         // so a cold-start run is captured. Without `--ledger-perf-record` (and
         // without a stored opt-in) this changes nothing.
@@ -35,7 +38,10 @@ struct LedgerMobileApp: App {
         }
         #if os(iOS)
         LedgerAgentNotifications.shared.open = { [weak session] in
-            LedgerAgentSessions.shared.showBackground()
+            // Only hand the tap to the route; the assistant's cover (and the
+            // background conversation it shows) waits for an active scene and a
+            // ready ledger, where `applyPendingExternalRoute` presents it once.
+            LedgerCrashLog.shared.record("账本助手通知：打开")
             session?.openWidgetURL(URL(string: "ledger://agent")!)
         }
         // 记账提醒 and 导入账单提醒 open their pages like a widget link.
@@ -63,6 +69,7 @@ struct LedgerMobileApp: App {
                     didStartSession = true
                 }
                 .onChange(of: scenePhase, initial: true) { _, phase in
+                    LedgerCrashLog.shared.record("scene \(phase)")
                     // System authentication briefly makes the scene inactive. Its task must
                     // survive that transition, and only a real background visit rearms it.
                     Task {
@@ -77,6 +84,10 @@ struct LedgerMobileApp: App {
                             await session.automaticallyUnlockIfNeeded()
                         }
                         if phase == .active {
+                            // A notification tap that cold-started or resumed the
+                            // app waited for an active scene before presenting the
+                            // assistant; apply it now that the scene is active.
+                            await session.applyPendingExternalRoute()
                             #if os(iOS)
                             LedgerLocalReminders.shared.reschedule()
                             #endif
