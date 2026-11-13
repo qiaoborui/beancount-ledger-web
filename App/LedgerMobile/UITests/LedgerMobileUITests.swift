@@ -462,6 +462,36 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 3))
     }
 
+    func testMoreOverflowRoutePushesAgainAfterPop() throws {
+        try XCTSkipIf(isPad, "Compact overflow navigation")
+        app = XCUIApplication()
+        app.launchArguments = ["--safe-preview"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
+        app.tabBars.buttons["更多"].tap()
+
+        // 更多 → 货币与汇率, then switch the valuation currency as in the report.
+        let currencyEntry = app.buttons["more-currencies"]
+        XCTAssertTrue(currencyEntry.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<3 where !currencyEntry.isHittable { app.swipeUp() }
+        waitUntilHittable(currencyEntry)
+        currencyEntry.tap()
+        XCTAssertTrue(app.scrollViews["currency-analysis-content"].waitForExistence(timeout: 5), app.debugDescription)
+        let usd = app.buttons["valuation-currency-USD"]
+        XCTAssertTrue(usd.waitForExistence(timeout: 3), app.debugDescription)
+        usd.tap()
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: usd)
+        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 3), .completed)
+
+        // Popping back to 更多 must not swallow the next overflow push: 查询 still
+        // has to open the workbench without a tab switch rebuilding the page.
+        let backButton = app.buttons["返回上一页"]
+        waitUntilHittable(backButton)
+        backButton.tap()
+        XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5), app.debugDescription)
+        openBQLWorkbench()
+    }
+
     func testReadOnlyNavigationAndResponsiveSurfaces() throws {
         XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
         app = XCUIApplication()
@@ -606,14 +636,11 @@ final class LedgerMobileUITests: XCTestCase {
                 captureName: "11-investments"
             )
 
-            // 更多 pushes its overflow destinations through one navigation item, and
-            // after it pops the next push is dropped until the page is rebuilt; also
-            // give 查询 the list before the valuation-currency reload lands.
-            reopenMore()
+            // Consecutive overflow pushes: the query workbench pops back to the
+            // same page, and 货币与汇率 must still open from it.
             openBQLWorkbench()
             exerciseBQL(capturePrefix: "13")
 
-            reopenMore()
             let currencyEntry = app.buttons["more-currencies"]
             for _ in 0..<3 where !currencyEntry.isHittable {
                 app.swipeUp()
@@ -744,20 +771,6 @@ final class LedgerMobileUITests: XCTestCase {
         configurationEntry.tap()
 
         XCTAssertTrue(app.navigationBars["底部标签栏"].waitForExistence(timeout: 5))
-        // A previous session may have left a customised bar in UserDefaults: start
-        // from the default tabs, which is also what the rest of the suite expects.
-        if !app.buttons["compact-tab-remove-overview"].exists {
-            let reset = app.buttons["compact-tab-reset"]
-            let staleList = app.collectionViews["compact-tab-list"]
-            for _ in 0..<4 where !reset.isHittable { staleList.swipeUp() }
-            waitUntilHittable(reset)
-            reset.tap()
-            app.buttons["compact-tab-save"].tap()
-            let configurationEntryAgain = app.buttons["settings-compact-tabs"]
-            waitUntilHittable(configurationEntryAgain)
-            configurationEntryAgain.tap()
-            XCTAssertTrue(app.navigationBars["底部标签栏"].waitForExistence(timeout: 5))
-        }
         XCTAssertTrue(app.staticTexts["已显示 3/3"].exists)
         XCTAssertTrue(app.buttons["compact-tab-remove-overview"].exists)
         capture("compact-tabs-02-configuration")
@@ -822,6 +835,26 @@ final class LedgerMobileUITests: XCTestCase {
         app.buttons["返回上一页"].tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 3))
 
+        // The bar lives in UserDefaults, so leaving it customised changes every
+        // later launch: put the default tabs back before finishing. The walk
+        // through 更多 → 设置 works now that a popped overflow row no longer
+        // swallows the next push.
+        let settingsAgain = app.buttons["more-settings"]
+        for _ in 0..<3 where !settingsAgain.isHittable { app.swipeDown() }
+        waitUntilHittable(settingsAgain)
+        settingsAgain.tap()
+        let configurationAgain = app.buttons["settings-compact-tabs"]
+        waitUntilHittable(configurationAgain)
+        configurationAgain.tap()
+        XCTAssertTrue(app.navigationBars["底部标签栏"].waitForExistence(timeout: 5))
+        let resetAgain = app.buttons["compact-tab-reset"]
+        let configurationListAgain = app.collectionViews["compact-tab-list"]
+        for _ in 0..<4 where !resetAgain.isHittable { configurationListAgain.swipeUp() }
+        waitUntilHittable(resetAgain)
+        resetAgain.tap()
+        XCTAssertTrue(app.staticTexts["已显示 3/3"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["compact-tab-save"].tap()
+        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 10), app.debugDescription)
     }
 
     func testImportClassificationReviewsFieldsIndependentlyAndRestoresFullList() throws {
@@ -1434,26 +1467,10 @@ final class LedgerMobileUITests: XCTestCase {
         waitUntilHittable(app.buttons["more-analysis-assets"])
     }
 
-    /// Re-enters 更多 from another tab.
-    ///
-    /// The page routes every overflow destination through one navigation item
-    /// (`.navigationDestination(item: $overflowDestination)`), and after one of
-    /// them pops the next push is dropped until the page is rebuilt. Switching
-    /// tabs rebuilds it; see the PR for the app-side bug this works around.
-    private func reopenMore() {
-        guard !isPad else { return }
-        // 概览 is a tab only while the bar keeps its default tabs; the tab-bar test
-        // leaves its own set behind, so fall back to another tab.
-        let other = app.tabBars.buttons["概览"].exists ? "概览" : "账户"
-        app.compactTab(other).tap()
-        app.compactTab("更多").tap()
-        XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5), app.debugDescription)
-    }
-
     /// Opens 查询 from the compact 更多 list. The row is the last one, so the
-    /// floating tab bar reaches over its lower half, and the pop back from the
-    /// previous page can still swallow a tap: aim at the top of the row and retry
-    /// until the workbench is on screen.
+    /// floating tab bar reaches over its lower half, and the page may still be
+    /// settling after a pop: aim at the top of the row and retry until the
+    /// workbench is on screen.
     private func openBQLWorkbench() {
         let entry = app.buttons["more-query"]
         for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
