@@ -23,11 +23,15 @@ import (
 // files.
 
 const (
-	assistTimeout       = 75 * time.Second
-	maxSuggestions      = 6
-	maxSuggestionRunes  = 40
-	maxRecapRunes       = 600
-	maxTitleRunes       = 32
+	assistTimeout      = 75 * time.Second
+	maxSuggestions     = 6
+	maxSuggestionRunes = 40
+	maxRecapRunes      = 600
+	maxTitleRunes      = 32
+	// A name is drawn from the first two exchanges, each cut short: enough to
+	// see what the conversation is about, not the whole of it.
+	maxTitleExchanges   = 2
+	maxTitleMessage     = 600
 	maxAssistMessage    = 2000
 	maxAssistTail       = 6
 	maxRecapBytes       = 24000
@@ -90,12 +94,14 @@ const recapPrompt = `你为记账 App 里和「账本助手」的一段对话写
 - 只写对话里出现过的事实，不要编造。只输出要点本身。`
 
 // titlePrompt names one conversation for the history list. The shell asks for
-// it once, after the first answer, and keeps the first question as a fallback.
+// it once the conversation has two exchanges, retries a failed name on a later
+// answer, and keeps the first question as a fallback.
 const titlePrompt = `你为记账 App 里和「账本助手」的一段对话起名字，这个名字会显示在历史列表里。
 
 要求：
 - 用用户提问的语言，中文 4 到 16 个字（其他语言最多 40 个字符），概括这段对话在做什么。
 - 用具体的对象：分类、商户、账户、月份或要办的事。不要写「对话」「咨询」「理财问题」这类空话。
+- 不要照抄用户提问：概括这段对话的主题，不要把用户的话原样重复或截短。
 - 不要引号、不要句号、不要「标题：」之类的前缀、不要编号。
 - 只输出标题本身。`
 
@@ -192,9 +198,9 @@ func assist(ctx context.Context, network *turnHTTP, requestJSON string, kind ass
 		return assistResponseV1{}, err
 	}
 	if kind == title {
-		text := cleanTitle(reply)
+		text := cleanTitle(reply, firstQuestion(history))
 		if text == "" {
-			return assistResponseV1{}, errors.New("模型没有给出标题")
+			return assistResponseV1{}, errors.New("模型没有给出标题，或只是重复了用户的问题")
 		}
 		return assistResponseV1{Title: text}, nil
 	}
@@ -320,32 +326,77 @@ func starterMessage(facts, memory string, recent []string, count int) string {
 	return out.String()
 }
 
-// titleMessage is the opening exchange: what the user asked and what the
-// answer was about, which is all a name needs.
+// titleMessage gives the first two exchanges, each cut short: what the user
+// asked and what the answer was about, twice, which is what tells a
+// conversation apart from the question it opened with.
 func titleMessage(history []historyMessageV1) string {
-	question, answer := "", ""
+	var out strings.Builder
+	questions, answers := 0, 0
 	for _, entry := range history {
-		switch {
-		case entry.Role == "user" && question == "":
-			question = truncateRunes(entry.Content, maxAssistMessage)
-		case entry.Role == "assistant" && answer == "":
-			answer = truncateRunes(entry.Content, maxAssistMessage)
+		var label string
+		switch entry.Role {
+		case "user":
+			if questions == maxTitleExchanges {
+				continue
+			}
+			questions++
+			label = "用户提问："
+		case "assistant":
+			if answers == maxTitleExchanges {
+				continue
+			}
+			answers++
+			label = "助手回答："
+		default:
+			continue
 		}
-		if question != "" && answer != "" {
+		if out.Len() > 0 {
+			out.WriteString("\n\n")
+		}
+		out.WriteString(label + "\n" + truncateRunes(entry.Content, maxTitleMessage))
+		if questions == maxTitleExchanges && answers == maxTitleExchanges {
 			break
 		}
-	}
-	var out strings.Builder
-	out.WriteString("用户提问：\n" + question)
-	if answer != "" {
-		out.WriteString("\n\n助手回答：\n" + answer)
 	}
 	return out.String()
 }
 
+// firstQuestion is what the user asked first, which a name must not repeat.
+func firstQuestion(history []historyMessageV1) string {
+	for _, entry := range history {
+		if entry.Role == "user" {
+			return entry.Content
+		}
+	}
+	return ""
+}
+
+// minRepeatedTitleRunes keeps a two-character question from rejecting a name
+// that only happens to start the same way.
+const minRepeatedTitleRunes = 4
+
+// repeatsQuestion reports whether a name is the user's first question again:
+// the same words once spacing and punctuation are dropped, or one cut short
+// from the other. Such a name names nothing.
+func repeatsQuestion(name, question string) bool {
+	name, question = normalized(name), normalized(question)
+	if name == "" || question == "" {
+		return false
+	}
+	if name == question {
+		return true
+	}
+	shorter, longer := name, question
+	if utf8.RuneCountInString(question) < utf8.RuneCountInString(name) {
+		shorter, longer = question, name
+	}
+	return utf8.RuneCountInString(shorter) >= minRepeatedTitleRunes && strings.HasPrefix(longer, shorter)
+}
+
 // cleanTitle reduces a reply to one short name: first line, no markdown or
-// label, no trailing punctuation, bounded.
-func cleanTitle(reply string) string {
+// label, no trailing punctuation, bounded. A reply that only repeats the
+// user's first question, given here, is no name at all.
+func cleanTitle(reply, question string) string {
 	line := ""
 	for _, candidate := range strings.Split(reply, "\n") {
 		if trimmed := strings.TrimSpace(candidate); trimmed != "" {
@@ -372,7 +423,11 @@ func cleanTitle(reply string) string {
 	if utf8.RuneCountInString(line) < 2 {
 		return ""
 	}
-	return strings.TrimSpace(truncateRunes(line, maxTitleRunes))
+	line = strings.TrimSpace(truncateRunes(line, maxTitleRunes))
+	if repeatsQuestion(line, question) {
+		return ""
+	}
+	return line
 }
 
 func nextMessage(history []historyMessageV1, memory string) string {
