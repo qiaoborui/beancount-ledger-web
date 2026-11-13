@@ -55,7 +55,7 @@ struct LedgerAgentAssistResponse: Decodable, Sendable {
 struct LedgerAgentAssistant: Sendable {
     var suggest: @Sendable (Data) async throws -> Data
     var recap: @Sendable (Data) async throws -> Data
-    /// Names one conversation from its first exchange.
+    /// Names one conversation from its first two exchanges.
     var title: @Sendable (Data) async throws -> Data
 
     static let native = LedgerAgentAssistant(suggest: { request in

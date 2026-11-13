@@ -79,7 +79,7 @@ func TestNextSuggestionFollowsTheConversation(t *testing.T) {
 	}
 }
 
-func TestTitleNamesTheOpeningExchange(t *testing.T) {
+func TestTitleNamesTheTwoOpeningExchanges(t *testing.T) {
 	var seen string
 	var tools []string
 	useFaux(t, ai.FauxFactoryStep(func(request ai.TranscriptContext, _ ai.StreamOptions, _ *ai.FauxProviderState, _ *ai.Model) (ai.AssistantMessage, error) {
@@ -87,17 +87,78 @@ func TestTitleNamesTheOpeningExchange(t *testing.T) {
 		return ai.FauxResponse{Content: []ai.FauxContentBlock{ai.FauxText("**标题：本月外卖支出**。\n解释一下")}, StopReason: "stop"}.AssistantMessage(), nil
 	}))
 	response := assistFor(t, TitleJSON, map[string]any{"version": 1, "provider": "faux", "model": "faux-1", "apiKey": "test",
-		"history": []map[string]string{{"role": "user", "content": "帮我看下这个月的外卖"}, {"role": "assistant", "content": "本月餐饮支出合计 1,280.00 元。"}}})
+		"history": []map[string]string{
+			{"role": "user", "content": "帮我看下这个月的外卖"},
+			{"role": "assistant", "content": "本月餐饮支出合计 1,280.00 元。"},
+			{"role": "user", "content": "那上周呢"},
+			{"role": "assistant", "content": "上周 320.00 元，主要在外卖。"},
+		}})
 	if !response.OK || response.Title != "本月外卖支出" {
 		t.Fatalf("unexpected response: %+v", response)
 	}
-	for _, fact := range []string{"帮我看下这个月的外卖", "1,280.00"} {
+	for _, fact := range []string{"帮我看下这个月的外卖", "1,280.00", "那上周呢", "320.00"} {
 		if !strings.Contains(seen, fact) {
 			t.Fatalf("%q did not reach the model:\n%s", fact, seen)
 		}
 	}
+	for _, rule := range []string{"不要照抄用户提问", "概括"} {
+		if !strings.Contains(seen, rule) {
+			t.Fatalf("the prompt does not say %q:\n%s", rule, seen)
+		}
+	}
 	if len(tools) != 0 {
 		t.Fatalf("assist calls must not offer tools: %v", tools)
+	}
+}
+
+func TestTitleMessageKeepsTwoExchangesAndTruncates(t *testing.T) {
+	history := []historyMessageV1{
+		{Role: "user", Content: "第一问"},
+		{Role: "assistant", Content: strings.Repeat("长", 700) + "结尾标记"},
+		{Role: "user", Content: "第二问"},
+		{Role: "assistant", Content: "第二答"},
+		{Role: "user", Content: "第三问"},
+		{Role: "assistant", Content: "第三答"},
+	}
+	message := titleMessage(history)
+	for _, kept := range []string{"第一问", "第二问", "第二答"} {
+		if !strings.Contains(message, kept) {
+			t.Fatalf("title message lost %q:\n%s", kept, message)
+		}
+	}
+	for _, dropped := range []string{"第三问", "第三答", "结尾标记"} {
+		if strings.Contains(message, dropped) {
+			t.Fatalf("title message kept %q:\n%s", dropped, message)
+		}
+	}
+	if !strings.Contains(message, "…") {
+		t.Fatalf("a long answer was not truncated:\n%s", message)
+	}
+
+	truncated := titleMessage([]historyMessageV1{
+		{Role: "user", Content: strings.Repeat("问", 700) + "问尾标记"},
+		{Role: "assistant", Content: "答"},
+		{Role: "user", Content: "再问一句"},
+	})
+	if strings.Contains(truncated, "问尾标记") || !strings.Contains(truncated, "…") {
+		t.Fatalf("a long question was not truncated:\n%s", truncated)
+	}
+	if !strings.Contains(truncated, "再问一句") || !strings.Contains(truncated, "答") {
+		t.Fatalf("a second question was dropped:\n%s", truncated)
+	}
+}
+
+func TestTitleRejectsCopyingTheQuestion(t *testing.T) {
+	useFaux(t, ai.FauxStaticStep(ai.FauxResponse{Content: []ai.FauxContentBlock{ai.FauxText("这个月外卖花了多少？")}, StopReason: "stop"}))
+	response := assistFor(t, TitleJSON, map[string]any{"version": 1, "provider": "faux", "model": "faux-1", "apiKey": "test",
+		"history": []map[string]string{
+			{"role": "user", "content": "这个月外卖花了多少？"},
+			{"role": "assistant", "content": "1,280.00 元"},
+			{"role": "user", "content": "那上周呢"},
+			{"role": "assistant", "content": "320.00 元"},
+		}})
+	if response.OK || response.Error == "" {
+		t.Fatalf("a title copied from the question was accepted: %+v", response)
 	}
 }
 
@@ -125,12 +186,40 @@ func TestCleanTitleTakesOneLineAndDropsLabels(t *testing.T) {
 		"！":                       "",
 	}
 	for reply, want := range cases {
-		if got := cleanTitle(reply); got != want {
+		if got := cleanTitle(reply, ""); got != want {
 			t.Fatalf("cleanTitle(%q) = %q, want %q", reply, got, want)
 		}
 	}
-	if got := cleanTitle(strings.Repeat("长", 80)); utf8.RuneCountInString(got) != maxTitleRunes+1 {
+	if got := cleanTitle(strings.Repeat("长", 80), ""); utf8.RuneCountInString(got) != maxTitleRunes+1 {
 		t.Fatalf("long title clipped to %d runes", utf8.RuneCountInString(got))
+	}
+}
+
+func TestCleanTitleRejectsTheQuestionAgain(t *testing.T) {
+	question := "这个月外卖花了多少？"
+	copies := map[string]string{
+		"这个月外卖花了多少":         question,
+		"这个月外卖花了多少？。":       question,
+		"这个月外卖":             question,
+		"这个月外卖花了多少？\n解释":    question,
+		"外卖":                "外卖",
+		"Q3 budget review?": "Q3 budget review",
+		"Q3 budget":         "Q3 budget review",
+	}
+	for reply, asked := range copies {
+		if got := cleanTitle(reply, asked); got != "" {
+			t.Fatalf("cleanTitle(%q, %q) = %q, want the question rejected", reply, asked, got)
+		}
+	}
+	kept := map[string]string{
+		"本月外卖支出": "这个月外卖花了多少？",
+		"外卖支出":   "外卖",
+		"外卖":     "外卖支出",
+	}
+	for reply, asked := range kept {
+		if got := cleanTitle(reply, asked); got != reply {
+			t.Fatalf("cleanTitle(%q, %q) = %q, want it kept", reply, asked, got)
+		}
 	}
 }
 

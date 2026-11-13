@@ -181,13 +181,19 @@ private struct LedgerAgentChatScreen: View {
         .task(id: conversation.id) {
             if conversation.restored { recapIfWanted() }
             if conversation.messages.isEmpty { refreshStarters() }
+            // Answers that landed while another conversation was on screen
+            // get their name here.
+            nameSession()
         }
         .onChange(of: conversation.messages.count) { _, _ in
             predictNext()
             nameSession()
         }
         .onChange(of: session.privacyShielded) { _, shielded in
-            if !shielded { resumeIfInterrupted() }
+            if !shielded {
+                resumeIfInterrupted()
+                nameSession()
+            }
         }
         // A turn found dead after a freeze is interrupted while the user
         // may already be looking.
@@ -995,11 +1001,11 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
-    /// Names the conversation once it has its first answer, when the user
-    /// allows the extra requests. An unnamed conversation keeps its first
-    /// question as its name.
+    /// Names the conversation once it has two answers, when the user allows
+    /// the extra requests and is not hiding amounts. An unnamed conversation
+    /// keeps its first question as its name.
     private func nameSession() {
-        guard settings.assists, settings.hasKey, conversation.generatedTitle == nil,
+        guard settings.assists, settings.hasKey, !session.privacyShielded, conversation.generatedTitle == nil,
               let repository = session.localRepository, let key = try? settings.apiKey() else { return }
         let choice = settings.choice
         conversation.nameSession { history in
@@ -2233,7 +2239,7 @@ struct LedgerAgentSettingsView: View {
                 Toggle("智能建议、回顾与命名", isOn: Binding(get: { settings.assists }, set: { settings.setAssists($0) }))
                     .accessibilityIdentifier("ledger-agent-assists")
             } header: { Text("记忆与建议") } footer: {
-                Text("记忆是这本账的 memory.md：你的偏好、常用的账户和分类、常做的事。助手每次回答都会读，你说「记住」或纠正它时会自己更新。只存在本机，不随 Git 同步。智能建议会根据账本和记忆生成「试试」、在输入框里预测下一句、回来时总结对话，并在第一次回答后给这段对话起一个名字，每次都是一个不带思考的小请求。")
+                Text("记忆是这本账的 memory.md：你的偏好、常用的账户和分类、常做的事。助手每次回答都会读，你说「记住」或纠正它时会自己更新。只存在本机，不随 Git 同步。智能建议会根据账本和记忆生成「试试」、在输入框里预测下一句、回来时总结对话，并在聊过两个来回后给这段对话起一个名字，起名失败会在下次回答后再试，每次都是一个不带思考的小请求。")
             }
             Section {
                 Toggle("后台保持运行", isOn: Binding(get: { settings.keepsAwake }, set: { settings.setKeepsAwake($0) }))
