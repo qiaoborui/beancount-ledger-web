@@ -23,6 +23,29 @@ struct LedgerAgentLiveActivity: Widget {
     /// would scale the common timer to pay for it.
     private static let compactSide: CGFloat = 34
 
+    /// The running timer's column, fixed rather than a maximum.
+    ///
+    /// A flexible `.frame(maxWidth:)` takes the width the expanded region
+    /// proposes, and can end up narrower than the timer's own ideal width. The
+    /// timer then draws into too little room and its last digit is cut by the
+    /// region's edge, which is a straight line in blank space, not the island's
+    /// rounded end: on a 402pt-wide phone at step 15 the island still left the
+    /// timer about 12pt of clearance while 0:45 lost part of its 5. A fixed
+    /// column reserves the room up front, so the region cannot under-report it:
+    /// the frame sets the size `trailing` reports, which is the size the region
+    /// lays out, so it reserves the same room inside `trailing` as it would
+    /// wrapped around the region's content.
+    ///
+    /// The column belongs to the timer alone. How a turn ended shows a steps
+    /// pill, which keeps its own width instead of sitting centred in 64pt.
+    /// 64pt holds an h:mm:ss timer at the expanded font; the 0.6 scale floor on
+    /// the timer covers anything longer.
+    private static let timerColumn: CGFloat = 64
+
+    /// The subtitle gets two lines and then a tail ellipsis, so a longer step
+    /// is shortened rather than run past the room the island gives it.
+    private static let detailLines = 2
+
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: LedgerAgentActivityAttributes.self) { context in
             let phase = context.state.phase
@@ -30,7 +53,7 @@ struct LedgerAgentLiveActivity: Widget {
                 LedgerLockBody(
                     header: String(localized: "账本助手"),
                     glyph: glyph(phase), color: color(phase),
-                    title: title(phase), detail: context.state.detail, detailLines: 2
+                    title: title(phase), detail: context.state.detail, detailLines: LedgerAgentLiveActivity.detailLines
                 ) {
                     trailing(context)
                 } footer: {
@@ -44,17 +67,24 @@ struct LedgerAgentLiveActivity: Widget {
         } dynamicIsland: { context in
             let phase = context.state.phase
             return DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) { LedgerGlassBadge(glyph: glyph(phase), color: color(phase), size: 24, symbolSize: 12) }
-                DynamicIslandExpandedRegion(.trailing) { trailing(context) }
+                DynamicIslandExpandedRegion(.leading) {
+                    LedgerGlassBadge(glyph: glyph(phase), color: color(phase), size: 24, symbolSize: 12)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    trailing(context)
+                }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(title(phase))
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
                             .foregroundStyle(LedgerGlass.text)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                         Text(context.state.detail)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(LedgerGlass.secondary)
-                            .lineLimit(2)
+                            .lineLimit(LedgerAgentLiveActivity.detailLines)
+                            .truncationMode(.tail)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 4)
@@ -102,8 +132,10 @@ struct LedgerAgentLiveActivity: Widget {
             Text(context.attributes.startedAt, style: .timer)
                 .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle(LedgerGlass.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 64)
+                .frame(width: LedgerAgentLiveActivity.timerColumn, alignment: .trailing)
         } else if context.state.steps > 0 {
             LedgerGlassPill(text: String(localized: "\(context.state.steps) 步"), color: LedgerGlass.secondary)
         }
