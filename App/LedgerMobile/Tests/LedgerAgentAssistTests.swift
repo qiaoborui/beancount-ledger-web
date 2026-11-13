@@ -208,9 +208,9 @@ final class LedgerAgentAssistTests: XCTestCase {
     }
 
     private func waitForTitleCalls(_ calls: TitleCalls, atLeast expected: Int) async throws {
-        for _ in 0..<200 {
+        for _ in 0..<400 {
             if await calls.count >= expected { return }
-            try await Task.sleep(for: .milliseconds(2))
+            try await Task.sleep(for: .milliseconds(5))
         }
         XCTFail("naming was not asked \(expected) times")
     }

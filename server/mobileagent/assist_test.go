@@ -134,6 +134,18 @@ func TestTitleMessageKeepsTwoExchangesAndTruncates(t *testing.T) {
 	if !strings.Contains(message, "…") {
 		t.Fatalf("a long answer was not truncated:\n%s", message)
 	}
+
+	truncated := titleMessage([]historyMessageV1{
+		{Role: "user", Content: strings.Repeat("问", 700) + "问尾标记"},
+		{Role: "assistant", Content: "答"},
+		{Role: "user", Content: "再问一句"},
+	})
+	if strings.Contains(truncated, "问尾标记") || !strings.Contains(truncated, "…") {
+		t.Fatalf("a long question was not truncated:\n%s", truncated)
+	}
+	if !strings.Contains(truncated, "再问一句") || !strings.Contains(truncated, "答") {
+		t.Fatalf("a second question was dropped:\n%s", truncated)
+	}
 }
 
 func TestTitleRejectsCopyingTheQuestion(t *testing.T) {

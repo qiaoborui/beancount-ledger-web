@@ -1920,11 +1920,12 @@ final class LedgerAgentConversation: ObservableObject {
     /// How often one conversation asks for a name before it keeps its first
     /// question, so a model that keeps failing is not asked forever.
     static let maximumNamingAttempts = 3
-    /// How many times this conversation has asked for a name, and the answers
-    /// it saw then; a failed request is retried on a later answer, never on
-    /// the same one again.
+    /// How many times this conversation has asked for a name, the answers it
+    /// saw then, and whether a request is out; a failed request is retried on
+    /// a later answer, never on the same one again.
     private var namingAttempts = 0
     private var namedAnswers: Int?
+    private var naming = false
 
     /// Whether a naming request should go out now: the conversation has no
     /// name yet, it is not running a turn, it has at least two answers, it has
@@ -1942,14 +1943,18 @@ final class LedgerAgentConversation: ObservableObject {
     /// tries, and an unnamed conversation keeps its first question as its
     /// name.
     func nameSession(using write: @escaping Assist<String>) {
-        guard Self.shouldName(answerCount: answerCount, generatedTitle: generatedTitle, isRunning: isRunning,
-                              attempts: namingAttempts, namedAnswers: namedAnswers) else { return }
+        guard !naming, Self.shouldName(answerCount: answerCount, generatedTitle: generatedTitle,
+                                      isRunning: isRunning, attempts: namingAttempts,
+                                      namedAnswers: namedAnswers) else { return }
+        naming = true
         namingAttempts += 1
         namedAnswers = answerCount
         let epoch = epoch, history = visibleHistory
         Task { [weak self] in
             let name = try? await write(history)
-            guard let self, self.epoch == epoch, let name, !name.isEmpty, self.generatedTitle == nil else { return }
+            guard let self else { return }
+            self.naming = false
+            guard self.epoch == epoch, let name, !name.isEmpty, self.generatedTitle == nil else { return }
             self.generatedTitle = name
             self.onSettled?(self)
         }
@@ -2175,6 +2180,7 @@ final class LedgerAgentConversation: ObservableObject {
         generatedTitle = nil
         namingAttempts = 0
         namedAnswers = nil
+        naming = false
         epoch += 1
         if let editor {
             let draft = draft, reopening = reopening

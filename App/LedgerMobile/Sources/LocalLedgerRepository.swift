@@ -1382,7 +1382,7 @@ actor LocalLedgerRepository: LedgerRepository {
         return try LedgerAgentAssistant.decode(data).suggestions ?? []
     }
 
-    /// A short name for a conversation, from its first exchange.
+    /// A short name for a conversation, from its first two exchanges.
     func agentSessionTitle(history: [LedgerAgentTurnRequest.HistoryEntry], choice: LedgerAgentModelChoice, apiKey: String,
                            assistant: LedgerAgentAssistant = .native) async throws -> String {
         let request = LedgerAgentAssistRequest(provider: choice.provider, model: choice.model, apiKey: apiKey,
