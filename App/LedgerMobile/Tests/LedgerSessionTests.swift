@@ -206,12 +206,16 @@ final class LedgerSessionTests: XCTestCase {
         await session.updateActivity(isActive: false, isBackground: true)
         session.openWidgetURL(URL(string: "ledger://record")!)
         await session.applyPendingExternalRoute()
+        // The route is untouched while the scene is inactive: this remote
+        // session would otherwise reject it at once with an error message.
         XCTAssertNil(session.quickEntry)
+        XCTAssertNil(session.errorMessage)
         XCTAssertNotNil(session.pendingExternalRoute)
 
         await session.updateActivity(isActive: true, isBackground: false)
         await session.applyPendingExternalRoute()
-        XCTAssertEqual(session.quickEntry?.kind, .record)
+        XCTAssertNil(session.quickEntry)
+        XCTAssertEqual(session.errorMessage, String(localized: "快速记账仅支持本机账本"))
         XCTAssertNil(session.pendingExternalRoute)
     }
 
