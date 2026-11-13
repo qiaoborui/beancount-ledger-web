@@ -103,6 +103,35 @@ final class LedgerCrashLogTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: oldest.path))
     }
 
+    func testEntriesOrderCrashAndMetricKitReportsTogether() throws {
+        let fixture = try fixture()
+        let base = Date(timeIntervalSince1970: 1_764_000_000)
+        LedgerCrashLog.write("older crash", prefix: "crash", date: base, directory: fixture.directory)
+        let crash = LedgerMetricKitCrash(
+            applicationVersion: "1.4.3", exceptionType: "1", exceptionCode: nil,
+            signal: "6", terminationReason: nil, virtualMemoryRegionInfo: nil,
+            callStackTree: "{}")
+        LedgerCrashLog.writeMetricKitReport(crash, at: base.addingTimeInterval(60),
+                                            directory: fixture.directory)
+        let entries = fixture.log.entries()
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertTrue(entries[0].text.contains("callStackTree"), entries[0].text)
+        XCTAssertEqual(entries[1].text, "older crash")
+    }
+
+    func testUncaughtExceptionReportIsWrittenWithTheException() throws {
+        let fixture = try fixture()
+        let exception = NSException(name: NSExceptionName(rawValue: "TestException"),
+                                    reason: "assertion from a test", userInfo: nil)
+        LedgerCrashLog.writeUncaughtException(exception, at: fixture.now,
+                                              directory: fixture.directory,
+                                              defaults: fixture.defaults)
+        let entries = fixture.log.entries()
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertTrue(entries[0].text.contains("TestException"), entries[0].text)
+        XCTAssertTrue(entries[0].text.contains("assertion from a test"), entries[0].text)
+    }
+
     func testDeleteAndClearRemoveOnlyReports() throws {
         let fixture = try fixture()
         let base = Date(timeIntervalSince1970: 1_764_000_000)

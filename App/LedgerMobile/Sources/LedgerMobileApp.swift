@@ -39,10 +39,10 @@ struct LedgerMobileApp: App {
         #if os(iOS)
         LedgerAgentNotifications.shared.open = { [weak session] in
             // Only hand the tap to the route; the assistant's cover (and the
-            // background conversation it shows) waits for an active scene and a
-            // ready ledger, where `applyPendingExternalRoute` presents it once.
+            // background conversation it reveals) waits for an active scene and
+            // a ready ledger, where `applyPendingExternalRoute` presents it once.
             LedgerCrashLog.shared.record("账本助手通知：打开")
-            session?.openWidgetURL(URL(string: "ledger://agent")!)
+            session?.openAgentFromNotification()
         }
         // 记账提醒 and 导入账单提醒 open their pages like a widget link.
         LedgerLocalReminders.shared.open = { [weak session] url in
