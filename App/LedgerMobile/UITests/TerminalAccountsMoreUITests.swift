@@ -9,13 +9,20 @@ final class TerminalAccountsMoreUITests: XCTestCase {
         assertHeader(app)
         capture("terminal-accounts")
         app.buttons["账户操作"].tap()
-        app.buttons["accounts-add-button"].tap()
-        XCTAssertTrue(app.navigationBars["新建账户"].waitForExistence(timeout: 5), app.debugDescription)
+        let add = app.buttons["accounts-add-button"]
+        let created = app.navigationBars["新建账户"]
+        for _ in 0..<3 where !created.exists {
+            if !add.exists { app.buttons["账户操作"].tap() }
+            guard add.waitForExistence(timeout: 5) else { continue }
+            add.tapMenuItem()
+            _ = created.waitForExistence(timeout: 3)
+        }
+        XCTAssertTrue(created.waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["取消"].tap()
         // Group cards start collapsed: open the first one to reach an account.
-        let group = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'account-group-'")).firstMatch
+        let group = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'account-group-'")).firstMatch
         XCTAssertTrue(group.waitForExistence(timeout: 5), app.debugDescription)
-        let account = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'account-link-'")).firstMatch
+        let account = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'account-link-'")).firstMatch
         XCTAssertFalse(account.exists)
         group.tap()
         XCTAssertTrue(account.waitForExistence(timeout: 5), app.debugDescription)
@@ -28,15 +35,15 @@ final class TerminalAccountsMoreUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["金额已隐藏"].firstMatch.exists)
         capture("terminal-accounts-private")
         app.buttons["显示金额"].tap()
-        app.tabBars.buttons["更多"].tap()
+        app.compactTab("更多").tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5))
         assertNoDateHeader(app)
         capture("terminal-more")
         app.buttons["more-analysis-assets"].tap()
-        XCTAssertTrue(app.staticTexts["01 / 净资产历史"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["净值走势"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["返回上一页"].tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5))
-        app.tabBars.buttons["搜索"].tap()
+        app.compactTab("搜索").tap()
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 

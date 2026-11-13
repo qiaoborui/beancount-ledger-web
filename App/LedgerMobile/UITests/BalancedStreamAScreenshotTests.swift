@@ -156,7 +156,7 @@ final class BalancedStreamAScreenshotTests: XCTestCase {
         app.buttons["local-ledger-create"].tap(); app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
         app.tabBars.buttons["流水"].tap()
-        app.buttons["transaction-actions"].tap()
+        XCTAssertTrue(app.buttons["transaction-create-local"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["transaction-create-local"].tap()
         XCTAssertTrue(app.buttons["高级"].waitForExistence(timeout: 5)); app.buttons["高级"].tap()
         let genericPayee = app.textFields["transaction-edit-payee"]

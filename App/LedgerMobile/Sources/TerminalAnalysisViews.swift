@@ -235,7 +235,8 @@ private struct BalancedAnalysisTable: View {
                     Text(total.label).balancedFont(size: 14.5, weight: .semibold).foregroundStyle(BalancedPalette.ink)
                     Spacer(minLength: 8)
                     Text(amountText(total.minorUnits)).balancedFont(size: 14.5, weight: .semibold).monospacedDigit().foregroundStyle(BalancedPalette.ink)
-                    Text("100%").balancedFont(size: 14.5, weight: .semibold).monospacedDigit().foregroundStyle(BalancedPalette.secondary)
+                    // Same as each row: the share column is a ratio, so it hides with the amounts.
+                    Text(session.amountsVisible ? "100%" : "—").balancedFont(size: 14.5, weight: .semibold).monospacedDigit().foregroundStyle(BalancedPalette.secondary)
                         .frame(width: 54, alignment: .trailing)
                 }
                 .padding(EdgeInsets(top: 11, leading: 20, bottom: 11, trailing: 20))

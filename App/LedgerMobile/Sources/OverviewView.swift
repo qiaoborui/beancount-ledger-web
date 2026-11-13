@@ -139,6 +139,11 @@ struct OverviewView: View {
             amount(abs(net), currency: currency, prefix: net < 0 ? "−" : "", size: 30, weight: .medium,
                    color: net >= 0 ? BalancedPalette.income : BalancedPalette.expense, currencySymbol: true)
                 .lineLimit(1).minimumScaleFactor(0.45)
+                // Hidden amounts read as 金额已隐藏, as everywhere else, not as a row of dots.
+                .accessibilityLabel(session.amountsVisible
+                    ? (net < 0 ? "−" : "") + MoneyText.format(minorUnits: abs(net), currency: currency)
+                    : String(localized: "金额已隐藏"))
+                .accessibilityIdentifier("overview-monthly-net")
             Text(String(localized: "留存率") + " " + rateText)
                 .balancedFont(size: 15).monospacedDigit().foregroundStyle(BalancedPalette.meta)
                 .padding(.top, 4)

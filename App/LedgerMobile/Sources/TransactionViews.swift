@@ -549,7 +549,9 @@ private struct BalancedLedgerTransactionRow: View {
                     .monospacedDigit()
                     .foregroundStyle(presentation.kind == .income ? BalancedPalette.income : BalancedPalette.ink)
                     .lineLimit(1).minimumScaleFactor(0.6)
+                    .accessibilityIdentifier("transaction-card-amount-\(transaction.source.line)")
                 Text(presentation.isRefund ? String(localized: "退款") : presentation.kind == .transfer ? String(localized: "转账") : visual.categoryLabel).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .accessibilityIdentifier("transaction-category-\(transaction.source.line)")
             }
         }
         .padding(.vertical, 11)
@@ -1418,6 +1420,7 @@ struct TransactionsView: View {
                 HStack(spacing: 8) {
                     Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                         .foregroundStyle(TerminalPalette.accent)
+                        .accessibilityIdentifier("transaction-card-selection-\(transaction.source.line)")
                     BalancedLedgerTransactionRow(transaction: transaction, accountLabels: accountLabels,
                         accountCurrency: session.ledger?.valuationCurrency ?? "CNY")
                 }

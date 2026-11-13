@@ -13,11 +13,16 @@
 #             neither LedgerCore nor the Beancount runtime, so it is quick
 #   ui-tests  build the LedgerMobile scheme and run LedgerMobileUITests; several
 #             of them time out on a loaded machine, so CI runs them only when a
-#             manual run asks for them
+#             manual run asks for them. UI_TESTS_ONLY narrows the run to the
+#             classes or Class/testMethod entries it lists (space or comma
+#             separated, no target prefix), and `smoke` stands for the release
+#             smoke set below; empty runs every UI test except the screenshot
+#             generators.
 set -euo pipefail
 
 mode="${1:-}"
 skipped_tests=()
+only_tests=()
 case "$mode" in
   app)
     scheme=LedgerMobile
@@ -40,6 +45,34 @@ case "$mode" in
     scheme=LedgerMobile
     test_target=LedgerMobileUITests
     needs_frameworks=true
+    only_input="${UI_TESTS_ONLY:-}"
+    read -r -a requested <<< "${only_input//,/ }"
+    for item in ${requested[@]+"${requested[@]}"}; do
+      # The release smoke set: launch, tab switching, the accounts and 更多 pages,
+      # and a local ledger restarting without placeholder cards.
+      if [[ "$item" == smoke ]]; then
+        only_tests+=(
+          "$test_target/TerminalOverviewUITests/testFlatNavigationKeepsSearchAndOverviewReachable"
+          "$test_target/TerminalAccountsMoreUITests/testAccessibilityKeepsAccountFiltersAndMoreReachable"
+          "$test_target/LocalLedgerUITests/testLocalRestartDoesNotShowPassiveLoadingCards"
+        )
+        continue
+      fi
+      # Class or Class/testMethod: letters, digits, `_` and at most one `/`.
+      if [[ ! "$item" =~ ^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)?$ ]]; then
+        echo "::error::invalid UI_TESTS_ONLY entry: $item (expected Class, Class/testMethod or smoke)" >&2
+        exit 2
+      fi
+      only_tests+=("$test_target/$item")
+    done
+    if [[ ${#only_tests[@]} -eq 0 ]]; then
+      # They generate App Store screenshots rather than check behaviour; name
+      # them in UI_TESTS_ONLY to run them.
+      skipped_tests=(
+        LedgerMobileUITests/BalancedScreenshotTests
+        LedgerMobileUITests/BalancedStreamAScreenshotTests
+      )
+    fi
     ;;
   *)
     echo "usage: $0 app|widgets|ui-tests" >&2
@@ -84,6 +117,14 @@ print(best[1])
 ')"
 echo "Simulator: $simulator"
 
+if [[ "$mode" == ui-tests ]]; then
+  # The app keeps its layout preferences (compact tab bar, hidden amounts,
+  # overview sections) in UserDefaults, and the simulator outlives the job: a
+  # run that customised the bar leaves every later run starting from a bar the
+  # tests do not expect, and the failures cascade. Begin from a clean install.
+  xcrun simctl uninstall "$simulator" com.qiaoborui.ledger.mobile 2>/dev/null || true
+fi
+
 derived_data="$(mktemp -d "${TMPDIR:-/tmp}/ledger-ios-app.XXXXXX")"
 trap 'rm -rf "$derived_data"' EXIT
 common=(
@@ -98,17 +139,36 @@ echo "::group::Build the $scheme scheme and its test bundles"
 xcodebuild build-for-testing -quiet "${common[@]}"
 echo "::endgroup::"
 
+only_args=()
+for test in ${only_tests[@]+"${only_tests[@]}"}; do
+  only_args+=("-only-testing:$test")
+done
+if [[ ${#only_args[@]} -eq 0 ]]; then
+  only_args=("-only-testing:$test_target")
+fi
+echo "Selected: ${only_args[*]}"
+if [[ ${#skipped_tests[@]} -gt 0 ]]; then
+  echo "Skipped: ${skipped_tests[*]}"
+fi
 skip_args=()
 for test in ${skipped_tests[@]+"${skipped_tests[@]}"}; do
   skip_args+=("-skip-testing:$test")
 done
+test_log="$derived_data/test.log"
 xcodebuild test-without-building "${common[@]}" \
-  "-only-testing:$test_target" \
+  "${only_args[@]}" \
   ${skip_args[@]+"${skip_args[@]}"} \
-  -resultBundlePath "$derived_data/Tests.xcresult" \
-  | grep -E --line-buffered '(error|failed|passed|Executed|TEST (SUCCEEDED|FAILED)|\*\* )' \
-  || true
-# grep hides the full log, so take the verdict from the result bundle.
+  -resultBundlePath "$derived_data/Tests.xcresult" > "$test_log" 2>&1 || true
+grep -E '(error|failed|passed|Executed|TEST (SUCCEEDED|FAILED)|\*\* )' "$test_log" || true
+# The step-by-step lines around a failure are what make it diagnosable, and
+# grep above drops them: print them for every failing test.
+awk '/error: -\[/ { start = NR } { line[NR] = $0 }
+     END { for (i = 1; i <= NR; i++) if (line[i] ~ /error: -\[/) {
+             print "::group::context for " line[i]
+             for (j = (i > 40 ? i - 40 : 1); j <= i; j++) print line[j]
+             print "::endgroup::"
+           } }' "$test_log" || true
+# The grep hides the full log, so take the verdict from the result bundle.
 xcrun xcresulttool get test-results summary --path "$derived_data/Tests.xcresult" \
   | python3 -c '
 import json, sys

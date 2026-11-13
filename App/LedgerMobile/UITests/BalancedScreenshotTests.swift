@@ -308,8 +308,9 @@ final class BalancedScreenshotTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 40), app.debugDescription)
 
         app.tabBars.buttons["流水"].tap()
-        XCTAssertTrue(app.buttons["transaction-actions"].waitForExistence(timeout: 10), app.debugDescription)
-        app.buttons["transaction-actions"].tap()
+        // 记一笔 is the page's own quick entry button; the 流水操作 menu only
+        // closes when it is tapped.
+        XCTAssertTrue(app.buttons["transaction-create-local"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["transaction-create-local"].tap()
         let natural = app.buttons["bookkeeping-natural-entry"]
         XCTAssertTrue(natural.waitForExistence(timeout: 10), app.debugDescription)

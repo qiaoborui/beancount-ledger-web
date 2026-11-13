@@ -5,21 +5,24 @@ final class TerminalReportsUITests: XCTestCase {
     func testReportsShareDateHeaderAndKeepDrillDowns() {
         let app = launch()
         openReport(app, id: "more-analysis-incomeExpense")
-        XCTAssertTrue(app.staticTexts["01 / 月度收支"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.descendants(matching: .any)["balanced-cashflow-chart"].waitForExistence(timeout: 15), app.debugDescription)
         assertHeader(app)
         capture("terminal-income-light")
         app.swipeUp()
         capture("terminal-income-categories-light")
         app.swipeDown()
-        let income = app.buttons.containing(.staticText, identifier: "收入").matching(NSPredicate(format: "label CONTAINS '50,500'")).firstMatch
-        XCTAssertTrue(income.isHittable, app.debugDescription)
-        income.tap()
-        XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["收入"].isSelected)
-        app.tabBars.buttons["更多"].tap()
+        // 支出构成 rows (label "居住、3,800.00、68.4%") open the transactions page filtered to 支出.
+        let category = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "居住、")).firstMatch
+        for _ in 0..<4 where !category.isHittable { app.swipeUp() }
+        XCTAssertTrue(category.isHittable, app.debugDescription)
+        category.tap()
+        XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 5), app.debugDescription)
+        let expenseFilter = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "支出、")).firstMatch
+        XCTAssertTrue(expenseFilter.isSelected, app.debugDescription)
+        app.compactTab("更多").tap()
         if app.buttons["返回上一页"].exists { app.buttons["返回上一页"].tap() }
         openReport(app, id: "more-analysis-assets")
-        XCTAssertTrue(app.staticTexts["01 / 净资产历史"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["净值走势"].waitForExistence(timeout: 15), app.debugDescription)
         assertHeader(app)
         capture("terminal-assets-light")
         app.swipeUp()
@@ -54,13 +57,13 @@ final class TerminalReportsUITests: XCTestCase {
 
     func testReportPrivacyHidesChartsAndRatios() {
         let app = launch()
-        app.tabBars.buttons["账户"].tap()
+        app.compactTab("账户").tap()
         let hide = app.buttons["隐藏金额"]
         XCTAssertTrue(hide.waitForExistence(timeout: 5))
         hide.tap()
         openReport(app, id: "more-analysis-incomeExpense")
-        XCTAssertTrue(app.staticTexts["01 / 月度收支"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.otherElements["terminal-cashflow-chart"].exists)
+        XCTAssertTrue(app.scrollViews["analysis-content-incomeExpense"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["balanced-cashflow-chart"].exists)
         XCTAssertTrue(app.staticTexts["金额已隐藏"].firstMatch.exists)
         XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "%")).count, 0)
         capture("terminal-income-private")
@@ -69,10 +72,10 @@ final class TerminalReportsUITests: XCTestCase {
     func testReportAccessibilityKeepsHeaderAndSectionsReachable() {
         let app = launch(category: "UICTContentSizeCategoryAccessibilityXXXL")
         openReport(app, id: "more-analysis-incomeExpense")
-        XCTAssertTrue(app.staticTexts["01 / 月度收支"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.scrollViews["analysis-content-incomeExpense"].waitForExistence(timeout: 10), app.debugDescription)
         assertHeader(app)
         capture("terminal-report-accessibility")
-        let categories = app.staticTexts["03 / 分类构成"]
+        let categories = app.staticTexts["支出构成"]
         for _ in 0..<5 where !categories.isHittable { app.swipeUp() }
         XCTAssertTrue(categories.isHittable, app.debugDescription)
         app.buttons["返回上一页"].tap()
@@ -80,7 +83,7 @@ final class TerminalReportsUITests: XCTestCase {
     }
 
     private func openReport(_ app: XCUIApplication, id: String) {
-        app.tabBars.buttons["更多"].tap()
+        app.compactTab("更多").tap()
         let button = app.buttons[id]
         for _ in 0..<5 where !button.isHittable { app.swipeUp() }
         XCTAssertTrue(button.isHittable, app.debugDescription)
