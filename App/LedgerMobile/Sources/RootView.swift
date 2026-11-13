@@ -619,7 +619,7 @@ private struct MainTabView: View {
                 Tab(value: LedgerDestination.agent, role: Self.searchTabRole) {
                     Color.clear
                 } label: {
-                    Label { Text("助手") } icon: { LedgerTabMark.image }
+                    Label { Text(LedgerDestination.agent.compactTitle) } icon: { LedgerTabMark.image }
                 }
             } else {
                 Tab("搜索", systemImage: "magnifyingglass", value: LedgerDestination.search, role: Self.searchTabRole) {
@@ -652,7 +652,7 @@ private struct MainTabView: View {
             if agentFloats {
                 // Selecting it opens the assistant's sheet (`compactSelection`).
                 Color.clear
-                    .tabItem { Label { Text("助手") } icon: { LedgerTabMark.image } }
+                    .tabItem { Label { Text(LedgerDestination.agent.compactTitle) } icon: { LedgerTabMark.image } }
                     .tag(LedgerDestination.agent)
             } else {
                 NavigationStack { GlobalSearchPage() }

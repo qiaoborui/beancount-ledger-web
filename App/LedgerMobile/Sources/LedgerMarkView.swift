@@ -4,10 +4,11 @@ import UIKit
 /// 账本助手's glyph in the compact tab bar: the app's own mark from
 /// `Supporting/AppIcon/ledger-mark.svg`, a page with an L cut out of it and a
 /// turned corner down its notch. It is drawn with a shape so it stays crisp at
-/// tab-bar sizes and does not need an asset catalogue. The widget extension
-/// restates this geometry in `WidgetDesign.swift`; the app target never
-/// compiles that file.
-struct LedgerMarkShape: Shape {
+/// tab-bar sizes and needs no asset catalogue. The widget extension restates
+/// this geometry in `WidgetDesign.swift`, and `LedgerMarkCanvas` in
+/// `LedgerLaunchView.swift` animates the same page and fold on the launch
+/// screen; the app target never compiles the widget's copy.
+struct LedgerTabMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         // The svg's 64-unit view box keeps the mark in its middle 40 units
         // (12...52); that square is fitted to the rect and centred.
@@ -39,24 +40,32 @@ struct LedgerMarkShape: Shape {
 /// same way it tints the SF Symbols beside it.
 @MainActor
 enum LedgerTabMark {
-    /// A bar glyph sits in about 25pt. The mark fills 18pt of that canvas so it
-    /// reads a little quieter than a system symbol, centred with even padding
-    /// all round; the same image serves the detached glass button and the
-    /// ordinary trailing tab item before iOS 26.
+    /// A bar glyph sits in about 25pt, and a system symbol's ink covers roughly
+    /// 19–20pt of that. The mark is a filled silhouette rather than line art,
+    /// so its page fills 18pt of the 25pt canvas: a little smaller than that
+    /// ink, centred with 3.5pt of padding all round. The same image serves the
+    /// detached glass button and the ordinary trailing tab item before iOS 26.
     private static let canvas: CGFloat = 25
     private static let mark: CGFloat = 18
 
     static let image: Image = {
-        let content = LedgerMarkShape()
-            .fill(Color.black, style: FillStyle(eoFill: true))
-            .frame(width: mark, height: mark)
-            .frame(width: canvas, height: canvas)
-        let renderer = ImageRenderer(content: content)
-        renderer.scale = 3
-        guard let rendered = renderer.uiImage else {
+        guard let rendered = rendered() else {
             // Never expected; an ordinary symbol is a better bar than no glyph.
             return Image(systemName: LedgerDestination.agent.systemImage)
         }
         return Image(uiImage: rendered.withRenderingMode(.alwaysTemplate))
     }()
+
+    /// The glyph as a bitmap, which the geometry test reads too. Rendered at 4x
+    /// rather than a device's scale: the detached button can draw the label
+    /// above its 25pt canvas, and the headroom keeps that from going soft.
+    static func rendered() -> UIImage? {
+        let content = LedgerTabMarkShape()
+            .fill(Color.black, style: FillStyle(eoFill: true))
+            .frame(width: mark, height: mark)
+            .frame(width: canvas, height: canvas)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 4
+        return renderer.uiImage
+    }
 }
