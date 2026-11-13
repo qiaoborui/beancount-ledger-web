@@ -34,9 +34,11 @@ struct LedgerCrashLogView: View {
                         .accessibilityIdentifier("diagnostics-crash-entry")
                     }
                     .onDelete { offsets in
-                        for index in offsets where entries.indices.contains(index) {
-                            delete(entries[index])
-                        }
+                        // Resolve before deleting: reloading after each report
+                        // would shift the remaining offsets.
+                        let removed = offsets.compactMap { entries.indices.contains($0) ? entries[$0] : nil }
+                        for entry in removed { LedgerCrashLog.shared.delete(entry) }
+                        reload()
                     }
                 }
             } header: {

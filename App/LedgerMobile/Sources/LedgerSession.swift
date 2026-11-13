@@ -1225,7 +1225,9 @@ final class LedgerSession: ObservableObject {
         suspendWidgetCredential()
         clearWidgetSnapshot()
         pendingWidgetExpenseDay = nil
+        deferredWidgetExpenseDay = nil
         pendingExternalRoute = nil
+        revealsBackgroundAgent = false
         agentPresented = false
         agentSheetOnScreen = false
         externalAccount = nil
@@ -3443,7 +3445,9 @@ final class LedgerSession: ObservableObject {
         if isLocal { chooseLedger(); return }
         guard let contextURL else { return }
         pendingWidgetExpenseDay = nil
+        deferredWidgetExpenseDay = nil
         pendingExternalRoute = nil
+        revealsBackgroundAgent = false
         agentPresented = false
         agentSheetOnScreen = false
         externalAccount = nil
@@ -3470,8 +3474,10 @@ final class LedgerSession: ObservableObject {
 
     func changeServer() {
         pendingWidgetExpenseDay = nil
+        deferredWidgetExpenseDay = nil
         resetGlobalSearch()
         pendingExternalRoute = nil
+        revealsBackgroundAgent = false
         agentPresented = false
         agentSheetOnScreen = false
         externalAccount = nil
@@ -3621,6 +3627,16 @@ final class LedgerSession: ObservableObject {
     /// The one route whose deferral is already in the crash log, so a view
     /// update that re-applies it does not push older breadcrumbs out.
     private var deferredRouteNote: UUID?
+    /// The route currently being applied, so two triggers cannot run it twice
+    /// while one is suspended in a range load.
+    private var applyingExternalRouteID: UUID?
+    /// Set by the assistant's completion notification: that tap should reveal
+    /// the conversation whose turn ended, not whatever is on screen. A plain
+    /// `ledger://agent` link keeps the current conversation.
+    private var revealsBackgroundAgent = false
+    /// A widget day that arrived while the scene was inactive; it becomes the
+    /// sheet's request once the scene is active again.
+    private var deferredWidgetExpenseDay: String?
     /// A question for the ledger assistant that arrived from Siri, a
     /// shortcut or a ledger://agent?q= link, until the assistant takes it.
     @Published private(set) var pendingAgentQuestion: LedgerAgentPendingQuestion?
@@ -3668,8 +3684,15 @@ final class LedgerSession: ObservableObject {
     }
 
     func applyPendingExternalRoute() async {
+        if applicationActive, let day = deferredWidgetExpenseDay {
+            deferredWidgetExpenseDay = nil
+            pendingWidgetExpenseDay = day
+        }
         guard phase == .ready, !isRangeLoading, !isValuationCurrencyLoading,
               let request = pendingExternalRoute else { return }
+        guard applyingExternalRouteID != request.id else { return }
+        applyingExternalRouteID = request.id
+        defer { if applyingExternalRouteID == request.id { applyingExternalRouteID = nil } }
         // A notification tap can arrive while iOS is still bringing the scene
         // forward. Presentations requested then collide with the background
         // snapshot/state-restoration transaction UIKit runs as the app goes to
@@ -3698,10 +3721,13 @@ final class LedgerSession: ObservableObject {
         switch request.route {
         case let .page(destination):
             if destination == .agent {
-                // A finished turn's conversation is what the notification was
-                // about; showing it here keeps the swap to the active, ready
-                // path instead of the notification callback.
-                LedgerAgentSessions.shared.showBackground()
+                // Only the completion notification reveals the background
+                // conversation; a widget or shortcut link keeps the one on
+                // screen. Either way this runs on the active, ready path.
+                if revealsBackgroundAgent {
+                    revealsBackgroundAgent = false
+                    LedgerAgentSessions.shared.showBackground()
+                }
                 LedgerCrashLog.shared.record("外部路由：打开账本助手")
                 agentPresented = true
             }
@@ -3747,16 +3773,29 @@ final class LedgerSession: ObservableObject {
     }
 
     func openWidgetURL(_ url: URL) {
+        applyWidgetURL(url, revealsBackground: false)
+    }
+
+    /// A tap on the assistant's completion notification: open the assistant
+    /// and reveal the conversation whose turn just ended. It goes through the
+    /// same ready + active route as every other link.
+    func openAgentFromNotification() {
+        applyWidgetURL(URL(string: "ledger://agent")!, revealsBackground: true)
+    }
+
+    private func applyWidgetURL(_ url: URL, revealsBackground: Bool) {
         guard url.scheme?.lowercased() == "ledger" else { return }
         let route = LedgerExternalRoute.parse(url)
         // The assistant opens as a sheet over the current tab once the ledger
         // is ready (`applyPendingExternalRoute`); any other page closes it, so
         // a link in one of its replies shows the page it names.
         if let route, route.opensAgent {
+            revealsBackgroundAgent = revealsBackground
             pendingWidgetExpenseDay = nil
             pendingExternalRoute = LedgerExternalRouteRequest(route: route)
             return
         }
+        revealsBackgroundAgent = false
         agentPresented = false
         // 周报 / 月报 is a sheet over the current tab, so the tab stays.
         if let route, route.opensReport {
@@ -3767,7 +3806,14 @@ final class LedgerSession: ObservableObject {
         if url.host?.lowercased() == "transactions",
            let day = LedgerWidgetLink.expenseDay(from: url) {
             pendingExternalRoute = nil
-            pendingWidgetExpenseDay = day
+            if applicationActive {
+                pendingWidgetExpenseDay = day
+            } else {
+                // A sheet requested while the scene is inactive would race the
+                // background snapshot; keep the day until the scene is active.
+                pendingWidgetExpenseDay = nil
+                deferredWidgetExpenseDay = day
+            }
             return
         }
         if url.host?.lowercased() != "gmail-import" {
@@ -3803,11 +3849,8 @@ final class LedgerSession: ObservableObject {
     }
 
     var canPresentWidgetDay: Bool {
-        // A widget day is a sheet too: presenting it while the scene is
-        // inactive races the background snapshot just like the assistant's
-        // cover. The scene becoming active re-evaluates this binding.
-        pendingWidgetExpenseDay != nil && phase == .ready && applicationActive
-            && !agentSheetOnScreen && !isAuthenticationBusy
+        pendingWidgetExpenseDay != nil && phase == .ready && !agentSheetOnScreen
+            && !isAuthenticationBusy
     }
 
     func dismissWidgetDay() {

@@ -94,8 +94,12 @@ final class LedgerCrashLog {
     func install() {
         guard !installed else { return }
         installed = true
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        Self.prepareDirectory(directory)
         prune()
+        // MetricKit delivers a previous launch's crash later in this process;
+        // its report must carry the trail that was stored before this launch's
+        // own "启动" breadcrumb was added.
+        CrashBreadcrumbSnapshot.shared.store(crumbs)
         #if os(iOS)
         let subscriber = MetricKitSubscriber()
         metricKitSubscriber = subscriber
@@ -172,7 +176,8 @@ final class LedgerCrashLog {
     /// and the breadcrumbs that led to it. `UserDefaults` and the bundle are
     /// safe to read on the crashing thread; the actor-isolated state is not.
     nonisolated static func uncaughtExceptionReport(_ exception: NSException,
-                                                    at date: Date = Date()) -> String {
+                                                    at date: Date = Date(),
+                                                    defaults: UserDefaults = .standard) -> String {
         let app = bundleVersion()
         let details: [(String, String)] = [
             ("异常", exception.name.rawValue),
@@ -182,7 +187,7 @@ final class LedgerCrashLog {
         return render(title: String(localized: "未捕获的异常"),
                       details: details, at: date,
                       appVersion: app.version, build: app.build,
-                      breadcrumbs: loadBreadcrumbs(defaults: .standard))
+                      breadcrumbs: loadBreadcrumbs(defaults: defaults))
     }
 
     /// The report text. Fixed labels, the build and the breadcrumbs only: no
@@ -219,15 +224,21 @@ final class LedgerCrashLog {
     }
 
     /// Writes a crash report from the crashing thread.
-    nonisolated static func writeUncaughtException(_ exception: NSException, at date: Date = Date()) {
-        let text = uncaughtExceptionReport(exception, at: date)
-        write(text, prefix: "crash", date: date, directory: defaultDirectory())
+    nonisolated static func writeUncaughtException(_ exception: NSException, at date: Date = Date(),
+                                                   directory: URL = defaultDirectory(),
+                                                   defaults: UserDefaults = .standard) {
+        let text = uncaughtExceptionReport(exception, at: date, defaults: defaults)
+        write(text, prefix: "crash", date: date, directory: directory)
     }
 
     /// Writes one MetricKit crash diagnostic as JSON. The call stack tree is
     /// the JSON MetricKit already provides, so nothing is re-interpreted.
-    nonisolated static func writeMetricKitReport(_ crash: LedgerMetricKitCrash, at date: Date = Date()) {
-        let crumbs = loadBreadcrumbs(defaults: .standard)
+    nonisolated static func writeMetricKitReport(_ crash: LedgerMetricKitCrash, at date: Date = Date(),
+                                                 suffix: String = "",
+                                                 directory: URL = defaultDirectory()) {
+        // The payload describes a previous launch; the breadcrumbs stored
+        // before this launch began are the trail that led to it.
+        let crumbs = CrashBreadcrumbSnapshot.shared.load()
         var object: [String: Any] = [
             "title": String(localized: "MetricKit 崩溃诊断"),
             "capturedAt": isoTimestamp(date),
@@ -252,14 +263,23 @@ final class LedgerCrashLog {
         if let value = crash.virtualMemoryRegionInfo { object["virtualMemoryRegionInfo"] = value }
         guard let data = try? JSONSerialization.data(withJSONObject: object,
                                                     options: [.prettyPrinted, .sortedKeys]) else { return }
-        let directory = defaultDirectory()
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent("metrickit-\(stamp(date)).json")
+        prepareDirectory(directory)
+        let url = directory.appendingPathComponent("metrickit-\(stamp(date))\(suffix).json")
         try? data.write(to: url, options: .atomic)
+        // The list shows the crash's own time, not when MetricKit delivered it.
+        try? FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
         pruneDirectory(directory)
     }
 
     // MARK: Files
+
+    nonisolated static func prepareDirectory(_ directory: URL) {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var url = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? url.setResourceValues(values)
+    }
 
     nonisolated static func defaultDirectory() -> URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -289,7 +309,21 @@ final class LedgerCrashLog {
             : String(localized: "意外退出")
     }
 
-    /// The reports this log owns, oldest first (the file name is the time).
+    /// The time in `crash-2026-11-13T09-41-02Z.log` or
+    /// `metrickit-2026-11-13T09-41-02Z-1.json`.
+    nonisolated static func timestamp(forFileName name: String) -> Date? {
+        guard let range = name.range(of: #"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z"#,
+                                     options: .regularExpression) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH-mm-ss'Z'"
+        return formatter.date(from: String(name[range]))
+    }
+
+    /// The reports this log owns, oldest first. The name carries the report's
+    /// own time, so a crash and a MetricKit payload are ordered together
+    /// instead of one prefix sorting before the other.
     nonisolated static func reportFiles(in directory: URL) -> [URL] {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: [.isRegularFileKey])) ?? []
@@ -299,7 +333,12 @@ final class LedgerCrashLog {
                 return (name.hasPrefix("crash-") && url.pathExtension == "log")
                     || (name.hasPrefix("metrickit-") && url.pathExtension == "json")
             }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .sorted { lhs, rhs in
+                let left = timestamp(forFileName: lhs.lastPathComponent) ?? .distantPast
+                let right = timestamp(forFileName: rhs.lastPathComponent) ?? .distantPast
+                if left == right { return lhs.lastPathComponent < rhs.lastPathComponent }
+                return left < right
+            }
     }
 
     nonisolated static func pruneDirectory(_ directory: URL) {
@@ -315,7 +354,7 @@ final class LedgerCrashLog {
     }
 
     nonisolated static func write(_ text: String, prefix: String, date: Date, directory: URL) {
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        prepareDirectory(directory)
         let url = directory.appendingPathComponent("\(prefix)-\(stamp(date)).log")
         guard let data = text.data(using: .utf8) else { return }
         try? data.write(to: url, options: .atomic)
@@ -363,14 +402,40 @@ final class LedgerCrashLog {
     #endif
 }
 
+/// The breadcrumbs stored by the previous launch, captured before `install()`
+/// records this launch. MetricKit reports a crash in a later process, so its
+/// report must not carry this process's trail.
+private final class CrashBreadcrumbSnapshot: @unchecked Sendable {
+    static let shared = CrashBreadcrumbSnapshot()
+    private let lock = NSLock()
+    private var crumbs: [LedgerCrashBreadcrumb] = []
+
+    func store(_ value: [LedgerCrashBreadcrumb]) {
+        lock.lock()
+        crumbs = value
+        lock.unlock()
+    }
+
+    func load() -> [LedgerCrashBreadcrumb] {
+        lock.lock()
+        defer { lock.unlock() }
+        return crumbs
+    }
+}
+
 #if os(iOS)
 /// MetricKit's subscriber must be an `NSObject`; it stays a separate value so
 /// the log itself keeps its main-actor API.
 private final class MetricKitSubscriber: NSObject, MXMetricManagerSubscriber {
     nonisolated func didReceive(_ payloads: [MXDiagnosticPayload]) {
         for payload in payloads {
-            for crash in payload.crashDiagnostics ?? [] {
-                LedgerCrashLog.writeMetricKitReport(LedgerCrashLog.snapshot(crash))
+            for (index, crash) in (payload.crashDiagnostics ?? []).enumerated() {
+                // A payload can carry several crashes; the index keeps their
+                // second-resolution file names apart.
+                LedgerCrashLog.writeMetricKitReport(
+                    LedgerCrashLog.snapshot(crash),
+                    at: payload.timeStampBegin,
+                    suffix: index == 0 ? "" : "-\(index)")
             }
         }
     }

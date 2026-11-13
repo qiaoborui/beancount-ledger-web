@@ -231,10 +231,13 @@ final class LedgerSessionTests: XCTestCase {
 
         await session.updateActivity(isActive: false, isBackground: true)
         session.openWidgetURL(URL(string: "ledger://transactions?date=2026-08-09")!)
-        XCTAssertEqual(session.pendingWidgetExpenseDay, "2026-08-09")
+        // The day is remembered but not requested as a sheet while inactive.
+        XCTAssertNil(session.pendingWidgetExpenseDay)
         XCTAssertFalse(session.canPresentWidgetDay)
 
         await session.updateActivity(isActive: true, isBackground: false)
+        await session.applyPendingExternalRoute()
+        XCTAssertEqual(session.pendingWidgetExpenseDay, "2026-08-09")
         XCTAssertTrue(session.canPresentWidgetDay)
     }
 
