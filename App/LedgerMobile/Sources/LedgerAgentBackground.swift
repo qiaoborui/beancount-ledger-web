@@ -115,6 +115,7 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
         guard running else { return }
         running = false
         let seen = UIApplication.shared.applicationState == .active && conversation?.isOnScreen == true
+        LedgerCrashLog.shared.record("assistant turn ended \(Self.crashLabel(ending)) seen=\(seen)")
         if ending == .interrupted, interruptionCause == nil {
             interruptionCause = String(localized: "App 在后台的时间用完了")
         }
@@ -135,6 +136,18 @@ final class LedgerAgentBackgroundRun: LedgerAgentLifecycle {
             LedgerAgentNotifications.shared.post(title: summary.title, body: summary.body)
         }
         finishHolding()
+    }
+
+    /// The ending without its reply, count or failure text: a breadcrumb must
+    /// never carry what the assistant answered.
+    private static func crashLabel(_ ending: LedgerAgentTurnEnding) -> String {
+        switch ending {
+        case .answered: return "answered"
+        case .changeReady: return "changeReady"
+        case .failed: return "failed"
+        case .interrupted: return "interrupted"
+        case .stopped: return "stopped"
+        }
     }
 
     /// The Agent screen is in front of the user: what the Lock Screen and the
@@ -466,6 +479,7 @@ final class LedgerAgentNotifications {
 
     /// A tap on one of this thread's notifications.
     func route() {
+        LedgerCrashLog.shared.record("账本助手通知：路由")
         if let open { open() } else { pendingOpen = true }
     }
 }

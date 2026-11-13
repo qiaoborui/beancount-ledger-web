@@ -1504,6 +1504,16 @@
         }
       }
     },
+    "App: %@ (%@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App: %@ (%@)"
+          }
+        }
+      }
+    },
     "A股证券账户" : {
       "localizations" : {
         "en" : {
@@ -1829,6 +1839,16 @@
         }
       }
     },
+    "Ledger 崩溃日志" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ledger crash log"
+          }
+        }
+      }
+    },
     "Ledger 收支报告" : {
       "localizations" : {
         "en" : {
@@ -1874,6 +1894,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 笔"
+          }
+        }
+      }
+    },
+    "MetricKit 崩溃诊断" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MetricKit crash diagnostic"
           }
         }
       }
@@ -5574,6 +5604,16 @@
         }
       }
     },
+    "删除这条崩溃日志？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete this crash report?"
+          }
+        }
+      }
+    },
     "删除这条查询历史？" : {
       "localizations" : {
         "en" : {
@@ -6152,6 +6192,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Also filled post dates on %lld existing transactions."
+          }
+        }
+      }
+    },
+    "只删除本机上的崩溃日志，不影响账本。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only deletes crash reports on this device; the ledger is untouched."
           }
         }
       }
@@ -7268,6 +7318,16 @@
         }
       }
     },
+    "复制" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy"
+          }
+        }
+      }
+    },
     "复制 Markdown 文本清单" : {
       "localizations" : {
         "en" : {
@@ -8300,6 +8360,16 @@
         }
       }
     },
+    "崩溃日志" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crash reports"
+          }
+        }
+      }
+    },
     "工作日" : {
       "localizations" : {
         "en" : {
@@ -8650,6 +8720,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Backed up to “%@”"
+          }
+        }
+      }
+    },
+    "已复制" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copied"
           }
         }
       }
@@ -10228,6 +10308,16 @@
         }
       }
     },
+    "意外退出" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unexpected exit"
+          }
+        }
+      }
+    },
     "成本" : {
       "localizations" : {
         "en" : {
@@ -10764,6 +10854,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Remind to import bills before reports"
+          }
+        }
+      }
+    },
+    "报告只含固定的诊断字段，不含 API Key、账本金额或交易内容。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A report contains fixed diagnostic fields only, never an API key, ledger amount or transaction."
           }
         }
       }
@@ -12568,6 +12668,16 @@
         }
       }
     },
+    "时间: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Time: %@"
+          }
+        }
+      }
+    },
     "时间范围" : {
       "localizations" : {
         "en" : {
@@ -13204,6 +13314,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Earliest"
+          }
+        }
+      }
+    },
+    "最近 20 条，超出后自动删掉最旧的。记录只有时间、App 版本、页面和操作路径，不含 API Key、金额或交易内容。点一条可以复制或分享给开发者。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The newest 20 are kept; older ones are deleted automatically. A report holds only the time, app version, page and path of actions, never an API key, amount or transaction. Tap one to copy or share it with the developer."
           }
         }
       }
@@ -14024,6 +14144,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No matching preset institutions"
+          }
+        }
+      }
+    },
+    "未捕获的异常" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uncaught exception"
           }
         }
       }
@@ -14994,6 +15124,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Title"
+          }
+        }
+      }
+    },
+    "标题: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Title: %@"
           }
         }
       }
@@ -16408,6 +16548,16 @@
         }
       }
     },
+    "没有崩溃记录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No crash reports"
+          }
+        }
+      }
+    },
     "没有未明确分类、缺少商户或待核对的交易，账目非常规整。" : {
       "localizations" : {
         "en" : {
@@ -16694,6 +16844,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Clear"
+          }
+        }
+      }
+    },
+    "清空全部崩溃日志" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear all crash reports"
+          }
+        }
+      }
+    },
+    "清空全部崩溃日志？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear all crash reports?"
           }
         }
       }
@@ -18938,6 +19108,16 @@
         }
       }
     },
+    "设备端引擎留下的诊断信息。账本助手页面仍会在下次打开时提示一次。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostics left by the on-device engine. The 账本助手 page still shows it once on the next visit."
+          }
+        }
+      }
+    },
     "设备重启后需先解锁一次 iPhone 才能记账。" : {
       "localizations" : {
         "en" : {
@@ -19024,6 +19204,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Detected channel"
+          }
+        }
+      }
+    },
+    "诊断" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostics"
           }
         }
       }
@@ -20354,6 +20544,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ledger Locked"
+          }
+        }
+      }
+    },
+    "账本引擎" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ledger engine"
+          }
+        }
+      }
+    },
+    "账本引擎诊断" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ledger engine diagnostics"
           }
         }
       }
@@ -22118,6 +22328,16 @@
         }
       }
     },
+    "遇到意外退出时，这里保留最近的崩溃日志，可以复制或分享给开发者。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "After an unexpected exit the latest crash reports stay here, ready to copy or share with the developer."
+          }
+        }
+      }
+    },
     "邮件账单" : {
       "localizations" : {
         "en" : {
@@ -22784,6 +23004,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Needs careful review"
+          }
+        }
+      }
+    },
+    "面包屑 (%lld):" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Breadcrumbs (%lld):"
           }
         }
       }

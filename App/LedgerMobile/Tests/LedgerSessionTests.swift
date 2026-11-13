@@ -168,6 +168,99 @@ final class LedgerSessionTests: XCTestCase {
         XCTAssertEqual(session.primaryDestinationID, "imports")
     }
 
+    /// Tapping the assistant's notification while iOS is still bringing the
+    /// scene forward used to request the full-screen cover from an inactive
+    /// scene, which UIKit drops (and can crash on). The route waits now.
+    func testAgentRouteWaitsForTheSceneToBecomeActive() async throws {
+        let suiteName = "ledger-agent-inactive-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        await session.resume()
+        XCTAssertEqual(session.phase, .ready)
+
+        await session.updateActivity(isActive: false, isBackground: true)
+        session.openWidgetURL(URL(string: "ledger://agent")!)
+        await session.applyPendingExternalRoute()
+        XCTAssertFalse(session.agentPresented)
+        XCTAssertNotNil(session.pendingExternalRoute)
+
+        await session.updateActivity(isActive: true, isBackground: false)
+        await session.applyPendingExternalRoute()
+        XCTAssertTrue(session.agentPresented)
+        XCTAssertNil(session.pendingExternalRoute)
+    }
+
+    /// Every presentation route, not only the assistant's cover, waits for an
+    /// active scene; the background snapshot no longer races a sheet.
+    func testQuickEntryRouteWaitsForTheSceneToBecomeActive() async throws {
+        let suiteName = "ledger-quick-inactive-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        await session.resume()
+        XCTAssertEqual(session.phase, .ready)
+
+        await session.updateActivity(isActive: false, isBackground: true)
+        session.openWidgetURL(URL(string: "ledger://record")!)
+        await session.applyPendingExternalRoute()
+        // The route is untouched while the scene is inactive: this remote
+        // session would otherwise reject it at once with an error message.
+        XCTAssertNil(session.quickEntry)
+        XCTAssertNil(session.errorMessage)
+        XCTAssertNotNil(session.pendingExternalRoute)
+
+        await session.updateActivity(isActive: true, isBackground: false)
+        await session.applyPendingExternalRoute()
+        XCTAssertNil(session.quickEntry)
+        XCTAssertEqual(session.errorMessage, String(localized: "快速记账仅支持本机账本"))
+        XCTAssertNil(session.pendingExternalRoute)
+    }
+
+    /// The widget day is a sheet as well: it waits for an active scene.
+    func testWidgetDaySheetWaitsForTheSceneToBecomeActive() async throws {
+        let suiteName = "ledger-widget-inactive-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        await session.resume()
+        XCTAssertEqual(session.phase, .ready)
+
+        await session.updateActivity(isActive: false, isBackground: true)
+        session.openWidgetURL(URL(string: "ledger://transactions?date=2026-08-09")!)
+        XCTAssertEqual(session.pendingWidgetExpenseDay, "2026-08-09")
+        XCTAssertFalse(session.canPresentWidgetDay)
+
+        await session.updateActivity(isActive: true, isBackground: false)
+        XCTAssertTrue(session.canPresentWidgetDay)
+    }
+
+    /// The assistant's cover is not requested while another sheet is in front
+    /// of the shell; it opens once that sheet has gone.
+    func testAgentRouteWaitsForAnotherPresentedSheet() async throws {
+        let suiteName = "ledger-agent-sheet-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("https://ledger.example.com", forKey: "ledger.mobile.server-origin")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
+        await session.resume()
+        XCTAssertEqual(session.phase, .ready)
+
+        session.quickEntry = LedgerQuickEntryRequest(kind: .record)
+        session.openWidgetURL(URL(string: "ledger://agent")!)
+        await session.applyPendingExternalRoute()
+        XCTAssertFalse(session.agentPresented)
+        XCTAssertNotNil(session.pendingExternalRoute)
+
+        session.quickEntry = nil
+        await session.applyPendingExternalRoute()
+        XCTAssertTrue(session.agentPresented)
+        XCTAssertNil(session.pendingExternalRoute)
+    }
+
     func testWidgetDayRoutePreservesGlobalRangeAndNavigation() async throws {
         let suiteName = "ledger-widget-warm-route-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

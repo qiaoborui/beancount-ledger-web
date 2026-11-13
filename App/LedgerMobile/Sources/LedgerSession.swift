@@ -3618,6 +3618,9 @@ final class LedgerSession: ObservableObject {
     }
 
     @Published private(set) var pendingExternalRoute: LedgerExternalRouteRequest?
+    /// The one route whose deferral is already in the crash log, so a view
+    /// update that re-applies it does not push older breadcrumbs out.
+    private var deferredRouteNote: UUID?
     /// A question for the ledger assistant that arrived from Siri, a
     /// shortcut or a ledger://agent?q= link, until the assistant takes it.
     @Published private(set) var pendingAgentQuestion: LedgerAgentPendingQuestion?
@@ -3667,9 +3670,41 @@ final class LedgerSession: ObservableObject {
     func applyPendingExternalRoute() async {
         guard phase == .ready, !isRangeLoading, !isValuationCurrencyLoading,
               let request = pendingExternalRoute else { return }
+        // A notification tap can arrive while iOS is still bringing the scene
+        // forward. Presentations requested then collide with the background
+        // snapshot/state-restoration transaction UIKit runs as the app goes to
+        // the background (SIGABRT in `_updateSnapshotAndStateRestoration…`),
+        // so every route waits for an active scene. The app re-applies pending
+        // routes when the scene becomes active, which also means one tap is
+        // handled once: the pending request is the only state and is cleared
+        // when it is applied.
+        guard applicationActive else {
+            noteDeferredRoute(request)
+            return
+        }
+        // Another sheet or cover (a widget day, a quick entry, a report) in
+        // front of the shell makes a second presentation fail; wait for it to
+        // close, then this runs again.
+        if request.route.opensAgent, !agentPresented {
+            guard !agentSheetOnScreen,
+                  reportRequest == nil, quickEntry == nil,
+                  pendingWidgetExpenseDay == nil else {
+                noteDeferredRoute(request)
+                return
+            }
+        }
+        deferredRouteNote = nil
+        LedgerCrashLog.shared.record("route applying \(crashRouteLabel(request.route)) active=\(applicationActive) agent=\(agentPresented) sheet=\(agentSheetOnScreen)")
         switch request.route {
         case let .page(destination):
-            if destination == .agent { agentPresented = true }
+            if destination == .agent {
+                // A finished turn's conversation is what the notification was
+                // about; showing it here keeps the swap to the active, ready
+                // path instead of the notification callback.
+                LedgerAgentSessions.shared.showBackground()
+                LedgerCrashLog.shared.record("外部路由：打开账本助手")
+                agentPresented = true
+            }
         case let .account(path, currency):
             switch ledger?.resolveExternalAccount(path, currency: currency) {
             case let .resolved(target):
@@ -3690,6 +3725,7 @@ final class LedgerSession: ObservableObject {
         case let .search(query):
             prepareExternalSearch(query)
         case let .agent(question):
+            LedgerCrashLog.shared.record("外部路由：打开账本助手")
             pendingAgentQuestion = LedgerAgentPendingQuestion(text: question)
             agentPresented = true
         case let .report(target):
@@ -3767,12 +3803,38 @@ final class LedgerSession: ObservableObject {
     }
 
     var canPresentWidgetDay: Bool {
-        pendingWidgetExpenseDay != nil && phase == .ready && !agentSheetOnScreen
-            && !isAuthenticationBusy
+        // A widget day is a sheet too: presenting it while the scene is
+        // inactive races the background snapshot just like the assistant's
+        // cover. The scene becoming active re-evaluates this binding.
+        pendingWidgetExpenseDay != nil && phase == .ready && applicationActive
+            && !agentSheetOnScreen && !isAuthenticationBusy
     }
 
     func dismissWidgetDay() {
         pendingWidgetExpenseDay = nil
+        // A route that waited for this sheet now has a free screen.
+        Task { await applyPendingExternalRoute() }
+    }
+
+    /// The route without its question, query or account: a breadcrumb may
+    /// name where the app was going, never what the user asked or holds.
+    private func crashRouteLabel(_ route: LedgerExternalRoute) -> String {
+        switch route {
+        case let .page(destination): return "page:\(destination.rawValue)"
+        case .account: return "account"
+        case .transactions: return "transactions"
+        case .search: return "search"
+        case .agent: return "agent"
+        case .report: return "report"
+        case .record: return "record"
+        case .sentence: return "sentence"
+        }
+    }
+
+    private func noteDeferredRoute(_ request: LedgerExternalRouteRequest) {
+        guard deferredRouteNote != request.id else { return }
+        deferredRouteNote = request.id
+        LedgerCrashLog.shared.record("route deferred \(crashRouteLabel(request.route)) active=\(applicationActive) agent=\(agentPresented) sheet=\(agentSheetOnScreen) other=\(reportRequest != nil || quickEntry != nil || pendingWidgetExpenseDay != nil)")
     }
 
     func navigateToTransactions(

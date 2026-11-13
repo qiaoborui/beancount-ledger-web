@@ -213,6 +213,18 @@ struct SettingsView: View {
                 }
             }
             Section {
+                SettingsNavRow(title: String(localized: "诊断")) { LedgerCrashLogView() }
+                    .accessibilityIdentifier("settings-diagnostics")
+            } header: {
+                TerminalSectionLabel(text: String(localized: "诊断")).listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+            } footer: {
+                Text("遇到意外退出时，这里保留最近的崩溃日志，可以复制或分享给开发者。")
+                    .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                    .listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+            }
+            Section {
                 HStack {
                     Text("版本").balancedFont(size: 14).foregroundStyle(BalancedPalette.secondary)
                     Spacer()

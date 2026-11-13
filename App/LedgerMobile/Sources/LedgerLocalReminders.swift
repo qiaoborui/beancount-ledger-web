@@ -280,7 +280,10 @@ final class LedgerNotificationDelegate: NSObject, UNUserNotificationCenterDelega
                                             didReceive response: UNNotificationResponse) async {
         let content = response.notification.request.content
         if content.threadIdentifier == LedgerAgentNotifications.thread {
-            await MainActor.run { LedgerAgentNotifications.shared.route() }
+            await MainActor.run {
+                LedgerCrashLog.shared.record("收到账本助手通知")
+                LedgerAgentNotifications.shared.route()
+            }
             return
         }
         guard LedgerReminderNotification.isReminder(categoryIdentifier: content.categoryIdentifier),

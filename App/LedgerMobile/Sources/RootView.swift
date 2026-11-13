@@ -448,6 +448,7 @@ private struct LoginView: View {
 private struct MainTabView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @State private var moreDestination: LedgerDestination?
 
     private var selection: Binding<LedgerDestination> {
@@ -496,14 +497,26 @@ private struct MainTabView: View {
     private func quickEntryBinding(_ kind: LedgerQuickEntryRequest.Kind) -> Binding<LedgerQuickEntryRequest?> {
         Binding(
             get: { session.quickEntry?.kind == kind && !session.agentSheetOnScreen ? session.quickEntry : nil },
-            set: { if $0 == nil, session.quickEntry?.kind == kind { session.quickEntry = nil } }
+            set: {
+                if $0 == nil, session.quickEntry?.kind == kind {
+                    session.quickEntry = nil
+                    // A route waiting for this sheet can present now.
+                    Task { await session.applyPendingExternalRoute() }
+                }
+            }
         )
     }
 
     private var reportBinding: Binding<LedgerReportRequest?> {
         Binding(
             get: { session.agentSheetOnScreen || session.quickEntry != nil ? nil : session.reportRequest },
-            set: { if $0 == nil { session.reportRequest = nil } }
+            set: {
+                if $0 == nil {
+                    session.reportRequest = nil
+                    // A route waiting for this sheet can present now.
+                    Task { await session.applyPendingExternalRoute() }
+                }
+            }
         )
     }
 
@@ -572,18 +585,40 @@ private struct MainTabView: View {
         // downward drag scrolls the conversation instead of dismissing it, and
         // only the close button leaves. Closing it keeps the conversation, and
         // a running reply, in `LedgerAgentSessions`.
-        .fullScreenCover(isPresented: agentSheetBinding, onDismiss: { session.agentSheetOnScreen = false }) {
+        .fullScreenCover(isPresented: agentSheetBinding, onDismiss: {
+            session.agentSheetOnScreen = false
+            LedgerCrashLog.shared.record("账本助手整屏：关闭")
+            // A route that arrived while the cover was going away can present
+            // now instead of asking SwiftUI to present during the dismissal.
+            Task { await session.applyPendingExternalRoute() }
+        }) {
             NavigationStack {
                 LedgerAgentView(isRoot: true, onClose: { session.agentPresented = false })
             }
             .ledgerPrivacyProtectedSheet()
-            .onAppear { session.agentSheetOnScreen = true }
+            .onAppear {
+                session.agentSheetOnScreen = true
+                LedgerCrashLog.shared.record("账本助手整屏：出现")
+            }
         }
-        .onChange(of: session.primaryDestinationID, initial: true) { previous, _ in routeAgent(previous: previous) }
+        .onChange(of: session.primaryDestinationID, initial: true) { previous, _ in
+            LedgerCrashLog.shared.updateContext(ledgerMode: session.isLocal ? "本机" : "远程",
+                                                page: session.primaryDestinationID)
+            routeAgent(previous: previous)
+        }
         .onChange(of: session.agentPresented) { _, _ in routeAgent() }
         .onChange(of: horizontalSizeClass) { _, _ in routeAgent() }
-        .onChange(of: session.isLocal) { _, _ in routeAgent() }
+        .onChange(of: session.isLocal) { _, local in
+            LedgerCrashLog.shared.updateContext(ledgerMode: local ? "本机" : "远程",
+                                                page: session.primaryDestinationID)
+            routeAgent()
+        }
         .task(id: session.pendingExternalRoute?.id) { await session.applyPendingExternalRoute() }
+        // A notification tap that resumed the app waits for an active scene
+        // before its route presents anything.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await session.applyPendingExternalRoute() } }
+        }
         // The shell now outlives a lock, so a route that arrived while locked is
         // applied on unlock rather than on the next mount.
         .onChange(of: session.phase) { _, phase in
