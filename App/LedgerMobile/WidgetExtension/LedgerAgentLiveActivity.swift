@@ -9,14 +9,19 @@ import WidgetKit
 struct LedgerAgentLiveActivity: Widget {
     private typealias Phase = LedgerAgentActivityAttributes.ContentState.Phase
 
-    /// Both compact sides take this width, the same choice
-    /// `LedgerIslandStage.compactWidth` makes for the in-app island: the system
-    /// gives each side of the compact pill its content's width plus a small
-    /// inset, so a 14pt mark beside a wider timer both stretched the pill out
-    /// to the trailing side and left the mark against the camera. The width
-    /// holds the longest `m:ss` timer at the compact font, so an hour of
-    /// running does not change it; a longer `h:mm:ss` timer scales down to fit.
-    private static let compactSide: CGFloat = 32
+    /// Both compact sides take this width. On the iPhone 18 Pro simulator the
+    /// system gave each side of the compact pill its content's width plus an
+    /// inset of 3.0-3.7pt, so a 14pt mark beside a 24.7pt timer grew the pill
+    /// 17pt to the leading side of the camera and 28.3pt to the trailing one:
+    /// it read as off-centre, and the mark's ink ended on the camera's edge.
+    /// Equal sides let the system centre the pill, the rule
+    /// `LedgerIslandStage.compactWidth` follows for the in-app island by taking
+    /// the wider of its two sides. The width is the longest `m:ss` timer at the
+    /// compact font, 33.5pt, so it holds for the first hour and a longer
+    /// `h:mm:ss` one scales down instead of widening the pill. The cost is a
+    /// pill about 29pt wider than the lopsided one it replaces; a narrower side
+    /// would scale the common timer to pay for it.
+    private static let compactSide: CGFloat = 34
 
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: LedgerAgentActivityAttributes.self) { context in
@@ -58,9 +63,12 @@ struct LedgerAgentLiveActivity: Widget {
                 if phase == .running {
                     LedgerMark(accent: color(phase))
                         .frame(width: 14, height: 14)
-                        .frame(width: LedgerAgentLiveActivity.compactSide, height: 14)
+                        .frame(width: LedgerAgentLiveActivity.compactSide)
                 } else {
-                    Image(systemName: symbol(phase)).font(.system(size: 13, weight: .semibold)).foregroundStyle(color(phase))
+                    Image(systemName: symbol(phase))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(color(phase))
+                        .frame(width: LedgerAgentLiveActivity.compactSide)
                 }
             } compactTrailing: {
                 if phase == .running {
@@ -71,7 +79,10 @@ struct LedgerAgentLiveActivity: Widget {
                         .minimumScaleFactor(0.6)
                         .frame(width: LedgerAgentLiveActivity.compactSide)
                 } else {
-                    Image(systemName: "checkmark").foregroundStyle(color(phase)).opacity(phase == .answered ? 1 : 0)
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(color(phase))
+                        .opacity(phase == .answered ? 1 : 0)
+                        .frame(width: LedgerAgentLiveActivity.compactSide)
                 }
             } minimal: {
                 if phase == .running {
