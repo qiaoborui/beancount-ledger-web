@@ -85,7 +85,10 @@ struct LedgerLaunchView: View {
     }
 
     private var canFinish: Bool {
-        scenePhase == .active && foldFinished && (reduceMotion || contentReady || holdFinished)
+        // Content that authentication revealed behind its dismissing sheet does
+        // not wait for the active scene; the interrupted fold leaves at once.
+        if contentReady, scenePhase != .active { return startedAt != nil }
+        return scenePhase == .active && foldFinished && (reduceMotion || contentReady || holdFinished)
     }
 }
 
