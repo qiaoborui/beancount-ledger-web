@@ -1,8 +1,9 @@
 # 20261114-agent-settings-write-policy
 
-- Status: active (draft PR open, CI running)
+- Status: active (draft PR open, CI `Gate` green, waiting for review)
 - Last updated: 2026-11-14 (+08:00)
 - Branch: `codex/ios-agent-settings-write-policy`, based on `main` at `8ef3888b`; PR #697 (draft)
+- Code covered: commits `49eaf005`, `8dcb46ab`, `a831caae`, `0dab48a3`
 - Task: subtask A of the AI-native 账本助手 work (see the parent notes in the
   maintainer's local handoff directory; this note is the sanitized, shareable
   half)
@@ -75,17 +76,23 @@ its old switch, the root page fits one screen, Go and Swift tests pass and CI
 - `go test ./internal/app -run LocalAgent -v`: `TestLocalAgentSystemPrompt…`
   both pass, including the new `DoesNotClaimAWrite`.
 - This machine is Linux with no Swift/Xcode, so the Swift side was not compiled
-  or tested locally. CI's iOS core (`swift test`), iOS app and iOS widgets jobs
-  are the check for: the write policy migration, the tiered decisions, the
-  tiered / always / confirm conversation cases, and the new settings file.
-- Not tested: the settings page on a simulator or device (whether the root fits
-  one screen, how the menu-style picker looks), and any live model conversation
-  with the new prompt wording.
+  locally. CI checked it: `Gate` is green on run 43577468587 — iOS core
+  (`swift test`), iOS app (simulator build plus `LedgerMobileTests`) and
+  Backend all pass; iOS widgets, iOS UI tests, Frontend and the rest are
+  skipped because no path of this change plans them.
+- Two CI failures were fixed on the way: the change card's `note` getter lost
+  its implicit return once a case had statements, and five existing tests
+  assumed a fresh conversation waits for the card, so they now set
+  `.confirm` explicitly (`LedgerAgentTests`, `LedgerAgentBranchesTests`).
+- Not tested: the settings page looked at on a simulator or device (whether the
+  root fits one screen, how the menu-style picker looks), and any live model
+  conversation with the new prompt wording. `LedgerAgentSettingsView.swift` is
+  app-target only, so no automated test draws it.
 
 ## Next
 
-1. Watch CI until `Gate` is green; fix any Swift compile or test failure.
+1. Review and merge; the 能力 section is the place to add 技能 and MCP 服务器
+   rows from the other subtasks, and `LedgerAgentSettingsView` is the file they
+   touch for that.
 2. Look at the settings root on a simulator when one is available, and shorten
    or merge sections if it does not fit one screen.
-3. Hand over to the parent task for review and merge; the 能力 section is the
-   place to add 技能 and MCP 服务器 rows from the other subtasks.
