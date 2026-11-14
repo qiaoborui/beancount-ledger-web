@@ -218,7 +218,8 @@ extension LedgerAgentMessage {
                   duration: stored.duration, attachments: stored.attachments ?? [],
                   rememberedMemory: stored.memory ?? false, ask: stored.ask, write: stored.write,
                   steps: stored.steps ?? [], stopped: stored.stopped ?? false, usage: stored.usage,
-                  compacted: stored.compacted ?? false, outsideTranscript: stored.outsideTranscript ?? false)
+                  compacted: stored.compacted ?? false, outsideTranscript: stored.outsideTranscript ?? false,
+                  settings: stored.settings)
     }
 }
 
@@ -229,7 +230,7 @@ extension LedgerAgentSavedConversation.Message {
                   memory: message.rememberedMemory ? true : nil, ask: message.ask, write: message.write,
                   steps: message.steps.isEmpty ? nil : message.steps, stopped: message.stopped ? true : nil,
                   usage: message.usage, compacted: message.compacted ? true : nil,
-                  outsideTranscript: message.outsideTranscript ? true : nil)
+                  outsideTranscript: message.outsideTranscript ? true : nil, settings: message.settings)
     }
 }
 

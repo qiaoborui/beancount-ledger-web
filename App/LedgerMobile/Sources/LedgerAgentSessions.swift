@@ -30,6 +30,9 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
         /// The conversation's transcript never took this turn in (a stop that
         /// did not settle); absent when it did.
         var outsideTranscript: Bool? = nil
+        /// The App settings the answer changed, and what they were before;
+        /// absent in older saves and when it changed none.
+        var settings: LedgerAgentAppSettingsChange? = nil
     }
 
     /// A message off the active path: another answer to a question, another

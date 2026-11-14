@@ -541,8 +541,8 @@ final class LedgerSession: ObservableObject {
     nonisolated private static let valuationCurrenciesKey = "ledger.mobile.valuation-currencies"
     private static let backgroundDatesKey = "ledger.mobile.background-dates"
     private static let gmailOAuthStatesKey = "ledger.mobile.gmail-oauth-states"
-    private static let compactTabsKey = "ledger.mobile.compact-tabs"
-    private static let overviewSectionsKey = "ledger.mobile.overview-sections"
+    private static let compactTabsKey = LedgerAgentAppSettings.Keys.compactTabs
+    private static let overviewSectionsKey = LedgerAgentAppSettings.Keys.overviewSections
     private static let sessionCookieName = "ledger_session"
     private static let sensitiveCookieName = "ledger_sensitive_until"
 

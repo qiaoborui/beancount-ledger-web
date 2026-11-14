@@ -140,9 +140,9 @@ func TestCancelTurnStopsARunningTurn(t *testing.T) {
 	}
 }
 
-func TestToolCatalogIsReadOnly(t *testing.T) {
+func TestToolCatalogListsTheAssistantsTools(t *testing.T) {
 	var catalog struct {
-		Tools []struct{ Name string } `json:"tools"`
+		Tools []struct{ Name, Title string } `json:"tools"`
 	}
 	if err := json.Unmarshal([]byte(ToolCatalogJSON()), &catalog); err != nil {
 		t.Fatal(err)
@@ -150,8 +150,12 @@ func TestToolCatalogIsReadOnly(t *testing.T) {
 	var names []string
 	for _, tool := range catalog.Tools {
 		names = append(names, tool.Name)
+		if tool.Title == "" {
+			t.Fatalf("%s has no title", tool.Name)
+		}
 	}
-	if got := strings.Join(names, ","); got != "get_bql_capabilities,validate_bql,run_bql,search_transactions,get_ledger_summary,get_accounts" {
+	// The ledger tools keep their order; the assistant's own tools follow.
+	if got := strings.Join(names, ","); got != "get_bql_capabilities,validate_bql,run_bql,search_transactions,get_ledger_summary,get_accounts,ask_user,get_app_settings,update_app_settings" {
 		t.Fatalf("catalog = %s", got)
 	}
 }

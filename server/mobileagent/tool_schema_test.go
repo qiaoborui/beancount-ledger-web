@@ -53,6 +53,7 @@ func everyToolSchema(t *testing.T) map[string]ai.ToolSchema {
 	add([]agent.AgentTool{attached.saveTool(scratch), attached.archiveTool(scratch)})
 
 	add([]agent.AgentTool{&askTool{}})
+	add((&appSettingsSession{}).tools())
 
 	for _, spec := range app.LocalAgentToolSpecs() {
 		add([]agent.AgentTool{ledgerTool{spec: spec}})
