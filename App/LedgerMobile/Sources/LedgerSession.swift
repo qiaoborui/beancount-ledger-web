@@ -205,6 +205,9 @@ final class LedgerSession: ObservableObject {
     /// a link in a reply, a quick entry) waits for it, since UIKit drops a
     /// presentation requested while another is still going away.
     @Published var agentSheetOnScreen = false
+    /// True while AI 开账's sheet is up. Its 确认创建 hands the fresh ledger to
+    /// the assistant, which can only be covered in once this sheet is gone.
+    @Published var aiOnboardingOnScreen = false
     /// The overview's blocks in display order; one list per device, like the tabs.
     @Published private(set) var overviewSections = OverviewSection.defaultSections
     @Published private(set) var selectedRange: LedgerDateRange {
@@ -3781,6 +3784,29 @@ final class LedgerSession: ObservableObject {
     /// same ready + active route as every other link.
     func openAgentFromNotification() {
         applyWidgetURL(URL(string: "ledger://agent")!, revealsBackground: true)
+    }
+
+    /// Opens 账本助手 with a greeting the app wrote, once the sheets before it
+    /// are gone. AI 开账 calls this as it creates the ledger: the onboarding
+    /// sheet is dismissing then, and a cover asked for during that dismissal
+    /// stays closed while thinking it is open, so this waits for a quiet
+    /// moment instead of presenting into the dismissal.
+    func openAgent(with opening: LedgerAgentOpening) {
+        LedgerAgentSessions.shared.pendingOpening = opening
+        LedgerAgentSessions.shared.pendingOpeningLedger = localRepository?.descriptor.id
+        guard !agentPresented else { return }
+        let epoch = sessionEpoch
+        Task { @MainActor [weak self] in
+            for _ in 0..<30 {
+                guard let self, self.sessionEpoch == epoch else { return }
+                if !self.aiOnboardingOnScreen { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            // The sheet's own dismissal animation runs after it disappears.
+            try? await Task.sleep(for: .milliseconds(450))
+            guard let self, self.sessionEpoch == epoch, self.phase == .ready, !self.agentPresented else { return }
+            self.agentPresented = true
+        }
     }
 
     private func applyWidgetURL(_ url: URL, revealsBackground: Bool) {

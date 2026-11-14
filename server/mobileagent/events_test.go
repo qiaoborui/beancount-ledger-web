@@ -217,6 +217,13 @@ func TestFeedNeverCutsACharacter(t *testing.T) {
 	want := strings.Repeat("账本助手", 100)
 	for index := range len(want) {
 		feed.send(turnEventV1{Kind: "text_delta", Text: want[index : index+1]})
+		// A delta flush joins onto the last event the observer has not taken
+		// yet, so without this pause two flushes of the same kind can merge
+		// into one delivered event on a fast, idle machine, and the count
+		// below would depend on when the delivering goroutine ran.
+		if (index+1)%(deltaFlushBytes/4) == 0 {
+			time.Sleep(time.Millisecond)
+		}
 	}
 	feed.close()
 	events := observer.recorded()

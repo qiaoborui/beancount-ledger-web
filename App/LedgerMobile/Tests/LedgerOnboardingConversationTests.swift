@@ -58,33 +58,122 @@ final class LedgerOnboardingConversationTests: XCTestCase {
         XCTAssertFalse(debtOnly.canCreate)
     }
 
-    func testTheStepFollowsTheDraftAndSkipsWhatWasAnsweredAhead() throws {
+    func testCoverageFollowsTheDraftHoweverItWasAnswered() throws {
         var state = LedgerOnboardingState()
-        XCTAssertEqual(state.currentStep, .funds)
+        XCTAssertEqual(state.coverage.items.map(\.part), [.accounts, .debts, .income, .expenses])
+        XCTAssertEqual(state.coverage.missing.map(\.part), [.accounts, .income, .expenses])
+        XCTAssertFalse(state.coverage.isComplete)
+        XCTAssertEqual(state.coverage.summary, "还缺 资金账户、收入分类、支出分类")
+        XCTAssertEqual(state.coverage.items.map(\.label), ["资金账户", "待还款项", "收入分类", "支出分类"])
 
-        let card = LedgerOnboardingDraft.Account(kind: "bank_card", name: "招行", account: "Assets:Bank:CMB")
-        state.draft.accounts = [card]
-        XCTAssertEqual(state.currentStep, .debts, "amounts owed come next, even when there are none yet")
+        // A card alone is money owed, not money kept, so the funds item stays
+        // open however far the rest of the draft gets.
+        state.draft.accounts = [.init(kind: "credit_card", name: "信用卡", account: "Liabilities:CreditCard:CMB", openingBalance: "800")]
+        XCTAssertEqual(state.coverage.items.map(\.count), [0, 1, 0, 0])
+        XCTAssertTrue(state.coverage.missing.contains { $0.part == .accounts })
+        XCTAssertEqual(state.coverage.summary, "还缺 资金账户、收入分类、支出分类")
 
-        // Owing nothing: the categories mark the debts step as passed.
-        state.draft.incomeCategories = [.init(name: "工资", account: "Income:Salary")]
-        XCTAssertTrue(state.isDone(.debts))
-        XCTAssertEqual(state.currentStep, .expenses)
-
+        // An answer that arrives ahead of the questions fills its part at
+        // once; the line only names what is really absent.
         state.draft.expenseCategories = [.init(name: "餐饮", account: "Expenses:Food")]
-        XCTAssertEqual(state.currentStep, .review)
-        XCTAssertFalse(state.isDone(.review), "only a presented plan finishes the review")
-        state.ready = true
-        XCTAssertTrue(LedgerOnboardingStep.allCases.allSatisfy(state.isDone))
-        XCTAssertEqual(state.currentStep, .review)
+        state.draft.incomeCategories = [.init(name: "工资", account: "Income:Salary")]
+        XCTAssertEqual(state.coverage.items.map(\.label), ["资金账户", "待还款项 1", "收入分类 1", "支出分类 1"])
+        XCTAssertEqual(state.coverage.missing.map(\.part), [.accounts])
+        XCTAssertEqual(state.coverage.summary, "还缺 资金账户")
 
-        // A user who opens with a credit card still starts at the accounts.
-        var ahead = LedgerOnboardingState()
-        ahead.draft.accounts = [.init(kind: "credit_card", name: "信用卡", account: "Liabilities:CreditCard:CMB", openingBalance: "800")]
-        XCTAssertTrue(ahead.isDone(.debts))
-        XCTAssertEqual(ahead.currentStep, .funds)
-        ahead.draft.accounts.append(card)
-        XCTAssertEqual(ahead.currentStep, .income)
+        state.draft.accounts.append(.init(kind: "bank_card", name: "招行", account: "Assets:Bank:CMB"))
+        XCTAssertEqual(state.coverage.items.map(\.label), ["资金账户 1", "待还款项 1", "收入分类 1", "支出分类 1"])
+        XCTAssertTrue(state.coverage.isComplete)
+        XCTAssertEqual(state.coverage.summary, "资料齐了，可以看结构")
+        // Coverage never claims more than the creation step accepts.
+        XCTAssertEqual(state.coverage.isComplete, state.draft.isComplete)
+        XCTAssertFalse(state.canCreate, "only a presented plan may create")
+        state.ready = true
+        XCTAssertTrue(state.canCreate)
+
+        // Amounts owed are optional; a ledger holding none is still complete.
+        state.draft.accounts.removeAll { $0.isLiability }
+        XCTAssertTrue(state.coverage.isComplete)
+        XCTAssertEqual(state.coverage.items.first { $0.part == .debts }?.count, 0)
+    }
+
+    func testTheOpeningSummarizesWhatWasCreatedAndOffersNextSteps() throws {
+        var draft = LedgerOnboardingDraft()
+        draft.title = "日常账本"
+        draft.currency = "HKD"
+        draft.accounts = [
+            .init(kind: "bank_card", name: "汇丰", account: "Assets:Bank:HSBC", currency: "HKD"),
+            .init(kind: "credit_card", name: "招行信用卡", account: "Liabilities:CreditCard:CMB", openingBalance: "800"),
+        ]
+        draft.incomeCategories = [.init(name: "工资", account: "Income:Salary")]
+        draft.expenseCategories = [.init(name: "餐饮", account: "Expenses:Food"), .init(name: "交通", account: "Expenses:Transport")]
+
+        let opening = LedgerAgentOpening(draft: draft)
+        XCTAssertTrue(opening.text.contains("「日常账本」建好了"))
+        XCTAssertTrue(opening.text.contains("2 个账户、3 个分类"))
+        XCTAssertTrue(opening.text.contains("HKD"))
+        XCTAssertEqual(opening.steps, LedgerAgentOpening.nextSteps)
+        XCTAssertEqual(opening.steps.count, 4)
+        XCTAssertFalse(opening.ask.allowsMultiple, "a step is one tap, not a checklist")
+        XCTAssertEqual(opening.ask.options, opening.steps)
+        XCTAssertFalse(opening.ask.options.contains(where: { $0.contains(":") }), "no account paths reach the user")
+    }
+
+    @MainActor
+    func testTheAssistantOpensWithTheGreetingInsteadOfASpentTurn() async throws {
+        let opening = LedgerAgentOpening(draft: LedgerOnboardingDraft())
+        let conversation = LedgerAgentConversation()
+        conversation.greet(opening)
+        XCTAssertEqual(conversation.messages.count, 1)
+        XCTAssertEqual(conversation.messages.first?.role, .assistant)
+        XCTAssertEqual(conversation.messages.first?.text, opening.text)
+        XCTAssertEqual(conversation.messages.first?.ask?.options, opening.steps)
+        // The greeting is the app's, not the model's: it is not replayed as
+        // something the assistant said, so the first question starts clean.
+        XCTAssertTrue(LedgerAgentHistory.entries(from: conversation.messages).isEmpty)
+
+        // A greeting never replaces work already in a conversation.
+        conversation.greet(opening)
+        XCTAssertEqual(conversation.messages.count, 1)
+
+        // The sessions open it as their conversation once, then forget it.
+        let sessions = LedgerAgentSessions()
+        sessions.pendingOpening = opening
+        sessions.takeOpening()
+        XCTAssertNil(sessions.pendingOpening)
+        XCTAssertEqual(sessions.current.messages.first?.text, opening.text)
+
+        // A taken greeting is not applied twice: the next appearance keeps
+        // the conversation it already opened.
+        let shown = sessions.current.id
+        sessions.takeOpening()
+        XCTAssertEqual(sessions.current.id, shown)
+    }
+
+    @MainActor
+    func testTheGreetingOpensTheLedgerItWasWrittenFor() async throws {
+        let first = UUID(), second = UUID()
+        let storage = LedgerAgentSessions.Storage(save: { _, _ in }, load: { [Data]() },
+                                                  remove: { _ in }, removeAll: {})
+        let opening = LedgerAgentOpening(draft: LedgerOnboardingDraft())
+
+        let sessions = LedgerAgentSessions()
+        sessions.bind(ledger: first, storage: storage)
+        sessions.pendingOpening = opening
+        sessions.pendingOpeningLedger = first
+        // 确认创建 binds the ledger the greeting was written for, which keeps
+        // it, so the assistant opens on the greeting.
+        sessions.bind(ledger: first, storage: storage)
+        sessions.takeOpening()
+        XCTAssertEqual(sessions.current.messages.first?.text, opening.text)
+
+        // Another ledger drops it instead of showing it over its own history.
+        sessions.pendingOpening = opening
+        sessions.pendingOpeningLedger = first
+        sessions.bind(ledger: second, storage: storage)
+        XCTAssertNil(sessions.pendingOpening)
+        XCTAssertNil(sessions.pendingOpeningLedger)
+        XCTAssertTrue(sessions.current.messages.isEmpty)
     }
 
     @MainActor

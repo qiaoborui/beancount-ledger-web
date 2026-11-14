@@ -1499,6 +1499,18 @@ final class LedgerAgentConversation: ObservableObject {
         transcript = saved
     }
 
+    /// Opens the conversation with a greeting the app wrote, not the model:
+    /// AI 开账 sums up the ledger it just made and offers next steps to tap.
+    /// No turn is spent on it, and the greeting stays out of the transcript
+    /// the model reads until the first real question follows it.
+    func greet(_ opening: LedgerAgentOpening) {
+        guard messages.isEmpty, !isRunning else { return }
+        messages = [LedgerAgentMessage(role: .assistant, text: opening.text, ask: opening.ask)]
+        // The card already names the steps, so the greeting alone need not
+        // spend a prediction request for the composer's hint.
+        nextSuggestion = opening.steps.first
+    }
+
     /// What to save, or nil while nothing has been asked.
     func saved(at date: Date = Date()) -> LedgerAgentSavedConversation? {
         guard !messages.isEmpty else { return nil }

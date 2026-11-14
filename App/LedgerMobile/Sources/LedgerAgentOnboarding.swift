@@ -100,40 +100,98 @@ struct LedgerOnboardingState: Codable, Equatable, Sendable {
     var ready = false
 
     var canCreate: Bool { ready && draft.isComplete }
+    var coverage: LedgerOnboardingCoverage { LedgerOnboardingCoverage(draft: draft) }
+}
 
-    /// A step is done once the draft holds its answer. Amounts owed are
-    /// optional, so that step also counts as done once the conversation has
-    /// moved on to the categories.
-    func isDone(_ step: LedgerOnboardingStep) -> Bool {
-        switch step {
-        case .funds: draft.accounts.contains { !$0.isLiability }
-        case .debts: draft.accounts.contains(where: \.isLiability) || !draft.incomeCategories.isEmpty || !draft.expenseCategories.isEmpty
-        case .income: !draft.incomeCategories.isEmpty
-        case .expenses: !draft.expenseCategories.isEmpty
-        case .review: canCreate
+/// How much of the ledger the draft already describes, derived from the draft
+/// itself rather than from what the conversation asked: which parts hold
+/// something and which the ledger still needs, whatever order the user
+/// answered in. Amounts owed and the profile have defaults, so they are shown
+/// when present but never hold the plan back.
+struct LedgerOnboardingCoverage: Equatable, Sendable {
+    enum Part: String, CaseIterable, Sendable, Identifiable {
+        case accounts, debts, income, expenses
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .accounts: String(localized: "资金账户")
+            case .debts: String(localized: "待还款项")
+            case .income: String(localized: "收入分类")
+            case .expenses: String(localized: "支出分类")
+            }
         }
+
+        /// A ledger can be created without money owed; it cannot without
+        /// somewhere to keep money and a category on each side.
+        var isRequired: Bool { self != .debts }
     }
 
-    /// The first step still open, so a user who answered ahead skips the
-    /// steps they already covered.
-    var currentStep: LedgerOnboardingStep {
-        LedgerOnboardingStep.allCases.first { !isDone($0) } ?? .review
+    struct Item: Equatable, Sendable, Identifiable {
+        let part: Part
+        let count: Int
+
+        var id: String { part.rawValue }
+        var isDone: Bool { count > 0 }
+        var isMissing: Bool { part.isRequired && !isDone }
+        /// 资金账户 2 / 待还款项 1 / 收入分类
+        var label: String { isDone ? "\(part.title) \(count)" : part.title }
+    }
+
+    let items: [Item]
+
+    init(draft: LedgerOnboardingDraft) {
+        let accounts = draft.accounts.filter { !$0.isLiability }.count
+        items = [
+            Item(part: .accounts, count: accounts),
+            Item(part: .debts, count: draft.accounts.count - accounts),
+            Item(part: .income, count: draft.incomeCategories.count),
+            Item(part: .expenses, count: draft.expenseCategories.count),
+        ]
+    }
+
+    var missing: [Item] { items.filter(\.isMissing) }
+
+    /// Whether the draft holds everything 确认创建 needs.
+    var isComplete: Bool { missing.isEmpty }
+
+    /// The one line above the conversation: which parts are still open, or
+    /// that the plan is ready to review.
+    var summary: String {
+        guard !missing.isEmpty else { return String(localized: "资料齐了，可以看结构") }
+        return String(localized: "还缺 ") + missing.map(\.part.title).joined(separator: String(localized: "、"))
     }
 }
 
-/// The steps AI 开账 walks through, in the order the onboarding prompt asks
-/// them: four questions, then the review.
-enum LedgerOnboardingStep: Int, CaseIterable, Sendable {
-    case funds, debts, income, expenses, review
+/// The greeting 账本助手 opens with once AI 开账 created the ledger: what the
+/// ledger holds now and a few steps to tap. The app writes it, so the
+/// hand-off costs no turn; a tap sends that step on as the first question.
+struct LedgerAgentOpening: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let text: String
+    let steps: [String]
 
-    var title: String {
-        switch self {
-        case .funds: String(localized: "资金账户")
-        case .debts: String(localized: "待还款项")
-        case .income: String(localized: "收入分类")
-        case .expenses: String(localized: "支出分类")
-        case .review: String(localized: "确认方案")
-        }
+    /// What a brand-new ledger most often needs next, in the order a new
+    /// user tends to want it.
+    static let nextSteps = [
+        String(localized: "帮我导入一份账单"),
+        String(localized: "帮我设置记账提醒"),
+        String(localized: "帮我记第一笔账"),
+        String(localized: "帮我调整首页"),
+    ]
+
+    /// The card under the greeting: one tap asks the assistant for that step.
+    var ask: LedgerAgentAsk {
+        LedgerAgentAsk(question: String(localized: "接下来想做什么？"), options: steps)
+    }
+
+    init(draft: LedgerOnboardingDraft) {
+        let accounts = draft.accounts.count
+        let categories = draft.incomeCategories.count + draft.expenseCategories.count
+        text = String(localized: "「\(draft.title)」建好了：\(accounts) 个账户、\(categories) 个分类，用 \(draft.currency) 记账。")
+            + "\n\n" + String(localized: "接下来想做什么？点一个，也可以直接说。")
+        steps = Self.nextSteps
     }
 }
 
@@ -156,7 +214,7 @@ final class LedgerOnboardingConversation: ObservableObject {
     }
 
     /// The first question, sent on the user's behalf and not shown.
-    static let opening = "你好，我想新建一个账本，请帮我完成初始化。"
+    static let opening = "你好，我想开始记账，帮我建一本账本吧。"
 
     @Published private(set) var messages: [Message] = []
     @Published private(set) var state = LedgerOnboardingState()

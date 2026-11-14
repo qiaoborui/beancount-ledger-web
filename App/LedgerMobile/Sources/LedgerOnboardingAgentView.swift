@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// AI 开账: the on-device Agent walks the user through four questions and
-/// drafts the ledger as they talk. A bar above the conversation shows the step
-/// and opens the draft itself in a sheet, so the plan never pushes the replies
-/// away; nothing is written until 确认创建, and then through the same path as
-/// the manual wizard, which stays one tap away.
+/// AI 开账: the on-device Agent learns how the user handles money and drafts
+/// the ledger as they talk, however they answer and in whatever order. A bar
+/// above the conversation shows what the draft already holds and what it still
+/// needs, and opens the draft itself in a sheet, so the plan never pushes the
+/// replies away; nothing is written until 确认创建, and then through the same
+/// path as the manual wizard, which stays one tap away.
 struct LedgerOnboardingAgentView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dismiss) private var dismiss
@@ -47,7 +48,13 @@ struct LedgerOnboardingAgentView: View {
             .sheet(isPresented: $planPresented) { planSheet }
             .onChange(of: settings.isReady) { _, ready in if ready { conversation.start() } }
             .onChange(of: session.phase) { _, phase in if phase == .ready { dismiss() } }
-            .onDisappear { conversation.stop() }
+            // 确认创建 hands over to the assistant once this sheet is gone;
+            // the cover cannot present into its dismissal.
+            .onAppear { session.aiOnboardingOnScreen = true }
+            .onDisappear {
+                session.aiOnboardingOnScreen = false
+                conversation.stop()
+            }
             .interactiveDismissDisabled(conversation.hasStarted || creating)
         }
     }
@@ -80,7 +87,7 @@ struct LedgerOnboardingAgentView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    Text("分四步搭好账本：钱放在哪里、有没有要还的、收入和支出。每次只问一件事，点选项或直接输入都行；你确认之前不会创建。")
+                    Text("聊几句就能把账本搭好：说说钱放在哪里、有没有要还的、钱都花在哪。它会先记下你说过的，再问还缺的部分；你确认之前不会创建。")
                         .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary).lineSpacing(3)
                     ForEach(conversation.messages) { message in
                         switch message.role {
@@ -222,29 +229,37 @@ struct LedgerOnboardingAgentView: View {
 
     // MARK: Progress
 
-    /// Two lines pinned above the conversation: which of the steps the
-    /// conversation is on, and the size of the draft so far. Tapping it opens
-    /// the draft, which used to sit under the replies and crowd them out.
+    /// Two lines pinned above the conversation: what the draft already holds
+    /// and what it still needs, both read off the draft so they follow any
+    /// order the user answered in. Tapping it opens the draft, which used to
+    /// sit under the replies and crowd them out.
     private var progress: some View {
         let state = conversation.state
-        let current = state.currentStep
+        let coverage = state.coverage
         return Button { planPresented = true } label: {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 4) {
-                    ForEach(LedgerOnboardingStep.allCases, id: \.self) { step in
-                        Capsule()
-                            .fill(state.isDone(step) ? BalancedPalette.ink : step == current ? BalancedPalette.edge : BalancedPalette.rule)
-                            .frame(height: 3)
+                HStack(spacing: 6) {
+                    ForEach(coverage.items) { item in
+                        Text(item.label)
+                            .balancedFont(size: 11.5)
+                            .foregroundStyle(item.isDone ? BalancedPalette.ink : BalancedPalette.meta)
+                            .lineLimit(1)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(item.isDone ? BalancedPalette.sunken : Color.clear)
+                            .clipShape(Capsule())
+                            .overlay {
+                                if !item.isDone { Capsule().stroke(BalancedPalette.rule, lineWidth: 1) }
+                            }
                     }
+                    Spacer(minLength: 0)
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(state.canCreate ? String(localized: "方案已就绪，检查后确认创建")
-                         : String(localized: "第 \(current.rawValue + 1)/\(LedgerOnboardingStep.allCases.count) 步 · \(current.title)"))
+                    Text(state.canCreate ? String(localized: "方案已就绪，检查后确认创建") : coverage.summary)
                         .balancedFont(size: 13.5, weight: .medium)
                         .foregroundStyle(state.canCreate ? BalancedPalette.income : BalancedPalette.ink)
                         .lineLimit(1)
                     Spacer(minLength: 8)
-                    Text(planSummary).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).lineLimit(1)
                     Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(BalancedPalette.meta)
                 }
@@ -258,12 +273,6 @@ struct LedgerOnboardingAgentView: View {
         .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
         .accessibilityHint(Text("查看账本结构"))
         .accessibilityIdentifier("ai-onboarding-progress")
-    }
-
-    private var planSummary: String {
-        let categories = plan.incomeCategories.count + plan.expenseCategories.count
-        if plan.accounts.isEmpty && categories == 0 { return String(localized: "账本结构") }
-        return String(localized: "\(plan.accounts.count) 个账户 · \(categories) 个分类")
     }
 
     // MARK: Plan
@@ -443,7 +452,12 @@ struct LedgerOnboardingAgentView: View {
                                                   accounts: plan.accountSelections, categories: plan.categorySelections,
                                                   openingDate: plan.startDate.isEmpty ? nil : plan.startDate)
             creating = false
-            if session.phase == .ready { dismiss() }
+            guard session.phase == .ready else { return }
+            // The assistant takes over from here: it opens with what was just
+            // created and a few next steps, instead of leaving the user on a
+            // page for a ledger that already exists.
+            session.openAgent(with: LedgerAgentOpening(draft: plan))
+            dismiss()
         }
     }
 }
