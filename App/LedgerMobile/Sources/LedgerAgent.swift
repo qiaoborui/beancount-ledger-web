@@ -540,6 +540,9 @@ struct LedgerAgentMessage: Identifiable, Equatable, Sendable {
     /// back for it. Cutting the transcript back for a regenerate or an edit
     /// counts only the questions it holds.
     var outsideTranscript = false
+    /// The App settings this answer changed, and what they were before, so the
+    /// row under it can put them back.
+    var settings: LedgerAgentAppSettingsChange? = nil
 }
 
 /// The provider and model a turn uses. The key travels separately.
@@ -777,6 +780,10 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     /// applies it only to a model its catalog does not describe, a custom
     /// endpoint's included; nil keeps the common limit.
     var maxOutputTokens: Int? = nil
+    /// The App's own settings (home page, tabs, valuation, reminders,
+    /// reports), so the native settings tools can read and change them. The
+    /// turn answers with the ones it changed. Nil turns them off.
+    var appSettings: LedgerAgentAppSettings? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {
@@ -810,19 +817,24 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
     /// The onboarding draft as the turn left it; only an onboarding turn that
     /// answered or was stopped has one.
     var onboarding: LedgerOnboardingState? = nil
+    /// The App settings a turn changed, with the sections it changed; nil when
+    /// it changed none. A failed or stopped turn never carries one.
+    var appSettings: LedgerAgentAppSettingsUpdate? = nil
 
     private enum CodingKeys: String, CodingKey {
         case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited, transcript, memoryUpdated, ask
-        case steps, usage, stopReason, compacted, onboarding
+        case steps, usage, stopReason, compacted, onboarding, appSettings
     }
     init(ok: Bool, reply: String? = nil, toolCalls: [LedgerAgentToolCall] = [], error: String? = nil,
          cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false, transcript: String? = nil,
          memoryUpdated: Bool = false, ask: LedgerAgentAsk? = nil, steps: [LedgerAgentStepRecord] = [],
-         usage: LedgerAgentUsage? = nil, stopReason: String? = nil, compacted: Bool = false) {
+         usage: LedgerAgentUsage? = nil, stopReason: String? = nil, compacted: Bool = false,
+         appSettings: LedgerAgentAppSettingsUpdate? = nil) {
         self.ok = ok; self.reply = reply; self.toolCalls = toolCalls; self.error = error
         self.cancelled = cancelled; self.modelUnavailable = modelUnavailable; self.edited = edited
         self.transcript = transcript; self.memoryUpdated = memoryUpdated; self.ask = ask
         self.steps = steps; self.usage = usage; self.stopReason = stopReason; self.compacted = compacted
+        self.appSettings = appSettings
     }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -844,6 +856,8 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
         stopReason = try container.decodeIfPresent(String.self, forKey: .stopReason)
         compacted = try container.decodeIfPresent(Bool.self, forKey: .compacted) ?? false
         onboarding = try container.decodeIfPresent(LedgerOnboardingState.self, forKey: .onboarding)
+        // A change this build cannot read is dropped; the reply still stands.
+        appSettings = try? container.decodeIfPresent(LedgerAgentAppSettingsUpdate.self, forKey: .appSettings)
     }
 
     private struct Lossy<Value: Decodable>: Decodable {
@@ -1313,6 +1327,8 @@ final class LedgerAgentConversation: ObservableObject {
     @Published private(set) var written: LedgerAgentReview?
     /// The message whose written change is being undone.
     @Published private(set) var undoing: UUID?
+    /// The message whose App settings change is being undone.
+    @Published private(set) var undoingSettings: UUID?
     /// Why the last undo did not go through, for the message it was asked on.
     @Published private(set) var undoFailure: UndoFailure?
 
@@ -1391,6 +1407,9 @@ final class LedgerAgentConversation: ObservableObject {
     static let maximumResumes = 2
     private var reopening: Task<LedgerAgentDraft?, Never>?
     var editor: LedgerAgentEditor?
+    /// Reads the App settings a turn sends and writes the sections it changed;
+    /// nil leaves the settings tools off, as in a test or a preview.
+    var appSettings: LedgerAgentAppSettingsHost?
     /// Every streamed event so far; `live` is this as last published.
     private var liveDraft: LedgerAgentLiveTurn?
     private var livePublishedAt: Date?
@@ -1528,6 +1547,10 @@ final class LedgerAgentConversation: ObservableObject {
         let response: LedgerAgentTurnResponse
         let draft: LedgerAgentDraft?
         let review: Result<LedgerAgentReview?, Error>?
+        /// The App settings the turn changed, once they applied.
+        var settingsChange: LedgerAgentAppSettingsChange? = nil
+        /// Why part of them did not apply, for the next turn.
+        var settingsFailure: String? = nil
     }
 
     /// Starts a turn. The question shows at once; the reply, or the failure,
@@ -1595,6 +1618,7 @@ final class LedgerAgentConversation: ObservableObject {
         stepCount = 0
         let editor = editor, existing = draft, reopening = reopening, unreviewed = draftUnreviewed
         let hadChange = pending != nil, settleTimeout = stopSettleTimeout
+        let settingsHost = appSettings, settingsBefore = appSettings?.snapshot()
         let report: LedgerAgentSteps.Handler = { [weak self] step in
             Task { @MainActor in self?.advance(step, started: started) }
         }
@@ -1636,12 +1660,31 @@ final class LedgerAgentConversation: ObservableObject {
                     }
                 }
                 let response = try await send(message, history, draft?.root, report)
+                // Only an answered turn applies: a failed or stopped one drops
+                // what it changed, like a change card it never finished.
+                var settingsChange: LedgerAgentAppSettingsChange?
+                var settingsFailure: String?
+                if response.ok, let update = response.appSettings, !update.changedSections.isEmpty {
+                    if let settingsHost, let settingsBefore {
+                        let applied = await settingsHost.apply(update.snapshot, update.changedSections)
+                        if !applied.applied.isEmpty {
+                            settingsChange = LedgerAgentAppSettingsChange(sections: applied.applied,
+                                                                         previous: settingsBefore)
+                        }
+                        if !applied.failures.isEmpty {
+                            settingsFailure = applied.failures.joined(separator: "；")
+                        }
+                    } else {
+                        settingsFailure = String(localized: "这台设备上没有可用的 App 设置")
+                    }
+                }
                 var review: Result<LedgerAgentReview?, Error>?
                 // A stopped turn leaves its draft for the next turn to review.
                 if response.cancelled != true, response.edited || unreviewed || redraw, let editor, let draft {
                     do { review = .success(try await editor.review(draft)) } catch { review = .failure(error) }
                 }
-                outcome = .success(.init(response: response, draft: draft, review: review))
+                outcome = .success(.init(response: response, draft: draft, review: review,
+                                         settingsChange: settingsChange, settingsFailure: settingsFailure))
             } catch { outcome = .failure(error) }
             self?.finish(outcome, question: question, questionID: questionID, started: started)
         }
@@ -2172,6 +2215,7 @@ final class LedgerAgentConversation: ObservableObject {
         phase = .idle
         pending = nil
         written = nil
+        undoingSettings = nil
         note = nil
         transcript = nil
         clearsStoredTranscript = false
@@ -2283,6 +2327,37 @@ final class LedgerAgentConversation: ObservableObject {
         }
     }
 
+    /// Whether the App settings change under `message` can be undone now.
+    func canUndoAppSettings(_ message: LedgerAgentMessage) -> Bool {
+        guard let change = message.settings, change.undoneAt == nil else { return false }
+        return undoingSettings == nil && !isRunning && !isWriting && !switching
+    }
+
+    /// Puts the sections this answer changed back the way they were. The
+    /// settings screens run their own side effects again, so reminders are
+    /// rescheduled exactly as a manual change would reschedule them.
+    func undoAppSettings(_ message: LedgerAgentMessage) {
+        guard canUndoAppSettings(message), let host = appSettings, let change = message.settings else { return }
+        undoingSettings = message.id
+        undoFailure = nil
+        let epoch = epoch, id = message.id, titles = change.titles
+        Task { [weak self] in
+            let result = await host.apply(change.previous, change.sections)
+            guard let self, self.epoch == epoch else { return }
+            self.undoingSettings = nil
+            guard result.failures.isEmpty else {
+                self.undoFailure = UndoFailure(message: id, text: result.failures.joined(separator: "；"))
+                return
+            }
+            if let index = self.messages.firstIndex(where: { $0.id == id }) {
+                self.messages[index].settings?.undoneAt = Date()
+            }
+            let note = String(localized: "（系统提示：用户撤销了之前对 App 设置的改动（\(titles)），这些设置已经恢复成改之前的样子。）")
+            self.note = self.note.map { $0 + "\n" + note } ?? note
+            self.onSettled?(self)
+        }
+    }
+
     private static func hasText(_ reply: String?) -> Bool {
         !(reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -2338,6 +2413,11 @@ final class LedgerAgentConversation: ObservableObject {
         switch outcome {
         case let .success(turn) where turn.response.ok && (Self.hasText(turn.response.reply) || pending?.review != nil):
             note = nil
+            if let failure = turn.settingsFailure {
+                // The next turn knows which settings did not take, so it can
+                // tell the user instead of assuming the change landed.
+                note = String(localized: "（系统提示：上一轮想改的 App 设置有一部分没改成：\(failure)。可以换一种说法再试，或者告诉用户在设置页里改。）")
+            }
             unannounced = []
             if let next = turn.response.transcript, !next.isEmpty {
                 transcript = next
@@ -2352,7 +2432,8 @@ final class LedgerAgentConversation: ObservableObject {
                                             duration: Date().timeIntervalSince(started),
                                             rememberedMemory: turn.response.memoryUpdated, ask: turn.response.ask,
                                             steps: steps, usage: turn.response.usage,
-                                            compacted: turn.response.compacted || liveDraft?.compacted == true)
+                                            compacted: turn.response.compacted || liveDraft?.compacted == true,
+                                            settings: turn.settingsChange)
             messages.append(answer)
             if let usage = turn.response.usage, usage.fraction != nil { self.usage = usage }
             phase = .idle

@@ -538,11 +538,14 @@ private struct LedgerAgentChatScreen: View {
                 undoing: conversation.undoing == message.id,
                 canUndo: conversation.canUndo(message),
                 undoFailure: undoFailure,
+                undoingSettings: conversation.undoingSettings == message.id,
+                canUndoSettings: conversation.canUndoAppSettings(message),
                 onMemory: { memoryPresented = true },
                 onRecord: { bookkeeping = .init(text: question(before: message)) },
                 onAnswer: { send($0, clearsComposer: false) },
                 onAsk: { ask($0) },
-                onUndo: { undo(message) })
+                onUndo: { undo(message) },
+                onUndoSettings: { conversation.undoAppSettings(message) })
             // No context menu over the answer: a long press there selects
             // its text, tool sources and errors, as everywhere else.
             answerActions(message)
@@ -1441,10 +1444,14 @@ private struct LedgerAgentChatScreen: View {
         }
         let choice = settings.choice, thinking = settings.effectiveThinking, usesMemory = settings.usesMemory
         let contextWindow = settings.contextWindow(for: choice), maxOutputTokens = settings.maxOutputTokens(for: choice)
+        // The App's own settings travel with the turn, so the assistant can
+        // read and change them; the conversation applies what it changed.
+        let appSettings = LedgerAgentAppSettings.load(valuationCurrency: session.ledger?.valuationCurrency ?? "CNY")
         let conversation = conversation, conversationID = conversation.id
         let location = repository.workspace.agentAttachmentLocation(id: conversationID)
         conversation.editor = .live(repository)
         conversation.writePolicy = settings.writePolicy
+        conversation.appSettings = .live(session)
         conversation.lifecycle = LedgerAgentBackgroundRun.shared
         LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
         LedgerAgentBackgroundRun.shared.keepsAwake = settings.keepsAwake
@@ -1460,7 +1467,8 @@ private struct LedgerAgentChatScreen: View {
                                               draft: draftRoot, transcript: transcript,
                                               conversationID: conversationID, attachments: attachments,
                                               usesMemory: usesMemory, contextWindow: contextWindow,
-                                              maxOutputTokens: maxOutputTokens, onStep: report)
+                                              maxOutputTokens: maxOutputTokens, appSettings: appSettings,
+                                              onStep: report)
         }
     }
 
@@ -1588,12 +1596,15 @@ private struct LedgerAgentAnswer: View {
     var undoing = false
     var canUndo = false
     var undoFailure: String? = nil
+    var undoingSettings = false
+    var canUndoSettings = false
     var onMemory: () -> Void = {}
     let onRecord: () -> Void
     var onAnswer: (String) -> Void = { _ in }
     /// A follow-up question from a visual's button.
     var onAsk: (String) -> Void = { _ in }
     var onUndo: () -> Void = {}
+    var onUndoSettings: () -> Void = {}
     @State private var toolsExpanded = false
     @State private var picked: Set<String> = []
 
@@ -1626,6 +1637,10 @@ private struct LedgerAgentAnswer: View {
                     .accessibilityIdentifier("ledger-agent-record")
             }
             if let write = message.write { writeRow(write) }
+            if let settings = message.settings {
+                LedgerAgentSettingsChangeRow(change: settings, undoing: undoingSettings, canUndo: canUndoSettings,
+                                             undoFailure: undoFailure, onUndo: onUndoSettings)
+            }
             if message.rememberedMemory {
                 Button(action: onMemory) {
                     Label("已更新记忆", systemImage: "brain")

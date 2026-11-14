@@ -1295,6 +1295,7 @@ actor LocalLedgerRepository: LedgerRepository {
                       thinking: LedgerAgentThinking? = nil, draft: URL? = nil, transcript: String? = nil,
                       conversationID: UUID? = nil, attachments: [LedgerAgentAttachment.Payload] = [],
                       usesMemory: Bool = false, contextWindow: Int? = nil, maxOutputTokens: Int? = nil,
+                      appSettings: LedgerAgentAppSettings? = nil,
                       runner: LedgerAgentRunner = .native,
                       onStep: LedgerAgentSteps.Handler? = nil) async throws -> LedgerAgentTurnResponse {
         if draft != nil { LedgerAgentChecker.install() }
@@ -1323,7 +1324,7 @@ actor LocalLedgerRepository: LedgerRepository {
                     conversationId: conversationID?.uuidString,
                     attachments: attachments.isEmpty ? nil : attachments,
                     memoryPath: memoryPath, streamEvents: onStep != nil ? true : nil, contextWindow: contextWindow,
-                    maxOutputTokens: maxOutputTokens)
+                    maxOutputTokens: maxOutputTokens, appSettings: appSettings)
                 let encoded = try JSONEncoder().encode(request)
                 if let onStep {
                     onStep(.startingLoop)

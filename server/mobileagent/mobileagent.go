@@ -94,6 +94,11 @@ type turnRequestV1 struct {
 	// Onboarding, when set, runs the ledger-less onboarding mode: no ledger
 	// is opened, and the model edits this draft with the onboarding tools.
 	Onboarding *onboardingStateV1 `json:"onboarding,omitempty"`
+	// AppSettings is the shell's snapshot of the App's own settings (pages,
+	// tabs, reminders, reports). The settings tools read and edit it, and the
+	// shell applies the changed sections when the turn succeeds; nil turns
+	// them off for the turn.
+	AppSettings *appSettingsV1 `json:"appSettings,omitempty"`
 	// Today is the user's local date, YYYY-MM-DD, for an onboarding turn.
 	Today string `json:"today,omitempty"`
 }
@@ -241,6 +246,10 @@ type turnResponseV1 struct {
 	// Onboarding is the draft after an onboarding turn, returned with the
 	// transcript it belongs to.
 	Onboarding *onboardingStateV1 `json:"onboarding,omitempty"`
+	// AppSettings is the App settings after a turn that changed them, with
+	// the sections it changed; the shell applies those sections to its own
+	// settings. Absent when the turn changed nothing.
+	AppSettings *appSettingsResultV1 `json:"appSettings,omitempty"`
 }
 
 // turnOutcome is what a turn hands back, also when it failed or was stopped
@@ -255,6 +264,8 @@ type turnOutcome struct {
 	// compactedTurns is how many questions the turn's summary replaced.
 	compactedTurns int
 	onboarding     *onboardingStateV1
+	// appSettings is the settings after a turn that changed them.
+	appSettings *appSettingsResultV1
 }
 
 // compaction is what the response reports of the turn's summary: only a
@@ -338,7 +349,7 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 	}
 	return encode(turnResponseV1{Version: 1, OK: true, Reply: out.reply, ToolCalls: out.calls, Steps: out.steps, Usage: out.usage,
 		Edited: out.edited, MemoryUpdated: out.remembered, Transcript: out.transcript, Ask: out.ask,
-		Compacted: compacted, CompactedTurns: compactedTurns, Onboarding: out.onboarding})
+		Compacted: compacted, CompactedTurns: compactedTurns, Onboarding: out.onboarding, AppSettings: out.appSettings})
 }
 
 // turnErrorText says why a turn failed in words the user can act on; the
@@ -420,10 +431,16 @@ func ModelCatalogJSON() string {
 // ToolCatalogJSON lists the tools the on-device Agent can call.
 func ToolCatalogJSON() string {
 	specs := app.LocalAgentToolSpecs()
-	tools := make([]map[string]string, 0, len(specs))
+	tools := make([]map[string]string, 0, len(specs)+3)
 	for _, spec := range specs {
 		tools = append(tools, map[string]string{"name": spec.Name, "title": spec.Title})
 	}
+	// The assistant's own tools take no ledger files, so they follow the
+	// ledger tools; the settings ones work on the App's settings.
+	tools = append(tools,
+		map[string]string{"name": "ask_user", "title": "向你提问"},
+		map[string]string{"name": "get_app_settings", "title": "读取 App 设置"},
+		map[string]string{"name": "update_app_settings", "title": "修改 App 设置"})
 	return encode(map[string]any{"version": 1, "tools": tools})
 }
 
@@ -487,6 +504,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	turns := maxTurns
 	var systemPrompt string
 	var remembered *memoryFile
+	var appSettings *appSettingsSession
 	if request.Onboarding != nil {
 		if request.WorkspaceRoot != "" || request.ScratchRoot != "" || request.MemoryPath != "" || len(request.Attachments) > 0 {
 			return files, errors.New("onboarding turns take no ledger, scratch copy, memory or attachments")
@@ -561,6 +579,17 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 				allowed[tool.Name()] = true
 			}
 			systemPrompt += savedHistoryPrompt
+		}
+		// The App's own settings live in the shell, not the ledger, so these
+		// tools append last: a conversation's cached prefix keeps its tools
+		// before them, and the prompt stays before the memory below.
+		if settings := openAppSettings(request.AppSettings); settings != nil {
+			appSettings = settings
+			for _, tool := range settings.tools() {
+				tools = append(tools, tool)
+				allowed[tool.Name()] = true
+			}
+			systemPrompt += appSettingsPrompt
 		}
 		if remembered != nil {
 			// Last, so the rules and tools before it stay one cacheable prefix.
@@ -713,6 +742,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		return files, err
 	}
 	out.reply, out.ask = reply, ask
+	out.appSettings = appSettings.result()
 	// The whole transcript goes back to the shell, which sends it with the
 	// next question unchanged: the provider then sees the same prefix every
 	// turn and serves it from its prompt cache.
