@@ -924,6 +924,62 @@ private struct LedgerAgentChatScreen: View {
     /// goes, so sending does not make it jump.
     private var composerExpanded: Bool {
         composerFocused || !draft.isEmpty || editedQuestion != nil || !conversation.staged.isEmpty || attaching
+            || dockHeldOpen
+    }
+
+    /// Keeps the second row while its chip is in use. Opening the model or
+    /// thinking menu can take focus from the field, and with an empty draft
+    /// that alone would fold the row away, and the menu with it, before
+    /// anything was chosen. The rules:
+    ///
+    /// - The field losing focus holds the row for `focusGrace`, long enough
+    ///   for a menu that caused it to report itself.
+    /// - A chip's menu opening (its label tapped, or its content appearing)
+    ///   holds the row for as long as the menu is open.
+    /// - A choice made, or the menu's content going away, starts
+    ///   `chipLinger`: the row stays that long so the other chip can be used
+    ///   next, then folds if nothing else keeps it open.
+    /// - The field taking focus again ends the hold; focus keeps the row.
+    ///
+    /// When a menu's closing is not reported (dismissed without a choice on
+    /// a system that does not tell its content), the row stays open until
+    /// the field is focused again or the page goes away. That is the safe
+    /// side: it never folds under an open menu.
+    @State private var dockHeldOpen = false
+    @State private var chipMenuOpen = false
+    @State private var dockRelease: Task<Void, Never>?
+    private static let focusGrace: Duration = .milliseconds(350)
+    private static let chipLinger: Duration = .seconds(3)
+
+    private func chipMenuChanged(open: Bool) {
+        chipMenuOpen = open
+        if open {
+            dockRelease?.cancel()
+            dockHeldOpen = true
+        } else {
+            releaseDock(after: Self.chipLinger)
+        }
+    }
+
+    private func composerFocusChanged(_ focused: Bool) {
+        dockRelease?.cancel()
+        if focused {
+            chipMenuOpen = false
+            dockHeldOpen = false
+        } else {
+            dockHeldOpen = true
+            releaseDock(after: Self.focusGrace)
+        }
+    }
+
+    /// Lets go of the row after `delay`, unless a menu opened meanwhile.
+    private func releaseDock(after delay: Duration) {
+        dockRelease?.cancel()
+        dockRelease = Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, !chipMenuOpen else { return }
+            dockHeldOpen = false
+        }
     }
 
     /// The floating dock, 16pt in from either edge. At rest it is one row:
@@ -966,7 +1022,9 @@ private struct LedgerAgentChatScreen: View {
                 if composerExpanded {
                     // Not in the hierarchy at rest, so nothing empty is left
                     // for VoiceOver or a keyboard to land on.
-                    LedgerAgentQuickSwitch(usage: conversation.usage) { settingsPresented = true }
+                    LedgerAgentQuickSwitch(usage: conversation.usage, menuChanged: chipMenuChanged) {
+                        settingsPresented = true
+                    }
                         .frame(minHeight: 40)
                         .padding(.leading, 4)
                         .padding(.trailing, Self.sendReserve)
@@ -981,6 +1039,14 @@ private struct LedgerAgentChatScreen: View {
         // under the field. Only this change is animated here; the keyboard
         // moves the inset with the system's own animation.
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: composerExpanded)
+        .onChange(of: composerFocused) { _, focused in composerFocusChanged(focused) }
+        // Leaving the page with a menu open or a release pending: nothing is
+        // left running, and the page comes back at rest.
+        .onDisappear {
+            dockRelease?.cancel()
+            chipMenuOpen = false
+            dockHeldOpen = false
+        }
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
         .padding(.top, 4)
@@ -2535,6 +2601,9 @@ private struct LedgerAgentQuickSwitch: View {
     @ObservedObject private var settings = LedgerAgentSettings.shared
     /// The conversation's latest usage; the meter shows once it is known.
     var usage: LedgerAgentUsage? = nil
+    /// A chip's menu opened (`true`), or a choice was made or the menu went
+    /// away (`false`). The composer keeps this row in place meanwhile.
+    var menuChanged: (Bool) -> Void = { _ in }
     var manage: () -> Void
 
     var body: some View {
@@ -2543,6 +2612,7 @@ private struct LedgerAgentQuickSwitch: View {
                 Menu { models } label: {
                     half(settings.modelTitle, tint: BalancedPalette.ink, leading: 12, trailing: 4)
                 }
+                .simultaneousGesture(TapGesture().onEnded { menuChanged(true) })
                 .accessibilityLabel(String(localized: "模型：\(settings.modelTitle)"))
                 .accessibilityIdentifier("ledger-agent-quick-model")
                 Menu { thinking } label: {
@@ -2550,6 +2620,7 @@ private struct LedgerAgentQuickSwitch: View {
                 }
                 // A long model name gives way before the effort does.
                 .layoutPriority(1)
+                .simultaneousGesture(TapGesture().onEnded { menuChanged(true) })
                 .accessibilityLabel(String(localized: "思考强度：\(settings.effectiveThinking.title)"))
                 .accessibilityIdentifier("ledger-agent-quick-thinking")
             }
@@ -2574,6 +2645,7 @@ private struct LedgerAgentQuickSwitch: View {
                 let provider = settings.providerTitle(for: favorite.choice.provider)
                 Button {
                     settings.select(favorite: favorite)
+                    menuChanged(false)
                     if !settings.hasKey { manage() }
                 } label: {
                     if favorite.id == current { Label(favorite.title, systemImage: "checkmark") } else { Text(favorite.title) }
@@ -2582,21 +2654,32 @@ private struct LedgerAgentQuickSwitch: View {
             }
         }
         Section {
-            Button { settings.toggleFavoriteForCurrent() } label: {
+            Button { settings.toggleFavoriteForCurrent(); menuChanged(false) } label: {
                 Label(settings.currentIsFavorite ? "取消收藏当前模型" : "收藏当前模型",
                       systemImage: settings.currentIsFavorite ? "star.slash" : "star")
             }
-            Button(action: manage) { Label("全部模型与密钥…", systemImage: "slider.horizontal.3") }
+            Button { menuChanged(false); manage() } label: {
+                Label("全部模型与密钥…", systemImage: "slider.horizontal.3")
+            }
+            // Always in the menu, so it is the item that reports the menu
+            // coming and going.
+            .onAppear { menuChanged(true) }
+            .onDisappear { menuChanged(false) }
         }
     }
 
     @ViewBuilder private var thinking: some View {
-        Picker("思考强度", selection: Binding(get: { settings.effectiveThinking }, set: { settings.select(thinking: $0) })) {
+        Picker("思考强度", selection: Binding(get: { settings.effectiveThinking }, set: {
+            settings.select(thinking: $0)
+            menuChanged(false)
+        })) {
             ForEach(settings.supportedThinking.reversed()) { level in
                 Text(level.title).tag(level)
             }
         }
         .pickerStyle(.inline)
+        .onAppear { menuChanged(true) }
+        .onDisappear { menuChanged(false) }
         if settings.thinkingIsAssumed {
             Section { Text("这个模型是否支持推理无从得知，不支持时由服务端忽略") }
         }
