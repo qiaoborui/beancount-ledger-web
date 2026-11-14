@@ -257,7 +257,7 @@ extension LedgerAgentAppSettings {
     }
 
     private static func day(of cadence: LedgerImportReminderCadence) -> Int {
-        if case let .monthly(day) = cadence { return day(of: day) }
+        if case let .monthly(value) = cadence { return day(of: value) }
         return 1
     }
 
@@ -357,7 +357,7 @@ extension LedgerAgentAppSettings {
                 }
                 cadence = .weekly(weekday: imports.weekday)
             case "monthly":
-                cadence = .monthly(day: try Self.monthDay(imports.day, at: String(localized: "导入提醒的日期")))
+                cadence = .monthly(try Self.monthDay(imports.day, at: String(localized: "导入提醒的日期")))
             default:
                 throw LedgerAgentAppSettingsError(String(localized: "导入提醒只能是 weekly（每周）或 monthly（每月）"))
             }
