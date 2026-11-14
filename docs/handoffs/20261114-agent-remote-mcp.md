@@ -1,8 +1,9 @@
 # 20261114-agent-remote-mcp
 
-- Status: active (draft PR awaiting CI and review)
+- Status: active (draft PR #701, CI `Gate` green, awaiting review)
 - Last updated: 2026-11-14 (+08:00)
-- Branch: `codex/agent-remote-mcp`, based on `main` at `8ef3888b`
+- Branch: `codex/agent-remote-mcp`, based on `main` at `8ef3888b`; PR
+  https://github.com/qiaoborui/beancount-ledger-web/pull/701
 - Task: 子任务 E of the AI-native ledger assistant batch (see
   `/home/borui/beancount-ledger-web/.git/agent-handoffs/20261114-ai-native/`,
   not in this repository)
@@ -99,15 +100,17 @@ per-server tokens in the Keychain, a settings page, and a native probe.
   `TestGitHubWriteValidationLargeLedgerPerformance` (a 2 s budget missed at
   3.9 s on this host, unrelated to `mobileagent`).
 - `gofmt` and `go vet ./mobileagent/` clean.
-- Swift: no toolchain on this Linux host, so the Swift side was written by
-  reading the surrounding code; `swift test`, the LedgerCore xcframework build
-  and the Xcode app check are left to CI (Mac runner). Not tested: a real MCP
-  server, a signed build, the settings page on a device.
+- Swift: no toolchain on this Linux host, so the first compile and test run was
+  CI. CI now passes on the final commit: Backend, iOS core (`swift test`),
+  iOS app (`LedgerMobileTests`) and `Gate` green. Four of the new Swift tests
+  failed on the first CI run and were the test's own fault (the fake token store
+  was asked for the id instead of the `mcp.<id>` account, and one case added a
+  server with an empty name, which the settings refuse); both fixed.
+- Not tested: a real MCP server, a signed build, the settings page on a device.
 
 ## Remaining
 
-1. CI `Gate` (Swift compile + tests) is the real check for the Swift side.
-2. The settings page is not wired into `LedgerAgentSettingsView` (A owns that
+1. The settings page is not wired into `LedgerAgentSettingsView` (A owns that
    struct): the owner connects `LedgerAgentMCPView` from the new 能力 section.
-3. Only `Authorization: Bearer` is supported; a server that wants another header
+2. Only `Authorization: Bearer` is supported; a server that wants another header
    name would need an editable header list.
