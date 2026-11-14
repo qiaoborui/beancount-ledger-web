@@ -5,9 +5,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// 账本助手 — a conversation over the local ledger. It opens as a chat, not a
-/// page: no heading over the conversation, two round buttons on the bar
-/// (history left, model settings right), a centred mark and one question when
-/// nothing has been asked yet, and a floating capsule dock at the bottom.
+/// page: no heading over the conversation, round buttons on the bar (history
+/// left, 新对话 and model settings right), a greeting for the time of day with
+/// the recommended starters when nothing has been asked yet, and a floating
+/// capsule dock at the bottom. No logo: the page is the ledger's, not a
+/// model provider's.
 /// The design is `docs/design/ios-balanced/agent.html`: questions sit in a
 /// sunken block on the right, replies run on the page with a collapsible list
 /// of the reads behind them. The Agent edits a private draft of the ledger;
@@ -106,10 +108,11 @@ private struct LedgerAgentChatScreen: View {
             if settings.isReady { chat } else { LedgerAgentIntro { settingsPresented = true } }
         }
         .background(BalancedPalette.page)
-        // No heading over a conversation: the bar is two round buttons, the
-        // way the assistant reads as a chat rather than a page. History sits
-        // on the left, model settings on the right; a conversation's name and
-        // its rename live in the history sheet, where the sessions are.
+        // No heading over a conversation: the bar is a row of round buttons,
+        // the way the assistant reads as a chat rather than a page. History
+        // sits on the left, 新对话 and model settings on the right; a
+        // conversation's name and its rename live in the history sheet, where
+        // the sessions are.
         .terminalPageChrome(String(localized: "账本助手"), isRoot: isRoot, showsSync: false,
                             actions: AnyView(actions), balanced: true, showsTitle: false,
                             leadingActions: settings.isReady ? AnyView(historyButton) : nil)
@@ -169,6 +172,7 @@ private struct LedgerAgentChatScreen: View {
             conversation.isOnScreen = true
             LedgerAgentBackgroundRun.shared.conversationSeen()
             resumeIfInterrupted()
+            greetingNow = Date()
         }
         .onDisappear { conversation.isOnScreen = false }
         // A turn the system cut short goes on by itself once the user is
@@ -177,6 +181,10 @@ private struct LedgerAgentChatScreen: View {
             if phase == .active {
                 resumeIfInterrupted()
                 refreshInbox()
+                // The empty state's greeting is read from this clock, so a
+                // page left open across 11:00, 13:00 or 18:00 says the right
+                // thing when the user comes back instead of at launch.
+                greetingNow = Date()
             }
             if phase == .background { awaySince = Date() }
             if phase == .active, let away = awaySince {
@@ -185,10 +193,11 @@ private struct LedgerAgentChatScreen: View {
             }
         }
         // A conversation reopened from the history is recapped on arrival,
-        // and an empty one offers fresh suggestions.
+        // and an empty one offers fresh suggestions — unless they are hidden,
+        // in which case fetching them would be a model call nobody reads.
         .task(id: conversation.id) {
             if conversation.restored { recapIfWanted() }
-            if conversation.messages.isEmpty { refreshStarters() }
+            if conversation.messages.isEmpty, settings.suggestions { refreshStarters() }
             // Answers that landed while another conversation was on screen
             // get their name here.
             nameSession()
@@ -196,6 +205,12 @@ private struct LedgerAgentChatScreen: View {
         .onChange(of: conversation.messages.count) { _, _ in
             predictNext()
             nameSession()
+        }
+        // Turning the recommendations back on fills the empty state again;
+        // the starters are cached per ledger, so this is only a fetch the
+        // first time.
+        .onChange(of: settings.suggestions) { _, on in
+            if on, conversation.messages.isEmpty { refreshStarters() }
         }
         .onChange(of: session.privacyShielded) { _, shielded in
             if !shielded {
@@ -287,13 +302,20 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
-    /// Settings, and the close button when the assistant is a full-screen
-    /// sheet. 新对话 moved into the history sheet: the top bar keeps two
-    /// buttons, and starting over is where the saved conversations are.
+    /// Settings, then 新对话 when there is something to leave behind, then
+    /// the close button when the assistant is a full-screen sheet. 新对话 sits
+    /// in the bar beside 模型与密钥, so starting over is one tap from the
+    /// conversation it replaces; it is disabled while this conversation is
+    /// already empty and idle.
     private var actions: some View {
         HStack(spacing: 0) {
             // The bar's trailing cluster already supplies one glass capsule
             // for its controls, so these are plain buttons inside it.
+            circleButton("square.and.pencil", label: "新对话", identifier: "ledger-agent-new",
+                         drawsGlass: false) {
+                sessions.startNew()
+            }
+            .disabled(conversation.messages.isEmpty && !conversation.isRunning && conversation.pending == nil)
             circleButton("slider.horizontal.3", label: "模型与密钥", identifier: "ledger-agent-settings",
                          drawsGlass: false) {
                 settingsPresented = true
@@ -331,6 +353,8 @@ private struct LedgerAgentChatScreen: View {
     /// The height the conversation rests in, so the empty state can sit in
     /// the middle of the page rather than at its top.
     @State private var emptyHeight: CGFloat = 0
+    /// When the empty state last read the clock for its greeting.
+    @State private var greetingNow = Date()
 
     private var showsJumpButton: Bool {
         // Not while the page is on its way down to a growing reply.
@@ -771,24 +795,23 @@ private struct LedgerAgentChatScreen: View {
     /// A recap is written when the user comes back after this long.
     private static let recapAfterAbsence: TimeInterval = 10 * 60
 
-    /// The page before the first question: a centred mark and one short
-    /// question, the way a chat app opens, then the starters as pills. The
-    /// paragraphs that explained the assistant are now the single line under
-    /// the question; the attach hint lives on the ＋ in the dock.
+    /// The page before the first question: a greeting for the time of day,
+    /// one question that carries it on, and the starters as pills. No mark
+    /// over it — the assistant is not a brand to put on the page — so the
+    /// block is a plain centred column. The starters, and the refresh beside
+    /// them, follow the 显示推荐问题 switch.
     private var emptyState: some View {
         VStack(spacing: 8) {
-            LedgerAgentSpark()
-                .frame(width: 36, height: 36)
-                .accessibilityHidden(true)
-            Text("想查什么？").balancedFont(size: 21, weight: .medium)
+            Text(Self.greeting(at: greetingNow))
+                // The reading serif, as claude.ai sets its replies: Source
+                // Serif 4 for Latin, falling through to PingFang for CJK.
+                .font(BalancedReading.font(.regular, size: 24, relativeTo: .title2))
                 .foregroundStyle(BalancedPalette.secondary)
                 .multilineTextAlignment(.center)
-                .padding(.top, 6)
-            Text("可以查账，也可以上传账单对账；改账先出草稿，你确认后才写入。")
-                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-                .multilineTextAlignment(.center).lineSpacing(2)
-                .padding(.top, 2)
-            if settings.assists || !starters.suggestions.isEmpty {
+            Text("今天想查点什么？").balancedFont(size: 15)
+                .foregroundStyle(BalancedPalette.meta)
+                .multilineTextAlignment(.center)
+            if settings.suggestions, settings.assists || !starters.suggestions.isEmpty {
                 HStack(spacing: 4) {
                     Text("试试").balancedFont(size: 12.5, weight: .medium)
                         .foregroundStyle(BalancedPalette.meta)
@@ -823,6 +846,20 @@ private struct LedgerAgentChatScreen: View {
         }
         .frame(maxWidth: .infinity, minHeight: max(0, emptyHeight - 52), alignment: .center)
         .padding(.vertical, 16)
+    }
+
+    /// The empty state's greeting. Only the hour matters, and only the user's
+    /// own clock: 05-11 早上好, 11-13 中午好, 13-18 下午好, 18-05 晚上好.
+    /// `greetingNow` is refreshed on appear and on every return to the
+    /// foreground, so the boundary is crossed when the page is looked at
+    /// again rather than frozen at launch.
+    private static func greeting(at date: Date) -> String {
+        switch Calendar.current.component(.hour, from: date) {
+        case 5..<11: String(localized: "早上好")
+        case 11..<13: String(localized: "中午好")
+        case 13..<18: String(localized: "下午好")
+        default: String(localized: "晚上好")
+        }
     }
 
     private func failure(_ error: LedgerAgentError, question: String) -> some View {
@@ -988,8 +1025,11 @@ private struct LedgerAgentChatScreen: View {
     private var ghost: String? { ghost(for: draft) }
 
     private func ghost(for text: String) -> String? {
-        guard settings.assists, text.isEmpty, conversation.staged.isEmpty, !conversation.isRunning,
-              !sessions.busyElsewhere, editedQuestion == nil else { return nil }
+        // The same 显示推荐问题 switch as the empty state's starters: hiding
+        // the recommendations but leaving one floating in the field would
+        // contradict the switch, so the field keeps only its placeholder.
+        guard settings.suggestions, settings.assists, text.isEmpty, conversation.staged.isEmpty,
+              !conversation.isRunning, !sessions.busyElsewhere, editedQuestion == nil else { return nil }
         if conversation.messages.isEmpty { return starters.isDynamic ? starters.suggestions.first : nil }
         guard case .idle = conversation.phase else { return nil }
         return conversation.nextSuggestion
@@ -998,8 +1038,10 @@ private struct LedgerAgentChatScreen: View {
     // MARK: Suggestions and recap
 
     private func refreshStarters(force: Bool = false) {
-        guard settings.assists, settings.hasKey, let repository = session.localRepository, !session.privacyShielded,
-              let key = try? settings.apiKey() else { return }
+        // Hidden recommendations are not fetched either: this is the only
+        // path that spends a model call on the starters.
+        guard settings.suggestions, settings.assists, settings.hasKey, let repository = session.localRepository,
+              !session.privacyShielded, let key = try? settings.apiKey() else { return }
         let choice = settings.choice, usesMemory = settings.usesMemory
         let recent = sessions.recentQuestions()
         let workspace = repository.workspace
@@ -1015,7 +1057,9 @@ private struct LedgerAgentChatScreen: View {
     }
 
     private func predictNext() {
-        guard settings.assists, settings.hasKey, let repository = session.localRepository,
+        // Only the composer's ghost reads the prediction, so it follows the
+        // same switch: no ghost, no request.
+        guard settings.suggestions, settings.assists, settings.hasKey, let repository = session.localRepository,
               let key = try? settings.apiKey() else { return }
         let choice = settings.choice, usesMemory = settings.usesMemory
         conversation.predictNext { history in
@@ -2263,8 +2307,10 @@ struct LedgerAgentSettingsView: View {
                     .accessibilityIdentifier("ledger-agent-uses-memory")
                 Toggle("智能建议、回顾与命名", isOn: Binding(get: { settings.assists }, set: { settings.setAssists($0) }))
                     .accessibilityIdentifier("ledger-agent-assists")
+                Toggle("显示推荐问题", isOn: Binding(get: { settings.suggestions }, set: { settings.setSuggestions($0) }))
+                    .accessibilityIdentifier("ledger-agent-suggestions")
             } header: { Text("记忆与建议") } footer: {
-                Text("记忆是这本账的 memory.md：你的偏好、常用的账户和分类、常做的事。助手每次回答都会读，你说「记住」或纠正它时会自己更新。只存在本机，不随 Git 同步。智能建议会根据账本和记忆生成「试试」、在输入框里预测下一句、回来时总结对话，并在聊过两个来回后给这段对话起一个名字，起名失败会在下次回答后再试，每次都是一个不带思考的小请求。")
+                Text("记忆是这本账的 memory.md：你的偏好、常用的账户和分类、常做的事。助手每次回答都会读，你说「记住」或纠正它时会自己更新。只存在本机，不随 Git 同步。智能建议会根据账本和记忆生成「试试」、在输入框里预测下一句、回来时总结对话，并在聊过两个来回后给这段对话起一个名字，起名失败会在下次回答后再试，每次都是一个不带思考的小请求。「显示推荐问题」单独控制空态里的「试试」和输入框里的下一句建议，关掉后不再为它们请求模型，回顾和命名照常。")
             }
             Section {
                 Toggle("后台保持运行", isOn: Binding(get: { settings.keepsAwake }, set: { settings.setKeepsAwake($0) }))
@@ -2566,30 +2612,4 @@ private struct LedgerAgentDock: ViewModifier {
     }
 }
 
-/// The empty state's mark: eight spokes around a centre, the assistant's own
-/// glyph. Balanced has no accent colour — chroma means direction — so this is
-/// drawn in the palette's one warm tone and used only as decoration, never as
-/// a control; the app mark itself lives in the widget target and is a page
-/// with an L, not this star.
-private struct LedgerAgentSpark: View {
-    var color: Color = BalancedPalette.expense
-
-    var body: some View {
-        GeometryReader { geometry in
-            let side = min(geometry.size.width, geometry.size.height)
-            ZStack {
-                ForEach(0..<8, id: \.self) { index in
-                    Capsule()
-                        .fill(color)
-                        .frame(width: side * 0.10, height: side * 0.46)
-                        .offset(y: -side * 0.21)
-                        .rotationEffect(.degrees(Double(index) * 45))
-                }
-            }
-            .frame(width: side, height: side)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .accessibilityHidden(true)
-    }
-}
 #endif
