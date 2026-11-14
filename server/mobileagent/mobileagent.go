@@ -104,6 +104,10 @@ type turnRequestV1 struct {
 	// DisabledSkills are the skills the user turned off: they stay out of the
 	// prompt's list and load_skill refuses them.
 	DisabledSkills []string `json:"disabledSkills,omitempty"`
+	// MCPServers are the user's remote MCP servers whose tools this turn may
+	// call. The shell sends only the enabled ones, with the token it read from
+	// the Keychain in Headers.
+	MCPServers []mcpServerV1 `json:"mcpServers,omitempty"`
 }
 
 type customEndpointV1 struct {
@@ -512,6 +516,11 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 		if request.WorkspaceRoot != "" || request.ScratchRoot != "" || request.MemoryPath != "" || len(request.Attachments) > 0 {
 			return files, errors.New("onboarding turns take no ledger, scratch copy, memory or attachments")
 		}
+		// A new ledger has no assistant conversation to lend it outside
+		// tools, and its draft is the only thing the user is deciding on.
+		if len(request.MCPServers) > 0 {
+			return files, errors.New("onboarding turns take no MCP servers")
+		}
 		today := onboardingDay(request.Today)
 		drafting, err := newOnboardingSession(request.Onboarding, today)
 		if err != nil {
@@ -603,6 +612,20 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 			}
 			systemPrompt += appSettingsPrompt
 		}
+		// The user's own MCP servers come after everything else, so the
+		// ledger tools keep the front of the cached prefix. A server that
+		// cannot be reached only costs this turn its tools.
+		mcpServers, err := openMCPTools(ctx, network.client, request.MCPServers, supportsImages(model) && !assumed)
+		if err != nil {
+			return files, err
+		}
+		defer mcpServers.close()
+		for _, tool := range mcpServers.tools {
+			tools = append(tools, tool)
+			allowed[tool.Name()] = true
+		}
+		systemPrompt += mcpServers.prompt()
+		message = mcpServers.withNote(message)
 		if remembered != nil {
 			// Last, so the rules and tools before it stay one cacheable prefix.
 			systemPrompt += remembered.prompt()
