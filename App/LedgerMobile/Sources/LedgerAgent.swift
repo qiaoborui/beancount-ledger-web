@@ -23,10 +23,6 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
     /// The row title, in the words of the design: what was read, then the range
     /// or search term when the arguments carry one.
     var title: String {
-        if let remote = LedgerAgentMCPToolName.split(name) {
-            // The server's own name, when this launch has read the saved list.
-            return (LedgerAgentMCPServerIndex.shared.name(for: remote.server) ?? remote.server) + " · " + remote.tool
-        }
         let base: String = switch name {
         case "get_ledger_summary": String(localized: "汇总")
         case "search_transactions": String(localized: "搜索流水")
@@ -792,10 +788,6 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     /// reports), so the native settings tools can read and change them. The
     /// turn answers with the ones it changed. Nil turns them off.
     var appSettings: LedgerAgentAppSettings? = nil
-    /// The user's remote MCP servers whose tools this turn may call, each with
-    /// the token the Keychain holds as a header; nil when none are enabled.
-    /// Appended last so the cached prompt prefix of an earlier build stays.
-    var mcpServers: [LedgerAgentMCPServer.Payload]? = nil
 }
 
 struct LedgerAgentTurnResponse: Decodable, Sendable {
