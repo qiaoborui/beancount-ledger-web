@@ -714,6 +714,8 @@ final class LedgerAgentTests: XCTestCase {
         let ledger = FakeDraftLedger()
         let conversation = LedgerAgentConversation()
         conversation.editor = ledger.editor
+        // 每次确认: the card, not the policy, is what writes here.
+        conversation.writePolicy = .confirm
         conversation.send("午饭改成 26") { message, _, draft in
             XCTAssertEqual(message, "午饭改成 26")
             XCTAssertEqual(draft?.lastPathComponent, "draft-1")
@@ -828,6 +830,7 @@ final class LedgerAgentTests: XCTestCase {
 
         // The retry is told about the interruption and shows whatever the
         // interrupted turn left in the draft, even if it edits nothing itself.
+        conversation.writePolicy = .confirm
         conversation.send("批量改分类") { message, _, draft in
             XCTAssertTrue(message.contains("中断"))
             XCTAssertEqual(draft?.lastPathComponent, "draft-1")
@@ -1012,6 +1015,7 @@ final class LedgerAgentTests: XCTestCase {
         sessions.bind(ledger: UUID(), storage: MemoryConversationStore().storage)
         let editing = sessions.current
         editing.editor = ledger.editor
+        editing.writePolicy = .confirm
         editing.send("午饭改成 26") { _, _, _ in .init(ok: true, reply: "改好了。", edited: true) }
         try await waitUntilIdle(editing)
         XCTAssertEqual(editing.pending?.status, .ready)
@@ -1310,6 +1314,7 @@ final class LedgerAgentTests: XCTestCase {
         await ledger.dropOnRebase(["2026/10.bean"])
         let conversation = LedgerAgentConversation()
         conversation.editor = ledger.editor
+        conversation.writePolicy = .confirm
         conversation.send("记一笔") { message, _, _ in
             XCTAssertFalse(message.contains("冲突"))
             return .init(ok: true, reply: "好了。", edited: true)
