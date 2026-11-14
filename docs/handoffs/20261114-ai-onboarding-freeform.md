@@ -3,7 +3,7 @@
 - Status: active (draft PR, CI Gate green)
 - Last updated: 2026-11-14 (+08:00)
 - Branch: `codex/ai-onboarding-freeform`, based on `main` at `8ef3888b`
-- PR: draft, opened from this branch
+- PR: #698 (draft), opened from this branch
 - Part of the AI-native ledger assistant batch (sub-task C); the shared
   conventions live in the coordinator's `00-common.md`.
 
