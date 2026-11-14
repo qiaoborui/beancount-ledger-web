@@ -22,6 +22,8 @@ struct LedgerAgentSettingsView: View {
 /// 记忆, 建议, 能力, and the page for what rarely changes.
 private struct LedgerAgentSettingsRoot: View {
     @ObservedObject private var settings = LedgerAgentSettings.shared
+    @ObservedObject private var skills = LedgerAgentSkillSettings.shared
+    @ObservedObject private var mcp = LedgerAgentMCPSettings.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -76,9 +78,26 @@ private struct LedgerAgentSettingsRoot: View {
                 Text("智能建议用不带思考的小请求写回顾、预测下一句并给对话起名；推荐问题只控制空态里的「试试」。")
             }
             Section {
-                // 技能 and MCP 服务器 join this section as their own rows.
+                NavigationLink {
+                    LedgerAgentSkillsView()
+                } label: {
+                    LabeledContent("技能") {
+                        if let text = skillsValue { AgentSettingsValue(text: text) }
+                    }
+                }
+                .accessibilityIdentifier("ledger-agent-skills")
+                NavigationLink {
+                    LedgerAgentMCPView()
+                } label: {
+                    LabeledContent("MCP 服务器") {
+                        if let text = mcpValue { AgentSettingsValue(text: text) }
+                    }
+                }
+                .accessibilityIdentifier("ledger-agent-mcp")
                 NavigationLink("可用工具") { LedgerAgentToolsView() }
-            } header: { Text("能力") }
+            } header: { Text("能力") } footer: {
+                Text("技能是助手按需加载的说明；MCP 服务器是用户自己接入的外部工具，调用时参数会发给那个服务器。")
+            }
             Section {
                 NavigationLink("高级") { LedgerAgentAdvancedSettingsView() }
             }
@@ -91,6 +110,20 @@ private struct LedgerAgentSettingsRoot: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
         }
+    }
+
+    /// What the 技能 row says on the right. The catalog itself takes a read of
+    /// the ledger, so the list keeps only the part this device decided.
+    private var skillsValue: String? {
+        let off = skills.disabled.count
+        return off == 0 ? nil : String(localized: "\(off) 个已关闭")
+    }
+
+    /// What the MCP 服务器 row says on the right: how many servers a turn may
+    /// call, counted here rather than in the page.
+    private var mcpValue: String? {
+        let on = mcp.servers.filter(\.enabled).count
+        return on == 0 ? nil : String(localized: "已接入 \(on) 个")
     }
 }
 
