@@ -65,6 +65,9 @@ final class AssistantScreenshotTests: XCTestCase {
         XCTAssertTrue(seed.waitForExistence(timeout: 15), app.debugDescription)
         seed.tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30), app.debugDescription)
+        // The seeding overlay sits over the tab bar and eats the tab tap until
+        // the fixture says it is done.
+        XCTAssertTrue(app.staticTexts["pagination-fixture-ready"].waitForExistence(timeout: 30), app.debugDescription)
 
         app.tabBars.buttons["助手"].tap()
         let setUp = app.buttons["ledger-agent-setup"]
