@@ -61,9 +61,11 @@ final class LedgerAgentMCPTests: XCTestCase {
         super.tearDown()
     }
 
+    /// The settings with the app's own account naming (`mcp.<id>`), so a test
+    /// checks where a token really lands.
     @MainActor
     private func makeSettings(_ tokens: FakeMCPTokens) -> LedgerAgentMCPSettings {
-        LedgerAgentMCPSettings(defaults: defaults, tokenStore: tokens.store(account:))
+        LedgerAgentMCPSettings(defaults: defaults) { tokens.store(account: LedgerAgentMCPSettings.tokenAccountPrefix + $0) }
     }
 
     @MainActor
@@ -133,12 +135,14 @@ final class LedgerAgentMCPTests: XCTestCase {
         let tokens = FakeMCPTokens()
         let settings = makeSettings(tokens)
         let keyed = try settings.add(name: "我的笔记", url: "https://mcp.example.com/mcp", token: "secret")
-        let open = try settings.add(name: "", url: "http://192.168.1.8:3000/mcp", token: "")
+        let open = try settings.add(name: "家里的服务", url: "http://192.168.1.8:3000/mcp", token: "")
         XCTAssertEqual(settings.payloads(), [
             .init(id: keyed.id, name: "我的笔记", url: "https://mcp.example.com/mcp",
                   headers: ["Authorization": "Bearer secret"]),
-            .init(id: open.id, name: "192.168.1.8", url: "http://192.168.1.8:3000/mcp", headers: nil),
+            .init(id: open.id, name: "家里的服务", url: "http://192.168.1.8:3000/mcp", headers: nil),
         ])
+        // A server the user never named is called by its host.
+        XCTAssertEqual(LedgerAgentMCPServer(id: "x", name: " ", url: "https://mcp.example.com/mcp").title, "mcp.example.com")
 
         settings.setEnabled(false, for: keyed.id)
         XCTAssertEqual(settings.payloads().map(\.id), [open.id])
