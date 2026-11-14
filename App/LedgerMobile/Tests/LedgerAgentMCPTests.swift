@@ -220,7 +220,9 @@ final class LedgerAgentMCPTests: XCTestCase {
         let server = LedgerAgentMCPServer(id: "ab12cd34", name: "我的笔记", url: "https://mcp.example.com/mcp")
         let seen = Captured()
         let prober = LedgerAgentMCPProber { request in
-            seen.set(JSONSerialization.jsonObject(with: request) as? [String: Any] ?? [:])
+            if let object = try? JSONSerialization.jsonObject(with: request) {
+                seen.set(object as? [String: Any] ?? [:])
+            }
             return Data("""
             {"version":1,"ok":true,"name":"我的笔记","tools":[
               {"name":"search_notes","description":"搜索笔记\\n更多说明"},
