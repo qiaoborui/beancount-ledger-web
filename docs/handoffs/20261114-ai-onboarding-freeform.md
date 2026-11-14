@@ -112,6 +112,12 @@ steps.
   fails on `origin/main` at `8ef3888b` under `-count=10`) and
   `TestGitHubWriteValidationLargeLedgerPerformance` (bean-check budgets on this
   machine; also fails on `origin/main`).
+- That first flake also failed the Backend job of the draft PR, so
+  `mobileagent/events_test.go` got a test-only fix: the byte-limit test now
+  pauses every 128 bytes so the observer takes one flush before the next,
+  instead of depending on when its goroutine is scheduled (30/30 clean after
+  the change). No production behaviour changed; drop the commit if the
+  coordinator prefers to fix the flake elsewhere.
 - Swift: self-reviewed only (no Xcode on this machine), with portable unit
   tests added to `App/LedgerMobile/Tests/LedgerOnboardingConversationTests.swift`:
   coverage derivation and its agreement with `draft.isComplete`, the greeting
