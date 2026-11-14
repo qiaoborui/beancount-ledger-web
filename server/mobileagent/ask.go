@@ -41,18 +41,13 @@ func (*askTool) Name() string  { return "ask_user" }
 func (*askTool) Label() string { return "向用户提问" }
 func (*askTool) Schema() ai.ToolSchema {
 	return ai.ToolSchema{Name: "ask_user", Description: "需要用户做选择才能继续时（分类拿不准、两边金额对不上要保留哪边、几种改法选哪种），用它在 App 里展示一张选项卡，而不是在回复里用文字反问。调用后这一轮立即结束，用户的选择会作为下一条消息发来。只在确实需要用户决定时用；能从账本推断的不要问。",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"question": map[string]any{"type": "string", "description": "要问的问题，一句话，写清楚是哪笔交易或哪个账户"},
-				"options": map[string]any{"type": "array", "minItems": minAskOptions, "maxItems": maxAskOptions,
-					"items":       map[string]any{"type": "string"},
-					"description": "2 到 6 个简短的选项，每个不超过 60 字；用户也可以不选而直接输入"},
-				"multiple": map[string]any{"type": "boolean", "description": "允许多选"},
-			},
-			"required":             []string{"question", "options"},
-			"additionalProperties": false,
-		}}
+		Parameters: objectParameters(map[string]any{
+			"question": map[string]any{"type": "string", "description": "要问的问题，一句话，写清楚是哪笔交易或哪个账户"},
+			"options": map[string]any{"type": "array", "minItems": minAskOptions, "maxItems": maxAskOptions,
+				"items":       map[string]any{"type": "string"},
+				"description": "2 到 6 个简短的选项，每个不超过 60 字；用户也可以不选而直接输入"},
+			"multiple": map[string]any{"type": "boolean", "description": "允许多选"},
+		}, "question", "options")}
 }
 func (*askTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
 

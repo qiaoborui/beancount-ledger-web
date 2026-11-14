@@ -42,7 +42,7 @@ func (a *attachments) tools(ledger postingSource) []agent.AgentTool {
 	tools := []agent.AgentTool{
 		fileTool{name: "list_attachments", title: "查看附件",
 			description: "列出用户上传的附件：类型、大小、工作表、行数和前几行预览（每行以行号开头，列用制表符分隔）；PDF 和图片给出识别文字的开头。",
-			parameters:  objectParameters(map[string]any{}, nil),
+			parameters:  objectParameters(map[string]any{}),
 			run:         func(json.RawMessage) (any, error) { return a.listAttachments() }},
 		fileTool{name: "read_attachment", title: "读取附件",
 			description: "分段读取一个附件。表格按行读：start 是起始行号（从 1 开始），limit 默认 60、最多 200 行，返回 nextStart 表示后面还有；contains 只返回包含该文字的行。PDF 和图片读识别出的文字：start 是字符位置，limit 默认 6000；contains 返回包含该文字的行。",
@@ -52,7 +52,7 @@ func (a *attachments) tools(ledger postingSource) []agent.AgentTool {
 				"start":    map[string]any{"type": "integer", "description": "表格的起始行号，或文字的起始字符位置"},
 				"limit":    map[string]any{"type": "integer", "description": "最多返回的行数或字符数"},
 				"contains": map[string]any{"type": "string", "description": "只返回包含这段文字的行"},
-			}, []string{"id"}),
+			}, "id"),
 			run: func(raw json.RawMessage) (any, error) { return a.readAttachment(raw) }},
 		fileTool{name: "reconcile_attachment", title: "对账",
 			description: "把账单明细和账本里指定账户的记录逐笔比对，返回对上的笔数、合计与差额，以及账本缺失、账本多出、金额不一致的条目。金额按账户余额变化计（转入为正、支出为负）。表格附件用 id + 列映射；PDF 或图片把整理出的明细放进 rows。",
@@ -70,32 +70,23 @@ func (a *attachments) tools(ledger postingSource) []agent.AgentTool {
 				"descriptionColumns": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "摘要列（商户、商品、备注），用于找出金额不一致的条目"},
 				"amountSign":         map[string]any{"type": "string", "enum": []string{"balance", "expense_positive"}, "description": "没有方向列时金额的含义：balance（默认，转入为正、支出为负）或 expense_positive（消费为正，多数信用卡账单）"},
 				"rows": map[string]any{"type": "array", "description": "从 PDF 或图片整理出的明细，代替 id；最多 600 行",
-					"items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"date", "amount"},
-						"properties": map[string]any{
-							"date":        map[string]any{"type": "string", "description": "YYYY-MM-DD"},
-							"amount":      map[string]any{"type": "string", "description": "金额，例如 -36.50"},
-							"description": map[string]any{"type": "string"},
-						}}},
+					"items": objectParameters(map[string]any{
+						"date":        map[string]any{"type": "string", "description": "YYYY-MM-DD"},
+						"amount":      map[string]any{"type": "string", "description": "金额，例如 -36.50"},
+						"description": map[string]any{"type": "string"},
+					}, "date", "amount")},
 				"accounts":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "要对账的账本账户，或它们的上级账户"},
 				"start":         map[string]any{"type": "string", "description": "起始日期 YYYY-MM-DD，默认账单最早一天"},
 				"end":           map[string]any{"type": "string", "description": "结束日期 YYYY-MM-DD（不含），默认账单最后一天的次日"},
 				"toleranceDays": map[string]any{"type": "integer", "description": "日期允许相差的天数，默认 3，最多 10（信用卡入账日常晚几天）"},
 				"currency":      map[string]any{"type": "string", "description": "只比对这个币种的账本记录，例如 CNY"},
-			}, []string{"accounts"}),
+			}, "accounts"),
 			run: func(raw json.RawMessage) (any, error) { return reconcile(a, ledger, raw) }},
 	}
 	if a.images && slices.ContainsFunc(a.items, func(item attachmentV1) bool { return item.ImagePath != "" }) {
 		tools = append(tools, imageTool{attachments: a})
 	}
 	return tools
-}
-
-func objectParameters(properties map[string]any, required []string) map[string]any {
-	schema := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
-	if len(required) > 0 {
-		schema["required"] = required
-	}
-	return schema
 }
 
 // imageTool shows the model an attached picture.
@@ -105,7 +96,7 @@ func (imageTool) Name() string  { return "view_attachment_image" }
 func (imageTool) Label() string { return "查看图片" }
 func (imageTool) Schema() ai.ToolSchema {
 	return ai.ToolSchema{Name: "view_attachment_image", Description: "查看用户上传的图片原图（已缩小），用于核对识别文字不清楚的地方。每张图只在需要时看一次。",
-		Parameters: objectParameters(map[string]any{"id": map[string]any{"type": "string", "description": "图片附件 id"}}, []string{"id"})}
+		Parameters: objectParameters(map[string]any{"id": map[string]any{"type": "string", "description": "图片附件 id"}}, "id")}
 }
 func (imageTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
 
@@ -175,7 +166,7 @@ func (a *attachments) saveTool(files *scratch) agent.AgentTool {
 			"id":        map[string]any{"type": "string", "description": "附件 id，例如 a1"},
 			"path":      map[string]any{"type": "string", "description": "相对账本根目录的目标路径，含文件名和扩展名"},
 			"overwrite": map[string]any{"type": "boolean", "description": "目标已存在时覆盖"},
-		}, []string{"id", "path"}),
+		}, "id", "path"),
 		run: func(raw json.RawMessage) (any, error) { return a.saveInto(files, raw) }}
 }
 
@@ -239,7 +230,7 @@ func (a *attachments) archiveTool(files *scratch) agent.AgentTool {
 			"dateStart": map[string]any{"type": "string", "description": "账单覆盖的第一天，YYYY-MM-DD"},
 			"dateEnd":   map[string]any{"type": "string", "description": "账单覆盖的最后一天，YYYY-MM-DD"},
 			"overwrite": map[string]any{"type": "boolean", "description": "同名的归档已存在且内容不同时覆盖"},
-		}, []string{"id", "provider", "dateStart", "dateEnd"}),
+		}, "id", "provider", "dateStart", "dateEnd"),
 		run: func(raw json.RawMessage) (any, error) { return a.archiveInto(files, raw) }}
 }
 

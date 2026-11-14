@@ -122,18 +122,15 @@ func (m *memoryFile) tools() []agent.AgentTool {
 	str := func(description string) map[string]any {
 		return map[string]any{"type": "string", "description": description}
 	}
-	object := func(properties map[string]any, required ...string) map[string]any {
-		return map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false}
-	}
 	return []agent.AgentTool{
 		fileTool{name: "edit_memory", title: "更新记忆",
 			description: "修改长期记忆 memory.md（当前内容在系统提示末尾）。old_string 为空时，把 new_string 作为新的一行或几行追加到末尾；否则把 old_string（必须原样出现且只出现一次）替换成 new_string，new_string 为空就是删掉那一段。",
-			parameters: object(map[string]any{"old_string": str("要替换或删除的原文；追加时留空"),
+			parameters: objectParameters(map[string]any{"old_string": str("要替换或删除的原文；追加时留空"),
 				"new_string": str("新内容，例如「- 星巴克记 Expenses:Food:Coffee」")}, "old_string", "new_string"),
 			run: m.edit},
 		fileTool{name: "write_memory", title: "整理记忆",
 			description: "用 content 整份覆盖 memory.md，用于合并重复、删掉过时条目、重新分组。会丢掉没写进 content 的内容，所以要基于当前的完整记忆来写。",
-			parameters:  object(map[string]any{"content": str("完整的新记忆，Markdown")}, "content"),
+			parameters:  objectParameters(map[string]any{"content": str("完整的新记忆，Markdown")}, "content"),
 			run:         m.write},
 	}
 }
