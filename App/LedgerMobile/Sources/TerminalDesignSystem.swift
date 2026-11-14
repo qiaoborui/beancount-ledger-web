@@ -86,6 +86,13 @@ struct TerminalPageChrome: ViewModifier {
     var balanced = false
     /// Makes the compact bar's title a button, announced with `hint`.
     var titleAction: TerminalTitleAction? = nil
+    /// The bar draws no title. Only 账本助手 asks for this: its conversation
+    /// names itself in the history sheet, and the page is a chat, so the bar
+    /// carries two round buttons instead of a heading. Off by default, so
+    /// every other page keeps the same title and the same bar.
+    var showsTitle = true
+    /// The bar's leading control when there is no title.
+    var leadingActions: AnyView? = nil
 
     private var titleLabel: some View {
         Text(compactTitle ?? title)
@@ -179,7 +186,7 @@ struct TerminalPageChrome: ViewModifier {
         content
             .scrollContentBackground(.hidden)
             .background(BalancedPalette.page)
-            .navigationTitle(title)
+            .navigationTitle(showsTitle ? title : "")
             .navigationBarTitleDisplayMode(.inline)
             .background {
                 if !isRoot && horizontalSizeClass != .regular {
@@ -189,6 +196,9 @@ struct TerminalPageChrome: ViewModifier {
             .toolbar(horizontalSizeClass == .regular ? .visible : .hidden, for: .navigationBar)
             .toolbar {
                 if horizontalSizeClass == .regular {
+                    if !showsTitle, let leadingActions {
+                        ToolbarItem(placement: .topBarLeading) { leadingActions }
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         HStack(spacing: 8) {
                             if showsTimeRange { TerminalDateRangeButton() }
@@ -209,7 +219,14 @@ struct TerminalPageChrome: ViewModifier {
                     // between the chevron and the trailing actions instead of
                     // setting it left-aligned next to the chevron.
                     Group {
-                        if isRoot {
+                        if !showsTitle {
+                            HStack(spacing: 8) {
+                                if !isRoot { backButton }
+                                leadingActions
+                                Spacer(minLength: 4)
+                                trailingCluster
+                            }
+                        } else if isRoot {
                             HStack(spacing: 8) {
                                 titleText
                                 Spacer(minLength: 4)
@@ -223,8 +240,10 @@ struct TerminalPageChrome: ViewModifier {
                             }
                         }
                     }
-                    .padding(.leading, LedgerGlass.isAvailable ? 16 : 20)
-                    .padding(.trailing, LedgerGlass.isAvailable ? 16 : 20)
+                    // A bar without a title keeps the reference's 16pt edge on
+                    // either side; titled pages keep their own padding.
+                    .padding(.leading, !showsTitle || LedgerGlass.isAvailable ? 16 : 20)
+                    .padding(.trailing, !showsTitle || LedgerGlass.isAvailable ? 16 : 20)
                     .frame(height: 52)
                 }
             }
@@ -330,8 +349,8 @@ private struct TerminalBackGestureBridge: UIViewControllerRepresentable {
 }
 
 extension View {
-    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, showsTimeRange: Bool = false, showsSync: Bool = true, actions: AnyView? = nil, balanced: Bool = false, titleAction: TerminalTitleAction? = nil) -> some View {
-        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions, showsTimeRange: showsTimeRange, showsSync: showsSync, balanced: balanced, titleAction: titleAction))
+    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, showsTimeRange: Bool = false, showsSync: Bool = true, actions: AnyView? = nil, balanced: Bool = false, titleAction: TerminalTitleAction? = nil, showsTitle: Bool = true, leadingActions: AnyView? = nil) -> some View {
+        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions, showsTimeRange: showsTimeRange, showsSync: showsSync, balanced: balanced, titleAction: titleAction, showsTitle: showsTitle, leadingActions: leadingActions))
     }
 }
 
