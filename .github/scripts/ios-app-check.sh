@@ -17,7 +17,8 @@
 #             classes or Class/testMethod entries it lists (space or comma
 #             separated, no target prefix), and `smoke` stands for the release
 #             smoke set below; empty runs every UI test except the screenshot
-#             generators.
+#             generators. Those write their PNGs to UI_SCREENSHOT_DIR when it
+#             is set, which is how CI collects the ones it keeps as artifacts.
 #
 # On the CI runner the build products outlive the job. The checkout step cleans
 # the workspace, so they live in $RUNNER_WORKSPACE/ledger-ci-cache (override
@@ -80,11 +81,12 @@ case "$mode" in
       only_tests+=("$test_target/$item")
     done
     if [[ ${#only_tests[@]} -eq 0 ]]; then
-      # They generate App Store screenshots rather than check behaviour; name
-      # them in UI_TESTS_ONLY to run them.
+      # They generate screenshots rather than check behaviour; name them in
+      # UI_TESTS_ONLY to run them.
       skipped_tests=(
         LedgerMobileUITests/BalancedScreenshotTests
         LedgerMobileUITests/BalancedStreamAScreenshotTests
+        LedgerMobileUITests/AssistantScreenshotTests
       )
     fi
     ;;
@@ -261,6 +263,11 @@ for test in ${skipped_tests[@]+"${skipped_tests[@]}"}; do
   skip_args+=("-skip-testing:$test")
 done
 test_log="$work_dir/test.log"
+# XCTest hands TEST_RUNNER_-prefixed variables to the test runner with the
+# prefix removed; that is how the screenshot generators learn where to write.
+if [[ -n "${UI_SCREENSHOT_DIR:-}" ]]; then
+  export TEST_RUNNER_UI_SCREENSHOT_DIR="$UI_SCREENSHOT_DIR"
+fi
 xcodebuild test-without-building "${common[@]}" \
   "${only_args[@]}" \
   ${skip_args[@]+"${skip_args[@]}"} \

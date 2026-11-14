@@ -263,6 +263,14 @@ final class LedgerSession: ObservableObject {
     private var applicationActive = true
     private var applicationBackground = false
     private var localAuthenticationForegroundWaiters: [UUID: CheckedContinuation<Void, Error>] = [:]
+    /// Device authentication succeeded while its own system sheet still holds the
+    /// scene inactive. Until the next scene change that inactive scene counts as
+    /// active, so the ledger appears behind the dismissing Face ID sheet rather
+    /// than after it. A background visit ends it like any other scene change.
+    @Published private(set) var authenticationRevealsInactiveScene = false
+    /// The scene may show ledger content: it is active, or the authentication
+    /// sheet that just succeeded is the only thing keeping it inactive.
+    private var sceneReadable: Bool { applicationActive || authenticationRevealsInactiveScene }
     private var automaticUnlockAttempted = false
     /// Cold-launch read of the startup presentation that runs while the system
     /// authentication sheet is up. Its result stays private to this object and is
@@ -327,13 +335,13 @@ final class LedgerSession: ObservableObject {
     /// True once the list hit its retained-row cap; further windows are not appended.
     @Published private(set) var localTransactionReachedRowCap = false
     var localTransactionRows: [LedgerTransaction] {
-        guard isLocal, phase == .ready, !privacyShielded, applicationActive else { return [] }
+        guard isLocal, phase == .ready, !privacyShielded, sceneReadable else { return [] }
         return localTransactionAccumulatedRows
     }
     @Published private(set) var localTransactionWindow: LocalTransactionWindow.Window?
     private var localTransactionAccumulatedIDs: Set<String> = []
     var localBootstrapTransactions: [LedgerTransaction] {
-        guard isLocal, phase == .ready, !privacyShielded, applicationActive,
+        guard isLocal, phase == .ready, !privacyShielded, sceneReadable,
               !isRangeLoading, !isValuationCurrencyLoading,
               !transactionMutations.values.contains(where: { $0.phase == .pending }),
               localPresentation?.revisionID != nil else { return [] }
@@ -1034,7 +1042,11 @@ final class LedgerSession: ObservableObject {
         }
     }
 
-    private func authenticateLocalLedger(epoch: Int, location expectedLocation: LedgerLocation?) async throws {
+    /// `revealsWhileInactive` is for unlocking: the ledger then opens behind the
+    /// dismissing system sheet. Creating, importing and opening a ledger still
+    /// wait for the active scene.
+    private func authenticateLocalLedger(epoch: Int, location expectedLocation: LedgerLocation?,
+                                         revealsWhileInactive: Bool = false) async throws {
         let previousAuthenticationBusy = isAuthenticationBusy
         let previousSystemAuthentication = systemAuthenticationInProgress
         isAuthenticationBusy = true
@@ -1045,10 +1057,17 @@ final class LedgerSession: ObservableObject {
         }
         try await localAuthenticator.authenticate()
         guard sessionEpoch == epoch, location == expectedLocation, !applicationBackground else { throw CancellationError() }
-        // LocalAuthentication may finish before SwiftUI delivers the active scene
-        // event. Keep the operation pending until that event, without opening data
-        // while inactive. A background visit or context change cancels the waiter.
-        if !applicationActive {
+        // LocalAuthentication answers while its sheet is still dismissing and the
+        // scene is inactive. An unlock opens the ledger now, behind the fading
+        // sheet: waiting for the active scene event kept the cover up for the
+        // whole dismissal. A background visit ends that reveal and, like a context
+        // change, cancels the operation.
+        if !applicationActive, revealsWhileInactive {
+            authenticationRevealsInactiveScene = true
+        } else if !applicationActive {
+            // Other operations stay pending until the active scene event, without
+            // opening data while inactive. A background visit or context change
+            // cancels the waiter.
             let id = UUID()
             try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -1075,7 +1094,7 @@ final class LedgerSession: ObservableObject {
 
     private func requireCurrentLocalOperation(epoch: Int, location expectedLocation: LedgerLocation?) throws {
         try Task.checkCancellation()
-        guard applicationActive, sessionEpoch == epoch, location == expectedLocation else { throw CancellationError() }
+        guard sceneReadable, sessionEpoch == epoch, location == expectedLocation else { throw CancellationError() }
     }
 
     private func activateLocalLedger(_ descriptor: LocalLedgerDescriptor,
@@ -1140,7 +1159,8 @@ final class LedgerSession: ObservableObject {
         }
         do {
             if localPrivacyProtectionEnabled {
-                try await authenticateLocalLedger(epoch: epoch, location: expectedLocation)
+                try await authenticateLocalLedger(epoch: epoch, location: expectedLocation,
+                                                  revealsWhileInactive: true)
             }
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
             if restoreRetainedLocalLedger() { return }
@@ -1196,7 +1216,7 @@ final class LedgerSession: ObservableObject {
             do {
                 let revision = try await repository.workspace.currentRevision()
                 guard !Task.isCancelled, self.sessionEpoch == epoch, self.location == expectedLocation,
-                      self.applicationActive, self.phase == .ready else { return }
+                      self.sceneReadable, self.phase == .ready else { return }
                 if presentation.revisionID == nil || presentation.revisionID != revision?.id
                     || presentation.today != LedgerDateRange.today(now: self.ledgerNow()) {
                     await self.refresh()
@@ -1204,7 +1224,7 @@ final class LedgerSession: ObservableObject {
                     await self.ensureLocalOverviewCategories()
                 }
                 guard !Task.isCancelled, self.sessionEpoch == epoch, self.location == expectedLocation,
-                      self.applicationActive, self.phase == .ready else { return }
+                      self.sceneReadable, self.phase == .ready else { return }
                 if prepareAutomaticSync { await self.prepareLocalAutomaticSync() }
             } catch {
                 guard !Task.isCancelled, self.sessionEpoch == epoch, self.location == expectedLocation,
@@ -1967,6 +1987,12 @@ final class LedgerSession: ObservableObject {
     }
 
     func automaticallyUnlockIfNeeded() async {
+        defer {
+            // The shield kept up on return for this attempt gives way to the
+            // unlock page once the attempt is over (or was never made) and the
+            // ledger is still locked.
+            if isLocal, case .locked = phase, applicationActive, !isAuthenticationBusy { privacyShielded = false }
+        }
         let localStartup = isLocal && phase == .checking
         let awaitsAutomaticUnlock = phase == .locked(authenticated: true)
             || phase == .locked(authenticated: false) || localStartup
@@ -3522,6 +3548,8 @@ final class LedgerSession: ObservableObject {
     func updateActivity(isActive: Bool, isBackground: Bool) async {
         defer { updateLocalSyncEligibility() }
         let wasActive = applicationActive
+        let revealedByAuthentication = authenticationRevealsInactiveScene
+        authenticationRevealsInactiveScene = false
         applicationActive = isActive
         applicationBackground = isBackground
         if !isActive || isBackground {
@@ -3569,16 +3597,31 @@ final class LedgerSession: ObservableObject {
         }
         clearBackgroundDate(for: contextURL)
         amountsVisible = phase == .ready
-        privacyShielded = false
+        // A local ledger that locked on return keeps the shield over its retained
+        // shell and any open sheet until the automatic unlock that follows has
+        // answered. Dropping it here showed the last page, then the unlock page,
+        // before Face ID even appeared.
+        privacyShielded = awaitsLocalAutomaticUnlock
         privacyCoverArmed = true
         guard !wasActive, phase == .ready, !systemAuthenticationInProgress else { return }
         Task { await restoreImportIndexTrackingIfNeeded() }
+        // The unlock that revealed the ledger behind the authentication sheet
+        // already scheduled its own resume refresh.
+        guard !revealedByAuthentication else { return }
         if isLocal { scheduleLocalResumeRefresh() }
         else { await refresh() }
     }
 
     func presentsPrivacyCover(sceneIsActive: Bool) -> Bool {
-        localPrivacyCoverEnabled && privacyCoverArmed && (!sceneIsActive || privacyShielded)
+        localPrivacyCoverEnabled && privacyCoverArmed
+            && ((!sceneIsActive && !authenticationRevealsInactiveScene) || privacyShielded)
+    }
+
+    /// A local ledger locked over its retained presentation whose automatic
+    /// device authentication has not been tried since it came back.
+    private var awaitsLocalAutomaticUnlock: Bool {
+        isLocal && retainsLockedPresentation && !automaticUnlockAttempted
+            && !isAuthenticationBusy && localAuthenticator.isAvailable
     }
 
     func toggleAmounts() {
@@ -4228,8 +4271,8 @@ final class LedgerSession: ObservableObject {
         if local != nil { retirePublishedLocalCommitReceipts() }
         storeValuationCurrency(payload.valuationCurrency, for: contextURL)
         selectedRange = targetRange
-        amountsVisible = applicationActive
-        privacyShielded = !applicationActive
+        amountsVisible = sceneReadable
+        privacyShielded = !sceneReadable
         if let route = pendingExternalRoute?.route, case let .search(query) = route {
             prepareExternalSearch(query)
         }
@@ -4839,7 +4882,7 @@ final class LedgerSession: ObservableObject {
               context.request == requestGeneration, context.epoch == sessionEpoch,
               location == .local(context.presentation.ledgerID),
               localPresentation == context.presentation, selectedRange == context.range,
-              phase == .ready, !privacyShielded, applicationActive, !applicationBackground,
+              phase == .ready, !privacyShielded, sceneReadable, !applicationBackground,
               !isRangeLoading, !isValuationCurrencyLoading,
               !transactionMutations.values.contains(where: { $0.phase == .pending }) else {
             throw CancellationError()
@@ -5962,6 +6005,11 @@ final class LedgerSession: ObservableObject {
         guard self.contextURL == contextURL else { return }
         guard localPrivacyProtectionEnabled else { return }
         if case .locked = phase { return }
+        // A local ledger still opening sits behind its startup cover and opens only
+        // through authentication. A background date left by a process the system
+        // ended would otherwise lock it here on a cold launch, trading that cover
+        // for the unlock page and the startup read for a full reload.
+        if isLocal, phase == .checking { return }
         flushPendingWidgetPublish()
         _ = invalidateSession()
         stopImportIndexTracking()

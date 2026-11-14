@@ -1,6 +1,7 @@
 package mobileagent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -73,7 +74,7 @@ func TestParseSkillReadsTheFrontmatterShapesSkillsUse(t *testing.T) {
 			wantName: "alipay", wantDescription: "导入", wantBody: "正文"},
 		"no description": {content: "---\nname: alipay\n---\n正文\n", wantName: "alipay", wantBody: "正文"},
 	} {
-		name, description, body, err := parseSkill(test.content)
+		name, description, body, _, err := parseSkill(test.content)
 		if err != nil {
 			t.Fatalf("%s: %v", label, err)
 		}
@@ -90,13 +91,13 @@ func TestParseSkillRejectsFilesWithoutFrontmatter(t *testing.T) {
 		"empty file":     "",
 		"leading blank":  "\n---\nname: alipay\n---\n正文\n",
 	} {
-		if _, _, _, err := parseSkill(content); err == nil {
+		if _, _, _, _, err := parseSkill(content); err == nil {
 			t.Errorf("%s parsed without error", name)
 		}
 	}
 	// A file with frontmatter and no body parses, and is rejected by the
 	// catalog for having nothing to say.
-	if _, description, body, err := parseSkill("---\nname: alipay\ndescription: 导入\n---\n"); err != nil || description != "导入" || body != "" {
+	if _, description, body, _, err := parseSkill("---\nname: alipay\ndescription: 导入\n---\n"); err != nil || description != "导入" || body != "" {
 		t.Fatalf("frontmatter without body: %q %q %v", description, body, err)
 	}
 }
@@ -213,7 +214,7 @@ func TestSkillPromptListsNamesAndDescriptionsOnly(t *testing.T) {
 	}
 	defer set.close()
 	prompt := set.prompt(true)
-	for _, want := range []string{"技能（skills）", "- monthly-close：月底对账", "- alipay-bill-import：", "load_skill"} {
+	for _, want := range []string{"技能（skills）", "- monthly-close：月底对账", "- alipay-bill-import：", "load_skill", "create_skill", "update_skill", "delete_skill"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt misses %q:\n%s", want, prompt)
 		}
@@ -557,5 +558,245 @@ func TestSkillsComeBeforeTheMemory(t *testing.T) {
 	skills, remembered := strings.Index(systemPrompt, "可用技能："), strings.Index(systemPrompt, "记忆（memory.md）")
 	if skills < 0 || remembered < 0 || skills > remembered {
 		t.Fatalf("the memory no longer ends the prompt (skills %d, memory %d)", skills, remembered)
+	}
+}
+
+func TestRenderedSkillReadsBackUnchanged(t *testing.T) {
+	description := `导入 "建行" 账单: 先看余额 #2`
+	body := "第一步：登录\n第二步：导出 CSV"
+	content := renderSkill("ccb-bill-import", description, body, false)
+	name, gotDescription, gotBody, deleted, err := parseSkill(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "ccb-bill-import" || gotDescription != description || gotBody != body || deleted {
+		t.Fatalf("round trip = %q %q %q %v\n%s", name, gotDescription, gotBody, deleted, content)
+	}
+	// The delete mark survives the round trip too, and nothing else changes.
+	_, _, keptBody, marked, err := parseSkill(renderSkill("ccb-bill-import", description, body, true))
+	if err != nil || !marked || keptBody != body {
+		t.Fatalf("tombstone round trip = %v %v %q", marked, err, keptBody)
+	}
+}
+
+// skillTurn opens a turn's skills over a fresh draft of the ledger, the way a
+// turn that may edit does.
+func skillTurn(t *testing.T) (*skillSet, *scratch) {
+	t.Helper()
+	files, err := openScratch(scratchCopy(t), "main.bean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(files.close)
+	set, err := openSkills("", files, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(set.close)
+	return set, files
+}
+
+// callSkillTool runs one of the skill tools the way the model does.
+func callSkillTool(t *testing.T, set *skillSet, name string, args map[string]any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range set.tools() {
+		if tool.Name() != name {
+			continue
+		}
+		output, err := tool.Execute(context.Background(), "", raw, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var result map[string]any
+		if err := json.Unmarshal([]byte(toolResultText(output.Content)), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	t.Fatalf("no tool named %s", name)
+	return nil
+}
+
+func TestCreateSkillWritesALedgerSkillIntoTheDraft(t *testing.T) {
+	set, files := skillTurn(t)
+	result := callSkillTool(t, set, "create_skill", map[string]any{
+		"name": "ccb-bill-import", "description": "导入建行账单", "body": "1. 打开账单\n2. 逐笔核对",
+	})
+	if result["path"] != "skills/ccb-bill-import/SKILL.md" || result["source"] != skillSourceLedger {
+		t.Fatalf("result = %v", result)
+	}
+	if !files.wasEdited() {
+		t.Fatal("a skill written into the draft must count as an edit")
+	}
+	skills, problems := set.discover()
+	if len(problems) != 0 {
+		t.Fatalf("problems = %v", problems)
+	}
+	found := false
+	for _, item := range skills {
+		if item.Name == "ccb-bill-import" {
+			found = true
+			if item.Description != "导入建行账单" || !strings.Contains(item.Body, "逐笔核对") {
+				t.Fatalf("skill = %+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the new skill is not listed: %v", skillNames(skills))
+	}
+}
+
+func TestCreateSkillRefusesANameThatIsTaken(t *testing.T) {
+	set, _ := skillTurn(t)
+	if _, err := set.create(json.RawMessage(`{"name":"alipay-bill-import","description":"x","body":"y"}`)); err == nil {
+		t.Fatal("a built-in name must be refused")
+	}
+	callSkillTool(t, set, "create_skill", map[string]any{"name": "mine", "description": "说明", "body": "步骤"})
+	if _, err := set.create(json.RawMessage(`{"name":"mine","description":"x","body":"y"}`)); err == nil {
+		t.Fatal("a ledger name must be refused")
+	}
+}
+
+func TestUpdateSkillCopiesABuiltinIntoTheLedger(t *testing.T) {
+	set, _ := skillTurn(t)
+	result := callSkillTool(t, set, "update_skill", map[string]any{
+		"name": "alipay-bill-import", "body": "我们家的支付宝流程：先看余额，再逐笔核对。",
+	})
+	if result["source"] != skillSourceLedger {
+		t.Fatalf("result = %v", result)
+	}
+	skills, _ := set.discover()
+	for _, item := range skills {
+		if item.Name != "alipay-bill-import" {
+			continue
+		}
+		if item.Source != skillSourceLedger || !strings.Contains(item.Body, "我们家的支付宝流程") {
+			t.Fatalf("skill = %+v", item)
+		}
+		if item.Description == "" {
+			t.Fatal("update must keep the description it did not touch")
+		}
+		// The built-in's extra files do not follow the ledger copy: its folder
+		// is the ledger's own.
+		if len(item.Files) != 0 {
+			t.Fatalf("files = %v", item.Files)
+		}
+		return
+	}
+	t.Fatalf("the copied skill is not listed: %v", skillNames(skills))
+}
+
+func TestDeleteSkillRemovesALedgerSkillFolder(t *testing.T) {
+	set, files := skillTurn(t)
+	callSkillTool(t, set, "create_skill", map[string]any{"name": "mine", "description": "说明", "body": "步骤"})
+	if err := files.root.WriteFile("skills/mine/columns.md", []byte("a,b"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	callSkillTool(t, set, "delete_skill", map[string]any{"name": "mine"})
+	if _, err := files.root.Stat("skills/mine"); err == nil {
+		t.Fatal("the folder must be gone")
+	}
+	for _, item := range mustDiscover(t, set) {
+		if item.Name == "mine" {
+			t.Fatal("a deleted skill must not be listed")
+		}
+	}
+}
+
+func TestDeleteSkillLeavesATombstoneForABuiltin(t *testing.T) {
+	set, files := skillTurn(t)
+	callSkillTool(t, set, "delete_skill", map[string]any{"name": "wechat-bill-import"})
+	data, err := files.root.ReadFile("skills/wechat-bill-import/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "deleted: true") {
+		t.Fatalf("tombstone = %s", data)
+	}
+	for _, item := range mustDiscover(t, set) {
+		if item.Name == "wechat-bill-import" {
+			t.Fatal("a deleted built-in must not be listed")
+		}
+	}
+	// load_skill says why instead of pretending the skill never existed.
+	if _, err := set.load(json.RawMessage(`{"name":"wechat-bill-import"}`)); err == nil || !strings.Contains(err.Error(), "删掉") {
+		t.Fatalf("load error = %v", err)
+	}
+	// update_skill brings it back, with the body the tombstone kept.
+	callSkillTool(t, set, "update_skill", map[string]any{"name": "wechat-bill-import"})
+	for _, item := range mustDiscover(t, set) {
+		if item.Name == "wechat-bill-import" {
+			if item.Source != skillSourceLedger || !strings.Contains(item.Body, "微信") {
+				t.Fatalf("restored = %+v", item)
+			}
+			return
+		}
+	}
+	t.Fatal("update_skill must restore a deleted built-in")
+}
+
+func TestSkillToolsOnlyWriteWithADraft(t *testing.T) {
+	root := committedWorkspace(t)
+	set, err := openSkills(root, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.close()
+	for _, tool := range set.tools() {
+		if tool.Name() != "load_skill" {
+			t.Fatalf("a read-only turn must not offer %s", tool.Name())
+		}
+	}
+	if _, err := set.create(json.RawMessage(`{"name":"mine","description":"说明","body":"步骤"}`)); err == nil {
+		t.Fatal("creating a skill needs a draft")
+	}
+}
+
+func TestCreateSkillChecksTheNameAndTheLimits(t *testing.T) {
+	set, _ := skillTurn(t)
+	for label, args := range map[string]string{
+		"bad name":       `{"name":"CCB Import","description":"说明","body":"步骤"}`,
+		"empty body":     `{"name":"mine","description":"说明","body":"  "}`,
+		"no description": `{"name":"mine","body":"步骤"}`,
+		"too long":       `{"name":"mine","description":"说明","body":"` + strings.Repeat("步", maxSkillBytes) + `"}`,
+	} {
+		if _, err := set.create(json.RawMessage(args)); err == nil {
+			t.Fatalf("%s was accepted", label)
+		}
+	}
+}
+
+func mustDiscover(t *testing.T, set *skillSet) []skill {
+	t.Helper()
+	skills, problems := set.discover()
+	if len(problems) != 0 {
+		t.Fatalf("problems = %v", problems)
+	}
+	return skills
+}
+
+func TestCreateSkillStopsAtTheListLimit(t *testing.T) {
+	files, err := openScratch(scratchCopy(t), "main.bean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer files.close()
+	for index := 0; index < maxSkills; index++ {
+		file := fmt.Sprintf("skills/filler-%02d/SKILL.md", index)
+		if err := files.write(file, []byte(skillFile(fmt.Sprintf("filler-%02d", index), "占位", "正文"))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set, err := openSkills("", files, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.close()
+	if _, err := set.create(json.RawMessage(`{"name":"one-more","description":"说明","body":"步骤"}`)); err == nil {
+		t.Fatal("a create past the list limit must be refused")
 	}
 }
