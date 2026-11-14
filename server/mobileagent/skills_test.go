@@ -561,6 +561,24 @@ func TestSkillsComeBeforeTheMemory(t *testing.T) {
 	}
 }
 
+func TestRenderedSkillReadsBackUnchanged(t *testing.T) {
+	description := `导入 "建行" 账单: 先看余额 #2`
+	body := "第一步：登录\n第二步：导出 CSV"
+	content := renderSkill("ccb-bill-import", description, body, false)
+	name, gotDescription, gotBody, deleted, err := parseSkill(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "ccb-bill-import" || gotDescription != description || gotBody != body || deleted {
+		t.Fatalf("round trip = %q %q %q %v\n%s", name, gotDescription, gotBody, deleted, content)
+	}
+	// The delete mark survives the round trip too, and nothing else changes.
+	_, _, keptBody, marked, err := parseSkill(renderSkill("ccb-bill-import", description, body, true))
+	if err != nil || !marked || keptBody != body {
+		t.Fatalf("tombstone round trip = %v %v %q", marked, err, keptBody)
+	}
+}
+
 // skillTurn opens a turn's skills over a fresh draft of the ledger, the way a
 // turn that may edit does.
 func skillTurn(t *testing.T) (*skillSet, *scratch) {
