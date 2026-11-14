@@ -1,8 +1,8 @@
 # 20261114-agent-app-settings-tools
 
-- Status: active (draft PR open, waiting for CI `Gate`)
+- Status: completed (draft PR open, CI `Gate` green)
 - Last updated: 2026-11-14 (+08:00)
-- Branch: `codex/agent-app-settings-tools`, based on `main` at `8ef3888b`
+- Branch: `codex/agent-app-settings-tools`, based on `main` at `8ef3888b`; PR #699
 - Task B of the AI-native assistant batch (see
   `00-common.md` and `B-app-settings-tools.md` in the coordinator's local
   `agent-handoffs/20261114-ai-native/` directory)
@@ -106,10 +106,10 @@ Done:
 
 Remaining:
 
-1. Watch CI until `Gate` is green; the Swift side was written without a local
-   toolchain (Linux), so the iOS core/app jobs are its first compile.
-2. Coordinator: review, then merge in the batch order and wire the two tool
-   names into task A's 能力 › 可用工具 list if desired.
+1. Coordinator: review, then merge in the batch order (A → B → C → D → E) and
+   wire the two tool names into task A's 能力 › 可用工具 list if desired.
+2. Release when the maintainer asks; this is a user-facing capability
+   (「助手读写 App 设置」).
 
 ## Validation
 
@@ -120,16 +120,25 @@ Remaining:
   goroutine does not run between byte-by-byte sends, so all deltas merge into
   one event) and `internal/app.TestGitHubWriteValidationLargeLedgerPerformance`
   (19s against a threshold). Both pass on CI's Backend job for `main`.
-- Swift: no toolchain on this machine. Not yet compiled or run; CI's iOS core,
-  iOS app and iOS widgets jobs are the check. Tests added but unverified:
-  snapshot/wire-format equality with the Go literal, snapshot reading the
-  values the screens write, custom weekdays and foreign currency round trip,
-  update decoding (unknown sections dropped, broken block dropped), request
-  encoding, applying every section, bad values refused per section without
-  writing, no-op apply, undo of a section, and conversation-level apply /
-  save / undo / failed turn / partial failure note.
+- Swift: no toolchain on this machine, so CI was the compiler. Two errors it
+  caught are fixed: the month-day helper shadowed its own name inside
+  `day(of: LedgerImportReminderCadence)` (`cannot call value of non-function
+  type`), and `LedgerImportReminderCadence.monthly` takes its payload
+  unlabelled (`extraneous argument label 'day:'`).
+- CI on the final commit: Plan checks, Backend, iOS core (portable package
+  build + `swift test`, which runs the new `LedgerAgentAppSettingsTests`) and
+  iOS app (app scheme build + `LedgerMobileTests`) all pass; everything else is
+  skipped by the planner and `Gate` is green.
+- Swift tests now verified by CI: snapshot/wire-format equality with the Go
+  literal, snapshot reading the values the screens write, custom weekdays and
+  foreign currency round trip, update decoding (unknown sections dropped,
+  broken block dropped), request encoding, applying every section, bad values
+  refused per section without writing, no-op apply, undo of a section, and
+  conversation-level apply / save / undo / failed turn / partial failure note.
 - Not tested: a live model conversation (no key here), a real device, the
-  notification permission prompt path after the assistant turns a reminder on.
+  notification permission prompt path after the assistant turns a reminder on,
+  and the UI row itself (no UI test was added; it is compiled by the iOS app
+  job only).
 
 ## Open questions
 
