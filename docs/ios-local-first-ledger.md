@@ -38,17 +38,6 @@ generation; it cannot stage, write, or reach the dispatcher's endpoint
 allowlist. Write tools will follow once the shell can pause a turn for an
 explicit confirmation card.
 
-Remote MCP servers are the one way a turn reaches a service the user runs: 设置
-› MCP 服务器 saves up to eight Streamable HTTP endpoints (https, or plain http
-for localhost, a `.local` name or a private address), each with an optional
-bearer token in this device's Keychain. The turn connects to the enabled ones
-at its start with the turn's own HTTP client, so the stop button and the
-network budgets cover them, lists their tools and closes them when it ends. A
-server that is unreachable or slow costs that turn its tools, not the turn: the
-model is told which one before the question. Ledger data stays out of the
-arguments unless the user asks for that server, and a server's answer is
-treated as data, never as instructions.
-
 A turn keeps running when the user leaves the Agent page or the app. The
 conversation is shared rather than owned by the page. On iOS 26 each turn is
 submitted as a `BGContinuedProcessingTask` (`com.qiaoborui.ledger.mobile.agent.*`),
