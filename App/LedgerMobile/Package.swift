@@ -61,6 +61,7 @@ let package = Package(
                 "ImportClassificationSettingsView.swift",
                 "LedgerIslandEntryView.swift",
                 "LedgerAgentView.swift",
+                "LedgerAgentSettingsView.swift",
                 "LedgerAgentMemoryView.swift",
                 "LedgerAgentVisualView.swift",
                 "LedgerAgentHistoryView.swift",

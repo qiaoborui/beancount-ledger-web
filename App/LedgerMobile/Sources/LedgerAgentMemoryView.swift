@@ -16,11 +16,11 @@ struct LedgerAgentMemoryView: View {
     var body: some View {
         List {
             if let error { Section { StatusBanner(message: error) { self.error = nil } } }
-            if !settings.usesMemory {
-                Section {
-                    Text("记忆已关闭：助手不会读取或更新它。可以在「模型与密钥」里重新打开。")
-                        .foregroundStyle(BalancedPalette.meta)
-                }
+            Section {
+                Toggle("使用记忆", isOn: Binding(get: { settings.usesMemory }, set: { settings.setUsesMemory($0) }))
+                    .accessibilityIdentifier("ledger-agent-uses-memory")
+            } footer: {
+                Text("关掉后助手不读也不更新 memory.md，下面写下的内容仍然保留。")
             }
             Section {
                 ZStack(alignment: .topLeading) {

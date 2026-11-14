@@ -251,6 +251,65 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertTrue(LedgerAgentModelChoice(provider: "anthropic", model: "claude-sonnet-4-5").isComplete)
     }
 
+    func testTieredPolicyHoldsDeletionsAndLargeRemovals() {
+        func review(_ files: [LedgerAgentFileDiff]) -> LedgerAgentReview { .init(id: UUID(), files: files) }
+        func edit(_ before: String, _ after: String) -> LedgerAgentReview {
+            review([.init(path: "2026/10.bean", before: Data(before.utf8), after: Data(after.utf8))])
+        }
+        func lines(_ count: Int) -> String { (0..<count).map { "l\($0)" }.joined(separator: "\n") + "\n" }
+
+        // Appending and a small edit are the everyday change: written at once.
+        let append = edit("a\n", "a\nb\n")
+        XCTAssertNil(append.tieredHoldReason)
+        XCTAssertTrue(LedgerAgentWritePolicy.tiered.writesWithoutAsking(append))
+        XCTAssertNil(review([.init(path: "2026/11.bean", before: nil, after: Data("x\n".utf8))]).tieredHoldReason)
+        XCTAssertNil(edit(lines(21), "l0\n").tieredHoldReason, "20 removed lines is still allowed")
+
+        // Past the threshold it asks first, and says how much goes.
+        let cut = edit(lines(22), "l0\n")
+        XCTAssertEqual(cut.removed, 21)
+        XCTAssertEqual(cut.tieredHoldReason, "这次改动删除了 21 行，需要你确认。")
+        XCTAssertFalse(LedgerAgentWritePolicy.tiered.writesWithoutAsking(cut))
+
+        // A deleted file asks whatever it weighed.
+        let deleted = review([.init(path: "documents/old.pdf", before: Data([0, 1]), after: nil),
+                              .init(path: "documents/older.pdf", before: Data([0, 1]), after: nil)])
+        XCTAssertEqual(deleted.files.map(\.change), [.removed, .removed])
+        XCTAssertEqual(deleted.tieredHoldReason, "这次改动删除了 2 个文件，需要你确认。")
+        XCTAssertEqual(review([.init(path: "documents/old.pdf", before: Data([0, 1]), after: nil)]).tieredHoldReason,
+                       "这次改动删除了 1 个文件，需要你确认。")
+
+        // 全部自动写入 never asks; 每次确认 always waits, with nothing to explain.
+        XCTAssertTrue(LedgerAgentWritePolicy.always.writesWithoutAsking(deleted))
+        XCTAssertNil(LedgerAgentWritePolicy.always.holdReason(for: deleted))
+        XCTAssertFalse(LedgerAgentWritePolicy.confirm.writesWithoutAsking(append))
+        XCTAssertNil(LedgerAgentWritePolicy.confirm.holdReason(for: append))
+    }
+
+    @MainActor
+    func testWritePolicyStartsTieredAndMigratesTheOldAutoWriteSwitch() throws {
+        let suite = "LedgerAgentTests-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
+        let keys: (String) -> ClassificationKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
+        @MainActor func stored() -> LedgerAgentSettings { LedgerAgentSettings(defaults: defaults, catalog: .fallback, keyStore: keys) }
+
+        // Nothing stored yet: a new install writes tiered.
+        XCTAssertEqual(stored().writePolicy, .tiered)
+        // An old switch that was on meant every change was written, one that
+        // was explicitly off meant every change was confirmed.
+        defaults.set(true, forKey: "ledger.agent.auto-write")
+        XCTAssertEqual(stored().writePolicy, .always)
+        defaults.set(false, forKey: "ledger.agent.auto-write")
+        XCTAssertEqual(stored().writePolicy, .confirm)
+        // Once the user picks, the new key wins and outlives the old one.
+        let settings = stored()
+        settings.setWritePolicy(.tiered)
+        XCTAssertEqual(defaults.string(forKey: "ledger.agent.write-policy"), "tiered")
+        defaults.removeObject(forKey: "ledger.agent.auto-write")
+        XCTAssertEqual(stored().writePolicy, .tiered)
+    }
+
     @MainActor
     func testSettingsRestoreTheCustomEndpointAfterSwitchingProviders() throws {
         let suite = "LedgerAgentTests-" + UUID().uuidString
@@ -1165,11 +1224,11 @@ final class LedgerAgentTests: XCTestCase {
     }
 
     @MainActor
-    func testAutoWriteCommitsAReadyChangeWithoutTheCard() async throws {
+    func testAlwaysPolicyWritesAndStillStopsOnAConflict() async throws {
         let ledger = FakeDraftLedger()
         let conversation = LedgerAgentConversation()
         conversation.editor = ledger.editor
-        conversation.autoWrites = true
+        conversation.writePolicy = .always
         conversation.send("记一笔") { _, _, _ in .init(ok: true, reply: "好了。", edited: true) }
         try await waitUntilIdle(conversation)
         for _ in 0..<200 where conversation.pending != nil { try await Task.sleep(nanoseconds: 5_000_000) }
@@ -1183,6 +1242,64 @@ final class LedgerAgentTests: XCTestCase {
         conversation.send("再改") { _, _, _ in .init(ok: true, reply: "改了。", edited: true) }
         try await waitUntilIdle(conversation)
         XCTAssertEqual(conversation.pending?.status, .conflict(["main.bean"]))
+        let after = await ledger.writes
+        XCTAssertEqual(after, 1)
+    }
+
+    @MainActor
+    func testTieredPolicyWritesASmallChangeAtOnce() async throws {
+        let ledger = FakeDraftLedger()
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        // The default: an edit of a bean file is the everyday kind of change.
+        XCTAssertEqual(conversation.writePolicy, .tiered)
+        conversation.send("记一笔") { _, _, _ in .init(ok: true, reply: "好了。", edited: true) }
+        try await waitUntilIdle(conversation)
+        for _ in 0..<200 where conversation.pending != nil { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertNil(conversation.pending)
+        XCTAssertEqual(conversation.written?.files.map(\.path), ["main.bean"])
+        let writes = await ledger.writes
+        XCTAssertEqual(writes, 1)
+    }
+
+    @MainActor
+    func testTieredPolicyHoldsAFileDeletion() async throws {
+        let ledger = FakeDraftLedger()
+        await ledger.serve(files: [.init(path: "documents/old.pdf", before: Data([0, 1]), after: nil)])
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.send("删掉那份旧账单") { _, _, _ in .init(ok: true, reply: "好了。", edited: true) }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.pending?.status, .ready)
+        XCTAssertEqual(conversation.pending?.holdReason, "这次改动删除了 1 个文件，需要你确认。")
+        let writes = await ledger.writes
+        XCTAssertEqual(writes, 0)
+
+        // The card's button writes it, as before.
+        conversation.write()
+        for _ in 0..<200 where conversation.pending != nil { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertNil(conversation.pending)
+        let after = await ledger.writes
+        XCTAssertEqual(after, 1)
+    }
+
+    @MainActor
+    func testConfirmPolicyWaitsForTheCard() async throws {
+        let ledger = FakeDraftLedger()
+        let conversation = LedgerAgentConversation()
+        conversation.editor = ledger.editor
+        conversation.writePolicy = .confirm
+        conversation.send("记一笔") { _, _, _ in .init(ok: true, reply: "好了。", edited: true) }
+        try await waitUntilIdle(conversation)
+        XCTAssertEqual(conversation.pending?.status, .ready)
+        // 每次确认 is the user's own choice, so the card has nothing to explain.
+        XCTAssertNil(conversation.pending?.holdReason)
+        let writes = await ledger.writes
+        XCTAssertEqual(writes, 0)
+
+        conversation.write()
+        for _ in 0..<200 where conversation.pending != nil { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertNil(conversation.pending)
         let after = await ledger.writes
         XCTAssertEqual(after, 1)
     }
@@ -1369,6 +1486,9 @@ final class LedgerAgentTests: XCTestCase {
         var opened = 0, writes = 0, closed = 0, reviews = 0, undos = 0
         private var reviewError: LedgerAgentEditError?
         private var undoError: LedgerAgentEditError?
+        /// The files the next review reports; nil means one small bean edit.
+        private var served: [LedgerAgentFileDiff]?
+        func serve(files: [LedgerAgentFileDiff]) { served = files }
         func failUndo(with error: LedgerAgentEditError) { undoError = error }
         private var dropped: [String] = []
         func failReview(with error: LedgerAgentEditError) { reviewError = error }
@@ -1406,7 +1526,7 @@ final class LedgerAgentTests: XCTestCase {
         private func review(_ draft: LedgerAgentDraft) throws -> LedgerAgentReview? {
             reviews += 1
             if let reviewError { throw reviewError }
-            return .init(id: UUID(), files: [.init(path: "main.bean", before: Data("a\n".utf8), after: Data("b\n".utf8))])
+            return .init(id: UUID(), files: served ?? [.init(path: "main.bean", before: Data("a\n".utf8), after: Data("b\n".utf8))])
         }
         private func write(_ draft: LedgerAgentDraft) -> LedgerAgentDraft {
             writes += 1

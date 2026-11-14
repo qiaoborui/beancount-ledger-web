@@ -158,10 +158,10 @@ func withAttachmentNote(a *attachments, message string) string {
 
 // saveTool copies an attachment's original bytes into the scratch copy, so
 // the user can keep a statement next to the ledger. Like every edit it only
-// reaches the ledger through the change card.
+// reaches the ledger once it passes validation and the write policy allows it.
 func (a *attachments) saveTool(files *scratch) agent.AgentTool {
 	return fileTool{name: "save_attachment", title: "存入账本",
-		description: "把用户上传的附件原文件（原样的 PDF、Excel、图片等）复制进账本草稿的指定路径，例如 documents/statements/2026-10-招行信用卡.pdf。目标已存在时需要 overwrite。和其他改动一样，用户在改动卡片确认后才写入账本。",
+		description: "把用户上传的附件原文件（原样的 PDF、Excel、图片等）复制进账本草稿的指定路径，例如 documents/statements/2026-10-招行信用卡.pdf。目标已存在时需要 overwrite。和其他改动一样，通过校验后按用户的写入设置写入账本。",
 		parameters: objectParameters(map[string]any{
 			"id":        map[string]any{"type": "string", "description": "附件 id，例如 a1"},
 			"path":      map[string]any{"type": "string", "description": "相对账本根目录的目标路径，含文件名和扩展名"},
@@ -223,7 +223,7 @@ func (a *attachments) saveInto(files *scratch, raw json.RawMessage) (any, error)
 // not choose the path itself: the tool writes the import flow's naming.
 func (a *attachments) archiveTool(files *scratch) agent.AgentTool {
 	return fileTool{name: "archive_statement", title: "归档账单",
-		description: "把用户上传的账单原件归档到导入页认的位置 transactions/<年>/documents/imports/<开始>_<结束>-<渠道>.<扩展名>。导入页的渠道覆盖日期和归档记录只认这个目录；存到 documents/statements 不会更新导入页。provider 用渠道 id：" + strings.Join(app.ImportProviderIDs(), "、") + "；dateStart、dateEnd 是账单覆盖的起止日（YYYY-MM-DD）。和别的改动一样，用户在改动卡片确认后才写入账本。",
+		description: "把用户上传的账单原件归档到导入页认的位置 transactions/<年>/documents/imports/<开始>_<结束>-<渠道>.<扩展名>。导入页的渠道覆盖日期和归档记录只认这个目录；存到 documents/statements 不会更新导入页。provider 用渠道 id：" + strings.Join(app.ImportProviderIDs(), "、") + "；dateStart、dateEnd 是账单覆盖的起止日（YYYY-MM-DD）。和别的改动一样，通过校验后按用户的写入设置写入账本。",
 		parameters: objectParameters(map[string]any{
 			"id":        map[string]any{"type": "string", "description": "附件 id，例如 a1"},
 			"provider":  map[string]any{"type": "string", "description": "渠道 id，例如 alipay、wechat、hsbchk-credit"},
