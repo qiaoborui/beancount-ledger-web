@@ -36,7 +36,7 @@ struct LedgerAgentSkillsView: View {
                 Section {
                     ForEach(skills) { skill in row(skill) }
                 } header: { Text("技能") } footer: {
-                    Text("关掉的技能不会出现在助手每轮的清单里，也用不了。技能内容属于账本，改动会随 Git 同步；这里的开关只在这台设备上生效。")
+                    Text("关掉的技能不会出现在助手每轮的清单里，也用不了。技能内容属于账本，改动会随 Git 同步；这里的开关只在这台设备上生效。内置技能也能改、能删，和助手说一声就行。")
                 }
             }
             if let problems = catalog?.problems, !problems.isEmpty {

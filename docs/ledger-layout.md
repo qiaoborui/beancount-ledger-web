@@ -31,7 +31,7 @@ Transactions can be organized however you prefer as long as they are included fr
 
 ## Agent skills
 
-The iOS assistant loads instructions on demand, so only their names and one-line descriptions are in its prompt. It writes and edits them like any other ledger file, which means a skill is shared through Git with the user's other devices:
+The iOS assistant loads instructions on demand, so only their names and one-line descriptions are in its prompt. It owns the set through `create_skill`, `update_skill` and `delete_skill` — no shell, no CLI, just those tools — and the files live in the ledger, so a skill is shared through Git with the user's other devices:
 
 ```text
 skills/october-close/SKILL.md
@@ -49,7 +49,7 @@ description: 月底对账，先补空白再对上账单
 2. 再用上传的账单对账。
 ```
 
-The name is lowercase letters, digits and hyphens and replaces a built-in skill of the same name. Steps should only use the assistant's own tools (file tools, `bean_check`, `reconcile_attachment`, `archive_statement`); a ledger has no shell or network for it to call.
+The name is lowercase letters, digits and hyphens and replaces a built-in skill of the same name. Editing a built-in skill copies it into `skills/` first, so the shipped three (`alipay-bill-import`, `wechat-bill-import`, `beancount-bookkeeping`) are editable too. Deleting a built-in leaves its text behind with `deleted: true` in the frontmatter: the app skips it, every device that syncs the ledger skips it, and removing that line brings it back. Steps should only use the assistant's own tools (file tools, `bean_check`, `reconcile_attachment`, `archive_statement`); a ledger has no shell or network for it to call.
 
 ## Categories and tags
 

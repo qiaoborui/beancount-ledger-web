@@ -434,7 +434,7 @@ func ModelCatalogJSON() string {
 // ToolCatalogJSON lists the tools the on-device Agent can call.
 func ToolCatalogJSON() string {
 	specs := app.LocalAgentToolSpecs()
-	tools := make([]map[string]string, 0, len(specs)+3)
+	tools := make([]map[string]string, 0, len(specs)+7)
 	for _, spec := range specs {
 		tools = append(tools, map[string]string{"name": spec.Name, "title": spec.Title})
 	}
@@ -443,7 +443,11 @@ func ToolCatalogJSON() string {
 	tools = append(tools,
 		map[string]string{"name": "ask_user", "title": "向你提问"},
 		map[string]string{"name": "get_app_settings", "title": "读取 App 设置"},
-		map[string]string{"name": "update_app_settings", "title": "修改 App 设置"})
+		map[string]string{"name": "update_app_settings", "title": "修改 App 设置"},
+		map[string]string{"name": "load_skill", "title": "加载技能"},
+		map[string]string{"name": "create_skill", "title": "新建技能"},
+		map[string]string{"name": "update_skill", "title": "修改技能"},
+		map[string]string{"name": "delete_skill", "title": "删除技能"})
 	return encode(map[string]any{"version": 1, "tools": tools})
 }
 
@@ -588,9 +592,10 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 			return files, err
 		}
 		defer turnSkills.close()
-		skillsTool := turnSkills.tool()
-		tools = append(tools, skillsTool)
-		allowed[skillsTool.Name()] = true
+		for _, tool := range turnSkills.tools() {
+			tools = append(tools, tool)
+			allowed[tool.Name()] = true
+		}
 		systemPrompt += turnSkills.prompt(request.MemoryPath != "")
 		// The App's own settings live in the shell, not the ledger, so these
 		// tools append last: a conversation's cached prefix keeps its tools
