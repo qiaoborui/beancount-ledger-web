@@ -101,6 +101,9 @@ type turnRequestV1 struct {
 	AppSettings *appSettingsV1 `json:"appSettings,omitempty"`
 	// Today is the user's local date, YYYY-MM-DD, for an onboarding turn.
 	Today string `json:"today,omitempty"`
+	// DisabledSkills are the skills the user turned off: they stay out of the
+	// prompt's list and load_skill refuses them.
+	DisabledSkills []string `json:"disabledSkills,omitempty"`
 }
 
 type customEndpointV1 struct {
@@ -580,6 +583,15 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 			}
 			systemPrompt += savedHistoryPrompt
 		}
+		turnSkills, err := openSkills(request.WorkspaceRoot, files, request.DisabledSkills)
+		if err != nil {
+			return files, err
+		}
+		defer turnSkills.close()
+		skillsTool := turnSkills.tool()
+		tools = append(tools, skillsTool)
+		allowed[skillsTool.Name()] = true
+		systemPrompt += turnSkills.prompt(request.MemoryPath != "")
 		// The App's own settings live in the shell, not the ledger, so these
 		// tools append last: a conversation's cached prefix keeps its tools
 		// before them, and the prompt stays before the memory below.
