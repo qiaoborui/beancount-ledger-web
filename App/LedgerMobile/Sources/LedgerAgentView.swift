@@ -520,6 +520,9 @@ private struct LedgerAgentChatScreen: View {
                     follow(proxy)
                 }
             }
+            // A touch on the conversation lets go of a row held open for the
+            // model menu.
+            .simultaneousGesture(TapGesture().onEnded { if rowPinned { rowPinned = false } })
             .overlay(alignment: .bottomTrailing) {
                 ZStack {
                     if showsJumpButton {
@@ -951,27 +954,30 @@ private struct LedgerAgentChatScreen: View {
     /// about to get, so it is not read as Return.
     @State private var newlineRequested = false
 
-    /// The dock is in use: the field is or has been focused, or there is
-    /// something to send (a draft, a question being edited, an attachment
-    /// chosen or being read). It is two rows then, and one row otherwise.
+    /// The dock is in use: the field is focused, or there is something to
+    /// send (a draft, a question being edited, an attachment chosen or being
+    /// read). It is two rows then, and one row otherwise.
     ///
     /// A tap in the field opens the second row at once, before anything is
-    /// typed, and `composerOpened` keeps it open from then on: the keyboard
-    /// going away, or a menu on that row taking focus, does not fold it.
-    /// Only a question going out folds it again (`composerSent`).
+    /// typed, and losing focus folds it again unless something is left to
+    /// send. The one exception is the model chip on that row: its menu takes
+    /// the focus when it opens, and folding the row would take the menu away
+    /// with it. A touch on the row therefore holds it open (`rowPinned`)
+    /// until a model is chosen, the field is focused again, or the
+    /// conversation is touched.
     private var composerExpanded: Bool {
-        composerOpened || composerFocused || !draft.isEmpty || editedQuestion != nil
+        rowPinned || composerFocused || !draft.isEmpty || editedQuestion != nil
             || !conversation.staged.isEmpty || attaching || voiceDocked
     }
 
-    /// The field has been focused since the last question went out.
-    @State private var composerOpened = false
+    /// The second row is being used while the field is not focused.
+    @State private var rowPinned = false
 
     /// A question went out: the dock returns to one row. The focus goes with
     /// it, since a focused field is an open dock, so the keyboard comes down
     /// and the answer has the page.
     private func composerSent() {
-        composerOpened = false
+        rowPinned = false
         composerFocused = false
     }
 
@@ -1027,6 +1033,7 @@ private struct LedgerAgentChatScreen: View {
                             .padding(.leading, 4)
                             .padding(.trailing, Self.sendReserve)
                             .transition(.opacity)
+                            .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in rowPinned = true })
                     }
                 }
             }
@@ -1047,7 +1054,10 @@ private struct LedgerAgentChatScreen: View {
         // under the field. Only this change is animated here; the keyboard
         // moves the inset with the system's own animation.
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: composerExpanded)
-        .onChange(of: composerFocused) { _, focused in if focused { composerOpened = true } }
+        .onChange(of: composerFocused) { _, focused in if focused { rowPinned = false } }
+        // The chip's menu is done with once a model or an effort is chosen.
+        .onChange(of: settings.modelTitle) { _, _ in rowPinned = false }
+        .onChange(of: settings.effectiveThinking) { _, _ in rowPinned = false }
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
         .padding(.top, 4)
@@ -1298,7 +1308,6 @@ private struct LedgerAgentChatScreen: View {
         guard !voice.isActive, !conversation.isRunning, !sessions.busyElsewhere else { return }
         voiceMode = mode
         voiceBase = draft
-        composerOpened = true
         composerFocused = false
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         Task { await voice.start() }

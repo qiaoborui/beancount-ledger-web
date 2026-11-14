@@ -64,13 +64,15 @@ final class LedgerAgentVoiceTests: XCTestCase {
         XCTAssertEqual(LedgerVoiceWaveform.level(decibels: -80), 0)
         XCTAssertEqual(LedgerVoiceWaveform.level(decibels: -.infinity), 0)
         XCTAssertEqual(LedgerVoiceWaveform.level(decibels: .nan), 0)
-        XCTAssertEqual(LedgerVoiceWaveform.level(decibels: 0), 1)
+        XCTAssertEqual(LedgerVoiceWaveform.level(decibels: LedgerVoiceWaveform.floorDecibels), 0)
+        XCTAssertEqual(LedgerVoiceWaveform.level(decibels: LedgerVoiceWaveform.ceilingDecibels), 1)
         XCTAssertEqual(LedgerVoiceWaveform.level(decibels: 6), 1)
-        let quiet = LedgerVoiceWaveform.level(decibels: -40)
-        let speech = LedgerVoiceWaveform.level(decibels: -20)
-        XCTAssertGreaterThan(quiet, 0)
-        XCTAssertGreaterThan(speech, quiet)
-        XCTAssertLessThan(speech, 1)
+        // A quiet room stays at dots; speech is well clear of them.
+        XCTAssertLessThan(LedgerVoiceWaveform.level(decibels: -46), 0.125)
+        let speech = LedgerVoiceWaveform.level(decibels: -30)
+        XCTAssertGreaterThan(speech, 0.3)
+        XCTAssertGreaterThan(LedgerVoiceWaveform.level(decibels: -20), speech)
+        XCTAssertLessThan(LedgerVoiceWaveform.level(decibels: -20), 1)
     }
 
     func testLevelOfSamples() {
@@ -79,10 +81,10 @@ final class LedgerAgentVoiceTests: XCTestCase {
         XCTAssertEqual([Float]().withUnsafeBufferPointer { LedgerVoiceWaveform.level(samples: $0) }, 0)
         let full = [Float](repeating: 1, count: 512)
         XCTAssertEqual(full.withUnsafeBufferPointer { LedgerVoiceWaveform.level(samples: $0) }, 1, accuracy: 1e-9)
-        // A square wave at half scale sits at −6 dBFS.
-        let half = [Float](repeating: 0.5, count: 512)
-        XCTAssertEqual(half.withUnsafeBufferPointer { LedgerVoiceWaveform.level(samples: $0) },
-                       LedgerVoiceWaveform.level(decibels: -6.0206), accuracy: 1e-4)
+        // A square wave at 0.05 of full scale sits at −26 dBFS.
+        let quiet = [Float](repeating: 0.05, count: 512)
+        XCTAssertEqual(quiet.withUnsafeBufferPointer { LedgerVoiceWaveform.level(samples: $0) },
+                       LedgerVoiceWaveform.level(decibels: -26.0206), accuracy: 1e-4)
     }
 
     // MARK: Transcript

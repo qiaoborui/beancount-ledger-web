@@ -23,9 +23,14 @@ struct LedgerVoiceStrip: View {
     var body: some View {
         // Reduce Motion keeps the level history but redraws at the sampling
         // rate, so the strip steps instead of gliding.
-        TimelineView(.animation(minimumInterval: reduceMotion ? LedgerVoiceWaveform.interval : nil)) { _ in
+        TimelineView(.animation(minimumInterval: reduceMotion ? LedgerVoiceWaveform.interval : nil)) { timeline in
+            // The frame's time is taken from the timeline's date, not read
+            // off the clock inside the closure: a Canvas whose closure
+            // captures nothing that changes is never redrawn, and the strip
+            // would stay as it was drawn the first time.
+            let now = ProcessInfo.processInfo.systemUptime - Date().timeIntervalSince(timeline.date)
             Canvas { context, size in
-                draw(context: &context, size: size, now: ProcessInfo.processInfo.systemUptime)
+                draw(context: &context, size: size, now: now)
             }
         }
         .frame(height: height)
