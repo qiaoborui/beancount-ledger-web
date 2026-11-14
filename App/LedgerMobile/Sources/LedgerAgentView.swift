@@ -1840,10 +1840,10 @@ private struct LedgerAgentChangeCard: View {
         case .ready:
             let validation = String(localized: "校验通过。写入时会再校验一次，并生成一个可撤回的提交。")
             return pending.holdReason.map { $0 + "\n" + validation } ?? validation
-        case .writing: String(localized: "正在写入…")
-        case let .invalid(message): message + "\n" + String(localized: "可以让助手接着修，或者放弃草稿。")
-        case let .conflict(paths): String(localized: "对话期间账本有了新的改动，和草稿改到了同一处：\(paths.joined(separator: "、"))。可以让助手基于最新账本重改这些地方，或者放弃草稿。")
-        case let .failed(message): String(localized: "没有写入：") + message
+        case .writing: return String(localized: "正在写入…")
+        case let .invalid(message): return message + "\n" + String(localized: "可以让助手接着修，或者放弃草稿。")
+        case let .conflict(paths): return String(localized: "对话期间账本有了新的改动，和草稿改到了同一处：\(paths.joined(separator: "、"))。可以让助手基于最新账本重改这些地方，或者放弃草稿。")
+        case let .failed(message): return String(localized: "没有写入：") + message
         }
     }
 
