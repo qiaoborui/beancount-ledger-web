@@ -1454,6 +1454,9 @@ private struct LedgerAgentChatScreen: View {
         // The App's own settings travel with the turn, so the assistant can
         // read and change them; the conversation applies what it changed.
         let appSettings = LedgerAgentAppSettings.load(valuationCurrency: session.ledger?.valuationCurrency ?? "CNY")
+        // The MCP servers too: the list and each token, which a turn sends only
+        // while the server stays enabled.
+        let mcpServers = LedgerAgentMCPSettings.shared.payloads()
         let conversation = conversation, conversationID = conversation.id
         let location = repository.workspace.agentAttachmentLocation(id: conversationID)
         conversation.editor = .live(repository)
@@ -1475,7 +1478,7 @@ private struct LedgerAgentChatScreen: View {
                                               conversationID: conversationID, attachments: attachments,
                                               usesMemory: usesMemory, contextWindow: contextWindow,
                                               maxOutputTokens: maxOutputTokens, disabledSkills: disabledSkills,
-                                              appSettings: appSettings,
+                                              appSettings: appSettings, mcpServers: mcpServers,
                                               onStep: report)
         }
     }

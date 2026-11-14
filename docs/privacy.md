@@ -16,6 +16,18 @@ If AI parsing is enabled, the server sends the user's input and the active accou
 
 Disable AI by not configuring provider API keys.
 
+## Data sent to MCP servers
+
+The iOS assistant can call tools of remote MCP servers the user adds in
+设置 › MCP 服务器. Each turn connects to the enabled servers, sends the tool
+arguments the model chose to that server, and reads its answer back. Nothing
+is sent to a server the user did not add and enable, and a server is only
+reached with the token saved for it in this device's Keychain. The assistant's
+prompt tells the model not to put ledger amounts, transactions or account data
+into those arguments unless the user asks for that server in the turn, but the
+request leaves the device once a tool is called: keep ledger data out of tools
+whose server should not see it.
+
 ## Runtime state
 
 The stateless `ledger-web` service stores runtime state in Postgres:
