@@ -780,6 +780,10 @@ struct LedgerAgentTurnRequest: Encodable, Sendable {
     /// applies it only to a model its catalog does not describe, a custom
     /// endpoint's included; nil keeps the common limit.
     var maxOutputTokens: Int? = nil
+    /// The skills the user turned off: no turn lists or loads them. nil when
+    /// nothing is off, so the request is unchanged for anyone who never
+    /// touched the 技能 page.
+    var disabledSkills: [String]? = nil
     /// The App's own settings (home page, tabs, valuation, reminders,
     /// reports), so the native settings tools can read and change them. The
     /// turn answers with the ones it changed. Nil turns them off.

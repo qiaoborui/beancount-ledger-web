@@ -1448,6 +1448,9 @@ private struct LedgerAgentChatScreen: View {
         }
         let choice = settings.choice, thinking = settings.effectiveThinking, usesMemory = settings.usesMemory
         let contextWindow = settings.contextWindow(for: choice), maxOutputTokens = settings.maxOutputTokens(for: choice)
+        // Read when the turn is asked for, like the model: the page may have
+        // been open in another sheet since.
+        let disabledSkills = LedgerAgentSkillSettings.shared.disabled
         // The App's own settings travel with the turn, so the assistant can
         // read and change them; the conversation applies what it changed.
         let appSettings = LedgerAgentAppSettings.load(valuationCurrency: session.ledger?.valuationCurrency ?? "CNY")
@@ -1471,7 +1474,8 @@ private struct LedgerAgentChatScreen: View {
                                               draft: draftRoot, transcript: transcript,
                                               conversationID: conversationID, attachments: attachments,
                                               usesMemory: usesMemory, contextWindow: contextWindow,
-                                              maxOutputTokens: maxOutputTokens, appSettings: appSettings,
+                                              maxOutputTokens: maxOutputTokens, disabledSkills: disabledSkills,
+                                              appSettings: appSettings,
                                               onStep: report)
         }
     }

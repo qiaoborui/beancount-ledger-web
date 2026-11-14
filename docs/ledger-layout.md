@@ -29,6 +29,28 @@ Accounts are loaded from `accounts.bean`. AI-generated entries are validated aga
 
 Transactions can be organized however you prefer as long as they are included from `main.bean`. New Web writes append to `transactions/YYYY/MM.bean`; importing a statement also links its generated `.bean` file from that month.
 
+## Agent skills
+
+The iOS assistant loads instructions on demand, so only their names and one-line descriptions are in its prompt. It writes and edits them like any other ledger file, which means a skill is shared through Git with the user's other devices:
+
+```text
+skills/october-close/SKILL.md
+```
+
+A `SKILL.md` starts with frontmatter and is followed by Markdown steps:
+
+```markdown
+---
+name: october-close
+description: 月底对账，先补空白再对上账单
+---
+
+1. 先看这个月有没有空白天。
+2. 再用上传的账单对账。
+```
+
+The name is lowercase letters, digits and hyphens and replaces a built-in skill of the same name. Steps should only use the assistant's own tools (file tools, `bean_check`, `reconcile_attachment`, `archive_statement`); a ledger has no shell or network for it to call.
+
 ## Categories and tags
 
 Use expense accounts to describe what was purchased, and Beancount tags to describe the context or event. For example, a train ticket and hotel stay keep their specific categories while sharing trip tags:
