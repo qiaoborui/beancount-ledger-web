@@ -43,6 +43,11 @@ case "$mode" in
       LedgerMobileTests/BookkeepingPipelineTests/testSemanticCredentialsStayLocalAndChangingEndpointRequiresFreshKey
       LedgerMobileTests/ImportClassificationTests/testConsentIsPerLedgerAndKeyIsStoredSeparatelyFromPreferences
       LedgerMobileTests/LocalGitBackgroundCredentialTests/testDeviceOnlyCredentialMigratesAccessibilityWithoutChangingToken
+      # Timing probes: they print measurements and check no behaviour, and
+      # together they took a third of the test phase (18 s and 14 s of 95 s).
+      # iOS core still runs the staging one on macOS.
+      LedgerMobileTests/PerfProbeTests
+      LedgerMobileTests/LocalLedgerWorkspaceStagingTests/testSyntheticLedgerStagingTiming
     )
     ;;
   widgets)
@@ -107,6 +112,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Where the job's time went, for the log and the run summary.
+phase_started=$SECONDS
+phase_done() {
+  local line="$1: $((SECONDS - phase_started)) s"
+  phase_started=$SECONDS
+  echo "$line"
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+  fi
+}
+
 if [[ -n "$cache_root" && "${IOS_CI_CLEAN:-false}" == true ]]; then
   echo "Discarding the build caches in $cache_root"
   rm -rf "$cache_root/server-build" "$cache_root/DerivedData-$scheme"
@@ -152,6 +168,7 @@ if [[ "$needs_frameworks" == true ]]; then
     "$server_build/beancount-ios/BeancountRuntime.xcframework" \
     HEAD:App/LedgerMobile/Runtime
   echo "::endgroup::"
+  phase_done "Frameworks"
 fi
 
 cd "$repo_root/App/LedgerMobile"
@@ -199,8 +216,34 @@ common=(
 )
 
 echo "::group::Build the $scheme scheme and its test bundles"
-xcodebuild build-for-testing -quiet "${common[@]}"
+build_log="$work_dir/build.log"
+build_status=0
+xcodebuild build-for-testing -quiet "${common[@]}" 2>&1 | tee "$build_log" || build_status=$?
 echo "::endgroup::"
+phase_done "Build"
+if [[ "$build_status" != 0 ]]; then
+  # Compiler errors as annotations: they show on the pull request's diff and
+  # can be read from the check run without opening the log.
+  python3 - "$build_log" "$repo_root" <<'PY'
+import re, sys
+log, root = sys.argv[1], sys.argv[2].rstrip("/") + "/"
+seen = []
+for line in open(log, errors="replace"):
+    match = re.match(r"(/[^:]+):(\d+):(\d+): error: (.*)", line.rstrip("\n"))
+    if not match or match.groups() in seen:
+        continue
+    seen.append(match.groups())
+    path, row, column, message = match.groups()
+    if path.startswith(root):
+        path = path[len(root):]
+    message = message.replace("%", "%25").replace("\r", "%0D")
+    # GitHub shows at most ten error annotations for a step.
+    if len(seen) <= 10:
+        print("::error file=%s,line=%s,col=%s::%s" % (path, row, column, message))
+print("%d compiler error(s)" % len(seen))
+PY
+  exit "$build_status"
+fi
 
 only_args=()
 for test in ${only_tests[@]+"${only_tests[@]}"}; do
@@ -222,7 +265,25 @@ xcodebuild test-without-building "${common[@]}" \
   "${only_args[@]}" \
   ${skip_args[@]+"${skip_args[@]}"} \
   -resultBundlePath "$work_dir/Tests.xcresult" > "$test_log" 2>&1 || true
+phase_done "Tests"
 grep -E '(error|failed|passed|Executed|TEST (SUCCEEDED|FAILED)|\*\* )' "$test_log" || true
+# The slowest tests decide how long this phase takes; keep them in view.
+python3 - "$test_log" <<'PY'
+import os, re, sys
+cases = []
+for line in open(sys.argv[1], errors="replace"):
+    match = re.search(r"Test Case '-\[\S+?\.(\S+) (\S+)\]' \w+ \(([\d.]+) seconds\)", line)
+    if match:
+        cases.append((float(match[3]), "%s/%s" % (match[1], match[2])))
+cases.sort(reverse=True)
+lines = ["%d tests took %.0f s; the slowest:" % (len(cases), sum(case[0] for case in cases))]
+lines += ["- %.1f s %s" % case for case in cases[:8]]
+print("\n".join(lines))
+summary = os.environ.get("GITHUB_STEP_SUMMARY")
+if summary:
+    with open(summary, "a") as out:
+        out.write("\n" + "\n".join(lines) + "\n")
+PY
 # The step-by-step lines around a failure are what make it diagnosable, and
 # grep above drops them: print them for every failing test.
 awk '/error: -\[/ { start = NR } { line[NR] = $0 }
