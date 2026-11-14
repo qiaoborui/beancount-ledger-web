@@ -57,7 +57,10 @@ final class AssistantScreenshotTests: XCTestCase {
         let app = XCUIApplication()
         // The pagination fixture seeds a populated ledger in one tap, which is
         // what gives the app a 助手 tab; no model key is involved.
-        app.launchArguments = ["--local-ui-testing", "--pagination-ui-testing"]
+        // `--initial-tab=agent` opens the assistant on the first page that has
+        // the tab bar, which is the one route that works without tapping the
+        // floating tab (that tap is swallowed on the simulator).
+        app.launchArguments = ["--local-ui-testing", "--pagination-ui-testing", "--initial-tab=agent"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
 
@@ -69,9 +72,16 @@ final class AssistantScreenshotTests: XCTestCase {
         // the fixture says it is done.
         XCTAssertTrue(app.staticTexts["pagination-fixture-ready"].waitForExistence(timeout: 30), app.debugDescription)
 
-        app.tabBars.buttons["助手"].tap()
         let setUp = app.buttons["ledger-agent-setup"]
-        XCTAssertTrue(setUp.waitForExistence(timeout: 10), app.debugDescription)
+        if !setUp.waitForExistence(timeout: 10) {
+            // The fixture can still swallow a tap on the floating tab.
+            for _ in 0..<3 where !setUp.exists {
+                let assistant = app.tabBars.buttons["助手"]
+                if assistant.exists { assistant.tap() }
+                _ = setUp.waitForExistence(timeout: 5)
+            }
+        }
+        XCTAssertTrue(setUp.exists, app.debugDescription)
         settle()
         save(app.screenshot(), as: "assistant-intro")
 
