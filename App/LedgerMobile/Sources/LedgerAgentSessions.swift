@@ -224,6 +224,12 @@ final class LedgerAgentSessions: ObservableObject {
     /// A question from Siri or a shortcut for the conversation on screen to
     /// send once it can.
     @Published var queuedQuestion: String?
+    /// The greeting AI 开账 left for the next conversation it opens, until the
+    /// assistant screen takes it.
+    @Published var pendingOpening: LedgerAgentOpening?
+    /// The ledger that greeting was written for; one written for another
+    /// ledger is dropped when that one is bound instead of opening here.
+    var pendingOpeningLedger: UUID?
     private var ledgerID: UUID?
     private var storage: Storage?
     private var loading: Task<Void, Never>?
@@ -303,6 +309,13 @@ final class LedgerAgentSessions: ObservableObject {
             background = nil
             current.reset()
             current = LedgerAgentConversation()
+            // A greeting belongs to the ledger it was written for; AI 开账
+            // leaves it for the ledger it just made, so the bind that follows
+            // its creation keeps it.
+            if pendingOpeningLedger != nil, pendingOpeningLedger != id {
+                pendingOpening = nil
+                pendingOpeningLedger = nil
+            }
             wire(current)
         }
         ledgerID = id
@@ -321,6 +334,18 @@ final class LedgerAgentSessions: ObservableObject {
     func startNew() {
         guard !current.messages.isEmpty || current.isRunning || current.pending != nil else { return }
         show(LedgerAgentConversation())
+    }
+
+    /// Takes the greeting AI 开账 left when it created the ledger, now that its
+    /// ledger is bound: the new conversation opens with it, and a tap on one
+    /// of its steps is the first question. Nothing asks while a turn runs.
+    func takeOpening() {
+        guard let opening = pendingOpening, !current.isRunning, !busyElsewhere else { return }
+        pendingOpening = nil
+        pendingOpeningLedger = nil
+        let next = LedgerAgentConversation()
+        next.greet(opening)
+        show(next)
     }
 
     func open(_ id: UUID) {

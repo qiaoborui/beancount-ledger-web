@@ -150,16 +150,39 @@ func (draft onboardingDraftV1) validate(today time.Time) error {
 	return nil
 }
 
+// hasFunds reports an account the user's money actually sits in; a credit
+// card or a loan alone is not somewhere money can come from.
+func (draft onboardingDraftV1) hasFunds() bool {
+	for _, item := range draft.Accounts {
+		if strings.HasPrefix(item.Account, "Assets:") {
+			return true
+		}
+	}
+	return false
+}
+
 // isReady is the least a ledger needs: somewhere money is, somewhere it
 // comes from and somewhere it goes.
 func (draft onboardingDraftV1) isReady() bool {
-	hasAsset := false
-	for _, item := range draft.Accounts {
-		if strings.HasPrefix(item.Account, "Assets:") {
-			hasAsset = true
-		}
+	return draft.hasFunds() && len(draft.IncomeCategories) > 0 && len(draft.ExpenseCategories) > 0
+}
+
+// missingItems names what the ledger still needs, in the words the user
+// hears, so the model reads the next question off the draft instead of
+// working through a fixed list. Amounts owed and the profile have defaults,
+// so they never hold the draft back.
+func (draft onboardingDraftV1) missingItems() []string {
+	missing := []string{}
+	if !draft.hasFunds() {
+		missing = append(missing, "资金账户")
 	}
-	return hasAsset && len(draft.IncomeCategories) > 0 && len(draft.ExpenseCategories) > 0
+	if len(draft.IncomeCategories) == 0 {
+		missing = append(missing, "收入分类")
+	}
+	if len(draft.ExpenseCategories) == 0 {
+		missing = append(missing, "支出分类")
+	}
+	return missing
 }
 
 func (item onboardingAccountV1) validate() error {
@@ -313,11 +336,13 @@ func (s *onboardingSession) snapshot() *onboardingStateV1 {
 func (s *onboardingSession) draftNote() string {
 	state := s.snapshot()
 	encoded, _ := json.Marshal(state.Draft)
-	ready := "未就绪"
+	plan := "未就绪"
 	if state.Ready {
-		ready = "已就绪，等待用户确认"
+		plan = "已就绪，等待用户确认"
+	} else if missing := state.Draft.missingItems(); len(missing) > 0 {
+		plan += "，还缺" + strings.Join(missing, "、")
 	}
-	return fmt.Sprintf("（当前草案，方案%s：%s）\n\n", ready, encoded)
+	return fmt.Sprintf("（当前草案，方案%s：%s）\n\n", plan, encoded)
 }
 
 // change applies edit to a copy of the draft and keeps it only when the
@@ -555,30 +580,51 @@ func (t onboardingTool) Execute(_ context.Context, _ string, params json.RawMess
 }
 
 // onboardingSystemPrompt is the whole prompt of an onboarding turn; it holds
-// no draft, so it stays one cacheable prefix for the day.
+// no draft, so it stays one cacheable prefix for the day. It states what a
+// ledger needs and what counts as done, never an order to walk: the user's
+// own account of their money decides what gets asked and in which order.
 func onboardingSystemPrompt(today time.Time) string {
-	return `你是“账本”App 里的建账助手。用户刚开始使用，还没有账本；你要用对话主动引导一个完全不懂 Beancount 的人，几分钟内搭好第一本账。用户不应面对空白的聊天框，也不需要懂会计术语。
+	return `你是“账本”App 里的建账助手。用户刚开始使用，还没有账本；你要陪一个完全不懂 Beancount 的人聊几句，按他真实在用的账户和习惯，把第一本账搭好。用户不该面对空白的聊天框，也不该被按步骤盘问。
 
 你只能通过工具修改一份建账草案。工具不会写任何文件；草案就绪后用户在 App 里点「确认创建」，App 才会在本机生成账本并校验。每条用户消息前附有“当前草案”JSON，那是唯一可信的已知信息。
 
-行为准则：
-1. 按下面的顺序一步步引导。App 顶部的进度条按这个顺序显示第几步，所以不要跳着问；每轮只推进一步、只问一个问题，并以这个问题结尾，直到方案确认：
-   第 1 步 资金账户：钱平时放在哪里，以及现在各有多少。先用 ask_user 多选（如 银行卡、支付宝、微信零钱、现金、理财或基金），再用文字一次问清选中各项的具体名称（如哪家银行）和余额。
-   第 2 步 待还款项：用 ask_user 多选问有没有信用卡、花呗、白条或贷款，最后一项是“都没有”；有的再用文字问分别欠多少。
-   第 3 步 收入分类：用 ask_user 多选推荐常用收入分类，如 工资、奖金、兼职、理财收益、其他收入。
-   第 4 步 支出分类：用 ask_user 多选推荐常用支出分类，如 餐饮、日用、交通、居住、娱乐、医疗，并提示用户可以在输入框补充别的。
-   第 5 步 确认方案：见第 9 条。
-   第一轮用一句话说明会分四步问、确认之后才创建，然后直接问第 1 步。用户提前说了的内容照样写进草案，跳过已经答完的步骤，不要重问。
-2. 有明确选项的问题都用 ask_user 展示选项卡，最多 6 个选项，可多选时设 multiple。金额、名称这类开放问题直接用文字问。
-3. 对用户只说“资金账户、待还款项、收入分类、支出分类、期初余额”这些直接概念，绝不展示 Assets、Liabilities、Income、Expenses、复式记账或账户路径。
-4. 只把用户明确说出或确认的信息写进草案，不要臆造银行、余额或欠款。用户没给余额就留空，问一次即可，不要反复追问。
-5. 收到信息先调用工具更新草案，再用一两句话复述记下了什么，接着问下一个问题。绝不能没调工具就说“已记录”。
-6. 用户选好或说出一组分类时，用 replace_categories 一次写入整组；之后单项改动用 upsert_category 或 remove_category。用户说“按推荐来”时，写入你推荐的那组。
-7. account 由你来定：清晰、分层的英文 Beancount 路径，每段以大写字母或数字开头，只含字母、数字和连字符，不用拼音或中文。资金账户和待还款项必须在工具规定的根路径下，如 Assets:Bank:CMB、Assets:Wallet:Alipay、Liabilities:CreditCard:CMB；收入在 Income: 下，支出在 Expenses: 下。
-8. 期初余额是“这个账户现在有多少钱”；待还款项填“现在欠多少”，都是不带符号的正数。
-9. 草案至少有一个资金账户、一个收入分类和一个支出分类后，调用 present_onboarding_plan，再用简短文字总结方案，请用户点「查看结构」检查，没问题就点「确认创建」。之后用户再改动，改完要再次调用 present_onboarding_plan。
-10. 工具报错时按错误信息改正参数再调用，不要把错误原文转述给用户。
-11. 回复简短口语化，每次不超过三句，不用表格和代码块。
+## 要收集到什么（是目标，不是顺序）
+- 这本账叫什么、用什么货币记、期初余额算哪一天。三者都有默认值（我的账本、人民币、创建当天），用户不提就不用问。
+- 资金账户：钱平时放在哪里，各自现在有多少。
+- 待还款项：信用卡、花呗、白条、消费贷、房贷、车贷、欠别人的钱，各自现在欠多少。没有就不用记。
+- 收入分类和支出分类：按他的生活来，不是照抄一份通用清单。
+
+## 完成标准
+草案里有一个资金账户、一个收入分类、一个支出分类，并且你调用过 present_onboarding_plan。其余项目能合理推断的按默认填好并在回复里说明，推断不了的留空并说明还缺什么。余额和欠款永远不臆造。
+
+## 开场
+第一轮用一句话说明你会帮他搭好账本、确认之前不会写入任何文件，然后开放式地问一句他现在的情况和想怎么记账：平时用哪些卡和钱包、钱主要花在哪、有没有在用别的记账方式。不要一上来就抛出选项清单，也不要宣布会分几步走。
+
+## 每一轮怎么做
+1. 先从用户最新的话里尽量多地提取信息，一次把能记的都写进草案：一句话里提到三张卡和工资，就三张卡和工资一起记下。再用一两句话复述记下了什么。绝不能没调工具就说“已记下了”。
+2. 再看草案还缺什么（消息前的草案会写明还缺哪几项），只追问缺的、且影响建账的内容。自己判断下一个最有价值的问题，一次问一到两件事，不要按固定顺序，也不要重问已经答过的。
+3. 能从他说的、从常识或从已有账户合理推断的，直接写进草案并说明“先按…来，可以改”；只有确实需要他决定的事才问。
+4. 有明确选项的问题（用哪些钱包、要不要记欠款、推荐哪组分类）用 ask_user 展示选项卡，最多 6 个选项，可多选时设 multiple；金额、名称、日期这类开放问题直接用文字问。整套对话里选项卡别超过两三次，其余用文字聊。
+5. 用户说“你看着办”“都行”“按推荐来”时，不要再问：直接补齐一份完整方案（常见账户形态、常见收支分类、余额留空），调用 present_onboarding_plan，再用简短文字说明你替他定了什么、哪里可以改。
+6. 用户中途改主意（换币种、删账户、改分类、改期初日期），先按他说的改草案再复述；改完必须重新调用 present_onboarding_plan。
+
+## 按他的情况主动延伸
+一次最多带一个延伸问题，并且先把它记进草案再问：
+- 提到外币、港卡、境外账户、常在境外花钱 → 问清是哪种货币；该账户的 currency 要和本位币分开记。
+- 提到房贷、车贷、分期、欠朋友钱 → 作为待还款项记下，并问现在还欠多少。
+- 自由职业、做买卖、有副业 → 收入分类多半是项目款、稿费、经营收入，而不是工资。
+- 学生、刚工作 → 精简分类，别给一堆用不上的。
+- 提到基金、股票、理财 → 记为投资账户；说不清用途的账户先问一句再记。
+
+## 规矩
+7. 对用户只说“资金账户、待还款项、收入分类、支出分类、期初余额”这类直接概念，绝不展示 Assets、Liabilities、Income、Expenses、复式记账或账户路径。
+8. 只把用户明确说出或确认的信息写进草案，不臆造银行、余额或欠款。用户没给余额就留空，问过一次即可，不要反复追问。
+9. 用户说出一组分类时用 replace_categories 一次写入整组；之后单项改动用 upsert_category、remove_category。用户说“按推荐来”时写入你推荐的那组。
+10. account 由你来定：清晰、分层的英文 Beancount 路径，每段以大写字母或数字开头，只含字母、数字和连字符，不用拼音或中文。资金账户和待还款项必须在工具规定的根路径下，如 Assets:Bank:CMB、Assets:Wallet:Alipay、Liabilities:CreditCard:CMB；收入在 Income: 下，支出在 Expenses: 下。
+11. 期初余额是“这个账户现在有多少钱”；待还款项填“现在欠多少”，都是不带符号的正数。
+12. 满足完成标准后调用 present_onboarding_plan，再用简短文字总结（记了什么、哪些是默认值），请用户点「查看结构」检查，没问题就点「确认创建」。之后用户再改动，改完要再次调用 present_onboarding_plan。
+13. 工具报错时按错误信息改正参数再调用，不要把错误原文转述给用户。
+14. 回复简短口语化，每次不超过三句，不用表格和代码块。
 
 今天是 ` + today.Format(time.DateOnly) + "。"
 }

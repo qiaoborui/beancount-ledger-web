@@ -44,7 +44,7 @@ func TestOnboardingTurnBuildsTheDraftWithoutALedger(t *testing.T) {
 	if !response.OK || response.Reply != "方案好了，检查一下就可以创建。" {
 		t.Fatalf("unexpected response: %+v", response)
 	}
-	if !strings.HasPrefix(question, "（当前草案，方案未就绪：") || !strings.HasSuffix(question, "我有招行卡和招行信用卡") {
+	if !strings.HasPrefix(question, "（当前草案，方案未就绪，还缺资金账户、收入分类、支出分类：") || !strings.HasSuffix(question, "我有招行卡和招行信用卡") {
 		t.Fatalf("question does not carry the draft: %q", question)
 	}
 	if response.Onboarding == nil || !response.Onboarding.Ready {
@@ -152,6 +152,67 @@ func TestOnboardingDraftValidation(t *testing.T) {
 	debtOnly.ExpenseCategories = []onboardingCategoryV1{{Name: "餐饮", Account: "Expenses:Food"}}
 	if debtOnly.isReady() {
 		t.Fatal("a draft with only a credit card is ready")
+	}
+}
+
+func TestOnboardingPromptStatesGoalsNotAFixedSequence(t *testing.T) {
+	prompt := onboardingSystemPrompt(onboardingToday)
+	for _, fixed := range []string{"第 1 步", "第 2 步", "每轮只推进一步", "分四步", "按下面的顺序"} {
+		if strings.Contains(prompt, fixed) {
+			t.Errorf("the prompt still walks the user through %q", fixed)
+		}
+	}
+	// The goal, its completion criteria, and the situations the model is
+	// asked to extend on its own must all be there.
+	for _, want := range []string{"资金账户", "待还款项", "收入分类", "支出分类", "完成标准", "present_onboarding_plan",
+		"ask_user", "你看着办", "先按…来，可以改", "外币", "房贷", "自由职业", "学生", "绝不展示 Assets"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the prompt does not mention %q", want)
+		}
+	}
+	// The hard constraints of the original prompt survive the rewrite.
+	for _, kept := range []string{"不臆造", "绝不能没调工具就说", "Income: 下，支出在 Expenses: 下", "不超过三句", "确认创建"} {
+		if !strings.Contains(prompt, kept) {
+			t.Errorf("the prompt lost %q", kept)
+		}
+	}
+	if !strings.Contains(prompt, onboardingToday.Format(time.DateOnly)) {
+		t.Error("the prompt does not carry today")
+	}
+}
+
+func TestOnboardingDraftNoteNamesWhatIsMissing(t *testing.T) {
+	session, err := newOnboardingSession(nil, onboardingToday)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if note := session.draftNote(); !strings.Contains(note, "还缺资金账户、收入分类、支出分类") {
+		t.Fatalf("empty draft note = %q", note)
+	}
+	if err := onboardingRun(t, session, "upsert_account", map[string]any{"kind": "credit_card", "name": "信用卡", "account": "Liabilities:CreditCard:CMB"}); err != nil {
+		t.Fatal(err)
+	}
+	// A card is somewhere money is owed, not somewhere money is; it does
+	// not make the funds item done.
+	if note := session.draftNote(); !strings.Contains(note, "还缺资金账户") {
+		t.Fatalf("debt-only draft note = %q", note)
+	}
+	if err := onboardingRun(t, session, "upsert_account", map[string]any{"kind": "bank_card", "name": "招行卡", "account": "Assets:Bank:CMB"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := onboardingRun(t, session, "upsert_category", map[string]any{"kind": "income", "name": "工资", "account": "Income:Salary"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := onboardingRun(t, session, "upsert_category", map[string]any{"kind": "expense", "name": "餐饮", "account": "Expenses:Food"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.present(); err != nil {
+		t.Fatal(err)
+	}
+	// A ready draft says so instead of listing what it lacks.
+	note := session.draftNote()
+	if !strings.Contains(note, "已就绪") || strings.Contains(note, "还缺") {
+		t.Fatalf("ready draft note = %q", note)
 	}
 }
 
