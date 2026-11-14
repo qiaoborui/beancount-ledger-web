@@ -13,8 +13,12 @@ import Foundation
 struct LedgerVoiceWaveform: Equatable, Sendable {
     /// Seconds between two recorded levels.
     static let interval: TimeInterval = 0.05
-    /// Quietest level the meter tells from silence, in dBFS.
+    /// Quietest level the meter tells from silence, in dBFS: a quiet room
+    /// sits below it, so it draws as a row of dots.
     static let floorDecibels: Float = -50
+    /// The level drawn at full height. Speech at arm's length peaks around
+    /// here, so the bars use the whole strip without being pinned to it.
+    static let ceilingDecibels: Float = -10
 
     struct Sample: Equatable, Sendable {
         /// 0…1.
@@ -58,15 +62,14 @@ struct LedgerVoiceWaveform: Equatable, Sendable {
         return result
     }
 
-    /// 0…1 for a power in dBFS, linear between the floor and 0 dB with the
-    /// quiet end lifted a little so speech at a normal distance fills about
-    /// three quarters of the height.
+    /// 0…1 for a power in dBFS: 0 at the floor, 1 at the ceiling, with a
+    /// slight curve so the quiet end stays calm and speech has room to swell.
     static func level(decibels: Float) -> Double {
         guard decibels.isFinite else { return 0 }
         if decibels <= floorDecibels { return 0 }
-        if decibels >= 0 { return 1 }
-        let linear = Double((decibels - floorDecibels) / -floorDecibels)
-        return pow(linear, 1.6)
+        if decibels >= ceilingDecibels { return 1 }
+        let linear = Double((decibels - floorDecibels) / (ceilingDecibels - floorDecibels))
+        return pow(linear, 1.4)
     }
 
     /// The level of a block of samples: its RMS, in dBFS, through `level`.

@@ -99,7 +99,9 @@ final class LedgerAgentVoiceRecorder: ObservableObject {
 
     private func begin(recognizer: SFSpeechRecognizer) throws {
         let audio = AVAudioSession.sharedInstance()
-        try audio.setCategory(.record, mode: .measurement, options: [.duckOthers])
+        // Not .measurement: that switches off the input's gain control, which
+        // leaves speech too quiet for the waveform to move.
+        try audio.setCategory(.record, mode: .default, options: [.duckOthers])
         try audio.setActive(true, options: .notifyOthersOnDeactivation)
 
         let request = SFSpeechAudioBufferRecognitionRequest()
