@@ -71,6 +71,10 @@
 	<string>拍摄票据或账单照片，交给账本助手识别记账。</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>使用 Face ID 解锁受保护的账本金额和财务数据。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用语音向账本助手提问或记账，录音只用于转成文字，不会保存。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>把你说的话转成文字，放进账本助手的输入框。</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIAppFonts</key>

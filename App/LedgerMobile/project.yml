@@ -83,6 +83,8 @@ targets:
               - public.html
               - public.zip-archive
         NSCameraUsageDescription: 拍摄票据或账单照片，交给账本助手识别记账。
+        NSMicrophoneUsageDescription: 用语音向账本助手提问或记账，录音只用于转成文字，不会保存。
+        NSSpeechRecognitionUsageDescription: 把你说的话转成文字，放进账本助手的输入框。
         NSFaceIDUsageDescription: 使用 Face ID 解锁受保护的账本金额和财务数据。
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
         NSSupportsLiveActivities: true
