@@ -80,6 +80,16 @@ private struct LedgerAgentChatScreen: View {
     @State private var dropTargeted = false
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var voice = LedgerAgentVoiceRecorder()
+    /// How the current dictation was started: by a tap, which keeps the
+    /// recording bar in the dock until ✓, ✗ or send, or by holding the
+    /// microphone button, which inserts on release.
+    @State private var voiceMode: VoiceMode = .idle
+    /// When the finger touched the microphone button, while it is down.
+    @State private var voicePress: Date?
+    /// The field's text before dictation began; the transcript is joined to
+    /// it, so cancelling gives it back untouched.
+    @State private var voiceBase = ""
     /// The question being edited in the composer, and what the composer held
     /// before, given back when the edit is cancelled.
     @State private var editing: UUID?
@@ -951,7 +961,7 @@ private struct LedgerAgentChatScreen: View {
     /// Only a question going out folds it again (`composerSent`).
     private var composerExpanded: Bool {
         composerOpened || composerFocused || !draft.isEmpty || editedQuestion != nil
-            || !conversation.staged.isEmpty || attaching
+            || !conversation.staged.isEmpty || attaching || voiceDocked
     }
 
     /// The field has been focused since the last question went out.
@@ -983,6 +993,7 @@ private struct LedgerAgentChatScreen: View {
             }
             if editedQuestion != nil { editBanner }
             if !conversation.staged.isEmpty || attaching || attachError != nil { stagedFiles }
+            if let failure = voice.failure { voiceFailureNotice(failure) }
             VStack(spacing: 4) {
                 HStack(alignment: .bottom, spacing: 4) {
                     attachMenu
@@ -1000,21 +1011,37 @@ private struct LedgerAgentChatScreen: View {
                         .accessibilityLabel("编辑建议：\(ghost)")
                         .accessibilityIdentifier("ledger-agent-ghost-edit")
                     }
+                    if !voiceDocked, !conversation.isRunning { voiceButton }
                 }
                 .padding(.trailing, composerExpanded ? 0 : Self.sendReserve)
                 if composerExpanded {
                     // Not in the hierarchy at rest, so nothing empty is left
                     // for VoiceOver or a keyboard to land on.
-                    LedgerAgentQuickSwitch(usage: conversation.usage) { settingsPresented = true }
-                        .frame(minHeight: 40)
-                        .padding(.leading, 4)
-                        .padding(.trailing, Self.sendReserve)
-                        .transition(.opacity)
+                    if voiceDocked {
+                        LedgerVoiceBar(recorder: voice, onCancel: cancelVoice, onConfirm: { Task { await commitVoice() } })
+                            .frame(minHeight: 40)
+                            .transition(.opacity)
+                    } else {
+                        LedgerAgentQuickSwitch(usage: conversation.usage) { settingsPresented = true }
+                            .frame(minHeight: 40)
+                            .padding(.leading, 4)
+                            .padding(.trailing, Self.sendReserve)
+                            .transition(.opacity)
+                    }
                 }
             }
             .overlay(alignment: .bottomTrailing) { sendButton }
             .padding(8)
             .modifier(LedgerAgentDock())
+            .overlay(alignment: .top) {
+                // Over the dock rather than in the stack, so it does not move
+                // the conversation while the button is held.
+                if voiceMode == .hold, voice.phase == .recording {
+                    LedgerVoicePill(recorder: voice)
+                        .offset(y: -60)
+                        .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
+                }
+            }
         }
         // The dock is anchored to the bottom, so the second row opens upward
         // under the field. Only this change is animated here; the keyboard
@@ -1028,6 +1055,16 @@ private struct LedgerAgentChatScreen: View {
         // at another one.
         .onAppear { if draft.isEmpty { draft = sessions.unsentText(for: conversation.id) } }
         .onChange(of: draft) { old, new in composerChanged(old: old, new: new) }
+        .onChange(of: voice.transcript) { _, text in
+            if voice.isActive { draft = LedgerVoiceTranscript.merged(base: voiceBase, transcript: text) }
+        }
+        .onChange(of: voice.phase) { _, phase in voicePhaseChanged(phase) }
+        // A recording does not outlive the screen it was made on: leaving the
+        // app keeps what was heard, leaving the page drops it.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active, voice.isActive { Task { await commitVoice() } }
+        }
+        .onDisappear { if voice.isActive { cancelVoice() } }
     }
 
     /// The send circle's 40pt and the row's 4pt gap before it.
@@ -1059,7 +1096,14 @@ private struct LedgerAgentChatScreen: View {
 
     private var sendButton: some View {
         Button {
-            if conversation.isRunning { conversation.stop() } else { submit() }
+            if conversation.isRunning {
+                conversation.stop()
+            } else if voice.isActive {
+                // What was said so far goes out as it stands.
+                Task { await commitVoice(); submit() }
+            } else {
+                submit()
+            }
         } label: {
             Image(systemName: conversation.isRunning ? "stop.fill" : "arrow.up")
                 .font(.system(size: 16, weight: .semibold))
@@ -1191,6 +1235,122 @@ private struct LedgerAgentChatScreen: View {
     }
 
     private static let reconcileQuestion = String(localized: "帮我把附件和账本对一下账，列出对不上的地方")
+
+    // MARK: Voice
+
+    private enum VoiceMode: Equatable {
+        case idle
+        /// The finger is down and has not yet stayed long enough to be a hold.
+        case pressing
+        case dock
+        case hold
+    }
+
+    /// The recording bar is in the dock.
+    private var voiceDocked: Bool { voiceMode == .dock && voice.isActive }
+
+    /// How long the button must stay down to be a hold rather than a tap.
+    private static let voiceHoldDelay: Duration = .milliseconds(300)
+
+    /// One button for both ways in: a tap starts a recording the dock keeps
+    /// until it is confirmed, and holding records only while the finger is
+    /// down. Recording starts on touch-down either way, so no first word is
+    /// lost to the decision.
+    private var voiceButton: some View {
+        Image(systemName: "mic").font(.system(size: 16, weight: .medium))
+            .foregroundStyle(BalancedPalette.secondary)
+            .frame(width: 36, height: 40)
+            .contentShape(Rectangle())
+            .opacity(sessions.busyElsewhere ? 0.38 : 1)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in if voicePress == nil { voicePressBegan() } }
+                    .onEnded { _ in voicePressEnded() })
+            .accessibilityElement()
+            .accessibilityLabel("语音输入")
+            .accessibilityHint("双击开始录音，再点完成")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { startVoice(mode: .dock) }
+            .accessibilityIdentifier("ledger-agent-voice")
+    }
+
+    private func voicePressBegan() {
+        guard !voice.isActive, !sessions.busyElsewhere else { return }
+        voicePress = Date()
+        startVoice(mode: .pressing)
+        Task {
+            try? await Task.sleep(for: Self.voiceHoldDelay)
+            if voicePress != nil, voiceMode == .pressing { voiceMode = .hold }
+        }
+    }
+
+    private func voicePressEnded() {
+        guard voicePress != nil else { return }
+        voicePress = nil
+        switch voiceMode {
+        case .hold: Task { await commitVoice() }
+        case .pressing: voiceMode = .dock
+        case .idle, .dock: break
+        }
+    }
+
+    private func startVoice(mode: VoiceMode) {
+        guard !voice.isActive, !conversation.isRunning, !sessions.busyElsewhere else { return }
+        voiceMode = mode
+        voiceBase = draft
+        composerOpened = true
+        composerFocused = false
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Task { await voice.start() }
+    }
+
+    private func voicePhaseChanged(_ phase: LedgerAgentVoiceRecorder.Phase) {
+        switch phase {
+        case .idle:
+            voiceMode = .idle
+            voicePress = nil
+        case .recording:
+            // The permission sheet took the finger away before it was
+            // released: nobody is holding any more, so the recording stays.
+            if voiceMode == .hold, voicePress == nil { voiceMode = .dock }
+        case .starting, .finishing:
+            break
+        }
+    }
+
+    /// Stops recording and leaves the text in the field, after what was
+    /// already there.
+    private func commitVoice() async {
+        guard voice.isActive else { return }
+        let text = await voice.finish()
+        draft = LedgerVoiceTranscript.merged(base: voiceBase, transcript: text)
+        voiceMode = .idle
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func cancelVoice() {
+        voice.cancel()
+        draft = voiceBase
+        voiceMode = .idle
+    }
+
+    private func voiceFailureNotice(_ failure: LedgerAgentVoiceRecorder.Failure) -> some View {
+        Button {
+            if failure.opensSettings, let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+            voice.dismissFailure()
+        } label: {
+            Label(failure.message, systemImage: "mic.slash")
+                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.expense)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 6)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(failure.opensSettings ? "轻点打开系统设置" : "轻点关闭")
+        .accessibilityIdentifier("ledger-agent-voice-error")
+    }
 
     // MARK: Attachments
 
